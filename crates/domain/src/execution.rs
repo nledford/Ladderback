@@ -250,14 +250,23 @@ impl Operation {
     }
 
     /// Records a warning. Only the first [`MAX_STORED_WARNINGS`] are kept,
-    /// but every one is counted ([`Self::warning_count`]).
+    /// but every one is counted ([`Self::warning_count`]). A kept warning's
+    /// text is cut to [`MAX_WARNING_TEXT_BYTES`] in each field, ending in
+    /// [`WARNING_TEXT_CUT`] where it was.
     pub fn record_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
-            self.warnings.push(warning);
+            // Every field is named, so a text field added to `Warning` must
+            // be given its cut, or left whole on purpose, to compile.
+            self.warnings.push(Warning {
+                kind: warning.kind,
+                item: warning.item.map(cut_warning_text),
+                during: cut_warning_text(warning.during),
+                detail: cut_warning_text(warning.detail),
+            });
         }
         Ok(())
     }
@@ -310,11 +319,18 @@ impl Operation {
     }
 }
 
+/// How much of a cut text is kept: the cap, less the room the marker takes.
+const KEPT_WHEN_CUT: usize = MAX_WARNING_TEXT_BYTES - WARNING_TEXT_CUT.len();
+
 /// `text` as a warning keeps it: whole when it fits [`MAX_WARNING_TEXT_BYTES`],
 /// otherwise its longest prefix that ends on a character boundary and leaves
 /// room for [`WARNING_TEXT_CUT`], which follows it.
-fn cut_warning_text(_text: String) -> String {
-    todo!()
+fn cut_warning_text(mut text: String) -> String {
+    if text.len() > MAX_WARNING_TEXT_BYTES {
+        text.truncate(text.floor_char_boundary(KEPT_WHEN_CUT));
+        text.push_str(WARNING_TEXT_CUT);
+    }
+    text
 }
 
 #[cfg(test)]
