@@ -27,8 +27,8 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
-| `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
-| `just mutants [base]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists |
+| `just test-ui [args]` | Builds the web UI and the binary, installs the UI test dependencies if they are missing or stale, then runs the `@ui` scenarios |
+| `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists; further `args` go to `cargo mutants` (e.g. `--jobs 3`) |
 | `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests fail at run time (§13.1) |
 | `just serve` | Builds everything and runs `steading serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
