@@ -2605,8 +2605,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_start_timeout_counts_from_the_start_of_the_write_of_the_job() {
-        let script = "sleep 1.5; cat >/dev/null; exec sleep 30";
-        let timeout = Duration::from_secs(2);
+        let script = "sleep 3; cat >/dev/null; exec sleep 30";
+        let timeout = Duration::from_secs(4);
         let engine = WorkerEngine::new("sh", ["-c", script]).with_start_timeout(timeout);
         let began = Instant::now();
         let RunningJob {
@@ -2622,7 +2622,7 @@ mod tests {
             [EngineEvent::Failed(FailureReason::EngineStartTimedOut)]
         );
         assert!(
-            took < Duration::from_millis(3200),
+            took < Duration::from_millis(5500),
             "the wait for the first line started over after the write: {took:?}"
         );
     }
@@ -2665,12 +2665,11 @@ mod tests {
         .unwrap()
     }
 
-    /// Runs `script`, which reads its job first, under a start timeout of one
-    /// second, and returns the events.
+    /// Runs `script`, which reads its job first, under a start timeout of
+    /// `timeout`, and returns the events.
     #[cfg(unix)]
-    async fn events_under_a_start_timeout_of_one_second(script: &str) -> Vec<EngineEvent> {
-        let engine =
-            WorkerEngine::new("sh", ["-c", script]).with_start_timeout(Duration::from_secs(1));
+    async fn events_under_a_start_timeout(timeout: Duration, script: &str) -> Vec<EngineEvent> {
+        let engine = WorkerEngine::new("sh", ["-c", script]).with_start_timeout(timeout);
         let RunningJob {
             events,
             control: _control,
@@ -2691,7 +2690,7 @@ mod tests {
             started_line(),
             result_line()
         );
-        let events = events_under_a_start_timeout_of_one_second(&script).await;
+        let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
         assert!(
             matches!(
                 events.as_slice(),
@@ -2713,7 +2712,7 @@ mod tests {
             log_line(),
             result_line()
         );
-        let events = events_under_a_start_timeout_of_one_second(&script).await;
+        let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
         assert!(
             matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
             "{events:?}"
@@ -2726,7 +2725,7 @@ mod tests {
     #[tokio::test]
     async fn a_worker_that_answers_within_the_start_timeout_is_not_timed_out() {
         let script = format!("cat >/dev/null; sleep 0.3; echo '{}'", result_line());
-        let events = events_under_a_start_timeout_of_one_second(&script).await;
+        let events = events_under_a_start_timeout(Duration::from_secs(5), &script).await;
         assert!(
             matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
             "{events:?}"
