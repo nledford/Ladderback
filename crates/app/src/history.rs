@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use domain::{OperationId, PlanId};
 
-use crate::ports::{HistoryPage, OperationDetail, OperationStore, StoreError};
+use crate::ports::{
+    HistoryPage, HistoryQuery, OperationDetail, OperationStore, PageSize, StoreError,
+};
 
 /// Lists operations, newest first, a page at a time.
 pub struct ListOperations {
@@ -28,7 +30,8 @@ impl ListOperations {
         after: Option<OperationId>,
         limit: Option<usize>,
     ) -> Result<HistoryPage, StoreError> {
-        todo!()
+        let limit = limit.map_or(PageSize::DEFAULT, PageSize::new);
+        self.store.list(&HistoryQuery { plan, after, limit }).await
     }
 }
 
@@ -44,6 +47,6 @@ impl GetOperation {
 
     /// The operation, or `None` when the log has none with this ID.
     pub async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
-        todo!()
+        self.store.get(id).await
     }
 }

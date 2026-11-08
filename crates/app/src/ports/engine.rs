@@ -79,13 +79,29 @@ impl Job {
 
     /// The kind of operation this job makes.
     pub fn kind(&self) -> OperationKind {
-        todo!()
+        match self {
+            Self::Fake(_) => OperationKind::Fake,
+            Self::Identify(_) => OperationKind::Identify,
+            Self::Backup(_) => OperationKind::Backup,
+            Self::Prune(_) => OperationKind::Prune,
+            Self::Check(_) => OperationKind::Check,
+        }
     }
 
     /// What the job works on: a backup's plan, and the repository of any job
     /// that opens one whose ID is already known.
     pub fn target(&self) -> Target {
-        todo!()
+        let (plan, access) = match self {
+            Self::Fake(_) => return Target::default(),
+            Self::Identify(access) => (None, access),
+            Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
+            Self::Prune(job) => (None, &job.repository),
+            Self::Check(job) => (None, &job.repository),
+        };
+        Target {
+            plan,
+            repository: access.id.clone(),
+        }
     }
 }
 

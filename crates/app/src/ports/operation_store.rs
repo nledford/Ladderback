@@ -72,7 +72,7 @@ impl PageSize {
     /// The page size asked for, raised to 1 or cut to [`MAX_PAGE_SIZE`] when
     /// it is outside that range.
     pub fn new(requested: usize) -> Self {
-        todo!()
+        Self(requested.clamp(1, MAX_PAGE_SIZE))
     }
 
     pub fn get(self) -> usize {
@@ -129,8 +129,26 @@ impl OperationRecord {
     /// How the log describes `operation` and the engine's `result`: its
     /// times cut to the millisecond, the precision the log keeps.
     pub fn of(operation: &Operation, result: Option<&EngineResult>) -> Self {
-        todo!()
+        Self {
+            id: operation.id(),
+            kind: operation.kind(),
+            trigger: operation.trigger(),
+            target: operation.target().clone(),
+            status: operation.status().clone(),
+            queued_at: to_millisecond(operation.queued_at()),
+            started_at: operation.started_at().map(to_millisecond),
+            finished_at: operation.finished_at().map(to_millisecond),
+            warning_count: operation.warning_count(),
+            result: result.cloned(),
+        }
     }
+}
+
+/// `at` cut to the millisecond, never rounded up.
+fn to_millisecond(at: Timestamp) -> Timestamp {
+    // Every timestamp has a whole-millisecond count that is a timestamp
+    // again; the fallback is for a range this can't leave.
+    Timestamp::from_millisecond(at.as_millisecond()).unwrap_or(at)
 }
 
 /// One operation in full: its record and the warnings it kept.
