@@ -89,19 +89,25 @@ async fn run_and_cancel(agent: &mut Agent, minutes: u32) {
             .await
     });
     for _ in 0..minutes {
-        settle().await;
+        until_sleeping(&clock).await;
         clock.advance(SignedDuration::from_mins(1));
     }
-    settle().await;
+    until_sleeping(&clock).await;
     cancel.send(()).expect("the operation is still running");
     agent.operation = Some(running.await.expect("the operation ran"));
 }
 
-/// Lets spawned work run until it waits on something.
-async fn settle() {
-    for _ in 0..10 {
+/// Waits until the engine sleeps on `clock`, so the next `advance` wakes it.
+/// The operation runs on another worker thread; a fixed number of yields
+/// doesn't guarantee it got that far, and an early `advance` loses a minute.
+async fn until_sleeping(clock: &FakeClock) {
+    for _ in 0..100_000 {
+        if clock.sleepers() > 0 {
+            return;
+        }
         tokio::task::yield_now().await;
     }
+    panic!("the engine never slept on the clock");
 }
 
 /// An engine whose worker can't be launched.
