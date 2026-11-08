@@ -26,6 +26,13 @@ pub enum ErrorCode {
     OperationFailed,
     /// The job's deadline passed before it finished, so the worker stopped it.
     DeadlinePassed,
+    /// The request's `Host` header names neither a loopback address nor a
+    /// configured host name (a DNS-rebinding defense, §10.1).
+    HostNotAllowed,
+    /// The request's `Origin` header isn't the UI's own origin (§10.1).
+    OriginNotAllowed,
+    /// A mutating request didn't use `Content-Type: application/json` (§10.1).
+    JsonRequired,
     #[serde(other)]
     Unknown,
 }

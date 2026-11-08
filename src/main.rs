@@ -35,6 +35,10 @@ enum Command {
         /// use is printed on startup.
         #[arg(long, default_value = "127.0.0.1:9898")]
         listen: SocketAddr,
+        /// A host name besides loopback addresses that the web UI answers to,
+        /// such as the name a reverse proxy forwards (repeatable).
+        #[arg(long = "allowed-host", value_name = "NAME")]
+        allowed_hosts: Vec<String>,
     },
     /// Run one operation, read from stdin, and report events on stdout.
     /// Started by the agent; not for direct use.
@@ -44,12 +48,15 @@ enum Command {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Serve { listen } => serve(listen),
+        Command::Serve {
+            listen,
+            allowed_hosts,
+        } => serve(listen, allowed_hosts),
         Command::Worker => engine::worker::main(),
     }
 }
 
-fn serve(listen: SocketAddr) -> ExitCode {
+fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -69,7 +76,10 @@ fn serve(listen: SocketAddr) -> ExitCode {
             Ok(addr) => eprintln!("steading: listening on http://{addr}"),
             Err(error) => eprintln!("steading: listening (address unknown: {error})"),
         }
-        let app = http_adapter::router(Arc::new(http_adapter::EmbeddedUi));
+        let app = http_adapter::router(
+            Arc::new(http_adapter::EmbeddedUi),
+            http_adapter::RequestChecks::new(allowed_hosts),
+        );
         match axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
             .await
