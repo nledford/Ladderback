@@ -1,0 +1,84 @@
+# Releases (technical design §12.1). Steading releases as one product: the
+# `steading` package carries the version every crate inherits from
+# `[workspace.package]`, its `vX.Y.Z` tag and the root CHANGELOG.md. No crate
+# is published to crates.io.
+
+[workspace]
+# Versions come from git tags, not from a registry.
+git_only = true
+publish = false
+semver_check = false
+dependencies_update = false
+# Every crate is a package release-plz updates, so a commit touching only
+# `crates/**` still drives the one workspace version (the highest bump among
+# all changes). Only `steading` keeps a tag, a GitHub release and a changelog.
+changelog_update = false
+git_tag_enable = false
+# Not created for these packages, but release-plz finds each package's last
+# release by this pattern; without it a crate looks unreleased and its feat
+# commits only bump the patch version.
+git_tag_name = "v{{ version }}"
+git_release_enable = false
+# Release only when a release PR merged, never on every push to main.
+release_always = false
+# Only these commits trigger a release: feat, fix, perf and revert, and a
+# breaking change (`!`) of any type. docs, ci, chore, test and refactor
+# commits alone don't open a release PR.
+release_commits = "^(feat|fix|perf|revert)(\\(.+\\))?!?:|^[a-z]+(\\(.+\\))?!:"
+# Features bump the minor version, fixes the patch, even in 0.x; breaking
+# changes bump the minor version until 1.0.0, then the major version.
+features_always_increment_minor = true
+pr_name = "chore: release v{{ version }}"
+pr_labels = ["release"]
+pr_draft = true
+
+[[package]]
+name = "steading"
+release = true
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = ["domain", "app", "api", "web", "engine", "http-adapter", "platform"]
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "Steading v{{ version }}"
+# `X.Y.Z-rc.N` becomes a GitHub pre-release, not the latest release.
+git_release_type = "auto"
+
+[changelog]
+header = """# Changelog
+
+All notable changes to Steading are listed here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Steading uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in
+[docs/TECHNICAL-DESIGN.md §12.1](docs/TECHNICAL-DESIGN.md).
+
+## [Unreleased]
+"""
+protect_breaking_commits = true
+trim = false
+sort_commits = "oldest"
+commit_parsers = [
+    { message = "^feat", group = "<!-- 1 -->Added" },
+    { message = "^fix", group = "<!-- 3 -->Fixed" },
+    { message = "^perf", group = "<!-- 2 -->Changed" },
+    { message = "^revert", group = "<!-- 2 -->Changed" },
+    { message = "^(docs|test|chore|ci|build|refactor|style)", skip = true },
+]
+body = """
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for commit in commits | filter(attribute="breaking", value=true) -%}
+{% if loop.first %}
+### Breaking
+
+{% endif -%}
+- {{ commit.message | upper_first }}{% if commit.breaking_description and commit.breaking_description != commit.message %}: {{ commit.breaking_description }}{% endif %}
+{% endfor -%}
+{% for group, commits in commits | filter(attribute="breaking", value=false) | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits -%}
+- {{ commit.message | upper_first }}
+{% endfor -%}
+{% endfor -%}
+"""
