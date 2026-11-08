@@ -127,8 +127,9 @@ pub struct RepositoryAccess {
 }
 
 /// Everything that can hold a secret is masked (I4): the password, the
-/// password in the repository's URL, and every option's value. The rest of
-/// the URL and the options' names stay, for diagnosing.
+/// password in the repository's URL, the passwords in URLs that options
+/// hold, every option's value, and what the references resolved to. The rest
+/// of the URL and the options' names stay, for diagnosing.
 impl std::fmt::Debug for RepositoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let repository = Redactor::for_repository(
@@ -140,10 +141,12 @@ impl std::fmt::Debug for RepositoryAccess {
         .redact(&self.repository);
         let options: BTreeMap<&String, &str> =
             self.options.keys().map(|name| (name, REDACTED)).collect();
+        let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositoryAccess")
             .field("repository", &repository)
             .field("password", &self.password)
             .field("options", &options)
+            .field("secrets", &secrets)
             .field("id", &self.id)
             .finish()
     }

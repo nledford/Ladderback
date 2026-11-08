@@ -5,7 +5,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use domain::secrets::{SecretError, SecretRef, SecretWarning, TemplateError};
+use domain::secrets::{
+    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, SecretError, SecretRef, SecretValue,
+    SecretWarning, Template, TemplateError,
+};
 
 use crate::ports::{RepositoryAccess, SecretResolver};
 
@@ -26,8 +29,21 @@ pub struct RepositorySettings {
 /// An option written in the config can be a secret as it stands, so what the
 /// options hold is masked, and so are the passwords in the repository URLs.
 impl std::fmt::Debug for RepositorySettings {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("the settings with every secret masked")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inline = self
+            .password
+            .inline()
+            .cloned()
+            .unwrap_or_else(|| SecretValue::new(""));
+        let redactor = Redactor::for_repository(&self.repository, &inline, &self.options, &[]);
+        f.debug_struct("RepositorySettings")
+            .field("repository", &redactor.redact(&self.repository))
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
+            .field("password", &self.password)
+            .field("options", &masked(&self.options))
+            .field("options_hot", &masked(&self.options_hot))
+            .field("options_cold", &masked(&self.options_cold))
+            .finish()
     }
 }
 
@@ -45,9 +61,23 @@ pub struct ResolvedRepository {
 
 /// `access` masks its own secrets; the hot and cold fields are masked here.
 impl std::fmt::Debug for ResolvedRepository {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("the resolved repository with every secret masked")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedRepository")
+            .field("access", &self.access)
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
+            .field("options_hot", &masked(&self.options_hot))
+            .field("options_cold", &masked(&self.options_cold))
+            .field("warnings", &self.warnings)
+            .finish()
     }
+}
+
+/// The option names with every value hidden: the names help to diagnose.
+fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
+    options
+        .keys()
+        .map(|name| (name.as_str(), REDACTED))
+        .collect()
 }
 
 /// Where in a repository's settings a secret failed to resolve.
@@ -103,8 +133,8 @@ pub struct ResolveRepository {
 }
 
 impl ResolveRepository {
-    pub fn new(_resolver: Arc<dyn SecretResolver>) -> Self {
-        todo!("a use case that reads secrets through the resolver")
+    pub fn new(resolver: Arc<dyn SecretResolver>) -> Self {
+        Self { resolver }
     }
 
     /// Each distinct reference is read once, so a value can't change between
@@ -112,8 +142,206 @@ impl ResolveRepository {
     /// for the engine to hide wherever it reports text.
     pub async fn resolve(
         &self,
-        _settings: &RepositorySettings,
+        settings: &RepositorySettings,
     ) -> Result<ResolvedRepository, ResolveError> {
-        todo!("resolve the password and every reference in the settings")
+        refuse_references_in_arguments(settings)?;
+        let mut run = Run {
+            resolver: self.resolver.as_ref(),
+            values: BTreeMap::new(),
+            secrets: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let password = run.password(&settings.password).await?;
+        let repository = run.expand(Field::Repository, &settings.repository).await?;
+        refuse_supplied_prefix(Field::Repository, &settings.repository, &repository)?;
+        let repo_hot = match &settings.repo_hot {
+            Some(text) => {
+                let hot = run.expand(Field::RepoHot, text).await?;
+                refuse_supplied_prefix(Field::RepoHot, text, &hot)?;
+                Some(hot)
+            }
+            None => None,
+        };
+        let options = run.expand_all(&settings.options, Field::Option).await?;
+        let options_hot = run
+            .expand_all(&settings.options_hot, Field::OptionHot)
+            .await?;
+        let options_cold = run
+            .expand_all(&settings.options_cold, Field::OptionCold)
+            .await?;
+        Ok(ResolvedRepository {
+            access: RepositoryAccess {
+                repository,
+                password,
+                options,
+                secrets: run.secrets,
+                id: None,
+            },
+            repo_hot,
+            options_hot,
+            options_cold,
+            warnings: run.warnings,
+        })
+    }
+}
+
+/// The repository strings that rustic hands to a process as an argument:
+/// `rclone:…` starts rclone with the rest as its argument.
+const ARGUMENT_REPOSITORY_PREFIX: &str = "rclone:";
+
+/// The options of the pinned `rustic_backend` that are run as commands:
+/// `rclone-command` starts rclone (`rclone.rs`), and the local backend runs
+/// `post-create-command` and `post-delete-command` (`local.rs`).
+const COMMAND_OPTIONS: [&str; 3] = [
+    "rclone-command",
+    "post-create-command",
+    "post-delete-command",
+];
+
+/// Whether `text` is a valid template with a reference in it. A malformed
+/// one is reported by the field's expansion, in its turn.
+fn has_reference(text: &str) -> bool {
+    Template::parse(text).is_ok_and(|template| {
+        template
+            .parts()
+            .iter()
+            .any(|part| matches!(part, Part::Reference(_)))
+    })
+}
+
+/// A resolved secret in a process's arguments shows in `ps` and in
+/// `/proc/<pid>/cmdline` (I4), so a reference in a field that becomes one is
+/// refused, before anything is read. A plain `rclone:remote:path` is fine.
+fn refuse_references_in_arguments(settings: &RepositorySettings) -> Result<(), ResolveError> {
+    let refuse = |field| ResolveError {
+        field,
+        cause: Cause::ReferenceInProcessArguments,
+    };
+    let repository =
+        |text: &str| text.starts_with(ARGUMENT_REPOSITORY_PREFIX) && has_reference(text);
+    if repository(&settings.repository) {
+        return Err(refuse(Field::Repository));
+    }
+    if settings.repo_hot.as_deref().is_some_and(repository) {
+        return Err(refuse(Field::RepoHot));
+    }
+    let commands = |options: &BTreeMap<String, String>| {
+        options
+            .iter()
+            .find(|(name, text)| COMMAND_OPTIONS.contains(&name.as_str()) && has_reference(text))
+            .map(|(name, _)| name.clone())
+    };
+    if let Some(name) = commands(&settings.options) {
+        return Err(refuse(Field::Option(name)));
+    }
+    if let Some(name) = commands(&settings.options_hot) {
+        return Err(refuse(Field::OptionHot(name)));
+    }
+    if let Some(name) = commands(&settings.options_cold) {
+        return Err(refuse(Field::OptionCold(name)));
+    }
+    Ok(())
+}
+
+/// A reference can supply the `rclone:` itself (`${REPO}`), and only the
+/// expansion shows it. The secret was read by then, but it goes no further.
+fn refuse_supplied_prefix(
+    field: Field,
+    template: &str,
+    expanded: &str,
+) -> Result<(), ResolveError> {
+    if expanded.starts_with(ARGUMENT_REPOSITORY_PREFIX) && has_reference(template) {
+        return Err(ResolveError {
+            field,
+            cause: Cause::ReferenceInProcessArguments,
+        });
+    }
+    Ok(())
+}
+
+/// One resolution: what it has read so far.
+struct Run<'a> {
+    resolver: &'a dyn SecretResolver,
+    values: BTreeMap<Reference, SecretValue>,
+    secrets: Vec<SecretValue>,
+    warnings: Vec<SecretWarning>,
+}
+
+impl Run<'_> {
+    async fn password(&mut self, password: &SecretRef) -> Result<SecretValue, ResolveError> {
+        let resolved = self
+            .resolver
+            .resolve(password)
+            .await
+            .map_err(|error| ResolveError {
+                field: Field::Password,
+                cause: Cause::Unresolved(error),
+            })?;
+        self.warn(resolved.warnings);
+        Ok(resolved.value)
+    }
+
+    async fn expand_all(
+        &mut self,
+        options: &BTreeMap<String, String>,
+        field: fn(String) -> Field,
+    ) -> Result<BTreeMap<String, String>, ResolveError> {
+        let mut expanded = BTreeMap::new();
+        for (name, text) in options {
+            expanded.insert(name.clone(), self.expand(field(name.clone()), text).await?);
+        }
+        Ok(expanded)
+    }
+
+    /// `text` with its references replaced by what they resolve to. Never
+    /// more than [`MAX_SECRET_BYTES`], so a few large files can't size an
+    /// allocation.
+    async fn expand(&mut self, field: Field, text: &str) -> Result<String, ResolveError> {
+        let fail = |cause| ResolveError {
+            field: field.clone(),
+            cause,
+        };
+        let template = Template::parse(text).map_err(|error| fail(Cause::Invalid(error)))?;
+        let mut expanded = String::new();
+        for part in template.parts() {
+            let resolved;
+            let piece = match part {
+                Part::Text(text) => text.as_str(),
+                Part::Reference(reference) => {
+                    resolved = self
+                        .value(reference)
+                        .await
+                        .map_err(|error| fail(Cause::Unresolved(error)))?;
+                    resolved.expose()
+                }
+            };
+            if expanded.len() + piece.len() > MAX_SECRET_BYTES {
+                return Err(fail(Cause::ExpansionTooLong {
+                    limit: MAX_SECRET_BYTES,
+                }));
+            }
+            expanded.push_str(piece);
+        }
+        Ok(expanded)
+    }
+
+    async fn value(&mut self, reference: &Reference) -> Result<SecretValue, SecretError> {
+        if let Some(value) = self.values.get(reference) {
+            return Ok(value.clone());
+        }
+        let resolved = self.resolver.resolve(&reference.secret_ref()).await?;
+        self.warn(resolved.warnings);
+        self.secrets.push(resolved.value.clone());
+        self.values
+            .insert(reference.clone(), resolved.value.clone());
+        Ok(resolved.value)
+    }
+
+    fn warn(&mut self, warnings: Vec<SecretWarning>) {
+        for warning in warnings {
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
     }
 }
