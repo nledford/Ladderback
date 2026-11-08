@@ -1,0 +1,15 @@
+{
+  "name": "steading-ui-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs Steading's @ui scenarios in a real browser: Playwright, axe-core and keyboard-only journeys (technical design §4.5, §13.2)",
+  "scripts": {
+    "test": "cucumber-js",
+    "lint": "node scripts/lint-journeys.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@cucumber/cucumber": "^13.3.0",
+    "playwright": "^1.65.0"
+  }
+}
