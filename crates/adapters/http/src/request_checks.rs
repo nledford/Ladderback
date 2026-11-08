@@ -7,12 +7,12 @@
 //!
 //! 1. the `Host` header names a loopback address or a configured host name;
 //! 2. a request that carries an `Origin` header comes from the UI's own origin;
-//! 3. such a request, when it mutates, uses `Content-Type: application/json`.
+//! 3. a mutating request uses `Content-Type: application/json`, with or
+//!    without an `Origin`: a browser or extension that strips it must not let
+//!    a cross-site form post through.
 //!
-//! A request without `Origin` (curl, scripts, the `steading` CLI) is subject
-//! to the first check only. Each refusal is a typed [`ErrorCode`]; `/sync/v1`
-//! is exempt from all three, since agents authenticate there with a signed
-//! nonce (§7.1).
+//! Each refusal is a typed [`ErrorCode`]; `/sync/v1` is exempt from all
+//! three, since agents authenticate there with a signed nonce (§7.1).
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -42,8 +42,35 @@ impl RequestChecks {
     }
 
     fn check(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<(), ErrorCode> {
-        let _ = (method, uri, headers, &self.allowed_hosts);
-        todo!("request checks")
+        if is_agent_route(uri.path()) {
+            return Ok(());
+        }
+        let host = match one(headers, &HOST) {
+            Header::Text(host) => host,
+            Header::Absent => uri.authority().map_or("", |authority| authority.as_str()),
+            Header::Invalid => return Err(ErrorCode::HostNotAllowed),
+        };
+        let allowed = parse_authority(host).is_some_and(|authority| self.allows(authority.host));
+        if !allowed {
+            return Err(ErrorCode::HostNotAllowed);
+        }
+        match one(headers, &ORIGIN) {
+            // A request without Origin (curl, scripts, the CLI) has no origin to match.
+            Header::Absent => {}
+            Header::Text(origin) if is_own_origin(origin, host) => {}
+            Header::Text(_) | Header::Invalid => return Err(ErrorCode::OriginNotAllowed),
+        }
+        let reads_only =
+            method == Method::GET || method == Method::HEAD || method == Method::OPTIONS;
+        if !reads_only {
+            match one(headers, &CONTENT_TYPE) {
+                Header::Text(content_type) if is_json(content_type) => {}
+                Header::Text(_) | Header::Absent | Header::Invalid => {
+                    return Err(ErrorCode::JsonRequired);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Whether `host` (the host part of an authority) is a loopback address
@@ -174,8 +201,11 @@ fn refusal(code: ErrorCode) -> Response {
 /// The startup rule of §10.1. Sign-in doesn't exist yet and there is no
 /// trusted-proxy mode, so the daemon may only listen on a loopback address.
 pub fn require_loopback(addr: SocketAddr) -> Result<(), NonLoopbackBind> {
-    let _ = addr;
-    todo!("startup rule")
+    if addr.ip().is_loopback() {
+        Ok(())
+    } else {
+        Err(NonLoopbackBind(addr))
+    }
 }
 
 /// The daemon was asked to listen beyond loopback with sign-in off.
@@ -198,8 +228,10 @@ impl std::error::Error for NonLoopbackBind {}
 /// port, such as `nas.example.com`, `192.168.1.5` or `[fd00::1]`. A value the
 /// `Host` header could never match would silently lock the UI out.
 pub fn validate_host_name(name: &str) -> Result<String, InvalidHostName> {
-    let _ = name;
-    todo!("host name validation")
+    match parse_authority(name) {
+        Some(authority) if authority.host == name => Ok(name.to_owned()),
+        _ => Err(InvalidHostName(name.to_owned())),
+    }
 }
 
 /// A configured host name that isn't a name or an address without a port.
