@@ -49,7 +49,9 @@ pub enum EngineError {
     /// The engine couldn't be started, or refused the job. `detail` is the
     /// platform's own message.
     Unavailable { detail: String },
-    /// The engine started but never took its job: it didn't read it in time.
+    /// The engine started but didn't take its job in time: writing it to the
+    /// worker stayed blocked, as it does for a spec larger than the pipe's
+    /// buffer when the worker doesn't read.
     StartTimedOut,
 }
 

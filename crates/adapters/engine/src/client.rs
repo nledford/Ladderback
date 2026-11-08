@@ -117,13 +117,15 @@ impl WorkerEngine {
     }
 
     /// How long writing a job to a new worker's stdin may take, 30 seconds by
-    /// default. A worker that never reads its job, because it hung before it
-    /// got to it, leaves the write blocked once the pipe is full. When the
+    /// default. A worker that doesn't read its job, because it hung before it
+    /// got to it, leaves the write blocked once the pipe is full, which a job
+    /// spec larger than the pipe's buffer (64 KiB on Linux) does. When the
     /// time has passed, the worker and what it started are killed, and
     /// [`Engine::run`] fails with [`EngineError::StartTimedOut`]. Only the
-    /// write is bounded, however slowly the worker reads: a write that
-    /// finishes in time is not affected, and one that fails is
-    /// [`EngineError::Unavailable`], as ever.
+    /// write is bounded, however slowly the worker reads: a smaller spec is
+    /// buffered at once, whether or not the worker reads it, so it is not
+    /// covered; a write that finishes in time is not affected, and one that
+    /// fails is [`EngineError::Unavailable`], as ever.
     #[must_use]
     pub fn with_start_timeout(mut self, timeout: Duration) -> Self {
         self.start_timeout = timeout;
