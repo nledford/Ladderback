@@ -5,6 +5,8 @@
 //! `chmod 000` ineffective, a backend tool isn't installed). A silent early
 //! return would read as a pass.
 
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// The environment variable naming the file that collects skips. `just test`
@@ -32,23 +34,46 @@ macro_rules! skip {
 /// The one-line record of a skip. Line breaks in the reason become spaces,
 /// so every skip stays one line of the log.
 pub fn skip_line(module: &str, reason: &str) -> String {
-    todo!("format {module}: {reason}")
+    let reason = reason.replace(['\r', '\n'], " ");
+    format!("SKIPPED {module}: {reason}")
 }
 
 /// Records a skip on stderr and in the file named by `STEADING_SKIP_LOG`.
 pub fn record_skip(module: &str, reason: &str) {
-    record_skip_to(
-        std::env::var_os(SKIP_LOG_ENV).as_deref().map(Path::new),
-        module,
-        reason,
-    );
+    // This crate's own tests skip on purpose; they must not add lines to
+    // the list of the run that is testing it.
+    let log = if cfg!(test) {
+        None
+    } else {
+        std::env::var_os(SKIP_LOG_ENV)
+    };
+    record_skip_to(log.as_deref().map(Path::new), module, reason);
 }
 
 /// Records a skip on stderr and appends it to `log` when there is one. A log
 /// that can't be written is reported on stderr, never a panic: the skip
 /// itself still shows there.
 pub fn record_skip_to(log: Option<&Path>, module: &str, reason: &str) {
-    todo!("record {module}: {reason} in {log:?}")
+    let line = skip_line(module, reason);
+    eprintln!("{line}");
+    if let Some(log) = log
+        && let Err(error) = append_line(log, &line)
+    {
+        eprintln!(
+            "testkit: cannot record the skip in {}: {error}",
+            log.display()
+        );
+    }
+}
+
+/// One `write` per line, so skips from test processes running side by side
+/// don't interleave.
+fn append_line(log: &Path, line: &str) -> io::Result<()> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)?
+        .write_all(format!("{line}\n").as_bytes())
 }
 
 #[cfg(test)]
