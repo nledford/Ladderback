@@ -75,7 +75,10 @@ WCAG 2.2 AA:
 - every action is reachable by keyboard;
 - text and controls meet contrast minimums;
 - every control has an accessible name;
-- status (success, warning, failure) is never shown by color alone.
+- status (success, warning, failure) is never shown by color alone;
+- live changes (progress, finished backups) reach screen readers without flooding them.
+
+Supported assistive technologies: Orca on Linux, VoiceOver on macOS, and keyboard-only use. Accessibility is a release requirement, not a later polish pass.
 
 ## Offer
 

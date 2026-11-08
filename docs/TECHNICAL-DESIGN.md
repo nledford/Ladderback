@@ -7,9 +7,11 @@ A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a 
 
 ---
 
-## 0. Safety invariants
+## 0. Invariants
 
 Every later section serves these. Each one has a single enforcing component and a test that proves it.
+
+### Safety invariants
 
 | # | Invariant | Enforced by | Verified by |
 |---|---|---|---|
@@ -20,6 +22,19 @@ Every later section serves these. Each one has a single enforcing component and 
 | I5 | Destructive restic commands (`prune`, `forget`, `rewrite`, `repair`) are never run against a Steading-maintained repo, and the UI says so. | Repo page warning; Steading never invokes restic (§7.3) | Doc and UI review |
 | I6 | Forget, run by any owner, only deletes snapshots that a plan owns, by tag, or that the user explicitly adopted or selected. | Forget algorithm (§7.3) | Untagged snapshots survive a forget run |
 | I7 | Maintenance operations on one repository run one at a time. | `OperationStore::try_start`, backed by a partial unique index (§9) | Store contract test: a second maintenance start on the same repo is refused; `maintenance/serialization.feature` |
+
+### Accessibility invariants
+
+The web UI meets **WCAG 2.2 AA** ([PRODUCT.md](../PRODUCT.md)). These rules bind like I1–I7: a change that breaks one doesn't merge. §4.5 is the design that delivers them.
+
+| # | Invariant | Enforced by | Verified by |
+|---|---|---|---|
+| A1 | Every workflow can be completed with the keyboard alone, in a logical focus order. Focus is always visible, never hidden behind sticky UI, and never trapped (WCAG 2.1.1, 2.1.2, 2.4.3, 2.4.7, 2.4.11). | Native interactive elements and the shared component set (§4.5) | Keyboard-only Playwright journeys through a helper with no pointer actions, which check focus visibility and obscuring after every Tab |
+| A2 | Every control, image, chart and status has a role and an accessible name that contains its visible label, and status is never shown by color alone (1.1.1, 1.3.1, 1.4.1, 2.5.3, 4.1.2). | Semantic HTML first; status is icon + text + color (§4.5) | axe-core on every page and state; UI steps find elements by role and name only, so an unnamed control fails its scenario |
+| A3 | Changes nobody asked for (progress, an operation finishing, an agent going offline) reach screen readers without flooding them, and live updates can be paused (4.1.3, 2.2.2). | One app-wide announcer fed by `UiEvent`s; a "Pause live updates" control (§4.5) | Announcer unit tests with a fake clock; screen-reader pass per milestone |
+| A4 | Text has 4.5:1 contrast and UI components 3:1. Pages reflow at 320 × 256 CSS px without two-dimensional scrolling, resize text to 200 %, and survive user text-spacing overrides (1.4.3, 1.4.4, 1.4.10, 1.4.11, 1.4.12). | Design tokens; fluid layout with logical properties and relative units | A token contrast test; axe-core; Playwright at 320 × 256, with 200 % root font size and with the 1.4.12 spacing stylesheet injected |
+| A5 | Destructive actions can be reviewed and cancelled, and step-up confirmation is no cognitive test: paste and password managers work (3.3.4, 3.3.8). | Confirmation dialog component; `autocomplete` attributes; paste never blocked (§4.5, §10.4) | Keyboard and screen-reader journeys for restore and step-up confirmation |
+| A6 | Form errors are identified in text, with a suggestion where one is known, and announced on submit (3.3.1, 3.3.3, 1.3.5). | Form field component and error summary (§4.5) | Component contracts; journeys that submit invalid input |
 
 ---
 
@@ -348,7 +363,7 @@ Everything an agent has, plus:
 
 ### 4.4 Web UI (Leptos CSR)
 
-Pages:
+Every page follows §4.5. Pages:
 
 1. **Dashboard.** A card per machine: online status, last backup per plan (time, result, size added), next run, overdue plans and any running operation with live progress. A list of recent failures and warnings.
 2. **Machine detail.** Plans, history timeline, logs and an agent settings summary.
@@ -361,6 +376,86 @@ Pages:
 7. **Settings.** Auth, hub pairing, notifications.
 
 Live updates come from one WebSocket per tab carrying `UiEvent` (operation started/progress/finished, agent online/offline). The page fetches initial state over REST.
+
+### 4.5 Accessibility
+
+Accessibility is designed in from the first screen, not audited in at the end. The target is WCAG 2.2 AA (A1–A6, §0).
+
+**Supported assistive technologies** follow the supported platforms:
+
+- Orca with Firefox on Linux;
+- VoiceOver with Safari on macOS;
+- keyboard-only use in any current browser. Safari reaches links and buttons with Tab only when "Press Tab to highlight each item" is on, or with Option+Tab; the manual pass uses that setting.
+
+**Structure.**
+
+- **Native HTML first:** `<button>`, `<a>`, `<table>` with `<th scope>`, `<progress>`, `<dialog>` opened with `showModal()`, `<details>`, `<time datetime>`. ARIA only where no native element exists, and then following the WAI-ARIA Authoring Practices pattern for that widget.
+- **Page skeleton:** landmarks (`header`, `nav`, `main`), exactly one `<h1>`, descriptive headings and labels with no skipped levels (2.4.6), and a "Skip to content" link. Text in another language, such as rustic's verbatim English messages, carries its own `lang` (3.1.2).
+- **Route changes** (path navigation): the router updates `document.title` (page, then machine, then "Steading") and moves focus to the new page's `<h1>` (`tabindex="-1"`). Screen readers read the focused heading, so the announcer stays silent. Changing filters, sorting or pages updates the URL query without moving focus.
+- **Pointer targets:** at least 24 × 24 CSS px (2.5.8). Nothing needs dragging (2.5.7) or works only on hover.
+- **Tooltips and popovers** can be dismissed with Escape, stay open while hovered, and stay until dismissed (1.4.13). The `title` attribute never carries information on its own.
+- **Sessions** last 24 hours, above 2.2.1's 20-hour exception. Expiry never discards unsaved form input; the user signs in again and continues.
+
+**The shared component set** in `web` is the only place widgets are built. Each component has an accessibility contract and tests for it:
+
+| Component | Contract |
+|---|---|
+| Dialog (confirmations, step-up confirmation) | Native modal `<dialog>`. Focus moves in, the background is inert, Escape cancels, and focus returns to the control that opened it. A destructive button is never the default. Errors inside the dialog, such as a wrong password, use a `role="alert"` inside it |
+| Data table (snapshots, operations, history) | A real `<table>`. Sortable headers are buttons with `aria-sort`. Row actions are named with their row ("Restore snapshot 3f2a…"). The new page and row count are announced |
+| Tree (snapshot browser, M3) | WAI-ARIA tree pattern: one tab stop with roving `tabindex`; arrow keys (Left and Right swap in right-to-left layouts), Home and End, type-ahead; `aria-expanded`, `aria-level`, `aria-setsize` and `aria-posinset` for lazily loaded children; `aria-busy` while a folder loads. Download and Restore for the selected node sit in a details pane next to the tree, reached with Tab. If M3's VoiceOver pass shows the tree is unusable there, the fallback is a nested list of disclosures |
+| Status badge | An icon with a distinct shape per state, visible text, and color. Never color alone (A2) |
+| Progress | A visual bar (`aria-hidden`) that moves smoothly, plus a focusable `<progress>` whose value and `aria-valuetext` ("42 %, 3.1 GiB of 7.4 GiB, about 6 minutes left") change at most every 30 s. Screen readers can speak value changes themselves, so the exposed value is throttled too |
+| Form field | Visible `<label>`; hint and error linked with `aria-describedby`; `aria-invalid` on error; `autocomplete` tokens where a field has a known purpose (1.3.5). On a failed submit, focus moves to an error summary (a heading with `tabindex="-1"`) that names each problem and links to its field. Errors say what is wrong and how to fix it (3.3.1, 3.3.3). Validation never interrupts typing |
+| Tabs, menus, disclosures | Their WAI-ARIA patterns, or native `<details>` where it suffices |
+| Toast | Spoken through the announcer and never steals focus. Never the only place a failure appears: failures also stay on the page |
+
+**Live updates (A3).** `UiEvent`s update the page visually, but only the **announcer** talks to screen readers.
+
+- **Two regions:** a polite `role="status"` and an assertive `role="alert"`. Both sit in the static `index.html`, outside the Leptos mount point, empty and never `display: none`, so they exist before anything is written to them.
+- **Polite:** an operation finished, an agent came back. **Assertive:** only a failure that needs the user now, such as a failed restore.
+- **Writing:** each message clears the region and sets the text on the next tick, so a repeated message is announced again.
+- **Bursts are merged:** the same message within 2 s is said once, and ten agents changing at once become one summary ("3 backups finished, 1 failed").
+- **Modal dialogs** make the rest of the page inert, including the regions. While one is open, announcements queue and are spoken when it closes.
+- **Progress** is never written to a region. The start and the finish are announced.
+- **Pause:** the dashboard has a "Pause live updates" control (2.2.2). While paused, the page stops changing and a banner counts pending changes.
+
+**Time, numbers and charts.**
+
+- Relative times ("3 h ago") are always paired with the absolute time, both in `<time datetime>` and in the accessible name. Text inside a live region never ticks.
+- Sizes and durations come from `l10n` (§8.4). Where an abbreviation reads badly aloud, the visible text is `aria-hidden` and a visually hidden spoken form, from the catalog's `.spoken` attribute, sits next to it. An accessible name always contains the visible label text (2.5.3).
+- SVG charts (§8.1) have `role="img"`, a title and a one-sentence summary ("Snapshot size grew from 41 to 44 GiB over 30 days"). A "Show as table" toggle exposes the same numbers as a real table.
+
+**Visual adaptation.**
+
+- Light and dark themes follow `prefers-color-scheme`, with a manual override.
+- `prefers-contrast: more` strengthens borders and focus rings, and `forced-colors: active` falls back to system colors without losing state.
+- `prefers-reduced-motion` stops every animation except the progress bar's value. Nothing flashes.
+- Text resizes to 200 % without loss, and pages reflow at 320 × 256 CSS px (A4).
+- Color tokens live in one CSS file, and a test checks every foreground and background pair against A4's ratios. Once the visual `DESIGN.md` exists, `design.md lint` runs the same check on its tokens.
+
+**Safe actions and authentication (A5).**
+
+- Restore, in-place restore, adoption, forget and prune say what will happen before it happens and can be cancelled (3.3.4).
+- Step-up confirmation (§10.4) allows paste and password managers (`autocomplete="current-password"`). The "type the snapshot short ID" check used when auth is off accepts paste, and the ID is shown as selectable text with a copy button, so it isn't a transcription test (3.3.8).
+- A multi-step flow never asks again for something already entered (3.3.7).
+
+**Beyond the web UI.**
+
+- **Notifications:** every message has a plain-text form (email has a text part). Meaning never depends on color or emoji, and every message says what happened and what to do next.
+- **CLI:** color is never the only signal, and `NO_COLOR` is honored. Spinners and redraws are off when output isn't a TTY, or with `--plain`. Every command that reports state has `--json`.
+
+**Tests** (test first, like everything else; §13):
+
+- **Component structure** (roles, names, ARIA attributes, DOM) runs in the browser under `wasm-bindgen-test`.
+- **Component behavior** (keyboard, focus return, Escape, accessibility-tree snapshots with `toMatchAriaSnapshot`) runs in Playwright, which sends real input, against a dev-only component gallery route. Synthetic key events in `wasm-bindgen-test` don't trigger native behavior, so they can't test this.
+- **Announcer:** throttling, merging, politeness, queueing during dialogs, and "the same text twice, 5 s apart, is announced twice", all with a fake clock.
+- **UI journeys** (`@ui` scenarios, §13.2), from M0:
+  - axe-core with tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` and `wcag22aa` on every page, in its loading, empty, error and success states;
+  - keyboard-only runs through a helper that offers only key presses and role locators; a lint bans pointer actions in journey code;
+  - after every Tab, the focused element must have a visible focus indicator, and `elementFromPoint` at its center must be that element or inside it (2.4.7, 2.4.11);
+  - runs at 320 × 256, with a 200 % root font size, with the 1.4.12 text-spacing stylesheet injected (failing on clipped text, as in §8.4), and under emulated dark, `forced-colors`, `prefers-contrast: more` and `prefers-reduced-motion`.
+- **Other surfaces:** a catalog test that every notification message has a plain-text form; a CLI `@e2e` test that output has no ANSI codes under `NO_COLOR` or without a TTY, and that `--json` parses.
+- **Manual screen-reader pass** in each milestone with UI: the milestone's journeys in Orca and in VoiceOver, including whether progress bars over-announce. Automated checks catch only part of WCAG, so this pass is part of the milestone's definition of done.
 
 ---
 
@@ -581,7 +676,7 @@ Backups made outside Steading (the rustic or restic CLI) are not covered by the 
 | **CSR with explicit REST + WebSocket API** (chosen) | Single `trunk` build output that's easy to embed. The API is a real, versioned contract that the hub, the CLI and a future Tauri shell can all reuse. Shared types via an `api` crate | A bit more boilerplate than server functions |
 | SSR + hydration with server functions | Less API code. Fast first paint | Couples UI and server build (`cargo-leptos`, two targets). Server fns aren't a stable contract for agents or a CLI. SEO and first paint don't matter for a localhost dashboard |
 
-UI kit: plain Leptos plus Tailwind (with the `trunk` Tailwind hook) or a small hand-rolled component set. Charts (snapshot sizes over time, durations) use SVG rendered in Leptos, with no JS chart library.
+UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling, and Steading's own small component set for every widget, built to the accessibility contracts in §4.5. Charts (snapshot sizes over time, durations) use SVG rendered in Leptos, with no JS chart library.
 
 ### 8.2 Backend crates
 
@@ -630,6 +725,8 @@ steading/
 │     └─ platform/            # clock, power, network, identity key, service install (systemd/launchd)
 ├─ features/                  # Gherkin scenarios, one folder per bounded context (§13.2)
 ├─ tests/e2e.rs               # cucumber-rs runner for @e2e scenarios against the real binary
+├─ ui-tests/                  # Node: @cucumber/cucumber + Playwright + axe-core for @ui scenarios and the
+│                             #   component gallery (§4.5)
 ├─ src/main.rs                # composition root; `steading` binary: serve | worker | pair | import-profile
 │                             #   | export-profile | install-service | db rebuild
 ├─ migrations/
@@ -689,7 +786,7 @@ steading/
 - Every message is a complete sentence or label; code never concatenates fragments.
 - Counts use selectors with CLDR categories and a `*[other]` default.
 - The ubiquitous language (§3.1) becomes Fluent terms (`-snapshot`, `-repository`, `-plan`, `-agent`, `-hub`, `-brand-name`). UI copy uses the same words as the glossary, and translators translate each term once.
-- One element's texts are grouped as attributes (`.aria-label`, `.title`, `.placeholder`). A translation of a message must carry all of its attributes, because fallback happens per message.
+- One element's texts are grouped as attributes (`.aria-label`, `.placeholder`, `.tooltip`, and `.spoken` for a spoken form of abbreviated text, §4.5). A translation of a message must carry all of its attributes, because fallback happens per message.
 - A translator comment precedes every message with variables, saying what each variable holds.
 - Voice follows [PRODUCT.md](../PRODUCT.md): calm and exact; a warning says what happened and what to do next.
 
@@ -709,7 +806,7 @@ steading/
   - `en-XA`: accented Latin letters with doubled vowels.
   - `ar-XB`: upside-down Latin letters, rendered with `lang="ar"` and `dir="rtl"`. This tests right-to-left layout, not Arabic shaping. The bundle keeps the `en-US` locale so English plural rules still apply.
 
-  From M3, Playwright runs the UI journeys in both. A run fails on clipped or overflowing text, on layout that breaks right-to-left, and on any visible text node with no transformed character, unless the node is data: IDs, paths, numbers, hostnames, or verbatim rustic text marked `lang="en"`.
+  From M1b, Playwright runs the UI journeys in both. A run fails on clipped or overflowing text, on layout that breaks right-to-left, and on any visible text node with no transformed character, unless the node is data: IDs, paths, numbers, hostnames, or verbatim rustic text marked `lang="en"`.
 
 **Security.** Translations are compiled in and rendered as text nodes; Leptos escapes them, and nothing passes translated text to `inner_html`. Fluent's markup and DOM-overlay features are not used. Arguments are redacted when codes are built (above); the I4 canary test covers the `args` and `detail` paths too.
 
@@ -787,7 +884,7 @@ Retention: logs 30 days, operations 1 year (configurable), snapshot cache rebuil
 ### 10.1 Web UI
 
 - Binds to `127.0.0.1` by default.
-- **Auth is optional**, as in Backrest (§16, decision 11). When enabled: a single admin user with an argon2id password hash, `HttpOnly`/`SameSite=Strict` session cookies and CSRF protection on mutating routes.
+- **Auth is optional**, as in Backrest (§16, decision 11). When enabled: a single admin user with an argon2id password hash, `HttpOnly`/`SameSite=Strict` session cookies lasting 24 hours (§4.5), and CSRF protection on mutating routes.
 - **Request checks, always on**, auth or not. The UI can set hooks and `password-command`, so an unauthenticated API reachable from a web page would let any site run commands on the machine (DNS rebinding or cross-site POSTs). Therefore:
   - the `Host` header must be a configured name or a loopback address;
   - a request that carries an `Origin` header must match the UI's own origin, and mutating requests must use `Content-Type: application/json`, which forces a CORS preflight that the daemon refuses. Requests without `Origin` (curl, scripts, the `steading` CLI) aren't affected by this rule;
@@ -833,7 +930,7 @@ Ed25519 identities, TLS (pinned or CA), and single-use short-lived pairing token
 ### 10.4 Restores
 
 Restores are the most dangerous action because they can overwrite files.
-- **Step-up confirmation** before any restore or download started from a web UI, whether local or on the hub. With auth enabled, re-enter your password; this is required even with a valid session, so an unattended open tab isn't enough. With auth disabled or in proxy-header mode there is no password to re-enter, so the user types the snapshot's short ID instead. That only guards against misclicks, not against someone at the keyboard.
+- **Step-up confirmation** before any restore or download started from a web UI, whether local or on the hub. With auth enabled, re-enter your password; this is required even with a valid session, so an unattended open tab isn't enough. Password managers and paste work (A5). With auth disabled or in proxy-header mode there is no password to re-enter, so the user types or pastes the snapshot's short ID instead. That only guards against misclicks, not against someone at the keyboard.
 - **Default destination is a new folder** on the target machine: `~/steading-restore/<host>-<snapshot-short-id>-<timestamp>/` (configurable per agent). Existing files are never touched in this mode.
 - **From the hub**, only new-folder restores are possible, and only to agents that set `allow-hub-restore = true` (off by default). The agent runs the restore itself; the hub sends only the request.
 - **Restoring in place** (original paths) is offered only in the agent's own UI. Its confirmation dialog states how many files would be overwritten or deleted, using a dry-run `prepare_restore` plan first.
@@ -877,7 +974,7 @@ Steading is built behaviour first and test first. The two together are how the i
 
 **How CI makes skipping it visible.** No tool can prove a test was written before the code. These checks make skipping test-first visible and costly:
 
-1. **Red-first check**, for pull requests labelled `behaviour`. The pull request's first commit is a `test:` commit that adds the new tests and scenarios, with `todo!()` stubs for any new API so that it compiles. CI checks out that commit and runs exactly the tests it added, by name (`cargo test -- --exact`, and the new scenarios by name); each one must **fail at run time**. A compile error doesn't count, because it would pass vacuously. A test that already passes specifies nothing new.
+1. **Red-first check**, for pull requests labelled `behaviour`. The pull request's first commit is a `test:` commit that adds the new tests and scenarios, with `todo!()` stubs for any new API so that it compiles. CI checks out that commit and runs exactly the tests it added, by name (`cargo test -- --exact`, and the new scenarios by name in both the Rust and the `@ui` runner); each one must **fail at run time**. A compile error doesn't count, because it would pass vacuously. A test that already passes specifies nothing new.
 2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on `domain`, `app`, `adapters/config` and `adapters/interop`. A mutant that survives in changed code means behaviour no test asserts, and blocks the merge. Exceptions are marked `#[mutants::skip]` (from the `mutants` crate) or listed in `.cargo/mutants.toml` `exclude_re`, each with a reason. A full run happens nightly.
 3. **Squash merge.** The check runs on the pull request before merge, and pull requests are squash-merged, so the failing `test:` commit never lands on `main` and `git bisect` stays clean.
 
@@ -887,9 +984,10 @@ There is deliberately **no coverage percentage gate**. Coverage counts executed 
 
 Every user-visible behaviour starts as a Given/When/Then scenario in `features/<context>/*.feature`, written in the ubiquitous language (§3.1) before any test or code for it. Scenarios describe outcomes, never endpoints, tables or crates.
 
-- **Runner:** the `cucumber` crate (cucumber-rs). `crates/app/tests/acceptance.rs` (`harness = false`) runs every scenario not tagged `@e2e`. Because it lives in `app`, `cargo mutants` runs it for every `app` mutant.
+- **Runner:** the `cucumber` crate (cucumber-rs). `crates/app/tests/acceptance.rs` (`harness = false`) runs every scenario tagged neither `@e2e` nor `@ui`. Because it lives in `app`, `cargo mutants` runs it for every `app` mutant.
 - **Default level:** steps drive `app` use cases with the in-memory fakes and the fake clock, so scenarios about sleep, deadlines, leases and catch-up run in milliseconds and deterministically.
-- **`@e2e` scenarios** run from the root `tests/e2e.rs` against the real `steading` binary with scratch repositories. Rules enforced in adapters (request checks in `http`, the deadline watchdog in the worker) are specified this way. From M3, a handful of UI journeys run as separate Playwright tests.
+- **`@e2e` scenarios** run from the root `tests/e2e.rs` against the real `steading` binary with scratch repositories. Rules enforced in adapters (request checks in `http`, the deadline watchdog in the worker) are specified this way.
+- **`@ui` scenarios** drive the browser. They share `features/` with the rest, but run under `@cucumber/cucumber` (Node) with Playwright, from M0. Both Rust runners skip them. Their steps find elements only by role and accessible name (`getByRole`), so a control a screen reader can't identify can't be tested either (A2).
 - **A milestone is done when its feature files pass** (§14).
 
 Examples, one per core rule:
@@ -943,9 +1041,9 @@ Feature: Restores from the hub
 | `domain` | Unit and property tests | `proptest` | `ForgetSelection` partitions, `Deadline`, lease transitions, `NextRun` across DST, `WakeDetector`, `Redactor` |
 | `app` | Use-case tests and BDD scenarios with fakes | cucumber-rs, fake clock | Catch-up, retries, overlap, claims, prune guard waiting, deadline kill decision, restore policy |
 | Adapters | **Port contract tests** (§3.2), plus integration tests against real infrastructure | sqlx on SQLite (also on btrfs in CI), scratch rustic repos (local + one OpenDAL backend), rustic CLI golden tests, golden config files per schema version, WebSocket over loopback | Store contract and `try_start`, kill-at-random-points test, import list replacement, export round trip, config migrations, outbox replay |
-| `http`, `web` | Request handling and view models | axum `oneshot` requests; Leptos view-model unit tests | Host and Origin checks, auth, step-up confirmation; dashboard state from `UiEvent`s |
+| `http`, `web` | Request handling, view models and components | axum `oneshot` requests; Leptos view-model unit tests; `wasm-bindgen-test` for component structure; Playwright against the component gallery for component behavior; announcer tests (§4.5) | Host and Origin checks, auth, step-up confirmation; dashboard state from `UiEvent`s; dialog focus return; announcer merging |
 | `l10n` | Catalog and formatting lanes (§8.4) | `fluent-bundle`, `fluent-pseudo`, `wasm-bindgen-test` | Every message ID and error code formats in `en-US` across its selector branches; `NUMBER` drives plural selectors; `NUMBER`/`DATETIME` in `de` and `ja` with both formatters |
-| System | `@e2e` scenarios on the real binary; UI journeys from M3 | cucumber-rs, Playwright | First backup end to end; deadline with a real worker; hub pairing; restore into a new folder |
+| System | `@e2e` scenarios on the real binary; `@ui` journeys with axe-core and keyboard-only runs (§4.5) | cucumber-rs; `@cucumber/cucumber` with Playwright | First backup end to end; deadline with a real worker; hub pairing; restore into a new folder; each journey by keyboard alone |
 
 Domain behaviour is never mocked. Doubles replace ports only: slow, external or nondeterministic boundaries.
 
@@ -958,6 +1056,7 @@ A change is done when:
 - no mutants survive in its changed `domain`, `app`, `config` or `interop` code;
 - any new port has a contract test run against both fake and real adapter;
 - every invariant in §0 it touches has a test;
+- for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
 - docs are updated, and `fmt` and `clippy` are clean.
 
 ---
@@ -968,26 +1067,26 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 
 | # | Milestone | Deliverables | Effort |
 |---|---|---|---|
-| **M0** | Skeleton | Workspace in the §8.3 layout; CI with fmt, clippy, tests, the `domain` wasm build, banned-crate and banned-call checks; cucumber-rs runners, red-first check and `cargo mutants` job; fake clock and port fakes with contract-suite scaffold; worker protocol with a fake operation; daemon serving an embedded "hello" Leptos app | 2 wks |
+| **M0** | Skeleton | Workspace in the §8.3 layout; CI with fmt, clippy, tests, the `domain` wasm build, banned-crate and banned-call checks; cucumber-rs runners, red-first check and `cargo mutants` job; fake clock and port fakes with contract-suite scaffold; worker protocol with a fake operation; daemon serving an embedded "hello" Leptos app; Node toolchain with the `@ui` runner, Playwright, axe-core and a keyboard-only journey on that app | 2–3 wks |
 | **M1a** | Engine | Pinned `rustic_core` revision; worker with `EventProgressBars`, warnings, SIGTERM handling, deadline watchdog and per-worker cache dir; agent ID and repository ID; `steading-*` tags and explicit parents with fallback; kill-at-random-points test (local + one OpenDAL backend); `*-tmp-*` cleanup | 2–3 wks |
-| **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1); `l10n` crate with the `en-US` catalog, error codes in the API, catalog tests and dev pseudolocales (§8.4) | 3–4 wks |
-| **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates; service install (systemd, launchd); optional auth; macOS signing and Full Disk Access test | 2–3 wks |
-| **M3** | Browse and restore | Snapshot tree browser; restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; Playwright journeys also run in `en-XA` and `ar-XB` | 2 wks |
+| **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1); `l10n` crate with the `en-US` catalog, error codes in the API, catalog tests and dev pseudolocales (§8.4); accessible component set (dialog, table, form field, status, progress, toast) with its gallery, the announcer, route focus handling, token contrast test, CLI `NO_COLOR`/`--plain`/`--json`, and the first Orca and VoiceOver pass (§4.5) | 4–5 wks |
+| **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates and plain-text forms; service install (systemd, launchd); optional auth with an accessible sign-in form (A5, A6); "Pause live updates"; macOS signing and Full Disk Access test | 2–3 wks |
+| **M3** | Browse and restore | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page | 2 wks |
 | **M4a** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 3–4 wks |
 | **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub) | 3–4 wks |
-| **M5** | Polish | Conditions (AC power / metered), charts, Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
+| **M5** | Polish | Conditions (AC power / metered), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
 
 | Milestone | Feature files |
 |---|---|
 | M1a | `execution/backup.feature` (warnings), `execution/cancel.feature`, `execution/deadline.feature` (`@e2e` with a real worker) |
-| M1b | `planning/config.feature`, `planning/hooks.feature`, `interop/import.feature`, `interop/export.feature`, `maintenance/forget.feature`, `maintenance/adopt.feature`, `maintenance/serialization.feature`, `secrets/substitution.feature`, `secrets/redaction.feature`, `security/request_checks.feature` (`@e2e`) |
+| M1b | `planning/config.feature`, `planning/hooks.feature`, `interop/import.feature`, `interop/export.feature`, `maintenance/forget.feature`, `maintenance/adopt.feature`, `maintenance/serialization.feature`, `secrets/substitution.feature`, `secrets/redaction.feature`, `security/request_checks.feature` (`@e2e`), `ui/accessibility.feature` (`@ui`: first backup by keyboard alone; announcements; reflow; form errors) |
 | M2 | `execution/schedule.feature` (catch-up, wake, time zones), `execution/retry.feature`, `execution/overlap.feature`, `notifications/rules.feature` |
 | M3 | `restore/restore.feature`, `restore/download.feature` |
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |
 | M4b | `maintenance/ownership.feature`, `maintenance/prune_guard.feature`, `restore/hub_restore.feature` |
 | M5 | `execution/conditions.feature`, `operations/db_rebuild.feature` |
 
-A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **9–12 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **17–22 weeks**, roughly **4–5 months part-time**. These ranges include writing scenarios and tests first; M0 is longer than in v0.2 because the test tooling is built there.
+A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **10–14 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **18–24 weeks**, roughly **4½–6 months part-time**. These ranges include writing scenarios and tests first and building the accessible component set in M1b; M0 is longer than in v0.2 because the test tooling, including the browser toolchain, is built there.
 
 ---
 
@@ -1005,7 +1104,8 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | SQLite failure on unusual filesystems | Daily copy, `db rebuild`, CI on btrfs and Docker volumes (§9) |
 | Config upgrades break existing installs | Schema version and migrations from M1b; refuse newer schemas (§6.1) |
 | Leptos 0.8 → 0.9 migration | Keep UI components thin and logic in `api`/view-models. Migrate once 0.9 is stable |
-| Hard-coded strings creep into the UI and make localization a rewrite | Generated message IDs, the unused-ID lint and Playwright pseudolocale runs from M3 (§8.4) |
+| Hard-coded strings creep into the UI and make localization a rewrite | Generated message IDs, the unused-ID lint and Playwright pseudolocale runs from M1b (§8.4) |
+| Accessibility erodes as the UI grows | Invariants A1–A6 (§0); one component set with contract tests; role-and-name-only test locators; axe-core in CI; a screen-reader pass in each milestone's definition of done (§4.5) |
 | ICU4X data bloats the daemon binary | Measure in M1b; generate data for shipped locales only if needed (§8.4) |
 | macOS TCC permissions | Signed, notarized builds; detect denials and link to the settings pane. Document this in setup |
 | Memory use on very large repos | Worker isolation. Restore and `dump` need the full index (`to_indexed()`); measure early with a large test repo. Document `--no-cache` and cache dir options |
@@ -1017,7 +1117,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 
 ## 16. Decisions
 
-Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decision 17 recorded 2026-11-08.
+Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decisions 17–18 recorded 2026-11-08.
 
 | # | Question | Decision |
 |---|---|---|
@@ -1038,6 +1138,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | 15 | Option types | **Steading owns its option types** in `domain`. The `config` adapter parses TOML with rustic's keys into them; the engine adapter maps them onto `rustic_core` types, with a parity test per struct. Replaces v0.2's plan to deserialize into `rustic_core` types directly (§6.1). |
 | 16 | License | **MIT OR Apache-2.0**, the same terms as rustic, so code can move upstream without relicensing. Files: `LICENSE-MIT`, `LICENSE-APACHE`; the workspace `Cargo.toml` will declare `license = "MIT OR Apache-2.0"`. |
 | 17 | Internationalization | **Localization-ready from the first UI string; `en-US` only in v1.** Project Fluent via `fluent-bundle` in a shared `l10n` crate, with a per-message fallback chain of bundles; the core and the wire carry codes and typed arguments, never sentences; dates and numbers through browser `Intl` or ICU4X behind Fluent's formatter hook; machine-facing text never localized (§8.4). |
+| 18 | Accessibility | **First-class, WCAG 2.2 AA from the first screen.** Invariants A1–A6 in §0; one accessible component set and an app-wide announcer; `@ui` scenarios in Playwright with axe-core and keyboard-only journeys from M0; a manual Orca and VoiceOver pass per milestone (§4.5). |
 
 ## 17. Open questions
 
