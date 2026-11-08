@@ -17,3 +17,5 @@ workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+shell-words.workspace = true
+url.workspace = true

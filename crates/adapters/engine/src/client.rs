@@ -144,6 +144,18 @@ impl WorkerEngine {
         self.exit_timeout = timeout;
         self
     }
+
+    /// Starts workers with `vars` as the environment they are scrubbed from
+    /// (see the `environment` module) instead of this process's own. For
+    /// tests, and for a composition root that has read its environment
+    /// already.
+    #[must_use]
+    pub fn with_environment(
+        self,
+        _vars: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
+    ) -> Self {
+        todo!("start workers with the given environment, scrubbed")
+    }
 }
 
 #[async_trait]
@@ -886,6 +898,7 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
         repository: access.repository,
         password: access.password,
         options: access.options,
+        secrets: access.secrets,
     }
 }
 
@@ -1585,6 +1598,128 @@ mod tests {
         );
     }
 
+    fn identify(password: &str, secrets: &[&str]) -> Job {
+        Job::Identify(RepositoryAccess {
+            repository: "/backups/demo".to_owned(),
+            password: domain::secrets::SecretValue::new(password),
+            options: std::collections::BTreeMap::new(),
+            secrets: secrets
+                .iter()
+                .map(|secret| domain::secrets::SecretValue::new(*secret))
+                .collect(),
+            id: None,
+        })
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_jobs_password_and_secrets_are_masked_in_what_the_worker_writes_to_stderr() {
+        capture_the_worker_log();
+        let script = format!(
+            "cat >/dev/null; echo 'redaction one: hunter2-demo then CANARY-resolved' >&2; echo '{}'",
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-resolved"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("redaction one:"))
+            .await
+            .expect("the worker's stderr never reached the log");
+        assert_eq!(line, "redaction one: *** then ***");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_straddling_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {
+        capture_the_worker_log();
+        let script = format!(
+            "cat >/dev/null; head -c {} /dev/zero | tr '\\0' x >&2; \
+             printf 'CANARY-straddle and more\\n' >&2; echo '{}'",
+            MAX_MESSAGE_BYTES - 3,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-straddle"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let _ = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("xxxx"))
+            .await
+            .expect("the long stderr line never reached the log");
+        let kept = line.strip_suffix('…').expect("the line was not cut");
+        assert!(
+            kept.chars().all(|c| c == 'x'),
+            "the start of the secret is in the log: {:?}",
+            kept.chars().rev().take(8).collect::<String>()
+        );
+    }
+
+    /// What a stand-in worker saw, written to files: its environment, its
+    /// arguments and its stdin.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_starts_with_a_scrubbed_environment_and_still_gets_its_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let script = format!(
+            "cat > '{dir}/spec.json'; env > '{dir}/env.txt'; echo \"$0 $*\" > '{dir}/args.txt'; \
+             echo '{result}'",
+            dir = dir.path().display(),
+            result = result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_environment([
+            (OsString::from("PATH"), path),
+            (OsString::from("HOME"), OsString::from("/home/demo")),
+            (
+                OsString::from("AWS_SECRET_ACCESS_KEY"),
+                OsString::from("CANARY-aws"),
+            ),
+            (
+                OsString::from("RUSTIC_PASSWORD"),
+                OsString::from("CANARY-rustic"),
+            ),
+            (OsString::from("DEMO_B2_KEY"), OsString::from("CANARY-b2")),
+        ]);
+        let job = identify("demo-password", &[]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        let env = read("env.txt");
+        assert!(env.contains("HOME=/home/demo"), "HOME is missing: {env}");
+        assert!(env.lines().any(|line| line.starts_with("PATH=")), "{env}");
+        for leaked in [
+            "AWS_SECRET_ACCESS_KEY",
+            "RUSTIC_PASSWORD",
+            "DEMO_B2_KEY",
+            "CANARY",
+        ] {
+            assert!(!env.contains(leaked), "{leaked} reached the worker: {env}");
+        }
+        let spec: serde_json::Value = serde_json::from_str(&read("spec.json")).unwrap();
+        assert_eq!(spec["job"]["password"], "demo-password");
+        assert!(!read("args.txt").contains("demo-password"));
+    }
+
     /// More than a pipe holds, written between two events: a stderr that
     /// nobody reads would stop the worker there.
     #[cfg(unix)]
@@ -1890,6 +2025,7 @@ mod tests {
                 repository,
                 password: SecretValue::new("demo"),
                 options: BTreeMap::new(),
+                secrets: Vec::new(),
                 id: Some(id.clone()),
             })
         };

@@ -5,3 +5,4 @@
 pub mod clock;
 pub mod engine;
 pub mod operation_store;
+pub mod secrets;

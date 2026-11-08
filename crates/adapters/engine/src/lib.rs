@@ -18,6 +18,7 @@
 
 mod cache_lock;
 mod client;
+mod environment;
 pub mod job;
 pub mod worker;
 

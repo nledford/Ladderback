@@ -265,6 +265,7 @@ impl Agent {
                 repository: self.repository().to_str().unwrap().to_owned(),
                 password: domain::secrets::SecretValue::new(PASSWORD),
                 options: Default::default(),
+                secrets: Vec::new(),
                 id: None,
             },
             sources: vec![self.source().to_str().unwrap().to_owned()],
