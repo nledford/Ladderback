@@ -15,8 +15,12 @@ on:
 permissions:
   contents: read
 
+# On pull requests only a push (`synchronize`) may cancel a run; any other
+# pull request run (opened, reopened) gets a group of its own, so a required
+# check is never left cancelled on the commit being merged (see red-first.yml).
+# Pushes to main, the nightly run and manual runs share one group and queue.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && github.event.action != 'synchronize' && github.run_id || 'serial' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
