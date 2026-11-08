@@ -1,0 +1,90 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/app",
+    "crates/api",
+    "crates/web",
+    "crates/adapters/engine",
+    "crates/adapters/http",
+    "crates/adapters/platform",
+]
+# `web` only builds for wasm32 with trunk; host commands skip it unless asked.
+default-members = [
+    ".",
+    "crates/domain",
+    "crates/app",
+    "crates/api",
+    "crates/adapters/engine",
+    "crates/adapters/http",
+    "crates/adapters/platform",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nledford/Steading"
+publish = false
+
+[workspace.dependencies]
+domain = { path = "crates/domain" }
+app = { path = "crates/app" }
+api = { path = "crates/api" }
+engine = { path = "crates/adapters/engine" }
+http-adapter = { path = "crates/adapters/http" }
+platform = { path = "crates/adapters/platform" }
+
+async-trait = "0.1.92"
+axum = "0.8.9"
+clap = { version = "4.6.7", features = ["derive"] }
+console_error_panic_hook = "0.1.7"
+cucumber = "0.23.0"
+futures = "0.3.34"
+http-body-util = "0.1.5"
+jiff = { version = "0.2.40", features = ["serde"] }
+leptos = { version = "0.8.23", features = ["csr"] }
+mime_guess = "2.0.5"
+rust-embed = "8.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = "1.54.1"
+tower = "0.5.3"
+uuid = { version = "1.29.1", features = ["serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[package]
+name = "steading"
+description = "Self-hosted backup manager for rustic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[test]]
+name = "e2e"
+harness = false
+
+[dependencies]
+engine.workspace = true
+http-adapter.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
+
+[dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
+cucumber.workspace = true
+domain.workspace = true
+platform.workspace = true
+
+[lints]
+workspace = true
