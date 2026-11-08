@@ -18,8 +18,16 @@ on:
 permissions:
   contents: read
 
+# GitHub keeps the latest check run per name and a cancelled run doesn't pass,
+# so a run cancelled on the commit being merged blocks the merge (#8: opening a
+# pull request with its label sends `opened` and `labeled` together, and one
+# run cancelled the other). Only a push (`synchronize`) may cancel: it always
+# brings a new head commit, so the cancelled run lands on a commit nobody
+# merges. Every other run gets a group of its own (its run ID): sharing one
+# group, a queued run would still be cancelled when a newer one queued behind
+# it. Duplicate runs on one commit therefore run side by side.
 concurrency:
-  group: red-first-${{ github.event.pull_request.number }}
+  group: red-first-${{ github.event.pull_request.number }}-${{ github.event.action == 'synchronize' && 'push' || github.run_id }}
   cancel-in-progress: true
 
 env:
