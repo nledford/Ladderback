@@ -12,7 +12,7 @@ Steading is built behaviour first and test first. The two together are how the i
 
 1. **Red-first check**, for pull requests labelled `behaviour`. The pull request's first commit is a `test:` commit that adds the new tests and scenarios, with `todo!()` stubs for any new API so that it compiles. CI checks out that commit and runs exactly the tests it added, by name (`cargo test -- --exact`, and the new scenarios by name in both the Rust and the `@ui` runner); each one must **fail at run time**. A compile error doesn't count, because it would pass vacuously. A test that already passes specifies nothing new.
    - **Workflow and cache.** It runs in its own workflow, `.github/workflows/red-first.yml`, so adding or removing a label re-runs it alone and not the rest of CI. The base tree's build is kept in the Actions cache, keyed on the OS, the toolchain, `Cargo.lock` and the merge base, so a later run of the same pull request doesn't rebuild the dependencies, only the workspace crates. The first run of a pull request is cold, because pull requests can't read each other's caches. `just red-first <base>` runs the same script locally.
-2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on `domain`, `app`, `adapters/config` and `adapters/interop`. A mutant that survives in changed code means behaviour no test asserts, and blocks the merge. Exceptions are marked `#[mutants::skip]` (from the `mutants` crate) or listed in `.cargo/mutants.toml` `exclude_re`, each with a reason. A full run happens nightly.
+2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on the gated crates: `domain`, `app`, `api` (the wire contract, including each code's arguments), `l10n` (the code-to-message mapping and the formatters), `adapters/config` and `adapters/interop`. The Justfile's `mutants_packages` lists the ones that exist so far. A mutant that survives in changed code means behaviour no test asserts, and blocks the merge. Exceptions are marked `#[mutants::skip]` (from the `mutants` crate) or listed in `.cargo/mutants.toml` `exclude_re`, each with a reason. A full run happens nightly.
 3. **Squash merge.** The check runs on the pull request before merge, and pull requests are squash-merged, so the failing `test:` commit never lands on `main` and `git bisect` stays clean.
 
 There is deliberately **no coverage percentage gate**. Coverage counts executed lines, not asserted behaviour; mutation testing measures the latter.
@@ -90,7 +90,7 @@ A change is done when:
 
 - its scenarios exist and pass;
 - the red-first check passed;
-- no mutants survive in its changed `domain`, `app`, `config` or `interop` code;
+- no mutants survive in its changed code in a gated crate (§13.1);
 - any new port has a contract test run against both fake and real adapter;
 - every invariant in §0 it touches has a test;
 - for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
