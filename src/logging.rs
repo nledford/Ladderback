@@ -3,15 +3,42 @@
 //! Every crate reports through the `log` facade, and nothing is written until
 //! a logger is installed: the daemon's records, and the lines the worker's
 //! stderr is forwarded as (target `steading::worker`), would be dropped.
+//!
+//! The daemon logs to stderr, at `info` unless `RUST_LOG` says otherwise.
 
-use env_logger::{Logger, Target};
+use env_logger::{Builder, Logger, Target};
+use log::LevelFilter;
 
-/// Makes the daemon log to stderr, once.
-pub(crate) fn install() {}
+/// What the daemon logs when `RUST_LOG` names no level. env_logger's own
+/// default is `error`, which would hide the warnings of a worker.
+const DEFAULT_LEVEL: LevelFilter = LevelFilter::Info;
 
-/// The daemon's logger, writing to `target`.
-pub(crate) fn logger(_rust_log: Option<&str>, _target: Target) -> Logger {
-    todo!()
+/// Makes the daemon log to stderr, once. Where a logger is set already, this
+/// one or another, that one stays, and nothing is changed or reported.
+pub(crate) fn install() {
+    let rust_log = std::env::var("RUST_LOG").ok();
+    let logger = logger(rust_log.as_deref(), Target::Stderr);
+    let level = logger.filter();
+    if log::set_boxed_logger(Box::new(logger)).is_ok() {
+        log::set_max_level(level);
+    }
+}
+
+/// The daemon's logger, writing to `target`, for the value of `RUST_LOG`, if
+/// that is set.
+///
+/// It logs at [`DEFAULT_LEVEL`] unless `rust_log` names another level, and
+/// env_logger's directives (`debug`, `steading::worker=off`) go on top of
+/// that, so one for a target leaves the others at the default. An empty or
+/// blank `rust_log` says nothing, as none does. Colors are used only when the
+/// target is a terminal.
+pub(crate) fn logger(rust_log: Option<&str>, target: Target) -> Logger {
+    let mut builder = Builder::new();
+    builder.filter_level(DEFAULT_LEVEL);
+    if let Some(rust_log) = rust_log {
+        builder.parse_filters(rust_log);
+    }
+    builder.target(target).format_timestamp_millis().build()
 }
 
 #[cfg(test)]
