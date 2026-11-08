@@ -5,6 +5,10 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 root := justfile_directory()
 
+# The crates mutation testing gates (technical design §13.1). Add a crate here
+# when it lands, so `mutants` and `mutants-all` both cover it.
+mutants_packages := "--package domain --package app"
+
 # List available workflows.
 [group('help')]
 default:
@@ -101,7 +105,7 @@ serve: build
 test-ui *args: build
     cd ui-tests && npx cucumber-js "$@"
 
-# Mutation-test domain and app code changed since `base`.
+# Mutation-test the gated crates' code changed since `base`.
 [group('test')]
 mutants base='origin/main':
     #!/usr/bin/env bash
@@ -109,12 +113,12 @@ mutants base='origin/main':
     diff=$(mktemp)
     trap 'rm -f "$diff"' EXIT
     git diff '{{ base }}...HEAD' > "$diff"
-    cargo mutants --in-diff "$diff" --package domain --package app
+    cargo mutants --in-diff "$diff" {{ mutants_packages }}
 
-# Mutation-test all of domain and app (slow; CI runs it nightly).
+# Mutation-test all of the gated crates (slow; CI runs it nightly).
 [group('test')]
 mutants-all:
-    cargo mutants --package domain --package app
+    cargo mutants {{ mutants_packages }}
 
 # Check that the branch's first commit is a failing test: commit (§13.1).
 [group('test')]
