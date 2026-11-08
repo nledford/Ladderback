@@ -50,7 +50,7 @@ architecture:
 # Set NEXTEST_PROFILE=ci for retries and the JUnit report (.config/nextest.toml).
 [group('test')]
 [positional-arguments]
-test *args='':
+test *args:
     scripts/with-skip-log.sh '{{ just_executable() }}' _test-suites "$@"
 
 # The suites `test` runs, under its one skip log. The cucumber runners use
@@ -62,7 +62,7 @@ test *args='':
 # with other features, and each of those commands rebuilt nearly all of them.
 [private]
 [positional-arguments]
-_test-suites *args='':
+_test-suites *args:
     cargo nextest run --workspace "$@"
     cargo test --doc --workspace
     cargo test --workspace --test acceptance
@@ -70,13 +70,15 @@ _test-suites *args='':
 
 # Run the acceptance scenarios (fakes and a fake clock) only.
 [group('test')]
-test-acceptance *args='':
-    scripts/with-skip-log.sh cargo test --workspace --test acceptance -- {{ args }}
+[positional-arguments]
+test-acceptance *args:
+    scripts/with-skip-log.sh cargo test --workspace --test acceptance -- "$@"
 
 # Run the @e2e scenarios against the real binary only.
 [group('test')]
-test-e2e *args='':
-    scripts/with-skip-log.sh cargo test --workspace --test e2e -- {{ args }}
+[positional-arguments]
+test-e2e *args:
+    scripts/with-skip-log.sh cargo test --workspace --test e2e -- "$@"
 
 # Build the web UI into crates/web/dist, where the binary embeds it from.
 [group('build')]
@@ -95,8 +97,9 @@ serve: build
 
 # Run the @ui scenarios in Chromium against a fresh build.
 [group('test')]
-test-ui *args='': build
-    cd ui-tests && npx cucumber-js {{ args }}
+[positional-arguments]
+test-ui *args: build
+    cd ui-tests && npx cucumber-js "$@"
 
 # Mutation-test domain and app code changed since `base`.
 [group('test')]
