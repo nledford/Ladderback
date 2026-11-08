@@ -49,7 +49,16 @@ impl From<io::Error> for JobError {
 
 /// What Steading knows of a snapshot rustic listed.
 pub(crate) fn snapshot_ref(snapshot: &SnapshotFile) -> Result<SnapshotRef, JobError> {
-    todo!()
+    let mut paths: Vec<String> = snapshot.paths.iter().cloned().collect();
+    paths.sort();
+    Ok(SnapshotRef {
+        id: snapshot_id(&snapshot.id)?,
+        time: snapshot.time.timestamp(),
+        host: snapshot.hostname.clone(),
+        label: snapshot.label.clone(),
+        paths,
+        tags: snapshot.tags.iter().cloned().collect(),
+    })
 }
 
 /// Steading's form of a snapshot ID: the full 64 hex characters.
@@ -63,7 +72,21 @@ pub(crate) fn backup_result(
     repository: RepositoryId,
     snapshot: &SnapshotFile,
 ) -> Result<BackupResult, JobError> {
-    todo!()
+    let summary = snapshot
+        .summary
+        .as_ref()
+        .ok_or_else(|| JobError::failed("the snapshot rustic saved has no summary"))?;
+    Ok(BackupResult {
+        repository,
+        snapshot: snapshot_id(&snapshot.id)?,
+        parent: snapshot.parent.as_ref().map(snapshot_id).transpose()?,
+        files_new: summary.files_new,
+        files_changed: summary.files_changed,
+        files_unmodified: summary.files_unmodified,
+        data_added: summary.data_added,
+        data_added_packed: summary.data_added_packed,
+        error_count: summary.error_count,
+    })
 }
 
 /// rustic's prune options for a job. Prune only marks packs and deletes them
@@ -72,7 +95,13 @@ pub(crate) fn backup_result(
 /// A `keep_delete` under rustic's default is refused like the daemon refuses
 /// it ([`KeepDelete`]).
 pub(crate) fn prune_options(keep_delete: SignedDuration) -> Result<PruneOptions, JobError> {
-    todo!()
+    let keep_delete = KeepDelete::new(keep_delete).map_err(|error| invalid_spec(&error))?;
+    let keep_delete = Span::try_from(keep_delete.get())
+        .map_err(|error| JobError::failed(format!("keep_delete is out of range: {error}")))?;
+    Ok(PruneOptions::default()
+        .keep_delete(keep_delete)
+        .instant_delete(false)
+        .early_delete_index(false))
 }
 
 /// A snapshot's tags: the plan's, then the job's extra tags, one list entry
@@ -80,7 +109,15 @@ pub(crate) fn prune_options(keep_delete: SignedDuration) -> Result<PruneOptions,
 /// extra tag with the reserved prefix is refused like the daemon refuses it
 /// ([`UserTag`]).
 pub(crate) fn snapshot_tags(plan: &PlanTags, extra: &[String]) -> Result<StringList, JobError> {
-    todo!()
+    let mut tags = StringList::default();
+    for tag in plan.tags() {
+        tags.add(tag);
+    }
+    for tag in extra {
+        let tag = UserTag::new(tag.as_str()).map_err(|error| invalid_spec(&error))?;
+        tags.add(tag.as_str().to_owned());
+    }
+    Ok(tags)
 }
 
 fn invalid_spec(error: &dyn std::error::Error) -> JobError {
@@ -100,14 +137,31 @@ fn invalid_spec(error: &dyn std::error::Error) -> JobError {
 /// - `packs_recovered`: marked packs a newer snapshot uses again; rustic
 ///   unmarks them.
 pub(crate) fn prune_result(repository: RepositoryId, stats: &PruneStats) -> PruneResult {
-    todo!()
+    PruneResult {
+        repository,
+        packs_marked: stats.packs.unused.saturating_add(stats.packs.repack),
+        packs_deleted: stats.packs_to_delete.remove,
+        packs_recovered: stats.packs_to_delete.recover,
+    }
 }
 
 /// What a finished check found. `CheckErrorLevel` isn't exported, so the
 /// level is read from its `Debug` form: `Warn` is a warning, anything else
 /// an error.
 pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> CheckResult {
-    todo!()
+    let (mut errors, mut warnings) = (0_u64, 0_u64);
+    for (level, _) in &results.0 {
+        if format!("{level:?}") == "Warn" {
+            warnings = warnings.saturating_add(1);
+        } else {
+            errors = errors.saturating_add(1);
+        }
+    }
+    CheckResult {
+        repository,
+        errors,
+        warnings,
+    }
 }
 
 #[cfg(test)]

@@ -90,7 +90,11 @@ impl Events {
     /// `text` with every secret the stream knows replaced, for what the
     /// worker writes elsewhere (stderr).
     pub(crate) fn redact_text(&self, text: &str) -> String {
-        todo!()
+        self.0
+            .redactor
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .redact(text)
     }
 
     /// Whether [`WorkerEvent::Started`] was written. Progress that begins
@@ -103,12 +107,11 @@ impl Events {
     /// Writes `event` as one line and flushes it, unless the stream ended.
     /// A result or a failure ends it.
     pub(crate) fn emit(&self, event: &WorkerEvent) -> io::Result<()> {
-        // Red-first stub. It touches the writer before it gives up, because a
-        // test waits for its writer thread to enter the writer, and would
-        // hang, not fail, if the thread never got there.
         let mut sink = self.0.sink.lock().unwrap_or_else(PoisonError::into_inner);
-        let _ = sink.out.write(&[]);
-        todo!()
+        if sink.closed {
+            return Ok(());
+        }
+        self.write(&mut sink, event)
     }
 
     /// [`Events::emit`] for callers that have nobody to tell about a
@@ -116,14 +119,40 @@ impl Events {
     /// written means the daemon is gone, so the worker gives up at once
     /// instead of running on to a result nobody can read.
     pub(crate) fn report(&self, event: &WorkerEvent) {
-        todo!()
+        if self.emit(event).is_err()
+            && let Some(on_broken) = &self.0.on_broken
+        {
+            on_broken();
+        }
     }
 
     /// Ends the stream from outside the job: writes `last` if there is one,
     /// then drops everything that follows. Waits at most `patience` for a
     /// writer that is stuck on a full pipe, so ending never hangs.
     pub(crate) fn end(&self, last: Option<&WorkerEvent>, patience: Duration) -> Ending {
-        todo!()
+        let give_up_at = Instant::now().checked_add(patience);
+        let mut sink = loop {
+            match self.0.sink.try_lock() {
+                Ok(sink) => break sink,
+                // A writer that panicked left at worst a half-written line.
+                Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+                Err(TryLockError::WouldBlock) => {
+                    if give_up_at.is_some_and(|at| Instant::now() >= at) {
+                        return Ending::Stuck;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        };
+        if sink.closed {
+            return Ending::AlreadyClosed;
+        }
+        if let Some(last) = last {
+            // The stream ends either way, so a failed write changes nothing.
+            let _ = self.write(&mut sink, last);
+        }
+        sink.closed = true;
+        Ending::Closed
     }
 
     /// Writes one event as a flushed line. The caller holds the sink.

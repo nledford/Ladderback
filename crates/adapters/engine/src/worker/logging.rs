@@ -27,11 +27,25 @@ impl EventLogger {
 
 impl Log for EventLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        todo!()
+        metadata.level() <= MAX_LEVEL
     }
 
     fn log(&self, record: &Record) {
-        todo!()
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let level = match record.level() {
+            LogLevel::Error => Level::Error,
+            LogLevel::Warn => Level::Warn,
+            LogLevel::Info => Level::Info,
+            LogLevel::Debug | LogLevel::Trace => Level::Debug,
+        };
+        // A log record has nobody to tell about a broken stream: see
+        // `Events::report`.
+        self.events.report(&WorkerEvent::Log {
+            level,
+            message: format!("{}: {}", record.target(), record.args()),
+        });
     }
 
     fn flush(&self) {}

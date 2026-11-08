@@ -77,7 +77,15 @@ pub struct RepositorySpec {
 /// the options' names.
 impl fmt::Debug for RepositorySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        let repository =
+            Redactor::for_repository(&self.repository, &self.password).redact(&self.repository);
+        let options: BTreeMap<&String, &str> =
+            self.options.keys().map(|name| (name, REDACTED)).collect();
+        f.debug_struct("RepositorySpec")
+            .field("repository", &repository)
+            .field("password", &self.password)
+            .field("options", &options)
+            .finish()
     }
 }
 
@@ -114,8 +122,6 @@ pub struct FakeJobSpec {
     pub warnings: Vec<FakeWarning>,
     pub end: FakeEndSpec,
     /// Counted from the start of the job.
-    // Red-first stub: the budget doesn't travel yet.
-    #[serde(skip)]
     pub deadline_budget: Option<SignedDuration>,
 }
 
@@ -190,7 +196,7 @@ pub enum WorkerEvent {
 impl WorkerEvent {
     /// The last line of a stream: after it the worker writes nothing more.
     pub fn is_final(&self) -> bool {
-        todo!()
+        matches!(self, Self::Result(_) | Self::Failed { .. })
     }
 }
 
@@ -217,8 +223,6 @@ pub enum OpResult {
     Fake { steps_completed: u32 },
     Repository { id: RepositoryId },
     Backup(BackupResult),
-    // Red-first stub: a prune result doesn't travel yet.
-    #[serde(skip)]
     Prune(PruneResult),
     Check(CheckResult),
 }
@@ -262,7 +266,7 @@ mod secret {
         secret: &SecretValue,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        todo!()
+        serializer.serialize_str(secret.expose())
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(

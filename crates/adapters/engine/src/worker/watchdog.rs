@@ -49,7 +49,45 @@ impl Watchdog {
         clock: WallClock,
         terminate: Terminate,
     ) -> Self {
-        todo!()
+        // The first look is here, so a deadline that has passed already
+        // stops the job before it does anything.
+        if deadline.has_passed(clock()) {
+            expire(&events, &terminate);
+            return Self {
+                stop: None,
+                thread: None,
+            };
+        }
+        let (stop, stopped) = mpsc::channel();
+        let spawned = thread::Builder::new()
+            .name("deadline-watchdog".to_owned())
+            .spawn({
+                let (events, terminate) = (events.clone(), Arc::clone(&terminate));
+                move || watch(deadline, interval, &events, &clock, &terminate, &stopped)
+            });
+        match spawned {
+            Ok(thread) => Self {
+                stop: Some(stop),
+                thread: Some(thread),
+            },
+            Err(error) => {
+                // A job that can't be held to its deadline must not run.
+                end_process(
+                    &events,
+                    &terminate,
+                    &WorkerEvent::Failed {
+                        code: ErrorCode::OperationFailed,
+                        args: Vec::new(),
+                        detail: Some(format!("cannot start the deadline watchdog: {error}")),
+                    },
+                    1,
+                );
+                Self {
+                    stop: None,
+                    thread: None,
+                }
+            }
+        }
     }
 }
 

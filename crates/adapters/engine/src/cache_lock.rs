@@ -23,7 +23,15 @@ impl CacheLock {
     /// Makes `dir` if it doesn't exist and locks it. Fails with
     /// [`io::ErrorKind::WouldBlock`] when another process holds the lock.
     pub(crate) fn acquire(dir: &Path) -> io::Result<Self> {
-        todo!()
+        fs::create_dir_all(dir)?;
+        let directory = File::open(dir)?;
+        match directory.try_lock() {
+            Ok(()) => Ok(Self {
+                _directory: directory,
+            }),
+            Err(TryLockError::WouldBlock) => Err(io::ErrorKind::WouldBlock.into()),
+            Err(TryLockError::Error(error)) => Err(error),
+        }
     }
 }
 

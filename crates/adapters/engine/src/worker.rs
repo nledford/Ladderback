@@ -62,11 +62,44 @@ impl Exit {
 /// What `steading worker` does. Never returns normally: the process exits
 /// with the job's [`Exit`] code, or 74 when the events can't be written.
 pub fn main() -> ExitCode {
-    // Red-first stub: a worker that never answers. A `todo!()` would end the
-    // process, and a worker that is gone proves nothing about what it does
-    // when its daemon dies.
-    loop {
-        std::thread::park();
+    #[cfg(target_os = "linux")]
+    die_with_the_daemon();
+    // Descriptor 1 stops being the event pipe: nothing a library prints, or a
+    // program the worker starts, can reach the stream or hold it open.
+    #[cfg(unix)]
+    let stream = match stdio::detach_stdout() {
+        Ok(stream) => stream,
+        Err(error) => {
+            say(&format!("cannot set up the event stream: {error}"));
+            std::process::exit(exit_code::EVENTS_UNWRITABLE);
+        }
+    };
+    #[cfg(not(unix))]
+    let stream = io::stdout();
+    // Rustic's progress and log callbacks have nobody to tell about a stream
+    // that can't be written, so the worker gives itself up: the daemon is gone.
+    let events =
+        Events::with_broken_stream(stream, || std::process::exit(exit_code::EVENTS_UNWRITABLE));
+    panic_hook::install(events.clone());
+    if let Err(error) = logging::install(events.clone()) {
+        say(&format!("cannot route logs into events: {error}"));
+    }
+    #[cfg(unix)]
+    if let Err(error) = exit_on_sigterm(events.clone()) {
+        say(&format!("cannot handle SIGTERM: {error}"));
+    }
+    match run_events(
+        io::stdin().lock(),
+        events,
+        std::process::id(),
+        Process::real(),
+    ) {
+        // An abrupt exit may use any code, including ones outside u8.
+        Ok(exit) => std::process::exit(exit.code()),
+        Err(error) => {
+            say(&format!("cannot write events: {error}"));
+            std::process::exit(exit_code::EVENTS_UNWRITABLE)
+        }
     }
 }
 
@@ -166,7 +199,8 @@ impl Context {
     /// restarted can't know which ones are in use, so a directory another
     /// worker holds is refused: the caller runs without a cache instead.
     pub(crate) fn lock_cache(&self, dir: &Path) -> io::Result<()> {
-        todo!()
+        *self.cache_lock.borrow_mut() = Some(CacheLock::acquire(dir)?);
+        Ok(())
     }
 
     /// Reports that the job began its work, and arms the deadline watchdog
@@ -174,7 +208,23 @@ impl Context {
     /// is read, because the deadline counts from there. A deadline that has
     /// passed already ends the process before this returns.
     pub(crate) fn start(&self, budget: Option<SignedDuration>) -> io::Result<()> {
-        todo!()
+        let index_read_at = (self.process.clock)();
+        self.events.emit(&WorkerEvent::Started {
+            op_id: self.op_id,
+            pid: self.pid,
+            index_read_at,
+        })?;
+        if let Some(budget) = budget {
+            let watchdog = Watchdog::start(
+                Deadline::after_index_read(index_read_at, budget),
+                self.watchdog_interval,
+                self.events.clone(),
+                Arc::clone(&self.process.clock),
+                Arc::clone(&self.process.terminate),
+            );
+            *self.watchdog.borrow_mut() = Some(watchdog);
+        }
+        Ok(())
     }
 
     /// The job's work is done. What is left (reporting the result, dropping
@@ -196,7 +246,62 @@ impl Context {
 }
 
 fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> io::Result<Exit> {
-    todo!()
+    // A job spec is a few kilobytes; one past the protocol's message cap is
+    // refused, and never read past the cap.
+    let mut raw = String::new();
+    let spec = match input
+        .take(MAX_MESSAGE_READ)
+        .read_to_string(&mut raw)
+        .map_err(|e| e.to_string())
+        .and_then(|_| {
+            if raw.len() > MAX_MESSAGE_BYTES {
+                Err(format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"))
+            } else {
+                serde_json::from_str::<JobSpec>(&raw).map_err(|e| e.to_string())
+            }
+        }) {
+        Ok(spec) => spec,
+        Err(detail) => {
+            events.emit(&WorkerEvent::Failed {
+                code: ErrorCode::InvalidJobSpec,
+                args: Vec::new(),
+                detail: Some(detail),
+            })?;
+            return Ok(Exit::Reported { failed: true });
+        }
+    };
+    // From here on, the secrets of the job never reach the stream (I4).
+    if let Some(repository) = repository_of(&spec.job) {
+        events.redact_with(Redactor::for_repository(
+            &repository.repository,
+            &repository.password,
+        ));
+    }
+    let ctx = Context::new(events.clone(), &spec, pid, process);
+    let outcome = match &spec.job {
+        JobKind::Fake(job) => fake::run(&ctx, job),
+        JobKind::Identify(repository) => jobs::identify(&ctx, repository),
+        JobKind::Backup(job) => jobs::backup(&ctx, job),
+        JobKind::Prune(job) => jobs::prune(&ctx, job),
+        JobKind::Check(job) => jobs::check(&ctx, job),
+    };
+    match outcome {
+        Ok(Done::Result(result)) => {
+            events.emit(&WorkerEvent::Result(result))?;
+            Ok(Exit::Reported { failed: false })
+        }
+        Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
+        Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
+        Err(JobError::Failed { code, detail }) => {
+            events.emit(&WorkerEvent::Failed {
+                code,
+                args: Vec::new(),
+                detail: Some(detail),
+            })?;
+            Ok(Exit::Reported { failed: true })
+        }
+        Err(JobError::Events(error)) => Err(error),
+    }
 }
 
 fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {

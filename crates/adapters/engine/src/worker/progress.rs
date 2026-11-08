@@ -56,7 +56,31 @@ impl EventProgressBars {
 
 impl ProgressBars for EventProgressBars {
     fn progress(&self, progress_type: ProgressType, prefix: &str) -> Progress {
-        todo!()
+        let key = self.next_key.fetch_add(1, Ordering::SeqCst);
+        // The daemon accepts progress only from a started job, and rustic
+        // lists snapshots before the worker says `Started`: such a progress
+        // stays silent for its whole life.
+        let announced = self.events.has_started();
+        if announced {
+            let kind = match progress_type {
+                ProgressType::Spinner => ProgressKind::Spinner,
+                ProgressType::Counter => ProgressKind::Counter,
+                ProgressType::Bytes => ProgressKind::Bytes,
+            };
+            // rustic can't be told about a broken stream: see `Events::report`.
+            self.events.report(&WorkerEvent::ProgressStart {
+                key,
+                kind,
+                prefix: prefix.to_owned(),
+            });
+        }
+        Progress::new(EventProgress {
+            key,
+            announced,
+            events: self.events.clone(),
+            clock: Arc::clone(&self.clock),
+            limiter: Mutex::new(Limiter::default()),
+        })
     }
 }
 
@@ -85,7 +109,10 @@ impl std::fmt::Debug for EventProgress {
 
 impl EventProgress {
     fn send(&self, event: WorkerEvent) {
-        todo!()
+        if self.announced {
+            // rustic can't be told about a broken stream: see `Events::report`.
+            self.events.report(&event);
+        }
     }
 }
 
@@ -109,16 +136,54 @@ impl RusticProgress for EventProgress {
     /// Leading edge: the first increment goes out at once, the rest are
     /// added up and sent when [`MIN_INC_INTERVAL`] has passed since the last.
     fn inc(&self, inc: u64) {
-        todo!()
+        let now = (self.clock)();
+        let due = {
+            let mut limiter = self.limiter.lock().unwrap_or_else(PoisonError::into_inner);
+            limiter.pending = limiter.pending.saturating_add(inc);
+            if limiter
+                .sent_at
+                .is_none_or(|at| now.saturating_sub(at) >= MIN_INC_INTERVAL)
+            {
+                limiter.sent_at = Some(now);
+                Some(std::mem::take(&mut limiter.pending))
+            } else {
+                None
+            }
+        };
+        if let Some(inc) = due {
+            self.send(WorkerEvent::ProgressInc { key: self.key, inc });
+        }
     }
 
     fn finish(&self) {
-        todo!()
+        let pending = std::mem::take(
+            &mut self
+                .limiter
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pending,
+        );
+        if pending > 0 {
+            self.send(WorkerEvent::ProgressInc {
+                key: self.key,
+                inc: pending,
+            });
+        }
+        self.send(WorkerEvent::ProgressFinish { key: self.key });
     }
 
     /// Only a source that couldn't be read is a known kind of warning.
     fn error(&self, item: Option<&str>, during: &str, message: &str) {
-        todo!()
+        let code = match during {
+            "scan" | "archival" => WarningCode::SourceUnreadable,
+            _ => WarningCode::Unknown,
+        };
+        self.send(WorkerEvent::Warning {
+            item: item.map(str::to_owned),
+            during: during.to_owned(),
+            code,
+            detail: message.to_owned(),
+        });
     }
 }
 

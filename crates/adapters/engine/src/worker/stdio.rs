@@ -17,7 +17,10 @@ use std::os::fd::AsFd;
 /// and no program the worker starts inherits the pipe.
 #[cfg(unix)]
 pub(crate) fn detach_stdout() -> io::Result<File> {
-    todo!()
+    let events = File::from(io::stdout().as_fd().try_clone_to_owned()?);
+    let null = File::options().write(true).open("/dev/null")?;
+    nix::unistd::dup2_stdout(&null)?;
+    Ok(events)
 }
 
 #[cfg(test)]

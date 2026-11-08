@@ -39,7 +39,15 @@ pub(crate) struct Cleanup {
 /// The caller must have opened the repository first: a path that turned out
 /// not to be one is not ours to clean.
 pub(crate) fn remove_stale_files(root: &Path, now: SystemTime) -> Cleanup {
-    todo!()
+    let mut cleanup = Cleanup::default();
+    sweep(root, is_config_temporary, now, &mut cleanup);
+    for folder in ["keys", "snapshots", "index"] {
+        sweep(&root.join(folder), is_id_temporary, now, &mut cleanup);
+    }
+    for folder in pack_folders(&root.join("data"), &mut cleanup) {
+        sweep(&folder, is_id_temporary, now, &mut cleanup);
+    }
+    cleanup
 }
 
 /// The `<two hex digits>` folders directly inside `data`.

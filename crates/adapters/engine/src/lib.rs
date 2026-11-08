@@ -15,8 +15,6 @@
     clippy::todo,
     clippy::unreachable
 )]
-// Red-first stubs: removed when the real code returns.
-#![allow(unused, clippy::todo)]
 
 mod cache_lock;
 mod client;

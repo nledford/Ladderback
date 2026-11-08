@@ -104,7 +104,90 @@ impl WorkerEngine {
 #[async_trait]
 impl Engine for WorkerEngine {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-        todo!()
+        let slot = match (&self.cache_root, repository_id(&job)) {
+            (Some(root), Some(id)) => {
+                let (slots, root, id) = (Arc::clone(&self.slots), root.clone(), id.clone());
+                // Looking at the slots' locks is file I/O.
+                tokio::task::spawn_blocking(move || slots.acquire(&root, &id))
+                    .await
+                    .unwrap_or(None)
+            }
+            _ => None,
+        };
+        let spec = serde_json::to_vec(&JobSpec {
+            op_id: op,
+            cache_dir: slot.as_ref().map(|slot| slot.dir.clone()),
+            watchdog_interval_ms: u64::try_from(self.watchdog_interval.as_millis())
+                .unwrap_or(u64::MAX),
+            job: job_kind(job)?,
+        })
+        .map_err(|e| failed_to_start(&self.program, e))?;
+        // The worker refuses a longer spec, so don't start one to be refused.
+        if spec.len() > MAX_MESSAGE_BYTES {
+            return Err(EngineError {
+                detail: format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"),
+            });
+        }
+        let mut command = Command::new(&self.program);
+        command
+            .args(&self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Piped, not inherited: the worker leads a process group of its
+            // own, which a terminal with `stty tostop` treats as a background
+            // job, and a write to the terminal would suspend it.
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        // The worker leads a process group of its own: see `signal_group`.
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
+            .spawn()
+            .map_err(|e| failed_to_start(&self.program, e))?;
+        let Some(mut stdin) = child.stdin.take() else {
+            return Err(failed_to_start(&self.program, "the worker has no stdin"));
+        };
+        stdin
+            .write_all(&spec)
+            .await
+            .map_err(|e| failed_to_start(&self.program, e))?;
+        // Closing stdin tells the worker the job spec is complete.
+        drop(stdin);
+        let Some(stdout) = child.stdout.take() else {
+            return Err(failed_to_start(&self.program, "the worker has no stdout"));
+        };
+        let Some(stderr) = child.stderr.take() else {
+            return Err(failed_to_start(&self.program, "the worker has no stderr"));
+        };
+
+        let (commands, command_rx) = mpsc::unbounded_channel();
+        let (exited_tx, exited) = watch::channel(None);
+        tokio::spawn(supervise(
+            child,
+            command_rx,
+            exited_tx,
+            self.stop_grace,
+            slot,
+        ));
+        tokio::spawn(forward_stderr(BufReader::new(stderr), exited.clone()));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let reading = Reading {
+            stdout: BufReader::new(stdout),
+            line: Vec::new(),
+            exited: exited.clone(),
+            commands: commands.clone(),
+            stopped: Arc::clone(&stopped),
+            done: false,
+            drain_until: None,
+        };
+        Ok(RunningJob {
+            events: stream::unfold(reading, Reading::next).boxed(),
+            control: Box::new(Control {
+                commands,
+                exited,
+                stopped,
+            }),
+        })
     }
 }
 
@@ -184,7 +267,7 @@ async fn next_command(commands: &mut Option<mpsc::UnboundedReceiver<Order>>) -> 
 /// When a worker that reported its result must be done with its cleanup:
 /// `grace` after `now`, or `now` when that time can't be represented.
 fn deadline_after(now: tokio::time::Instant, grace: Duration) -> tokio::time::Instant {
-    todo!()
+    now.checked_add(grace).unwrap_or(now)
 }
 
 /// Kills the worker and everything it started.
@@ -271,7 +354,17 @@ enum WorkerExit {
 /// What one `waitid(WEXITED | WNOWAIT)` found; `None` when interrupted.
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 fn worker_exit(waited: nix::Result<nix::sys::wait::WaitStatus>) -> Option<WorkerExit> {
-    todo!()
+    use nix::errno::Errno;
+
+    match waited {
+        // The arguments are fixed and valid, so EINVAL comes from nix after
+        // libc's `waitid` succeeded: a status it can't convert, such as a
+        // real-time signal. The worker exited all the same.
+        Ok(_) | Err(Errno::EINVAL) => Some(WorkerExit::Unreaped),
+        Err(Errno::ECHILD) => Some(WorkerExit::Reaped),
+        Err(Errno::EINTR) => None,
+        Err(_) => Some(WorkerExit::Unobservable),
+    }
 }
 
 /// Resolves once the worker has exited, *without reaping it*: `waitid` with
@@ -590,7 +683,92 @@ async fn read_log_line(
 }
 
 fn translate(event: WorkerEvent) -> Option<EngineEvent> {
-    todo!()
+    Some(match event {
+        WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started { index_read_at },
+        WorkerEvent::ProgressStart { key, kind, prefix } => {
+            EngineEvent::Progress(ProgressEvent::Begin {
+                key,
+                kind: match kind {
+                    ProgressKind::Spinner => AppProgressKind::Spinner,
+                    ProgressKind::Counter => AppProgressKind::Counter,
+                    ProgressKind::Bytes => AppProgressKind::Bytes,
+                },
+                prefix,
+            })
+        }
+        WorkerEvent::ProgressLength { key, len } => {
+            EngineEvent::Progress(ProgressEvent::Length { key, len })
+        }
+        WorkerEvent::ProgressInc { key, inc } => {
+            EngineEvent::Progress(ProgressEvent::Advance { key, by: inc })
+        }
+        WorkerEvent::ProgressTitle { key, title } => {
+            EngineEvent::Progress(ProgressEvent::Title { key, title })
+        }
+        WorkerEvent::ProgressFinish { key } => EngineEvent::Progress(ProgressEvent::Finish { key }),
+        WorkerEvent::Warning {
+            item,
+            during,
+            code,
+            detail,
+        } => EngineEvent::Warning(Warning {
+            kind: match code {
+                WarningCode::SourceUnreadable => WarningKind::SourceUnreadable,
+                WarningCode::Unknown => WarningKind::Other,
+            },
+            item,
+            during,
+            detail,
+        }),
+        // Logs are for the daemon's own log, which gets them under the target
+        // `steading::worker`.
+        WorkerEvent::Log { level, message } => {
+            let level = match level {
+                Level::Error => log::Level::Error,
+                Level::Warn => log::Level::Warn,
+                Level::Info => log::Level::Info,
+                Level::Debug => log::Level::Debug,
+            };
+            log::log!(target: "steading::worker", level, "{message}");
+            return None;
+        }
+        WorkerEvent::Result(result) => EngineEvent::Succeeded(match result {
+            OpResult::Fake { steps_completed } => EngineResult::Fake { steps_completed },
+            OpResult::Repository { id } => EngineResult::Repository { id },
+            OpResult::Backup(r) => EngineResult::Backup(BackupSummary {
+                repository: r.repository,
+                snapshot: r.snapshot,
+                parent: r.parent,
+                files_new: r.files_new,
+                files_changed: r.files_changed,
+                files_unmodified: r.files_unmodified,
+                data_added: r.data_added,
+                data_added_packed: r.data_added_packed,
+                error_count: r.error_count,
+            }),
+            OpResult::Prune(r) => EngineResult::Prune(PruneSummary {
+                repository: r.repository,
+                packs_marked: r.packs_marked,
+                packs_deleted: r.packs_deleted,
+                packs_recovered: r.packs_recovered,
+            }),
+            OpResult::Check(r) => EngineResult::Check(CheckSummary {
+                repository: r.repository,
+                errors: r.errors,
+                warnings: r.warnings,
+            }),
+        }),
+        WorkerEvent::Failed { code, detail, .. } => {
+            let detail = detail.unwrap_or_default();
+            EngineEvent::Failed(match code {
+                ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
+                ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
+                ErrorCode::OperationFailed | ErrorCode::Unknown => {
+                    FailureReason::EngineFailed { detail }
+                }
+            })
+        }
+    })
 }
 
 fn repository_id(job: &Job) -> Option<&RepositoryId> {
@@ -689,7 +867,22 @@ struct CacheSlots {
 impl CacheSlots {
     /// `None` when every slot is taken: that worker runs without a cache.
     fn acquire(self: &Arc<Self>, root: &Path, repository: &RepositoryId) -> Option<CacheSlot> {
-        todo!()
+        let directory = |number: u32| {
+            root.join("steading")
+                .join(repository.as_str())
+                .join(number.to_string())
+        };
+        let mut in_use = self.in_use.lock().unwrap_or_else(PoisonError::into_inner);
+        let taken = in_use.entry(repository.as_str().to_owned()).or_default();
+        let number = (0..MAX_CACHE_SLOTS)
+            .find(|number| !taken.contains(number) && !held_by_another(&directory(*number)))?;
+        taken.insert(number);
+        Some(CacheSlot {
+            slots: Arc::clone(self),
+            repository: repository.as_str().to_owned(),
+            number,
+            dir: directory(number),
+        })
     }
 }
 
