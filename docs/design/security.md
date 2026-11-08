@@ -27,7 +27,7 @@ Every secret-bearing field can come from any of these sources. That covers the r
 | Environment variable | `password-env = "NAS_PASSWORD"` | Containers, CI, systemd `Environment=`/`EnvironmentFile=` |
 | Inline | `password = "…"` | Accepted (e.g. on import) with a warning and an offer to move it to the keyring |
 
-**Substitution in repository fields.** Inspired by Backrest's `${VAR}` expansion, but stricter. `repository`, `repo-hot` and the values in `options`, `options-hot` and `options-cold` may reference `${VAR}` (an environment variable) or `${file:/path}` (a file's contents, trailing newline trimmed). Substitution is limited to these fields: in hooks it would put secrets into process arguments (I4), and in `label`, `sources` or `tags` it would silently change snapshot identity. For example:
+**Substitution in repository fields.** Inspired by Backrest's `${VAR}` expansion, but stricter. `repository`, `repo-hot` and the **values** of `options`, `options-hot` and `options-cold` may reference `${VAR}` (an environment variable) or `${file:/abs/path}` (a file's contents). Substitution is limited to these fields: in hooks it would put secrets into process arguments (I4), and in `label`, `sources` or `tags` it would silently change snapshot identity. It never applies to option names, and never to an inline `password`, which is taken as written. For example:
 
 ```toml
 [repositories.b2]
@@ -36,14 +36,55 @@ password-file = "/run/secrets/b2_repo_password"
 options = { bucket = "my-backups", application_key_id = "${B2_KEY_ID}", application_key = "${file:/run/secrets/b2_app_key}" }
 ```
 
-Rules:
-- `$${…}` escapes a literal `${`.
-- Substitution happens **at job start** in the daemon, not when the config is loaded. Rotated secrets are picked up without a restart, and resolved values never get written back to `config.toml` or shown in the UI. The UI shows the reference (`${B2_KEY_ID}`), not the value.
-- A missing variable or file fails the job with a clear error naming the reference. It never silently becomes an empty string (unlike Backrest).
-- File permissions: Steading warns if a secret file is group- or world-readable, except for files under `/run/secrets/`, `$CREDENTIALS_DIRECTORY` and `/var/run/secrets/`, where container runtimes control permissions.
+Grammar and limits (`domain::secrets::Template`):
+- `${VAR}` names a variable of `[A-Za-z_][A-Za-z0-9_]*`. `${file:/abs/path}` takes an absolute path that has no `}` in it. There are no defaults (`${VAR:-x}`) and no nesting.
+- `$${` is a literal `${`. A text is read left to right, and a value a reference resolved to is never scanned again, so a secret that looks like a reference stays as it is.
+- A malformed reference (unterminated, empty, invalid name, empty or relative path, nested) fails the field with the byte offset of its `${`, never with the text.
+- A field has at most 16 references (`MAX_REFERENCES`) and is at most 64 KiB (`MAX_SECRET_BYTES`) both before and after expansion.
+
+**Sources and what they give.** Every source goes through the `SecretResolver` port (§3.2), which returns the secret and any warnings, or an error that names the source:
+
+| Source | The secret is | Nothing there |
+|---|---|---|
+| `${VAR}`, `password-env` | the value as it is, with no trimming | not set: `Missing`. Set to empty: the empty secret |
+| `${file:/abs/path}` | the whole contents minus one trailing `\n` (and a `\r` before it) | `Missing` |
+| `password-file` | the first line: up to the first `\n`, minus a `\r` before it (as rustic does) | `Missing` |
+| `password-command` | the first line of the command's output | — |
+| `password-keyring` | the entry's secret | no such entry: `Missing` |
+| Inline `password` | as written | — |
+
+Options accept only `${VAR}` and `${file:/abs/path}`; commands and the keyring are forms of the repository password. A missing variable or file is never an empty string (unlike Backrest). What a source gives, the whole file, output or value and not only the line taken from it, is limited to 64 KiB (`TooLarge`) and must be UTF-8 (`NotUnicode`). A source that exists but can't be read is `Unreachable`. A file or keyring read that outlives the resolver's limit (a keyring that waits for an unlock, a mount that has hung) fails as `TimedOut`, like a command; the blocked read can't be cancelled and ends when the system lets it go.
+
+**Commands.** The command line is split into words POSIX-style and started **without a shell**, so `|`, `;` and `$(…)` in it mean nothing. The port contract (`app::ports::SecretResolver`) is that a command gets no input, runs in a process group of its own, and is limited in time: one that outlives the resolver's limit fails as `TimedOut` and nothing it started is left running. A command that exits unsuccessfully fails as `CommandFailed` with its exit status (none when a signal ended it) and the first non-empty line of its **stderr**, cut to 512 bytes, with the value it printed on stdout masked (whole, trimmed and line by line), since a helper that rejects a value may quote it. Its stdout itself is never part of an error. One that can't be started is `Unreachable`.
+
+**Errors.** An error names the source and the problem, as codes (§8.4): the variable's name, the file's path, the program (without its arguments), or the keyring entry. It never holds a value or a command's arguments; the one text a command controls is the `CommandFailed` detail, which has the value the command printed on stdout masked (see above). In a resolved repository the error also names the field it was found in (`repository`, `repo-hot`, `password`, or an option by its name); when several fields fail, the first is reported, in the order password, `repository`, `repo-hot`, `options`, `options-hot`, `options-cold`.
+
+**File permissions.** Steading warns (`FileReadableByOthers`, with the path) if a secret file, whether read as `password-file` or as `${file:…}`, is readable by group or others (mode `& 0o044`), except for files under `/run/secrets`, `/var/run/secrets` and an absolute `$CREDENTIALS_DIRECTORY`, where container runtimes and systemd control permissions. A path with a `..` component is never exempt, and a `$CREDENTIALS_DIRECTORY` that is empty, relative or `/` counts for nothing.
+
+**Rules.**
+- Substitution happens **at job start** in the daemon (`app::secrets::ResolveRepository`), not when the config is loaded. Rotated secrets are picked up without a restart, and resolved values never get written back to `config.toml` or shown in the UI. The UI shows the reference (`${B2_KEY_ID}`), not the value.
+- Each distinct reference is read once per job, so a value can't change between two places that use it. Warnings are reported once each.
+- **A reference may not be in a field that becomes a process argument**, because argv is visible to every local user in `ps` and `/proc/<pid>/cmdline` (I4), and the engine's masking can't reach it. The pinned `rustic_backend` does that for the repository string of an `rclone:` repository (`rclone.rs`: it is appended to rclone's arguments), and for the options it runs as commands: `rclone-command` (`rclone.rs`), `post-create-command` and `post-delete-command` (`local.rs`). Such a reference, in `repository` or `repo-hot` that starts with `rclone:` or in one of these options in `options`, `options-hot` or `options-cold`, is **refused** (`Cause::ReferenceInProcessArguments`, naming the field) before any secret is read, even when the password can't be read either. A reference that supplies the `rclone:` itself (`${REPO}` holding `rclone:…`) shows only in the expansion, so the expansion of `repository` and `repo-hot` is checked too: that is refused once its references were read, and before anything else is done with it. A plain `rclone:remote:path`, an escaped `$${`, and a reference in any other field or option are allowed. An rclone remote's credentials belong in rclone's own config file (the worker keeps `RCLONE_CONFIG`).
+- The hot and cold halves of a repository (`repo-hot`, `options-hot`, `options-cold`) are resolved and returned separately from the main fields. Passing them on to the engine belongs to the repository slice, but their resolved values are already masked like the rest.
 - rustic's own environment variables (`RUSTIC_PASSWORD`, `RUSTIC_PASSWORD_FILE`, `RUSTIC_PASSWORD_COMMAND`, `RUSTIC_REPOSITORY`, `RUSTIC_REPO_OPT_*`) are recognized on import. They're **not** read implicitly at runtime, so one stray variable can't redirect every plan. Use `password-env` explicitly instead.
 
-Resolved secrets are passed to workers through the `JobSpec` on stdin, never as argv or environment variables. That holds even when a secret was *sourced* from an environment variable: workers and hooks get a scrubbed environment. The daemon and worker replace every resolved secret value with `***` in logs, warnings and errors before they are stored or forwarded, and hook and notification templates never receive secrets (Backrest leaks them this way, [#1170](https://github.com/garethgeorge/backrest/issues/1170)). **Secrets never leave the agent.** Hub maintenance and hub downloads need the repo password, so for hub-managed repos the **hub has its own secret entry** for that repo, configured on the hub. Agents don't push passwords.
+**What is masked.** The `Redactor` (§3.1) replaces each of these with `***`:
+- the repository password;
+- every value a `${…}` reference resolved to (`RepositoryAccess.secrets`), wherever it lands, whatever the option or field is called: the repository string, an option such as `endpoint`, or a path in an error;
+- the password in the userinfo of any URL in `repository` or in an option value. An S3 `endpoint` is **not** a secret by its name; only credentials embedded in its URL (`https://demo:…@host`) are masked, so a plain endpoint stays readable in diagnostics;
+- the value of every option whose name says it holds a credential (`is_secret_option`), **even when written inline**: a name, lowercased with `-` read as `_`, that contains `password`, `passwd`, `secret`, `token`, `credential`, `passphrase` or `delegation`, or ends in `_key` (`sas_token`, `secret_access_key`, `application_key`). `use_password` (a switch), `key` (an SFTP key file path), `access_key_id` and `application_key_id` are not secrets.
+
+Each is masked raw and as a URL parser prints it (§4.1): percent-encoded in full (either hex case); as the `url` crate encodes a userinfo, a path (also with `^` encoded, as the newer standard does), a query, a special URL's query (which also encodes `'`) and a fragment (upper-case hex); with tab and newlines taken out and with `\` read as `/`, as a parser rewrites them; and lower-cased, as a host is. Not covered: a host that is not ASCII, which a parser writes in punycode. Secrets that overlap or touch are masked as one span, so no tail of one is left. A secret that spans lines is also masked without the white space around it, and line by line for lines of at least 8 bytes (the first 64 lines), because logs reach a reader one line at a time.
+
+**Where masking runs.** The worker masks every `Log`, `Warning` and failure detail, and its panic report, before it cuts them to size (§4.1). The daemon masks what the worker writes to stderr, because the programs a worker starts (rclone, ssh) write there too, and a line cut at the cap first loses the bytes a secret could straddle the cut with. The `Debug` forms of `RepositorySettings`, `ResolvedRepository`, `RepositoryAccess` and the worker's `RepositorySpec` show option names but no values, no secrets and the repository string redacted.
+
+Resolved secrets are passed to workers through the `JobSpec` on stdin, never as argv or environment variables. That holds even when a secret was *sourced* from an environment variable: **a worker starts with a scrubbed environment** (§4.1): only a fixed allow-list of variables that name a place or a setting (`PATH`, `HOME`, the locale, `SSH_AUTH_SOCK`, certificate locations, `RCLONE_CONFIG`, the proxy variables) and nothing else of the daemon's. Two consequences:
+- Ambient cloud credentials (`AWS_*`, `AZURE_*`, `GOOGLE_*`, `RUSTIC_*`, `RCLONE_CONFIG_*`) no longer reach a worker. A repository that needs them says so explicitly, with `${…}` in its options.
+- A proxy URL with credentials embedded passes as it is. This is a residual risk the user takes by writing it there.
+
+Hook and notification templates never receive secrets (Backrest leaks them this way, [#1170](https://github.com/garethgeorge/backrest/issues/1170)); hooks get the same scrubbed environment when they are built. **Secrets never leave the agent.** Hub maintenance and hub downloads need the repo password, so for hub-managed repos the **hub has its own secret entry** for that repo, configured on the hub. Agents don't push passwords.
+
+**Not yet in place.** Mapping `SecretError` and `TemplateError` to operation failure reasons, API error codes and their localized messages belongs to the job-runner, operation-log and `l10n` work. The warning for an inline secret, and seeding a daemon-wide redactor with every secret at config load, belong to the config work. Passing `repo-hot` and the hot and cold options to the engine belongs to the repository work.
 
 ### 10.3 Agent ↔ hub
 

@@ -5,6 +5,11 @@
 //! `rustic_core` can't be cancelled, keeps whole indexes in memory and runs
 //! its own Tokio runtimes. [`main`] is what `steading worker` does: it routes
 //! rustic's logging into the event stream, exits on SIGTERM, and runs the job.
+//!
+//! Nothing the job holds secret reaches the stream: the worker masks the
+//! password, the secrets its settings resolved to, the credential options and
+//! the passwords in URLs, in every text it writes. What the programs it
+//! starts write to stderr, it can't mask; the daemon does that.
 
 mod convert;
 mod events;
@@ -275,6 +280,8 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         events.redact_with(Redactor::for_repository(
             &repository.repository,
             &repository.password,
+            &repository.options,
+            &repository.secrets,
         ));
     }
     let ctx = Context::new(events.clone(), &spec, pid, process);
@@ -469,6 +476,7 @@ mod tests {
                 repository: "/nonexistent/hunter2/repo".to_owned(),
                 password: SecretValue::new("hunter2"),
                 options: Default::default(),
+                secrets: Vec::new(),
             }),
         };
         let (events, capture) = capture();
@@ -477,6 +485,68 @@ mod tests {
         assert_eq!(exit.code(), 1);
         let text = capture.text();
         assert!(!text.contains("hunter2"), "the password leaked: {text}");
+    }
+
+    /// An Identify job on a local path that doesn't exist: it fails with the
+    /// path in its message, so what the path holds shows whether it is masked.
+    fn failure_text_for(path_part: &str, options: &[(&str, &str)], secrets: &[&str]) -> String {
+        let spec = JobSpec {
+            op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+            cache_dir: None,
+            watchdog_interval_ms: 10,
+            job: JobKind::Identify(RepositorySpec {
+                repository: format!("/nonexistent/{path_part}/repo"),
+                password: SecretValue::new("hunter2"),
+                options: options
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                    .collect(),
+                secrets: secrets.iter().map(|s| SecretValue::new(*s)).collect(),
+            }),
+        };
+        let (events, capture) = capture();
+        let input = serde_json::to_vec(&spec).unwrap();
+        let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
+        assert_eq!(exit.code(), 1);
+        let text = capture.text();
+        assert!(
+            text.contains("nonexistent"),
+            "the failure is not about the path: {text}"
+        );
+        text
+    }
+
+    #[test]
+    fn a_resolved_secret_is_hidden_in_a_failure_whatever_it_sits_in() {
+        let text = failure_text_for("CANARY-resolved", &[], &["CANARY-resolved"]);
+        assert!(
+            !text.contains("CANARY-resolved"),
+            "a resolved secret leaked: {text}"
+        );
+    }
+
+    #[test]
+    fn the_value_of_a_credential_option_is_hidden_in_a_failure() {
+        for (name, canary) in [
+            ("sas_token", "CANARY-sas"),
+            ("secret_access_key", "CANARY-sak"),
+        ] {
+            let text = failure_text_for(canary, &[(name, canary)], &[]);
+            assert!(!text.contains(canary), "{name} leaked: {text}");
+        }
+    }
+
+    #[test]
+    fn the_password_in_the_url_of_an_option_is_hidden_in_a_failure() {
+        let text = failure_text_for(
+            "CANARY-userinfo",
+            &[("endpoint", "http://demo:CANARY-userinfo@127.0.0.1:9")],
+            &[],
+        );
+        assert!(
+            !text.contains("CANARY-userinfo"),
+            "endpoint credentials leaked: {text}"
+        );
     }
 
     fn invalid_spec_failure(events: &[WorkerEvent]) {

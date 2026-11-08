@@ -27,6 +27,9 @@ mod backup_steps;
 #[path = "steps/request_checks.rs"]
 mod request_checks_steps;
 
+#[path = "steps/secrets.rs"]
+mod secrets_steps;
+
 const STEADING: &str = env!("CARGO_BIN_EXE_steading");
 
 #[derive(World)]
@@ -44,6 +47,7 @@ struct Agent {
     agent_id: AgentId,
     backup: backup_steps::BackupSetup,
     web: request_checks_steps::Web,
+    secrets: secrets_steps::SecretsSetup,
 }
 
 impl std::fmt::Debug for Agent {
@@ -77,6 +81,7 @@ impl Agent {
             agent_id,
             backup: backup_steps::BackupSetup::default(),
             web: request_checks_steps::Web::default(),
+            secrets: secrets_steps::SecretsSetup::default(),
         }
     }
 

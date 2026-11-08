@@ -15,6 +15,9 @@ use domain::{OperationId, SignedDuration, Timestamp, Uuid};
 #[path = "steps/operation.rs"]
 mod operation_steps;
 
+#[path = "steps/secrets.rs"]
+mod secrets_steps;
+
 #[derive(World)]
 #[world(init = Self::new)]
 struct Agent {
@@ -23,6 +26,7 @@ struct Agent {
     store: Arc<InMemoryOperationStore>,
     job: FakeJob,
     finished: Option<Finished>,
+    secrets: secrets_steps::SecretsWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -51,6 +55,7 @@ impl Agent {
                 deadline_budget: None,
             },
             finished: None,
+            secrets: Default::default(),
         }
     }
 

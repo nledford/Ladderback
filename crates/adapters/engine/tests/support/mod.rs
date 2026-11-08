@@ -66,6 +66,7 @@ impl Location {
             repository: self.repository.clone(),
             password: SecretValue::new(password),
             options: self.options.clone(),
+            secrets: Vec::new(),
             id: None,
         }
     }

@@ -53,6 +53,7 @@ fn identify_job() -> Job {
         repository: "/srv/demo/repo".to_owned(),
         password: SecretValue::new("demo-password"),
         options: BTreeMap::new(),
+        secrets: Vec::new(),
         id: Some(repository()),
     })
 }

@@ -4,8 +4,9 @@
 //! The daemon writes one [`JobSpec`] as JSON to the worker's stdin and closes
 //! it. The worker answers with one [`WorkerEvent`] per line on stdout, and
 //! ends the stream with a [`WorkerEvent::Result`] or a [`WorkerEvent::Failed`].
-//! The job carries the repository password, so it travels over stdin only:
-//! never as an argument, in the environment or in a file (invariant I4).
+//! The job carries the repository password and every secret its settings
+//! resolved to, so it travels over stdin only: never as an argument, in the
+//! environment or in a file (invariant I4).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -69,22 +70,36 @@ pub struct RepositorySpec {
     pub password: SecretValue,
     /// Backend options, as rustic's `[repository.options]`.
     pub options: BTreeMap<String, String>,
+    /// What the `${…}` references in the repository's settings resolved to
+    /// (the password is not among them). They are masked wherever they show,
+    /// whatever the option they sit in is called.
+    #[serde(with = "secrets")]
+    pub secrets: Vec<SecretValue>,
 }
 
 /// Everything that can hold a secret is masked: the password, the password
-/// in the repository's URL, and the value of every option (`secret_access_key`
-/// and the like). What helps with diagnosing stays: the rest of the URL and
-/// the options' names.
+/// in the repository's URL, every secret the job carries, and the value of
+/// every option (`secret_access_key` and the like). What helps with
+/// diagnosing stays: the rest of the URL and the options' names. The
+/// secrets show as one mask each, so how many there are is visible and what
+/// they are is not.
 impl fmt::Debug for RepositorySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repository =
-            Redactor::for_repository(&self.repository, &self.password).redact(&self.repository);
+        let repository = Redactor::for_repository(
+            &self.repository,
+            &self.password,
+            &self.options,
+            &self.secrets,
+        )
+        .redact(&self.repository);
         let options: BTreeMap<&String, &str> =
             self.options.keys().map(|name| (name, REDACTED)).collect();
+        let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositorySpec")
             .field("repository", &repository)
             .field("password", &self.password)
             .field("options", &options)
+            .field("secrets", &secrets)
             .finish()
     }
 }
@@ -276,6 +291,31 @@ mod secret {
     }
 }
 
+/// A list of secrets, each a plain string like [`secret`].
+mod secrets {
+    use domain::secrets::SecretValue;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        secrets: &[SecretValue],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(secrets.len()))?;
+        for secret in secrets {
+            seq.serialize_element(secret.expose())?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<SecretValue>, D::Error> {
+        Vec::<String>::deserialize(deserializer)
+            .map(|values| values.into_iter().map(SecretValue::new).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +325,7 @@ mod tests {
             repository: "/backups/home".to_owned(),
             password: SecretValue::new("hunter2"),
             options: BTreeMap::from([("retry".to_owned(), "3".to_owned())]),
+            secrets: Vec::new(),
         }
     }
 
@@ -367,6 +408,7 @@ mod tests {
                     ("secret_access_key".to_owned(), "AKIAEXAMPLEKEY".to_owned()),
                     ("retry".to_owned(), "3".to_owned()),
                 ]),
+                secrets: Vec::new(),
             },
             sources: vec!["/home/demo".to_owned()],
             plan: PlanId::parse("home").unwrap(),
@@ -383,6 +425,38 @@ mod tests {
         for kept in ["nas:8000", "secret_access_key", "retry", "/home/demo"] {
             assert!(text.contains(kept), "{kept} is missing: {text}");
         }
+    }
+
+    #[test]
+    fn a_spec_with_secrets_round_trips_and_they_travel_as_plain_strings() {
+        let mut repo = repository();
+        repo.secrets = vec![SecretValue::new("tok-1"), SecretValue::new("tok-2")];
+        let spec = spec(JobKind::Identify(repo));
+        assert_eq!(round_trip(&spec), spec);
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            json["job"]["secrets"],
+            serde_json::json!(["tok-1", "tok-2"])
+        );
+    }
+
+    #[test]
+    fn debug_output_hides_the_secrets_but_counts_them() {
+        let mut repo = repository();
+        repo.repository = "rest:https://nas:8000/CANARY-ref/backups".to_owned();
+        repo.secrets = vec![
+            SecretValue::new("CANARY-ref"),
+            SecretValue::new("CANARY-two"),
+        ];
+        let text = format!("{:?}", spec(JobKind::Identify(repo)));
+        for secret in ["CANARY-ref", "CANARY-two"] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        assert!(
+            text.contains("nas:8000") && text.contains("backups"),
+            "{text}"
+        );
+        assert!(text.contains(r#"secrets: ["***", "***"]"#), "{text}");
     }
 
     #[test]

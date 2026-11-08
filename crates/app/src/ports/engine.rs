@@ -115,24 +115,38 @@ pub struct RepositoryAccess {
     pub password: SecretValue,
     /// Backend options, as rustic's `[repository.options]`.
     pub options: BTreeMap<String, String>,
+    /// What the `${…}` references in the repository's settings resolved to.
+    /// They may sit anywhere in `repository` and in `options`, whatever the
+    /// option's name, so the engine hides every one of them wherever it
+    /// reports text (I4, technical design §10.2). The password isn't listed:
+    /// it has a field of its own.
+    pub secrets: Vec<SecretValue>,
     /// The repository's ID when already known; the engine uses it to give
     /// each worker its own cache dir. `None` before the first `Identify`.
     pub id: Option<RepositoryId>,
 }
 
 /// Everything that can hold a secret is masked (I4): the password, the
-/// password in the repository's URL, and every option's value. The rest of
-/// the URL and the options' names stay, for diagnosing.
+/// password in the repository's URL, the passwords in URLs that options
+/// hold, every option's value, and what the references resolved to. The rest
+/// of the URL and the options' names stay, for diagnosing.
 impl std::fmt::Debug for RepositoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let repository =
-            Redactor::for_repository(&self.repository, &self.password).redact(&self.repository);
+        let repository = Redactor::for_repository(
+            &self.repository,
+            &self.password,
+            &self.options,
+            &self.secrets,
+        )
+        .redact(&self.repository);
         let options: BTreeMap<&String, &str> =
             self.options.keys().map(|name| (name, REDACTED)).collect();
+        let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositoryAccess")
             .field("repository", &repository)
             .field("password", &self.password)
             .field("options", &options)
+            .field("secrets", &secrets)
             .field("id", &self.id)
             .finish()
     }
@@ -296,6 +310,7 @@ mod tests {
             repository: "/srv/demo/repo".to_owned(),
             password: SecretValue::new("demo-password"),
             options: BTreeMap::new(),
+            secrets: Vec::new(),
             id,
         }
     }
@@ -362,16 +377,24 @@ mod tests {
         assert_eq!(identify.target(), Target::default());
     }
 
+    fn access_at(repository: &str) -> RepositoryAccess {
+        RepositoryAccess {
+            repository: repository.to_owned(),
+            password: SecretValue::new("hunter2"),
+            options: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+        }
+    }
+
     #[test]
     fn a_job_never_shows_its_secrets_in_its_debug_form() {
         let access = RepositoryAccess {
-            repository: "rest:https://demo:s3cr3t@nas:8000/backups".to_owned(),
-            password: SecretValue::new("hunter2"),
             options: BTreeMap::from([(
                 "secret_access_key".to_owned(),
                 "AKIAEXAMPLEKEY".to_owned(),
             )]),
-            id: None,
+            ..access_at("rest:https://demo:s3cr3t@nas:8000/backups")
         };
         let debug = format!("{:?}", Job::Identify(access));
         for secret in ["hunter2", "s3cr3t", "AKIAEXAMPLEKEY"] {
@@ -380,5 +403,24 @@ mod tests {
         for kept in ["https://demo:", "@nas:8000/backups", "secret_access_key"] {
             assert!(debug.contains(kept), "{kept} is gone: {debug}");
         }
+    }
+
+    #[test]
+    fn a_job_hides_what_its_references_resolved_to_wherever_that_shows() {
+        let access = RepositoryAccess {
+            secrets: vec![
+                SecretValue::new("canary-from-a-file"),
+                SecretValue::new("canary-from-env"),
+            ],
+            ..access_at("rest:https://canary-from-env:8000/canary-from-a-file/backups")
+        };
+        let debug = format!("{:?}", Job::Identify(access));
+        for secret in ["canary-from-a-file", "canary-from-env"] {
+            assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+        }
+        assert!(
+            debug.contains("rest:https://***:8000/***/backups"),
+            "{debug}"
+        );
     }
 }

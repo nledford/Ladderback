@@ -1,6 +1,29 @@
 //! Secrets context: resolved secret values and the redactor that keeps them
 //! out of logs, warnings and errors (invariant I4, technical design §10.2).
 
+use std::collections::BTreeMap;
+
+mod command;
+mod options;
+mod outcome;
+mod source;
+mod template;
+
+pub use command::{CommandLine, CommandLineError};
+pub use options::is_secret_option;
+pub use outcome::{MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, decode, file_warning};
+pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};
+pub use template::{Part, Reference, Template, TemplateError};
+
+/// The most bytes a secret may have, and a field that may hold references:
+/// what is read from a file or from a command's output, what a reference
+/// expands to, and what a template is made of. A file or an output of any
+/// size could otherwise size an allocation (technical design §13.5).
+pub const MAX_SECRET_BYTES: usize = 64 * 1024;
+
+/// The most `${…}` references one field may hold.
+pub const MAX_REFERENCES: usize = 16;
+
 /// A resolved secret, such as a repository password. Its `Debug` form never
 /// shows the value, so it can't leak through a log or a test failure.
 #[derive(Clone, PartialEq, Eq)]
@@ -26,13 +49,36 @@ impl std::fmt::Debug for SecretValue {
 /// What a secret is replaced with.
 pub const REDACTED: &str = "***";
 
-/// Replaces every known secret value, raw or percent-encoded as it appears
-/// in URLs (fully encoded with either hex case, or as the url crate encodes
-/// a userinfo), with [`REDACTED`].
-#[derive(Clone, Debug, Default)]
+/// A line of a secret that spans lines is a needle of its own when it has at
+/// least this many bytes: a shorter one would mask half of all the text there
+/// is.
+const MIN_LINE_BYTES: usize = 8;
+
+/// How many lines of one secret are needles of their own, so a large secret
+/// can't make every redaction slow.
+const MAX_LINES_PER_SECRET: usize = 64;
+
+/// Replaces every known secret value, raw or as a URL parser writes it
+/// (percent-encoded in full with either hex case, or as the url crate
+/// encodes a userinfo, a path, a query, a special URL's query or a fragment;
+/// without the tab and newlines it takes out; with `\` read as `/`; and
+/// lower-cased, as a host is), with [`REDACTED`]; and what else of it shows
+/// in text on its own (see `partial_needles`). Secrets that overlap or touch
+/// are replaced as one span.
+#[derive(Clone, Default)]
 pub struct Redactor {
     /// Longest first, so a secret containing another is replaced whole.
     needles: Vec<String>,
+}
+
+/// What a redactor hides is what it holds, so its `Debug` form counts the
+/// needles and shows none.
+impl std::fmt::Debug for Redactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Redactor")
+            .field("needles", &self.needles.len())
+            .finish()
+    }
 }
 
 impl Redactor {
@@ -41,33 +87,118 @@ impl Redactor {
             .into_iter()
             .map(SecretValue::expose)
             .filter(|value| !value.is_empty())
-            .flat_map(|value| {
-                [
-                    value.to_owned(),
-                    percent_encode(value, is_unreserved, Hex::Upper),
-                    percent_encode(value, is_unreserved, Hex::Lower),
-                    percent_encode(value, is_userinfo_safe, Hex::Upper),
-                ]
-            })
+            .flat_map(|value| url_needles(value).into_iter().chain(partial_needles(value)))
             .collect();
         needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         needles.dedup();
         Self { needles }
     }
 
-    /// A redactor for a repository's password and for the password in the
-    /// userinfo of the URL inside its repository string (`rest:https://…`),
-    /// which rustic's errors quote.
-    pub fn for_repository(repository: &str, password: &SecretValue) -> Self {
-        let url_passwords = url_passwords(repository);
-        Self::new(std::iter::once(password).chain(&url_passwords))
+    /// A redactor for everything that gives access to a repository: its
+    /// password; the password in the userinfo of every URL in its repository
+    /// string (`rest:https://…`) and in the value of any option (an
+    /// `endpoint`), which rustic's and OpenDAL's errors quote; the value of
+    /// every option whose name says it holds a credential
+    /// ([`is_secret_option`]), even one written inline; and `resolved`, what
+    /// the references in its settings were resolved to.
+    pub fn for_repository(
+        repository: &str,
+        password: &SecretValue,
+        options: &BTreeMap<String, String>,
+        resolved: &[SecretValue],
+    ) -> Self {
+        let url_passwords: Vec<SecretValue> = std::iter::once(repository)
+            .chain(options.values().map(String::as_str))
+            .flat_map(url_passwords)
+            .collect();
+        let credentials: Vec<SecretValue> = options
+            .iter()
+            .filter(|(name, _)| is_secret_option(name))
+            .map(|(_, value)| SecretValue::new(value.as_str()))
+            .collect();
+        Self::new(
+            std::iter::once(password)
+                .chain(&url_passwords)
+                .chain(&credentials)
+                .chain(resolved),
+        )
     }
 
+    /// `text` with every needle in it replaced by [`REDACTED`]. Needles that
+    /// overlap or touch become one span, so nothing of one is left behind
+    /// by the replacement of another.
     pub fn redact(&self, text: &str) -> String {
-        self.needles.iter().fold(text.to_owned(), |text, needle| {
-            text.replace(needle, REDACTED)
-        })
+        let mut covered = vec![false; text.len()];
+        let mut any = false;
+        for needle in &self.needles {
+            // Every occurrence, those that overlap another of the same
+            // needle included (`abab` in `ababab`), which `match_indices`
+            // skips.
+            for (start, _) in text.char_indices() {
+                let found = text
+                    .get(start..)
+                    .is_some_and(|rest| rest.starts_with(needle.as_str()));
+                if !found {
+                    continue;
+                }
+                if let Some(span) = covered.get_mut(start..start.saturating_add(needle.len())) {
+                    span.fill(true);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return text.to_owned();
+        }
+        let mut out = String::with_capacity(text.len());
+        let mut in_span = false;
+        for (at, c) in text.char_indices() {
+            if covered.get(at).copied().unwrap_or(false) {
+                if !in_span {
+                    out.push_str(REDACTED);
+                    in_span = true;
+                }
+            } else {
+                in_span = false;
+                out.push(c);
+            }
+        }
+        out
     }
+
+    /// The length in bytes of the longest text this redactor replaces. A text
+    /// that was cut off can end in the beginning of a secret only within this
+    /// many bytes, less one, of the cut: a reader that has to cut a line
+    /// drops that much first, so the cut can't leave half a secret.
+    pub fn longest_match(&self) -> usize {
+        self.needles.first().map_or(0, String::len)
+    }
+}
+
+/// What else of a secret shows in text without being the whole of it, apart
+/// from its encodings: the secret with the white space around it taken off
+/// (a variable that ends in a newline is logged without it), and each line
+/// that is long enough of one that spans lines (a key, a certificate), for
+/// text that reaches a reader a line at a time.
+fn partial_needles(secret: &str) -> Vec<String> {
+    let trimmed = secret.trim();
+    let mut needles = Vec::new();
+    // A secret with nothing around it is its own trimmed form: `Redactor::new`
+    // drops the duplicate.
+    if !trimmed.is_empty() {
+        needles.push(trimmed.to_owned());
+    }
+    if trimmed.contains('\n') {
+        needles.extend(
+            trimmed
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.len() >= MIN_LINE_BYTES)
+                .take(MAX_LINES_PER_SECRET)
+                .map(str::to_owned),
+        );
+    }
+    needles
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -138,14 +269,26 @@ fn is_unreserved(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"-._~".contains(&b)
 }
 
-/// What the url crate (the WHATWG URL standard) leaves unencoded in a
-/// userinfo: printable ASCII outside its userinfo percent-encode set.
-fn is_userinfo_safe(b: u8) -> bool {
-    b.is_ascii_graphic() && !b"\"#<>?`{}/:;=@[\\]^|".contains(&b)
+/// What the url crate (the WHATWG URL standard) encodes in each part of a
+/// URL besides controls, space and non-ASCII, which every part encodes. A
+/// byte outside the set is written as it is. The sets are those of url
+/// 2.5.8; the path set of a newer standard also takes `^`, so both are
+/// needles (see `PATH_WITH_CARET`).
+const FRAGMENT_SET: &[u8] = b"\"<>`";
+const QUERY_SET: &[u8] = b"\"#<>";
+const SPECIAL_QUERY_SET: &[u8] = b"\"#<>'";
+const PATH_SET: &[u8] = b"\"<>`#?{}";
+const PATH_WITH_CARET_SET: &[u8] = b"\"<>`#?{}^";
+const USERINFO_SET: &[u8] = b"\"#<>?`{}/:;=@[\\]^|";
+
+/// The bytes `set` doesn't name, apart from controls, space and non-ASCII,
+/// stay as they are.
+fn all_but(set: &'static [u8]) -> impl Fn(u8) -> bool {
+    move |b| b.is_ascii_graphic() && !set.contains(&b)
 }
 
 /// Percent-encodes every byte that `keep` rejects, with `hex` digits.
-fn percent_encode(value: &str, keep: fn(u8) -> bool, hex: Hex) -> String {
+fn percent_encode(value: &str, keep: impl Fn(u8) -> bool, hex: Hex) -> String {
     use std::fmt::Write;
     value.bytes().fold(String::new(), |mut out, b| {
         if keep(b) {
@@ -158,6 +301,43 @@ fn percent_encode(value: &str, keep: fn(u8) -> bool, hex: Hex) -> String {
         }
         out
     })
+}
+
+/// Every way a URL parser can write `value`. A parser takes tab and
+/// newlines out of a URL and reads `\` as `/` (in a special URL's path), so
+/// those two rewrites of the value are encoded too; then each is written as
+/// fully encoded (either hex case) and as each part of a URL encodes it,
+/// with upper-case hex like the url crate. A host is lower-cased, so every
+/// needle is lower-cased too. A secret of any size has at most about 50
+/// needles, each at most three times its size.
+fn url_needles(value: &str) -> Vec<String> {
+    let stripped: String = value
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let slashed = stripped.replace('\\', "/");
+    let mut needles = Vec::new();
+    for base in [value, stripped.as_str(), slashed.as_str()] {
+        if base.is_empty() {
+            continue;
+        }
+        needles.push(base.to_owned());
+        needles.push(percent_encode(base, is_unreserved, Hex::Upper));
+        needles.push(percent_encode(base, is_unreserved, Hex::Lower));
+        for set in [
+            USERINFO_SET,
+            FRAGMENT_SET,
+            QUERY_SET,
+            SPECIAL_QUERY_SET,
+            PATH_SET,
+            PATH_WITH_CARET_SET,
+        ] {
+            needles.push(percent_encode(base, all_but(set), Hex::Upper));
+        }
+    }
+    let lower: Vec<String> = needles.iter().map(|n| n.to_ascii_lowercase()).collect();
+    needles.extend(lower);
+    needles
 }
 
 #[cfg(test)]
@@ -179,6 +359,32 @@ mod tests {
             "a masked value still shows: {debug}"
         );
         assert_eq!(secret.expose(), "hunter2");
+    }
+
+    #[test]
+    fn a_redactor_never_shows_what_it_hides_in_its_debug_form() {
+        let debug = format!("{:?}", redactor(&["hunter2", "tok-ABC", "a b"]));
+        for secret in ["hunter2", "tok-ABC", "tok-abc", "a%20b"] {
+            assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+        }
+        assert!(debug.contains("Redactor"), "{debug}");
+    }
+
+    #[test]
+    fn a_secret_that_overlaps_itself_is_replaced_whole() {
+        for (secret, text) in [
+            ("abab", "ababab"),
+            ("abcabc", "abcabcabc"),
+            ("aaaa", "aaaaa"),
+        ] {
+            assert_eq!(
+                redactor(&[secret]).redact(text),
+                "***",
+                "{secret} in {text}"
+            );
+        }
+        // At character boundaries, with text around it.
+        assert_eq!(redactor(&["éé"]).redact("xéééy"), "x***y");
     }
 
     #[test]
@@ -223,6 +429,109 @@ mod tests {
     }
 
     #[test]
+    fn secrets_that_overlap_are_replaced_as_one_span() {
+        let redactor = redactor(&["abcdefghij", "defghijklm"]);
+        assert_eq!(redactor.redact("abcdefghijklm"), "***");
+        assert_eq!(redactor.redact("x abcdefghijklm y"), "x *** y");
+    }
+
+    #[test]
+    fn secrets_that_touch_are_replaced_as_one_span() {
+        let redactor = redactor(&["abc", "def"]);
+        assert_eq!(redactor.redact("abcdef ghi abc"), "*** ghi ***");
+    }
+
+    #[test]
+    fn text_that_is_not_ascii_is_cut_only_at_character_boundaries() {
+        let redactor = redactor(&["päss", "ssé"]);
+        assert_eq!(redactor.redact("é pässéé ü"), "é ***é ü");
+    }
+
+    /// Where a secret may land in a URL, and what a URL parser makes of it:
+    /// the parser, not the redactor, decides how it is printed, so the
+    /// `url` crate is the oracle.
+    #[derive(Clone, Copy, Debug)]
+    enum Place {
+        Userinfo,
+        Host,
+        Path,
+        Query,
+        Fragment,
+    }
+
+    fn url_with(place: Place, secret: &str) -> String {
+        match place {
+            Place::Userinfo => format!("http://demo:{secret}@nas.example/b"),
+            Place::Host => format!("http://{secret}.example/b"),
+            Place::Path => format!("http://nas.example/{secret}/b"),
+            Place::Query => format!("http://nas.example/b?k={secret}&z=1"),
+            Place::Fragment => format!("http://nas.example/b#{secret}"),
+        }
+    }
+
+    #[test]
+    fn a_secret_shows_nowhere_as_the_url_parser_prints_it() {
+        const PIECES: [&str; 14] = [
+            "a b:c",
+            "q=1&x y",
+            "\"q\\b",
+            "tab\there",
+            "nl\nine",
+            "it's",
+            "Host",
+            "ab+/=",
+            "100%",
+            "päss",
+            "a;b=c|d^e",
+            "x[y]z",
+            "{x} <y>",
+            "back`tick",
+        ];
+        let mut checked = 0;
+        for piece in PIECES {
+            let secret = format!("CANARY{piece}ZZEND");
+            for place in [
+                Place::Userinfo,
+                Place::Host,
+                Place::Path,
+                Place::Query,
+                Place::Fragment,
+            ] {
+                // What the parser refuses, or what changes the URL's shape
+                // (a `/` ends a host), is not a case of this kind.
+                // A host that isn't ASCII is written in punycode, which needs
+                // an IDNA library that the domain doesn't link: not covered.
+                if matches!(place, Place::Host) && !secret.is_ascii() {
+                    continue;
+                }
+                let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                    continue;
+                };
+                let kept_shape = match place {
+                    Place::Host => url.host_str().is_some_and(|h| h.ends_with(".example")),
+                    Place::Userinfo => {
+                        url.password().is_some() && url.host_str() == Some("nas.example")
+                    }
+                    _ => url.host_str() == Some("nas.example"),
+                };
+                if !kept_shape {
+                    continue;
+                }
+                checked += 1;
+                let printed = url.as_str();
+                let redacted = redactor(&[&secret]).redact(printed).to_lowercase();
+                for marker in ["canary", "zzend"] {
+                    assert!(
+                        !redacted.contains(marker),
+                        "{piece:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                    );
+                }
+            }
+        }
+        assert!(checked >= 50, "only {checked} cases ran");
+    }
+
+    #[test]
     fn an_empty_secret_redacts_nothing() {
         assert_eq!(redactor(&[""]).redact("text"), "text");
         assert_eq!(redactor(&[]).redact("text"), "text");
@@ -236,7 +545,12 @@ mod tests {
     }
 
     fn for_repository(repository: &str, password: &str) -> Redactor {
-        Redactor::for_repository(repository, &SecretValue::new(password))
+        Redactor::for_repository(
+            repository,
+            &SecretValue::new(password),
+            &BTreeMap::new(),
+            &[],
+        )
     }
 
     #[test]
@@ -320,5 +634,152 @@ mod tests {
     fn a_repository_with_an_empty_password_redacts_nothing() {
         let redactor = for_repository("/backups/home", "");
         assert_eq!(redactor.redact("nothing to hide"), "nothing to hide");
+    }
+
+    fn options(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_repository_redactor_masks_the_value_of_every_option_that_holds_a_credential() {
+        let options = options(&[
+            ("sas_token", "sv=2024&sig=abc123"),
+            ("secret_access_key", "AKIA-demo-secret"),
+            ("application_key_id", "0021a7c1"),
+            ("bucket", "demo-bucket"),
+        ]);
+        let redactor = Redactor::for_repository(
+            "opendal:azblob",
+            &SecretValue::new("hunter2"),
+            &options,
+            &[],
+        );
+        assert_eq!(
+            redactor.redact(
+                "url: http://nas/demo-bucket/config?sv=2024&sig=abc123 key AKIA-demo-secret id 0021a7c1"
+            ),
+            "url: http://nas/demo-bucket/config?*** key *** id 0021a7c1"
+        );
+    }
+
+    #[test]
+    fn a_repository_redactor_masks_what_the_references_in_its_settings_resolved_to() {
+        let resolved = [
+            SecretValue::new("canary-from-a-file"),
+            SecretValue::new("canary-from-env"),
+        ];
+        let redactor = Redactor::for_repository(
+            "opendal:s3",
+            &SecretValue::new("hunter2"),
+            &BTreeMap::new(),
+            &resolved,
+        );
+        assert_eq!(
+            redactor.redact("GET https://canary-from-env/canary-from-a-file/config failed"),
+            "GET https://***/***/config failed"
+        );
+    }
+
+    /// An endpoint isn't a secret, but a URL may carry credentials in its
+    /// userinfo, and OpenDAL's errors quote the URL it built from it.
+    #[test]
+    fn a_repository_redactor_masks_the_password_of_a_url_an_option_holds() {
+        let options = options(&[
+            ("endpoint", "https://demo:s3cr3t@minio.example:9000"),
+            ("root", "/backups/home"),
+        ]);
+        let redactor =
+            Redactor::for_repository("opendal:s3", &SecretValue::new("hunter2"), &options, &[]);
+        assert_eq!(
+            redactor.redact("url: https://demo:s3cr3t@minio.example:9000/demo/config failed"),
+            "url: https://demo:***@minio.example:9000/demo/config failed"
+        );
+    }
+
+    /// The control is the third URL: without it, a redactor that looks at no
+    /// option would pass this test too.
+    #[test]
+    fn an_option_url_without_a_password_hides_nothing() {
+        let options = options(&[
+            ("endpoint", "https://demo@minio.example:9000/data"),
+            ("rest-url", "https://minio.example:9000"),
+            ("proxy", "https://demo:s3cr3t@proxy.example:3128"),
+        ]);
+        let redactor =
+            Redactor::for_repository("opendal:s3", &SecretValue::new("hunter2"), &options, &[]);
+        assert_eq!(
+            redactor.redact(
+                "https://demo@minio.example:9000/data/demo/config via https://demo:s3cr3t@proxy.example:3128"
+            ),
+            "https://demo@minio.example:9000/data/demo/config via https://demo:***@proxy.example:3128"
+        );
+    }
+
+    #[test]
+    fn a_redactor_knows_how_long_the_longest_text_it_replaces_is() {
+        assert_eq!(redactor(&[]).longest_match(), 0);
+        assert_eq!(redactor(&[""]).longest_match(), 0);
+        assert_eq!(redactor(&["abc", "abcdef", "xy"]).longest_match(), 6);
+        // `p%40ss` is the longest form of `p@ss` that a URL can hold.
+        assert_eq!(redactor(&["p@ss"]).longest_match(), 6);
+    }
+
+    /// A worker's stderr reaches the daemon a line at a time, so no needle
+    /// of a whole key could match any of it.
+    #[test]
+    fn a_secret_that_spans_lines_is_masked_line_by_line_too() {
+        let key = "-----BEGIN KEY-----\r\n  MIIEvQIBADANBgkqhkiG9w0B  \nshort\nAQEFAASCBKcwggSj\n-----END KEY-----\n";
+        let redactor = redactor(&[key]);
+        for line in [
+            "-----BEGIN KEY-----",
+            "MIIEvQIBADANBgkqhkiG9w0B",
+            "AQEFAASCBKcwggSj",
+            "-----END KEY-----",
+        ] {
+            assert_eq!(
+                redactor.redact(&format!("rclone: {line} failed")),
+                "rclone: *** failed"
+            );
+        }
+        // The whole text is still replaced as one.
+        assert_eq!(redactor.redact(&format!("[{key}]")), "[***]");
+        // A line too short to stand for the secret doesn't mask other text.
+        assert_eq!(redactor.redact("a short line"), "a short line");
+    }
+
+    #[test]
+    fn a_line_of_a_secret_is_a_needle_of_its_own_from_eight_bytes_on() {
+        let redactor = redactor(&["1234567\n12345678\nabcdefgh"]);
+        assert_eq!(redactor.redact("7: 1234567"), "7: 1234567");
+        assert_eq!(redactor.redact("8: 12345678"), "8: ***");
+        assert_eq!(redactor.redact("9: abcdefgh"), "9: ***");
+    }
+
+    #[test]
+    fn only_the_first_lines_of_a_very_long_secret_are_needles_of_their_own() {
+        let lines: Vec<String> = (0..70).map(|n| format!("line-number-{n:03}")).collect();
+        let redactor = redactor(&[lines.join("\n").as_str()]);
+        assert_eq!(redactor.redact("line-number-063"), "***");
+        assert_eq!(redactor.redact("line-number-064"), "line-number-064");
+    }
+
+    /// `${VAR}` gives a value as it is, and a log line doesn't have its
+    /// newline.
+    #[test]
+    fn the_white_space_around_a_secret_is_masked_without_it() {
+        let redactor = redactor(&["hunter2\n", "  pad  "]);
+        assert_eq!(
+            redactor.redact("login hunter2 failed, pad."),
+            "login *** failed, ***."
+        );
+        // The secret with its white space is replaced as a whole.
+        assert_eq!(redactor.redact("[hunter2\n]"), "[***]");
+        // A secret of nothing but white space has no trimmed form.
+        let blank = super::Redactor::new(&[SecretValue::new(" \n ")]);
+        assert_eq!(blank.redact("a b"), "a b");
+        assert_eq!(blank.redact("x \n y"), "x***y");
     }
 }

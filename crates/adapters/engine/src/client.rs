@@ -16,6 +16,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
+use domain::secrets::Redactor;
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -23,6 +24,7 @@ use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use tokio::sync::{mpsc, watch};
 
 use crate::cache_lock::CacheLock;
+use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, JobKind, JobSpec, Level,
     MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec, RepositorySpec, WorkerEvent,
@@ -64,9 +66,20 @@ const MAX_CACHE_SLOTS: u32 = 64;
 /// A worker that hangs doesn't hold the daemon. One that doesn't read its job
 /// within the start timeout, and one that closes its output but is still
 /// there after the exit timeout, are killed.
+///
+/// A worker starts with a scrubbed environment (invariant I4): only the
+/// variables that name a place or a setting the worker, rclone or ssh need
+/// (`PATH`, `HOME`, `SSH_AUTH_SOCK`, the proxy variables and the like), and
+/// none of the rest of the daemon's, which may hold credentials. The base is
+/// this process's environment, read at each job, unless
+/// [`WorkerEngine::with_environment`] gives another.
+///
+/// What the worker writes to stderr is logged with the job's secrets masked,
+/// for the programs it starts write there too, unmasked.
 pub struct WorkerEngine {
     program: PathBuf,
     args: Vec<OsString>,
+    environment: Option<Vec<(OsString, OsString)>>,
     cache_root: Option<PathBuf>,
     stop_grace: Duration,
     watchdog_interval: Duration,
@@ -83,6 +96,7 @@ impl WorkerEngine {
         Self {
             program: program.into(),
             args: args.into_iter().map(Into::into).collect(),
+            environment: None,
             cache_root: None,
             stop_grace: Duration::from_secs(10),
             watchdog_interval: Duration::from_secs(5),
@@ -144,6 +158,30 @@ impl WorkerEngine {
         self.exit_timeout = timeout;
         self
     }
+
+    /// Starts workers with `vars` as the environment they are scrubbed from
+    /// (see [`environment`]) instead of this process's own. For tests, and
+    /// for a composition root that has read its environment already.
+    #[must_use]
+    pub fn with_environment(
+        mut self,
+        vars: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
+    ) -> Self {
+        self.environment = Some(
+            vars.into_iter()
+                .map(|(name, value)| (name.into(), value.into()))
+                .collect(),
+        );
+        self
+    }
+
+    /// The environment workers are scrubbed from: the one given, or else
+    /// this process's own as it is now.
+    fn base_environment(&self) -> Vec<(OsString, OsString)> {
+        self.environment
+            .clone()
+            .unwrap_or_else(|| std::env::vars_os().collect())
+    }
 }
 
 #[async_trait]
@@ -159,6 +197,7 @@ impl Engine for WorkerEngine {
             }
             _ => None,
         };
+        let redactor = job_redactor(&job);
         let spec = serde_json::to_vec(&JobSpec {
             op_id: op,
             cache_dir: slot.as_ref().map(|slot| slot.dir.clone()),
@@ -176,6 +215,10 @@ impl Engine for WorkerEngine {
         let mut command = Command::new(&self.program);
         command
             .args(&self.args)
+            // Nothing the daemon holds in its environment goes to a worker
+            // that doesn't need it: see `environment`.
+            .env_clear()
+            .envs(environment::scrubbed(self.base_environment()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Piped, not inherited: the worker leads a process group of its
@@ -222,7 +265,11 @@ impl Engine for WorkerEngine {
             self.stop_grace,
             slot,
         ));
-        tokio::spawn(forward_stderr(BufReader::new(stderr), exited.clone()));
+        tokio::spawn(forward_stderr(
+            BufReader::new(stderr),
+            exited.clone(),
+            redactor,
+        ));
         let stopped = Arc::new(AtomicBool::new(false));
         let reading = Reading {
             stdout: BufReader::new(stdout),
@@ -695,7 +742,11 @@ const MAX_LOG_LINE: usize = crate::job::MAX_MESSAGE_BYTES;
 /// panic report, and whatever a library of its says there. It runs beside the
 /// events, which a worker that writes a lot to stderr can't hold up, and ends
 /// like they do, [`DRAIN_AFTER_EXIT`] after the worker.
-async fn forward_stderr(mut stderr: BufReader<ChildStderr>, mut exited: watch::Receiver<Exited>) {
+async fn forward_stderr(
+    mut stderr: BufReader<ChildStderr>,
+    mut exited: watch::Receiver<Exited>,
+    redactor: Redactor,
+) {
     let mut line = Vec::new();
     let mut drain_until = None;
     loop {
@@ -707,7 +758,7 @@ async fn forward_stderr(mut stderr: BufReader<ChildStderr>, mut exited: watch::R
                         target: "steading::worker",
                         log::Level::Warn,
                         "{}{}",
-                        String::from_utf8_lossy(&line),
+                        redacted_log_line(&line, cut, &redactor),
                         if cut { "…" } else { "" }
                     );
                 }
@@ -715,6 +766,22 @@ async fn forward_stderr(mut stderr: BufReader<ChildStderr>, mut exited: watch::R
             Ok(None) | Err(_) => return,
         }
     }
+}
+
+/// One line of stderr with the job's secrets masked. A line cut at the cap
+/// first loses as many bytes of its end as the longest secret has, less
+/// one: a secret that straddles the cut can't leave its first characters
+/// behind, for the mask only finds what is whole. (The worker does the
+/// equivalent by masking before it cuts.)
+fn redacted_log_line(line: &[u8], cut: bool, redactor: &Redactor) -> String {
+    let kept = if cut {
+        line.len()
+            .saturating_sub(redactor.longest_match().saturating_sub(1))
+    } else {
+        line.len()
+    };
+    let text = String::from_utf8_lossy(line.get(..kept).unwrap_or(line));
+    redactor.redact(&text)
 }
 
 /// The next line of the worker's stderr: see [`read_log_line`]. Once the
@@ -881,11 +948,30 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     }
 }
 
+/// What masks the job's secrets: the worker's stderr is logged through it.
+/// A fake job has none.
+fn job_redactor(job: &Job) -> Redactor {
+    let access = match job {
+        Job::Fake(_) => return Redactor::default(),
+        Job::Identify(access) => access,
+        Job::Backup(job) => &job.repository,
+        Job::Prune(job) => &job.repository,
+        Job::Check(job) => &job.repository,
+    };
+    Redactor::for_repository(
+        &access.repository,
+        &access.password,
+        &access.options,
+        &access.secrets,
+    )
+}
+
 fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
     RepositorySpec {
         repository: access.repository,
         password: access.password,
         options: access.options,
+        secrets: access.secrets,
     }
 }
 
@@ -1585,6 +1671,128 @@ mod tests {
         );
     }
 
+    fn identify(password: &str, secrets: &[&str]) -> Job {
+        Job::Identify(RepositoryAccess {
+            repository: "/backups/demo".to_owned(),
+            password: domain::secrets::SecretValue::new(password),
+            options: std::collections::BTreeMap::new(),
+            secrets: secrets
+                .iter()
+                .map(|secret| domain::secrets::SecretValue::new(*secret))
+                .collect(),
+            id: None,
+        })
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_jobs_password_and_secrets_are_masked_in_what_the_worker_writes_to_stderr() {
+        capture_the_worker_log();
+        let script = format!(
+            "cat >/dev/null; echo 'redaction one: hunter2-demo then CANARY-resolved' >&2; echo '{}'",
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-resolved"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("redaction one:"))
+            .await
+            .expect("the worker's stderr never reached the log");
+        assert_eq!(line, "redaction one: *** then ***");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_straddling_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {
+        capture_the_worker_log();
+        let script = format!(
+            "cat >/dev/null; head -c {} /dev/zero | tr '\\0' x >&2; \
+             printf 'CANARY-straddle and more\\n' >&2; echo '{}'",
+            MAX_MESSAGE_BYTES - 3,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-straddle"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let _ = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("xxxx"))
+            .await
+            .expect("the long stderr line never reached the log");
+        let kept = line.strip_suffix('…').expect("the line was not cut");
+        assert!(
+            kept.chars().all(|c| c == 'x'),
+            "the start of the secret is in the log: {:?}",
+            kept.chars().rev().take(8).collect::<String>()
+        );
+    }
+
+    /// What a stand-in worker saw, written to files: its environment, its
+    /// arguments and its stdin.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_starts_with_a_scrubbed_environment_and_still_gets_its_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let script = format!(
+            "cat > '{dir}/spec.json'; env > '{dir}/env.txt'; echo \"$0 $*\" > '{dir}/args.txt'; \
+             echo '{result}'",
+            dir = dir.path().display(),
+            result = result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_environment([
+            (OsString::from("PATH"), path),
+            (OsString::from("HOME"), OsString::from("/home/demo")),
+            (
+                OsString::from("AWS_SECRET_ACCESS_KEY"),
+                OsString::from("CANARY-aws"),
+            ),
+            (
+                OsString::from("RUSTIC_PASSWORD"),
+                OsString::from("CANARY-rustic"),
+            ),
+            (OsString::from("DEMO_B2_KEY"), OsString::from("CANARY-b2")),
+        ]);
+        let job = identify("demo-password", &[]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        let env = read("env.txt");
+        assert!(env.contains("HOME=/home/demo"), "HOME is missing: {env}");
+        assert!(env.lines().any(|line| line.starts_with("PATH=")), "{env}");
+        for leaked in [
+            "AWS_SECRET_ACCESS_KEY",
+            "RUSTIC_PASSWORD",
+            "DEMO_B2_KEY",
+            "CANARY",
+        ] {
+            assert!(!env.contains(leaked), "{leaked} reached the worker: {env}");
+        }
+        let spec: serde_json::Value = serde_json::from_str(&read("spec.json")).unwrap();
+        assert_eq!(spec["job"]["password"], "demo-password");
+        assert!(!read("args.txt").contains("demo-password"));
+    }
+
     /// More than a pipe holds, written between two events: a stderr that
     /// nobody reads would stop the worker there.
     #[cfg(unix)]
@@ -1890,6 +2098,7 @@ mod tests {
                 repository,
                 password: SecretValue::new("demo"),
                 options: BTreeMap::new(),
+                secrets: Vec::new(),
                 id: Some(id.clone()),
             })
         };

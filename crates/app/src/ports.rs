@@ -3,6 +3,7 @@
 mod clock;
 mod engine;
 mod operation_store;
+mod secrets;
 
 pub use clock::Clock;
 pub use engine::{
@@ -14,3 +15,4 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, StoreError,
 };
+pub use secrets::{Resolved, SecretResolver};
