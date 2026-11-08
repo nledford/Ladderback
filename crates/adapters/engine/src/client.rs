@@ -410,7 +410,9 @@ mod tests {
             step_delay: Duration::ZERO,
             end: FakeEnd::Succeed,
         });
-        let engine = WorkerEngine::new("sh", ["-c", "cat >/dev/null"]);
+        // A program that can't start, so only the check before spawning can
+        // produce the cap's message.
+        let engine = WorkerEngine::new("/nonexistent/steading-worker", ["worker"]);
         let error = engine
             .run(op(), job)
             .await

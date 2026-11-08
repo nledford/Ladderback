@@ -45,7 +45,8 @@ pub fn record_skip(module: &str, reason: &str) {
     let log = if cfg!(test) {
         None
     } else {
-        std::env::var_os(SKIP_LOG_ENV)
+        // An empty variable is no log.
+        std::env::var_os(SKIP_LOG_ENV).filter(|log| !log.is_empty())
     };
     record_skip_to(log.as_deref().map(Path::new), module, reason);
 }

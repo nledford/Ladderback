@@ -8,13 +8,13 @@
 # Usage: scripts/with-skip-log.sh <command> [args…]
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 # Absolute, because test binaries run in their package's directory.
 target=${CARGO_TARGET_DIR:-target}
-mkdir -p "$target"
-target=$(cd "$target" && pwd)
-log=$(mktemp "$target/skipped-tests.XXXXXX")
+mkdir -p "$target" || exit 1
+target=$(cd "$target" && pwd) || exit 1
+log=$(mktemp "$target/skipped-tests.XXXXXX") || exit 1
 trap 'rm -f "$log"' EXIT
 export STEADING_SKIP_LOG=$log
 

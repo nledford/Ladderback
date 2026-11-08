@@ -5,8 +5,9 @@
 # (path parsing, `env::split_paths`, socket address values) stay allowed.
 
 # Production code never crashes (technical design §13.5): every crate root
-# denies clippy::unwrap_used, expect_used, panic and friends. Tests, and only
-# tests, may use them. Clippy reads the nearest clippy.toml only, so the root
+# denies clippy::unwrap_used, expect_used, panic and friends. Tests may unwrap,
+# expect and panic (todo!, unimplemented! and unreachable! stay denied there
+# too). Clippy reads the nearest clippy.toml only, so the root
 # clippy.toml, which covers the other crates, repeats these three lines.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true

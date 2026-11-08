@@ -1,6 +1,7 @@
 # Production code never crashes (technical design §13.5): every crate root
-# denies clippy::unwrap_used, expect_used, panic and friends. Tests, and only
-# tests, may use them.
+# denies clippy::unwrap_used, expect_used, panic and friends. Tests may unwrap,
+# expect and panic (todo!, unimplemented! and unreachable! stay denied there
+# too).
 #
 # This file covers every crate without a clippy.toml of its own. `domain` and
 # `app` have one (they also ban impure calls), and clippy reads the nearest

@@ -40,7 +40,9 @@ check app
 # testkit is test support: a dev-dependency only. `cargo tree --invert` lists
 # the crates that depend on it through normal or build edges, which includes
 # testkit itself and must include nothing else.
-testkit_users=$(cargo tree --workspace --all-features --edges normal,build --invert testkit --prefix none --format '{p}' | awk '{print $1}' | sort -u | grep -vx testkit || true)
+# Separate from the pipeline: a failing `cargo tree` must stop the script.
+tree=$(cargo tree --workspace --all-features --edges normal,build --invert testkit --prefix none --format '{p}')
+testkit_users=$(awk '{print $1}' <<<"$tree" | sort -u | grep -vx testkit || true)
 if [[ -n $testkit_users ]]; then
   echo "error: testkit is a dev-dependency only, but these depend on it:" >&2
   sed 's/^/  /' <<<"$testkit_users" >&2
@@ -60,7 +62,7 @@ fi
 # must deny the panicking lints. `testkit` is test support, not production.
 no_panic_lints=(unwrap_used expect_used panic unimplemented todo unreachable)
 no_panic_ok=1
-for file in clippy.toml crates/domain/clippy.toml crates/app/clippy.toml; do
+for file in clippy.toml $(find crates -name clippy.toml | sort); do
   for setting in allow-unwrap-in-tests allow-expect-in-tests allow-panic-in-tests; do
     if ! grep -qx "$setting = true" "$file"; then
       echo "error: $file lacks '$setting = true'" >&2
@@ -68,15 +70,21 @@ for file in clippy.toml crates/domain/clippy.toml crates/app/clippy.toml; do
     fi
   done
 done
+roots=$(find crates src -maxdepth 5 \( -path 'src/*' -o -path '*/src/*' \) \( -name lib.rs -o -name main.rs \) -not -path 'crates/testkit/*' | sort)
+if [[ -z $roots ]]; then
+  echo "error: found no crate roots to check" >&2
+  no_panic_ok=0
+fi
 while IFS= read -r root; do
+  [[ -n $root ]] || continue
   for lint in "${no_panic_lints[@]}"; do
-    # The lint's name, not a longer one that starts with it.
-    if ! grep -Eq "clippy::$lint([^_a-z]|\$)" "$root"; then
+    # The lint's name, not a longer one that starts with it, and not in a comment.
+    if (($(grep -v '^[[:space:]]*//' "$root" | grep -Ec "clippy::$lint([^_a-z]|\$)") == 0)); then
       echo "error: $root doesn't deny clippy::$lint" >&2
       no_panic_ok=0
     fi
   done
-done < <(find crates src -maxdepth 5 -path '*/src/*' \( -name lib.rs -o -name main.rs \) -not -path 'crates/testkit/*' | sort)
+done <<<"$roots"
 if ((no_panic_ok)); then
   echo "ok: crate roots deny panicking code; every clippy.toml lets tests use it"
 else
