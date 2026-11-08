@@ -1,0 +1,28 @@
+[package]
+name = "app"
+description = "Use cases, runtime loops and port traits; in-memory fakes and port contract suites behind the `fakes` feature"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+fakes = []
+
+[dependencies]
+domain.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
+cucumber.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "acceptance"
+harness = false
+
+[lints]
+workspace = true

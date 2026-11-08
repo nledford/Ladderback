@@ -1,0 +1,14 @@
+//! Steading's application ring (technical design §3.2): use cases and the
+//! port traits they drive. Depends only on `domain`, `async-trait` and
+//! `futures`; time comes from the [`Clock`](ports::Clock) port.
+//!
+//! The `fakes` feature adds in-memory port fakes and the port contract
+//! suites that every real adapter runs too.
+
+pub mod execution;
+pub mod ports;
+
+#[cfg(feature = "fakes")]
+pub mod contract;
+#[cfg(feature = "fakes")]
+pub mod fakes;
