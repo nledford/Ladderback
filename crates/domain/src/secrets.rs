@@ -680,6 +680,16 @@ mod tests {
         assert_eq!(credentials("https://tok3n-demo@proxy.demo"), ["tok3n-demo"]);
     }
 
+    /// `http://token:@proxy` is how a token as the user name is often
+    /// written: the empty password is no credential, the token is.
+    #[test]
+    fn a_user_name_with_an_empty_password_is_a_credential_too() {
+        assert_eq!(
+            credentials("https://tok3n-demo:@proxy.demo"),
+            ["tok3n-demo", "tok3n-demo:"]
+        );
+    }
+
     #[test]
     fn percent_encoded_credentials_are_found_decoded_and_as_written() {
         assert_eq!(
