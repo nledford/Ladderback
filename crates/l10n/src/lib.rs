@@ -36,5 +36,5 @@ mod localizer;
 pub mod msg;
 
 pub use id::MessageId;
-pub use locale::PosixEnv;
+pub use locale::{BrowserLanguages, Direction, PosixEnv};
 pub use localizer::{Formatted, Localizer};

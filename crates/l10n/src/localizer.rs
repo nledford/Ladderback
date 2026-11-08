@@ -12,7 +12,7 @@ use unic_langid::LanguageIdentifier;
 use crate::args::{MAX_ARGS, clamp_text, duration_parts, size_parts};
 use crate::catalog::Catalog;
 use crate::locale::negotiate;
-use crate::{MessageId, code, format, msg};
+use crate::{Direction, MessageId, code, format, msg};
 
 type Bundle = FluentBundle<FluentResource>;
 
@@ -125,6 +125,20 @@ impl Localizer {
     /// The locales messages are looked up in, best first; ends with `en-US`.
     pub fn locales(&self) -> &[LanguageIdentifier] {
         &self.locales
+    }
+
+    /// The language a page shown in this localizer's first locale declares
+    /// in its `lang` attribute. That locale, except that the pseudolocale
+    /// `ar-XB` declares `ar`, so that a right-to-left page is tested as one.
+    /// `en-US` when the localizer has no catalog at all.
+    pub fn language(&self) -> LanguageIdentifier {
+        todo!()
+    }
+
+    /// The direction text of [`language`](Self::language) runs, for the
+    /// page's `dir` attribute.
+    pub fn direction(&self) -> Direction {
+        todo!()
     }
 
     /// The message `id`, with `args` for its variables. At most 32 arguments
