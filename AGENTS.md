@@ -100,7 +100,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
 - A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
-- Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `api`, `l10n`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts. A new gated crate joins `mutants_packages` in the Justfile when it lands.
+- Mutation testing (`cargo mutants`) gates changed code in the crates §13.1 names; the Justfile's `mutants_packages` lists the ones that exist so far, and a new gated crate joins it when it lands. A surviving mutant means a behaviour no test asserts.
 - There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. `just test` lists the skips at its end, so CI shows them. `testkit` is a dev-dependency only.
@@ -146,6 +146,7 @@ The session that steers the work (the main session, which starts the other agent
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
 - **Localization:** no hard-coded user-facing strings. Use message IDs from `l10n`, Fluent terms for glossary words, and complete sentences. Code never concatenates fragments (§8.4).
 - **Time:** time goes through `jiff`, via the `Clock` port in the core. Never add `chrono` to a Steading crate: it reaches the build only transitively, through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which we can't turn off. `just architecture` bans it from `domain` and `app` (§16, decision 22).
+- **CI job names:** the "Protect main" ruleset requires checks by job name (`Check (ubuntu-latest)`, `Check (macos-latest)`, `UI journeys (Chromium, axe-core, keyboard)`, `Mutation testing (changed code)`, `Red-first check`). Renaming one of those jobs blocks every merge, so don't, unless the maintainer updates the ruleset at the same time.
 - **Docs:** keep [PRODUCT.md](PRODUCT.md) and the technical design current with the code. Record new decisions in §16.
 - **Commits:** atomic, in logical groups. Each commit is one coherent change for one reason: it builds, passes its tests (except the deliberately failing `test:` commit, §13.1), and can be reviewed and reverted on its own.
   - Split unrelated work, formatting, refactors and dependency updates into separate commits. Stage hunks selectively when one file holds changes for different commits.
