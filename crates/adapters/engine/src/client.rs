@@ -39,6 +39,14 @@ const AFTER_RESULT_GRACE: Duration = Duration::from_secs(10);
 /// long as it lives, and the events end with the worker, not with it.
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(1);
 
+/// How long writing a job to a new worker may take before the worker counts
+/// as hung and is killed: the default of [`WorkerEngine::with_start_timeout`].
+const START_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a worker that closed its output may go on living before it is
+/// killed: the default of [`WorkerEngine::with_exit_timeout`].
+const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// The most cache slots one repository gets. Looking for a free one stops
 /// here, so a lock that is wrongly always held can't send the search on to
 /// the end of the numbers.
@@ -52,12 +60,18 @@ const MAX_CACHE_SLOTS: u32 = 64;
 /// Stopping a job sends SIGTERM and, after a grace period, SIGKILL. Dropping
 /// a [`RunningJob`] before its result kills the worker at once; after the
 /// result, the worker gets a grace period to finish its cleanup.
+///
+/// A worker that hangs doesn't hold the daemon. One that doesn't read its job
+/// within the start timeout, and one that closes its output but is still
+/// there after the exit timeout, are killed.
 pub struct WorkerEngine {
     program: PathBuf,
     args: Vec<OsString>,
     cache_root: Option<PathBuf>,
     stop_grace: Duration,
     watchdog_interval: Duration,
+    start_timeout: Duration,
+    exit_timeout: Duration,
     slots: Arc<CacheSlots>,
 }
 
@@ -72,6 +86,8 @@ impl WorkerEngine {
             cache_root: None,
             stop_grace: Duration::from_secs(10),
             watchdog_interval: Duration::from_secs(5),
+            start_timeout: START_TIMEOUT,
+            exit_timeout: EXIT_TIMEOUT,
             slots: Arc::new(CacheSlots::default()),
         }
     }
@@ -100,16 +116,31 @@ impl WorkerEngine {
         self
     }
 
-    /// How long writing a job to a new worker may take.
+    /// How long writing a job to a new worker's stdin may take, 30 seconds by
+    /// default. A worker that never reads its job, because it hung before it
+    /// got to it, leaves the write blocked once the pipe is full. When the
+    /// time has passed, the worker and what it started are killed, and
+    /// [`Engine::run`] fails with [`EngineError::StartTimedOut`]. Only the
+    /// write is bounded, however slowly the worker reads: a write that
+    /// finishes in time is not affected, and one that fails is
+    /// [`EngineError::Unavailable`], as ever.
     #[must_use]
-    pub fn with_start_timeout(self, _timeout: Duration) -> Self {
-        todo!()
+    pub fn with_start_timeout(mut self, timeout: Duration) -> Self {
+        self.start_timeout = timeout;
+        self
     }
 
-    /// How long a worker that closed its output may go on living.
+    /// How long a worker that has closed its output may go on living, 10
+    /// seconds by default. Its events end with its output, and the daemon
+    /// waits for its exit to tell how it ended. A worker still there when the
+    /// time has passed is killed, with what it started, and the events end
+    /// with `Failed(EngineExitTimedOut)`. One that exits in time is reported
+    /// by its exit, and a job that is being stopped ends its events without a
+    /// failure, as ever.
     #[must_use]
-    pub fn with_exit_timeout(self, _timeout: Duration) -> Self {
-        todo!()
+    pub fn with_exit_timeout(mut self, timeout: Duration) -> Self {
+        self.exit_timeout = timeout;
+        self
     }
 }
 
@@ -159,10 +190,18 @@ impl Engine for WorkerEngine {
         let Some(mut stdin) = child.stdin.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdin"));
         };
-        stdin
-            .write_all(&spec)
-            .await
-            .map_err(|e| failed_to_start(&self.program, e))?;
+        // A worker that never reads its job, because it hung before it got to
+        // it, leaves this write blocked once the pipe is full.
+        match tokio::time::timeout(self.start_timeout, stdin.write_all(&spec)).await {
+            Ok(written) => written.map_err(|e| failed_to_start(&self.program, e))?,
+            Err(_) => {
+                // The worker is not waited for: nothing here may be able to
+                // hold `run` back. The runtime reaps the dropped child, and
+                // the cache slot is free again as `slot` goes out of scope.
+                kill_now(&mut child);
+                return Err(EngineError::StartTimedOut);
+            }
+        }
         // Closing stdin tells the worker the job spec is complete.
         drop(stdin);
         let Some(stdout) = child.stdout.take() else {
@@ -191,6 +230,7 @@ impl Engine for WorkerEngine {
             stopped: Arc::clone(&stopped),
             done: false,
             drain_until: None,
+            exit_timeout: self.exit_timeout,
         };
         Ok(RunningJob {
             events: stream::unfold(reading, Reading::next).boxed(),
@@ -213,6 +253,8 @@ fn failed_to_start(program: &Path, error: impl std::fmt::Display) -> EngineError
 enum Order {
     /// SIGTERM, then SIGKILL after the grace period.
     Stop,
+    /// SIGKILL at once: the worker closed its output and lives on.
+    Kill,
     /// The worker reported its result and may finish its cleanup.
     ResultReported,
 }
@@ -255,6 +297,7 @@ async fn supervise(
             }
             command = next_command(&mut commands) => match command {
                 Some(Order::Stop) => break terminate(&mut child, grace).await,
+                Some(Order::Kill) => break kill(&mut child).await,
                 Some(Order::ResultReported) => {
                     after_result = Some(deadline_after(tokio::time::Instant::now(), AFTER_RESULT_GRACE));
                 }
@@ -282,13 +325,20 @@ fn deadline_after(now: tokio::time::Instant, grace: Duration) -> tokio::time::In
     now.checked_add(grace).unwrap_or(now)
 }
 
-/// Kills the worker and everything it started.
+/// Kills the worker and everything it started, and waits for the worker to
+/// exit.
 async fn kill(child: &mut Child) -> std::io::Result<std::process::ExitStatus> {
+    kill_now(child);
+    child.wait().await
+}
+
+/// SIGKILL to the worker and everything it started, without waiting for the
+/// worker to exit.
+fn kill_now(child: &mut Child) {
     if !signal_group(child.id(), Signal::Kill) {
         // No process group to signal: the worker alone.
-        let _ = child.kill().await;
+        let _ = child.start_kill();
     }
-    child.wait().await
 }
 
 /// SIGTERM to the worker and everything it started, then SIGKILL once `grace`
@@ -465,6 +515,8 @@ struct Reading {
     done: bool,
     /// When the output of a worker that has exited is no longer waited for.
     drain_until: Option<tokio::time::Instant>,
+    /// How long the exit of a worker that closed its output is waited for.
+    exit_timeout: Duration,
 }
 
 impl Reading {
@@ -544,17 +596,38 @@ impl Reading {
         }
     }
 
-    /// The worker closed stdout without a result: it crashed, was killed, or
-    /// its deadline watchdog stopped it.
+    /// The worker closed stdout without a result: it crashed, was killed, its
+    /// deadline watchdog stopped it, or it lives on. Its exit is waited for
+    /// the exit timeout and no longer: a worker still there then is killed,
+    /// and the failure says so.
     async fn exited(mut self) -> Option<(EngineEvent, Self)> {
         self.done = true;
-        let status = (*self.exited.wait_for(Option::is_some).await.ok()?).flatten();
+        // `None`: the worker was still there when the time was up. The wait
+        // is a scope of its own: what it borrows from `self.exited` is let go
+        // before `self` moves on.
+        let exit = {
+            let waited =
+                tokio::time::timeout(self.exit_timeout, self.exited.wait_for(Option::is_some))
+                    .await;
+            match waited {
+                Ok(Ok(exit)) => Some((*exit).flatten()),
+                // The task that owns the worker is gone, and the worker with it.
+                Ok(Err(_)) => return None,
+                Err(_) => None,
+            }
+        };
         if self.stopped.load(Ordering::SeqCst) {
             return None;
         }
-        let reason = match status {
-            Some(exit_code::DEADLINE_PASSED) => FailureReason::DeadlinePassed,
-            exit_code => FailureReason::EngineExited { exit_code },
+        let reason = match exit {
+            Some(Some(exit_code::DEADLINE_PASSED)) => FailureReason::DeadlinePassed,
+            Some(exit_code) => FailureReason::EngineExited { exit_code },
+            None => {
+                // The worker is killed without waiting for the job's control,
+                // which may be held for as long as its owner likes.
+                let _ = self.commands.send(Order::Kill);
+                FailureReason::EngineExitTimedOut
+            }
         };
         Some((EngineEvent::Failed(reason), self))
     }
