@@ -1,5 +1,8 @@
 //! Execution context: one operation's lifecycle (technical design §3.1).
 
+pub mod deadline;
+pub mod plan_tags;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{OperationId, SignedDuration, Timestamp};
@@ -40,6 +43,9 @@ pub enum FailureReason {
     /// The engine reported events out of order: `transition` is the step the
     /// operation refused.
     ProtocolViolated { transition: Transition },
+    /// A backup was still running at its deadline and stopped without
+    /// writing a snapshot (I3).
+    DeadlinePassed,
 }
 
 /// A problem with a single item that doesn't fail the operation, such as a

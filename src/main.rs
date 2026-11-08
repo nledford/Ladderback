@@ -45,23 +45,7 @@ enum Command {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Serve { listen } => serve(listen),
-        Command::Worker => worker(),
-    }
-}
-
-fn worker() -> ExitCode {
-    let exit = engine::worker::run(
-        std::io::stdin().lock(),
-        std::io::stdout().lock(),
-        std::process::id(),
-    );
-    match exit {
-        // An abrupt exit may use any code, including ones outside u8.
-        Ok(exit) => std::process::exit(exit.code()),
-        Err(error) => {
-            eprintln!("steading worker: cannot write events: {error}");
-            ExitCode::from(74) // EX_IOERR
-        }
+        Command::Worker => engine::worker::main(),
     }
 }
 

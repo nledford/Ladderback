@@ -1,9 +1,32 @@
 //! The worker protocol. Only the daemon and the worker speak it, and both
 //! link this crate, so it isn't part of the published `api`.
+//!
+//! The daemon writes one [`JobSpec`] as JSON to the worker's stdin and closes
+//! it. The worker answers with one [`WorkerEvent`] per line on stdout, and
+//! ends the stream with a [`WorkerEvent::Result`] or a [`WorkerEvent::Failed`].
+//! The job carries the repository password, so it travels over stdin only:
+//! never as an argument, in the environment or in a file (invariant I4).
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
 
 use api::{ErrorCode, MsgArg, WarningCode};
-use domain::OperationId;
+use domain::secrets::{REDACTED, Redactor, SecretValue};
+use domain::{AgentId, OperationId, PlanId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
+
+/// Exit codes of a worker beyond 0 (the job ended and reported its result)
+/// and 1 (the job failed and said why).
+pub mod exit_code {
+    /// The deadline watchdog stopped the job once its deadline had passed.
+    pub const DEADLINE_PASSED: i32 = 75;
+    /// SIGTERM stopped the worker; the shell convention for that is 128 + 15.
+    pub const TERMINATED: i32 = 143;
+    /// The event stream could not be written, because the daemon is gone
+    /// (sysexits' `EX_IOERR`).
+    pub const EVENTS_UNWRITABLE: i32 = 74;
+}
 
 /// The longest message either side accepts: the job spec on the worker's
 /// stdin, and each event line on its stdout. Bytes from another process
@@ -14,11 +37,16 @@ pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
 /// How much of one message to read: one byte past the cap, so a message of
 /// exactly [`MAX_MESSAGE_BYTES`] is told from one that is too long.
 pub(crate) const MAX_MESSAGE_READ: u64 = MAX_MESSAGE_BYTES as u64 + 1;
-
 /// The one job a worker runs, read from its stdin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
     pub op_id: OperationId,
+    /// Where rustic keeps its cache for this worker; `None` runs without one.
+    pub cache_dir: Option<PathBuf>,
+    /// The longest the deadline watchdog sleeps between two looks at the
+    /// wall clock. A machine that was suspended notices a passed deadline
+    /// within this time of waking.
+    pub watchdog_interval_ms: u64,
     pub job: JobKind,
 }
 
@@ -26,6 +54,57 @@ pub struct JobSpec {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobKind {
     Fake(FakeJobSpec),
+    Identify(RepositorySpec),
+    Backup(BackupJobSpec),
+    Prune(PruneJobSpec),
+    Check(CheckJobSpec),
+}
+
+/// A repository and what it takes to open it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositorySpec {
+    /// rustic's `repository` string: a path, `rest:…`, `opendal:…`, `rclone:…`.
+    pub repository: String,
+    #[serde(with = "secret")]
+    pub password: SecretValue,
+    /// Backend options, as rustic's `[repository.options]`.
+    pub options: BTreeMap<String, String>,
+}
+
+/// Everything that can hold a secret is masked: the password, the password
+/// in the repository's URL, and the value of every option (`secret_access_key`
+/// and the like). What helps with diagnosing stays: the rest of the URL and
+/// the options' names.
+impl fmt::Debug for RepositorySpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupJobSpec {
+    pub repo: RepositorySpec,
+    pub sources: Vec<String>,
+    /// With `agent`, the plan tags and the parent choice (§7.3).
+    pub plan: PlanId,
+    pub agent: AgentId,
+    pub extra_tags: Vec<String>,
+    pub label: Option<String>,
+    /// Counted from the start of the index read; once it passes, the worker
+    /// stops (I3).
+    pub deadline_budget: SignedDuration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneJobSpec {
+    pub repo: RepositorySpec,
+    pub keep_delete: SignedDuration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckJobSpec {
+    pub repo: RepositorySpec,
+    pub read_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +113,10 @@ pub struct FakeJobSpec {
     pub step_delay_ms: u64,
     pub warnings: Vec<FakeWarning>,
     pub end: FakeEndSpec,
+    /// Counted from the start of the job.
+    // Red-first stub: the budget doesn't travel yet.
+    #[serde(skip)]
+    pub deadline_budget: Option<SignedDuration>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,9 +139,13 @@ pub enum FakeEndSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum WorkerEvent {
+    /// The job began its work. Nothing but a log line precedes it, and
+    /// `index_read_at` is when the worker started reading the repository
+    /// index, which is what a deadline counts from.
     Started {
         op_id: OperationId,
         pid: u32,
+        index_read_at: Timestamp,
     },
     ProgressStart {
         key: u32,
@@ -69,9 +156,14 @@ pub enum WorkerEvent {
         key: u32,
         len: u64,
     },
+    /// Increments are coalesced: a few messages a second per key at most.
     ProgressInc {
         key: u32,
         inc: u64,
+    },
+    ProgressTitle {
+        key: u32,
+        title: String,
     },
     ProgressFinish {
         key: u32,
@@ -95,6 +187,13 @@ pub enum WorkerEvent {
     },
 }
 
+impl WorkerEvent {
+    /// The last line of a stream: after it the worker writes nothing more.
+    pub fn is_final(&self) -> bool {
+        todo!()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressKind {
@@ -116,4 +215,200 @@ pub enum Level {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum OpResult {
     Fake { steps_completed: u32 },
+    Repository { id: RepositoryId },
+    Backup(BackupResult),
+    // Red-first stub: a prune result doesn't travel yet.
+    #[serde(skip)]
+    Prune(PruneResult),
+    Check(CheckResult),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupResult {
+    pub repository: RepositoryId,
+    pub snapshot: SnapshotId,
+    /// The parent rustic recorded in the snapshot, not the one asked for.
+    pub parent: Option<SnapshotId>,
+    pub files_new: u64,
+    pub files_changed: u64,
+    pub files_unmodified: u64,
+    pub data_added: u64,
+    pub data_added_packed: u64,
+    pub error_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneResult {
+    pub repository: RepositoryId,
+    pub packs_marked: u64,
+    pub packs_deleted: u64,
+    pub packs_recovered: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckResult {
+    pub repository: RepositoryId,
+    pub errors: u64,
+    pub warnings: u64,
+}
+
+/// A secret travels as the plain string it is: the protocol is the one place
+/// that must, and its only reader is the worker's stdin.
+mod secret {
+    use domain::secrets::SecretValue;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        secret: &SecretValue,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        todo!()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<SecretValue, D::Error> {
+        String::deserialize(deserializer).map(SecretValue::new)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repository() -> RepositorySpec {
+        RepositorySpec {
+            repository: "/backups/home".to_owned(),
+            password: SecretValue::new("hunter2"),
+            options: BTreeMap::from([("retry".to_owned(), "3".to_owned())]),
+        }
+    }
+
+    fn spec(job: JobKind) -> JobSpec {
+        JobSpec {
+            op_id: OperationId::from_uuid(domain::Uuid::from_u128(7)),
+            cache_dir: Some(PathBuf::from("/cache/steading/abc/0")),
+            watchdog_interval_ms: 5_000,
+            job,
+        }
+    }
+
+    fn round_trip(spec: &JobSpec) -> JobSpec {
+        serde_json::from_slice(&serde_json::to_vec(spec).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn every_kind_of_job_round_trips() {
+        let backup = BackupJobSpec {
+            repo: repository(),
+            sources: vec!["/home/demo".to_owned()],
+            plan: PlanId::parse("home").unwrap(),
+            agent: AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            extra_tags: vec!["weekly".to_owned()],
+            label: Some("laptop".to_owned()),
+            deadline_budget: SignedDuration::from_hours(6),
+        };
+        for job in [
+            JobKind::Identify(repository()),
+            JobKind::Backup(backup),
+            JobKind::Prune(PruneJobSpec {
+                repo: repository(),
+                keep_delete: SignedDuration::from_hours(144),
+            }),
+            JobKind::Check(CheckJobSpec {
+                repo: repository(),
+                read_data: true,
+            }),
+        ] {
+            let spec = spec(job);
+            assert_eq!(round_trip(&spec), spec);
+        }
+    }
+
+    #[test]
+    fn a_deadline_budget_keeps_zero_negative_and_fractions_of_a_second() {
+        for budget in [
+            SignedDuration::ZERO,
+            SignedDuration::from_hours(-3),
+            SignedDuration::from_millis(15),
+            SignedDuration::from_secs(1) + SignedDuration::from_millis(500),
+        ] {
+            let job = FakeJobSpec {
+                steps: 1,
+                step_delay_ms: 0,
+                warnings: Vec::new(),
+                end: FakeEndSpec::Succeed,
+                deadline_budget: Some(budget),
+            };
+            let spec = spec(JobKind::Fake(job));
+            assert_eq!(round_trip(&spec), spec, "budget {budget:?}");
+        }
+    }
+
+    #[test]
+    fn the_password_travels_as_a_plain_string_and_stays_out_of_debug() {
+        let spec = spec(JobKind::Identify(repository()));
+        let json: serde_json::Value = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["job"]["password"], "hunter2");
+        assert!(!format!("{spec:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn debug_output_hides_the_password_the_url_credentials_and_the_option_values() {
+        let spec = spec(JobKind::Backup(BackupJobSpec {
+            repo: RepositorySpec {
+                repository: "rest:https://demo:s3cr3t@nas:8000/backups".to_owned(),
+                password: SecretValue::new("hunter2"),
+                options: BTreeMap::from([
+                    ("secret_access_key".to_owned(), "AKIAEXAMPLEKEY".to_owned()),
+                    ("retry".to_owned(), "3".to_owned()),
+                ]),
+            },
+            sources: vec!["/home/demo".to_owned()],
+            plan: PlanId::parse("home").unwrap(),
+            agent: AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            extra_tags: Vec::new(),
+            label: None,
+            deadline_budget: SignedDuration::from_hours(6),
+        }));
+        let text = format!("{spec:?}");
+        for secret in ["hunter2", "s3cr3t", "AKIAEXAMPLEKEY"] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        // What helps with diagnosing stays.
+        for kept in ["nas:8000", "secret_access_key", "retry", "/home/demo"] {
+            assert!(text.contains(kept), "{kept} is missing: {text}");
+        }
+    }
+
+    #[test]
+    fn a_result_names_its_operation() {
+        let result = WorkerEvent::Result(OpResult::Prune(PruneResult {
+            repository: RepositoryId::parse(&"ab".repeat(32)).unwrap(),
+            packs_marked: 3,
+            packs_deleted: 2,
+            packs_recovered: 1,
+        }));
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["event"], "result");
+        assert_eq!(json["op"], "prune");
+        assert_eq!(serde_json::from_value::<WorkerEvent>(json).unwrap(), result);
+    }
+
+    #[test]
+    fn only_a_result_or_a_failure_ends_the_stream() {
+        let failed = WorkerEvent::Failed {
+            code: ErrorCode::OperationFailed,
+            args: Vec::new(),
+            detail: None,
+        };
+        let result = WorkerEvent::Result(OpResult::Fake { steps_completed: 0 });
+        let log = WorkerEvent::Log {
+            level: Level::Info,
+            message: String::new(),
+        };
+        assert!(failed.is_final());
+        assert!(result.is_final());
+        assert!(!log.is_final());
+    }
 }

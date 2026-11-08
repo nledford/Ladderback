@@ -1,18 +1,21 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use domain::execution::FailureReason;
+use domain::execution::deadline::Deadline;
 use domain::{OperationId, SignedDuration};
-use futures::stream::{self, BoxStream, StreamExt};
+use futures::stream::{self, StreamExt};
 
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, Job, ProgressEvent,
-    ProgressKind,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, Job, JobControl,
+    ProgressEvent, ProgressKind, RunningJob,
 };
 
 /// An in-process engine that plays [`FakeJob`]s exactly as the worker does,
-/// waiting on the given clock between steps.
+/// waiting on the given clock between steps. Like the worker's watchdog, it
+/// stops without a result once a fake job's deadline has passed.
 pub struct SimulatedEngine {
     clock: Arc<dyn Clock>,
 }
@@ -28,27 +31,26 @@ enum Step {
     Wait(SignedDuration),
 }
 
+struct Playing {
+    steps: VecDeque<Step>,
+    clock: Arc<dyn Clock>,
+    deadline: Option<Deadline>,
+    stopped: Arc<AtomicBool>,
+}
+
+struct Stop(Arc<AtomicBool>);
+
+#[async_trait]
+impl JobControl for Stop {
+    async fn stop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 #[async_trait]
 impl Engine for SimulatedEngine {
-    async fn run(
-        &self,
-        _op: OperationId,
-        job: Job,
-    ) -> Result<BoxStream<'static, EngineEvent>, EngineError> {
-        let Job::Fake(job) = job;
-        let steps = script(&job)?;
-        let clock = Arc::clone(&self.clock);
-        Ok(
-            stream::unfold((steps, clock), |(mut steps, clock)| async move {
-                loop {
-                    match steps.pop_front()? {
-                        Step::Wait(delay) => clock.sleep_until(clock.now() + delay).await,
-                        Step::Emit(event) => return Some((event, (steps, clock))),
-                    }
-                }
-            })
-            .boxed(),
-        )
+    async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        todo!()
     }
 }
 
@@ -58,7 +60,6 @@ fn script(job: &FakeJob) -> Result<VecDeque<Step>, EngineError> {
     })?;
     let key = 0;
     let mut steps = VecDeque::from([
-        Step::Emit(EngineEvent::Started),
         Step::Emit(EngineEvent::Progress(ProgressEvent::Begin {
             key,
             kind: ProgressKind::Counter,

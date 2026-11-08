@@ -13,12 +13,26 @@ app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
 futures.workspace = true
+jiff.workspace = true
+log.workspace = true
+rustic_backend.workspace = true
+rustic_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["process", "io-util", "rt", "macros", "time"] }
+tokio = { workspace = true, features = ["process", "io-util", "rt", "macros", "time", "sync"] }
+
+# Signals and process groups: the daemon stops a worker's whole process group
+# with SIGTERM and the worker handles it; the worker also points its file
+# descriptor 1 elsewhere and, on Linux, asks to be told when its parent dies.
+# Steading targets macOS and Linux (technical design §1); elsewhere a stop kills at once.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs"] }
+signal-hook.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
+tempfile.workspace = true
+testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

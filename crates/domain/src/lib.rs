@@ -12,10 +12,14 @@
     clippy::todo,
     clippy::unreachable
 )]
+// Red-first stubs: removed when the real code returns.
+#![allow(unused, clippy::todo)]
 
 pub mod execution;
 mod ids;
+pub mod secrets;
+pub mod snapshot;
 
-pub use ids::OperationId;
+pub use ids::{AgentId, IdKind, InvalidId, OperationId, PlanId, RepositoryId, SnapshotId};
 pub use jiff::{SignedDuration, Timestamp};
 pub use uuid::Uuid;
