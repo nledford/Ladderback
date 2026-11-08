@@ -2,10 +2,15 @@
 
 mod clock;
 mod engine;
+mod operation_store;
 
 pub use clock::Clock;
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
     PruneSummary, RepositoryAccess, RunningJob,
+};
+pub use operation_store::{
+    DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
+    OperationStore, PageSize, StoreError,
 };

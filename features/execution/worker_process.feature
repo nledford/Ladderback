@@ -8,19 +8,23 @@ Feature: Operations run in a worker process
     When the agent runs the operation
     Then the operation ends as succeeded with warnings
     And the operation lists 2 warnings
+    And the history shows the operation as it ended
 
   Scenario: A failure reported by a worker fails the operation
     Given the engine will report the failure "repository not found"
     When the agent runs the operation
     Then the operation ends as failed because the engine reported "repository not found"
+    And the history shows the operation as it ended
 
   Scenario: A worker that crashes fails the operation
     Given the engine will stop after 1 step with exit code 3
     When the agent runs the operation
     Then the operation ends as failed because the engine exited with code 3
+    And the history shows the operation as it ended
 
   Scenario: A worker that can't be started fails the operation
     Given the engine can't be started
     When the agent runs the operation
     Then the operation ends as failed because the engine could not start
     And the operation never started
+    And the history shows the operation as it ended

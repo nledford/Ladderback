@@ -7,10 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use app::ports::{BackupJob, Job};
+use app::history::GetOperation;
+use app::ports::{BackupJob, EngineResult, Job};
 use cucumber::{given, then, when};
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
+use domain::execution::{OperationKind, Trigger};
 use domain::{SignedDuration, SnapshotId};
 use rustic_backend::BackendOptions;
 use rustic_core::repofile::SnapshotFile;
@@ -195,6 +197,24 @@ fn tagged(agent: &mut Agent) {
     for tag in agent.plan_tags().tags() {
         assert!(tags.contains(&&tag), "{tag} missing from {tags:?}");
     }
+}
+
+#[then("the history shows the backup's snapshot")]
+async fn history_shows_the_snapshot(agent: &mut Agent) {
+    let store = agent.store().await;
+    let detail = GetOperation::new(store)
+        .get(agent.operation().id())
+        .await
+        .expect("the history answers")
+        .expect("the operation is in the history");
+    let latest = snapshots(&agent.repository()).pop().expect("a snapshot");
+    let Some(EngineResult::Backup(summary)) = &detail.record.result else {
+        panic!("the history holds no backup result: {:?}", detail.record);
+    };
+    assert_eq!(summary.snapshot, snapshot_id(&latest));
+    assert_eq!(detail.record.kind, OperationKind::Backup);
+    assert_eq!(detail.record.trigger, Trigger::Manual);
+    assert_eq!(detail.record.target.plan, agent.backup.plan);
 }
 
 fn new_snapshot_parent(agent: &Agent) -> Option<SnapshotId> {

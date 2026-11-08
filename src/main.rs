@@ -16,6 +16,8 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 
+mod logging;
+
 #[derive(Parser)]
 #[command(
     name = "steading",
@@ -62,6 +64,8 @@ fn main() -> ExitCode {
 }
 
 fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
+    logging::install();
+    log::info!("steading {} starting", env!("CARGO_PKG_VERSION"));
     // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
     if let Err(error) = http_adapter::require_loopback(listen) {
         eprintln!("steading: {error}");

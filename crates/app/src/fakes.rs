@@ -3,6 +3,8 @@
 
 mod clock;
 mod engine;
+mod operation_store;
 
 pub use clock::FakeClock;
 pub use engine::SimulatedEngine;
+pub use operation_store::InMemoryOperationStore;

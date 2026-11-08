@@ -15,6 +15,7 @@
 )]
 
 pub mod execution;
+pub mod history;
 pub mod ports;
 
 #[cfg(feature = "fakes")]

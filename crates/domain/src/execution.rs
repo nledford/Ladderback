@@ -5,7 +5,12 @@ pub mod plan_tags;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{OperationId, SignedDuration, Timestamp};
+use crate::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp};
+
+/// The most warnings one operation keeps (technical design §9). Warnings
+/// past it are counted but not kept ([`Operation::warning_count`]), so a
+/// source with millions of unreadable files can't grow the log without bound.
+pub const MAX_STORED_WARNINGS: usize = 10_000;
 
 /// Where an operation is in its lifecycle:
 /// `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed` / `Cancelled`.
@@ -46,6 +51,12 @@ pub enum FailureReason {
     /// A backup was still running at its deadline and stopped without
     /// writing a snapshot (I3).
     DeadlinePassed,
+    /// The engine's process started but never took its job: it didn't read
+    /// it in time, so the operation never ran.
+    EngineStartTimedOut,
+    /// The engine stopped reporting, but its process stayed alive and didn't
+    /// exit in time; it was killed.
+    EngineExitTimedOut,
 }
 
 /// A problem with a single item that doesn't fail the operation, such as a
@@ -95,31 +106,91 @@ impl std::fmt::Display for LifecycleError {
 
 impl std::error::Error for LifecycleError {}
 
+/// What an operation does: the `kind` the operation log stores (§9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OperationKind {
+    /// A scripted job that touches no repository, for tests and diagnostics.
+    Fake,
+    Identify,
+    Backup,
+    Prune,
+    Check,
+}
+
+/// What started an operation: the `trigger` the operation log stores (§9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Trigger {
+    Schedule,
+    /// The user asked for it.
+    Manual,
+    /// A scheduled run that was missed while the agent was off, started late.
+    CatchUp,
+    Retry,
+    Hub,
+    Mcp,
+}
+
+/// What an operation works on, as far as its job says: a backup names its
+/// plan, and a job that opens a known repository names it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Target {
+    pub plan: Option<PlanId>,
+    pub repository: Option<RepositoryId>,
+}
+
 /// One run of one action. Aggregate root of the Execution context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operation {
     id: OperationId,
+    kind: OperationKind,
+    trigger: Trigger,
+    target: Target,
     status: OperationStatus,
     queued_at: Timestamp,
     started_at: Option<Timestamp>,
     finished_at: Option<Timestamp>,
     warnings: Vec<Warning>,
+    /// Every warning recorded; `warnings` keeps only the first
+    /// [`MAX_STORED_WARNINGS`].
+    warning_count: u64,
 }
 
 impl Operation {
-    pub fn queue(id: OperationId, at: Timestamp) -> Self {
+    pub fn queue(
+        id: OperationId,
+        kind: OperationKind,
+        trigger: Trigger,
+        target: Target,
+        at: Timestamp,
+    ) -> Self {
         Self {
             id,
+            kind,
+            trigger,
+            target,
             status: OperationStatus::Queued,
             queued_at: at,
             started_at: None,
             finished_at: None,
             warnings: Vec::new(),
+            warning_count: 0,
         }
     }
 
     pub fn id(&self) -> OperationId {
         self.id
+    }
+
+    pub fn kind(&self) -> OperationKind {
+        self.kind
+    }
+
+    pub fn trigger(&self) -> Trigger {
+        self.trigger
+    }
+
+    pub fn target(&self) -> &Target {
+        &self.target
     }
 
     pub fn status(&self) -> &OperationStatus {
@@ -142,6 +213,11 @@ impl Operation {
         &self.warnings
     }
 
+    /// Every warning recorded, kept or not: at least `warnings().len()`.
+    pub fn warning_count(&self) -> u64 {
+        self.warning_count
+    }
+
     /// Time from start to finish; `None` until the operation has both started and finished.
     pub fn duration(&self) -> Option<SignedDuration> {
         Some(self.finished_at?.duration_since(self.started_at?))
@@ -161,11 +237,16 @@ impl Operation {
         })
     }
 
+    /// Records a warning. Only the first [`MAX_STORED_WARNINGS`] are kept,
+    /// but every one is counted ([`Self::warning_count`]).
     pub fn record_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
-        self.warnings.push(warning);
+        self.warning_count = self.warning_count.saturating_add(1);
+        if self.warnings.len() < MAX_STORED_WARNINGS {
+            self.warnings.push(warning);
+        }
         Ok(())
     }
 
@@ -173,7 +254,7 @@ impl Operation {
     /// warning was recorded, otherwise `Succeeded`.
     pub fn succeed(&mut self, at: Timestamp) -> Result<(), LifecycleError> {
         self.require(Transition::Succeed, |s| *s == OperationStatus::Running)?;
-        let status = if self.warnings.is_empty() {
+        let status = if self.warning_count == 0 {
             OperationStatus::Succeeded
         } else {
             OperationStatus::SucceededWithWarnings
@@ -227,7 +308,13 @@ mod tests {
     }
 
     fn queued() -> Operation {
-        Operation::queue(OperationId::from_uuid(Uuid::from_u128(7)), t(0))
+        Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(7)),
+            OperationKind::Backup,
+            Trigger::Manual,
+            Target::default(),
+            t(0),
+        )
     }
 
     fn running() -> Operation {
@@ -249,6 +336,66 @@ mod tests {
         OperationStatus::Failed {
             reason: FailureReason::EngineExited { exit_code: Some(1) },
         }
+    }
+
+    /// A running operation that has recorded `count` distinct warnings.
+    fn warned(count: usize) -> Operation {
+        let mut op = running();
+        for n in 0..count {
+            op.record_warning(unreadable(&format!("/home/demo/file-{n}")))
+                .unwrap();
+        }
+        op
+    }
+
+    #[test]
+    fn an_operation_remembers_what_it_is_for() {
+        let target = Target {
+            plan: Some(PlanId::parse("demo-home").unwrap()),
+            repository: Some(RepositoryId::parse(&"ab".repeat(32)).unwrap()),
+        };
+        let op = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(8)),
+            OperationKind::Prune,
+            Trigger::CatchUp,
+            target.clone(),
+            t(0),
+        );
+        assert_eq!(op.kind(), OperationKind::Prune);
+        assert_eq!(op.trigger(), Trigger::CatchUp);
+        assert_eq!(op.target(), &target);
+    }
+
+    #[test]
+    fn warnings_up_to_the_cap_are_all_kept() {
+        let op = warned(MAX_STORED_WARNINGS);
+        assert_eq!(op.warnings().len(), MAX_STORED_WARNINGS);
+        assert_eq!(op.warning_count(), MAX_STORED_WARNINGS as u64);
+    }
+
+    #[test]
+    fn warnings_past_the_cap_are_counted_but_not_kept() {
+        let op = warned(MAX_STORED_WARNINGS + 5);
+        assert_eq!(op.warnings().len(), MAX_STORED_WARNINGS);
+        assert_eq!(op.warning_count(), MAX_STORED_WARNINGS as u64 + 5);
+    }
+
+    #[test]
+    fn the_warnings_kept_are_the_first_ones_in_order() {
+        let op = warned(MAX_STORED_WARNINGS + 1);
+        let last_kept = format!("/home/demo/file-{}", MAX_STORED_WARNINGS - 1);
+        assert_eq!(
+            op.warnings().first(),
+            Some(&unreadable("/home/demo/file-0"))
+        );
+        assert_eq!(op.warnings().last(), Some(&unreadable(&last_kept)));
+    }
+
+    #[test]
+    fn a_refused_warning_is_not_counted() {
+        let mut op = queued();
+        assert!(op.record_warning(unreadable("/home/demo/a")).is_err());
+        assert_eq!(op.warning_count(), 0);
     }
 
     #[test]

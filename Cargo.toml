@@ -8,6 +8,7 @@ members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
+    "crates/adapters/store",
     "crates/testkit",
 ]
 # `web` only builds for wasm32 with trunk; host commands skip it unless asked.
@@ -19,6 +20,7 @@ default-members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
+    "crates/adapters/store",
     "crates/testkit",
 ]
 
@@ -37,6 +39,7 @@ api = { path = "crates/api" }
 engine = { path = "crates/adapters/engine" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
+store = { path = "crates/adapters/store" }
 testkit = { path = "crates/testkit" }
 
 async-trait = "0.1.92"
@@ -44,6 +47,7 @@ axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 cucumber = "0.23.0"
+env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
 futures = "0.3.34"
 http-body-util = "0.1.5"
 jiff = { version = "0.2.40", features = ["serde"] }
@@ -60,6 +64,9 @@ rustic_core = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 signal-hook = "0.4.6"
+# 0.9 needs rustc 1.94; the workspace's MSRV is 1.91 (technical design §8.2).
+# No `any`, `json` or TLS: the store is SQLite only. `migrate!` is a macro.
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3.27.0"
 tokio = "1.54.1"
 tower = "0.5.3"
@@ -122,6 +129,8 @@ engine.workspace = true
 http-adapter.workspace = true
 axum.workspace = true
 clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
 
 [dev-dependencies]
@@ -133,6 +142,7 @@ futures.workspace = true
 platform.workspace = true
 rustic_backend.workspace = true
 rustic_core.workspace = true
+store.workspace = true
 tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["time"] }

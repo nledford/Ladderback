@@ -7,6 +7,7 @@ Feature: Cancelling an operation
     When the agent runs the operation and the user cancels it after 3 minutes
     Then the operation ends as cancelled
     And the operation took 3 minutes
+    And the history shows the operation as it ended
 
   @e2e
   Scenario: Cancelling a backup stops its worker and writes no snapshot
@@ -15,3 +16,4 @@ Feature: Cancelling an operation
     When the agent backs up the plan and the user cancels it once it has started
     Then the operation ends as cancelled
     And the repository has no snapshots
+    And the history shows the operation as it ended

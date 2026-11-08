@@ -4,16 +4,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use app::execution::RunOperation;
-use app::ports::{Engine, EngineError, EngineEvent, FakeEnd, FakeJob, Job, RunningJob};
+use app::execution::{Finished, RunOperation};
+use app::ports::{
+    Engine, EngineError, EngineEvent, FakeEnd, FakeJob, Job, OperationStore, RunningJob,
+};
 use async_trait::async_trait;
 use cucumber::World;
-use domain::execution::Operation;
+use domain::execution::{Operation, Trigger};
 use domain::{AgentId, OperationId, Uuid};
 use engine::WorkerEngine;
 use futures::StreamExt;
 use futures::channel::oneshot;
 use platform::SystemClock;
+use store::SqliteStore;
 
 #[path = "../crates/app/tests/steps/operation.rs"]
 mod operation_steps;
@@ -31,7 +34,12 @@ const STEADING: &str = env!("CARGO_BIN_EXE_steading");
 struct Agent {
     engine: Arc<dyn Engine>,
     job: FakeJob,
-    operation: Option<Operation>,
+    finished: Option<Finished>,
+    /// The operation log: a SQLite database in the scratch dir, opened by the
+    /// first run or history step.
+    store: Option<Arc<SqliteStore>>,
+    /// How many operations the scenario has run; each gets its own ID.
+    runs: u128,
     scratch: tempfile::TempDir,
     agent_id: AgentId,
     backup: backup_steps::BackupSetup,
@@ -42,7 +50,7 @@ impl std::fmt::Debug for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Agent")
             .field("job", &self.job)
-            .field("operation", &self.operation)
+            .field("finished", &self.finished)
             .field("backup", &self.backup)
             .finish_non_exhaustive()
     }
@@ -62,7 +70,9 @@ impl Agent {
                 end: FakeEnd::Succeed,
                 deadline_budget: None,
             },
-            operation: None,
+            finished: None,
+            store: None,
+            runs: 0,
             scratch,
             agent_id,
             backup: backup_steps::BackupSetup::default(),
@@ -104,25 +114,44 @@ impl Agent {
             }
         };
         let job = self.backup_job();
-        self.operation = Some(Self::run_on(engine, job, cancel).await);
+        self.run_on(engine, job, cancel).await;
     }
 
     async fn run(&mut self, job: Job, cancel: impl Future<Output = ()> + Send) {
-        self.operation = Some(Self::run_on(self.engine.clone(), job, cancel).await);
+        self.run_on(self.engine.clone(), job, cancel).await;
     }
 
     async fn run_on(
+        &mut self,
         engine: Arc<dyn Engine>,
         job: Job,
         cancel: impl Future<Output = ()> + Send,
-    ) -> Operation {
-        let use_case = RunOperation::new(engine, Arc::new(SystemClock));
-        let id = OperationId::from_uuid(Uuid::from_u128(1));
-        use_case.run(id, job, cancel).await
+    ) {
+        let store = self.store().await;
+        self.runs += 1;
+        let id = OperationId::from_uuid(Uuid::from_u128(self.runs));
+        let use_case = RunOperation::new(engine, Arc::new(SystemClock), store);
+        self.finished = Some(use_case.run(id, Trigger::Manual, job, cancel).await);
+    }
+
+    fn finished(&self) -> &Finished {
+        self.finished.as_ref().expect("the operation has run")
     }
 
     fn operation(&self) -> &Operation {
-        self.operation.as_ref().expect("the operation has run")
+        &self.finished().operation
+    }
+
+    /// The operation log the runs write to.
+    async fn store(&mut self) -> Arc<dyn OperationStore> {
+        if self.store.is_none() {
+            let path = self.scratch().join("data").join("steading.db");
+            let opened = SqliteStore::open(&path)
+                .await
+                .expect("the operation log opens");
+            self.store = Some(Arc::new(opened));
+        }
+        self.store.clone().expect("opened above")
     }
 }
 

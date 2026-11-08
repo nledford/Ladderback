@@ -1,0 +1,248 @@
+//! How the database spells the log's enums, failures and warning kinds.
+//!
+//! The words are this store's own, equal today to `api`'s kebab-case codes but
+//! not tied to them: a database outlives the API's names. Writing matches
+//! every variant of the closed type, so a new one doesn't compile until it has
+//! a spelling; reading is strict, so a spelling this version never wrote is
+//! reported, not guessed at.
+
+use api::MsgArg;
+use domain::execution::{
+    FailureReason, OperationKind, OperationStatus, Transition, Trigger, WarningKind,
+};
+
+use crate::report::shown;
+
+pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Fake => "fake",
+        OperationKind::Identify => "identify",
+        OperationKind::Backup => "backup",
+        OperationKind::Prune => "prune",
+        OperationKind::Check => "check",
+    }
+}
+
+pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
+    match text {
+        "fake" => Some(OperationKind::Fake),
+        "identify" => Some(OperationKind::Identify),
+        "backup" => Some(OperationKind::Backup),
+        "prune" => Some(OperationKind::Prune),
+        "check" => Some(OperationKind::Check),
+        _ => None,
+    }
+}
+
+pub(crate) fn trigger_text(trigger: Trigger) -> &'static str {
+    match trigger {
+        Trigger::Schedule => "schedule",
+        Trigger::Manual => "manual",
+        Trigger::CatchUp => "catch-up",
+        Trigger::Retry => "retry",
+        Trigger::Hub => "hub",
+        Trigger::Mcp => "mcp",
+    }
+}
+
+pub(crate) fn trigger_from_text(text: &str) -> Option<Trigger> {
+    match text {
+        "schedule" => Some(Trigger::Schedule),
+        "manual" => Some(Trigger::Manual),
+        "catch-up" => Some(Trigger::CatchUp),
+        "retry" => Some(Trigger::Retry),
+        "hub" => Some(Trigger::Hub),
+        "mcp" => Some(Trigger::Mcp),
+        _ => None,
+    }
+}
+
+/// The status column's word for an operation that failed: the one status that
+/// carries more than a word, so the others are read apart from it.
+pub(crate) const FAILED: &str = "failed";
+
+pub(crate) fn status_text(status: &OperationStatus) -> &'static str {
+    match status {
+        OperationStatus::Queued => "queued",
+        OperationStatus::Running => "running",
+        OperationStatus::Succeeded => "succeeded",
+        OperationStatus::SucceededWithWarnings => "succeeded_with_warnings",
+        OperationStatus::Failed { .. } => FAILED,
+        OperationStatus::Cancelled => "cancelled",
+    }
+}
+
+/// Any status but [`FAILED`], which needs its reason.
+pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
+    match text {
+        "queued" => Some(OperationStatus::Queued),
+        "running" => Some(OperationStatus::Running),
+        "succeeded" => Some(OperationStatus::Succeeded),
+        "succeeded_with_warnings" => Some(OperationStatus::SucceededWithWarnings),
+        "cancelled" => Some(OperationStatus::Cancelled),
+        _ => None,
+    }
+}
+
+pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
+    match kind {
+        WarningKind::SourceUnreadable => "source-unreadable",
+        WarningKind::Other => "unknown",
+    }
+}
+
+/// A code this version doesn't know is a warning of another kind, as the
+/// domain has it: a newer worker may have written it.
+pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
+    match text {
+        "source-unreadable" => WarningKind::SourceUnreadable,
+        _ => WarningKind::Other,
+    }
+}
+
+fn transition_text(transition: Transition) -> &'static str {
+    match transition {
+        Transition::Start => "start",
+        Transition::ReportProgress => "report-progress",
+        Transition::RecordWarning => "record-warning",
+        Transition::Succeed => "succeed",
+        Transition::Fail => "fail",
+        Transition::Cancel => "cancel",
+    }
+}
+
+fn transition_from_text(text: &str) -> Option<Transition> {
+    match text {
+        "start" => Some(Transition::Start),
+        "report-progress" => Some(Transition::ReportProgress),
+        "record-warning" => Some(Transition::RecordWarning),
+        "succeed" => Some(Transition::Succeed),
+        "fail" => Some(Transition::Fail),
+        "cancel" => Some(Transition::Cancel),
+        _ => None,
+    }
+}
+
+/// The three columns a failure is stored in.
+pub(crate) struct FailureColumns<'a> {
+    /// `error_code`.
+    pub code: &'static str,
+    /// `error_args`: a JSON array of `[name, argument]` pairs, `[]` for none.
+    pub args: String,
+    /// `error_detail`: the engine's or platform's own text, when the reason has one.
+    pub detail: Option<&'a str>,
+}
+
+pub(crate) fn encode_failure(
+    reason: &FailureReason,
+) -> Result<FailureColumns<'_>, serde_json::Error> {
+    let text_arg = |name, value: String| vec![(name, MsgArg::Text(value))];
+    let (code, args, detail): (&'static str, Vec<(&str, MsgArg)>, Option<&str>) = match reason {
+        FailureReason::EngineUnavailable { detail } => {
+            ("engine-unavailable", Vec::new(), Some(detail))
+        }
+        FailureReason::JobRejected { detail } => ("invalid-job-spec", Vec::new(), Some(detail)),
+        FailureReason::EngineExited { exit_code } => (
+            "engine-exited",
+            exit_code
+                .map(|code| text_arg("exit_code", code.to_string()))
+                .unwrap_or_default(),
+            None,
+        ),
+        FailureReason::EngineFailed { detail } => ("operation-failed", Vec::new(), Some(detail)),
+        FailureReason::ProtocolViolated { transition } => (
+            "protocol-violated",
+            text_arg("transition", transition_text(*transition).to_owned()),
+            None,
+        ),
+        FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
+        FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
+        FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
+    };
+    Ok(FailureColumns {
+        code,
+        args: serde_json::to_string(&args)?,
+        detail,
+    })
+}
+
+/// A column of a failed operation that can't be read, and why.
+pub(crate) struct BadColumn {
+    pub column: &'static str,
+    pub why: String,
+}
+
+fn bad(column: &'static str, why: impl Into<String>) -> BadColumn {
+    BadColumn {
+        column,
+        why: why.into(),
+    }
+}
+
+/// The reason a failed operation's three columns stand for.
+pub(crate) fn decode_failure(
+    code: Option<&str>,
+    args: Option<&str>,
+    detail: Option<&str>,
+) -> Result<FailureReason, BadColumn> {
+    let code = code.ok_or_else(|| bad("error_code", "is NULL on a failed operation"))?;
+    let args = args.ok_or_else(|| bad("error_args", "is NULL on a failed operation"))?;
+    let args: Vec<(String, MsgArg)> = serde_json::from_str(args)
+        .map_err(|error| bad("error_args", format!("is not a list of pairs: {error}")))?;
+    let detail = || {
+        detail
+            .map(str::to_owned)
+            .ok_or_else(|| bad("error_detail", format!("is NULL, but {code} has a detail")))
+    };
+    match code {
+        "engine-unavailable" => Ok(FailureReason::EngineUnavailable { detail: detail()? }),
+        "invalid-job-spec" => Ok(FailureReason::JobRejected { detail: detail()? }),
+        "operation-failed" => Ok(FailureReason::EngineFailed { detail: detail()? }),
+        "engine-exited" => Ok(FailureReason::EngineExited {
+            exit_code: exit_code(&args)?,
+        }),
+        "protocol-violated" => Ok(FailureReason::ProtocolViolated {
+            transition: transition(&args)?,
+        }),
+        "deadline-passed" => Ok(FailureReason::DeadlinePassed),
+        "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
+        "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
+        other => Err(bad(
+            "error_code",
+            format!("{} is not an error code of this version", shown(other)),
+        )),
+    }
+}
+
+fn argument<'a>(args: &'a [(String, MsgArg)], name: &str) -> Option<&'a MsgArg> {
+    args.iter()
+        .find(|(arg, _)| arg == name)
+        .map(|(_, value)| value)
+}
+
+/// `exit_code` is left out when a signal ended the process.
+fn exit_code(args: &[(String, MsgArg)]) -> Result<Option<i32>, BadColumn> {
+    match argument(args, "exit_code") {
+        None => Ok(None),
+        Some(MsgArg::Text(text)) => text.parse().map(Some).map_err(|_| {
+            bad(
+                "error_args",
+                format!("exit_code {} is not an exit status", shown(text)),
+            )
+        }),
+        Some(_) => Err(bad("error_args", "exit_code is not text")),
+    }
+}
+
+fn transition(args: &[(String, MsgArg)]) -> Result<Transition, BadColumn> {
+    match argument(args, "transition") {
+        None => Err(bad("error_args", "has no transition")),
+        Some(MsgArg::Text(text)) => transition_from_text(text).ok_or_else(|| {
+            bad(
+                "error_args",
+                format!("transition {} is not one this version knows", shown(text)),
+            )
+        }),
+        Some(_) => Err(bad("error_args", "transition is not text")),
+    }
+}

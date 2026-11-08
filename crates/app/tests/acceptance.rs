@@ -4,12 +4,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use app::execution::RunOperation;
-use app::fakes::{FakeClock, SimulatedEngine};
-use app::ports::{Clock, Engine, EngineError, FakeEnd, FakeJob, Job, RunningJob};
+use app::execution::{Finished, RunOperation};
+use app::fakes::{FakeClock, InMemoryOperationStore, SimulatedEngine};
+use app::ports::{Clock, Engine, EngineError, FakeEnd, FakeJob, Job, OperationStore, RunningJob};
 use async_trait::async_trait;
 use cucumber::{World, when};
-use domain::execution::Operation;
+use domain::execution::{Operation, Trigger};
 use domain::{OperationId, SignedDuration, Timestamp, Uuid};
 
 #[path = "steps/operation.rs"]
@@ -20,15 +20,16 @@ mod operation_steps;
 struct Agent {
     clock: Arc<FakeClock>,
     engine: Arc<dyn Engine>,
+    store: Arc<InMemoryOperationStore>,
     job: FakeJob,
-    operation: Option<Operation>,
+    finished: Option<Finished>,
 }
 
 impl std::fmt::Debug for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Agent")
             .field("job", &self.job)
-            .field("operation", &self.operation)
+            .field("finished", &self.finished)
             .finish_non_exhaustive()
     }
 }
@@ -41,6 +42,7 @@ impl Agent {
         Self {
             engine: Arc::new(SimulatedEngine::new(clock.clone())),
             clock,
+            store: Arc::new(InMemoryOperationStore::new()),
             job: FakeJob {
                 steps: 1,
                 step_delay: Duration::from_secs(1),
@@ -48,7 +50,7 @@ impl Agent {
                 end: FakeEnd::Succeed,
                 deadline_budget: None,
             },
-            operation: None,
+            finished: None,
         }
     }
 
@@ -61,14 +63,24 @@ impl Agent {
     }
 
     async fn run_operation_until(&mut self, cancel: impl Future<Output = ()> + Send) {
-        let use_case = RunOperation::new(self.engine.clone(), self.clock.clone());
+        let use_case =
+            RunOperation::new(self.engine.clone(), self.clock.clone(), self.store.clone());
         let id = OperationId::from_uuid(Uuid::from_u128(1));
         let job = Job::Fake(self.job.clone());
-        self.operation = Some(use_case.run(id, job, cancel).await);
+        self.finished = Some(use_case.run(id, Trigger::Manual, job, cancel).await);
+    }
+
+    fn finished(&self) -> &Finished {
+        self.finished.as_ref().expect("the operation has run")
     }
 
     fn operation(&self) -> &Operation {
-        self.operation.as_ref().expect("the operation has run")
+        &self.finished().operation
+    }
+
+    /// The operation log the runs write to.
+    async fn store(&mut self) -> Arc<dyn OperationStore> {
+        self.store.clone()
     }
 }
 
@@ -77,13 +89,17 @@ impl Agent {
 #[when(expr = "the agent runs the operation and the user cancels it after {int} minute(s)")]
 async fn run_and_cancel(agent: &mut Agent, minutes: u32) {
     let clock = Arc::new(FakeClock::new(agent.clock.now()));
-    let use_case = RunOperation::new(Arc::new(SimulatedEngine::new(clock.clone())), clock.clone());
+    let use_case = RunOperation::new(
+        Arc::new(SimulatedEngine::new(clock.clone())),
+        clock.clone(),
+        agent.store.clone(),
+    );
     let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
     let job = Job::Fake(agent.job.clone());
     let id = OperationId::from_uuid(Uuid::from_u128(1));
     let running = tokio::spawn(async move {
         use_case
-            .run(id, job, async move {
+            .run(id, Trigger::Manual, job, async move {
                 let _ = cancelled.await;
             })
             .await
@@ -94,7 +110,7 @@ async fn run_and_cancel(agent: &mut Agent, minutes: u32) {
     }
     until_sleeping(&clock).await;
     cancel.send(()).expect("the operation is still running");
-    agent.operation = Some(running.await.expect("the operation ran"));
+    agent.finished = Some(running.await.expect("the operation ran"));
 }
 
 /// Waits until the engine sleeps on `clock`, so the next `advance` wakes it.
@@ -116,7 +132,7 @@ struct Unavailable;
 #[async_trait]
 impl Engine for Unavailable {
     async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
-        Err(EngineError {
+        Err(EngineError::Unavailable {
             detail: "worker not found".to_owned(),
         })
     }

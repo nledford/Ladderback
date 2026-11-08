@@ -45,6 +45,8 @@ Steading's hard problems are domain rules, not CRUD: who may prune a repository,
 | Plan | What to back up, from which agent, into which repository, when, and how long to keep it |
 | Repository | A rustic repository, identified by its **repository ID**. An **alias** is one agent's local name for it |
 | Operation | One run of one action (backup, forget, prune, check, restore, …) with a lifecycle: `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed { reason }` / `Cancelled`. A missed deadline is `Failed { reason: DeadlinePassed }` |
+| Trigger | What started an operation: `schedule`, `manual`, `catch-up`, `retry`, `hub` or `mcp` |
+| Operation log (history) | The record of every operation: when it was queued, started and finished, how it ended, what the engine reported, and its first 10,000 warnings with the total. It is written as an operation runs and never needed to run one |
 | Snapshot | A rustic snapshot, read from the repository; never created or edited except through an operation |
 | Plan tags | `steading-plan:<id>` and `steading-agent:<id>`; they make a snapshot **managed** by a plan |
 | Unmanaged group | Untagged snapshots, grouped by the repository's `group-by` |
