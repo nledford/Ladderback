@@ -182,15 +182,15 @@ impl Operation {
     }
 
     pub fn kind(&self) -> OperationKind {
-        todo!()
+        self.kind
     }
 
     pub fn trigger(&self) -> Trigger {
-        todo!()
+        self.trigger
     }
 
     pub fn target(&self) -> &Target {
-        todo!()
+        &self.target
     }
 
     pub fn status(&self) -> &OperationStatus {
@@ -215,7 +215,7 @@ impl Operation {
 
     /// Every warning recorded, kept or not: at least `warnings().len()`.
     pub fn warning_count(&self) -> u64 {
-        todo!()
+        self.warning_count
     }
 
     /// Time from start to finish; `None` until the operation has both started and finished.
@@ -237,11 +237,16 @@ impl Operation {
         })
     }
 
+    /// Records a warning. Only the first [`MAX_STORED_WARNINGS`] are kept,
+    /// but every one is counted ([`Self::warning_count`]).
     pub fn record_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
-        self.warnings.push(warning);
+        self.warning_count = self.warning_count.saturating_add(1);
+        if self.warnings.len() < MAX_STORED_WARNINGS {
+            self.warnings.push(warning);
+        }
         Ok(())
     }
 
@@ -249,7 +254,7 @@ impl Operation {
     /// warning was recorded, otherwise `Succeeded`.
     pub fn succeed(&mut self, at: Timestamp) -> Result<(), LifecycleError> {
         self.require(Transition::Succeed, |s| *s == OperationStatus::Running)?;
-        let status = if self.warnings.is_empty() {
+        let status = if self.warning_count == 0 {
             OperationStatus::Succeeded
         } else {
             OperationStatus::SucceededWithWarnings
