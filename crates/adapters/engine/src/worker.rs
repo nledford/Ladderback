@@ -118,7 +118,10 @@ fn run_fake(job: &FakeJobSpec, out: &mut Events<impl Write>) -> io::Result<Exit>
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+    use crate::job::MAX_MESSAGE_BYTES;
 
     fn events(output: &[u8]) -> Vec<WorkerEvent> {
         std::str::from_utf8(output)
@@ -167,6 +170,77 @@ mod tests {
         assert_eq!(
             events.last(),
             Some(&WorkerEvent::Result(OpResult::Fake { steps_completed: 2 }))
+        );
+    }
+
+    fn invalid_spec_failure(output: &[u8]) {
+        let events = events(output);
+        let [WorkerEvent::Failed { code, detail, .. }] = events.as_slice() else {
+            panic!("expected exactly one failure event, got {events:?}");
+        };
+        assert_eq!(*code, ErrorCode::InvalidJobSpec);
+        let detail = detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains(&MAX_MESSAGE_BYTES.to_string()),
+            "the failure should name the cap: {detail}"
+        );
+    }
+
+    fn a_valid_spec() -> Vec<u8> {
+        let spec = JobSpec {
+            op_id: domain::OperationId::from_uuid(domain::Uuid::from_u128(9)),
+            job: JobKind::Fake(FakeJobSpec {
+                steps: 0,
+                step_delay_ms: 0,
+                warnings: Vec::new(),
+                end: FakeEndSpec::Succeed,
+            }),
+        };
+        serde_json::to_vec(&spec).unwrap()
+    }
+
+    #[test]
+    fn a_job_spec_past_the_cap_is_rejected_even_when_it_parses() {
+        let mut input = a_valid_spec();
+        // Trailing whitespace is still valid JSON.
+        input.resize(MAX_MESSAGE_BYTES + 1, b' ');
+        let mut output = Vec::new();
+        let exit = run(input.as_slice(), &mut output, 42).unwrap();
+        assert_eq!(exit.code(), 1);
+        invalid_spec_failure(&output);
+    }
+
+    /// Serves up to 64 MiB of spaces and counts how much was asked for.
+    struct Endless<'a> {
+        served: &'a Cell<usize>,
+        left: usize,
+    }
+
+    impl Read for Endless<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = buf.len().min(self.left);
+            buf[..n].fill(b' ');
+            self.left -= n;
+            self.served.set(self.served.get() + n);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_job_spec_that_never_ends_is_not_read_past_the_cap() {
+        let served = Cell::new(0);
+        let input = Endless {
+            served: &served,
+            left: 64 << 20,
+        };
+        let mut output = Vec::new();
+        let exit = run(input, &mut output, 42).unwrap();
+        assert_eq!(exit.code(), 1);
+        invalid_spec_failure(&output);
+        assert!(
+            served.get() <= MAX_MESSAGE_BYTES + 1,
+            "read {} bytes of a job spec capped at {MAX_MESSAGE_BYTES}",
+            served.get()
         );
     }
 }

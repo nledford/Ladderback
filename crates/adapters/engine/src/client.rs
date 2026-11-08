@@ -260,6 +260,7 @@ mod tests {
     use domain::Uuid;
 
     use super::*;
+    use crate::job::MAX_MESSAGE_BYTES;
 
     fn failed(code: ErrorCode) -> WorkerEvent {
         WorkerEvent::Failed {
@@ -323,5 +324,81 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(scratch.exists(), "the worker was killed after its result");
         let _ = std::fs::remove_file(&scratch);
+    }
+
+    fn fake_job() -> Job {
+        Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: Duration::ZERO,
+            warnings: Vec::new(),
+            end: FakeEnd::Succeed,
+        })
+    }
+
+    fn op() -> OperationId {
+        OperationId::from_uuid(Uuid::from_u128(1))
+    }
+
+    /// Runs `script` as the worker and collects its events; the test fails if
+    /// they don't end within ten seconds.
+    async fn events_from(script: &str) -> Vec<EngineEvent> {
+        let engine = WorkerEngine::new("sh", ["-c", script]);
+        let events = engine.run(op(), fake_job()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), events.collect::<Vec<_>>())
+            .await
+            .expect("the worker's events ended")
+    }
+
+    fn assert_over_the_cap(events: &[EngineEvent]) {
+        let [EngineEvent::Failed(FailureReason::EngineFailed { detail })] = events else {
+            panic!("expected exactly one engine failure, got {events:?}");
+        };
+        assert!(
+            detail.contains(&MAX_MESSAGE_BYTES.to_string()),
+            "the failure should name the cap: {detail}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_event_line_past_the_cap_fails_the_job() {
+        // 3 MiB of `x`, then the newline.
+        let events =
+            events_from("cat >/dev/null; head -c 3145728 /dev/zero | tr '\\0' x; echo").await;
+        assert_over_the_cap(&events);
+    }
+
+    #[tokio::test]
+    async fn a_line_that_never_ends_fails_the_job_instead_of_growing_forever() {
+        // 64 MiB without a newline, then silence: the worker is still alive.
+        let events =
+            events_from("cat >/dev/null; head -c 67108864 /dev/zero | tr '\\0' x; exec sleep 30")
+                .await;
+        assert_over_the_cap(&events);
+    }
+
+    #[tokio::test]
+    async fn a_job_spec_past_the_cap_is_refused_before_a_worker_starts() {
+        let job = Job::Fake(FakeJob {
+            warnings: vec![Warning {
+                kind: WarningKind::Other,
+                item: None,
+                during: "backup".to_owned(),
+                detail: "x".repeat(2 * MAX_MESSAGE_BYTES),
+            }],
+            steps: 0,
+            step_delay: Duration::ZERO,
+            end: FakeEnd::Succeed,
+        });
+        let engine = WorkerEngine::new("sh", ["-c", "cat >/dev/null"]);
+        let error = engine
+            .run(op(), job)
+            .await
+            .err()
+            .expect("a spec past the cap is refused");
+        assert!(
+            error.detail.contains(&MAX_MESSAGE_BYTES.to_string()),
+            "the error should name the cap: {}",
+            error.detail
+        );
     }
 }

@@ -5,6 +5,12 @@ use api::{ErrorCode, MsgArg, WarningCode};
 use domain::OperationId;
 use serde::{Deserialize, Serialize};
 
+/// The longest message either side accepts: the job spec on the worker's
+/// stdin, and each event line on its stdout. Bytes from another process
+/// never size an allocation unbounded (technical design §13.5), and a
+/// message past the cap fails the job.
+pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
+
 /// The one job a worker runs, read from its stdin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
