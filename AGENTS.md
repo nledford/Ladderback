@@ -80,7 +80,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 **Test first (TDD).**
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
-- A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check verifies this for labelled pull requests only (§13.1); documentation, CI, tooling and dependency-only pull requests go unlabelled.
+- A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
 - Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts. A new gated crate joins `mutants_packages` in the Justfile when it lands.
 - There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
