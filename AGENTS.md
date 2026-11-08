@@ -12,12 +12,12 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 
 | Command | Does |
 |---|---|
-| `just setup` | Installs the wasm target, trunk, cargo-mutants and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
+| `just setup` | Installs the wasm target, trunk, cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
 | `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-ui` |
 | `just fmt` | Formats Rust code |
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
-| `just test [args]` | Unit, contract, acceptance and `@e2e` tests (`cargo test --workspace`), then the list of skipped tests |
+| `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; pass `--name <regex>` to pick scenarios |
 | `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
 | `just mutants [base]` | `cargo mutants` on `domain` and `app` code changed since `base` (default `origin/main`) |
@@ -25,7 +25,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just serve` | Builds everything and runs `steading serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
 
-The cucumber runners use `harness = false`, so `cargo nextest` can't run them; use `cargo test` for those. Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
+The cucumber runners use `harness = false`, so `cargo nextest` can't run them; `just test` excludes them from nextest and runs them with `cargo test`, as do `just test-acceptance` and `just test-e2e`. Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
 ## Read first
 

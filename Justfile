@@ -18,7 +18,7 @@ alias v := verify
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
-    cargo binstall --no-confirm trunk cargo-mutants release-plz
+    cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz
     cd ui-tests && npm ci
     cd ui-tests && npx playwright install chromium
 
@@ -44,11 +44,26 @@ lint:
 architecture:
     scripts/check-architecture.sh
 
-# Run unit, contract, acceptance and @e2e tests; extra arguments go to cargo
-# test. Tests that skip themselves (`testkit::skip!`) are listed at the end.
+# Run unit, contract and doc tests with cargo-nextest, then the acceptance and
+# @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
+# name). Tests that skip themselves (`testkit::skip!`) are listed at the end.
+# Set NEXTEST_PROFILE=ci for retries and the JUnit report (.config/nextest.toml).
 [group('test')]
+[positional-arguments]
 test *args='':
-    scripts/with-skip-log.sh cargo test --workspace {{ args }}
+    scripts/with-skip-log.sh '{{ just_executable() }}' _test-suites "$@"
+
+# The suites `test` runs, under its one skip log. The cucumber runners use
+# `harness = false`, which nextest can't run (its default filter in
+# .config/nextest.toml leaves them out), so `cargo test` runs them; nextest
+# doesn't run doc tests either.
+[private]
+[positional-arguments]
+_test-suites *args='':
+    cargo nextest run --workspace "$@"
+    cargo test --doc --workspace
+    cargo test --package app --test acceptance
+    cargo test --test e2e
 
 # Run the acceptance scenarios (fakes and a fake clock) only.
 [group('test')]

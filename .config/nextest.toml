@@ -1,0 +1,24 @@
+# cargo-nextest configuration; `just test` runs it. The cucumber runners
+# (`harness = false`: tests/e2e.rs, crates/app/tests/acceptance.rs) can't be
+# run by nextest, so the default filter leaves them out; the Justfile runs
+# them with `cargo test`.
+
+[profile.default]
+# A hung test is killed after two periods (120 s) instead of stalling the run
+# until CI's job timeout. The slowest test, the engine `kill` binary, takes
+# about 16 s, so it is well inside one period.
+slow-timeout = { period = "60s", terminate-after = 2 }
+# Command-line filtersets are ANDed with this one, and every profile inherits it.
+default-filter = "not (binary(e2e) | binary(acceptance))"
+
+[profile.ci]
+# Retry twice, and report a test that passed on a retry as flaky rather than
+# hiding it: a flaky test is a bug to fix, not noise to retry away.
+retries = 2
+# Run every test even after a failure, so one CI run lists every failure.
+fail-fast = false
+final-status-level = "flaky"
+
+[profile.ci.junit]
+# Written to <target dir>/nextest/ci/junit.xml; CI uploads it as an artifact.
+path = "junit.xml"
