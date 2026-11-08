@@ -223,18 +223,28 @@ fn url_passwords(repository: &str) -> Vec<SecretValue> {
 
 /// What the userinfo of a URL holds that must not show, wherever the URL is
 /// echoed: its password (as [`url_passwords`] finds it) and the whole
-/// userinfo, each as written and decoded. The whole userinfo is the
-/// credential when it has no `:` (a token as the user name). `url` may lack
-/// its scheme (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty
-/// when there is no userinfo.
+/// userinfo, each as written and decoded. The user name is the credential
+/// when there is no password (a token as the user name, `token@proxy` or
+/// `token:@proxy`), so it is one then. `url` may lack its scheme
+/// (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty when there
+/// is no userinfo.
 pub fn url_credentials(url: &str) -> Vec<SecretValue> {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let userinfos = userinfos(rest);
+    let split: Vec<(&str, &str)> = userinfos
+        .iter()
+        .filter_map(|userinfo| userinfo.split_once(':'))
+        .collect();
     forms(
-        userinfos
+        split
             .iter()
-            .filter_map(|userinfo| userinfo.split_once(':'))
-            .map(|(_, password)| password)
+            .map(|&(_, password)| password)
+            .chain(
+                split
+                    .iter()
+                    .filter(|(_, password)| password.is_empty())
+                    .map(|&(user, _)| user),
+            )
             .chain(userinfos.iter().copied()),
     )
 }
