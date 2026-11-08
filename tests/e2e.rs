@@ -21,6 +21,9 @@ mod operation_steps;
 #[path = "steps/backup.rs"]
 mod backup_steps;
 
+#[path = "steps/request_checks.rs"]
+mod request_checks_steps;
+
 const STEADING: &str = env!("CARGO_BIN_EXE_steading");
 
 #[derive(World)]
@@ -32,6 +35,7 @@ struct Agent {
     scratch: tempfile::TempDir,
     agent_id: AgentId,
     backup: backup_steps::BackupSetup,
+    web: request_checks_steps::Web,
 }
 
 impl std::fmt::Debug for Agent {
@@ -62,6 +66,7 @@ impl Agent {
             scratch,
             agent_id,
             backup: backup_steps::BackupSetup::default(),
+            web: request_checks_steps::Web::default(),
         }
     }
 
@@ -157,6 +162,7 @@ async fn main() {
     }
     let features = concat!(env!("CARGO_MANIFEST_DIR"), "/features");
     let permissions_work = file_permissions_work();
+    let ipv6_works = ipv6_works();
     // `--name` and `--tags` narrow this runner's scenarios rather than
     // replace its filter (see `operation_steps::picked_by_cli_tags`).
     let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
@@ -184,9 +190,22 @@ async fn main() {
                 );
                 return false;
             }
+            if !ipv6_works && operation_steps::tagged(feature, rule, scenario, "needs-ipv6") {
+                testkit::record_skip(
+                    module_path!(),
+                    &format!("{}: this machine can't listen on IPv6", scenario.name),
+                );
+                return false;
+            }
             true
         })
         .await;
+}
+
+/// Whether this machine can listen on IPv6: containers often can't, and a
+/// refusal to listen there would then prove nothing about the startup rule.
+fn ipv6_works() -> bool {
+    std::net::TcpListener::bind("[::]:0").is_ok()
 }
 
 /// Whether a file with mode 000 is unreadable here. Root and processes with

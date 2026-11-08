@@ -763,9 +763,13 @@ fn translate(event: WorkerEvent) -> Option<EngineEvent> {
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
-                ErrorCode::OperationFailed | ErrorCode::Unknown => {
-                    FailureReason::EngineFailed { detail }
-                }
+                // Request-check codes belong to the HTTP adapter; a worker
+                // that reports one has failed in some way this side doesn't know.
+                ErrorCode::OperationFailed
+                | ErrorCode::HostNotAllowed
+                | ErrorCode::OriginNotAllowed
+                | ErrorCode::JsonRequired
+                | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }
     })

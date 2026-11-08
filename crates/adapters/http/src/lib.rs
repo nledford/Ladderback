@@ -1,5 +1,6 @@
 //! HTTP adapter (technical design §4.2). In M0 it serves the embedded web
-//! UI; the REST API, the events WebSocket and request checks follow in M1b.
+//! UI; the REST API and the events WebSocket follow in M1b. Every request
+//! passes the request checks of §10.1 first.
 
 #![deny(
     clippy::unwrap_used,
@@ -10,14 +11,21 @@
     clippy::unreachable
 )]
 
+mod request_checks;
+
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
+use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
+
+pub use request_checks::{
+    InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
+};
 
 /// A file of the built web UI.
 #[derive(Clone, Debug)]
@@ -45,12 +53,15 @@ impl AssetSource for EmbeddedUi {
 }
 
 /// Routes for the web UI: files by path, and `index.html` for any other
-/// extensionless path, which the client-side router handles.
-pub fn router(assets: Arc<dyn AssetSource>) -> Router {
-    Router::new().fallback(move |method: Method, uri: Uri| {
-        let assets = Arc::clone(&assets);
-        async move { serve(assets.as_ref(), &method, &uri) }
-    })
+/// extensionless path, which the client-side router handles. A request that
+/// fails `checks` never reaches a route.
+pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks) -> Router {
+    Router::new()
+        .fallback(move |method: Method, uri: Uri| {
+            let assets = Arc::clone(&assets);
+            async move { serve(assets.as_ref(), &method, &uri) }
+        })
+        .layer(from_fn_with_state(checks, request_checks::enforce))
 }
 
 fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
@@ -168,11 +179,13 @@ mod tests {
     }
 
     async fn request(assets: Arc<dyn AssetSource>, method: Method, path: &str) -> Response {
-        router(assets)
+        router(assets, RequestChecks::default())
             .oneshot(
                 Request::builder()
                     .method(method)
                     .uri(path)
+                    .header(header::HOST, "localhost:9898")
+                    .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::empty())
                     .unwrap(),
             )

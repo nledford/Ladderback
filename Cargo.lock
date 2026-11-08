@@ -1855,10 +1855,13 @@ dependencies = [
 name = "http-adapter"
 version = "0.0.0"
 dependencies = [
+ "api",
  "axum",
  "http-body-util",
  "mime_guess",
  "rust-embed",
+ "serde",
+ "serde_json",
  "tokio",
  "tower",
 ]
