@@ -7,17 +7,17 @@
 // doesn't constrain which files it touches.
 //
 // The two trees (the merge base and the test: commit) are checked out at fixed
-// paths, target/red-first/trees/base and trees/first, next to their target
-// dirs, target/red-first/base and first. Paths that stay the same from run to
-// run let Cargo reuse a target dir across runs: CI caches the base tree's. Run
-// one at a time per checkout.
+// paths, target/red-first/trees/base and trees/first, each with its own target
+// dir, target/red-first/base and first. Paths that stay the same from run to
+// run let a target dir outlive its run: CI caches the base tree's, and the
+// first tree starts from a copy of it. Run one at a time per checkout.
 //
 // Usage: node scripts/red-first.mjs <base-ref>
 // Exit status: 0 when every new test fails at run time, 1 otherwise.
 // Needs git, cargo, and, for @ui scenarios, trunk and npm.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 // Generous limits: builds from cold caches are slow, but a hung command must
@@ -86,6 +86,31 @@ function removeTree(dir) {
   if (registered) git("worktree", "remove", "--force", dir);
   rmSync(dir, { recursive: true, force: true });
   git("worktree", "prune");
+}
+
+/**
+ * Gives the first tree a copy of the base tree's build to start from, unless it
+ * already has a target dir. Both trees compile the same dependencies, so after
+ * the copy only the crates the test: commit touches build again.
+ *
+ * Order matters: call this after the base tree is built and before the first
+ * tree is checked out. Cargo treats a crate as fresh when no source file is
+ * newer than its outputs, so files checked out before the copy would look older
+ * than the base tree's outputs and the commit's changes would go unseen, the
+ * very failure that separate target dirs exist to prevent. `cp -a` keeps the
+ * outputs' own times, and the checkout that follows is newer than all of them.
+ */
+function seedFirstTarget() {
+  const from = targetDir("base");
+  const to = targetDir("first");
+  if (existsSync(to) || !existsSync(from)) return;
+  // Copy beside the destination and rename, so a copy that died half way
+  // never passes for a target dir.
+  const partial = `${to}.partial`;
+  rmSync(partial, { recursive: true, force: true });
+  execFileSync("cp", ["-a", from, partial]);
+  renameSync(partial, to);
+  console.log(`red-first: the first tree starts from a copy of ${path.relative(repo, from)}`);
 }
 
 // --- Rust tests ------------------------------------------------------------
@@ -228,13 +253,13 @@ const trees = { base: path.join(treesRoot, "base"), first: path.join(treesRoot, 
 try {
   for (const dir of Object.values(trees)) removeTree(dir);
   git("worktree", "add", "--detach", trees.base, git("merge-base", base, first));
-  git("worktree", "add", "--detach", trees.first, first);
-
   const before = rustTests(trees.base);
-  const after = rustTests(trees.first);
   if (!before.ok) {
     throw new Error(`the base doesn't build:\n${before.output}`);
   }
+  seedFirstTarget();
+  git("worktree", "add", "--detach", trees.first, first);
+  const after = rustTests(trees.first);
   if (!after.ok) {
     throw new Error(`the test: commit doesn't compile; a compile error doesn't count as red:\n${after.output}`);
   }
