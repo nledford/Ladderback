@@ -1,6 +1,6 @@
 # Steading — Technical design
 
-> **Status:** Draft v0.5 · 2026-11-08
+> **Status:** Draft v0.6 · 2026-11-08
 > **Name:** Steading (binary `steading`). A steading is a farmhouse with its outbuildings: the hub and its agents.
 
 A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a web UI for connecting repositories, defining backup plans and schedules, and watching backup status and errors across several computers. Think "[Backrest](https://github.com/garethgeorge/backrest), but built on `rustic_core`". It is written from scratch in Rust, and the frontend is written in Leptos.
@@ -138,13 +138,14 @@ Steading enforces this with a worker deadline (I3, §7.3). Two rules are absolut
      └────────────────┘       └────────────────┘        └────────────────┘
 ```
 
-**One binary, three roles:**
+**One binary, three roles, plus an MCP server on demand:**
 
 | Role | Command | Runs where | Responsibility |
 |---|---|---|---|
 | **Agent** | `steading serve` | every machine | Local config, scheduler, op log, spawning workers, local web UI. Works fully standalone. |
 | **Hub** | `steading serve --hub` | one machine (often a server) | Everything an agent does, plus an agent registry, aggregated history, the repo ownership registry, maintenance for hub-managed repos, notifications |
 | **Worker** | `steading worker` (internal) | spawned per operation | Runs exactly one `rustic_core` operation, streams events to stdout, then exits |
+| **MCP server** | `steading mcp` (started by an MCP client) | wherever the client runs | Lets AI agents and scripts drive a running agent (a hub from M4b), or a headless session of their own, over stdio (§4.6) |
 
 Every agent is useful alone. Hub mode is opt-in, and an agent that can't reach the hub keeps backing up on schedule. It stores events in a persistent outbox and replays them when it reconnects.
 
@@ -284,12 +285,12 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 
 **Dependency rule, enforced in CI.**
 
-- `domain` has no I/O, no async and no ambient time or randomness. It may use `serde`, `thiserror`, `uuid` (without `v4`/`v7` features), `jiff` (with `tzdb-bundle-always`, so time zones validate in the browser) and the cron crate with its time library (`croner` and `chrono`; M0 confirms both build for `wasm32`).
+- `domain` has no I/O, no async and no ambient time or randomness. It may use `serde`, `uuid` (without `v4`/`v7` features), `jiff` (with `tzdb-bundle-always`, so time zones validate in the browser) and the cron crate with its time library (`croner` and `chrono`; M0 confirms both build for `wasm32`). Its error types implement `Display` and `Error` by hand: they carry codes and values, never sentences (§8.4).
 - `app` depends only on `domain`, `async-trait` and `futures`.
 - **Banned crates:** a CI step runs `cargo tree -e normal,build --prefix none` on `domain` (also with `--target wasm32-unknown-unknown`) and on `app`, and fails if `tokio`, `sqlx`, `axum`, `hyper`, `reqwest`, `rustic_core`, `rustic_backend`, `fluent-bundle`, `fluent-langneg`, `unic-langid` or any `icu_*` crate appears. Dev-dependencies are excluded, so tests may use a runtime.
-- **Banned calls:** `clippy.toml` `disallowed-methods` / `disallowed-types` in `domain` and `app` forbid `std::fs`, `std::env`, `std::process`, `std::net`, `SystemTime::now`, `Instant::now`, `jiff::Timestamp::now`, `jiff::Zoned::now`, `Uuid::now_v7` and `rand`. Time and randomness come from `Clock` and `Random`.
+- **Banned calls:** `clippy.toml` `disallowed-methods` / `disallowed-types` in `domain` and `app` forbid `std::fs`, the file-system methods of `std::path::Path`, `std::env`, `std::process`, `std::net`, `SystemTime::now`, `Instant::now`, `jiff::Timestamp::now`, `jiff::Zoned::now`, `Uuid::now_v7` and `rand`. Time and randomness come from `Clock` and `Random`. The two files are kept byte-identical, and the architecture check fails if they differ.
 - **wasm build:** CI builds `domain` for `wasm32-unknown-unknown`. This proves the UI can reuse its validation (schedules, retention syntax); purity is enforced by the two checks above, not by the wasm build.
-- Adapters depend on `app` and `domain`, never on each other. Only the composition root (`src/main.rs`) knows every adapter and wires them per role: agent, hub, worker, CLI. `l10n` is a presentation library outside the rings, used by `web`, `adapters/notify` and the CLI (§8.4).
+- Adapters depend on `app` and `domain`, never on each other. Only the composition root (`src/main.rs`) knows every adapter and wires them per role: agent, hub, worker, CLI, MCP. `l10n` is a presentation library outside the rings, used by `web`, `adapters/notify` and the CLI (§8.4).
 - The worker binary is an adapter: it maps a `JobSpec` onto `rustic_core` calls and reports events. It makes no policy decisions: deadlines, snapshot IDs to delete and retag targets all arrive in the `JobSpec`. Its watchdog is a thin loop that applies the `Deadline` rule from `domain`.
 
 ---
@@ -456,6 +457,54 @@ Accessibility is designed in from the first screen, not audited in at the end. T
   - runs at 320 × 256, with a 200 % root font size, with the 1.4.12 text-spacing stylesheet injected (failing on clipped text, as in §8.4), and under emulated dark, `forced-colors`, `prefers-contrast: more` and `prefers-reduced-motion`.
 - **Other surfaces:** a catalog test that every notification message has a plain-text form; a CLI `@e2e` test that output has no ANSI codes under `NO_COLOR` or without a TTY, and that `--json` parses.
 - **Manual screen-reader pass** in each milestone with UI: the milestone's journeys in Orca and in VoiceOver, including whether progress bars over-announce. Automated checks catch only part of WCAG, so this pass is part of the milestone's definition of done.
+
+### 4.6 MCP server
+
+`steading mcp` lets AI agents and scripts drive Steading through the [Model Context Protocol](https://modelcontextprotocol.io): newline-delimited JSON-RPC 2.0 over stdio. Stdout carries only protocol messages; logs go to stderr.
+
+**Protocol.** MCP revision `2025-06-18` or later, negotiated in `initialize`. Older revisions are refused, because results rely on `structuredContent` and `outputSchema`, which arrived in that revision. Implemented:
+
+- **Lifecycle:** `initialize`, then `notifications/initialized`, `ping`, and shutdown on stdin EOF.
+- **Tools:** `tools/list` and `tools/call`.
+- **Progress and cancellation:** progress notifications, sent only when a request carries `_meta.progressToken`; `notifications/cancelled` for a pending call.
+- **Errors:** an unknown tool or malformed arguments is JSON-RPC error `-32602`. A failure inside a tool is a result with `isError: true` and the same `{code, args}` payload the API returns (§8.4), never a sentence.
+- **Not localized:** tool `title`s and `description`s are fixed English, like API field names (§8.4).
+
+**Placement.** `adapters/mcp` is an inbound adapter beside `http`, with no rule of its own. Its tools call one `Backend` trait defined inside the adapter, with two implementations:
+
+- **In-process:** receives use-case handles from `src/main.rs`.
+- **Connect:** an HTTP and WebSocket client that depends only on `api`, never on `adapters/http` (§3.2).
+
+A parity contract suite runs every tool against both implementations, so the two modes can't drift.
+
+| Mode | Command | What it drives |
+|---|---|---|
+| **Connect** | `steading mcp --connect [URL] [--token-file PATH]` | A running agent, through `/api/v1` and its events WebSocket, like any other API client. The URL defaults to `http://127.0.0.1:9898` and must be `https` or loopback before a token is sent. The server starts even when the daemon isn't up yet, and connects on the first call. A request whose reply was lost is never resent: the tool reports that the outcome is unknown |
+| **Headless** | `steading mcp --headless [--config DIR] [--data DIR]` | An in-process agent session wired by the composition root, as `serve` does but without HTTP or the scheduler. It takes the data-dir lock (§9), so a data dir that `serve` has open fails with `data-dir-in-use` and connect mode is the answer. Operations run only while the session lives: on stdin EOF or SIGTERM it cancels its queued operations and stops its workers (SIGTERM, then SIGKILL), so a later `serve` finds no stale queue |
+| **Scratch** | `steading mcp --scratch` | A headless session in a new mode-0700 temporary directory (`steading-scratch-*`) holding config, data and a local repository, seeded with one plan over procedurally generated files. Deleted on exit; stale scratch directories from crashed sessions are swept at the next start. For demos and for agents testing Steading itself |
+
+**Tools.** Each maps onto one use case or read-side query. Results are `structuredContent` built from `api` types, declared by each tool's `outputSchema` and mirrored as JSON text. Every `list_*` tool takes `limit` and a cursor, and results have a size cap, so one call can't flood the client's context.
+
+| Tool | Does |
+|---|---|
+| `status` | Plans, last result and next run per plan, running operations |
+| `list_plans`, `list_repositories` | Plans and repositories, with secrets as references only (§10.5) |
+| `list_snapshots` | Snapshots, filtered by host, plan, tag, path or time |
+| `list_operations`, `get_operation` | History, one operation's status, summary and warnings |
+| `operation_log` | One operation's redacted log, paged |
+| `run_plan` | Queues a backup now, under the plan's overlap policy, with `trigger = mcp`; returns the operation ID. The plan's existing hooks and secret sources run as they would for any other trigger |
+| `wait_operation` | Waits until an operation finishes or a timeout passes, with progress notifications. Cancelling the call stops the wait, not the operation |
+| `cancel_operation` | Cancels a queued or running backup started by `run_plan` or a schedule. Maintenance operations can't be cancelled from MCP, so a loop can't keep a repository from being pruned |
+| `test_repository` | Tests a configured repository's connection |
+| `preview_forget` | The dry run of forget for a repository this agent owns: what would be deleted, per group (§7.3) |
+| `preview_import` | Takes a rustic profile's TOML as `content`, never a path, and returns the proposed plans and notices without applying them. `use-profiles` is reported as a notice rather than read from disk, and parse errors are redacted |
+| `export_profile` | A plan as a rustic profile (§6.2). Fails with `inline-secret` when the repository's password is stored inline, rather than writing it out |
+
+There is deliberately no tool that restores, downloads, applies forget or prune, adopts, edits config or pairs: each needs a human confirmation or could change what commands run (§10.5). They can be added later only with a confirmation that MCP can carry honestly.
+
+**Hub.** M3 drives one agent. Connect mode against a hub, with an `agent` argument on the tools that need one (plan IDs are unique per agent only), arrives with remote control in M4b.
+
+**Testing.** `features/automation/mcp.feature` runs as `@e2e` scenarios. The runner speaks JSON-RPC to `steading mcp --scratch`, and to `steading mcp --connect` against `steading serve --listen 127.0.0.1:0`, reading the chosen port from the `listening on` line on its stderr. Each tool's input and output schemas are checked against example calls. The I4 canary test (§10.2) scans every tool result, including `list_repositories`, `export_profile` and `preview_import` with inline secrets.
 
 ---
 
@@ -676,7 +725,7 @@ Backups made outside Steading (the rustic or restic CLI) are not covered by the 
 | **CSR with explicit REST + WebSocket API** (chosen) | Single `trunk` build output that's easy to embed. The API is a real, versioned contract that the hub, the CLI and a future Tauri shell can all reuse. Shared types via an `api` crate | A bit more boilerplate than server functions |
 | SSR + hydration with server functions | Less API code. Fast first paint | Couples UI and server build (`cargo-leptos`, two targets). Server fns aren't a stable contract for agents or a CLI. SEO and first paint don't matter for a localhost dashboard |
 
-UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling, and Steading's own small component set for every widget, built to the accessibility contracts in §4.5. Charts (snapshot sizes over time, durations) use SVG rendered in Leptos, with no JS chart library.
+UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling, and Steading's own small component set for every widget, built to the accessibility contracts in §4.5. Tailwind arrives with that component set in M1b; M0's hello page uses one plain stylesheet with the color, focus and motion tokens. Charts (snapshot sizes over time, durations) use SVG rendered in Leptos, with no JS chart library.
 
 ### 8.2 Backend crates
 
@@ -722,13 +771,16 @@ steading/
 │     ├─ interop/             # rustic profile import/export (anti-corruption layer)
 │     ├─ secrets/             # command, keyring, file, env sources; `${…}` substitution (redaction: domain `Redactor`)
 │     ├─ notify/              # webhook, ntfy, Gotify, Discord/Slack, SMTP, healthchecks
+│     ├─ mcp/                 # `steading mcp`: JSON-RPC 2.0 over stdio; in-process and /api/v1 backends (§4.6)
 │     └─ platform/            # clock, power, network, identity key, service install (systemd/launchd)
 ├─ features/                  # Gherkin scenarios, one folder per bounded context (§13.2)
 ├─ tests/e2e.rs               # cucumber-rs runner for @e2e scenarios against the real binary
 ├─ ui-tests/                  # Node: @cucumber/cucumber + Playwright + axe-core for @ui scenarios and the
 │                             #   component gallery (§4.5)
-├─ src/main.rs                # composition root; `steading` binary: serve | worker | pair | import-profile
+├─ src/main.rs                # composition root; `steading` binary: serve | worker | mcp | pair | import-profile
 │                             #   | export-profile | install-service | db rebuild
+├─ scripts/                   # CI checks behind the Justfile: banned crates (§3.2), red-first (§13.1)
+├─ Justfile                   # every workflow, for people, agents and CI alike
 ├─ migrations/
 └─ docs/
 ```
@@ -745,7 +797,7 @@ steading/
 | Default notification text (ntfy, Gotify, Discord/Slack, email) | Yes, in the configured locale |
 | Steading's own CLI messages and errors | Yes, from the POSIX locale. `clap`'s generated help and usage errors stay English |
 | The static `index.html` shown before the wasm app loads | No: a minimal `lang="en"` loading text, replaced on startup |
-| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, exported rustic profiles | **Never.** These are machine-facing or grep targets |
+| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, MCP tool names, arguments and results, exported rustic profiles | **Never.** These are machine-facing or grep targets |
 | Text from rustic itself (warning and error details) | Shown verbatim, in English, inside a localized frame (`backup-failed = Backup failed: { $detail }`), marked `lang="en"` in the UI |
 | User-written notification templates (§11) | Never; the user's own words |
 
@@ -821,7 +873,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   agent_id TEXT NOT NULL,         -- 'local' on agents; registry id on hub
   kind TEXT NOT NULL,             -- backup|forget|prune|check|restore|stats|...
   plan_id TEXT, repo_uuid TEXT,   -- repo_uuid = rustic repository ID
-  trigger TEXT NOT NULL,          -- schedule|manual|catch-up|retry|hub
+  trigger TEXT NOT NULL,          -- schedule|manual|catch-up|retry|hub|mcp
   status TEXT NOT NULL,           -- queued|running|succeeded|succeeded_with_warnings|failed|cancelled
   queued_at INTEGER, started_at INTEGER, finished_at INTEGER,
   index_read_at INTEGER, deadline INTEGER,     -- backups (§7.3)
@@ -860,6 +912,10 @@ CREATE TABLE sync_outbox (epoch TEXT NOT NULL, seq INTEGER NOT NULL, op_id TEXT,
 CREATE TABLE repo_grants (repo_uuid TEXT PRIMARY KEY, owner TEXT, epoch INTEGER, expires_at INTEGER,
                           keep_delete_secs INTEGER, prune_margin_secs INTEGER, updated_at INTEGER);
 
+CREATE TABLE api_tokens (id TEXT PRIMARY KEY, label TEXT, hash TEXT NOT NULL,  -- argon2id of the secret part
+                         scopes TEXT NOT NULL,      -- comma list of read|run|preview (§10.1)
+                         created_at INTEGER, last_used_at INTEGER);
+
 -- hub only
 CREATE TABLE agents (id TEXT PRIMARY KEY,          -- generated by the agent (§7.1)
                      hostname TEXT NOT NULL UNIQUE, pubkey BLOB, version TEXT,
@@ -877,6 +933,8 @@ Retention: logs 30 days, operations 1 year (configurable), snapshot cache rebuil
 
 **Recovery.** Backups never depend on the database. It keeps a daily copy (`VACUUM INTO`). `steading db rebuild` recreates a corrupt database: schedule state from config, the snapshot cache from the repositories, and history from the latest daily copy. Backrest has open SQLite failures on btrfs and with corruption ([#978](https://github.com/garethgeorge/backrest/issues/978), [#1174](https://github.com/garethgeorge/backrest/issues/1174)), so CI runs the store tests on btrfs and a Docker volume, and NFS is documented as unsupported for the data dir.
 
+**One process per data dir.** `serve`, `mcp --headless` and `db rebuild` take an exclusive `flock` on `<data>/steading.lock` before opening the database, and fail with `data-dir-in-use` (naming the holder's PID) when another process has it. SQLite's own locking allows several writers, so without this two schedulers could share one queue. The OS releases the lock when the process dies, so a crash never leaves it stale.
+
 ---
 
 ## 10. Security
@@ -885,6 +943,7 @@ Retention: logs 30 days, operations 1 year (configurable), snapshot cache rebuil
 
 - Binds to `127.0.0.1` by default.
 - **Auth is optional**, as in Backrest (§16, decision 11). When enabled: a single admin user with an argon2id password hash, `HttpOnly`/`SameSite=Strict` session cookies lasting 24 hours (§4.5), and CSRF protection on mutating routes.
+- **API tokens** (M3), for non-browser clients such as the CLI and MCP connect mode, when auth is enabled. A token is `stdg_<id>_<secret>`: the daemon looks it up by `id` and checks the secret against an argon2id hash (§9), so a request costs one hash. Each token carries scopes, `read`, `run` and `preview`, checked by the daemon per route. Restore, download, config, pairing and auth routes accept only a session (with step-up where §10.4 requires it), never a token. Tokens are created, listed and revoked in Settings, and the secret is shown once.
 - **Request checks, always on**, auth or not. The UI can set hooks and `password-command`, so an unauthenticated API reachable from a web page would let any site run commands on the machine (DNS rebinding or cross-site POSTs). Therefore:
   - the `Host` header must be a configured name or a loopback address;
   - a request that carries an `Origin` header must match the UI's own origin, and mutating requests must use `Content-Type: application/json`, which forces a CORS preflight that the daemon refuses. Requests without `Origin` (curl, scripts, the `steading` CLI) aren't affected by this rule;
@@ -936,6 +995,18 @@ Restores are the most dangerous action because they can overwrite files.
 - **Restoring in place** (original paths) is offered only in the agent's own UI. Its confirmation dialog states how many files would be overwritten or deleted, using a dry-run `prepare_restore` plan first.
 - Every restore is recorded in the op log with who started it and from where (local UI or hub).
 
+### 10.5 MCP server
+
+An MCP client is usually a language model acting on text it read elsewhere, so `steading mcp` treats every call as untrusted input with no human behind it. The aim is to bound what a confused or prompt-injected model can do, not to stop a local user, who already has the API.
+
+- **No step-up, so no restore.** Restores, downloads, applying forget or prune, adoption, config edits, hub pairing and auth settings have no tool (§4.6). A tool can't stand in for the confirmation in §10.4.
+- **No new commands.** Hooks, `password-command` and secret sources can't be set or changed through MCP, so a prompt injection can't add a command run as the daemon's user (I4). Running a plan does run the hooks and secret sources a human already configured.
+- **Enforced by the daemon, not the client.** With auth enabled, connect mode authenticates with an API token whose scopes (`read`, `run`, `preview`) the daemon checks per route (§10.1). A leaked token can't restore or edit config even through raw `/api/v1` calls. With auth disabled, the loopback API is open to local processes anyway, as it is to curl.
+- **Token handling.** Read from `--token-file` (default `<config>/mcp-token`; a file readable by group or others is refused, as for `password-file` in §10.2), never from argv, and sent only over `https` or loopback.
+- **Secrets stay references.** Results show secret references, never values. The `Redactor` is seeded with inline config secrets at load, not only with the values a job resolves, so `list_repositories`, `preview_import` and logs can't echo them. `export_profile` refuses inline passwords (§4.6). The I4 canary test covers every tool.
+- **Headless isolation.** Headless mode takes the data-dir lock (§9). `--scratch` uses a fresh mode-0700 temporary directory, never the user's config or data.
+- **Residual risk: untrusted output.** Logs, paths, tags, hostnames and rustic's error details are text a model reads, and an attacker can influence it. Steading doesn't sanitize it; the mitigation is that no tool can turn such text into a destructive action. Result size caps (§4.6) limit how much reaches the model at once.
+
 ---
 
 ## 11. Notifications
@@ -959,6 +1030,44 @@ Configured on the hub (or on a standalone agent). Each rule is **event → chann
   - The UI detects permission errors in warnings and links to System Settings → Privacy & Security.
 - **Docker:** an image for hub deployments on servers or a NAS.
 - Distribution: GitHub Releases (cargo-dist), a Homebrew tap, and possibly the AUR later.
+
+### 12.1 Versioning and releases
+
+Steading follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). The **release unit is the product**: the `steading` binary, and from M5 its Docker image. Every crate inherits one version from `[workspace.package]` and none is published, so crate APIs are not a public contract.
+
+**The public contract**, which decides the bump:
+
+| Surface | Breaking (major from 1.0) | Compatible (minor) |
+|---|---|---|
+| CLI: commands, flags, exit codes | Removing or renaming one, changing a default's meaning | New command or flag |
+| `config.toml` (§6.1) | Dropping the migration from an old `schema`, so a file stops loading | New keys; a new `schema` whose migration runs on load |
+| REST and WebSocket API `/api/v1` | Anything that needs `/api/v2` | New endpoints and optional fields |
+| Sync protocol `/sync/v1` (§7.2) | A new `protocol` number that the previous release can't speak | New optional message fields |
+| Snapshot tags `steading-plan:` / `steading-agent:` (§7.3) | Any change: existing repositories would lose their plan links | — |
+| Webhook JSON: keys, event names, error codes (§11) | Removing or renaming one | New events, keys or codes |
+| Exported rustic profiles (§6.2) | A profile that the pinned rustic CLI reads differently | — |
+| Database and data directory (§9) | A migration with no automatic path | Automatic migrations |
+| MCP tools (§4.6): names, input schemas, result fields | Removing or renaming a tool, a new required argument, a result field whose meaning changes | New tools, optional arguments and result fields |
+
+Not part of the contract: UI layout and wording, log text, the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back.
+
+**Bump rules.** A release takes the highest bump among its changes, judged by the table, not by commit labels:
+
+- before 1.0.0: a breaking change or a feature bumps the minor version, a fix bumps the patch;
+- from 1.0.0: breaking bumps the major, a feature the minor, a fix the patch;
+- every breaking change gets an entry under **Breaking** in `CHANGELOG.md`, with the upgrade step.
+
+**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version steading@<version>`.
+
+**Tags.** `vX.Y.Z` on `main`, created only by the release workflow. A tag is never moved or deleted; a bad release is fixed by the next patch, and its GitHub release is marked as such.
+
+**Process.** [release-plz](https://release-plz.dev) in git-only mode (`release-plz.toml`, `.github/workflows/release.yml`):
+
+1. Running the Release workflow by hand opens or updates a draft **release PR**. It bumps `[workspace.package] version` from the Conventional Commits since the last tag (`feat` → minor; `fix` → patch; `!` or a `BREAKING CHANGE:` footer → breaking) and writes the `CHANGELOG.md` entry.
+2. The maintainer checks the bump against the contract table, since labels only navigate, and edits the notes. `just release-preview` shows the same result locally.
+3. Merging the PR to `main` triggers the tag and a GitHub release with that entry as its notes.
+
+Until M5's release packaging, a release is source only. M5 adds cargo-dist builds that attach binaries, the signed macOS build and the Docker image to the same tag.
 
 ---
 
@@ -1071,9 +1180,9 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | **M1a** | Engine | Pinned `rustic_core` revision; worker with `EventProgressBars`, warnings, SIGTERM handling, deadline watchdog and per-worker cache dir; agent ID and repository ID; `steading-*` tags and explicit parents with fallback; kill-at-random-points test (local + one OpenDAL backend); `*-tmp-*` cleanup | 2–3 wks |
 | **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1); `l10n` crate with the `en-US` catalog, error codes in the API, catalog tests and dev pseudolocales (§8.4); accessible component set (dialog, table, form field, status, progress, toast) with its gallery, the announcer, route focus handling, token contrast test, CLI `NO_COLOR`/`--plain`/`--json`, and the first Orca and VoiceOver pass (§4.5) | 4–5 wks |
 | **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates and plain-text forms; service install (systemd, launchd); optional auth with an accessible sign-in form (A5, A6); "Pause live updates"; macOS signing and Full Disk Access test | 2–3 wks |
-| **M3** | Browse and restore | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page | 2 wks |
+| **M3** | Browse, restore and automation | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; scoped API tokens (§10.1); the data-dir lock (§9); MCP server in connect, headless and scratch modes with the read, run and preview tools (§4.6) | 2–3 wks |
 | **M4a** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 3–4 wks |
-| **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub) | 3–4 wks |
+| **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub); MCP connect mode against a hub, with an `agent` argument (§4.6) | 3–4 wks |
 | **M5** | Polish | Conditions (AC power / metered), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
 
 | Milestone | Feature files |
@@ -1081,7 +1190,7 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | M1a | `execution/backup.feature` (warnings), `execution/cancel.feature`, `execution/deadline.feature` (`@e2e` with a real worker) |
 | M1b | `planning/config.feature`, `planning/hooks.feature`, `interop/import.feature`, `interop/export.feature`, `maintenance/forget.feature`, `maintenance/adopt.feature`, `maintenance/serialization.feature`, `secrets/substitution.feature`, `secrets/redaction.feature`, `security/request_checks.feature` (`@e2e`), `ui/accessibility.feature` (`@ui`: first backup by keyboard alone; announcements; reflow; form errors) |
 | M2 | `execution/schedule.feature` (catch-up, wake, time zones), `execution/retry.feature`, `execution/overlap.feature`, `notifications/rules.feature` |
-| M3 | `restore/restore.feature`, `restore/download.feature` |
+| M3 | `restore/restore.feature`, `restore/download.feature`, `automation/mcp.feature` |
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |
 | M4b | `maintenance/ownership.feature`, `maintenance/prune_guard.feature`, `restore/hub_restore.feature` |
 | M5 | `execution/conditions.feature`, `operations/db_rebuild.feature` |
@@ -1139,6 +1248,8 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | 16 | License | **MIT OR Apache-2.0**, the same terms as rustic, so code can move upstream without relicensing. Files: `LICENSE-MIT`, `LICENSE-APACHE`; the workspace `Cargo.toml` will declare `license = "MIT OR Apache-2.0"`. |
 | 17 | Internationalization | **Localization-ready from the first UI string; `en-US` only in v1.** Project Fluent via `fluent-bundle` in a shared `l10n` crate, with a per-message fallback chain of bundles; the core and the wire carry codes and typed arguments, never sentences; dates and numbers through browser `Intl` or ICU4X behind Fluent's formatter hook; machine-facing text never localized (§8.4). |
 | 18 | Accessibility | **First-class, WCAG 2.2 AA from the first screen.** Invariants A1–A6 in §0; one accessible component set and an app-wide announcer; `@ui` scenarios in Playwright with axe-core and keyboard-only journeys from M0; a manual Orca and VoiceOver pass per milestone (§4.5). |
+| 19 | Versioning | **One SemVer version for the whole product**, judged against a declared contract (CLI, config schema, `/api/v1`, `/sync/v1`, snapshot tags, webhook JSON, exported profiles, data migrations). `0.1.0` at the end of M1b, `1.0.0` after M5; `vX.Y.Z` tags and `CHANGELOG.md` produced by release-plz from Conventional Commits through a reviewed release PR (§12.1). |
+| 20 | MCP server | **`steading mcp`: newline-delimited JSON-RPC 2.0 over stdio (MCP `2025-06-18` or later), in one inbound adapter (`adapters/mcp`).** Connect mode drives a running agent through `/api/v1` (a hub from M4b) with a scoped API token; headless and scratch modes run their own in-process session under the data-dir lock. Tools read state, run and cancel backups, and preview forget and import. Nothing restores, deletes, edits config or adds a command: a model-driven client is not a human confirmation, and token scopes enforce this in the daemon (§4.6, §10.5). |
 
 ## 17. Open questions
 
@@ -1147,3 +1258,7 @@ To be answered by M1a/M2 experiments rather than by decision:
 1. Does a SIGKILL during an S3, B2 or SFTP upload leave a partial object under a final pack name? The kill test (§4.1) must cover one OpenDAL backend.
 2. Does a Full Disk Access grant on the launchd-started daemon carry over to the worker child process, or does the worker need its own grant?
 3. How long does prune take on a large repo? That sets `prune_margin` (§7.3).
+
+To be decided in M4a, when hub and agents first talk:
+
+4. How far may hub and agent versions differ? The likely rule is that a hub speaks the `/sync/v1` protocol of its own release line and the one before, so the hub upgrades first (§12.1).

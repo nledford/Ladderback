@@ -4,14 +4,35 @@ Guidance for coding agents working on Steading, a self-hosted backup manager for
 
 ## Status
 
-Design stage: there is no code yet. Implementation starts with milestone M0 ([docs/TECHNICAL-DESIGN.md §14](docs/TECHNICAL-DESIGN.md)). Add build, test and lint commands to this file as M0 creates them; until then, don't invent any.
+Milestone M0 (skeleton) is in place: the workspace, the worker protocol with a fake operation, the embedded hello UI and every CI check. Next is M1a ([docs/TECHNICAL-DESIGN.md §14](docs/TECHNICAL-DESIGN.md)).
+
+## Commands
+
+Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists them.
+
+| Command | Does |
+|---|---|
+| `just setup` | Installs the wasm target, trunk, cargo-mutants and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
+| `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-ui` |
+| `just fmt` | Formats Rust code |
+| `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
+| `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`) |
+| `just test [args]` | Unit, contract, acceptance and `@e2e` tests (`cargo test --workspace`) |
+| `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; pass `--name <regex>` to pick scenarios |
+| `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
+| `just mutants [base]` | `cargo mutants` on `domain` and `app` code changed since `base` (default `origin/main`) |
+| `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests fail at run time (§13.1) |
+| `just serve` | Builds everything and runs `steading serve` on `127.0.0.1:9898` |
+| `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
+
+The cucumber runners use `harness = false`, so `cargo nextest` can't run them; use `cargo test` for those. Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
 ## Read first
 
 | File | Owns |
 |---|---|
 | [PRODUCT.md](PRODUCT.md) | Users, purpose, voice ("calm and exact"), boundaries, accessibility floor |
-| [docs/TECHNICAL-DESIGN.md](docs/TECHNICAL-DESIGN.md) | Invariants (§0), domain model (§3.1), architecture (§3.2), workspace layout (§8.3), localization (§8.4), accessibility (§4.5), development method (§13), milestones (§14), decisions (§16) |
+| [docs/TECHNICAL-DESIGN.md](docs/TECHNICAL-DESIGN.md) | Invariants (§0), domain model (§3.1), architecture (§3.2), workspace layout (§8.3), localization (§8.4), accessibility (§4.5), versioning and releases (§12.1), development method (§13), milestones (§14), decisions (§16) |
 
 Each fact lives in one file. Link to it rather than copying it. The design document is the source of truth: when work changes a decision, update the document, including §16, in the same change.
 
@@ -81,5 +102,6 @@ After implementing a non-trivial change, get one independent adversarial review 
   - Use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`) with an imperative subject and a body explaining why.
   - The atomic commits are for review; the pull request is squash-merged at the end.
 - **Pull requests:** one coherent feature per pull request, off `main`. Pull requests are squash-merged. Don't push, or open, edit or close a pull request, without the maintainer's approval.
+  - The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade.
 - **Screenshots and fixtures:** use neutral demo data and scratch repositories, never real backups, hostnames or paths.
 - **License:** MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
