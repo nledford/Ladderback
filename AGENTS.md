@@ -4,7 +4,7 @@ Guidance for coding agents working on Steading, a self-hosted backup manager for
 
 ## Status
 
-Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog. Next is M1b ([docs/TECHNICAL-DESIGN.md §14](docs/TECHNICAL-DESIGN.md)).
+Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog. Next is M1b ([docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones)).
 
 ## Commands
 
@@ -32,7 +32,7 @@ The cucumber runners use `harness = false`, so `cargo nextest` can't run them; u
 | File | Owns |
 |---|---|
 | [PRODUCT.md](PRODUCT.md) | Users, purpose, voice ("calm and exact"), boundaries, accessibility floor |
-| [docs/TECHNICAL-DESIGN.md](docs/TECHNICAL-DESIGN.md) | Invariants (§0), domain model (§3.1), architecture (§3.2), workspace layout (§8.3), localization (§8.4), accessibility (§4.5), versioning and releases (§12.1), development method (§13), milestones (§14), decisions (§16) |
+| [docs/design/](docs/design/README.md) | Invariants (§0), domain model (§3.1), architecture (§3.2), workspace layout (§8.3), localization (§8.4), accessibility (§4.5), versioning and releases (§12.1), development method (§13), milestones (§14), decisions (§16) |
 
 Each fact lives in one file. Link to it rather than copying it. The design document is the source of truth: when work changes a decision, update the document, including §16, in the same change.
 
