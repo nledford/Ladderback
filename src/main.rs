@@ -31,13 +31,18 @@ struct Cli {
 enum Command {
     /// Run the agent and serve its web UI.
     Serve {
-        /// Address to listen on. Port 0 picks a free port; the address in
-        /// use is printed on startup.
+        /// Loopback address to listen on, until sign-in exists. Port 0 picks
+        /// a free port; the address in use is printed on startup.
         #[arg(long, default_value = "127.0.0.1:9898")]
         listen: SocketAddr,
-        /// A host name besides loopback addresses that the web UI answers to,
-        /// such as the name a reverse proxy forwards (repeatable).
-        #[arg(long = "allowed-host", value_name = "NAME")]
+        /// A host name or address, without a port, that the web UI answers to
+        /// besides loopback addresses, such as the name a reverse proxy
+        /// forwards with the browser's Host (repeatable).
+        #[arg(
+            long = "allowed-host",
+            value_name = "NAME",
+            value_parser = http_adapter::validate_host_name
+        )]
         allowed_hosts: Vec<String>,
     },
     /// Run one operation, read from stdin, and report events on stdout.
@@ -57,6 +62,11 @@ fn main() -> ExitCode {
 }
 
 fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
+    // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
+    if let Err(error) = http_adapter::require_loopback(listen) {
+        eprintln!("steading: {error}");
+        return ExitCode::FAILURE;
+    }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
