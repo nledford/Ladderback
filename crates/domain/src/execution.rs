@@ -73,6 +73,10 @@ pub enum FailureReason {
 
 /// A problem with a single item that doesn't fail the operation, such as a
 /// file that couldn't be read during a backup.
+///
+/// Each text field is as the engine reported it until an operation keeps the
+/// warning, which cuts a field longer than [`MAX_WARNING_TEXT_BYTES`]
+/// ([`Operation::record_warning`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Warning {
     pub kind: WarningKind,
