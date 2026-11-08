@@ -122,6 +122,7 @@ Several agents may work on the repository at once (§13.5). Each one:
   - Use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`) with an imperative subject and a body explaining why.
   - The atomic commits are for review; the pull request is squash-merged at the end.
 - **Pull requests:** one coherent feature per pull request, off `main`. Pull requests are squash-merged. Don't push, or open, edit or close a pull request, without the maintainer's approval.
+  - Large work may be split into a stack of dependent pull requests with GitHub's stacked pull requests (`gh stack`). Each layer is one reviewable concern and passes every check on its own. A layer that changes behaviour starts with its own failing `test:` commit; run `just red-first <branch below>` for it. A stack merges bottom-up with `gh stack merge`.
   - The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade.
 - **Screenshots and fixtures:** use neutral demo data and scratch repositories, never real backups, hostnames or paths.
 - **License:** MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
