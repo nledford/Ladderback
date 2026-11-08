@@ -104,7 +104,14 @@ rustic_id!(
 );
 
 fn parse_rustic_id(value: &str, kind: IdKind) -> Result<String, InvalidId> {
-    todo!()
+    if value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err(InvalidId {
+            kind,
+            value: value.to_owned(),
+        })
+    }
 }
 
 /// Identifies a plan within one agent's config: its key in `config.toml`
@@ -116,7 +123,18 @@ pub struct PlanId(String);
 
 impl PlanId {
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
-        todo!()
+        let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+        let valid = value.len() <= 64
+            && value.bytes().next().is_some_and(slug)
+            && value.bytes().all(|b| slug(b) || b == b'-');
+        if valid {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidId {
+                kind: IdKind::Plan,
+                value: value.to_owned(),
+            })
+        }
     }
 
     pub fn as_str(&self) -> &str {

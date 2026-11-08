@@ -18,7 +18,11 @@ impl KeepDelete {
     pub const MIN: Self = Self(RUSTIC_KEEP_DELETE);
 
     pub fn new(value: SignedDuration) -> Result<Self, KeepDeleteTooShort> {
-        todo!()
+        if value < Self::MIN.0 {
+            Err(KeepDeleteTooShort { value })
+        } else {
+            Ok(Self(value))
+        }
     }
 
     pub fn get(self) -> SignedDuration {
@@ -52,7 +56,11 @@ pub fn backup_budget(
     keep_delete: Option<KeepDelete>,
     longest_prune: Option<SignedDuration>,
 ) -> SignedDuration {
-    todo!()
+    let margin = PRUNE_MARGIN_BASE.saturating_add(longest_prune.unwrap_or(SignedDuration::ZERO));
+    keep_delete
+        .unwrap_or(KeepDelete::MIN)
+        .get()
+        .saturating_sub(margin)
 }
 
 /// The latest wall-clock time a backup may write its snapshot. Time asleep
@@ -62,7 +70,15 @@ pub struct Deadline(Timestamp);
 
 impl Deadline {
     pub fn after_index_read(index_read_at: Timestamp, budget: SignedDuration) -> Self {
-        todo!()
+        Self(
+            index_read_at
+                .checked_add(budget)
+                .unwrap_or(if budget.is_negative() {
+                    Timestamp::MIN
+                } else {
+                    Timestamp::MAX
+                }),
+        )
     }
 
     pub fn at(self) -> Timestamp {

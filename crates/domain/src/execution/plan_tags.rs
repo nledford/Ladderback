@@ -19,7 +19,15 @@ pub struct UserTag(String);
 
 impl UserTag {
     pub fn new(tag: impl Into<String>) -> Result<Self, ReservedTag> {
-        todo!()
+        let tag = tag.into();
+        let reserved = tag
+            .get(..RESERVED_TAG_PREFIX.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(RESERVED_TAG_PREFIX));
+        if reserved {
+            Err(ReservedTag { tag })
+        } else {
+            Ok(Self(tag))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -64,12 +72,17 @@ impl PlanTags {
 
     /// The two tags, plan first.
     pub fn tags(&self) -> [String; 2] {
-        todo!()
+        [
+            format!("{PLAN_TAG_PREFIX}{}", self.plan.as_str()),
+            format!("{AGENT_TAG_PREFIX}{}", self.agent.as_uuid().hyphenated()),
+        ]
     }
 
     /// Whether `snapshot` carries both tags.
     pub fn mark(&self, snapshot: &SnapshotRef) -> bool {
-        todo!()
+        self.tags()
+            .iter()
+            .all(|tag| snapshot.tags.iter().any(|t| t == tag))
     }
 
     /// The parent for this plan's next backup: the newest snapshot carrying
@@ -81,7 +94,11 @@ impl PlanTags {
         &self,
         snapshots: impl IntoIterator<Item = &'a SnapshotRef>,
     ) -> Option<SnapshotId> {
-        todo!()
+        snapshots
+            .into_iter()
+            .filter(|snapshot| self.mark(snapshot))
+            .max_by(|a, b| (a.time, &a.id).cmp(&(b.time, &b.id)))
+            .map(|snapshot| snapshot.id.clone())
     }
 }
 

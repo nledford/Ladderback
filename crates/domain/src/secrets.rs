@@ -8,7 +8,7 @@ pub struct SecretValue(String);
 
 impl SecretValue {
     pub fn new(value: impl Into<String>) -> Self {
-        todo!()
+        Self(value.into())
     }
 
     /// The value itself, for the one place that must use it.
@@ -37,18 +37,36 @@ pub struct Redactor {
 
 impl Redactor {
     pub fn new<'a>(secrets: impl IntoIterator<Item = &'a SecretValue>) -> Self {
-        todo!()
+        let mut needles: Vec<String> = secrets
+            .into_iter()
+            .map(SecretValue::expose)
+            .filter(|value| !value.is_empty())
+            .flat_map(|value| {
+                [
+                    value.to_owned(),
+                    percent_encode(value, is_unreserved, Hex::Upper),
+                    percent_encode(value, is_unreserved, Hex::Lower),
+                    percent_encode(value, is_userinfo_safe, Hex::Upper),
+                ]
+            })
+            .collect();
+        needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        needles.dedup();
+        Self { needles }
     }
 
     /// A redactor for a repository's password and for the password in the
     /// userinfo of the URL inside its repository string (`rest:https://…`),
     /// which rustic's errors quote.
     pub fn for_repository(repository: &str, password: &SecretValue) -> Self {
-        todo!()
+        let url_passwords = url_passwords(repository);
+        Self::new(std::iter::once(password).chain(&url_passwords))
     }
 
     pub fn redact(&self, text: &str) -> String {
-        todo!()
+        self.needles.iter().fold(text.to_owned(), |text, needle| {
+            text.replace(needle, REDACTED)
+        })
     }
 }
 
@@ -61,7 +79,32 @@ impl Redactor {
 /// whole string is tried too. Masking part of a path by mistake is the safe
 /// direction.
 fn url_passwords(repository: &str) -> Vec<SecretValue> {
-    todo!()
+    let Some((_, rest)) = repository.split_once("://") else {
+        return Vec::new();
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let mut found: Vec<String> = Vec::new();
+    for candidate in [authority, rest] {
+        let Some((userinfo, _)) = candidate.rsplit_once('@') else {
+            continue;
+        };
+        let Some((user, password)) = userinfo.split_once(':') else {
+            continue;
+        };
+        // A `/` before the `:` puts the `@` in the path, not in a userinfo.
+        if user.contains('/') {
+            continue;
+        }
+        for form in [Some(password.to_owned()), percent_decode(password)]
+            .into_iter()
+            .flatten()
+        {
+            if !found.contains(&form) {
+                found.push(form);
+            }
+        }
+    }
+    found.into_iter().map(SecretValue::new).collect()
 }
 
 /// `None` when `text` isn't valid percent-encoding.
