@@ -150,3 +150,27 @@ pub fn tagged(
     let has = |tags: &[String]| tags.iter().any(|t| t == tag);
     has(&feature.tags) || rule.is_some_and(|r| has(&r.tags)) || has(&scenario.tags)
 }
+
+/// Whether the `--tags` expression given on the command line, if any, picks
+/// a scenario, counting its feature's and rule's tags as cucumber-rs does.
+///
+/// The runners apply it, and `--name`, on top of their own filter. Left to
+/// cucumber-rs, either option replaces that filter, and a runner is handed
+/// scenarios whose steps only the other runner defines.
+pub fn picked_by_cli_tags(
+    tags: Option<&cucumber::gherkin::tagexpr::TagOperation>,
+    feature: &cucumber::gherkin::Feature,
+    rule: Option<&cucumber::gherkin::Rule>,
+    scenario: &cucumber::gherkin::Scenario,
+) -> bool {
+    use cucumber::tag::Ext as _;
+    tags.is_none_or(|tags| {
+        tags.eval(
+            feature
+                .tags
+                .iter()
+                .chain(rule.iter().flat_map(|r| &r.tags))
+                .chain(&scenario.tags),
+        )
+    })
+}

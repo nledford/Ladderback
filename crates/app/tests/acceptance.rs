@@ -128,11 +128,19 @@ async fn main() {
         return;
     }
     let features = concat!(env!("CARGO_MANIFEST_DIR"), "/../../features");
+    // `--name` and `--tags` narrow this runner's scenarios rather than
+    // replace its filter (see `operation_steps::picked_by_cli_tags`).
+    let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
+    let name = cli.re_filter.take();
+    let tags = cli.tags_filter.take();
     Agent::cucumber()
+        .with_cli(cli)
         .fail_on_skipped()
-        .filter_run_and_exit(features, |feature, rule, scenario| {
+        .filter_run_and_exit(features, move |feature, rule, scenario| {
             !operation_steps::tagged(feature, rule, scenario, "e2e")
                 && !operation_steps::tagged(feature, rule, scenario, "ui")
+                && name.as_ref().is_none_or(|re| re.is_match(&scenario.name))
+                && operation_steps::picked_by_cli_tags(tags.as_ref(), feature, rule, scenario)
         })
         .await;
 }
