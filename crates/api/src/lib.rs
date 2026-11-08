@@ -102,9 +102,24 @@ impl IanaZone {
     /// The longest accepted name; the longest in the database has 32 characters.
     pub const MAX_LEN: usize = 64;
 
+    /// A zone name, if `name` has the shape of one: up to [`MAX_LEN`](Self::MAX_LEN)
+    /// characters of `A-Z`, `a-z`, `0-9`, `_`, `+` and `-`, in non-empty
+    /// segments joined by `/`.
     pub fn new(name: impl Into<String>) -> Result<Self, InvalidZone> {
-        let _ = name;
-        todo!()
+        let name = name.into();
+        let shaped = !name.is_empty()
+            && name.len() <= Self::MAX_LEN
+            && name.split('/').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-'))
+            });
+        if shaped {
+            Ok(Self(name))
+        } else {
+            Err(InvalidZone)
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -151,16 +166,41 @@ pub struct ArgSpec {
 
 impl ErrorCode {
     /// The arguments this code's message takes. A producer sends exactly
-    /// these; the catalog tests check that the message uses exactly these.
+    /// these, except that it may leave out an optional one, and the catalog
+    /// tests check that the message reads exactly these. A new code lists its
+    /// own here, so the compiler asks for them.
     pub const fn args(self) -> &'static [ArgSpec] {
-        todo!()
+        match self {
+            Self::EngineExited => &[ArgSpec {
+                name: "exit_code",
+                kind: ArgKind::Text,
+                optional: true,
+            }],
+            Self::ProtocolViolated => &[ArgSpec {
+                name: "transition",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::InvalidJobSpec
+            | Self::OperationFailed
+            | Self::DeadlinePassed
+            | Self::EngineUnavailable
+            | Self::EngineStartTimedOut
+            | Self::EngineExitTimedOut
+            | Self::HostNotAllowed
+            | Self::OriginNotAllowed
+            | Self::JsonRequired
+            | Self::Unknown => &[],
+        }
     }
 }
 
 impl WarningCode {
     /// The arguments this code's message takes (see [`ErrorCode::args`]).
     pub const fn args(self) -> &'static [ArgSpec] {
-        todo!()
+        match self {
+            Self::SourceUnreadable | Self::Unknown => &[],
+        }
     }
 }
 
