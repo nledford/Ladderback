@@ -46,7 +46,9 @@ function startServer() {
         return;
       }
       output += chunk;
-      const match = output.match(/listening on (http:\/\/\S+)/);
+      // Match only a whole line: stderr arrives in chunks, and a chunk can end
+      // inside the address ("http://127.0.0."), which `\S+` would accept.
+      const match = output.match(/listening on (http:\/\/\S+)\r?\n/);
       if (match) {
         listening = true;
         resolve({ child, url: match[1] });
