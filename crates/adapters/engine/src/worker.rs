@@ -381,6 +381,64 @@ mod tests {
         assert!(detail.is_some());
     }
 
+    /// The daemon gives a worker a start timeout to take its job, and opening
+    /// a repository can take longer than that: the worker says it has the job
+    /// before it opens anything, in a line the daemon counts as proof of
+    /// life and logs at the debug level.
+    #[test]
+    fn a_worker_says_it_took_its_job_before_it_starts_the_work() {
+        let (events, capture) = capture();
+        let input = serde_json::to_vec(&fake_spec(None, 1)).unwrap();
+        run_events(input.as_slice(), events, 42, Process::real()).unwrap();
+        let events = capture.parsed();
+        let [
+            WorkerEvent::Log { level, .. },
+            WorkerEvent::Started { .. },
+            ..,
+        ] = events.as_slice()
+        else {
+            panic!("expected a log line, then Started: {events:?}");
+        };
+        assert_eq!(*level, Level::Debug);
+    }
+
+    /// The line comes before the repository is opened, so that a job whose
+    /// opening never ends has sent it: here the opening fails, and the line
+    /// is still the first of the stream.
+    #[test]
+    fn a_worker_says_it_took_its_job_before_it_opens_the_repository() {
+        let spec = JobSpec {
+            op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+            cache_dir: None,
+            watchdog_interval_ms: 10,
+            job: JobKind::Identify(RepositorySpec {
+                repository: "/nonexistent/repo".to_owned(),
+                password: SecretValue::new("hunter2"),
+                options: Default::default(),
+                secrets: Vec::new(),
+            }),
+        };
+        let (events, capture) = capture();
+        let input = serde_json::to_vec(&spec).unwrap();
+        let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
+        assert_eq!(exit.code(), 1);
+        let events = capture.parsed();
+        assert!(
+            matches!(
+                events.first(),
+                Some(WorkerEvent::Log {
+                    level: Level::Debug,
+                    ..
+                })
+            ),
+            "the stream doesn't start with the log line: {events:?}"
+        );
+        assert!(
+            matches!(events.last(), Some(WorkerEvent::Failed { .. })),
+            "{events:?}"
+        );
+    }
+
     #[test]
     fn every_event_is_one_line_of_json() {
         let spec = fake_spec(None, 2);
@@ -389,7 +447,10 @@ mod tests {
         let exit = run_events(input.as_slice(), events, 42, Process::real()).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
         let events = capture.parsed();
-        let Some(WorkerEvent::Started { op_id, pid, .. }) = events.first() else {
+        let Some(WorkerEvent::Started { op_id, pid, .. }) = events
+            .iter()
+            .find(|event| !matches!(event, WorkerEvent::Log { .. }))
+        else {
             panic!("the stream doesn't start with Started: {events:?}");
         };
         assert_eq!((*op_id, *pid), (spec.op_id, 42));
@@ -418,7 +479,11 @@ mod tests {
             Ok(crate::job::exit_code::DEADLINE_PASSED)
         );
         // The fake job ran on after the injected "exit"; none of it was reported.
-        let events = capture.parsed();
+        let events: Vec<_> = capture
+            .parsed()
+            .into_iter()
+            .filter(|event| !matches!(event, WorkerEvent::Log { .. }))
+            .collect();
         let [
             WorkerEvent::Started { index_read_at, .. },
             WorkerEvent::Failed { code, .. },
