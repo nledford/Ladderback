@@ -1,0 +1,86 @@
+# The red-first check (docs/design/development.md §13.1) in a workflow of its
+# own. It depends on a pull request's labels, and a label change must re-run
+# this check alone, not every job in ci.yml.
+#
+# Each run builds the base tree and then the test: commit's tree, which starts
+# from a copy of the base tree's build (scripts/red-first.mjs). The base tree's
+# build is cached per merge base, so a later run of the same pull request
+# restores it and builds the workspace crates again but not the dependencies
+# (the trees are checked out afresh, so their sources are always newer). Pull
+# requests can't read each other's caches, so the first run of a pull request
+# is cold.
+name: Red-first
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: red-first-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same build profile as ci.yml, see the comment there.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  red-first:
+    # This name is a required status check (ruleset "Protect main"): don't rename it.
+    name: Red-first check
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'behaviour')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The check reads the PR's own commits, not the merge commit.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
+      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,trunk
+      - run: npm ci && npx playwright install --with-deps chromium
+        working-directory: ui-tests
+      # The parts of the cache key that aren't a file hash. rust-toolchain.toml
+      # names a channel, not a version, so the toolchain is identified by what
+      # rustc reports about itself.
+      - id: key
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          rustc -vV > "$RUNNER_TEMP/rustc-version"
+          merge_base=$(git merge-base "origin/$BASE_REF" HEAD)
+          echo "toolchain=$(sha256sum "$RUNNER_TEMP/rustc-version" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "merge-base=$merge_base" >> "$GITHUB_OUTPUT"
+      # Restore and save are separate steps, so the base build is saved even
+      # when the check goes red: a red check is the expected result on a good
+      # test: commit, and rebuilding the base on the next push would be waste.
+      - id: base-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/red-first/base
+          key: red-first-base-${{ runner.os }}-${{ steps.key.outputs.toolchain }}-${{ hashFiles('Cargo.lock') }}-${{ steps.key.outputs.merge-base }}
+          # After a rebase the merge base changes but most of the build is still good.
+          restore-keys: |
+            red-first-base-${{ runner.os }}-${{ steps.key.outputs.toolchain }}-${{ hashFiles('Cargo.lock') }}-
+      - run: just red-first "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      # Skipped when an earlier step failed before the restore, so there is no key.
+      - if: ${{ !cancelled() && steps.base-cache.outcome == 'success' && steps.base-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/red-first/base
+          key: ${{ steps.base-cache.outputs.cache-primary-key }}
