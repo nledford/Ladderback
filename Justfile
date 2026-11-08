@@ -44,20 +44,21 @@ lint:
 architecture:
     scripts/check-architecture.sh
 
-# Run unit, contract, acceptance and @e2e tests; extra arguments go to cargo test.
+# Run unit, contract, acceptance and @e2e tests; extra arguments go to cargo
+# test. Tests that skip themselves (`testkit::skip!`) are listed at the end.
 [group('test')]
 test *args='':
-    cargo test --workspace {{ args }}
+    scripts/with-skip-log.sh cargo test --workspace {{ args }}
 
 # Run the acceptance scenarios (fakes and a fake clock) only.
 [group('test')]
 test-acceptance *args='':
-    cargo test --package app --test acceptance -- {{ args }}
+    scripts/with-skip-log.sh cargo test --package app --test acceptance -- {{ args }}
 
 # Run the @e2e scenarios against the real binary only.
 [group('test')]
 test-e2e *args='':
-    cargo test --test e2e -- {{ args }}
+    scripts/with-skip-log.sh cargo test --test e2e -- {{ args }}
 
 # Build the web UI into crates/web/dist, where the binary embeds it from.
 [group('build')]

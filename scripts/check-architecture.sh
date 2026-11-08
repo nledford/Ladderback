@@ -4,7 +4,8 @@
 #     runtime, I/O, engine or presentation crates, with any feature enabled;
 #   - `domain` builds for wasm32-unknown-unknown;
 #   - the inner rings share one banned-call list (clippy.toml).
-# Dev-dependencies are excluded, so tests may use a runtime.
+# Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
+# support) may be a dev-dependency only.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -34,6 +35,18 @@ check() {
 check domain
 check domain --target wasm32-unknown-unknown
 check app
+
+# testkit is test support: a dev-dependency only. `cargo tree --invert` lists
+# the crates that depend on it through normal or build edges, which includes
+# testkit itself and must include nothing else.
+testkit_users=$(cargo tree --workspace --all-features --edges normal,build --invert testkit --prefix none --format '{p}' | awk '{print $1}' | sort -u | grep -vx testkit || true)
+if [[ -n $testkit_users ]]; then
+  echo "error: testkit is a dev-dependency only, but these depend on it:" >&2
+  sed 's/^/  /' <<<"$testkit_users" >&2
+  status=1
+else
+  echo "ok: testkit is a dev-dependency only"
+fi
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   echo "error: crates/domain/clippy.toml and crates/app/clippy.toml differ" >&2
