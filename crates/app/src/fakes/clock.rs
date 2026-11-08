@@ -61,6 +61,13 @@ impl FakeClock {
         state.move_to(to);
     }
 
+    /// How many sleepers are waiting for time to move. A test driving a
+    /// manual clock waits for one before each [`advance`](Self::advance):
+    /// moving time before the sleeper registers would skip its deadline.
+    pub fn sleepers(&self) -> usize {
+        self.lock().sleepers.len()
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         // A panic while holding this lock leaves plain data; keep using it.
         self.state.lock().unwrap_or_else(|e| e.into_inner())
