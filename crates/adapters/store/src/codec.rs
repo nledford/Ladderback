@@ -11,6 +11,7 @@ use domain::execution::{
     FailureReason, OperationKind, OperationStatus, Transition, Trigger, WarningKind,
 };
 
+use crate::error_args;
 use crate::report::shown;
 
 pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
@@ -161,7 +162,7 @@ pub(crate) fn encode_failure(
     };
     Ok(FailureColumns {
         code,
-        args: serde_json::to_string(&args)?,
+        args: error_args::encode(&args)?,
         detail,
     })
 }
@@ -187,8 +188,7 @@ pub(crate) fn decode_failure(
 ) -> Result<FailureReason, BadColumn> {
     let code = code.ok_or_else(|| bad("error_code", "is NULL on a failed operation"))?;
     let args = args.ok_or_else(|| bad("error_args", "is NULL on a failed operation"))?;
-    let args: Vec<(String, MsgArg)> = serde_json::from_str(args)
-        .map_err(|error| bad("error_args", format!("is not a list of pairs: {error}")))?;
+    let args = error_args::decode(args).map_err(|error| bad("error_args", error.to_string()))?;
     let detail = || {
         detail
             .map(str::to_owned)

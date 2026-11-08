@@ -16,7 +16,13 @@
 //! Reading ignores fields it doesn't know, so a newer version may add one; a
 //! `type` this version never wrote, or a value of the wrong shape, is an error.
 
-use api::MsgArg;
+use std::borrow::Cow;
+use std::fmt::{self, Display, Formatter};
+
+use api::{IanaZone, MsgArg};
+use serde::{Deserialize, Serialize, Serializer};
+
+use crate::report::shown;
 
 /// Why a stored list of arguments can't be read.
 #[derive(Debug)]
@@ -28,20 +34,107 @@ pub(crate) enum ArgsError {
     BadZone { name: String },
 }
 
-impl std::fmt::Display for ArgsError {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+impl Display for ArgsError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotPairs(error) => write!(f, "is not a list of pairs: {error}"),
+            Self::BadZone { name } => write!(
+                f,
+                "has a timestamp in {}, which is not a time-zone name",
+                shown(name)
+            ),
+        }
+    }
+}
+
+/// One argument as the column spells it. What each variant stores is its
+/// `rename`, a spelling of its own that doesn't change with the variant's
+/// name, with `MsgArg`'s or with anything else outside this module.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
+enum StoredArg<'a> {
+    #[serde(rename = "count")]
+    Count(u64),
+    #[serde(rename = "bytes")]
+    Bytes(u64),
+    #[serde(rename = "duration-ms")]
+    DurationMs(u64),
+    #[serde(rename = "timestamp")]
+    Timestamp {
+        utc_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<Cow<'a, str>>,
+    },
+    #[serde(rename = "text")]
+    Text(Cow<'a, str>),
+}
+
+impl<'a> From<&'a MsgArg> for StoredArg<'a> {
+    /// Names every variant, so a new `MsgArg` doesn't compile until it has a
+    /// spelling here.
+    fn from(arg: &'a MsgArg) -> Self {
+        match arg {
+            MsgArg::Count(count) => Self::Count(*count),
+            MsgArg::Bytes(bytes) => Self::Bytes(*bytes),
+            MsgArg::DurationMs(millis) => Self::DurationMs(*millis),
+            MsgArg::Timestamp { utc_ms, zone } => Self::Timestamp {
+                utc_ms: *utc_ms,
+                zone: zone.as_ref().map(|zone| Cow::Borrowed(zone.as_str())),
+            },
+            MsgArg::Text(text) => Self::Text(Cow::Borrowed(text)),
+        }
+    }
+}
+
+impl TryFrom<StoredArg<'_>> for MsgArg {
+    type Error = ArgsError;
+
+    fn try_from(arg: StoredArg<'_>) -> Result<Self, ArgsError> {
+        Ok(match arg {
+            StoredArg::Count(count) => Self::Count(count),
+            StoredArg::Bytes(bytes) => Self::Bytes(bytes),
+            StoredArg::DurationMs(millis) => Self::DurationMs(millis),
+            StoredArg::Timestamp { utc_ms, zone } => Self::Timestamp {
+                utc_ms,
+                zone: zone
+                    .map(|name| {
+                        IanaZone::new(&*name).map_err(|_| ArgsError::BadZone {
+                            name: name.into_owned(),
+                        })
+                    })
+                    .transpose()?,
+            },
+            StoredArg::Text(text) => Self::Text(text.into_owned()),
+        })
+    }
+}
+
+/// Arguments written as the column's list of pairs, without a copy of them.
+struct Pairs<'a>(&'a [(&'a str, MsgArg)]);
+
+impl Serialize for Pairs<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(
+            self.0
+                .iter()
+                .map(|(name, arg)| (name, StoredArg::from(arg))),
+        )
     }
 }
 
 /// The column's text for `args`, in order.
-pub(crate) fn encode(_args: &[(&str, MsgArg)]) -> Result<String, serde_json::Error> {
-    todo!()
+pub(crate) fn encode(args: &[(&str, MsgArg)]) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&Pairs(args))
 }
 
 /// The arguments the column's `text` holds, in order.
-pub(crate) fn decode(_text: &str) -> Result<Vec<(String, MsgArg)>, ArgsError> {
-    todo!()
+pub(crate) fn decode(text: &str) -> Result<Vec<(String, MsgArg)>, ArgsError> {
+    let stored: Vec<(String, StoredArg<'_>)> =
+        serde_json::from_str(text).map_err(ArgsError::NotPairs)?;
+    stored
+        .into_iter()
+        .map(|(name, arg)| Ok((name, MsgArg::try_from(arg)?)))
+        .collect()
 }
 
 #[cfg(test)]
