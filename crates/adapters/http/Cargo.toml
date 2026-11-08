@@ -1,0 +1,24 @@
+[package]
+name = "http-adapter"
+description = "HTTP adapter: serves the embedded web UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "http_adapter"
+
+[dependencies]
+axum.workspace = true
+mime_guess.workspace = true
+rust-embed.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower.workspace = true
+
+[lints]
+workspace = true

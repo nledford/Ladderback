@@ -1,0 +1,15 @@
+[package]
+name = "web"
+description = "Steading's web UI: a Leptos client-side app built with trunk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+console_error_panic_hook.workspace = true
+leptos.workspace = true
+
+[lints]
+workspace = true

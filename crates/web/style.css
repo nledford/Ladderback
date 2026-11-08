@@ -1,0 +1,104 @@
+/*
+ * Base styles for the M0 page skeleton. Text contrast (4.5:1) is checked by
+ * axe-core, and the focus ring (3:1 against its background, 2 px or more) by
+ * the journey keyboard helper, in light, dark, forced-colors and
+ * more-contrast runs.
+ * Logical properties only, so right-to-left layouts work (§8.4).
+ */
+
+:root {
+  --bg: #ffffff;
+  --fg: #1b1f24;
+  --muted: #4b5563;
+  --accent: #1d4ed8;
+  --focus: #1d4ed8;
+  --surface: #f3f4f6;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418;
+    --fg: #e8eaed;
+    --muted: #a7b0bc;
+    --accent: #8ab4f8;
+    --focus: #8ab4f8;
+    --surface: #1d2229;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  /* A long word wraps instead of overflowing at 320 px with large text. */
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+.skip-link {
+  position: absolute;
+  inset-inline-start: 0.5rem;
+  inset-block-start: -10rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  inset-block-start: 0.5rem;
+}
+
+.site-header {
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  background: var(--surface);
+}
+
+.brand {
+  margin: 0;
+  font-weight: 600;
+}
+
+main {
+  max-inline-size: 60rem;
+  margin-inline: auto;
+  padding: 1rem;
+}
+
+main:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
