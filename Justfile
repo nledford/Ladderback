@@ -103,10 +103,10 @@ build: web
 serve: build
     cargo run -- serve
 
-# Run the @ui scenarios in Chromium against a fresh build. This calls the
-# cucumber-js that `just setup` installs by its path: `npx` (even
+# Calls the cucumber-js that `just setup` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
 # copy of it, when the local one is missing, and that package exits 0.
+[doc('Run the @ui scenarios in Chromium against a fresh build.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: build
