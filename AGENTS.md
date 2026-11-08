@@ -4,7 +4,15 @@ Guidance for coding agents working on Steading, a self-hosted backup manager for
 
 ## Status
 
-Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog. Next is M1b ([docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones)).
+Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog.
+
+M1b (single-machine MVP, [docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones)) is in progress. In place so far:
+- secret sources, `${…}` substitution and redaction (§10.2);
+- the operation log and history in SQLite;
+- request checks (§10.1);
+- the `l10n` core with the `en-US` catalog and error codes rendered through it (§8.4).
+
+The rest of the M1b row is still to come; follow-up work is tracked as GitHub issues.
 
 ## Commands
 
