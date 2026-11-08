@@ -14,12 +14,14 @@ use async_trait::async_trait;
 use domain::OperationId;
 use domain::execution::{FailureReason, Warning, WarningKind};
 use futures::stream::{self, BoxStream, StreamExt};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
 
 use crate::job::{
-    FakeEndSpec, FakeJobSpec, FakeWarning, JobKind, JobSpec, OpResult, ProgressKind, WorkerEvent,
+    FakeEndSpec, FakeJobSpec, FakeWarning, JobKind, JobSpec, MAX_MESSAGE_BYTES, OpResult,
+    ProgressKind, WorkerEvent,
 };
+use crate::line::{Line, read_line};
 
 /// Runs each operation in a new worker process: `program args…`, normally
 /// `steading worker`. Dropping an operation's event stream before its result
@@ -53,6 +55,12 @@ impl Engine for WorkerEngine {
             job: job_kind(job)?,
         })
         .map_err(|e| failed_to_start(&self.program, e))?;
+        // The worker refuses a longer spec, so don't start one to be refused.
+        if spec.len() > MAX_MESSAGE_BYTES {
+            return Err(EngineError {
+                detail: format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"),
+            });
+        }
         let mut child = Command::new(&self.program)
             .args(&self.args)
             .stdin(Stdio::piped())
@@ -60,17 +68,24 @@ impl Engine for WorkerEngine {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| failed_to_start(&self.program, e))?;
-        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| failed_to_start(&self.program, "stdin is not piped"))?;
         stdin
             .write_all(&spec)
             .await
             .map_err(|e| failed_to_start(&self.program, e))?;
         // Closing stdin tells the worker the job spec is complete.
         drop(stdin);
-        let stdout = child.stdout.take().expect("stdout is piped");
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| failed_to_start(&self.program, "stdout is not piped"))?;
         let reading = Reading {
             child: Some(child),
-            lines: BufReader::new(stdout).lines(),
+            stdout: BufReader::new(stdout),
+            line: Vec::new(),
             done: false,
         };
         Ok(stream::unfold(reading, Reading::next).boxed())
@@ -90,7 +105,9 @@ const AFTER_RESULT_GRACE: Duration = Duration::from_secs(10);
 struct Reading {
     /// `None` once the worker has been handed to a reaper.
     child: Option<Child>,
-    lines: Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
+    /// The line being read, reused so one buffer serves the whole job.
+    line: Vec<u8>,
     done: bool,
 }
 
@@ -100,14 +117,18 @@ impl Reading {
             return None;
         }
         loop {
-            let line = match self.lines.next_line().await {
-                Ok(Some(line)) => line,
-                Ok(None) => return Some((self.exited().await, self)),
+            match read_line(&mut self.stdout, &mut self.line).await {
+                Ok(Line::Read) => {}
+                Ok(Line::End) => return Some((self.exited().await, self)),
+                Ok(Line::TooLong) => {
+                    let detail = format!("worker output line exceeds {MAX_MESSAGE_BYTES} bytes");
+                    return Some((self.broken(detail), self));
+                }
                 Err(error) => {
                     return Some((self.broken(format!("reading worker output: {error}")), self));
                 }
-            };
-            let event = match serde_json::from_str::<WorkerEvent>(&line) {
+            }
+            let event = match serde_json::from_slice::<WorkerEvent>(&self.line) {
                 Ok(event) => event,
                 Err(error) => {
                     return Some((
@@ -399,6 +420,31 @@ mod tests {
             error.detail.contains(&MAX_MESSAGE_BYTES.to_string()),
             "the error should name the cap: {}",
             error.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn an_event_line_of_exactly_the_cap_is_read() {
+        let head =
+            r#"{"event":"warning","item":null,"during":"backup","code":"unknown","detail":""#;
+        let tail = r#""}"#;
+        let detail_len = MAX_MESSAGE_BYTES - head.len() - tail.len();
+        let result =
+            serde_json::to_string(&WorkerEvent::Result(OpResult::Fake { steps_completed: 0 }))
+                .unwrap();
+        let script = format!(
+            "cat >/dev/null; printf '%s' '{head}'; head -c {detail_len} /dev/zero | tr '\\0' x; \
+             echo '{tail}'; echo '{result}'"
+        );
+        let events = events_from(&script).await;
+        assert!(
+            matches!(
+                events.as_slice(),
+                [EngineEvent::Warning(warning), EngineEvent::Succeeded(_)]
+                    if warning.detail.len() == detail_len
+            ),
+            "unexpected events: {} events",
+            events.len()
         );
     }
 }

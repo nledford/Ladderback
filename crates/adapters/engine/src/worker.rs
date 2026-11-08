@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use api::ErrorCode;
 
-use crate::job::{FakeEndSpec, FakeJobSpec, JobKind, JobSpec, OpResult, ProgressKind, WorkerEvent};
+use crate::job::{
+    FakeEndSpec, FakeJobSpec, JobKind, JobSpec, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult,
+    ProgressKind, WorkerEvent,
+};
 
 /// How the worker process should exit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,16 +31,25 @@ impl Exit {
     }
 }
 
+/// Reads the job spec from `input`: at most [`MAX_MESSAGE_BYTES`] of it, so a
+/// peer that never stops writing can't grow the worker's memory without bound.
+fn read_spec(input: impl Read) -> Result<JobSpec, String> {
+    let mut raw = Vec::new();
+    input
+        .take(MAX_MESSAGE_READ)
+        .read_to_end(&mut raw)
+        .map_err(|e| e.to_string())?;
+    if raw.len() > MAX_MESSAGE_BYTES {
+        return Err(format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"));
+    }
+    serde_json::from_slice(&raw).map_err(|e| e.to_string())
+}
+
 /// Runs the job read from `input`, writing events to `output`. Fails only if
 /// `output` can't be written, for example because the daemon went away.
-pub fn run(mut input: impl Read, output: impl Write, pid: u32) -> io::Result<Exit> {
+pub fn run(input: impl Read, output: impl Write, pid: u32) -> io::Result<Exit> {
     let mut out = Events(output);
-    let mut raw = String::new();
-    let spec = match input
-        .read_to_string(&mut raw)
-        .map_err(|e| e.to_string())
-        .and_then(|_| serde_json::from_str::<JobSpec>(&raw).map_err(|e| e.to_string()))
-    {
+    let spec = match read_spec(input) {
         Ok(spec) => spec,
         Err(detail) => {
             out.emit(&WorkerEvent::Failed {
@@ -208,6 +220,15 @@ mod tests {
         let exit = run(input.as_slice(), &mut output, 42).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&output);
+    }
+
+    #[test]
+    fn a_job_spec_of_exactly_the_cap_is_accepted() {
+        let mut input = a_valid_spec();
+        input.resize(MAX_MESSAGE_BYTES, b' ');
+        let mut output = Vec::new();
+        let exit = run(input.as_slice(), &mut output, 42).unwrap();
+        assert_eq!(exit, Exit::Reported { failed: false });
     }
 
     /// Serves up to 64 MiB of spaces and counts how much was asked for.

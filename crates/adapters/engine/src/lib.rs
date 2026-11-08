@@ -9,6 +9,7 @@
 
 mod client;
 pub mod job;
+mod line;
 pub mod worker;
 
 pub use client::WorkerEngine;

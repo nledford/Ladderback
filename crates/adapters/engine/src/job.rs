@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 /// message past the cap fails the job.
 pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
 
+/// How much of one message to read: one byte past the cap, so a message of
+/// exactly [`MAX_MESSAGE_BYTES`] is told from one that is too long.
+pub(crate) const MAX_MESSAGE_READ: u64 = MAX_MESSAGE_BYTES as u64 + 1;
+
 /// The one job a worker runs, read from its stdin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
