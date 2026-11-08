@@ -110,6 +110,17 @@ Several agents may work on the repository at once (§13.5). Each one:
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
 
+## Task tracking
+
+The session that steers the work (the main session, which starts the other agents) keeps a task queue in a Markdown file outside the repository: `~/.local/state/steading-scratch/queue.md`.
+
+- **Sections:** Now, Next, Waiting and Done.
+- **Items:** one item is one maintainer decision or one agent run, and every open item says `running` or `blocked-on: <what>`.
+- **When to read it:** at the start of every session and after every context compaction, before acting.
+- **Keeping it in sync with the to-do list:** the session's to-do list mirrors the queue's Now and Next items, with the same wording and order. Update both in the same step whenever a task starts, finishes, is added, is reordered or gets blocked. Waiting and Done items live only in the queue.
+- **Product follow-ups are GitHub issues,** not queue items. The queue links them as `#N`, and the pull request that fixes one says `Closes #N`.
+- **Other agents don't edit the queue.** They report what they finished and what they deferred, and the main session updates it.
+
 ## Conventions
 
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
