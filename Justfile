@@ -7,7 +7,7 @@ root := justfile_directory()
 
 # The crates mutation testing gates (technical design §13.1). Add a crate here
 # when it lands, so `mutants` and `mutants-all` both cover it.
-mutants_packages := "--package domain --package app --package api"
+mutants_packages := "--package domain --package app --package api --package l10n"
 
 # List available workflows.
 [group('help')]
