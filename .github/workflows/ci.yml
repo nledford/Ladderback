@@ -21,6 +21,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI builds are cached and thrown away, never debugged in place. Incremental
+  # compilation only adds files to the cache, and full debug info makes the
+  # target dir bigger without helping a test log: line tables keep the file and
+  # line numbers in backtraces. The mbx action sets neither of these.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   check:
