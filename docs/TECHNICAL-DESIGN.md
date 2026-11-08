@@ -1,6 +1,6 @@
-# Steading — Design
+# Steading — Technical design
 
-> **Status:** Draft v0.4 · 2026-11-08
+> **Status:** Draft v0.5 · 2026-11-08
 > **Name:** Steading (binary `steading`). A steading is a farmhouse with its outbuildings: the hub and its agents.
 
 A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a web UI for connecting repositories, defining backup plans and schedules, and watching backup status and errors across several computers. Think "[Backrest](https://github.com/garethgeorge/backrest), but built on `rustic_core`". It is written from scratch in Rust, and the frontend is written in Leptos.
@@ -23,24 +23,15 @@ Every later section serves these. Each one has a single enforcing component and 
 
 ---
 
-## 1. Goals and non-goals
+## 1. Scope
 
-### Goals
+Users, purpose, positioning and product boundaries live in [PRODUCT.md](../PRODUCT.md). This document covers how Steading delivers them. Engineering consequences of those boundaries:
 
-1. **Plans and schedules.** Define what to back up, from which machine, into which repository, how often, and how long to keep it.
-2. **One place to see every machine.** Show status, live progress, history, warnings and errors for every connected computer.
-3. **Lock-free by construction.** Use rustic's lock-free design. Backups on many hosts and a prune can overlap safely within the limits in §2.2. Exactly one place runs `forget`/`prune`/`check` for each repository (I1).
-4. **Compatible with rustic profiles.** Import existing rustic TOML profiles, and export any plan back to a profile, so users can always drop back to the `rustic` CLI. No lock-in.
-5. **Single self-contained binary.** The same program runs as daemon, hub, worker and CLI, with the web UI embedded. It runs headless on servers and as a user service on desktops and laptops.
-6. **Linux and macOS only.** That covers Bazzite desktops, Linux servers and a MacBook. Windows is out of scope (see §1 non-goals).
-
-### Non-goals (for v1)
-
-- Not a general rustic GUI covering every command (`copy`, `merge`, `rewrite`, `repair`, `webdav`, `mount`). Those stay CLI-only at first.
-- No support for restic repositories with restic doing maintenance. See §7.3 for why restic must never prune a repository this tool manages.
-- No multi-tenant SaaS and no multiple users. This is one owner and their machines.
-- No mobile app. A responsive web UI is enough.
-- **No Windows support.** Code stays portable where it costs nothing: paths via `std::path`/`camino`, never hard-coded `/`; platform code isolated in the `platform` crate. That way Windows could be added later without a rewrite, but it isn't designed, built or tested for.
+- **Exactly one place runs `forget`/`prune`/`check` per repository** (I1). Backups on many hosts and a prune overlap safely within the limits in §2.2.
+- **Profile compatibility is two-way:** import (§6.2) and export, checked by a golden test against the `rustic` CLI.
+- **One binary** runs as daemon, hub, worker and CLI, with the web UI embedded (§12).
+- **No Windows, but no needless barriers to it.** Paths go through `std::path`/`camino`, never a hard-coded `/`, and platform code is isolated in `adapters/platform`. Windows could be added later without a rewrite, but it isn't designed, built or tested for.
+- **v1 command scope:** `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only. Restic must never maintain a Steading-managed repository (§7.3).
 
 ### Relationship to Backrest
 
