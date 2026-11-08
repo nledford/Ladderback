@@ -11,9 +11,13 @@
 # is cold.
 name: Red-first
 
+# No `opened`: a pull request opened with its labels already set sends
+# `labeled` too, so `opened` only started a duplicate run that the
+# concurrency group cancelled, showing as a failed check. A pull request opened
+# without the label needs no run, and labelling it later sends `labeled`.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
