@@ -59,7 +59,7 @@ fn expected(saved: &[(Operation, Option<EngineResult>)]) -> (Vec<OperationDetail
             warnings: op.warnings().to_vec(),
         })
         .collect();
-    details.sort_by(|a, b| b.record.id.cmp(&a.record.id));
+    details.sort_by_key(|detail| std::cmp::Reverse(detail.record.id));
     let page = HistoryPage {
         operations: details.iter().map(|d| d.record.clone()).collect(),
         next: None,
