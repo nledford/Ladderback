@@ -271,10 +271,10 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 
 - `domain` has no I/O, no async and no ambient time or randomness. It may use `serde`, `thiserror`, `uuid` (without `v4`/`v7` features), `jiff` (with `tzdb-bundle-always`, so time zones validate in the browser) and the cron crate with its time library (`croner` and `chrono`; M0 confirms both build for `wasm32`).
 - `app` depends only on `domain`, `async-trait` and `futures`.
-- **Banned crates:** a CI step runs `cargo tree -e normal,build --prefix none` on `domain` (also with `--target wasm32-unknown-unknown`) and on `app`, and fails if `tokio`, `sqlx`, `axum`, `hyper`, `reqwest`, `rustic_core` or `rustic_backend` appears. Dev-dependencies are excluded, so tests may use a runtime.
+- **Banned crates:** a CI step runs `cargo tree -e normal,build --prefix none` on `domain` (also with `--target wasm32-unknown-unknown`) and on `app`, and fails if `tokio`, `sqlx`, `axum`, `hyper`, `reqwest`, `rustic_core`, `rustic_backend`, `fluent-bundle`, `fluent-langneg`, `unic-langid` or any `icu_*` crate appears. Dev-dependencies are excluded, so tests may use a runtime.
 - **Banned calls:** `clippy.toml` `disallowed-methods` / `disallowed-types` in `domain` and `app` forbid `std::fs`, `std::env`, `std::process`, `std::net`, `SystemTime::now`, `Instant::now`, `jiff::Timestamp::now`, `jiff::Zoned::now`, `Uuid::now_v7` and `rand`. Time and randomness come from `Clock` and `Random`.
 - **wasm build:** CI builds `domain` for `wasm32-unknown-unknown`. This proves the UI can reuse its validation (schedules, retention syntax); purity is enforced by the two checks above, not by the wasm build.
-- Adapters depend on `app` and `domain`, never on each other. Only the composition root (`src/main.rs`) knows every adapter and wires them per role: agent, hub, worker, CLI.
+- Adapters depend on `app` and `domain`, never on each other. Only the composition root (`src/main.rs`) knows every adapter and wires them per role: agent, hub, worker, CLI. `l10n` is a presentation library outside the rings, used by `web`, `adapters/notify` and the CLI (§8.4).
 - The worker binary is an adapter: it maps a `JobSpec` onto `rustic_core` calls and reports events. It makes no policy decisions: deadlines, snapshot IDs to delete and retag targets all arrive in the `JobSpec`. Its watchdog is a thin loop that applies the `Deadline` rule from `domain`.
 
 ---
@@ -314,10 +314,10 @@ enum WorkerEvent {
     ProgressInc { key: u32, inc: u64 },    // coalesced: at most ~4 msgs/s per key
     ProgressTitle { key: u32, title: String },
     ProgressFinish { key: u32 },
-    Warning { item: Option<String>, during: String, message: String }, // from Progress::error
-    Log { level: Level, message: String },
+    Warning { item: Option<String>, during: String, code: WarningCode, detail: String }, // from Progress::error; detail = rustic's text
+    Log { level: Level, message: String },   // logs are never localized (§8.4)
     Result(OpResult), // BackupSummary | ForgetSummary | PruneStats | CheckReport | …
-    Failed { error: String, kind: ErrorKind },
+    Failed { code: ErrorCode, args: Vec<(String, MsgArg)>, detail: Option<String> }, // codes from `api` (§8.4)
 }
 ```
 
@@ -394,6 +394,7 @@ hostname = "ogc-mbp-2021"        # defaults to system hostname; must be unique o
 concurrency = 1
 nice = 10
 allow-hub-restore = false        # §10.4
+locale = "en-US"                 # notification text (§8.4); defaults to the POSIX locale, then en-US
 
 [hub]                            # optional
 url = "https://hub.example.lan:9899"
@@ -595,6 +596,7 @@ UI kit: plain Leptos plus Tailwind (with the `trunk` Tailwind hook) or a small h
 | Crypto / identity | `ed25519-dalek`, `rustls` |
 | Secrets | `keyring` (macOS Keychain, Secret Service on Linux) |
 | Notifications | `reqwest` (webhooks, ntfy, Gotify, healthchecks.io), `lettre` (SMTP) |
+| Localization | `fluent-bundle`, `fluent-langneg`, `unic-langid`; `icu` (ICU4X) for dates and numbers in daemon-rendered text (§8.4) |
 | CLI | `clap` |
 
 The git dependency means Steading can't be published to crates.io until it moves to a release. Distribution doesn't depend on crates.io (§12).
@@ -612,6 +614,9 @@ steading/
 │  │                          # (feature "fakes"); tests/acceptance.rs runs non-@e2e scenarios
 │  ├─ api/                    # wasm-safe DTOs: REST, UiEvent, sync protocol (the published language)
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
+│  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,
+│  │                          # browser-intl, pseudo); build.rs generates message IDs from en-US
+│  │  └─ locales/<tag>/       # common.ftl, ui.ftl, notify.ftl, cli.ftl (en-US is the source locale)
 │  └─ adapters/
 │     ├─ engine/              # rustic_core + rustic_backend: worker main, engine::job (JobSpec, WorkerEvent),
 │     │                       # EventProgressBars, Retention via ForgetGroups, option mapping + parity tests
@@ -633,6 +638,81 @@ steading/
 
 `adapters/engine` is the only crate that depends on `rustic_core`, which contains the impact of its pre-1.0 API churn. `api` compiles to `wasm32` and never depends on `rustic_core` or an adapter; where the UI needs a domain value it either reuses `domain` (also wasm-safe) or defines a DTO, with a round-trip test per DTO. `JobSpec` and `WorkerEvent` only travel between the daemon and the worker, both of which link `adapters/engine`, so they live in `engine::job`. They reuse the serde-capable core types and carry Steading's own serde mirrors of the rest (`PruneOptions`, `CheckOptions`, `RestoreOptions`, `LsOptions`, `CheckResults`). The engine adapter translates `WorkerEvent` into `app`'s `EngineEvent`.
 
+### 8.4 Internationalization and localization (Project Fluent)
+
+**Scope.** v1 ships **American English (`en-US`) only**, but it is localization-ready from the first user-facing string. Adding a language touches only the `l10n` crate: drop `.ftl` files into `locales/<tag>/`. Its `build.rs` regenerates the locale table and the embedded catalogs, and the ICU4X data, if trimmed to the shipped locales, is regenerated with them. Retrofitting this after the UI exists would mean touching every view, so it starts in M1b with the first real screen.
+
+| Text | Localized? |
+|---|---|
+| Web UI: labels, messages, errors, `aria-*` text, page titles | Yes, in the browser's negotiated locale |
+| Default notification text (ntfy, Gotify, Discord/Slack, email) | Yes, in the configured locale |
+| Steading's own CLI messages and errors | Yes, from the POSIX locale. `clap`'s generated help and usage errors stay English |
+| The static `index.html` shown before the wasm app loads | No: a minimal `lang="en"` loading text, replaced on startup |
+| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, exported rustic profiles | **Never.** These are machine-facing or grep targets |
+| Text from rustic itself (warning and error details) | Shown verbatim, in English, inside a localized frame (`backup-failed = Backup failed: { $detail }`), marked `lang="en"` in the UI |
+| User-written notification templates (§11) | Never; the user's own words |
+
+**Errors cross the hexagon as codes, not sentences.**
+
+- `domain` and `app` return typed errors and outcomes (`Failed { reason: DeadlinePassed }`, `ClaimRejected { owner }`). No English string is produced inside the core, so the core needs no locale and its tests never assert on wording.
+- Adapters map them onto the published codes in `api`: closed enums `ErrorCode` and `WarningCode`, each with a `#[serde(other)] Unknown` variant.
+- Arguments are typed: `MsgArg = Count(u64) | Bytes(u64) | DurationMs(u64) | Timestamp { utc_ms, zone: Option<IanaZone> } | Text(String)`. Identifiers, ports, years and hostnames are `Text`, so they are never digit-grouped.
+- The REST API, the sync protocol, `WorkerEvent` (§4.1) and SQLite (§9) all carry `{ code, args, detail? }`, never rendered text. `detail` is rustic's own verbatim message.
+- Codes are rendered by matching the enum, never by using a wire string as a message ID. An `Unknown` code, say from a newer agent, renders as `error-unknown = Unexpected error ({ $code })` followed by its detail.
+- **Redaction happens where codes are built:** `args` and `detail` pass through the `Redactor` before they are serialized, stored or synced (I4). `l10n` never sees a secret.
+
+**The `l10n` crate.**
+
+- **Placement.** It is a presentation library: neither a ring nor an adapter. It depends only on `api` (for the codes) and the Fluent and formatter crates. `web`, `adapters/notify` and the CLI in the composition root use it; `domain` and `app` must not (§3.2 banned crates).
+- **Fallback chain.** One `FluentBundle` holds one locale's messages; its plural rules come from that locale. The negotiated chain (always ending in `en-US`) is therefore an ordered `Vec` of bundles, one per locale, and a lookup falls through per message. The browser uses the single-threaded `FluentBundle`; the daemon uses `fluent_bundle::concurrent::FluentBundle`, shared across tasks.
+- **Generated catalog table.** `build.rs` scans `locales/`, embeds every file with `include_str!`, and generates the message-ID constants in `l10n::msg` from `en-US`. A typo is a compile error, and the constants can't drift from the catalog. There are no runtime-loaded or remote catalogs.
+- **Locale negotiation:** `fluent-langneg`, filtering strategy, default `en-US`.
+  - UI: the user's language choice (stored in the browser), then `navigator.languages`.
+  - Notifications: `[agent] locale` on the hub or standalone agent, then the service's POSIX locale, then `en-US`. Services under systemd or launchd usually have no `LANG`.
+  - CLI: `LANGUAGE` (a list), then `LC_ALL`, `LC_MESSAGES` and `LANG`. POSIX values are normalized before parsing: strip the codeset and modifier, turn `_` into `-`, and ignore `C` and `POSIX`.
+  - Tags are parsed with `unic-langid`. An invalid tag is ignored; tags never reach a file path, because catalogs are compiled in.
+- **Numbers.** `fluent-bundle`'s built-in `NUMBER` keeps a value numeric, so plural selectors work, but it formats without locale-aware grouping. Steading keeps the built-in and does locale-aware output in the bundle's `set_formatter` hook. That hook is a plain `fn`, so it reaches the host formatter through the bundle's memoizer (`intl_memoizer::Memoizable`, keyed by locale).
+- **Dates.** `fluent-bundle` has no `DATETIME`. Steading registers one that returns a `FluentValue::Custom` value, which formats itself through the same memoized host formatter.
+- **Host formatters,** each behind a feature of `l10n`:
+  - `icu`: ICU4X (`icu_decimal`, `icu_datetime`) for the daemon and CLI. Binary size is measured in M1b; ICU4X brings a second time-zone database next to `jiff`'s.
+  - `browser-intl`: `js_sys::Intl` for `web`, with formatters built per locale and cached in the memoizer, since a `JsValue` can't be shared across threads. No locale data ships to the browser.
+- **Sizes and durations.** Byte sizes pick the IEC unit in code (KiB, MiB, GiB) and format the number through `NUMBER`, with the unit label in the catalog. Durations are catalog messages over numeric parts (`{ $hours } h { $minutes } min`), so word order stays with the translator.
+- **Time zones.** Timestamps travel as UTC plus an optional IANA zone.
+  - The UI shows times in the viewer's browser zone. A scheduled run whose plan has its own zone shows both ("02:00 Europe/Berlin, 03:00 your time").
+  - Notification text uses the sending agent's local zone and names it.
+- **Sorting.** Names users sort by (hosts, plans, repositories, paths in the snapshot tree) use the locale's collation with numeric ordering (`Intl.Collator`), so `host10` follows `host9`. Snapshot IDs and hashes sort by byte order. The API sorts only by stable keys (time, ID); name sorting happens in the UI.
+- **Bidi.** Unicode isolation marks around placeables are a per-bundle option. They are on in the web UI only, and off for the CLI, notifications (plain-text sinks show the marks as boxes) and tests. The UI sets `lang` and `dir` on `<html>` from the negotiated locale and uses logical CSS properties only (`margin-inline-start`, never `margin-left`).
+
+**Catalog rules.**
+
+- IDs are semantic and kebab-case: `plan-run-now`, `op-status-failed`, `error-claim-rejected`.
+- Every message is a complete sentence or label; code never concatenates fragments.
+- Counts use selectors with CLDR categories and a `*[other]` default.
+- The ubiquitous language (§3.1) becomes Fluent terms (`-snapshot`, `-repository`, `-plan`, `-agent`, `-hub`, `-brand-name`). UI copy uses the same words as the glossary, and translators translate each term once.
+- One element's texts are grouped as attributes (`.aria-label`, `.title`, `.placeholder`). A translation of a message must carry all of its attributes, because fallback happens per message.
+- A translator comment precedes every message with variables, saying what each variable holds.
+- Voice follows [PRODUCT.md](../PRODUCT.md): calm and exact; a warning says what happened and what to do next.
+
+**Tests** (test first, as everything else; §13):
+
+- **Catalog lane:**
+  - Every `.ftl` file of every locale parses and adds to a bundle without errors (syntax, duplicate IDs, missing default variants).
+  - Every `l10n::msg` ID formats in `en-US` without errors, using a fixture of representative arguments that covers each selector branch.
+  - Every `ErrorCode` and `WarningCode` variant has an `en-US` message.
+  - In other locales, a message absent from `en-US` fails, as does a message missing one of its `en-US` attributes. Missing messages are allowed; they fall back.
+  - Assertions run with isolation marks off, plus one test with them on.
+- **Formatting lane:**
+  - `NUMBER($n)` drives a plural selector correctly under the host formatter. This guards the trap of a formatter that returns text, which would send every count to `*[other]`.
+  - `NUMBER`, `DATETIME`, sizes and durations format as expected in `en-US`, `de` and `ja`. The `icu` formatter runs with full locale data (a test-only feature); `browser-intl` runs the same cases under `wasm-bindgen-test` in a headless browser.
+- **Unused IDs:** a CI lint fails if a generated message ID is referenced nowhere in the workspace, so dead strings can't pile up.
+- **Pseudolocales.** Built from `en-US` with `fluent-pseudo` (behind a `pseudo` feature, off in release builds) through the bundle's transform hook. Dev builds select them with `?locale=…`:
+  - `en-XA`: accented Latin letters with doubled vowels.
+  - `ar-XB`: upside-down Latin letters, rendered with `lang="ar"` and `dir="rtl"`. This tests right-to-left layout, not Arabic shaping. The bundle keeps the `en-US` locale so English plural rules still apply.
+
+  From M3, Playwright runs the UI journeys in both. A run fails on clipped or overflowing text, on layout that breaks right-to-left, and on any visible text node with no transformed character, unless the node is data: IDs, paths, numbers, hostnames, or verbatim rustic text marked `lang="en"`.
+
+**Security.** Translations are compiled in and rendered as text nodes; Leptos escapes them, and nothing passes translated text to `inner_html`. Fluent's markup and DOM-overlay features are not used. Arguments are redacted when codes are built (above); the I4 canary test covers the `args` and `detail` paths too.
+
 ---
 
 ## 9. Data model (SQLite)
@@ -653,7 +733,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   requested_by TEXT,              -- restores: local UI or hub (§10.4)
   snapshot_id TEXT,               -- for backups
   summary_json TEXT,              -- OpResult (files new/changed, bytes added, duration, …)
-  error TEXT,
+  error_code TEXT, error_args TEXT, error_detail TEXT,   -- api::ErrorCode, JSON MsgArgs, rustic's verbatim text (§8.4)
   warning_count INTEGER DEFAULT 0
 );
 CREATE INDEX ops_by_plan ON operations(plan_id, started_at DESC);
@@ -661,7 +741,7 @@ CREATE INDEX ops_queue   ON operations(status, queued_at);
 CREATE UNIQUE INDEX one_maintenance_per_repo ON operations(repo_uuid)
   WHERE status = 'running' AND kind IN ('forget', 'prune', 'check');   -- I7; OperationStore::try_start
 
-CREATE TABLE op_warnings (op_id TEXT NOT NULL, item TEXT, during TEXT, message TEXT);
+CREATE TABLE op_warnings (op_id TEXT NOT NULL, item TEXT, during TEXT, code TEXT, detail TEXT);
 CREATE INDEX op_warnings_by_op ON op_warnings(op_id);   -- capped at 10,000 rows per op; warning_count keeps the total
 CREATE TABLE op_logs     (op_id TEXT, seq INTEGER, ts INTEGER, level TEXT, line TEXT,
                           PRIMARY KEY (op_id, seq));      -- redacted; retained N days
@@ -767,7 +847,7 @@ Configured on the hub (or on a standalone agent). Each rule is **event → chann
 
 - Events: `backup.started`, `backup.succeeded`, `backup.failed`, `backup.warning`, `backup.missed` (no success within N × interval), `backup.retrying`, `forget.failed`, `prune.failed`, `prune.refused` (`keep-delete` too small for the margin, §7.3), `check.failed`, `check.errors`, `agent.offline` (> N min), `repo.unmanaged_groups`, `repo.claim_rejected`, `repo.maintenance_paused` (lease not renewed, repo now shared, or not configured on the hub).
 - Channels: generic webhook (JSON), ntfy, Gotify, Discord/Slack webhook, SMTP.
-- **Templates.** Webhook bodies and message text are templates with the plan, repo, agent, operation summary and error. Templates never receive secrets (I4).
+- **Templates.** Default message text comes from the `notify.ftl` catalog in the configured locale (§8.4). Users may override it with their own templates, which are not localized. Webhook bodies are JSON with stable, unlocalized keys, event names and error codes, plus a localized `message` field. Templates never receive secrets (I4).
 - **healthchecks.io-style pings per plan**: `start`, `success` and `fail` URLs. These are the most robust "it silently stopped" detector, because they work even when the whole Steading system is down.
 
 ---
@@ -864,6 +944,7 @@ Feature: Restores from the hub
 | `app` | Use-case tests and BDD scenarios with fakes | cucumber-rs, fake clock | Catch-up, retries, overlap, claims, prune guard waiting, deadline kill decision, restore policy |
 | Adapters | **Port contract tests** (§3.2), plus integration tests against real infrastructure | sqlx on SQLite (also on btrfs in CI), scratch rustic repos (local + one OpenDAL backend), rustic CLI golden tests, golden config files per schema version, WebSocket over loopback | Store contract and `try_start`, kill-at-random-points test, import list replacement, export round trip, config migrations, outbox replay |
 | `http`, `web` | Request handling and view models | axum `oneshot` requests; Leptos view-model unit tests | Host and Origin checks, auth, step-up confirmation; dashboard state from `UiEvent`s |
+| `l10n` | Catalog and formatting lanes (§8.4) | `fluent-bundle`, `fluent-pseudo`, `wasm-bindgen-test` | Every message ID and error code formats in `en-US` across its selector branches; `NUMBER` drives plural selectors; `NUMBER`/`DATETIME` in `de` and `ja` with both formatters |
 | System | `@e2e` scenarios on the real binary; UI journeys from M3 | cucumber-rs, Playwright | First backup end to end; deadline with a real worker; hub pairing; restore into a new folder |
 
 Domain behaviour is never mocked. Doubles replace ports only: slow, external or nondeterministic boundaries.
@@ -889,9 +970,9 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 |---|---|---|---|
 | **M0** | Skeleton | Workspace in the §8.3 layout; CI with fmt, clippy, tests, the `domain` wasm build, banned-crate and banned-call checks; cucumber-rs runners, red-first check and `cargo mutants` job; fake clock and port fakes with contract-suite scaffold; worker protocol with a fake operation; daemon serving an embedded "hello" Leptos app | 2 wks |
 | **M1a** | Engine | Pinned `rustic_core` revision; worker with `EventProgressBars`, warnings, SIGTERM handling, deadline watchdog and per-worker cache dir; agent ID and repository ID; `steading-*` tags and explicit parents with fallback; kill-at-random-points test (local + one OpenDAL backend); `*-tmp-*` cleanup | 2–3 wks |
-| **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1) | 3–4 wks |
+| **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1); `l10n` crate with the `en-US` catalog, error codes in the API, catalog tests and dev pseudolocales (§8.4) | 3–4 wks |
 | **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates; service install (systemd, launchd); optional auth; macOS signing and Full Disk Access test | 2–3 wks |
-| **M3** | Browse and restore | Snapshot tree browser; restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page | 2 wks |
+| **M3** | Browse and restore | Snapshot tree browser; restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; Playwright journeys also run in `en-XA` and `ar-XB` | 2 wks |
 | **M4a** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 3–4 wks |
 | **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub) | 3–4 wks |
 | **M5** | Polish | Conditions (AC power / metered), charts, Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
@@ -924,6 +1005,8 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | SQLite failure on unusual filesystems | Daily copy, `db rebuild`, CI on btrfs and Docker volumes (§9) |
 | Config upgrades break existing installs | Schema version and migrations from M1b; refuse newer schemas (§6.1) |
 | Leptos 0.8 → 0.9 migration | Keep UI components thin and logic in `api`/view-models. Migrate once 0.9 is stable |
+| Hard-coded strings creep into the UI and make localization a rewrite | Generated message IDs, the unused-ID lint and Playwright pseudolocale runs from M3 (§8.4) |
+| ICU4X data bloats the daemon binary | Measure in M1b; generate data for shipped locales only if needed (§8.4) |
 | macOS TCC permissions | Signed, notarized builds; detect denials and link to the settings pane. Document this in setup |
 | Memory use on very large repos | Worker isolation. Restore and `dump` need the full index (`to_indexed()`); measure early with a large test repo. Document `--no-cache` and cache dir options |
 | Hub is a single point of control | Agents back up without the hub. Agent owner leases last 7 days without renewal, so an outage longer than that pauses agent-run maintenance; backups continue |
@@ -934,7 +1017,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 
 ## 16. Decisions
 
-Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license.
+Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decision 17 recorded 2026-11-08.
 
 | # | Question | Decision |
 |---|---|---|
@@ -954,6 +1037,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | 14 | Development method | **Behaviour first and test first, for all production code.** Gherkin scenarios run by cucumber-rs against use cases with fakes, `@e2e` scenarios against the real binary; red-first check and `cargo mutants --in-diff` in CI instead of a coverage gate (§13). |
 | 15 | Option types | **Steading owns its option types** in `domain`. The `config` adapter parses TOML with rustic's keys into them; the engine adapter maps them onto `rustic_core` types, with a parity test per struct. Replaces v0.2's plan to deserialize into `rustic_core` types directly (§6.1). |
 | 16 | License | **MIT OR Apache-2.0**, the same terms as rustic, so code can move upstream without relicensing. Files: `LICENSE-MIT`, `LICENSE-APACHE`; the workspace `Cargo.toml` will declare `license = "MIT OR Apache-2.0"`. |
+| 17 | Internationalization | **Localization-ready from the first UI string; `en-US` only in v1.** Project Fluent via `fluent-bundle` in a shared `l10n` crate, with a per-message fallback chain of bundles; the core and the wire carry codes and typed arguments, never sentences; dates and numbers through browser `Intl` or ICU4X behind Fluent's formatter hook; machine-facing text never localized (§8.4). |
 
 ## 17. Open questions
 

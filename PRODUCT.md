@@ -66,6 +66,7 @@ Calm and exact.
 - Not a general rustic GUI. `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only in v1.
 - Not a manager for restic repositories that restic also maintains. Restic must never prune a repository Steading manages.
 - No mobile app. The web UI is responsive.
+- English (`en-US`) only in v1. Every user-facing string is localizable, so a language can be added without touching application code.
 
 ## Accessibility & Inclusion
 
