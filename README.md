@@ -1,9 +1,12 @@
 # Steading
 
+[![CI](https://github.com/nledford/Steading/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/nledford/Steading/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush)
+[![MSRV](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnledford%2FSteading%2Fmain%2FCargo.toml&query=%24.workspace.package%5B%27rust-version%27%5D&label=MSRV&color=orange)](Cargo.toml)
+
 A self-hosted backup manager for [rustic](https://rustic.cli.rs): plans, schedules and one dashboard for every machine.
 
 > [!WARNING]
-> **Steading is in the design stage. There is no code to run yet.** Don't use it for backups until the [roadmap](#roadmap) shows a usable release. Until then, use the `rustic` CLI directly or [Backrest](https://github.com/garethgeorge/backrest).
+> **Steading is early in development and can't make backups yet.** Don't use it for backups until the [roadmap](#roadmap) shows a usable release. Until then, use the `rustic` CLI directly or [Backrest](https://github.com/garethgeorge/backrest).
 
 ## What it will do
 
@@ -44,10 +47,10 @@ The [technical design](docs/TECHNICAL-DESIGN.md#relationship-to-backrest) has th
 
 ## Roadmap
 
-Nothing is implemented yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
+The skeleton (M0) and the backup engine (M1a) are in place; there is no way to configure or run backups yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
 
-- [ ] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
-- [ ] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
+- [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
+- [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
 - [ ] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
 - [ ] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications; systemd and launchd service install; optional login; signed macOS builds. **First usable release.**
 - [ ] **M3: Browse and restore.** Snapshot browser, restore into a new folder or in place, downloads as tar or zip, repository stats.
