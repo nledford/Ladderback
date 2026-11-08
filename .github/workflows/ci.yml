@@ -29,9 +29,54 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  # Tells a docs-only pull request from one that touches code, with plain git,
+  # so the jobs below can skip the Rust work. Anything that isn't clearly docs
+  # counts as code, and so does a failure here: the jobs below run unless this
+  # job says "true". Pushes to main and the nightly run skip this job and run
+  # everything.
+  changes:
+    name: Changed paths
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs-only: ${{ steps.diff.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # A failing git command fails this step, and then every job below runs.
+          git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          docs_only=true
+          count=0
+          while IFS= read -r -d '' file; do
+            count=$((count + 1))
+            case "$file" in
+              # Markdown under crates/ can be include_str!'d or doc-tested.
+              crates/*) docs_only=false ;;
+              docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
+              *) docs_only=false ;;
+            esac
+          done < "$RUNNER_TEMP/changed-files"
+          # A change with no files isn't a docs change.
+          if [ "$count" -eq 0 ]; then docs_only=false; fi
+          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
+
   check:
     name: Check (${{ matrix.os }})
-    if: github.event_name != 'schedule'
+    needs: changes
+    # A docs-only pull request skips every step but not the job. A matrix job
+    # that its own `if` skips never creates the per-leg checks the ruleset
+    # requires ("Check (ubuntu-latest)", "Check (macos-latest)"), so they would
+    # stay "Expected" and block the merge. ui and mutants have fixed names and
+    # skip as whole jobs.
+    if: ${{ !cancelled() && github.event_name != 'schedule' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,31 +84,41 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.docs-only != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: rustup toolchain install
+      - if: needs.changes.outputs.docs-only != 'true'
+        uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - if: needs.changes.outputs.docs-only != 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
           cache: npm
           cache-dependency-path: ui-tests/package-lock.json
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - if: needs.changes.outputs.docs-only != 'true'
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,cargo-nextest
-      - run: npm ci
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: npm ci
         working-directory: ui-tests
-      - run: just fmt-check
-      - run: just lint
-      - run: just architecture
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: just fmt-check
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: just lint
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: just architecture
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
       # writes the JUnit report.
-      - run: just test
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: just test
         env:
           NEXTEST_PROFILE: ci
-      - if: always()
+      - if: always() && needs.changes.outputs.docs-only != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-${{ matrix.os }}
@@ -71,7 +126,8 @@ jobs:
 
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -97,7 +153,8 @@ jobs:
 
   mutants:
     name: Mutation testing (changed code)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
