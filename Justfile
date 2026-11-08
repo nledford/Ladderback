@@ -56,24 +56,27 @@ test *args='':
 # The suites `test` runs, under its one skip log. The cucumber runners use
 # `harness = false`, which nextest can't run (its default filter in
 # .config/nextest.toml leaves them out), so `cargo test` runs them; nextest
-# doesn't run doc tests either.
+# doesn't run doc tests either. Every cargo command says --workspace, even
+# for one test target: Cargo unifies features over the packages a command
+# selects, so `--package app` or the root package alone builds dependencies
+# with other features, and each of those commands rebuilt nearly all of them.
 [private]
 [positional-arguments]
 _test-suites *args='':
     cargo nextest run --workspace "$@"
     cargo test --doc --workspace
-    cargo test --package app --test acceptance
-    cargo test --test e2e
+    cargo test --workspace --test acceptance
+    cargo test --workspace --test e2e
 
 # Run the acceptance scenarios (fakes and a fake clock) only.
 [group('test')]
 test-acceptance *args='':
-    scripts/with-skip-log.sh cargo test --package app --test acceptance -- {{ args }}
+    scripts/with-skip-log.sh cargo test --workspace --test acceptance -- {{ args }}
 
 # Run the @e2e scenarios against the real binary only.
 [group('test')]
 test-e2e *args='':
-    scripts/with-skip-log.sh cargo test --test e2e -- {{ args }}
+    scripts/with-skip-log.sh cargo test --workspace --test e2e -- {{ args }}
 
 # Build the web UI into crates/web/dist, where the binary embeds it from.
 [group('build')]
