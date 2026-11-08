@@ -43,7 +43,7 @@ Steading borrows Backrest's user-facing model: repositories, plans, schedules, h
 - need **multiple user accounts** or a way to run **arbitrary repository commands** from the UI. Steading has neither;
 - prefer restic's longer track record over rustic, which is the younger project.
 
-The [technical design](docs/TECHNICAL-DESIGN.md#relationship-to-backrest) has the full comparison, with sources.
+The [technical design](docs/design/README.md#relationship-to-backrest) has the full comparison, with sources.
 
 ## Roadmap
 
@@ -63,11 +63,11 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 ## Documentation
 
 - [PRODUCT.md](PRODUCT.md): who Steading is for, what it does and doesn't do.
-- [docs/TECHNICAL-DESIGN.md](docs/TECHNICAL-DESIGN.md): architecture, safety invariants, data model, milestones and decisions.
+- [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 
 ## Contributing
 
-Steading is built for its author's own machines first and published for other rustic users, without support promises. Issues and discussion about the design are welcome. Development is behaviour-first and test-first; see [docs/TECHNICAL-DESIGN.md §13](docs/TECHNICAL-DESIGN.md) for the method and [AGENTS.md](AGENTS.md) for the working rules.
+Steading is built for its author's own machines first and published for other rustic users, without support promises. Issues and discussion about the design are welcome. Development is behaviour-first and test-first; see [docs/design/development.md §13](docs/design/development.md#13-development-method) for the method and [AGENTS.md](AGENTS.md) for the working rules.
 
 ## License
 

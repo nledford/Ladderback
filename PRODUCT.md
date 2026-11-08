@@ -91,5 +91,5 @@ None yet: Steading is in the design stage. There are no users, screenshots, test
 ## Stack
 
 - Rust, built on `rustic_core`. The web UI is Leptos (client-side rendered), embedded in the binary.
-- [docs/TECHNICAL-DESIGN.md](docs/TECHNICAL-DESIGN.md): architecture, safety invariants, data model, milestones and decisions.
+- [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 - `DESIGN.md` (visual design system): not written yet. It will be recorded once the first UI screen exists.
