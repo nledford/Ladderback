@@ -1,0 +1,78 @@
+//! Wire types shared by the daemon, the hub, the worker and the web UI: the
+//! published language (technical design §3.1). Builds for `wasm32`.
+//!
+//! Errors and warnings cross every boundary as codes with typed arguments,
+//! never as sentences; the presentation layer renders them (§8.4).
+
+use serde::{Deserialize, Serialize};
+
+/// Why something failed. Closed: a code this version doesn't know, say from
+/// a newer agent, reads as [`ErrorCode::Unknown`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ErrorCode {
+    /// The worker couldn't read the job it was given.
+    InvalidJobSpec,
+    /// The engine reported a failure; the detail carries its own message.
+    OperationFailed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A problem with one item that doesn't fail the operation. Closed like [`ErrorCode`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WarningCode {
+    SourceUnreadable,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A typed message argument. Identifiers, ports and hostnames are `Text`,
+/// so they are never formatted as numbers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "kebab-case")]
+pub enum MsgArg {
+    Count(u64),
+    Bytes(u64),
+    DurationMs(u64),
+    Text(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_travel_as_kebab_case_strings() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::InvalidJobSpec).unwrap(),
+            r#""invalid-job-spec""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WarningCode::SourceUnreadable).unwrap(),
+            r#""source-unreadable""#
+        );
+    }
+
+    #[test]
+    fn a_code_from_a_newer_peer_reads_as_unknown() {
+        let error: ErrorCode = serde_json::from_str(r#""quota-exceeded""#).unwrap();
+        assert_eq!(error, ErrorCode::Unknown);
+        let warning: WarningCode = serde_json::from_str(r#""xattr-unreadable""#).unwrap();
+        assert_eq!(warning, WarningCode::Unknown);
+    }
+
+    #[test]
+    fn message_arguments_keep_their_type() {
+        for arg in [
+            MsgArg::Count(3),
+            MsgArg::Bytes(1 << 30),
+            MsgArg::DurationMs(90_000),
+            MsgArg::Text("9898".to_owned()),
+        ] {
+            let json = serde_json::to_string(&arg).unwrap();
+            assert_eq!(serde_json::from_str::<MsgArg>(&json).unwrap(), arg);
+        }
+    }
+}
