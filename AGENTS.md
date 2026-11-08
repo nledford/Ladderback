@@ -123,8 +123,9 @@ After implementing a non-trivial change, get one independent adversarial review 
 
 Several agents may work on the repository at once (§13.5). Each one:
 
-- works in its own git worktree, with its own `CARGO_TARGET_DIR`, and deletes that target directory when done;
-- edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against another directory, pass absolute paths;
+- works in its own git worktree under `.worktrees/<slug>` (git ignores the folder): `git worktree add -b <branch> .worktrees/<slug> origin/main` from the main checkout. It uses its own `CARGO_TARGET_DIR` and deletes that target directory when done;
+- edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
+- passes `--jobs` to `just mutants` when several agents share the machine;
 - uses its own ports, never `just serve`'s 9898, and its own scratch folder;
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.

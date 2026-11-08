@@ -7,3 +7,7 @@ exclude_globs = ["crates/app/src/contract/**"]
 exclude_re = ["<impl std::fmt::Display for "]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
+# Skip gitignored files when copying the tree (off by default since
+# cargo-mutants 25.0.2): otherwise each job's copy would include every agent
+# worktree under .worktrees/ and its build output.
+gitignore = true
