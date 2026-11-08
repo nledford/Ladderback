@@ -5,11 +5,14 @@ use std::sync::Arc;
 
 use domain::OperationId;
 use domain::execution::deadline::Deadline;
-use domain::execution::{FailureReason, Operation};
+use domain::execution::{FailureReason, Operation, OperationKind, Target, Trigger};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
-use crate::ports::{Clock, Engine, EngineEvent, Job, RunningJob};
+use crate::ports::{
+    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, OperationStore, RunningJob,
+    StoreError,
+};
 
 /// Runs one operation on the engine and records its lifecycle: queued now,
 /// running once the engine starts, then finished as the engine reports.
@@ -25,21 +28,66 @@ use crate::ports::{Clock, Engine, EngineEvent, Job, RunningJob};
 pub struct RunOperation {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
+    store: Arc<dyn OperationStore>,
+}
+
+/// How a run ended: the operation as it finished, what the engine reported
+/// when it succeeded, and what went wrong writing the operation log.
+///
+/// The log never decides how an operation ends (backups never depend on the
+/// database, §9), so a store that failed shows up here and nowhere else.
+#[derive(Debug)]
+pub struct Finished {
+    pub operation: Operation,
+    pub result: Option<EngineResult>,
+    /// One for each write the store refused: at most three per run.
+    pub recording_errors: Vec<StoreError>,
 }
 
 impl RunOperation {
-    pub fn new(engine: Arc<dyn Engine>, clock: Arc<dyn Clock>) -> Self {
-        Self { engine, clock }
+    pub fn new(
+        engine: Arc<dyn Engine>,
+        clock: Arc<dyn Clock>,
+        store: Arc<dyn OperationStore>,
+    ) -> Self {
+        Self {
+            engine,
+            clock,
+            store,
+        }
     }
 
-    /// Runs `job`. When `cancel` completes, the operation is cancelled.
+    /// Runs `job`, started by `trigger`. When `cancel` completes, the
+    /// operation is cancelled.
     pub async fn run(
         &self,
         id: OperationId,
+        trigger: Trigger,
+        job: Job,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        let operation = self.drive(id, trigger, job, cancel).await;
+        Finished {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+        }
+    }
+
+    async fn drive(
+        &self,
+        id: OperationId,
+        trigger: Trigger,
         job: Job,
         cancel: impl Future<Output = ()> + Send,
     ) -> Operation {
-        let mut op = Operation::queue(id, self.clock.now());
+        let mut op = Operation::queue(
+            id,
+            OperationKind::Fake,
+            trigger,
+            Target::default(),
+            self.clock.now(),
+        );
         let budget = job.deadline_budget();
         let RunningJob {
             events,
@@ -47,12 +95,13 @@ impl RunOperation {
         } = match self.engine.run(id, job).await {
             Ok(running) => running,
             Err(error) => {
-                self.fail(
-                    &mut op,
-                    FailureReason::EngineUnavailable {
-                        detail: error.detail,
-                    },
-                );
+                let reason = match error {
+                    EngineError::Unavailable { detail } => {
+                        FailureReason::EngineUnavailable { detail }
+                    }
+                    EngineError::StartTimedOut => todo!(),
+                };
+                self.fail(&mut op, reason);
                 return op;
             }
         };

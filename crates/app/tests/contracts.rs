@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use app::contract;
 use app::contract::clock::ClockHarness;
-use app::fakes::{FakeClock, SimulatedEngine};
+use app::fakes::{FakeClock, InMemoryOperationStore, SimulatedEngine};
 use app::ports::{Clock, Engine};
 use async_trait::async_trait;
 use domain::{SignedDuration, Timestamp};
@@ -38,6 +38,11 @@ async fn simulated_engine_meets_the_engine_contract() {
     let clock = Arc::new(FakeClock::auto_advancing(epoch()));
     let engine = SimulatedEngine::new(clock);
     contract::engine::run(&engine, Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn in_memory_operation_store_meets_the_operation_store_contract() {
+    contract::operation_store::run(&InMemoryOperationStore::new()).await;
 }
 
 #[tokio::test]

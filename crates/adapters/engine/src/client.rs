@@ -99,6 +99,18 @@ impl WorkerEngine {
         self.watchdog_interval = interval;
         self
     }
+
+    /// How long writing a job to a new worker may take.
+    #[must_use]
+    pub fn with_start_timeout(self, _timeout: Duration) -> Self {
+        todo!()
+    }
+
+    /// How long a worker that closed its output may go on living.
+    #[must_use]
+    pub fn with_exit_timeout(self, _timeout: Duration) -> Self {
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -124,7 +136,7 @@ impl Engine for WorkerEngine {
         .map_err(|e| failed_to_start(&self.program, e))?;
         // The worker refuses a longer spec, so don't start one to be refused.
         if spec.len() > MAX_MESSAGE_BYTES {
-            return Err(EngineError {
+            return Err(EngineError::Unavailable {
                 detail: format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"),
             });
         }
@@ -192,7 +204,7 @@ impl Engine for WorkerEngine {
 }
 
 fn failed_to_start(program: &Path, error: impl std::fmt::Display) -> EngineError {
-    EngineError {
+    EngineError::Unavailable {
         detail: format!("{}: {error}", program.display()),
     }
 }
@@ -763,9 +775,18 @@ fn translate(event: WorkerEvent) -> Option<EngineEvent> {
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
-                // Request-check codes belong to the HTTP adapter; a worker
-                // that reports one has failed in some way this side doesn't know.
+                // A worker only ever says one of the codes above or
+                // `operation-failed`. The daemon's own codes are the log's
+                // words for what the daemon saw, and the request-check codes
+                // belong to the HTTP adapter: a worker that sent one has failed
+                // in a way this side doesn't know, so it is reported as the
+                // failure it claims, in its own words.
                 ErrorCode::OperationFailed
+                | ErrorCode::EngineUnavailable
+                | ErrorCode::EngineExited
+                | ErrorCode::ProtocolViolated
+                | ErrorCode::EngineStartTimedOut
+                | ErrorCode::EngineExitTimedOut
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired
@@ -803,8 +824,10 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
             deadline_budget,
         }) => JobKind::Fake(FakeJobSpec {
             steps,
-            step_delay_ms: u64::try_from(step_delay.as_millis()).map_err(|_| EngineError {
-                detail: "step delay out of range".to_owned(),
+            step_delay_ms: u64::try_from(step_delay.as_millis()).map_err(|_| {
+                EngineError::Unavailable {
+                    detail: "step delay out of range".to_owned(),
+                }
             })?,
             warnings: warnings
                 .into_iter()
@@ -926,9 +949,11 @@ impl Drop for CacheSlot {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::Instant;
 
     use domain::Uuid;
+    use domain::secrets::SecretValue;
 
     use super::*;
     use crate::job::MAX_MESSAGE_BYTES;
@@ -953,7 +978,15 @@ mod tests {
 
     #[test]
     fn other_worker_failures_carry_the_engine_message_verbatim() {
-        for code in [ErrorCode::OperationFailed, ErrorCode::Unknown] {
+        for code in [
+            ErrorCode::OperationFailed,
+            ErrorCode::EngineUnavailable,
+            ErrorCode::EngineExited,
+            ErrorCode::ProtocolViolated,
+            ErrorCode::EngineStartTimedOut,
+            ErrorCode::EngineExitTimedOut,
+            ErrorCode::Unknown,
+        ] {
             assert_eq!(
                 translate(failed(code)),
                 Some(EngineEvent::Failed(FailureReason::EngineFailed {
@@ -1586,9 +1619,8 @@ mod tests {
             .err()
             .expect("a spec past the cap is refused");
         assert!(
-            error.detail.contains(&MAX_MESSAGE_BYTES.to_string()),
-            "the error should name the cap: {}",
-            error.detail
+            matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
+            "the error should name the cap: {error:?}"
         );
     }
 
@@ -1620,6 +1652,322 @@ mod tests {
             ),
             "unexpected events: {} events",
             events.len()
+        );
+    }
+
+    // The start and exit timeouts: a worker that hangs must not hold the
+    // daemon. Every wait on a worker is guarded, so that a regression fails
+    // at once instead of hanging the suite.
+
+    /// A job whose spec is about 900 KB: under the protocol's cap, and more
+    /// than any pipe holds, so a worker that never reads its stdin leaves
+    /// the daemon's write of the job blocked.
+    fn job_larger_than_a_pipe() -> Job {
+        Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: Duration::ZERO,
+            warnings: vec![Warning {
+                kind: WarningKind::Other,
+                item: None,
+                during: "backup".to_owned(),
+                detail: "x".repeat(900_000),
+            }],
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        })
+    }
+
+    /// The engine's answer to `job`, which it has `guard` to give.
+    async fn run_within(
+        guard: Duration,
+        engine: &WorkerEngine,
+        job: Job,
+    ) -> Result<RunningJob, EngineError> {
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        tokio::time::timeout(guard, engine.run(op, job))
+            .await
+            .expect("`run` never returned: a worker that never read its job held it")
+    }
+
+    /// Everything `events` yields, which has `guard` to end.
+    async fn collected_within(
+        guard: Duration,
+        events: impl futures::Stream<Item = EngineEvent>,
+    ) -> Vec<EngineEvent> {
+        tokio::time::timeout(guard, events.collect::<Vec<_>>())
+            .await
+            .expect("the events never ended")
+    }
+
+    /// The daemon writes a worker its job before anything else, and a worker
+    /// that never reads it leaves that write blocked once the pipe is full.
+    /// The start timeout ends the wait, and the worker with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_never_reads_its_job_is_killed_when_the_start_timeout_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("worker.pid");
+        let script = format!("echo $$ >'{}'; exec sleep 30", pid_file.display());
+        // Long enough for a loaded machine to start the shell, which the
+        // kill must not beat to its first command.
+        let timeout = Duration::from_secs(1);
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_start_timeout(timeout);
+        let began = Instant::now();
+        let answer = run_within(Duration::from_secs(5), &engine, job_larger_than_a_pipe()).await;
+        let took = began.elapsed();
+        assert_eq!(answer.err(), Some(EngineError::StartTimedOut));
+        assert!(
+            took >= timeout.saturating_sub(Duration::from_millis(50)),
+            "gave up before the start timeout: {took:?}"
+        );
+        let worker = pid_from(&pid_file).await;
+        assert!(
+            gone_soon(worker).await,
+            "the worker that never read its job outlived the start timeout"
+        );
+    }
+
+    /// The start timeout bounds the write, not the worker's pace: one that
+    /// takes a while to start reading, but reads in time, runs normally.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_reads_its_job_late_but_within_the_start_timeout_still_runs() {
+        let script = format!("sleep 0.3; cat >/dev/null; echo '{}'", result_line());
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()])
+            .with_start_timeout(Duration::from_secs(5));
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(15), &engine, job_larger_than_a_pipe())
+            .await
+            .expect("a worker that read its job in time was timed out");
+        let events = collected_within(Duration::from_secs(10), events).await;
+        assert_eq!(
+            events,
+            [EngineEvent::Succeeded(EngineResult::Fake {
+                steps_completed: 0
+            })]
+        );
+    }
+
+    /// A write that fails, here to a worker that is gone, is not a timeout.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_is_gone_before_it_reads_its_job_is_unavailable_not_timed_out() {
+        let engine =
+            WorkerEngine::new("sh", ["-c", "exit 0"]).with_start_timeout(Duration::from_secs(30));
+        let answer = run_within(Duration::from_secs(10), &engine, job_larger_than_a_pipe()).await;
+        let error = answer.err();
+        assert!(
+            matches!(error, Some(EngineError::Unavailable { .. })),
+            "{error:?}"
+        );
+    }
+
+    /// What the worker started is killed with it, as at every other end of a
+    /// worker: dropping the worker alone would leave an rclone running.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_start_timeout_also_kills_the_processes_the_worker_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let child_file = dir.path().join("child.pid");
+        let script = format!(
+            "sleep 30 & echo $! >'{}'; exec sleep 30",
+            child_file.display()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()])
+            .with_start_timeout(Duration::from_secs(1));
+        let answer = run_within(Duration::from_secs(5), &engine, job_larger_than_a_pipe()).await;
+        assert_eq!(answer.err(), Some(EngineError::StartTimedOut));
+        let child = pid_from(&child_file).await;
+        assert!(
+            gone_soon(child).await,
+            "the process the worker started outlived the start timeout"
+        );
+    }
+
+    /// A worker that timed out at start never took its job, and the daemon's
+    /// own record of its cache slot must let go too: the next worker of the
+    /// repository gets the same slot, and not one more, until the slots run
+    /// out and workers run without a cache.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_cache_slot_of_a_worker_that_timed_out_at_start_is_free_for_the_next_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let first_ran = dir.path().join("first-worker-ran");
+        let spec_file = dir.path().join("spec.json");
+        // The first worker never reads its job. The one after it keeps the
+        // job it is given, and reports a result.
+        let script = format!(
+            "if [ -e '{first}' ]; then cat >'{spec}'; echo '{result}'; \
+             else touch '{first}'; exec sleep 30; fi",
+            first = first_ran.display(),
+            spec = spec_file.display(),
+            result = result_line()
+        );
+        let cache_root = dir.path().join("cache");
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()])
+            .with_cache_root(&cache_root)
+            .with_start_timeout(Duration::from_secs(1));
+        let id = repository("ab");
+        let identify = |repository: String| {
+            Job::Identify(RepositoryAccess {
+                repository,
+                password: SecretValue::new("demo"),
+                options: BTreeMap::new(),
+                id: Some(id.clone()),
+            })
+        };
+
+        let timed_out = run_within(
+            Duration::from_secs(5),
+            &engine,
+            identify("x".repeat(900_000)),
+        )
+        .await;
+        assert_eq!(timed_out.err(), Some(EngineError::StartTimedOut));
+
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(
+            Duration::from_secs(5),
+            &engine,
+            identify("/home/demo/repo".to_owned()),
+        )
+        .await
+        .expect("the job after the timed out one was refused");
+        let events = collected_within(Duration::from_secs(10), events).await;
+        assert!(
+            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
+            "{events:?}"
+        );
+        let spec: JobSpec = serde_json::from_slice(&std::fs::read(&spec_file).unwrap()).unwrap();
+        assert_eq!(
+            spec.cache_dir,
+            Some(cache_dir(&cache_root, &id, 0)),
+            "the slot of the worker that timed out stayed taken"
+        );
+    }
+
+    /// A worker that closes its output produces no more events, and the
+    /// daemon waits for its exit to tell what became of it. One that lives on
+    /// would be waited for forever: the exit timeout kills it, and says why.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_closes_its_output_but_lives_on_is_killed_when_the_exit_timeout_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("worker.pid");
+        let script = format!(
+            "cat >/dev/null; echo $$ >'{}'; exec >&-; exec sleep 30",
+            pid_file.display()
+        );
+        let timeout = Duration::from_millis(300);
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_exit_timeout(timeout);
+        let RunningJob {
+            events,
+            mut control,
+        } = run(&engine).await;
+        let began = Instant::now();
+        let events = collected_within(Duration::from_secs(5), events).await;
+        let took = began.elapsed();
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineExitTimedOut)]
+        );
+        assert!(
+            took >= timeout.saturating_sub(Duration::from_millis(50)),
+            "the exit timeout fired early: {took:?}"
+        );
+        // Nobody stopped the job, and its control is still here: the worker
+        // is gone all the same.
+        let worker = pid_from(&pid_file).await;
+        assert!(
+            gone_soon(worker).await,
+            "the worker outlived the exit timeout"
+        );
+        tokio::time::timeout(Duration::from_secs(5), control.stop())
+            .await
+            .expect("stopping a worker that was killed already hung");
+    }
+
+    /// Neither does the kill leave behind what the worker started.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_exit_timeout_also_kills_the_processes_the_worker_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let child_file = dir.path().join("child.pid");
+        // The child's output goes elsewhere, so that the worker's own
+        // descriptor is the last one on the pipe.
+        let script = format!(
+            "cat >/dev/null; sleep 30 >/dev/null & echo $! >'{}'; exec >&-; exec sleep 30",
+            child_file.display()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()])
+            .with_exit_timeout(Duration::from_millis(300));
+        let RunningJob {
+            events,
+            control: _control,
+        } = run(&engine).await;
+        let events = collected_within(Duration::from_secs(5), events).await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineExitTimedOut)]
+        );
+        let child = pid_from(&child_file).await;
+        assert!(
+            gone_soon(child).await,
+            "the process the worker started outlived the exit timeout"
+        );
+    }
+
+    /// The exit timeout bounds the wait, not the worker: one that closes its
+    /// output and exits in time is reported as it always was.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_closes_its_output_and_exits_within_the_exit_timeout_keeps_its_code() {
+        let engine = WorkerEngine::new("sh", ["-c", "cat >/dev/null; exec >&-; sleep 0.2; exit 3"])
+            .with_exit_timeout(Duration::from_secs(5));
+        let RunningJob {
+            events,
+            control: _control,
+        } = run(&engine).await;
+        let events = collected_within(Duration::from_secs(10), events).await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineExited {
+                exit_code: Some(3)
+            })]
+        );
+    }
+
+    /// A stop that is under way ends the events silently, as it always does:
+    /// the exit timeout passing meanwhile adds no failure to them.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stop_requested_while_the_exit_is_awaited_ends_the_events_without_a_failure() {
+        // The worker ignores SIGTERM, so the stop is still waiting out its
+        // grace period when the exit timeout passes.
+        let script = "trap '' TERM; cat >/dev/null; exec >&-; exec sleep 30";
+        let engine = WorkerEngine::new("sh", ["-c", script])
+            .with_stop_grace(Duration::from_secs(2))
+            .with_exit_timeout(Duration::from_secs(1));
+        let RunningJob {
+            events,
+            mut control,
+        } = run(&engine).await;
+        let stopping = async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            control.stop().await;
+        };
+        let (events, ()) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(events.collect::<Vec<_>>(), stopping)
+        })
+        .await
+        .expect("the stop or the events never ended");
+        assert!(
+            events.is_empty(),
+            "a stopped job's events ended with {events:?}"
         );
     }
 }

@@ -51,7 +51,7 @@ impl JobControl for Stop {
 impl Engine for SimulatedEngine {
     async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
         let Job::Fake(job) = job else {
-            return Err(EngineError {
+            return Err(EngineError::Unavailable {
                 detail: "the simulated engine runs fake jobs only".to_owned(),
             });
         };
@@ -100,7 +100,7 @@ impl Engine for SimulatedEngine {
 }
 
 fn script(job: &FakeJob) -> Result<VecDeque<Step>, EngineError> {
-    let delay = SignedDuration::try_from(job.step_delay).map_err(|e| EngineError {
+    let delay = SignedDuration::try_from(job.step_delay).map_err(|e| EngineError::Unavailable {
         detail: format!("step delay out of range: {e}"),
     })?;
     let key = 0;

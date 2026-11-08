@@ -1,10 +1,12 @@
 //! Steps for `features/execution/*.feature`, shared by the fake-backed
 //! acceptance runner and the `@e2e` runner. Each runner's `Agent` world has
-//! a `job`, the finished `operation`, and the two methods used below.
+//! a `job`, the `finished` run and the `operation` it left, the operation
+//! `store` the run wrote, and the methods used below.
 
 use std::time::Duration;
 
-use app::ports::FakeEnd;
+use app::history::GetOperation;
+use app::ports::{FakeEnd, OperationDetail, OperationRecord};
 use cucumber::{given, then, when};
 use domain::SignedDuration;
 use domain::execution::{FailureReason, OperationStatus, Warning, WarningKind};
@@ -138,6 +140,44 @@ fn failed_deadline(agent: &mut Agent) {
             reason: FailureReason::DeadlinePassed
         }
     );
+}
+
+/// What the history holds for the operation that just ran.
+async fn history_of_the_operation(agent: &mut Agent) -> OperationDetail {
+    let store = agent.store().await;
+    let id = agent.operation().id();
+    GetOperation::new(store)
+        .get(id)
+        .await
+        .expect("the history answers")
+        .expect("the operation is in the history")
+}
+
+#[then("the history shows the operation as it ended")]
+async fn history_shows_the_operation(agent: &mut Agent) {
+    let detail = history_of_the_operation(agent).await;
+    let finished = agent.finished();
+    assert_eq!(
+        detail.record,
+        OperationRecord::of(&finished.operation, finished.result.as_ref())
+    );
+    assert_eq!(detail.warnings, finished.operation.warnings());
+    assert!(
+        finished.recording_errors.is_empty(),
+        "the log refused a write: {:?}",
+        finished.recording_errors
+    );
+}
+
+#[then(expr = "the history lists {int} warning(s) for the operation")]
+async fn history_lists_warnings(agent: &mut Agent, count: usize) {
+    assert_eq!(history_of_the_operation(agent).await.warnings.len(), count);
+}
+
+#[then(expr = "the history counts {int} warning(s) for the operation")]
+async fn history_counts_warnings(agent: &mut Agent, count: u64) {
+    let detail = history_of_the_operation(agent).await;
+    assert_eq!(detail.record.warning_count, count);
 }
 
 /// Whether a scenario carries `tag` on itself, its rule or its feature.

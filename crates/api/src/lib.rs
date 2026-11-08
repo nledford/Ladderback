@@ -26,6 +26,20 @@ pub enum ErrorCode {
     OperationFailed,
     /// The job's deadline passed before it finished, so the worker stopped it.
     DeadlinePassed,
+    /// The engine couldn't be started, for example because its program is
+    /// missing. The detail carries the platform's own message.
+    EngineUnavailable,
+    /// The engine stopped without reporting a result. The argument
+    /// `exit_code` is its exit status, left out when a signal ended it.
+    EngineExited,
+    /// The engine reported events out of order. The argument `transition`
+    /// names the step the operation refused.
+    ProtocolViolated,
+    /// The engine's process never took its job, so the operation never ran.
+    EngineStartTimedOut,
+    /// The engine stopped reporting, but its process stayed alive and was
+    /// killed.
+    EngineExitTimedOut,
     /// The request's `Host` header names neither a loopback address nor a
     /// configured host name (a DNS-rebinding defense, §10.1).
     HostNotAllowed,

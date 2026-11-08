@@ -10,6 +10,8 @@ Feature: Backups
   Scenario: A backup creates a snapshot tagged with its plan and agent
     When the agent backs up the plan
     Then the operation ends as succeeded
+    And the history shows the operation as it ended
+    And the history shows the backup's snapshot
     And the repository has 1 snapshot
     And the snapshot is tagged with the plan and the agent
 
@@ -19,6 +21,7 @@ Feature: Backups
     When the agent backs up the plan
     Then the operation ends as succeeded with warnings
     And the operation lists 1 warning
+    And the history shows the operation as it ended
     And the repository has 1 snapshot
 
   Scenario: A plan's history stays attached when its folder moves

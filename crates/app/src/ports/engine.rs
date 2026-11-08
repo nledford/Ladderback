@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
-use domain::execution::{FailureReason, Warning};
+use domain::execution::{FailureReason, OperationKind, Target, Warning};
 use domain::secrets::{REDACTED, Redactor, SecretValue};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use futures::stream::BoxStream;
@@ -45,8 +45,12 @@ pub trait JobControl: Send {
 
 /// The engine couldn't start the operation at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EngineError {
-    pub detail: String,
+pub enum EngineError {
+    /// The engine couldn't be started, or refused the job. `detail` is the
+    /// platform's own message.
+    Unavailable { detail: String },
+    /// The engine started but never took its job: it didn't read it in time.
+    StartTimedOut,
 }
 
 /// What an operation should do.
@@ -71,6 +75,17 @@ impl Job {
             Self::Backup(job) => Some(job.deadline_budget),
             Self::Identify(_) | Self::Prune(_) | Self::Check(_) => None,
         }
+    }
+
+    /// The kind of operation this job makes.
+    pub fn kind(&self) -> OperationKind {
+        todo!()
+    }
+
+    /// What the job works on: a backup's plan, and the repository of any job
+    /// that opens one whose ID is already known.
+    pub fn target(&self) -> Target {
+        todo!()
     }
 }
 
@@ -256,6 +271,78 @@ pub struct CheckSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::{AgentId, PlanId, Uuid};
+
+    fn access(id: Option<RepositoryId>) -> RepositoryAccess {
+        RepositoryAccess {
+            repository: "/srv/demo/repo".to_owned(),
+            password: SecretValue::new("demo-password"),
+            options: BTreeMap::new(),
+            id,
+        }
+    }
+
+    #[test]
+    fn a_job_knows_its_kind_and_what_it_targets() {
+        let repository = RepositoryId::parse(&"ab".repeat(32)).unwrap();
+        let plan = PlanId::parse("demo-home").unwrap();
+        let on_repository = Target {
+            plan: None,
+            repository: Some(repository.clone()),
+        };
+        let access = access(Some(repository.clone()));
+
+        let fake = Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: Duration::ZERO,
+            warnings: Vec::new(),
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        assert_eq!(fake.kind(), OperationKind::Fake);
+        assert_eq!(fake.target(), Target::default());
+
+        let identify = Job::Identify(access.clone());
+        assert_eq!(identify.kind(), OperationKind::Identify);
+        assert_eq!(identify.target(), on_repository);
+
+        let backup = Job::Backup(BackupJob {
+            repository: access.clone(),
+            sources: vec!["/home/demo".to_owned()],
+            tags: PlanTags::new(plan.clone(), AgentId::from_uuid(Uuid::from_u128(1))),
+            extra_tags: Vec::new(),
+            label: None,
+            deadline_budget: SignedDuration::from_hours(6),
+        });
+        assert_eq!(backup.kind(), OperationKind::Backup);
+        assert_eq!(
+            backup.target(),
+            Target {
+                plan: Some(plan),
+                repository: Some(repository),
+            }
+        );
+
+        let prune = Job::Prune(PruneJob {
+            repository: access.clone(),
+            keep_delete: KeepDelete::MIN,
+        });
+        assert_eq!(prune.kind(), OperationKind::Prune);
+        assert_eq!(prune.target(), on_repository);
+
+        let check = Job::Check(CheckJob {
+            repository: access,
+            read_data: false,
+        });
+        assert_eq!(check.kind(), OperationKind::Check);
+        assert_eq!(check.target(), on_repository);
+    }
+
+    #[test]
+    fn a_repository_that_is_not_identified_yet_is_not_a_target() {
+        let identify = Job::Identify(access(None));
+        assert_eq!(identify.target(), Target::default());
+    }
 
     #[test]
     fn a_job_never_shows_its_secrets_in_its_debug_form() {
