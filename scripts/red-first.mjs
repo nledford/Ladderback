@@ -6,13 +6,18 @@
 // The commit may carry `todo!()` stubs in src so the tests compile; the check
 // doesn't constrain which files it touches.
 //
+// The two trees (the merge base and the test: commit) are checked out at fixed
+// paths, target/red-first/trees/base and trees/first, next to their target
+// dirs, target/red-first/base and first. Paths that stay the same from run to
+// run let Cargo reuse a target dir across runs: CI caches the base tree's. Run
+// one at a time per checkout.
+//
 // Usage: node scripts/red-first.mjs <base-ref>
 // Exit status: 0 when every new test fails at run time, 1 otherwise.
 // Needs git, cargo, and, for @ui scenarios, trunk and npm.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 
 // Generous limits: builds from cold caches are slow, but a hung command must
@@ -21,10 +26,13 @@ const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const redFirst = path.join(repo, "target", "red-first");
+// The worktrees' parent directory, canonical; set once the arguments check out.
+let treesRoot;
 // One target dir per worktree: with a shared one, Cargo kept the base tree's
 // test binaries as fresh for the test: commit, so its new tests went unseen.
 function targetDir(tree) {
-  return path.join(repo, "target", "red-first", tree);
+  return path.join(redFirst, tree);
 }
 
 function git(...args) {
@@ -36,7 +44,7 @@ function git(...args) {
  * timeout or a command that can't start is an error, never a red result.
  */
 function run(command, args, cwd, { env = {}, timeout = BUILD_TIMEOUT_MS } = {}) {
-  const tree = path.relative(scratch, cwd).split(path.sep)[0];
+  const tree = path.relative(treesRoot, cwd).split(path.sep)[0];
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -64,6 +72,20 @@ function packageName(id) {
 function fail(message) {
   console.error(`red-first: ${message}`);
   process.exitCode = 1;
+}
+
+// --- Worktrees -------------------------------------------------------------
+
+/**
+ * Removes the worktree at `dir`, and whatever a run that was killed left there:
+ * the registration, the checkout, or both. The path is fixed, so a leftover
+ * would make the next `git worktree add` fail.
+ */
+function removeTree(dir) {
+  const registered = git("worktree", "list", "--porcelain").split("\n").includes(`worktree ${dir}`);
+  if (registered) git("worktree", "remove", "--force", dir);
+  rmSync(dir, { recursive: true, force: true });
+  git("worktree", "prune");
 }
 
 // --- Rust tests ------------------------------------------------------------
@@ -200,9 +222,11 @@ if (!/^test(\([^)]*\))?:/.test(subject)) {
 
 // Cargo reports canonical source paths (macOS: /private/var, not /var), so
 // the worktree roots must be canonical too for the paths to compare.
-const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), "steading-red-first-")));
-const trees = { base: path.join(scratch, "base"), first: path.join(scratch, "first") };
+mkdirSync(path.join(redFirst, "trees"), { recursive: true });
+treesRoot = realpathSync(path.join(redFirst, "trees"));
+const trees = { base: path.join(treesRoot, "base"), first: path.join(treesRoot, "first") };
 try {
+  for (const dir of Object.values(trees)) removeTree(dir);
   git("worktree", "add", "--detach", trees.base, git("merge-base", base, first));
   git("worktree", "add", "--detach", trees.first, first);
 
@@ -250,8 +274,5 @@ try {
 } catch (error) {
   fail(error.message);
 } finally {
-  for (const tree of Object.values(trees)) {
-    if (existsSync(tree)) git("worktree", "remove", "--force", tree);
-  }
-  rmSync(scratch, { recursive: true, force: true });
+  for (const dir of Object.values(trees)) removeTree(dir);
 }
