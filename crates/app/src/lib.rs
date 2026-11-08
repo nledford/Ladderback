@@ -5,6 +5,15 @@
 //! The `fakes` feature adds in-memory port fakes and the port contract
 //! suites that every real adapter runs too.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 pub mod execution;
 pub mod ports;
 

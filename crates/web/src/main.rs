@@ -5,6 +5,15 @@
 //! landmarks and a single `<h1>` (§4.5). Its text moves into the `l10n`
 //! catalog with the first real screen in M1b (§8.4).
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 use leptos::prelude::*;
 
 #[component]

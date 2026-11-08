@@ -53,6 +53,35 @@ if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   status=1
 fi
 
+# Production code never crashes (technical design §13.5). Clippy reads the
+# nearest clippy.toml only, so the root one and the two inner rings' must
+# all let tests unwrap, expect and panic; and every production crate root
+# must deny the panicking lints. `testkit` is test support, not production.
+no_panic_lints=(unwrap_used expect_used panic unimplemented todo unreachable)
+no_panic_ok=1
+for file in clippy.toml crates/domain/clippy.toml crates/app/clippy.toml; do
+  for setting in allow-unwrap-in-tests allow-expect-in-tests allow-panic-in-tests; do
+    if ! grep -qx "$setting = true" "$file"; then
+      echo "error: $file lacks '$setting = true'" >&2
+      no_panic_ok=0
+    fi
+  done
+done
+while IFS= read -r root; do
+  for lint in "${no_panic_lints[@]}"; do
+    # The lint's name, not a longer one that starts with it.
+    if ! grep -Eq "clippy::$lint([^_a-z]|\$)" "$root"; then
+      echo "error: $root doesn't deny clippy::$lint" >&2
+      no_panic_ok=0
+    fi
+  done
+done < <(find crates src -maxdepth 5 -path '*/src/*' \( -name lib.rs -o -name main.rs \) -not -path 'crates/testkit/*' | sort)
+if ((no_panic_ok)); then
+  echo "ok: crate roots deny panicking code; every clippy.toml lets tests use it"
+else
+  status=1
+fi
+
 cargo build --quiet --package domain --target wasm32-unknown-unknown
 echo "ok: domain builds for wasm32-unknown-unknown"
 

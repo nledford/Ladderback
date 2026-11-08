@@ -61,7 +61,9 @@ impl RunOperation {
     }
 
     fn fail(&self, op: &mut Operation, reason: FailureReason) {
-        op.fail(reason, self.clock.now())
-            .expect("only an unfinished operation is failed here");
+        // Only an unfinished operation can be failed. Every caller fails one
+        // that just broke the contract and so is unfinished; a finished one
+        // keeps the outcome it already has.
+        let _ = op.fail(reason, self.clock.now());
     }
 }

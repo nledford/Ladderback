@@ -4,6 +4,15 @@
 //! always passed in. This crate also builds for `wasm32-unknown-unknown`, so
 //! the web UI can reuse its validation.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 pub mod execution;
 mod ids;
 

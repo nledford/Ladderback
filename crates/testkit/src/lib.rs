@@ -18,7 +18,7 @@ pub const SKIP_LOG_ENV: &str = "STEADING_SKIP_LOG";
 /// when that is set, then returns from the enclosing function. The reason
 /// takes `format!` arguments.
 ///
-/// ```ignore
+/// ```text
 /// if running_as_root() {
 ///     testkit::skip!("root ignores file permissions");
 /// }

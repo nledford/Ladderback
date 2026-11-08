@@ -5,7 +5,8 @@ use domain::{OperationId, Uuid};
 use futures::StreamExt;
 
 use crate::ports::{
-    Engine, EngineEvent, EngineResult, FakeEnd, FakeJob, Job, ProgressEvent, ProgressKind,
+    Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, Job, ProgressEvent,
+    ProgressKind,
 };
 
 /// Every engine plays fake jobs identically. `step_delay` is the real time
@@ -22,13 +23,10 @@ fn op() -> OperationId {
     OperationId::from_uuid(Uuid::from_u128(0x5eed))
 }
 
-async fn events(engine: &dyn Engine, job: FakeJob) -> Vec<EngineEvent> {
-    engine
-        .run(op(), Job::Fake(job))
-        .await
-        .expect("the engine accepts a fake job")
-        .collect()
-        .await
+/// What the engine plays for `job`, or why it refused it: a fake job is always
+/// accepted, so a refusal fails the comparison with its detail.
+async fn events(engine: &dyn Engine, job: FakeJob) -> Result<Vec<EngineEvent>, EngineError> {
+    Ok(engine.run(op(), Job::Fake(job)).await?.collect().await)
 }
 
 fn begin() -> [EngineEvent; 2] {
@@ -71,7 +69,7 @@ async fn a_job_reports_progress_and_its_result(engine: &dyn Engine, delay: Durat
     }));
     assert_eq!(
         events(engine, job(2, delay, FakeEnd::Succeed)).await,
-        expected
+        Ok(expected)
     );
 }
 
@@ -102,7 +100,7 @@ async fn warnings_are_reported_without_ending_the_job(engine: &dyn Engine, delay
         warnings,
         ..job(1, delay, FakeEnd::Succeed)
     };
-    assert_eq!(events(engine, job).await, expected);
+    assert_eq!(events(engine, job).await, Ok(expected));
 }
 
 async fn a_reported_failure_ends_the_job(engine: &dyn Engine, delay: Duration) {
@@ -118,7 +116,7 @@ async fn a_reported_failure_ends_the_job(engine: &dyn Engine, delay: Duration) {
     ]);
     assert_eq!(
         events(engine, job(1, delay, FakeEnd::Fail { detail })).await,
-        expected
+        Ok(expected)
     );
 }
 
@@ -136,7 +134,7 @@ async fn an_engine_that_stops_without_a_result_fails_with_its_exit_code(
         after_steps: 1,
         exit_code: 3,
     };
-    assert_eq!(events(engine, job(3, delay, end)).await, expected);
+    assert_eq!(events(engine, job(3, delay, end)).await, Ok(expected));
 }
 
 async fn a_job_with_no_steps_still_starts_and_finishes(engine: &dyn Engine) {
@@ -148,6 +146,6 @@ async fn a_job_with_no_steps_still_starts_and_finishes(engine: &dyn Engine) {
     ]);
     assert_eq!(
         events(engine, job(0, Duration::ZERO, FakeEnd::Succeed)).await,
-        expected
+        Ok(expected)
     );
 }

@@ -7,6 +7,15 @@
 //! - [`WorkerEngine`] is the daemon side: it implements `app`'s `Engine`
 //!   port by spawning workers and translating their events.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 mod client;
 pub mod job;
 mod line;
