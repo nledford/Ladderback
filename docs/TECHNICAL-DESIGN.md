@@ -285,9 +285,9 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 
 **Dependency rule, enforced in CI.**
 
-- `domain` has no I/O, no async and no ambient time or randomness. It may use `serde`, `uuid` (without `v4`/`v7` features), `jiff` (with `tzdb-bundle-always`, so time zones validate in the browser) and the cron crate with its time library (`croner` and `chrono`; M0 confirms both build for `wasm32`). Its error types implement `Display` and `Error` by hand: they carry codes and values, never sentences (§8.4).
+- `domain` has no I/O, no async and no ambient time or randomness. It may use `serde`, `uuid` (without `v4`/`v7` features), `jiff` (with `tzdb-bundle-always`, so time zones validate in the browser) and the cron crate `croner` with `default-features = false, features = ["jiff"]` (`chrono` is only croner's default; time goes through `jiff` alone, and `just architecture` bans `chrono` from `domain` and `app`, so a default-features slip fails CI; M0 confirms `jiff` and `croner` build for `wasm32`). Its error types implement `Display` and `Error` by hand: they carry codes and values, never sentences (§8.4).
 - `app` depends only on `domain`, `async-trait` and `futures`.
-- **Banned crates:** a CI step runs `cargo tree -e normal,build --prefix none` on `domain` (also with `--target wasm32-unknown-unknown`) and on `app`, and fails if `tokio`, `sqlx`, `axum`, `hyper`, `reqwest`, `rustic_core`, `rustic_backend`, `fluent-bundle`, `fluent-langneg`, `unic-langid` or any `icu_*` crate appears. Dev-dependencies are excluded, so tests may use a runtime.
+- **Banned crates:** a CI step runs `cargo tree -e normal,build --prefix none` on `domain` (also with `--target wasm32-unknown-unknown`) and on `app`, and fails if `tokio`, `sqlx`, `axum`, `hyper`, `reqwest`, `rustic_core`, `rustic_backend`, `fluent-bundle`, `fluent-langneg`, `unic-langid`, `chrono` or any `icu_*` crate appears. Dev-dependencies are excluded, so tests may use a runtime.
 - **Banned calls:** `clippy.toml` `disallowed-methods` / `disallowed-types` in `domain` and `app` forbid `std::fs`, the file-system methods of `std::path::Path`, `std::env`, `std::process`, `std::net`, `SystemTime::now`, `Instant::now`, `jiff::Timestamp::now`, `jiff::Zoned::now`, `Uuid::now_v7` and `rand`. Time and randomness come from `Clock` and `Random`. The two files are kept byte-identical, and the architecture check fails if they differ.
 - **wasm build:** CI builds `domain` for `wasm32-unknown-unknown`. This proves the UI can reuse its validation (schedules, retention syntax); purity is enforced by the two checks above, not by the wasm build.
 - Adapters depend on `app` and `domain`, never on each other. Only the composition root (`src/main.rs`) knows every adapter and wires them per role: agent, hub, worker, CLI, MCP. `l10n` is a presentation library outside the rings, used by `web`, `adapters/notify` and the CLI (§8.4).
@@ -338,6 +338,8 @@ enum WorkerEvent {
 ```
 
 `ProgressBars` is implemented by `EventProgressBars`, which writes these events. Per-file errors raised through `Progress::error` become **warnings**, so an operation can end as `Succeeded`, `SucceededWithWarnings` or `Failed` (§3.1). The worker builds a `Redactor` (§3.1) from the resolved secrets in its `JobSpec` and passes every `Log`, `Warning` and error through it (I4). A worker stopped by its watchdog emits nothing more; the daemon records the operation as `Failed { reason: DeadlinePassed }`.
+
+**Message cap.** The daemon reads the worker's stdout one line at a time and the worker reads its stdin to the end, and each side reads at most `MAX_MESSAGE_BYTES` (1 MiB, in `engine::job`) of a message plus one byte to tell it from a longer one (§13.5, rule 2). An event line past the cap fails the operation as `EngineFailed` with the cap in its detail, and the daemon kills the worker; a worker answers a `JobSpec` past the cap with `InvalidJobSpec`; the daemon refuses to start a worker for a spec it would reject. A line that never ends therefore never grows a buffer past the cap.
 
 ### 4.2 Daemon (agent)
 
@@ -734,7 +736,7 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 | Async runtime / HTTP | `tokio`, `axum 0.8`, `tower-http` |
 | Engine | `rustic_core`, `rustic_backend` (one pinned git revision until a release has `Progress::error`; wrapped in our `engine` crate) |
 | DB | `sqlx` (SQLite, compile-time-checked queries, migrations) |
-| Scheduling | `croner` |
+| Scheduling | `croner` (with its `jiff` feature, not `chrono`) |
 | Embedding UI | `rust-embed` |
 | Auth | `argon2`, `axum-login` or a small cookie-session layer |
 | Crypto / identity | `ed25519-dalek`, `rustls` |
@@ -757,6 +759,7 @@ steading/
 │  ├─ app/                    # use cases, runtime loops, port traits, in-memory fakes and port contract suites
 │  │                          # (feature "fakes"); tests/acceptance.rs runs non-@e2e scenarios
 │  ├─ api/                    # wasm-safe DTOs: REST, UiEvent, sync protocol (the published language)
+│  ├─ testkit/                # test support, a dev-dependency only: `skip!` (§13.5)
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
 │  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,
 │  │                          # browser-intl, pseudo); build.rs generates message IDs from en-US
@@ -779,7 +782,7 @@ steading/
 │                             #   component gallery (§4.5)
 ├─ src/main.rs                # composition root; `steading` binary: serve | worker | mcp | pair | import-profile
 │                             #   | export-profile | install-service | db rebuild
-├─ scripts/                   # CI checks behind the Justfile: banned crates (§3.2), red-first (§13.1)
+├─ scripts/                   # CI checks behind the Justfile: banned crates (§3.2), red-first (§13.1), skip log (§13.5)
 ├─ Justfile                   # every workflow, for people, agents and CI alike
 ├─ migrations/
 └─ docs/
@@ -1166,7 +1169,17 @@ A change is done when:
 - any new port has a contract test run against both fake and real adapter;
 - every invariant in §0 it touches has a test;
 - for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
-- docs are updated, and `fmt` and `clippy` are clean.
+- docs are updated, and `fmt` and `clippy` are clean, which includes the robustness rules (§13.5).
+
+### 13.5 Robustness rules
+
+Maintainer decision, 2026-11-08 (§16, decision 21). The daemon runs unattended and owns the operation queue: a panic in it silently stops backups, and input it didn't expect is the likeliest cause of one.
+
+1. **Never crash in non-test code.** No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests. Return typed errors through `Result` and `?`; use `let … else`, `ok_or` and `unwrap_or…` only where the fallback can't hide corruption. The one exception is a provably infallible case, written `#[allow(clippy::expect_used, reason = "why it can't fail")]` with `.expect("…")`. A poisoned mutex is `lock().unwrap_or_else(PoisonError::into_inner)` or an error, and a thread join is a `Result`.
+   - **Enforcement.** Every production crate root (each `lib.rs`, `src/main.rs` and the `web` crate root; crate-level `//!` docs come first) carries `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`, and clippy lets tests use `unwrap`, `expect` and `panic!` (`allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`); `todo!`, `unimplemented!` and `unreachable!` stay denied in tests too. It is not `[workspace.lints]`, which would also reach integration tests and the cucumber runners. Clippy reads the nearest `clippy.toml` only, so the root file covers the crates without one and `crates/{domain,app}/clippy.toml` repeat the three settings; `just architecture` checks that every `clippy.toml` and every crate root agree. `testkit` is test support and has no deny. A red `test:` commit's `todo!()` stubs (§13.1) are the one place the lint doesn't hold, and the next commit removes them.
+2. **Input-derived numbers are hostile.** Bytes from outside the process (the worker's stdout lines, the `JobSpec` on its stdin, `/api/v1` and other HTTP requests, `config.toml`, imported rustic profiles, later hub sync messages) never size an allocation unbounded and are never indexed unchecked. Use `get()`, not `[i]` or `[a..b]`, on input-derived offsets; checked or saturating arithmetic on sizes and counts; caps on line and message lengths; and slice strings only at char boundaries. The worker protocol's cap is in §4.1. HTTP bodies are not read into memory by the M0 UI server, and axum's `DefaultBodyLimit` (2 MiB) bounds every extractor that does; a handler that needs more states its limit.
+3. **Visible test skips.** A test that can't run here, such as `chmod 000` under root or a backend tool that isn't installed, calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. The macro prints `SKIPPED <module path>: <reason>` to stderr and appends it to the file named by `STEADING_SKIP_LOG`. `just test`, `just test-acceptance` and `just test-e2e` run through `scripts/with-skip-log.sh`, which points that variable at a fresh file in the target directory (`$CARGO_TARGET_DIR`, default `target/`) and lists its lines after the run, also when tests fail and without changing the exit status. CI runs `just test`, so skips show in its log. `testkit` is a dev-dependency only (`just architecture` checks it).
+4. **Parallel agents.** Each agent works in its own git worktree with its own `CARGO_TARGET_DIR`, its own ports (never `just serve`'s 9898) and its own scratch folder. It never runs `rm -rf` on a shared path, deletes its target directory when done, and keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
 
 ---
 
@@ -1226,7 +1239,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 
 ## 16. Decisions
 
-Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decisions 17–18 recorded 2026-11-08.
+Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decisions 17–18 recorded 2026-11-08. Decisions 21–22 recorded 2026-11-08 with the robustness rules and the time library.
 
 | # | Question | Decision |
 |---|---|---|
@@ -1250,6 +1263,8 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | 18 | Accessibility | **First-class, WCAG 2.2 AA from the first screen.** Invariants A1–A6 in §0; one accessible component set and an app-wide announcer; `@ui` scenarios in Playwright with axe-core and keyboard-only journeys from M0; a manual Orca and VoiceOver pass per milestone (§4.5). |
 | 19 | Versioning | **One SemVer version for the whole product**, judged against a declared contract (CLI, config schema, `/api/v1`, `/sync/v1`, snapshot tags, webhook JSON, exported profiles, data migrations). `0.1.0` at the end of M1b, `1.0.0` after M5; `vX.Y.Z` tags and `CHANGELOG.md` produced by release-plz from Conventional Commits through a reviewed release PR (§12.1). |
 | 20 | MCP server | **`steading mcp`: newline-delimited JSON-RPC 2.0 over stdio (MCP `2025-06-18` or later), in one inbound adapter (`adapters/mcp`).** Connect mode drives a running agent through `/api/v1` (a hub from M4b) with a scoped API token; headless and scratch modes run their own in-process session under the data-dir lock. Tools read state, run and cancel backups, and preview forget and import. Nothing restores, deletes, edits config or adds a command: a model-driven client is not a human confirmation, and token scopes enforce this in the daemon (§4.6, §10.5). |
+| 21 | Robustness rules | **Four rules, enforced by tooling where a tool can, recorded 2026-11-08 (§13.5).** Never crash in non-test code (clippy `deny` at every production crate root). Input-derived numbers are hostile (caps and checked access; the worker protocol's messages are capped at 1 MiB, §4.1). A test that can't run says so with `testkit::skip!`, and `just test` lists the skips. Parallel agents each get their own worktree, target directory, ports and scratch folder. Why: the daemon runs unattended and owns the operation queue, so one panic silently stops backups; the inputs that reach it come from other processes, files and networks; a silent skip reads as a pass; and agents sharing a tree or a port break each other's builds. |
+| 22 | One time library | **Time goes through `jiff`, never `chrono`** (recorded 2026-11-08). `croner` is used with `default-features = false, features = ["jiff"]`, and `just architecture` bans `chrono` from `domain` and `app`. Why: Steading already models time with `jiff` (`Timestamp`, `SignedDuration`, the `Clock` port), and so does `rustic_core`; `jiff`'s time-zone handling and `Span`/DST arithmetic are what scheduling needs; `chrono` would add a second model of time and conversions between the two. `chrono` still reaches the build transitively through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which can't be turned off; no Steading crate depends on it. |
 
 ## 17. Open questions
 

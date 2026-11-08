@@ -1,6 +1,15 @@
 //! HTTP adapter (technical design §4.2). In M0 it serves the embedded web
 //! UI; the REST API, the events WebSocket and request checks follow in M1b.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -102,25 +111,32 @@ const UI_FILE_EXTENSIONS: &[&str] = &[
 
 fn file(path: &str, asset: Asset) -> Response {
     let content_type = if path == INDEX {
-        "text/html; charset=utf-8".to_owned()
+        HeaderValue::from_static("text/html; charset=utf-8")
     } else {
-        mime_guess::from_path(path)
-            .first_or_octet_stream()
-            .essence_str()
-            .to_owned()
+        // A MIME type is always valid header text; a file served with the
+        // generic type is the worst a failure here can cause.
+        HeaderValue::from_str(
+            mime_guess::from_path(path)
+                .first_or_octet_stream()
+                .essence_str(),
+        )
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))
     };
     // Trunk puts a content hash in every asset name except index.html, so
     // only the entry page must be revalidated.
-    let cache_control = if path == INDEX {
+    let cache_control = HeaderValue::from_static(if path == INDEX {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"
-    };
-    Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CACHE_CONTROL, cache_control)
-        .body(Body::from(asset.bytes))
-        .expect("static headers are valid")
+    });
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, cache_control),
+        ],
+        Body::from(asset.bytes),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

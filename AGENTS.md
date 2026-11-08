@@ -16,8 +16,8 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-ui` |
 | `just fmt` | Formats Rust code |
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
-| `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`) |
-| `just test [args]` | Unit, contract, acceptance and `@e2e` tests (`cargo test --workspace`) |
+| `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
+| `just test [args]` | Unit, contract, acceptance and `@e2e` tests (`cargo test --workspace`), then the list of skipped tests |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; pass `--name <regex>` to pick scenarios |
 | `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
 | `just mutants [base]` | `cargo mutants` on `domain` and `app` code changed since `base` (default `origin/main`) |
@@ -43,6 +43,14 @@ Each fact lives in one file. Link to it rather than copying it. The design docum
 - Exactly one maintenance owner per repository (I1). Prune never deletes instantly (I2).
 - Resolved secrets never appear in argv, environments, logs, templates, sync messages or the UI (I4).
 - Forget deletes only snapshots a plan owns or the user explicitly selected (I6).
+
+## Never crash
+
+The daemon runs unattended and owns the operation queue, so a panic silently stops backups. Rules and reasons: §13.5.
+
+- No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests. Return typed errors through `Result` and `?`. The one exception is a provably infallible case: `#[allow(clippy::expect_used, reason = "why it can't fail")]` and `.expect("…")`. Every production crate root denies these lints, so clippy fails the build. `todo!()` stubs live only in the red `test:` commit.
+- Mutex poisoning is `lock().unwrap_or_else(PoisonError::into_inner)` or an error; a thread join is a `Result`.
+- Input-derived numbers are hostile: bytes from outside the process (worker output, `JobSpec`, HTTP requests, `config.toml`, imported profiles, sync messages) never size an allocation unbounded and never index unchecked. Use `get()`, not `[i]` or `[a..b]`; checked or saturating arithmetic; caps on line and message lengths (§4.1); slice strings only at char boundaries.
 
 ## How to work: BDD, DDD and TDD
 
@@ -76,6 +84,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 - Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts.
 - There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
+- A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. `just test` lists the skips at its end, so CI shows them. `testkit` is a dev-dependency only.
 
 ## Independent adversarial review
 
@@ -91,10 +100,20 @@ After implementing a non-trivial change, get one independent adversarial review 
 - **What to give the reviewer:** the diff; the design sections and invariants it touches; the acceptance criteria; and an instruction to find what is wrong, not to confirm it works. Ask for evidence (file and line, a failing input, a counterexample) and a severity for each finding.
 - **Afterwards:** fix every real finding, with a failing test first where it is a bug. Say in the pull request which findings were rejected and why. One review per change; re-review only when the fixes change the design.
 
+## Parallel agents
+
+Several agents may work on the repository at once (§13.5). Each one:
+
+- works in its own git worktree, with its own `CARGO_TARGET_DIR`, and deletes that target directory when done;
+- uses its own ports, never `just serve`'s 9898, and its own scratch folder;
+- never runs `rm -rf` on a shared path;
+- keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
+
 ## Conventions
 
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
 - **Localization:** no hard-coded user-facing strings. Use message IDs from `l10n`, Fluent terms for glossary words, and complete sentences. Code never concatenates fragments (§8.4).
+- **Time:** time goes through `jiff`, via the `Clock` port in the core. Never add `chrono` to a Steading crate: it reaches the build only transitively, through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which we can't turn off. `just architecture` bans it from `domain` and `app` (§16, decision 22).
 - **Docs:** keep [PRODUCT.md](PRODUCT.md) and the technical design current with the code. Record new decisions in §16.
 - **Commits:** atomic, in logical groups. Each commit is one coherent change for one reason: it builds, passes its tests (except the deliberately failing `test:` commit, §13.1), and can be reviewed and reverted on its own.
   - Split unrelated work, formatting, refactors and dependency updates into separate commits. Stage hunks selectively when one file holds changes for different commits.

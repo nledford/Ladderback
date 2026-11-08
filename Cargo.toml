@@ -8,6 +8,7 @@ members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
+    "crates/testkit",
 ]
 # `web` only builds for wasm32 with trunk; host commands skip it unless asked.
 default-members = [
@@ -18,6 +19,7 @@ default-members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
+    "crates/testkit",
 ]
 
 [workspace.package]
@@ -35,6 +37,7 @@ api = { path = "crates/api" }
 engine = { path = "crates/adapters/engine" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
+testkit = { path = "crates/testkit" }
 
 async-trait = "0.1.92"
 axum = "0.8.9"

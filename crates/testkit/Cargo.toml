@@ -1,0 +1,11 @@
+[package]
+name = "testkit"
+description = "Test support shared by the workspace's tests: visible test skips"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

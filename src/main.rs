@@ -1,6 +1,15 @@
 //! Composition root: the only place that knows every adapter (technical
 //! design §3.2). One binary, several roles.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;

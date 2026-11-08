@@ -4,6 +4,15 @@
 //! Errors and warnings cross every boundary as codes with typed arguments,
 //! never as sentences; the presentation layer renders them (§8.4).
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 use serde::{Deserialize, Serialize};
 
 /// Why something failed. Closed: a code this version doesn't know, say from

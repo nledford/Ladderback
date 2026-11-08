@@ -1,6 +1,15 @@
 //! Platform adapter: the operating system's clocks. Power, network and
 //! identity arrive with later milestones (technical design §3.2).
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
 use app::ports::Clock;
 use async_trait::async_trait;
 use domain::Timestamp;
