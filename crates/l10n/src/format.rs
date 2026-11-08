@@ -10,8 +10,10 @@
 /// instant outside the years a calendar date can show (±9999) is written as
 /// its millisecond count, so no input can make this fail.
 pub(crate) fn instant(utc_ms: i64) -> String {
-    let _ = utc_ms;
-    todo!()
+    jiff::Timestamp::from_millisecond(utc_ms).map_or_else(
+        |_| utc_ms.to_string(),
+        |instant| instant.strftime("%Y-%m-%d %H:%M:%S UTC").to_string(),
+    )
 }
 
 #[cfg(test)]

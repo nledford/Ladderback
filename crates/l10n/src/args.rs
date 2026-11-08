@@ -16,8 +16,19 @@ pub(crate) const MAX_TEXT: usize = 16 * 1024;
 /// `text`, cut at a character boundary and ended with `…` if it is longer
 /// than [`MAX_TEXT`].
 pub(crate) fn clamp_text(text: &str) -> Cow<'_, str> {
-    let _ = text;
-    todo!()
+    if text.len() <= MAX_TEXT {
+        return Cow::Borrowed(text);
+    }
+    // The last character boundary that leaves room for the ellipsis.
+    let room = MAX_TEXT - '…'.len_utf8();
+    let end = (0..=room)
+        .rev()
+        .find(|at| text.is_char_boundary(*at))
+        .unwrap_or_default();
+    let mut clamped = String::with_capacity(MAX_TEXT);
+    clamped.push_str(text.get(..end).unwrap_or_default());
+    clamped.push('…');
+    Cow::Owned(clamped)
 }
 
 /// The IEC unit a byte count is shown in.
@@ -34,7 +45,14 @@ pub(crate) enum SizeUnit {
 impl SizeUnit {
     /// The key the catalog's `size` message selects its label by.
     pub(crate) const fn key(self) -> &'static str {
-        todo!()
+        match self {
+            Self::B => "b",
+            Self::KiB => "kib",
+            Self::MiB => "mib",
+            Self::GiB => "gib",
+            Self::TiB => "tib",
+            Self::PiB => "pib",
+        }
     }
 }
 
@@ -43,8 +61,24 @@ impl SizeUnit {
 /// unit, so 1,048,575 bytes read as 1 MiB, not 1,024 KiB. Nothing is larger
 /// than a PiB: a `u64` tops out at 16,384 of them.
 pub(crate) fn size_parts(bytes: u64) -> (f64, SizeUnit) {
-    let _ = bytes;
-    todo!()
+    const UNITS: [SizeUnit; 6] = [
+        SizeUnit::B,
+        SizeUnit::KiB,
+        SizeUnit::MiB,
+        SizeUnit::GiB,
+        SizeUnit::TiB,
+        SizeUnit::PiB,
+    ];
+    let tenth = |value: f64| (value * 10.0).round() / 10.0;
+    let mut value = bytes as f64;
+    let mut index = 0;
+    // Move up while the value, as it will be shown, reaches 1024.
+    while index + 1 < UNITS.len() && tenth(value) >= 1024.0 {
+        value /= 1024.0;
+        index += 1;
+    }
+    let unit = UNITS.get(index).copied().unwrap_or(SizeUnit::PiB);
+    (if index == 0 { value } else { tenth(value) }, unit)
 }
 
 /// A duration split into the parts its message shows: the two largest
@@ -59,8 +93,54 @@ pub(crate) enum DurationParts {
 }
 
 pub(crate) fn duration_parts(milliseconds: u64) -> DurationParts {
-    let _ = milliseconds;
-    todo!()
+    const SECOND: u64 = 1_000;
+    const MINUTE: u64 = 60 * SECOND;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    match milliseconds {
+        0..SECOND => DurationParts::Milliseconds { milliseconds },
+        SECOND..MINUTE => DurationParts::Seconds {
+            seconds: milliseconds / SECOND,
+        },
+        MINUTE..HOUR => DurationParts::MinutesSeconds {
+            minutes: milliseconds / MINUTE,
+            seconds: milliseconds % MINUTE / SECOND,
+        },
+        HOUR..DAY => DurationParts::HoursMinutes {
+            hours: milliseconds / HOUR,
+            minutes: milliseconds % HOUR / MINUTE,
+        },
+        DAY.. => DurationParts::DaysHours {
+            days: milliseconds / DAY,
+            hours: milliseconds % DAY / HOUR,
+        },
+    }
+}
+
+impl DurationParts {
+    /// The key the catalog's `duration` message selects its arrangement by.
+    pub(crate) const fn form(self) -> &'static str {
+        match self {
+            Self::Milliseconds { .. } => "ms",
+            Self::Seconds { .. } => "s",
+            Self::MinutesSeconds { .. } => "min-s",
+            Self::HoursMinutes { .. } => "h-min",
+            Self::DaysHours { .. } => "d-h",
+        }
+    }
+
+    /// The parts, under the names the `duration` message reads them by.
+    pub(crate) fn parts(self) -> Vec<(&'static str, u64)> {
+        match self {
+            Self::Milliseconds { milliseconds } => vec![("milliseconds", milliseconds)],
+            Self::Seconds { seconds } => vec![("seconds", seconds)],
+            Self::MinutesSeconds { minutes, seconds } => {
+                vec![("minutes", minutes), ("seconds", seconds)]
+            }
+            Self::HoursMinutes { hours, minutes } => vec![("hours", hours), ("minutes", minutes)],
+            Self::DaysHours { days, hours } => vec![("days", days), ("hours", hours)],
+        }
+    }
 }
 
 #[cfg(test)]
