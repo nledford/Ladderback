@@ -16,12 +16,17 @@ build = "build.rs"
 # the feature on through their own.
 default = ["pseudo"]
 pseudo = ["dep:fluent-pseudo"]
+# ICU4X's formatting of numbers and instants (technical design §8.4). Only the
+# daemon turns it on: a browser must never download the locale data, so `web`
+# depends on `l10n` without it, and `scripts/check-architecture.sh` checks it.
+icu = []
 
 [dependencies]
 api.workspace = true
 fluent-bundle.workspace = true
 fluent-langneg.workspace = true
 fluent-pseudo = { workspace = true, optional = true }
+intl-memoizer.workspace = true
 jiff.workspace = true
 unic-langid.workspace = true
 
@@ -31,6 +36,8 @@ unic-langid.workspace = true
 
 [dev-dependencies]
 fluent-syntax.workspace = true
+# The tests run with the daemon's formatting, as `app`'s run with its fakes.
+l10n = { workspace = true, features = ["icu"] }
 proc-macro2.workspace = true
 serde_json.workspace = true
 

@@ -66,6 +66,7 @@ fluent-pseudo = "0.3.3"
 fluent-syntax = "0.12.0"
 futures = "0.3.34"
 http-body-util = "0.1.5"
+intl-memoizer = "0.5.3"
 jiff = { version = "0.2.40", features = ["serde"] }
 keyring = { version = "3.6.3", default-features = false }
 leptos = { version = "0.8.23", features = ["csr"] }

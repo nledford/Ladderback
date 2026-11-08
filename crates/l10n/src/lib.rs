@@ -36,6 +36,8 @@ pub mod code;
 #[cfg(test)]
 mod constants;
 mod format;
+#[cfg(feature = "icu")]
+mod icu;
 mod id;
 mod locale;
 mod localizer;

@@ -74,15 +74,22 @@ fn a_count_picks_its_plural_form() {
     assert_eq!(files(1).text(), "1 file");
     assert_eq!(files(0).text(), "0 files");
     assert_eq!(files(2).text(), "2 files");
-    assert_eq!(files(1_000_000).text(), "1000000 files");
+    assert_eq!(files(1_000_000).text(), "1,000,000 files");
 }
 
 #[test]
 fn a_count_is_shown_digit_for_digit_even_past_what_a_float_holds() {
     let localizer = english();
-    for count in [(1 << 53) - 1, 1 << 53, (1 << 53) + 1, u64::MAX] {
-        let shown = localizer.message(id("files"), &[("count", MsgArg::Count(count))]);
-        assert_eq!(shown.text(), format!("{count} files"));
+    // Up to 2^53 a count is a number, which the locale groups; past it, it is
+    // its digits, so that none of them is rounded away.
+    for (count, shown) in [
+        ((1 << 53) - 1, "9,007,199,254,740,991 files"),
+        (1 << 53, "9,007,199,254,740,992 files"),
+        ((1 << 53) + 1, "9007199254740993 files"),
+        (u64::MAX, "18446744073709551615 files"),
+    ] {
+        let files = localizer.message(id("files"), &[("count", MsgArg::Count(count))]);
+        assert_eq!(files.text(), shown);
     }
 }
 
@@ -95,7 +102,7 @@ fn a_count_stays_a_number_up_to_the_largest_a_float_holds_exactly() {
             .into_text()
     };
     assert_eq!(exact(1 << 53), "the largest exact count");
-    assert_eq!(exact((1 << 53) - 1), "9007199254740991");
+    assert_eq!(exact((1 << 53) - 1), "9,007,199,254,740,991");
     assert_eq!(exact((1 << 53) + 1), "9007199254740993");
 }
 
@@ -110,12 +117,12 @@ fn a_size_reaches_its_message_in_the_largest_unit_that_keeps_it_at_one_or_more()
     let localizer = english();
     for (bytes, shown) in [
         (0, "0|b free"),
-        (1023, "1023|b free"),
+        (1023, "1,023|b free"),
         (1536, "1.5|kib free"),
         (1_048_575, "1|mib free"),
         (5_905_580_032, "5.5|gib free"),
         (3 << 40, "3|tib free"),
-        (u64::MAX, "16384|pib free"),
+        (u64::MAX, "16,384|pib free"),
     ] {
         let free = localizer.message(id("free"), &[("space", MsgArg::Bytes(bytes))]);
         assert!(free.problems().is_empty(), "{:?}", free.problems());
@@ -132,7 +139,7 @@ fn a_duration_reaches_its_message_as_its_two_largest_parts() {
         (61_000, "took min=1 s=1"),
         (3_900_000, "took h=1 min=5"),
         (90_000_000, "took d=1 h=1"),
-        (u64::MAX, "took d=213503982334 h=14"),
+        (u64::MAX, "took d=213,503,982,334 h=14"),
     ] {
         let took = localizer.message(id("took"), &[("time", MsgArg::DurationMs(milliseconds))]);
         assert!(took.problems().is_empty(), "{:?}", took.problems());
@@ -141,14 +148,14 @@ fn a_duration_reaches_its_message_as_its_two_largest_parts() {
 }
 
 #[test]
-fn an_instant_is_written_in_utc() {
+fn an_instant_with_no_zone_is_read_in_utc_and_written_by_the_locale() {
     let when = MsgArg::Timestamp {
         utc_ms: 1_794_144_645_000,
         zone: None,
     };
     let shown = english().message(id("at"), &[("when", when)]);
     assert!(shown.problems().is_empty(), "{:?}", shown.problems());
-    assert_eq!(shown.text(), "at 2026-11-08 13:30:45 UTC");
+    assert_eq!(shown.text(), "at Nov 8, 2026, 1:30\u{202f}PM");
 }
 
 #[test]
@@ -292,7 +299,7 @@ fn a_size_or_duration_is_written_by_the_locale_that_writes_its_message() {
     let localizer = Localizer::from_catalogs(&[tag("de")], &[EN, DE]);
     // The message and the size are both German.
     let free = localizer.message(id("free"), &[("space", MsgArg::Bytes(1536))]);
-    assert_eq!(free.text(), "1.5 kib-de frei");
+    assert_eq!(free.text(), "1,5 kib-de frei");
     // The German message has no duration of its own, so the next locale's
     // is used for the parts.
     let lasted = localizer.message(id("lasted"), &[("time", MsgArg::DurationMs(3_900_000))]);
