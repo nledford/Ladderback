@@ -32,8 +32,12 @@ impl PosixEnv {
 
     /// Reads the variables through `get`, which takes a variable's name.
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
-        let _ = get;
-        todo!()
+        Self {
+            language: get("LANGUAGE"),
+            lc_all: get("LC_ALL"),
+            lc_messages: get("LC_MESSAGES"),
+            lang: get("LANG"),
+        }
     }
 
     /// The languages asked for, best first.
@@ -46,7 +50,24 @@ impl PosixEnv {
     /// the modifier are dropped (`en_US.UTF-8@euro` is `en-US`) and `_`
     /// becomes `-`. What is not a language tag is left out.
     pub fn preferences(&self) -> Vec<LanguageIdentifier> {
-        todo!()
+        let locale = [&self.lc_all, &self.lc_messages, &self.lang]
+            .into_iter()
+            .flatten()
+            .map(|value| value.trim())
+            .find(|value| !value.is_empty());
+        if locale.is_some_and(is_c_locale) {
+            return Vec::new();
+        }
+        // Bounded, because the environment is outside input: at most four
+        // entries are looked at for each one kept.
+        let listed = self
+            .language
+            .iter()
+            .flat_map(|list| list.split(':'))
+            .take(MAX_PREFERENCES * 4)
+            .filter_map(posix_tag)
+            .take(MAX_PREFERENCES);
+        listed.chain(locale.and_then(posix_tag)).collect()
     }
 }
 
@@ -54,8 +75,23 @@ impl PosixEnv {
 /// (`en-US`), or `None` for `C`, `POSIX`, an empty value and anything that
 /// isn't a language tag.
 pub(crate) fn posix_tag(raw: &str) -> Option<LanguageIdentifier> {
-    let _ = raw;
-    todo!()
+    let raw = raw.trim();
+    if raw.len() > MAX_NAME_LEN {
+        return None;
+    }
+    let name = raw.split(['.', '@']).next().unwrap_or_default();
+    if name.is_empty() || is_c_locale(name) {
+        return None;
+    }
+    let tag: LanguageIdentifier = name.replace('_', "-").parse().ok()?;
+    (tag.language.as_str() != "und").then_some(tag)
+}
+
+/// Whether a POSIX locale value is the untranslated `C` or `POSIX` locale,
+/// with or without a codeset (`C.UTF-8`).
+fn is_c_locale(value: &str) -> bool {
+    let name = value.split(['.', '@']).next().unwrap_or_default();
+    name == "C" || name == "POSIX"
 }
 
 /// The locales among `available` to look a message up in, best first.
@@ -68,8 +104,20 @@ pub(crate) fn negotiate(
     preferences: &[LanguageIdentifier],
     available: &[LanguageIdentifier],
 ) -> Vec<LanguageIdentifier> {
-    let _ = (preferences, available);
-    todo!()
+    let default: LanguageIdentifier = unic_langid::langid!("en-US");
+    let mut chain = Vec::new();
+    for locale in fluent_langneg::negotiate_languages(
+        preferences,
+        available,
+        Some(&default),
+        fluent_langneg::NegotiationStrategy::Filtering,
+    ) {
+        chain.push(locale.clone());
+        if *locale == default {
+            break;
+        }
+    }
+    chain
 }
 
 #[cfg(test)]
