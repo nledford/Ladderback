@@ -1,16 +1,39 @@
 //! Which backend options hold a credential.
 
+/// A name that has any of these in it holds a secret: `password`,
+/// `secret_access_key`, `refresh_token`, `credential` (GCS's service account),
+/// `passphrase`, `delegation` (WebHDFS's delegation token).
+const SECRET_WORDS: [&str; 7] = [
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "passphrase",
+    "delegation",
+];
+
+/// Options that name `password` or the like without holding one. rustic's
+/// rclone backend reads `use-password` as a switch.
+const NOT_SECRETS: [&str; 1] = ["use_password"];
+
 /// Whether a backend option of this name holds a credential, whoever wrote
 /// it. The values of such options are secrets even when they are written
 /// inline in the config, so the redactor hides them (I4, §10.2).
 ///
-/// A name is a secret when it has `password`, `passwd`, `secret`, `token`,
-/// `credential`, `passphrase` or `delegation` in it or ends in `_key`; `-`
-/// and `_` are the same, and case doesn't matter. Names that only identify a
-/// credential (`access_key_id`, `application_key_id`) and `key`, which SFTP
-/// uses for the path of a key file, are not secrets.
-pub fn is_secret_option(_name: &str) -> bool {
-    todo!("whether the option's name says it holds a credential")
+/// A name is a secret when it has a [`SECRET_WORDS`] word in it or ends in
+/// `_key` (`account_key`, `application_key`, `encryption_key`,
+/// `temp_url_key`); `-` and `_` are the same, and case doesn't matter.
+/// Names that only identify a credential (`access_key_id`,
+/// `application_key_id`) and `key`, which SFTP uses for the path of a key
+/// file, are not secrets. Anything whose value comes from a `${…}` reference
+/// is a secret whatever its name.
+pub fn is_secret_option(name: &str) -> bool {
+    let name = name.to_ascii_lowercase().replace('-', "_");
+    if NOT_SECRETS.contains(&name.as_str()) {
+        return false;
+    }
+    SECRET_WORDS.iter().any(|word| name.contains(word)) || name.ends_with("_key")
 }
 
 #[cfg(test)]

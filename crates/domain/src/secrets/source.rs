@@ -24,13 +24,27 @@ impl SecretRef {
     /// seeded with these when the config loads, so they can't reach a log
     /// before any job runs (§10.5).
     pub fn inline(&self) -> Option<&SecretValue> {
-        todo!("the secret itself, when it is inline")
+        match self {
+            Self::Inline(value) => Some(value),
+            Self::Command(_) | Self::Keyring(_) | Self::File { .. } | Self::Env(_) => None,
+        }
     }
 
     /// What names this source in an error. `None` for an inline secret,
     /// which is its own value and can't fail to resolve.
     pub fn source_name(&self) -> Option<SourceName> {
-        todo!("what names the source in an error")
+        match self {
+            // The program only: its arguments may hold the secret itself.
+            Self::Command(command) => Some(SourceName::Command {
+                program: command.program().to_owned(),
+            }),
+            Self::Keyring(entry) => Some(SourceName::Keyring {
+                entry: entry.to_string(),
+            }),
+            Self::File { path, .. } => Some(SourceName::File { path: path.clone() }),
+            Self::Env(name) => Some(SourceName::Env { name: name.clone() }),
+            Self::Inline(_) => None,
+        }
     }
 }
 
@@ -54,16 +68,24 @@ pub enum FileRead {
 }
 
 impl FileRead {
-    pub fn extract(self, _contents: &str) -> &str {
-        todo!("the secret in the file's contents")
+    pub fn extract(self, contents: &str) -> &str {
+        match self {
+            Self::FirstLine => first_line(contents),
+            Self::Whole => contents
+                .strip_suffix('\n')
+                .map_or(contents, |rest| rest.strip_suffix('\r').unwrap_or(rest)),
+        }
     }
 }
 
 /// The first line of `text` without its line ending, as rustic reads a
 /// password from a file or from a command's output: up to the first `\n`,
 /// minus a `\r` before it.
-pub fn first_line(_text: &str) -> &str {
-    todo!("the first line of the text")
+pub fn first_line(text: &str) -> &str {
+    match text.split_once('\n') {
+        Some((line, _)) => line.strip_suffix('\r').unwrap_or(line),
+        None => text,
+    }
 }
 
 /// An entry of the OS keyring: `password-keyring = "service/name"`.
@@ -88,22 +110,28 @@ impl std::error::Error for NotAKeyringEntry {}
 impl KeyringEntry {
     /// Splits at the first `/`; the service and the name may not be empty,
     /// and the name may hold more slashes.
-    pub fn parse(_text: &str) -> Result<Self, NotAKeyringEntry> {
-        todo!("a keyring entry from service/name")
+    pub fn parse(text: &str) -> Result<Self, NotAKeyringEntry> {
+        match text.split_once('/') {
+            Some((service, name)) if !service.is_empty() && !name.is_empty() => Ok(Self {
+                service: service.to_owned(),
+                name: name.to_owned(),
+            }),
+            _ => Err(NotAKeyringEntry),
+        }
     }
 
     pub fn service(&self) -> &str {
-        todo!("the service")
+        &self.service
     }
 
     pub fn name(&self) -> &str {
-        todo!("the name")
+        &self.name
     }
 }
 
 impl std::fmt::Display for KeyringEntry {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("service/name")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.service, self.name)
     }
 }
 

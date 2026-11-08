@@ -2,6 +2,8 @@
 //! and its arguments, split the way a POSIX shell splits words, and run
 //! without a shell.
 
+use super::REDACTED;
+
 /// A program and its arguments. Nothing runs it here; the adapter that does
 /// starts the program directly, so no shell ever sees the arguments.
 ///
@@ -14,8 +16,12 @@ pub struct CommandLine {
 }
 
 impl std::fmt::Debug for CommandLine {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("the program, with every argument hidden")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let args: Vec<&str> = self.args.iter().map(|_| REDACTED).collect();
+        f.debug_struct("CommandLine")
+            .field("program", &self.program)
+            .field("args", &args)
+            .finish()
     }
 }
 
@@ -39,34 +45,133 @@ impl std::error::Error for CommandLineError {}
 
 impl CommandLine {
     pub fn new(
-        _program: impl Into<String>,
-        _args: impl IntoIterator<Item = impl Into<String>>,
+        program: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self, CommandLineError> {
-        todo!("a command line made of a program and its arguments")
+        let program = program.into();
+        if program.is_empty() {
+            return Err(CommandLineError::Empty);
+        }
+        Ok(Self {
+            program,
+            args: args.into_iter().map(Into::into).collect(),
+        })
     }
 
     /// Splits `text` as rustic does (the `shell_words` crate): white space
     /// separates words, quotes and backslashes group and escape, `#` starts a
     /// comment. No variable, command or glob is ever expanded.
-    pub fn parse(_text: &str) -> Result<Self, CommandLineError> {
-        todo!("split the text into a program and its arguments")
+    pub fn parse(text: &str) -> Result<Self, CommandLineError> {
+        let mut words = split(text)?.into_iter();
+        let program = words.next().ok_or(CommandLineError::Empty)?;
+        Self::new(program, words)
     }
 
     pub fn program(&self) -> &str {
-        todo!("the program")
+        &self.program
     }
 
     pub fn args(&self) -> &[String] {
-        todo!("the arguments")
+        &self.args
     }
+}
+
+#[derive(Clone, Copy)]
+enum State {
+    /// Between words.
+    Delimiter,
+    /// After a backslash that starts a word.
+    Backslash,
+    /// In an unquoted word.
+    Unquoted,
+    /// After a backslash in an unquoted word.
+    UnquotedBackslash,
+    SingleQuoted,
+    DoubleQuoted,
+    /// After a backslash inside double quotes.
+    DoubleQuotedBackslash,
+    Comment,
 }
 
 /// The words of `text`, by the rules of POSIX shell quoting without any
 /// expansion. The same rules, state for state, as `shell_words::split`: the
 /// tests compare the two on every short string over the characters that
 /// matter.
-fn split(_text: &str) -> Result<Vec<String>, CommandLineError> {
-    todo!("the words of the text")
+fn split(text: &str) -> Result<Vec<String>, CommandLineError> {
+    use State::{
+        Backslash, Comment, Delimiter, DoubleQuoted, DoubleQuotedBackslash, SingleQuoted, Unquoted,
+        UnquotedBackslash,
+    };
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut state = Delimiter;
+    for c in text.chars() {
+        state = match (state, c) {
+            (Delimiter, '\'') => SingleQuoted,
+            (Delimiter, '"') => DoubleQuoted,
+            (Delimiter, '\\') => Backslash,
+            (Delimiter, ' ' | '\t' | '\n') => Delimiter,
+            (Delimiter, '#') => Comment,
+            (Delimiter, c) => {
+                word.push(c);
+                Unquoted
+            }
+            // A backslash and a newline join two lines.
+            (Backslash, '\n') => Delimiter,
+            (UnquotedBackslash, '\n') => Unquoted,
+            (Backslash | UnquotedBackslash, c) => {
+                word.push(c);
+                Unquoted
+            }
+            (Unquoted, '\'') => SingleQuoted,
+            (Unquoted, '"') => DoubleQuoted,
+            (Unquoted, '\\') => UnquotedBackslash,
+            (Unquoted, ' ' | '\t' | '\n') => {
+                words.push(std::mem::take(&mut word));
+                Delimiter
+            }
+            (Unquoted, c) => {
+                word.push(c);
+                Unquoted
+            }
+            (SingleQuoted, '\'') => Unquoted,
+            (SingleQuoted, c) => {
+                word.push(c);
+                SingleQuoted
+            }
+            (DoubleQuoted, '"') => Unquoted,
+            (DoubleQuoted, '\\') => DoubleQuotedBackslash,
+            (DoubleQuoted, c) => {
+                word.push(c);
+                DoubleQuoted
+            }
+            (DoubleQuotedBackslash, '\n') => DoubleQuoted,
+            (DoubleQuotedBackslash, c @ ('$' | '`' | '"' | '\\')) => {
+                word.push(c);
+                DoubleQuoted
+            }
+            (DoubleQuotedBackslash, c) => {
+                word.push('\\');
+                word.push(c);
+                DoubleQuoted
+            }
+            (Comment, '\n') => Delimiter,
+            (Comment, _) => Comment,
+        };
+    }
+    match state {
+        Delimiter | Comment => {}
+        // A backslash that ends the text is a backslash.
+        Backslash | UnquotedBackslash => {
+            word.push('\\');
+            words.push(word);
+        }
+        Unquoted => words.push(word),
+        SingleQuoted | DoubleQuoted | DoubleQuotedBackslash => {
+            return Err(CommandLineError::UnclosedQuote);
+        }
+    }
+    Ok(words)
 }
 
 #[cfg(test)]

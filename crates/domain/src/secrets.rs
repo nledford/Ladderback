@@ -49,13 +49,36 @@ impl std::fmt::Debug for SecretValue {
 /// What a secret is replaced with.
 pub const REDACTED: &str = "***";
 
-/// Replaces every known secret value, raw or percent-encoded as it appears
-/// in URLs (fully encoded with either hex case, or as the url crate encodes
-/// a userinfo), with [`REDACTED`].
-#[derive(Clone, Debug, Default)]
+/// A line of a secret that spans lines is a needle of its own when it has at
+/// least this many bytes: a shorter one would mask half of all the text there
+/// is.
+const MIN_LINE_BYTES: usize = 8;
+
+/// How many lines of one secret are needles of their own, so a large secret
+/// can't make every redaction slow.
+const MAX_LINES_PER_SECRET: usize = 64;
+
+/// Replaces every known secret value, raw or as a URL parser writes it
+/// (percent-encoded in full with either hex case, or as the url crate
+/// encodes a userinfo, a path, a query, a special URL's query or a fragment;
+/// without the tab and newlines it takes out; with `\` read as `/`; and
+/// lower-cased, as a host is), with [`REDACTED`]; and what else of it shows
+/// in text on its own (see `partial_needles`). Secrets that overlap or touch
+/// are replaced as one span.
+#[derive(Clone, Default)]
 pub struct Redactor {
     /// Longest first, so a secret containing another is replaced whole.
     needles: Vec<String>,
+}
+
+/// What a redactor hides is what it holds, so its `Debug` form counts the
+/// needles and shows none.
+impl std::fmt::Debug for Redactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Redactor")
+            .field("needles", &self.needles.len())
+            .finish()
+    }
 }
 
 impl Redactor {
@@ -64,42 +87,118 @@ impl Redactor {
             .into_iter()
             .map(SecretValue::expose)
             .filter(|value| !value.is_empty())
-            .flat_map(|value| {
-                [
-                    value.to_owned(),
-                    percent_encode(value, is_unreserved, Hex::Upper),
-                    percent_encode(value, is_unreserved, Hex::Lower),
-                    percent_encode(value, is_userinfo_safe, Hex::Upper),
-                ]
-            })
+            .flat_map(|value| url_needles(value).into_iter().chain(partial_needles(value)))
             .collect();
         needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         needles.dedup();
         Self { needles }
     }
 
-    /// A redactor for a repository's password and for the password in the
-    /// userinfo of the URL inside its repository string (`rest:https://…`),
-    /// which rustic's errors quote.
+    /// A redactor for everything that gives access to a repository: its
+    /// password; the password in the userinfo of every URL in its repository
+    /// string (`rest:https://…`) and in the value of any option (an
+    /// `endpoint`), which rustic's and OpenDAL's errors quote; the value of
+    /// every option whose name says it holds a credential
+    /// ([`is_secret_option`]), even one written inline; and `resolved`, what
+    /// the references in its settings were resolved to.
     pub fn for_repository(
         repository: &str,
         password: &SecretValue,
-        _options: &BTreeMap<String, String>,
-        _resolved: &[SecretValue],
+        options: &BTreeMap<String, String>,
+        resolved: &[SecretValue],
     ) -> Self {
-        let url_passwords = url_passwords(repository);
-        Self::new(std::iter::once(password).chain(&url_passwords))
+        let url_passwords: Vec<SecretValue> = std::iter::once(repository)
+            .chain(options.values().map(String::as_str))
+            .flat_map(url_passwords)
+            .collect();
+        let credentials: Vec<SecretValue> = options
+            .iter()
+            .filter(|(name, _)| is_secret_option(name))
+            .map(|(_, value)| SecretValue::new(value.as_str()))
+            .collect();
+        Self::new(
+            std::iter::once(password)
+                .chain(&url_passwords)
+                .chain(&credentials)
+                .chain(resolved),
+        )
     }
 
+    /// `text` with every needle in it replaced by [`REDACTED`]. Needles that
+    /// overlap or touch become one span, so nothing of one is left behind
+    /// by the replacement of another.
     pub fn redact(&self, text: &str) -> String {
-        self.needles.iter().fold(text.to_owned(), |text, needle| {
-            text.replace(needle, REDACTED)
-        })
+        let mut covered = vec![false; text.len()];
+        let mut any = false;
+        for needle in &self.needles {
+            // Every occurrence, those that overlap another of the same
+            // needle included (`abab` in `ababab`), which `match_indices`
+            // skips.
+            for (start, _) in text.char_indices() {
+                let found = text
+                    .get(start..)
+                    .is_some_and(|rest| rest.starts_with(needle.as_str()));
+                if !found {
+                    continue;
+                }
+                if let Some(span) = covered.get_mut(start..start.saturating_add(needle.len())) {
+                    span.fill(true);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return text.to_owned();
+        }
+        let mut out = String::with_capacity(text.len());
+        let mut in_span = false;
+        for (at, c) in text.char_indices() {
+            if covered.get(at).copied().unwrap_or(false) {
+                if !in_span {
+                    out.push_str(REDACTED);
+                    in_span = true;
+                }
+            } else {
+                in_span = false;
+                out.push(c);
+            }
+        }
+        out
     }
 
+    /// The length in bytes of the longest text this redactor replaces. A text
+    /// that was cut off can end in the beginning of a secret only within this
+    /// many bytes, less one, of the cut: a reader that has to cut a line
+    /// drops that much first, so the cut can't leave half a secret.
     pub fn longest_match(&self) -> usize {
-        todo!("the length in bytes of the longest needle")
+        self.needles.first().map_or(0, String::len)
     }
+}
+
+/// What else of a secret shows in text without being the whole of it, apart
+/// from its encodings: the secret with the white space around it taken off
+/// (a variable that ends in a newline is logged without it), and each line
+/// that is long enough of one that spans lines (a key, a certificate), for
+/// text that reaches a reader a line at a time.
+fn partial_needles(secret: &str) -> Vec<String> {
+    let trimmed = secret.trim();
+    let mut needles = Vec::new();
+    // A secret with nothing around it is its own trimmed form: `Redactor::new`
+    // drops the duplicate.
+    if !trimmed.is_empty() {
+        needles.push(trimmed.to_owned());
+    }
+    if trimmed.contains('\n') {
+        needles.extend(
+            trimmed
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.len() >= MIN_LINE_BYTES)
+                .take(MAX_LINES_PER_SECRET)
+                .map(str::to_owned),
+        );
+    }
+    needles
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -170,14 +269,26 @@ fn is_unreserved(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"-._~".contains(&b)
 }
 
-/// What the url crate (the WHATWG URL standard) leaves unencoded in a
-/// userinfo: printable ASCII outside its userinfo percent-encode set.
-fn is_userinfo_safe(b: u8) -> bool {
-    b.is_ascii_graphic() && !b"\"#<>?`{}/:;=@[\\]^|".contains(&b)
+/// What the url crate (the WHATWG URL standard) encodes in each part of a
+/// URL besides controls, space and non-ASCII, which every part encodes. A
+/// byte outside the set is written as it is. The sets are those of url
+/// 2.5.8; the path set of a newer standard also takes `^`, so both are
+/// needles (see `PATH_WITH_CARET`).
+const FRAGMENT_SET: &[u8] = b"\"<>`";
+const QUERY_SET: &[u8] = b"\"#<>";
+const SPECIAL_QUERY_SET: &[u8] = b"\"#<>'";
+const PATH_SET: &[u8] = b"\"<>`#?{}";
+const PATH_WITH_CARET_SET: &[u8] = b"\"<>`#?{}^";
+const USERINFO_SET: &[u8] = b"\"#<>?`{}/:;=@[\\]^|";
+
+/// The bytes `set` doesn't name, apart from controls, space and non-ASCII,
+/// stay as they are.
+fn all_but(set: &'static [u8]) -> impl Fn(u8) -> bool {
+    move |b| b.is_ascii_graphic() && !set.contains(&b)
 }
 
 /// Percent-encodes every byte that `keep` rejects, with `hex` digits.
-fn percent_encode(value: &str, keep: fn(u8) -> bool, hex: Hex) -> String {
+fn percent_encode(value: &str, keep: impl Fn(u8) -> bool, hex: Hex) -> String {
     use std::fmt::Write;
     value.bytes().fold(String::new(), |mut out, b| {
         if keep(b) {
@@ -190,6 +301,43 @@ fn percent_encode(value: &str, keep: fn(u8) -> bool, hex: Hex) -> String {
         }
         out
     })
+}
+
+/// Every way a URL parser can write `value`. A parser takes tab and
+/// newlines out of a URL and reads `\` as `/` (in a special URL's path), so
+/// those two rewrites of the value are encoded too; then each is written as
+/// fully encoded (either hex case) and as each part of a URL encodes it,
+/// with upper-case hex like the url crate. A host is lower-cased, so every
+/// needle is lower-cased too. A secret of any size has at most about 50
+/// needles, each at most three times its size.
+fn url_needles(value: &str) -> Vec<String> {
+    let stripped: String = value
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let slashed = stripped.replace('\\', "/");
+    let mut needles = Vec::new();
+    for base in [value, stripped.as_str(), slashed.as_str()] {
+        if base.is_empty() {
+            continue;
+        }
+        needles.push(base.to_owned());
+        needles.push(percent_encode(base, is_unreserved, Hex::Upper));
+        needles.push(percent_encode(base, is_unreserved, Hex::Lower));
+        for set in [
+            USERINFO_SET,
+            FRAGMENT_SET,
+            QUERY_SET,
+            SPECIAL_QUERY_SET,
+            PATH_SET,
+            PATH_WITH_CARET_SET,
+        ] {
+            needles.push(percent_encode(base, all_but(set), Hex::Upper));
+        }
+    }
+    let lower: Vec<String> = needles.iter().map(|n| n.to_ascii_lowercase()).collect();
+    needles.extend(lower);
+    needles
 }
 
 #[cfg(test)]

@@ -2,6 +2,8 @@
 //! although it worked. Codes and values, never sentences (§8.4): the
 //! presentation layers word them.
 
+use std::path::{Component, Path};
+
 use super::source::SourceName;
 use super::{MAX_SECRET_BYTES, SecretValue};
 
@@ -23,8 +25,11 @@ impl std::error::Error for SecretError {}
 
 impl SecretError {
     /// There is nothing at `source`.
-    pub fn missing(_source: SourceName) -> Self {
-        todo!("an error that says there is nothing at the source")
+    pub fn missing(source: SourceName) -> Self {
+        Self {
+            source,
+            problem: Problem::Missing,
+        }
     }
 }
 
@@ -60,8 +65,23 @@ impl Problem {
     /// It is what the command chose to say: a caller masks the value the
     /// command printed on stdout (where a secret would be) in `stderr` first,
     /// and stdout is never part of the detail.
-    pub fn command_failed(_status: Option<i32>, _stderr: &[u8]) -> Self {
-        todo!("a failed command with the first line it said")
+    pub fn command_failed(status: Option<i32>, stderr: &[u8]) -> Self {
+        let text = String::from_utf8_lossy(stderr);
+        let line = text
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default();
+        let detail = if line.len() <= MAX_DETAIL_BYTES {
+            line.to_owned()
+        } else {
+            let end = (0..=MAX_DETAIL_BYTES)
+                .rev()
+                .find(|&at| line.is_char_boundary(at))
+                .unwrap_or_default();
+            format!("{}…", line.get(..end).unwrap_or_default())
+        };
+        Self::CommandFailed { status, detail }
     }
 }
 
@@ -81,12 +101,29 @@ pub enum SecretWarning {
 /// A reader may stop at `MAX_SECRET_BYTES + 1` bytes: that is already too
 /// large, and it need not read the rest.
 pub fn decode(
-    _source: &SourceName,
-    _bytes: &[u8],
-    _extract: impl FnOnce(&str) -> &str,
+    source: &SourceName,
+    bytes: &[u8],
+    extract: impl FnOnce(&str) -> &str,
 ) -> Result<SecretValue, SecretError> {
-    todo!("the secret in the bytes, within the limits")
+    let fail = |problem| SecretError {
+        source: source.clone(),
+        problem,
+    };
+    if bytes.len() > MAX_SECRET_BYTES {
+        return Err(fail(Problem::TooLarge {
+            limit: MAX_SECRET_BYTES,
+        }));
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| fail(Problem::NotUnicode))?;
+    Ok(SecretValue::new(extract(text)))
 }
+
+/// Where container runtimes and systemd control permissions, so a file there
+/// isn't warned about (§10.2); `$CREDENTIALS_DIRECTORY` is the third.
+const RUNTIME_SECRET_DIRECTORIES: [&str; 2] = ["/run/secrets", "/var/run/secrets"];
+
+/// The group and world read bits of a Unix file mode.
+const READABLE_BY_OTHERS: u32 = 0o044;
 
 /// The warning for a secret file with Unix permission bits `mode`, if it
 /// deserves one: it is group- or world-readable and isn't under one of the
@@ -94,11 +131,42 @@ pub fn decode(
 /// `credentials_directory` is the value of `$CREDENTIALS_DIRECTORY`, which
 /// only counts when it is a real absolute directory.
 pub fn file_warning(
-    _path: &str,
-    _mode: u32,
-    _credentials_directory: Option<&str>,
+    path: &str,
+    mode: u32,
+    credentials_directory: Option<&str>,
 ) -> Option<SecretWarning> {
-    todo!("a warning for a file that others can read")
+    let exposed = mode & READABLE_BY_OTHERS != 0;
+    (exposed && !is_runtime_secret(path, credentials_directory)).then(|| {
+        SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+        }
+    })
+}
+
+fn is_runtime_secret(path: &str, credentials_directory: Option<&str>) -> bool {
+    let path = Path::new(path);
+    // `/run/secrets/../../home/demo/key` isn't in `/run/secrets`.
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return false;
+    }
+    let credentials = credentials_directory.filter(|directory| names_a_directory(directory));
+    RUNTIME_SECRET_DIRECTORIES
+        .into_iter()
+        .chain(credentials)
+        .any(|directory| path.starts_with(directory))
+}
+
+/// An absolute path below the root. An empty or relative value, or the root
+/// itself, would count every file as being in the directory.
+fn names_a_directory(path: &str) -> bool {
+    let path = Path::new(path);
+    path.is_absolute()
+        && path
+            .components()
+            .any(|component| matches!(component, Component::Normal(_)))
 }
 
 #[cfg(test)]

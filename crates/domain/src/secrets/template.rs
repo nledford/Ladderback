@@ -21,7 +21,13 @@ pub enum Reference {
 impl Reference {
     /// The source that provides the value.
     pub fn secret_ref(&self) -> SecretRef {
-        todo!("the source that provides the value")
+        match self {
+            Self::Env(name) => SecretRef::Env(name.clone()),
+            Self::File(path) => SecretRef::File {
+                path: path.clone(),
+                read: FileRead::Whole,
+            },
+        }
     }
 }
 
@@ -73,13 +79,85 @@ impl std::fmt::Display for TemplateError {
 impl std::error::Error for TemplateError {}
 
 impl Template {
-    pub fn parse(_text: &str) -> Result<Self, TemplateError> {
-        todo!("the parts of the text, or where it is malformed")
+    pub fn parse(text: &str) -> Result<Self, TemplateError> {
+        if text.len() > MAX_SECRET_BYTES {
+            return Err(TemplateError::TooLong {
+                limit: MAX_SECRET_BYTES,
+            });
+        }
+        let mut parts = Vec::new();
+        let mut literal = String::new();
+        let mut references = 0;
+        let mut rest = text;
+        while !rest.is_empty() {
+            let at = text.len() - rest.len();
+            if let Some(after) = rest.strip_prefix("$${") {
+                literal.push_str("${");
+                rest = after;
+            } else if let Some(after) = rest.strip_prefix("${") {
+                let (body, after) = after
+                    .split_once('}')
+                    .ok_or(TemplateError::Unterminated { at })?;
+                let reference = parse_reference(body, at)?;
+                references += 1;
+                if references > MAX_REFERENCES {
+                    return Err(TemplateError::TooManyReferences {
+                        limit: MAX_REFERENCES,
+                    });
+                }
+                if !literal.is_empty() {
+                    parts.push(Part::Text(std::mem::take(&mut literal)));
+                }
+                parts.push(Part::Reference(reference));
+                rest = after;
+            } else {
+                let mut chars = rest.chars();
+                literal.extend(chars.next());
+                rest = chars.as_str();
+            }
+        }
+        if !literal.is_empty() {
+            parts.push(Part::Text(literal));
+        }
+        Ok(Self { parts })
     }
 
     pub fn parts(&self) -> &[Part] {
-        todo!("the parts")
+        &self.parts
     }
+}
+
+/// The reference a `${…}` holds; `body` is what is between the braces.
+fn parse_reference(body: &str, at: usize) -> Result<Reference, TemplateError> {
+    if body.contains("${") {
+        return Err(TemplateError::NestedReference { at });
+    }
+    if let Some(path) = body.strip_prefix("file:") {
+        if path.is_empty() {
+            return Err(TemplateError::EmptyPath { at });
+        }
+        if !path.starts_with('/') {
+            return Err(TemplateError::RelativePath { at });
+        }
+        return Ok(Reference::File(path.to_owned()));
+    }
+    if body.is_empty() {
+        return Err(TemplateError::EmptyReference { at });
+    }
+    if is_variable_name(body) {
+        Ok(Reference::Env(body.to_owned()))
+    } else {
+        Err(TemplateError::InvalidName { at })
+    }
+}
+
+/// `[A-Za-z_][A-Za-z0-9_]*`: what a shell allows in a variable name.
+fn is_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]
