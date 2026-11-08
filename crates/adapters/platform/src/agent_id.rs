@@ -3,9 +3,6 @@
 //! Every backup is tagged with it (§7.3), so losing or replacing it would
 //! detach every plan's history.
 
-// Red-first stub: removed when the real code returns.
-#![allow(unused, clippy::todo)]
-
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -25,7 +22,28 @@ const MAX_ID_FILE_BYTES: u64 = 256;
 /// there is none. A file that exists but doesn't hold an ID is an error,
 /// never silently replaced.
 pub fn load_or_create(data_dir: &Path) -> io::Result<AgentId> {
-    todo!()
+    let path = data_dir.join(AGENT_ID_FILE);
+    match read_id_file(&path) {
+        Ok(text) => return parse(&text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::create_dir_all(data_dir)?;
+    // Write the whole file under a private name, then link it into place:
+    // the link fails if another process got there first, so concurrent first
+    // starts agree on one ID and nobody ever reads a half-written file.
+    let id = Uuid::now_v7();
+    let staged = data_dir.join(format!("{AGENT_ID_FILE}.{}.tmp", id.simple()));
+    let written = stage(&staged, id).and_then(|()| fs::hard_link(&staged, &path));
+    let removed = fs::remove_file(&staged);
+    match written {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    removed?;
+    sync_dir(data_dir)?;
+    parse(&read_id_file(&path)?)
 }
 
 fn stage(path: &Path, id: Uuid) -> io::Result<()> {
