@@ -41,9 +41,9 @@ const AFTER_RESULT_GRACE: Duration = Duration::from_secs(10);
 /// long as it lives, and the events end with the worker, not with it.
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(1);
 
-/// How long a new worker may take to take its job and to send its first line
-/// of any kind, before it counts as hung and is killed: the default of
-/// [`WorkerEngine::with_start_timeout`].
+/// How long a new worker may take to take its job, which it shows with its
+/// first line of output, before it counts as hung and is killed: the default
+/// of [`WorkerEngine::with_start_timeout`].
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a worker that closed its output may go on living before it is
@@ -65,9 +65,8 @@ const MAX_CACHE_SLOTS: u32 = 64;
 /// result, the worker gets a grace period to finish its cleanup.
 ///
 /// A worker that hangs doesn't hold the daemon. One that doesn't take its
-/// job and send a first line of output within the start timeout, and one
-/// that closes its output but is still there after the exit timeout, are
-/// killed.
+/// job within the start timeout, and one that closes its output but is still
+/// there after the exit timeout, are killed.
 ///
 /// A worker starts with a scrubbed environment (invariant I4): only the
 /// variables that name a place or a setting the worker, rclone or ssh need
@@ -132,16 +131,18 @@ impl WorkerEngine {
         self
     }
 
-    /// How long a new worker has to take its job and to send its first line of
-    /// output, 30 seconds by default: one deadline, counted from the start of
-    /// the write of the job to its stdin. A worker that doesn't read its job,
-    /// because it hung before it got to it, leaves the write blocked once the
-    /// pipe is full, which a job spec larger than the pipe's buffer (64 KiB on
-    /// Linux) does. A worker that took its job and then says nothing is the
-    /// other case; a line of any kind, `log` lines included, shows that it is
-    /// alive, and `started` only comes after the repository is open, which
-    /// can be slow, so none is waited for in particular. A line is there when
-    /// its newline is.
+    /// How long a new worker has to take its job, 30 seconds by default: one
+    /// deadline, counted from the start of the write of the job to its stdin
+    /// and ending with the worker's first line of output. A worker that
+    /// doesn't read its job, because it hung before it got to it, leaves the
+    /// write blocked once the pipe is full, which a job spec larger than the
+    /// pipe's buffer (64 KiB on Linux) does. A worker that took its job and
+    /// then says nothing is the other case. A worker says it has its job with
+    /// a debug `log` line, written once the spec is read and before anything
+    /// else is done, so what follows is not on this clock: opening a
+    /// repository, which a slow backend can make take longer than the
+    /// timeout, is not bounded by it. A line of any kind counts, and a line is
+    /// there when its newline is.
     ///
     /// When the time has passed, the worker and what it started are killed.
     /// A write still blocked then fails [`Engine::run`] with

@@ -51,7 +51,9 @@ pub enum EngineError {
     Unavailable { detail: String },
     /// The engine started but didn't take its job in time: writing it to the
     /// worker stayed blocked, as it does for a spec larger than the pipe's
-    /// buffer when the worker doesn't read.
+    /// buffer when the worker doesn't read. A worker that took its job and
+    /// then sent nothing is not this error: `run` doesn't wait for it, and
+    /// its events fail with `FailureReason::EngineStartTimedOut` instead.
     StartTimedOut,
 }
 
