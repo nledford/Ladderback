@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Enforces the hexagonal dependency rule (technical design §3.2):
 #   - `domain` (host and wasm32) and `app` never depend, even indirectly, on
-#     runtime, I/O, engine or presentation crates, with any feature enabled;
+#     runtime, I/O, engine or presentation crates, or on `chrono` (time goes
+#     through `jiff`, decision 22), with any feature enabled;
 #   - `domain` builds for wasm32-unknown-unknown;
 #   - the inner rings share one banned-call list (clippy.toml).
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
@@ -10,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-banned='^(tokio|sqlx|axum|hyper|reqwest|rustic_core|rustic_backend|fluent-bundle|fluent-langneg|unic-langid|icu_[a-z_]+|rand)$'
+banned='^(tokio|sqlx|axum|hyper|reqwest|rustic_core|rustic_backend|fluent-bundle|fluent-langneg|unic-langid|icu_[a-z_]+|rand|chrono)$'
 status=0
 
 check() {

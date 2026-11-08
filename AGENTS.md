@@ -113,6 +113,7 @@ Several agents may work on the repository at once (§13.5). Each one:
 
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
 - **Localization:** no hard-coded user-facing strings. Use message IDs from `l10n`, Fluent terms for glossary words, and complete sentences. Code never concatenates fragments (§8.4).
+- **Time:** time goes through `jiff`, via the `Clock` port in the core. Never add `chrono` to a Steading crate: it reaches the build only transitively, through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which we can't turn off. `just architecture` bans it from `domain` and `app` (§16, decision 22).
 - **Docs:** keep [PRODUCT.md](PRODUCT.md) and the technical design current with the code. Record new decisions in §16.
 - **Commits:** atomic, in logical groups. Each commit is one coherent change for one reason: it builds, passes its tests (except the deliberately failing `test:` commit, §13.1), and can be reviewed and reverted on its own.
   - Split unrelated work, formatting, refactors and dependency updates into separate commits. Stage hunks selectively when one file holds changes for different commits.
