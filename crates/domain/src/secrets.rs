@@ -213,20 +213,55 @@ fn url_passwords(repository: &str) -> Vec<SecretValue> {
     let Some((_, rest)) = repository.split_once("://") else {
         return Vec::new();
     };
+    forms(
+        userinfos(rest)
+            .into_iter()
+            .filter_map(|userinfo| userinfo.split_once(':'))
+            .map(|(_, password)| password),
+    )
+}
+
+/// What the userinfo of a URL holds that must not show, wherever the URL is
+/// echoed: its password (as [`url_passwords`] finds it) and the whole
+/// userinfo, each as written and decoded. The whole userinfo is the
+/// credential when it has no `:` (a token as the user name). `url` may lack
+/// its scheme (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty
+/// when there is no userinfo.
+pub fn url_credentials(url: &str) -> Vec<SecretValue> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let userinfos = userinfos(rest);
+    forms(
+        userinfos
+            .iter()
+            .filter_map(|userinfo| userinfo.split_once(':'))
+            .map(|(_, password)| password)
+            .chain(userinfos.iter().copied()),
+    )
+}
+
+/// The userinfos a URL's authority and path (what follows its scheme) may
+/// hold: the one before the last `@` of the authority, and the one before
+/// the last `@` of the whole of it, for a raw `/` in a password ends the
+/// authority early.
+fn userinfos(rest: &str) -> Vec<&str> {
     let authority = rest.split('/').next().unwrap_or(rest);
-    let mut found: Vec<String> = Vec::new();
-    for candidate in [authority, rest] {
-        let Some((userinfo, _)) = candidate.rsplit_once('@') else {
-            continue;
-        };
-        let Some((user, password)) = userinfo.split_once(':') else {
-            continue;
-        };
+    [authority, rest]
+        .into_iter()
+        .filter_map(|candidate| candidate.rsplit_once('@'))
+        .map(|(userinfo, _)| userinfo)
         // A `/` before the `:` puts the `@` in the path, not in a userinfo.
-        if user.contains('/') {
-            continue;
-        }
-        for form in [Some(password.to_owned()), percent_decode(password)]
+        .filter(|userinfo| {
+            let user = userinfo.split_once(':').map_or(*userinfo, |(user, _)| user);
+            !user.contains('/')
+        })
+        .collect()
+}
+
+/// Each of `texts` that isn't empty, as written and percent-decoded, once.
+fn forms<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<SecretValue> {
+    let mut found: Vec<String> = Vec::new();
+    for text in texts.into_iter().filter(|text| !text.is_empty()) {
+        for form in [Some(text.to_owned()), percent_decode(text)]
             .into_iter()
             .flatten()
         {
@@ -236,17 +271,6 @@ fn url_passwords(repository: &str) -> Vec<SecretValue> {
         }
     }
     found.into_iter().map(SecretValue::new).collect()
-}
-
-/// What the userinfo of a URL holds that must not show, wherever the URL is
-/// echoed: its password (as [`url_passwords`] finds it, as written and
-/// decoded) and the whole userinfo, as written and decoded. The whole
-/// userinfo is the credential when it has no `:` (a token as the user name).
-/// `url` may lack its scheme (`demo:s3cr3t@proxy:3128`), as proxy settings
-/// often do. Empty when there is no userinfo.
-pub fn url_credentials(url: &str) -> Vec<SecretValue> {
-    let _ = url;
-    Vec::new()
 }
 
 /// `None` when `text` isn't valid percent-encoding.
@@ -683,6 +707,23 @@ mod tests {
             credentials("http://demo:ab/cd@proxy.demo"),
             ["ab/cd", "demo:ab/cd"]
         );
+    }
+
+    #[test]
+    fn a_url_without_a_userinfo_has_no_credentials() {
+        for url in [
+            "",
+            "http://proxy.demo:3128",
+            "proxy.demo:3128",
+            "http://@proxy.demo",
+            "@proxy.demo",
+            // The @ is in the path, not in the authority.
+            "http://proxy.demo/a@b",
+            "http://proxy.demo/p/x:y@z",
+            "proxy.demo/a@b",
+        ] {
+            assert_eq!(credentials(url), Vec::<String>::new(), "{url}");
+        }
     }
 
     #[test]
