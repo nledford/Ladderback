@@ -46,13 +46,22 @@ jobs:
           cache-dependency-path: ui-tests/package-lock.json
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: just
+          tool: just,cargo-nextest
       - run: npm ci
         working-directory: ui-tests
       - run: just fmt-check
       - run: just lint
       - run: just architecture
+      # The ci profile (.config/nextest.toml) retries, reports flaky tests and
+      # writes the JUnit report.
       - run: just test
+        env:
+          NEXTEST_PROFILE: ci
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-${{ matrix.os }}
+          path: target/nextest/ci/junit.xml
 
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
