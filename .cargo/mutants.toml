@@ -1,0 +1,9 @@
+# cargo mutants (technical design §13.1).
+# The contract suites are test code compiled into `app` behind the `fakes`
+# feature; mutating their assertions measures nothing.
+exclude_globs = ["crates/app/src/contract/**"]
+# Core error types implement Display only because `Error` requires it; they
+# carry codes and values, and adapters render them (technical design §8.4).
+exclude_re = ["<impl std::fmt::Display for "]
+# A mutant that makes a test hang is caught, but slowly; fail fast instead.
+timeout_multiplier = 3.0
