@@ -1,0 +1,9 @@
+# Keeps a `docker build` context to the sources: no history, build output,
+# agent worktrees or installed test tooling. Whether an image build makes the
+# web UI itself or copies crates/web/dist is decided with the image (M5).
+.git
+**/target
+.worktrees
+**/node_modules
+mutants.out*
+ui-tests/reports

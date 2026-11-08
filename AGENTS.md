@@ -27,8 +27,8 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
-| `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
-| `just mutants [base]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists |
+| `just test-ui [args]` | Builds the web UI and the binary, installs the UI test dependencies if they are missing or stale, then runs the `@ui` scenarios |
+| `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists; further `args` go to `cargo mutants` (e.g. `--jobs 3`) |
 | `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests fail at run time (§13.1) |
 | `just serve` | Builds everything and runs `steading serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
@@ -100,7 +100,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
 - A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
-- Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `api`, `l10n`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts. A new gated crate joins `mutants_packages` in the Justfile when it lands.
+- Mutation testing (`cargo mutants`) gates changed code in the crates §13.1 names; the Justfile's `mutants_packages` lists the ones that exist so far, and a new gated crate joins it when it lands. A surviving mutant means a behaviour no test asserts.
 - There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. `just test` lists the skips at its end, so CI shows them. `testkit` is a dev-dependency only.
@@ -123,8 +123,9 @@ After implementing a non-trivial change, get one independent adversarial review 
 
 Several agents may work on the repository at once (§13.5). Each one:
 
-- works in its own git worktree, with its own `CARGO_TARGET_DIR`, and deletes that target directory when done;
-- edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against another directory, pass absolute paths;
+- works in its own git worktree under `.worktrees/<slug>` (git ignores the folder): `git worktree add -b <branch> .worktrees/<slug> origin/main` from the main checkout. It uses its own `CARGO_TARGET_DIR` and deletes that target directory when done;
+- edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
+- passes `--jobs` to `just mutants` when several agents share the machine;
 - uses its own ports, never `just serve`'s 9898, and its own scratch folder;
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
@@ -145,6 +146,7 @@ The session that steers the work (the main session, which starts the other agent
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
 - **Localization:** no hard-coded user-facing strings. Use message IDs from `l10n`, Fluent terms for glossary words, and complete sentences. Code never concatenates fragments (§8.4).
 - **Time:** time goes through `jiff`, via the `Clock` port in the core. Never add `chrono` to a Steading crate: it reaches the build only transitively, through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which we can't turn off. `just architecture` bans it from `domain` and `app` (§16, decision 22).
+- **CI job names:** the "Protect main" ruleset requires checks by job name (`Check (ubuntu-latest)`, `Check (macos-latest)`, `UI journeys (Chromium, axe-core, keyboard)`, `Mutation testing (changed code)`, `Red-first check`). Renaming one of those jobs blocks every merge, so don't, unless the maintainer updates the ruleset at the same time.
 - **Docs:** keep [PRODUCT.md](PRODUCT.md) and the technical design current with the code. Record new decisions in §16.
 - **Commits:** atomic, in logical groups. Each commit is one coherent change for one reason: it builds, passes its tests (except the deliberately failing `test:` commit, §13.1), and can be reviewed and reverted on its own.
   - Split unrelated work, formatting, refactors and dependency updates into separate commits. Stage hunks selectively when one file holds changes for different commits.

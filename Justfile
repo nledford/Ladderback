@@ -66,8 +66,8 @@ test *args:
 # for one test target: Cargo unifies features over the packages a command
 # selects, so `--package app` or the root package alone builds dependencies
 # with other features, and each of those commands rebuilt nearly all of them.
-[private]
 [positional-arguments]
+[private]
 _test-suites *args:
     cargo nextest run --workspace "$@"
     cargo test --doc --workspace
@@ -103,29 +103,41 @@ build: web
 serve: build
     cargo run -- serve
 
-# Calls the cucumber-js that `just setup` installs by its path: `npx` (even
+# Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
 # copy of it, when the local one is missing, and that package exits 0.
 [doc('Run the @ui scenarios in Chromium against a fresh build.')]
 [group('test')]
 [positional-arguments]
-test-ui *args: build
+test-ui *args: build _ui-deps
     cd ui-tests && node_modules/.bin/cucumber-js "$@"
 
-# Mutation-test the gated crates' code changed since `base`.
+# Installs the UI test dependencies when they are missing or older than the
+# lockfile, as in a new worktree: node_modules isn't tracked.
+[private]
+_ui-deps:
+    cd ui-tests && if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci; fi
+
+# Further arguments go to cargo mutants, e.g. `just mutants origin/main --jobs 3`
+# when several agents share the machine.
+[doc("Mutation-test the gated crates' code changed since `base`.")]
 [group('test')]
-mutants base='origin/main':
+[positional-arguments]
+mutants base='origin/main' *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    shift
     diff=$(mktemp)
     trap 'rm -f "$diff"' EXIT
     git diff '{{ base }}...HEAD' > "$diff"
-    cargo mutants --in-diff "$diff" {{ mutants_packages }}
+    cargo mutants --in-diff "$diff" {{ mutants_packages }} "$@"
 
-# Mutation-test all of the gated crates (slow; CI runs it nightly).
+# Further arguments go to cargo mutants, as for `mutants`.
+[doc('Mutation-test all of the gated crates (slow; CI runs it nightly).')]
 [group('test')]
-mutants-all:
-    cargo mutants {{ mutants_packages }}
+[positional-arguments]
+mutants-all *args:
+    cargo mutants {{ mutants_packages }} "$@"
 
 # Check that the branch's first commit is a failing test: commit (§13.1).
 [group('test')]
