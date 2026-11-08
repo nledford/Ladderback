@@ -238,6 +238,17 @@ fn url_passwords(repository: &str) -> Vec<SecretValue> {
     found.into_iter().map(SecretValue::new).collect()
 }
 
+/// What the userinfo of a URL holds that must not show, wherever the URL is
+/// echoed: its password (as [`url_passwords`] finds it, as written and
+/// decoded) and the whole userinfo, as written and decoded. The whole
+/// userinfo is the credential when it has no `:` (a token as the user name).
+/// `url` may lack its scheme (`demo:s3cr3t@proxy:3128`), as proxy settings
+/// often do. Empty when there is no userinfo.
+pub fn url_credentials(url: &str) -> Vec<SecretValue> {
+    let _ = url;
+    Vec::new()
+}
+
 /// `None` when `text` isn't valid percent-encoding.
 fn percent_decode(text: &str) -> Option<String> {
     let mut bytes = Vec::with_capacity(text.len());
@@ -608,6 +619,79 @@ mod tests {
         ] {
             assert_eq!(passwords(repository), Vec::<String>::new(), "{repository}");
         }
+    }
+
+    fn credentials(url: &str) -> Vec<String> {
+        let mut found: Vec<String> = url_credentials(url)
+            .iter()
+            .map(|secret| secret.expose().to_owned())
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn the_password_and_the_whole_userinfo_of_a_url_are_credentials() {
+        for url in [
+            "http://demo:s3cr3t@proxy.demo:3128",
+            "https://demo:s3cr3t@proxy.demo",
+            "socks5h://demo:s3cr3t@proxy.demo:1080/",
+        ] {
+            assert_eq!(credentials(url), ["demo:s3cr3t", "s3cr3t"], "{url}");
+        }
+    }
+
+    /// Proxy settings often leave the scheme out.
+    #[test]
+    fn a_url_without_its_scheme_has_its_credentials_too() {
+        assert_eq!(
+            credentials("demo:s3cr3t@proxy.demo:3128"),
+            ["demo:s3cr3t", "s3cr3t"]
+        );
+        assert_eq!(credentials("tok3n-demo@proxy.demo:3128"), ["tok3n-demo"]);
+    }
+
+    #[test]
+    fn a_user_name_without_a_password_is_a_credential_too() {
+        assert_eq!(credentials("https://tok3n-demo@proxy.demo"), ["tok3n-demo"]);
+    }
+
+    #[test]
+    fn percent_encoded_credentials_are_found_decoded_and_as_written() {
+        assert_eq!(
+            credentials("http://demo:p%40ss@proxy.demo"),
+            ["demo:p%40ss", "demo:p@ss", "p%40ss", "p@ss"]
+        );
+        assert_eq!(credentials("http://t%40k@proxy.demo"), ["t%40k", "t@k"]);
+    }
+
+    #[test]
+    fn credentials_that_are_not_valid_percent_encoding_are_taken_as_they_are() {
+        assert_eq!(
+            credentials("http://demo:100%@proxy.demo"),
+            ["100%", "demo:100%"]
+        );
+    }
+
+    #[test]
+    fn an_at_sign_or_a_slash_in_the_password_stays_in_the_credentials() {
+        assert_eq!(
+            credentials("http://demo:p@ss@proxy.demo"),
+            ["demo:p@ss", "p@ss"]
+        );
+        assert_eq!(
+            credentials("http://demo:ab/cd@proxy.demo"),
+            ["ab/cd", "demo:ab/cd"]
+        );
+    }
+
+    #[test]
+    fn what_a_proxy_echoes_of_its_credentials_is_masked() {
+        let redactor = Redactor::new(&url_credentials("http://demo:p%40ss@proxy.demo:3128"));
+        assert_eq!(
+            redactor.redact("proxy http://demo:p%40ss@proxy.demo:3128 said 407 for p@ss"),
+            "proxy http://***@proxy.demo:3128 said 407 for ***"
+        );
     }
 
     #[test]

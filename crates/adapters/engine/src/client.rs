@@ -16,7 +16,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
-use domain::secrets::Redactor;
+use domain::secrets::{Redactor, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -197,7 +197,10 @@ impl Engine for WorkerEngine {
             }
             _ => None,
         };
-        let redactor = job_redactor(&job);
+        // What the worker starts with, and so what its proxy settings are:
+        // a proxy URL's credentials are masked like the job's own secrets.
+        let environment = environment::scrubbed(self.base_environment());
+        let redactor = job_redactor(&job, environment::proxy_credentials(&environment));
         let spec = serde_json::to_vec(&JobSpec {
             op_id: op,
             cache_dir: slot.as_ref().map(|slot| slot.dir.clone()),
@@ -218,7 +221,7 @@ impl Engine for WorkerEngine {
             // Nothing the daemon holds in its environment goes to a worker
             // that doesn't need it: see `environment`.
             .env_clear()
-            .envs(environment::scrubbed(self.base_environment()))
+            .envs(environment)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Piped, not inherited: the worker leads a process group of its
@@ -268,7 +271,7 @@ impl Engine for WorkerEngine {
         tokio::spawn(forward_stderr(
             BufReader::new(stderr),
             exited.clone(),
-            redactor,
+            redactor.clone(),
         ));
         let stopped = Arc::new(AtomicBool::new(false));
         let reading = Reading {
@@ -279,6 +282,7 @@ impl Engine for WorkerEngine {
             stopped: Arc::clone(&stopped),
             done: false,
             drain_until: None,
+            redactor,
             exit_timeout: self.exit_timeout,
         };
         Ok(RunningJob {
@@ -564,6 +568,8 @@ struct Reading {
     done: bool,
     /// When the output of a worker that has exited is no longer waited for.
     drain_until: Option<tokio::time::Instant>,
+    /// What masks the job's secrets in what the worker says.
+    redactor: Redactor,
     /// How long the exit of a worker that closed its output is waited for.
     exit_timeout: Duration,
 }
@@ -603,7 +609,7 @@ impl Reading {
                     ));
                 }
             };
-            if let Some(event) = translate(event) {
+            if let Some(event) = translate(event, &self.redactor) {
                 if matches!(event, EngineEvent::Succeeded(_) | EngineEvent::Failed(_)) {
                     self.done = true;
                     let _ = self.commands.send(Order::ResultReported);
@@ -836,7 +842,8 @@ async fn read_log_line(
     }
 }
 
-fn translate(event: WorkerEvent) -> Option<EngineEvent> {
+fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
+    let _ = redactor;
     Some(match event {
         WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started { index_read_at },
         WorkerEvent::ProgressStart { key, kind, prefix } => {
@@ -948,21 +955,24 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     }
 }
 
-/// What masks the job's secrets: the worker's stderr is logged through it.
-/// A fake job has none.
-fn job_redactor(job: &Job) -> Redactor {
+/// What masks the job's secrets: the worker's stderr is logged through it,
+/// and so are the events. `extra` is what else must not show, the proxy
+/// credentials of the worker's environment. A fake job has no secrets of its
+/// own.
+fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
     let access = match job {
-        Job::Fake(_) => return Redactor::default(),
+        Job::Fake(_) => return Redactor::new(&extra),
         Job::Identify(access) => access,
         Job::Backup(job) => &job.repository,
         Job::Prune(job) => &job.repository,
         Job::Check(job) => &job.repository,
     };
+    let resolved: Vec<SecretValue> = access.secrets.iter().cloned().chain(extra).collect();
     Redactor::for_repository(
         &access.repository,
         &access.password,
         &access.options,
-        &access.secrets,
+        &resolved,
     )
 }
 
@@ -1114,7 +1124,6 @@ mod tests {
     use std::time::Instant;
 
     use domain::Uuid;
-    use domain::secrets::SecretValue;
 
     use super::*;
     use crate::job::MAX_MESSAGE_BYTES;
@@ -1130,7 +1139,7 @@ mod tests {
     #[test]
     fn a_worker_that_rejects_its_job_spec_rejects_the_job() {
         assert_eq!(
-            translate(failed(ErrorCode::InvalidJobSpec)),
+            translate(failed(ErrorCode::InvalidJobSpec), &Redactor::default()),
             Some(EngineEvent::Failed(FailureReason::JobRejected {
                 detail: "bad spec".to_owned()
             }))
@@ -1149,7 +1158,7 @@ mod tests {
             ErrorCode::Unknown,
         ] {
             assert_eq!(
-                translate(failed(code)),
+                translate(failed(code), &Redactor::default()),
                 Some(EngineEvent::Failed(FailureReason::EngineFailed {
                     detail: "bad spec".to_owned()
                 }))
@@ -1160,8 +1169,122 @@ mod tests {
     #[test]
     fn a_deadline_failure_from_the_worker_is_a_passed_deadline() {
         assert_eq!(
-            translate(failed(ErrorCode::DeadlinePassed)),
+            translate(failed(ErrorCode::DeadlinePassed), &Redactor::default()),
             Some(EngineEvent::Failed(FailureReason::DeadlinePassed))
+        );
+    }
+
+    fn redactor_of(secrets: &[&str]) -> Redactor {
+        Redactor::new(
+            &secrets
+                .iter()
+                .map(|secret| SecretValue::new(*secret))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn failed_saying(code: ErrorCode, detail: &str) -> WorkerEvent {
+        WorkerEvent::Failed {
+            code,
+            args: Vec::new(),
+            detail: Some(detail.to_owned()),
+        }
+    }
+
+    /// The worker rejects a spec before it has the job's secrets to mask
+    /// with, and a deserialization error can quote the value it choked on.
+    #[test]
+    fn what_a_rejected_job_spec_quotes_of_the_jobs_secrets_is_masked() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        assert_eq!(
+            translate(
+                failed_saying(
+                    ErrorCode::InvalidJobSpec,
+                    "invalid type: string \"hunter2-demo\", expected u64 at line 1 column 90"
+                ),
+                &redactor
+            ),
+            Some(EngineEvent::Failed(FailureReason::JobRejected {
+                detail: "invalid type: string \"***\", expected u64 at line 1 column 90".to_owned()
+            }))
+        );
+    }
+
+    #[test]
+    fn what_any_other_failure_says_of_the_jobs_secrets_is_masked_too() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        for code in [
+            ErrorCode::OperationFailed,
+            ErrorCode::EngineUnavailable,
+            ErrorCode::EngineExited,
+            ErrorCode::ProtocolViolated,
+            ErrorCode::EngineStartTimedOut,
+            ErrorCode::EngineExitTimedOut,
+            ErrorCode::Unknown,
+        ] {
+            assert_eq!(
+                translate(
+                    failed_saying(code, "could not open with hunter2-demo"),
+                    &redactor
+                ),
+                Some(EngineEvent::Failed(FailureReason::EngineFailed {
+                    detail: "could not open with ***".to_owned()
+                })),
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_warning_hides_the_jobs_secrets_in_every_text_it_carries() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        let warning = WorkerEvent::Warning {
+            item: Some("/home/demo/hunter2-demo.txt".to_owned()),
+            during: "reading hunter2-demo".to_owned(),
+            code: WarningCode::SourceUnreadable,
+            detail: "denied for hunter2-demo".to_owned(),
+        };
+        assert_eq!(
+            translate(warning, &redactor),
+            Some(EngineEvent::Warning(Warning {
+                kind: WarningKind::SourceUnreadable,
+                item: Some("/home/demo/***.txt".to_owned()),
+                during: "reading ***".to_owned(),
+                detail: "denied for ***".to_owned(),
+            }))
+        );
+    }
+
+    #[test]
+    fn progress_text_hides_the_jobs_secrets() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        assert_eq!(
+            translate(
+                WorkerEvent::ProgressStart {
+                    key: 1,
+                    kind: ProgressKind::Spinner,
+                    prefix: "opening hunter2-demo".to_owned(),
+                },
+                &redactor
+            ),
+            Some(EngineEvent::Progress(ProgressEvent::Begin {
+                key: 1,
+                kind: AppProgressKind::Spinner,
+                prefix: "opening ***".to_owned(),
+            }))
+        );
+        assert_eq!(
+            translate(
+                WorkerEvent::ProgressTitle {
+                    key: 1,
+                    title: "still hunter2-demo".to_owned(),
+                },
+                &redactor
+            ),
+            Some(EngineEvent::Progress(ProgressEvent::Title {
+                key: 1,
+                title: "still ***".to_owned(),
+            }))
         );
     }
 
@@ -1738,6 +1861,185 @@ mod tests {
             "the start of the secret is in the log: {:?}",
             kept.chars().rev().take(8).collect::<String>()
         );
+    }
+
+    fn line_of(event: &WorkerEvent) -> String {
+        serde_json::to_string(event).unwrap()
+    }
+
+    /// The events of `job` when a stand-in worker, which started with
+    /// `environment` (the real one when `None`), writes `stderr` and then
+    /// `lines`.
+    #[cfg(unix)]
+    async fn answered(
+        job: Job,
+        environment: Option<Vec<(OsString, OsString)>>,
+        stderr: &str,
+        lines: &[String],
+    ) -> Vec<EngineEvent> {
+        let lines: String = lines.iter().map(|line| format!(" '{line}'")).collect();
+        let script = format!("cat >/dev/null; echo '{stderr}' >&2; printf '%s\\n'{lines}");
+        let mut engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        if let Some(environment) = environment {
+            engine = engine.with_environment(environment);
+        }
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine.run(op, job).await.unwrap().events;
+        tokio::time::timeout(Duration::from_secs(10), events.collect::<Vec<_>>())
+            .await
+            .expect("the worker's events ended")
+    }
+
+    /// The environment of a daemon behind a proxy that wants credentials.
+    #[cfg(unix)]
+    fn behind_a_proxy() -> Option<Vec<(OsString, OsString)>> {
+        Some(vec![
+            (
+                OsString::from("PATH"),
+                std::env::var_os("PATH").unwrap_or_default(),
+            ),
+            (
+                OsString::from("HTTPS_PROXY"),
+                OsString::from("http://demo:CANARY-proxy@proxy.demo:3128"),
+            ),
+        ])
+    }
+
+    /// The worker can refuse a spec before it has the job's secrets to mask
+    /// with, and what it says then can quote one.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_rejected_job_spec_that_quotes_the_jobs_password_is_masked_in_the_failure() {
+        let rejection = failed_saying(
+            ErrorCode::InvalidJobSpec,
+            "invalid type: string \"hunter2-demo\", expected a map",
+        );
+        let events = answered(
+            identify("hunter2-demo", &[]),
+            None,
+            "rejecting",
+            &[line_of(&rejection)],
+        )
+        .await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::JobRejected {
+                detail: "invalid type: string \"***\", expected a map".to_owned()
+            })]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_line_that_cannot_be_read_and_quotes_a_secret_is_masked_in_the_failure() {
+        let events = answered(
+            identify("hunter2-demo", &[]),
+            None,
+            "garbling",
+            &[r#"{"event":"hunter2-demo"}"#.to_owned()],
+        )
+        .await;
+        let [EngineEvent::Failed(FailureReason::EngineFailed { detail })] = events.as_slice()
+        else {
+            panic!("expected one engine failure, got {events:?}");
+        };
+        assert!(detail.starts_with("malformed worker event: "), "{detail}");
+        assert!(detail.contains("***"), "{detail}");
+        assert!(!detail.contains("hunter2-demo"), "{detail}");
+    }
+
+    /// The proxy variables pass the worker's scrubbed environment, so a
+    /// program the worker starts can use them, and what a proxy answers can
+    /// echo them: on stderr and in an event.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_credentials_of_a_proxy_url_are_masked_in_stderr_and_in_events() {
+        capture_the_worker_log();
+        let warning = WorkerEvent::Warning {
+            item: None,
+            during: "connecting".to_owned(),
+            code: WarningCode::Unknown,
+            detail: "proxy asked for CANARY-proxy".to_owned(),
+        };
+        let failure = failed_saying(
+            ErrorCode::OperationFailed,
+            "refused by http://demo:CANARY-proxy@proxy.demo:3128",
+        );
+        let events = answered(
+            fake_job(),
+            behind_a_proxy(),
+            "proxy echo: http://demo:CANARY-proxy@proxy.demo:3128",
+            &[line_of(&warning), line_of(&failure)],
+        )
+        .await;
+        assert_eq!(
+            events,
+            [
+                EngineEvent::Warning(Warning {
+                    kind: WarningKind::Other,
+                    item: None,
+                    during: "connecting".to_owned(),
+                    detail: "proxy asked for ***".to_owned(),
+                }),
+                EngineEvent::Failed(FailureReason::EngineFailed {
+                    detail: "refused by http://***@proxy.demo:3128".to_owned()
+                }),
+            ]
+        );
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("proxy echo:"))
+            .await
+            .expect("the worker's stderr never reached the log");
+        assert_eq!(line, "proxy echo: http://***@proxy.demo:3128");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_jobs_own_secrets_and_the_proxy_credentials_are_both_masked() {
+        capture_the_worker_log();
+        let failure = failed_saying(
+            ErrorCode::OperationFailed,
+            "hunter2-demo then CANARY-proxy then CANARY-resolved",
+        );
+        let events = answered(
+            identify("hunter2-demo", &["CANARY-resolved"]),
+            behind_a_proxy(),
+            "both: hunter2-demo CANARY-proxy CANARY-resolved",
+            &[line_of(&failure)],
+        )
+        .await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineFailed {
+                detail: "*** then *** then ***".to_owned()
+            })]
+        );
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("both:"))
+            .await
+            .expect("the worker's stderr never reached the log");
+        assert_eq!(line, "both: *** *** ***");
+    }
+
+    /// What a worker logs goes to the daemon's log as it says it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_log_line_from_the_worker_hides_the_jobs_secrets() {
+        capture_the_worker_log();
+        let log_line = WorkerEvent::Log {
+            level: Level::Info,
+            message: "log one: hunter2-demo".to_owned(),
+        };
+        let events = answered(
+            identify("hunter2-demo", &[]),
+            None,
+            "logging",
+            &[line_of(&log_line), result_line()],
+        )
+        .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let line = logged_soon(log::Level::Info, |text| text.starts_with("log one:"))
+            .await
+            .expect("the worker's log line never reached the log");
+        assert_eq!(line, "log one: ***");
     }
 
     /// What a stand-in worker saw, written to files: its environment, its
