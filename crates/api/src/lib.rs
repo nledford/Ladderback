@@ -24,6 +24,8 @@ pub enum ErrorCode {
     InvalidJobSpec,
     /// The engine reported a failure; the detail carries its own message.
     OperationFailed,
+    /// The job's deadline passed before it finished, so the worker stopped it.
+    DeadlinePassed,
     #[serde(other)]
     Unknown,
 }
@@ -62,6 +64,16 @@ mod tests {
             serde_json::to_string(&WarningCode::SourceUnreadable).unwrap(),
             r#""source-unreadable""#
         );
+    }
+
+    #[test]
+    fn a_passed_deadline_travels_as_its_own_code() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::DeadlinePassed).unwrap(),
+            r#""deadline-passed""#
+        );
+        let read: ErrorCode = serde_json::from_str(r#""deadline-passed""#).unwrap();
+        assert_eq!(read, ErrorCode::DeadlinePassed);
     }
 
     #[test]

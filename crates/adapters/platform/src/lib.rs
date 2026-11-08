@@ -1,5 +1,6 @@
-//! Platform adapter: the operating system's clocks. Power, network and
-//! identity arrive with later milestones (technical design §3.2).
+//! Platform adapter: the operating system's clocks and the agent ID file.
+//! Power, network and the identity key arrive with later milestones
+//! (technical design §3.2).
 
 #![deny(
     clippy::unwrap_used,
@@ -9,6 +10,8 @@
     clippy::todo,
     clippy::unreachable
 )]
+
+pub mod agent_id;
 
 use app::ports::Clock;
 use async_trait::async_trait;

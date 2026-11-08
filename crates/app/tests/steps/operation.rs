@@ -74,7 +74,7 @@ fn took(agent: &mut Agent, minutes: i64) {
     );
 }
 
-#[then(expr = "the operation lists {int} warnings")]
+#[then(expr = "the operation lists {int} warning(s)")]
 fn lists_warnings(agent: &mut Agent, count: usize) {
     assert_eq!(agent.operation().warnings().len(), count);
 }
@@ -118,6 +118,26 @@ fn failed_exited(agent: &mut Agent, code: i32) {
 #[then("the operation never started")]
 fn never_started(agent: &mut Agent) {
     assert_eq!(agent.operation().started_at(), None);
+}
+
+#[given(expr = "the operation has {int} minute(s) before its deadline")]
+fn minutes_before_deadline(agent: &mut Agent, minutes: i64) {
+    agent.job.deadline_budget = Some(SignedDuration::from_mins(minutes));
+}
+
+#[then("the operation ends as cancelled")]
+fn cancelled(agent: &mut Agent) {
+    assert_eq!(agent.operation().status(), &OperationStatus::Cancelled);
+}
+
+#[then("the operation ends as failed because its deadline passed")]
+fn failed_deadline(agent: &mut Agent) {
+    assert_eq!(
+        agent.operation().status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::DeadlinePassed
+        }
+    );
 }
 
 /// Whether a scenario carries `tag` on itself, its rule or its feature.

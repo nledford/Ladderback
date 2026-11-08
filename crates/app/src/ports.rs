@@ -5,6 +5,7 @@ mod engine;
 
 pub use clock::Clock;
 pub use engine::{
-    Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, Job, ProgressEvent,
-    ProgressKind,
+    BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
+    EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
+    PruneSummary, RepositoryAccess, RunningJob,
 };

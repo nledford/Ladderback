@@ -4,7 +4,7 @@ Guidance for coding agents working on Steading, a self-hosted backup manager for
 
 ## Status
 
-Milestone M0 (skeleton) is in place: the workspace, the worker protocol with a fake operation, the embedded hello UI and every CI check. Next is M1a ([docs/TECHNICAL-DESIGN.md §14](docs/TECHNICAL-DESIGN.md)).
+Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog. Next is M1b ([docs/TECHNICAL-DESIGN.md §14](docs/TECHNICAL-DESIGN.md)).
 
 ## Commands
 

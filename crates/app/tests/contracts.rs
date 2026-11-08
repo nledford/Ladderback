@@ -49,9 +49,14 @@ async fn simulated_engine_steps_take_time_on_its_clock() {
         step_delay: Duration::from_secs(60),
         warnings: Vec::new(),
         end: app::ports::FakeEnd::Succeed,
+        deadline_budget: None,
     };
     let op = domain::OperationId::from_uuid(domain::Uuid::from_u128(1));
-    let events = engine.run(op, app::ports::Job::Fake(job)).await.unwrap();
+    let events = engine
+        .run(op, app::ports::Job::Fake(job))
+        .await
+        .unwrap()
+        .events;
     futures::StreamExt::collect::<Vec<_>>(events).await;
     assert_eq!(clock.now(), epoch() + SignedDuration::from_mins(3));
 }
