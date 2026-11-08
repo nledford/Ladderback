@@ -25,8 +25,6 @@ pub enum ErrorCode {
     /// The engine reported a failure; the detail carries its own message.
     OperationFailed,
     /// The job's deadline passed before it finished, so the worker stopped it.
-    // Red-first stub: the code doesn't travel yet.
-    #[serde(skip)]
     DeadlinePassed,
     #[serde(other)]
     Unknown,
