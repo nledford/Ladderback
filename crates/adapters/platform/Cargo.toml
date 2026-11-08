@@ -1,0 +1,21 @@
+[package]
+name = "platform"
+description = "Platform adapter: system clock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+app.workspace = true
+domain.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
