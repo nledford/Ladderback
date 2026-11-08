@@ -18,9 +18,9 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
-| `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; pass `--name <regex>` to pick scenarios |
+| `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
 | `just test-ui [args]` | Builds the web UI and the binary, then runs the `@ui` scenarios |
-| `just mutants [base]` | `cargo mutants` on `domain` and `app` code changed since `base` (default `origin/main`) |
+| `just mutants [base]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists |
 | `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests fail at run time (§13.1) |
 | `just serve` | Builds everything and runs `steading serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
@@ -80,8 +80,8 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 **Test first (TDD).**
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
-- In a pull request, the first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check verifies this (§13.1).
-- Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts.
+- A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check verifies this for labelled pull requests only (§13.1); documentation, CI, tooling and dependency-only pull requests go unlabelled.
+- Mutation testing (`cargo mutants`) gates changed code in `domain`, `app`, `adapters/config` and `adapters/interop`. A surviving mutant means a behaviour no test asserts. A new gated crate joins `mutants_packages` in the Justfile when it lands.
 - There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. `just test` lists the skips at its end, so CI shows them. `testkit` is a dev-dependency only.
@@ -105,6 +105,7 @@ After implementing a non-trivial change, get one independent adversarial review 
 Several agents may work on the repository at once (§13.5). Each one:
 
 - works in its own git worktree, with its own `CARGO_TARGET_DIR`, and deletes that target directory when done;
+- edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against another directory, pass absolute paths;
 - uses its own ports, never `just serve`'s 9898, and its own scratch folder;
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
