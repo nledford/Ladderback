@@ -213,7 +213,8 @@ function scenarioFails(dir, scenario, uiReady) {
     result = run("cargo", ["test", "--test", "e2e", "--", "--name", regex], dir, { timeout: TEST_TIMEOUT_MS });
   } else {
     uiReady();
-    result = run("npx", ["cucumber-js", "--name", regex], path.join(dir, "ui-tests"), {
+    // The local binary by path, never `npx`: see the Justfile's test-ui.
+    result = run("node_modules/.bin/cucumber-js", ["--name", regex], path.join(dir, "ui-tests"), {
       env: { STEADING_BIN: path.join(targetDir("first"), "debug", "steading") },
       timeout: TEST_TIMEOUT_MS,
     });
