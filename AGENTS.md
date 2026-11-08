@@ -75,6 +75,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
   - `app` depends only on `domain`; time and randomness come from the `Clock` and `Random` ports.
   - Adapters never depend on each other. Only `src/main.rs` wires them together.
 - Foreign models stay behind their anti-corruption layers: `rustic_core` types only in `adapters/engine`, rustic profile TOML only in `adapters/interop`.
+- Secret sources (command, keyring, file, environment) are read only in `adapters/secrets`, behind the `SecretResolver` port; `adapters/engine` hands workers a scrubbed environment (§10.2, §4.1).
 - The core returns typed errors and codes, never user-facing sentences. Text is produced through `l10n` (§8.4).
 
 **Test first (TDD).**
