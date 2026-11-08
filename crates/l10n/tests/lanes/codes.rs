@@ -60,12 +60,14 @@ fn a_codes_message_is_named_after_its_wire_name_and_no_message_serves_two_codes(
 
 #[test]
 fn every_code_has_a_message_in_the_source_catalog() {
+    assert!(!mapped().is_empty());
     let problems = codes_without_message(&source_locale(), &mapped());
     assert!(problems.is_empty(), "{problems:#?}");
 }
 
 #[test]
 fn every_code_message_of_the_source_catalog_has_a_code() {
+    assert!(!mapped().is_empty());
     let problems = messages_without_code(&source_locale(), &mapped());
     assert!(problems.is_empty(), "{problems:#?}");
 }
