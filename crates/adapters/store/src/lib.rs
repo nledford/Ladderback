@@ -12,6 +12,7 @@
 )]
 
 mod codec;
+mod error_args;
 mod report;
 mod row;
 mod sql;

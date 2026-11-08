@@ -31,6 +31,30 @@ fn unreadable_files(agent: &mut Agent, count: usize) {
         .collect();
 }
 
+/// An unreadable file's warning with `length` characters of text in `field`
+/// (`item`, `during` or `detail`), and the usual short text in the others.
+fn unreadable_file_with_long(field: &str, length: usize) -> Warning {
+    let long = "x".repeat(length);
+    let mut warning = Warning {
+        kind: WarningKind::SourceUnreadable,
+        item: Some("/home/demo/locked.txt".to_owned()),
+        during: "backup".to_owned(),
+        detail: "permission denied".to_owned(),
+    };
+    match field {
+        "item" => warning.item = Some(long),
+        "during" => warning.during = long,
+        "detail" => warning.detail = long,
+        other => panic!("a warning has no {other}"),
+    }
+    warning
+}
+
+#[given(expr = "the engine will report an unreadable file whose {word} is {int} characters long")]
+fn unreadable_file_with_long_text(agent: &mut Agent, field: String, length: usize) {
+    agent.job.warnings = vec![unreadable_file_with_long(&field, length)];
+}
+
 #[given(expr = "the engine will report the failure {string}")]
 fn reported_failure(agent: &mut Agent, detail: String) {
     agent.job.end = FakeEnd::Fail { detail };
@@ -178,6 +202,56 @@ async fn history_lists_warnings(agent: &mut Agent, count: usize) {
 async fn history_counts_warnings(agent: &mut Agent, count: u64) {
     let detail = history_of_the_operation(agent).await;
     assert_eq!(detail.record.warning_count, count);
+}
+
+/// `field` (`item`, `during` or `detail`) of `warning`.
+fn text_of<'a>(warning: &'a Warning, field: &str) -> Option<&'a str> {
+    match field {
+        "item" => warning.item.as_deref(),
+        "during" => Some(&warning.during),
+        "detail" => Some(&warning.detail),
+        other => panic!("a warning has no {other}"),
+    }
+}
+
+/// The warning the engine reported, and the one the history holds for it.
+async fn reported_and_kept_warning(agent: &mut Agent) -> (Warning, Warning) {
+    let kept = history_of_the_operation(agent).await.warnings;
+    let [kept] = <[Warning; 1]>::try_from(kept).expect("the history holds one warning");
+    let reported = agent
+        .job
+        .warnings
+        .first()
+        .cloned()
+        .expect("the engine reported a warning");
+    (reported, kept)
+}
+
+#[then(expr = "the history keeps the warning's {word} cut to {int} bytes, ending in {string}")]
+async fn history_keeps_text_cut(agent: &mut Agent, field: String, bytes: usize, mark: String) {
+    let (reported, kept) = reported_and_kept_warning(agent).await;
+    let kept = text_of(&kept, &field).expect("the warning has that text");
+    let reported = text_of(&reported, &field).expect("the warning has that text");
+    assert_eq!(kept.len(), bytes);
+    let start = kept
+        .strip_suffix(&mark)
+        .unwrap_or_else(|| panic!("the {field} doesn't end in {mark:?}"));
+    assert!(
+        reported.starts_with(start),
+        "what is kept of the {field} is the start of what the engine reported"
+    );
+}
+
+#[then(expr = "the history keeps any of the warning's text of {int} bytes or less whole")]
+async fn history_keeps_short_text_whole(agent: &mut Agent, cap: usize) {
+    let (reported, kept) = reported_and_kept_warning(agent).await;
+    assert_eq!(kept.kind, reported.kind);
+    for field in ["item", "during", "detail"] {
+        let reported = text_of(&reported, field);
+        if reported.is_none_or(|text| text.len() <= cap) {
+            assert_eq!(text_of(&kept, field), reported, "{field}");
+        }
+    }
 }
 
 /// Whether a scenario carries `tag` on itself, its rule or its feature.
