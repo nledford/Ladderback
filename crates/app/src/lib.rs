@@ -13,8 +13,6 @@
     clippy::todo,
     clippy::unreachable
 )]
-// Red-first stubs: removed when the real code returns.
-#![allow(unused, clippy::todo)]
 
 pub mod execution;
 pub mod ports;

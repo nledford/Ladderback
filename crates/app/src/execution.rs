@@ -39,7 +39,76 @@ impl RunOperation {
         job: Job,
         cancel: impl Future<Output = ()> + Send,
     ) -> Operation {
-        todo!()
+        let mut op = Operation::queue(id, self.clock.now());
+        let budget = job.deadline_budget();
+        let RunningJob {
+            events,
+            mut control,
+        } = match self.engine.run(id, job).await {
+            Ok(running) => running,
+            Err(error) => {
+                self.fail(
+                    &mut op,
+                    FailureReason::EngineUnavailable {
+                        detail: error.detail,
+                    },
+                );
+                return op;
+            }
+        };
+        let mut cancel = pin!(cancel.fuse());
+        // Ended streams stay ended; `select_biased!` needs that guarantee.
+        let mut events = events.fuse();
+        let mut deadline: Option<Deadline> = None;
+        let mut timer: Fuse<BoxFuture<'_, ()>> = Fuse::terminated();
+        loop {
+            select_biased! {
+                event = events.next() => {
+                    let Some(event) = event else {
+                        let reason = match deadline {
+                            Some(d) if d.has_passed(self.clock.now()) => {
+                                FailureReason::DeadlinePassed
+                            }
+                            _ => FailureReason::EngineExited { exit_code: None },
+                        };
+                        self.fail(&mut op, reason);
+                        return op;
+                    };
+                    if let EngineEvent::Started { index_read_at } = &event
+                        && let Some(budget) = budget
+                        && timer.is_terminated()
+                    {
+                        let d = Deadline::after_index_read(*index_read_at, budget);
+                        deadline = Some(d);
+                        timer = self.clock.sleep_until(d.at()).fuse();
+                    }
+                    self.apply(&mut op, event);
+                    if op.status().is_finished() {
+                        // A result stands even past the deadline: the snapshot
+                        // it reports was written already. Dropping the job
+                        // stops whatever the engine still runs.
+                        return op;
+                    }
+                    // Checked on every event, so a stream that never pauses
+                    // can't keep the timer from its turn.
+                    if deadline.is_some_and(|d| d.has_passed(self.clock.now())) {
+                        self.fail(&mut op, FailureReason::DeadlinePassed);
+                        return op;
+                    }
+                }
+                () = cancel => {
+                    control.stop().await;
+                    self.cancel(&mut op);
+                    return op;
+                }
+                () = timer => {
+                    // No grace past the deadline: dropping the job on return
+                    // kills it at once (§4.1).
+                    self.fail(&mut op, FailureReason::DeadlinePassed);
+                    return op;
+                }
+            }
+        }
     }
 
     fn apply(&self, op: &mut Operation, event: EngineEvent) {

@@ -50,7 +50,52 @@ impl JobControl for Stop {
 #[async_trait]
 impl Engine for SimulatedEngine {
     async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-        todo!()
+        let Job::Fake(job) = job else {
+            return Err(EngineError {
+                detail: "the simulated engine runs fake jobs only".to_owned(),
+            });
+        };
+        let now = self.clock.now();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let playing = Playing {
+            steps: script(&job)?,
+            clock: Arc::clone(&self.clock),
+            deadline: job
+                .deadline_budget
+                .map(|budget| Deadline::after_index_read(now, budget)),
+            stopped: Arc::clone(&stopped),
+        };
+        let started = EngineEvent::Started { index_read_at: now };
+        let events = stream::iter([started])
+            .chain(stream::unfold(playing, |mut playing| async move {
+                loop {
+                    if playing.stopped.load(Ordering::SeqCst) {
+                        return None;
+                    }
+                    if playing
+                        .deadline
+                        .is_some_and(|d| d.has_passed(playing.clock.now()))
+                    {
+                        // Like the worker's watchdog: nothing more, then the failure.
+                        playing.steps.clear();
+                        playing.stopped.store(true, Ordering::SeqCst);
+                        let failed = EngineEvent::Failed(FailureReason::DeadlinePassed);
+                        return Some((failed, playing));
+                    }
+                    match playing.steps.pop_front()? {
+                        Step::Wait(delay) => {
+                            let until = playing.clock.now() + delay;
+                            playing.clock.sleep_until(until).await;
+                        }
+                        Step::Emit(event) => return Some((event, playing)),
+                    }
+                }
+            }))
+            .boxed();
+        Ok(RunningJob {
+            events,
+            control: Box::new(Stop(stopped)),
+        })
     }
 }
 

@@ -92,7 +92,16 @@ pub struct RepositoryAccess {
 /// the URL and the options' names stay, for diagnosing.
 impl std::fmt::Debug for RepositoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        let repository =
+            Redactor::for_repository(&self.repository, &self.password).redact(&self.repository);
+        let options: BTreeMap<&String, &str> =
+            self.options.keys().map(|name| (name, REDACTED)).collect();
+        f.debug_struct("RepositoryAccess")
+            .field("repository", &repository)
+            .field("password", &self.password)
+            .field("options", &options)
+            .field("id", &self.id)
+            .finish()
     }
 }
 
