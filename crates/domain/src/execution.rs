@@ -41,7 +41,9 @@ pub enum FailureReason {
     /// The engine refused the job it was given.
     JobRejected { detail: String },
     /// The engine stopped without reporting a result, for example because its
-    /// process crashed or was killed. `exit_code` is `None` when it was ended by a signal.
+    /// process crashed or was killed. `exit_code` is `None` when no exit status
+    /// is known: a signal ended it, its status couldn't be read, or the daemon
+    /// never learned it.
     EngineExited { exit_code: Option<i32> },
     /// The engine reported that the operation failed. `detail` is the engine's own message.
     EngineFailed { detail: String },

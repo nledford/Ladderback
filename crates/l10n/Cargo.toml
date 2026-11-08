@@ -1,0 +1,28 @@
+[package]
+name = "l10n"
+description = "Steading's localization: Fluent catalogs, generated message IDs, locale selection and the rendering of the API's error codes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+api.workspace = true
+fluent-bundle.workspace = true
+fluent-langneg.workspace = true
+jiff.workspace = true
+unic-langid.workspace = true
+
+[build-dependencies]
+fluent-syntax.workspace = true
+unic-langid.workspace = true
+
+[dev-dependencies]
+fluent-syntax.workspace = true
+proc-macro2.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

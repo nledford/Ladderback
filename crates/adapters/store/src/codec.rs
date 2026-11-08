@@ -220,7 +220,7 @@ fn argument<'a>(args: &'a [(String, MsgArg)], name: &str) -> Option<&'a MsgArg> 
         .map(|(_, value)| value)
 }
 
-/// `exit_code` is left out when a signal ended the process.
+/// `exit_code` is left out when no exit status is known.
 fn exit_code(args: &[(String, MsgArg)]) -> Result<Option<i32>, BadColumn> {
     match argument(args, "exit_code") {
         None => Ok(None),

@@ -14,7 +14,9 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use api::MsgArg;
 use clap::{Parser, Subcommand};
+use l10n::{Localizer, MessageId, PosixEnv, msg};
 
 mod logging;
 
@@ -66,15 +68,24 @@ fn main() -> ExitCode {
 fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
     logging::install();
     log::info!("steading {} starting", env!("CARGO_PKG_VERSION"));
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
-    if let Err(error) = http_adapter::require_loopback(listen) {
-        eprintln!("steading: {error}");
+    if let Err(refusal) = http_adapter::require_loopback(listen) {
+        say(
+            &localizer,
+            msg::CLI_REFUSE_NON_LOOPBACK,
+            &[("address", text(refusal.0))],
+        );
         return ExitCode::FAILURE;
     }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("steading: cannot start the async runtime: {error}");
+            say(
+                &localizer,
+                msg::CLI_CANNOT_START_RUNTIME,
+                &[("detail", text(error))],
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -82,13 +93,25 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         let listener = match tokio::net::TcpListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
-                eprintln!("steading: cannot listen on {listen}: {error}");
+                say(
+                    &localizer,
+                    msg::CLI_CANNOT_LISTEN,
+                    &[("address", text(listen)), ("detail", text(error))],
+                );
                 return ExitCode::FAILURE;
             }
         };
         match listener.local_addr() {
-            Ok(addr) => eprintln!("steading: listening on http://{addr}"),
-            Err(error) => eprintln!("steading: listening (address unknown: {error})"),
+            Ok(addr) => say(
+                &localizer,
+                msg::CLI_LISTENING,
+                &[("url", text(format!("http://{addr}")))],
+            ),
+            Err(error) => say(
+                &localizer,
+                msg::CLI_LISTENING_UNKNOWN,
+                &[("detail", text(error))],
+            ),
         }
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
@@ -100,11 +123,25 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                eprintln!("steading: server error: {error}");
+                say(
+                    &localizer,
+                    msg::CLI_SERVER_ERROR,
+                    &[("detail", text(error))],
+                );
                 ExitCode::FAILURE
             }
         }
     })
+}
+
+/// Prints one of Steading's own messages on stderr after the program's name.
+fn say(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) {
+    eprintln!("steading: {}", localizer.message(id, args));
+}
+
+/// A value shown as the text it prints as.
+fn text(value: impl std::fmt::Display) -> MsgArg {
+    MsgArg::Text(value.to_string())
 }
 
 /// Resolves on Ctrl-C or SIGTERM (what systemd and launchd send).

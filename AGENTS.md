@@ -52,6 +52,16 @@ The daemon runs unattended and owns the operation queue, so a panic silently sto
 - Mutex poisoning is `lock().unwrap_or_else(PoisonError::into_inner)` or an error; a thread join is a `Result`.
 - Input-derived numbers are hostile: bytes from outside the process (worker output, `JobSpec`, HTTP requests, `config.toml`, imported profiles, sync messages) never size an allocation unbounded and never index unchecked. Use `get()`, not `[i]` or `[a..b]`; checked or saturating arithmetic; caps on line and message lengths (§4.1); slice strings only at char boundaries.
 
+## Adding an error or warning code
+
+A code isn't done until a person can read it in their own language (§8.4). Three steps, in the same change:
+
+1. Add the variant to `ErrorCode` or `WarningCode` in `crates/api/src/lib.rs`, with its arm in that enum's `args()`: the arguments the sender attaches (`&[]` for none). Mark an argument `optional` when the sender may leave it out. It must be text, and every text of the message, in every locale, reads it only through a select that has a `[none]` arm. Never put a secret in them (I4).
+2. Add one line to that enum's list in `crates/l10n/src/code.rs`. The lookup is a `match` without a wildcard, so a variant with no line doesn't compile.
+3. Write the message in `crates/l10n/locales/en-US/common.ftl`, named `error-<code>` or `warning-<code>` after the code's name on the wire (`InvalidJobSpec` is `error-invalid-job-spec`). It reads the variables `args()` lists and no others, with a translator comment above it when it reads any, and may have a `.with-detail` attribute that shows `{ $detail }`, the sender's own text. Voice follows PRODUCT.md: say what happened and what to do next.
+
+`just test` fails for a code with no message, a message with no code, a message that reads a variable its code doesn't declare, and a catalog message that no product code names.
+
 ## How to work: BDD, DDD and TDD
 
 Follow all three whenever possible. Deviating needs a stated reason in the pull request.

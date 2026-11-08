@@ -4,6 +4,7 @@ members = [
     "crates/domain",
     "crates/app",
     "crates/api",
+    "crates/l10n",
     "crates/web",
     "crates/adapters/engine",
     "crates/adapters/http",
@@ -18,6 +19,7 @@ default-members = [
     "crates/domain",
     "crates/app",
     "crates/api",
+    "crates/l10n",
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
@@ -38,6 +40,7 @@ publish = false
 domain = { path = "crates/domain" }
 app = { path = "crates/app" }
 api = { path = "crates/api" }
+l10n = { path = "crates/l10n" }
 engine = { path = "crates/adapters/engine" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
@@ -51,6 +54,11 @@ clap = { version = "4.6.7", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 cucumber = "0.23.0"
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
+fluent-bundle = "0.16.0"
+# Not 0.14: it negotiates `icu_locid` identifiers, which `unic-langid`, and so
+# Fluent's bundles, can't take.
+fluent-langneg = "0.13.1"
+fluent-syntax = "0.12.0"
 futures = "0.3.34"
 http-body-util = "0.1.5"
 jiff = { version = "0.2.40", features = ["serde"] }
@@ -59,6 +67,7 @@ leptos = { version = "0.8.23", features = ["csr"] }
 log = "0.4.35"
 mime_guess = "2.0.5"
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+proc-macro2 = "1.0.107"
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased
 # (technical design §2.1). The `engine` crate depends on them, and so do the
@@ -75,6 +84,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 tempfile = "3.27.0"
 tokio = "1.54.1"
 tower = "0.5.3"
+unic-langid = { version = "0.9.6", features = ["macros"] }
 url = "2.5.8"
 uuid = { version = "1.29.1", features = ["serde"] }
 
@@ -131,8 +141,10 @@ name = "e2e"
 harness = false
 
 [dependencies]
+api.workspace = true
 engine.workspace = true
 http-adapter.workspace = true
+l10n.workspace = true
 axum.workspace = true
 clap.workspace = true
 env_logger.workspace = true

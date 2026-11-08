@@ -27,10 +27,12 @@ pub enum ErrorCode {
     /// The job's deadline passed before it finished, so the worker stopped it.
     DeadlinePassed,
     /// The engine couldn't be started, for example because its program is
-    /// missing. The detail carries the platform's own message.
+    /// missing, or it refused the job. The detail carries the platform's or
+    /// the adapter's own message.
     EngineUnavailable,
     /// The engine stopped without reporting a result. The argument
-    /// `exit_code` is its exit status, left out when a signal ended it.
+    /// `exit_code` is its exit status, left out when none is known: a signal
+    /// ended it, its status couldn't be read, or the daemon never learned it.
     EngineExited,
     /// The engine reported events out of order. The argument `transition`
     /// names the step the operation refused.
@@ -60,15 +62,148 @@ pub enum WarningCode {
     Unknown,
 }
 
-/// A typed message argument. Identifiers, ports and hostnames are `Text`,
-/// so they are never formatted as numbers.
+/// A typed message argument. Identifiers, ports, years and hostnames are
+/// `Text`, so they are never formatted as numbers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "kebab-case")]
 pub enum MsgArg {
     Count(u64),
     Bytes(u64),
     DurationMs(u64),
+    /// An instant, as milliseconds since the Unix epoch. The zone, when the
+    /// sender has one that matters (a plan's own zone, the agent's zone),
+    /// is how the instant is read; without one the viewer's zone applies.
+    Timestamp {
+        utc_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<IanaZone>,
+    },
     Text(String),
+}
+
+/// An IANA time-zone name such as `Europe/Berlin`. Checked for syntax only:
+/// whether the zone exists is for whoever resolves it. The syntax rules out
+/// anything that could walk a file path (`..`, a leading `/`, a backslash).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct IanaZone(String);
+
+/// The text is not shaped like an IANA time-zone name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidZone;
+
+impl std::fmt::Display for InvalidZone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not an IANA time-zone name")
+    }
+}
+
+impl std::error::Error for InvalidZone {}
+
+impl IanaZone {
+    /// The longest accepted name; the longest in the database has 32 characters.
+    pub const MAX_LEN: usize = 64;
+
+    /// A zone name, if `name` has the shape of one: up to [`MAX_LEN`](Self::MAX_LEN)
+    /// characters of `A-Z`, `a-z`, `0-9`, `_`, `+` and `-`, in non-empty
+    /// segments joined by `/`.
+    pub fn new(name: impl Into<String>) -> Result<Self, InvalidZone> {
+        let name = name.into();
+        let shaped = !name.is_empty()
+            && name.len() <= Self::MAX_LEN
+            && name.split('/').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-'))
+            });
+        if shaped {
+            Ok(Self(name))
+        } else {
+            Err(InvalidZone)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for IanaZone {
+    type Error = InvalidZone;
+
+    fn try_from(name: String) -> Result<Self, InvalidZone> {
+        Self::new(name)
+    }
+}
+
+impl From<IanaZone> for String {
+    fn from(zone: IanaZone) -> String {
+        zone.0
+    }
+}
+
+/// What kind of value a message argument carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ArgKind {
+    Count,
+    Bytes,
+    DurationMs,
+    Timestamp,
+    Text,
+}
+
+/// One argument a code's message takes: the name its catalog message uses
+/// for it, and what it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArgSpec {
+    pub name: &'static str,
+    pub kind: ArgKind,
+    /// Whether the sender may leave it out, as the store does with the exit
+    /// status of an engine when none is known. The renderer then supplies
+    /// the text `none`, so the message can choose its wording (§8.4). An
+    /// optional argument is always text.
+    pub optional: bool,
+}
+
+impl ErrorCode {
+    /// The arguments this code's message takes. A producer sends exactly
+    /// these, except that it may leave out an optional one, and the catalog
+    /// tests check that the message reads exactly these. A new code lists its
+    /// own here, so the compiler asks for them.
+    pub const fn args(self) -> &'static [ArgSpec] {
+        match self {
+            Self::EngineExited => &[ArgSpec {
+                name: "exit_code",
+                kind: ArgKind::Text,
+                optional: true,
+            }],
+            Self::ProtocolViolated => &[ArgSpec {
+                name: "transition",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::InvalidJobSpec
+            | Self::OperationFailed
+            | Self::DeadlinePassed
+            | Self::EngineUnavailable
+            | Self::EngineStartTimedOut
+            | Self::EngineExitTimedOut
+            | Self::HostNotAllowed
+            | Self::OriginNotAllowed
+            | Self::JsonRequired
+            | Self::Unknown => &[],
+        }
+    }
+}
+
+impl WarningCode {
+    /// The arguments this code's message takes (see [`ErrorCode::args`]).
+    pub const fn args(self) -> &'static [ArgSpec] {
+        match self {
+            Self::SourceUnreadable | Self::Unknown => &[],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +250,113 @@ mod tests {
         ] {
             let json = serde_json::to_string(&arg).unwrap();
             assert_eq!(serde_json::from_str::<MsgArg>(&json).unwrap(), arg);
+        }
+    }
+
+    #[test]
+    fn a_zone_name_with_the_shape_of_one_is_accepted_up_to_the_length_cap() {
+        let longest = "a".repeat(IanaZone::MAX_LEN);
+        for name in [
+            "UTC",
+            "Europe/Berlin",
+            "America/Argentina/Buenos_Aires",
+            "America/Port-au-Prince",
+            "Etc/GMT+5",
+            longest.as_str(),
+        ] {
+            let zone = IanaZone::new(name).unwrap_or_else(|_| panic!("{name} is a valid shape"));
+            assert_eq!(zone.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn a_zone_name_that_could_walk_a_path_or_overflow_is_rejected() {
+        let too_long = "a".repeat(IanaZone::MAX_LEN + 1);
+        for name in [
+            "",
+            ".",
+            "..",
+            "../../etc/passwd",
+            "/etc/localtime",
+            "Europe/../Berlin",
+            "Europe//Berlin",
+            "Europe/Berlin/",
+            "Europe\\Berlin",
+            "Europe/Ber lin",
+            "Europe/Berlin\n",
+            "Europe/Zürich",
+            too_long.as_str(),
+        ] {
+            assert_eq!(IanaZone::new(name), Err(InvalidZone), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn a_timestamp_travels_as_utc_plus_an_optional_zone() {
+        let zoned = MsgArg::Timestamp {
+            utc_ms: 1_794_144_600_000,
+            zone: Some(IanaZone::new("Europe/Berlin").unwrap()),
+        };
+        let json = serde_json::to_string(&zoned).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"timestamp","value":{"utc_ms":1794144600000,"zone":"Europe/Berlin"}}"#
+        );
+        assert_eq!(serde_json::from_str::<MsgArg>(&json).unwrap(), zoned);
+
+        // Before the epoch, and without a zone: the field is left out, and a
+        // peer that writes `null` instead is read the same way.
+        let unzoned = MsgArg::Timestamp {
+            utc_ms: -1,
+            zone: None,
+        };
+        let json = serde_json::to_string(&unzoned).unwrap();
+        assert_eq!(json, r#"{"type":"timestamp","value":{"utc_ms":-1}}"#);
+        assert_eq!(serde_json::from_str::<MsgArg>(&json).unwrap(), unzoned);
+        let explicit_null = r#"{"type":"timestamp","value":{"utc_ms":-1,"zone":null}}"#;
+        assert_eq!(
+            serde_json::from_str::<MsgArg>(explicit_null).unwrap(),
+            unzoned
+        );
+    }
+
+    #[test]
+    fn a_timestamp_naming_a_hostile_zone_is_rejected_when_read() {
+        let hostile = r#"{"type":"timestamp","value":{"utc_ms":0,"zone":"../../etc/passwd"}}"#;
+        assert!(serde_json::from_str::<MsgArg>(hostile).is_err());
+    }
+
+    #[test]
+    fn a_code_declares_the_arguments_its_producers_send() {
+        let spec = |name, kind, optional| ArgSpec {
+            name,
+            kind,
+            optional,
+        };
+        assert_eq!(
+            ErrorCode::EngineExited.args(),
+            &[spec("exit_code", ArgKind::Text, true)]
+        );
+        assert_eq!(
+            ErrorCode::ProtocolViolated.args(),
+            &[spec("transition", ArgKind::Text, false)]
+        );
+        for code in [
+            ErrorCode::InvalidJobSpec,
+            ErrorCode::OperationFailed,
+            ErrorCode::DeadlinePassed,
+            ErrorCode::EngineUnavailable,
+            ErrorCode::EngineStartTimedOut,
+            ErrorCode::EngineExitTimedOut,
+            ErrorCode::HostNotAllowed,
+            ErrorCode::OriginNotAllowed,
+            ErrorCode::JsonRequired,
+            ErrorCode::Unknown,
+        ] {
+            assert!(code.args().is_empty(), "{code:?}");
+        }
+        for code in [WarningCode::SourceUnreadable, WarningCode::Unknown] {
+            assert!(code.args().is_empty(), "{code:?}");
         }
     }
 }
