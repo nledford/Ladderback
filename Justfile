@@ -17,8 +17,9 @@ default:
 alias t := test
 alias v := verify
 
-# Install the wasm target, the cargo tools (needs cargo-binstall), the UI test
+# Installs the wasm target, the cargo tools (needs cargo-binstall), the UI test
 # dependencies and the test browser.
+[doc('Install the build, test and release tools.')]
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
@@ -48,10 +49,11 @@ lint:
 architecture:
     scripts/check-architecture.sh
 
-# Run unit, contract and doc tests with cargo-nextest, then the acceptance and
+# Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
 # name). Tests that skip themselves (`testkit::skip!`) are listed at the end.
 # Set NEXTEST_PROFILE=ci for retries and the JUnit report (.config/nextest.toml).
+[doc('Run every Rust test suite, then list skipped tests.')]
 [group('test')]
 [positional-arguments]
 test *args:
@@ -72,7 +74,9 @@ _test-suites *args:
     cargo test --workspace --test acceptance
     cargo test --workspace --test e2e
 
-# Run the acceptance scenarios (fakes and a fake clock) only.
+# Arguments go to cucumber-rs as given, so `--name 'a job that runs'` stays
+# one pattern, and narrow this runner's scenarios (as for `test-e2e`).
+[doc('Run the acceptance scenarios (fakes and a fake clock) only.')]
 [group('test')]
 [positional-arguments]
 test-acceptance *args:
@@ -129,8 +133,9 @@ red-first base='origin/main':
 [group('quality')]
 verify: fmt-check lint architecture test test-ui
 
-# Preview the next release: the version bump and CHANGELOG.md entry that the
-# release PR would contain for the committed history (§12.1). Changes nothing.
+# Shows the version bump and CHANGELOG.md entry that the release PR would
+# contain for the committed history (§12.1). Changes nothing.
+[doc('Preview the next release.')]
 [group('release')]
 release-preview:
     #!/usr/bin/env bash
