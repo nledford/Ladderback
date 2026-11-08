@@ -688,9 +688,12 @@ impl Reading {
     }
 
     fn broken(&mut self, detail: String) -> EngineEvent {
-        // Dropping the job kills the worker.
+        // Dropping the job kills the worker. What a parser says of the line
+        // it couldn't read can quote it.
         self.done = true;
-        EngineEvent::Failed(FailureReason::EngineFailed { detail })
+        EngineEvent::Failed(FailureReason::EngineFailed {
+            detail: self.redactor.redact(&detail),
+        })
     }
 }
 
@@ -842,8 +845,12 @@ async fn read_log_line(
     }
 }
 
+/// The event a worker's line says, with the job's secrets masked in every
+/// text of the worker's that reaches the daemon's log, the history or the
+/// user. The worker masks its own output with what it is given, but not what
+/// it can't know: the proxy credentials of its environment, and what it says
+/// of a spec before it has read it.
 fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
-    let _ = redactor;
     Some(match event {
         WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started { index_read_at },
         WorkerEvent::ProgressStart { key, kind, prefix } => {
@@ -854,7 +861,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                     ProgressKind::Counter => AppProgressKind::Counter,
                     ProgressKind::Bytes => AppProgressKind::Bytes,
                 },
-                prefix,
+                prefix: redactor.redact(&prefix),
             })
         }
         WorkerEvent::ProgressLength { key, len } => {
@@ -863,9 +870,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         WorkerEvent::ProgressInc { key, inc } => {
             EngineEvent::Progress(ProgressEvent::Advance { key, by: inc })
         }
-        WorkerEvent::ProgressTitle { key, title } => {
-            EngineEvent::Progress(ProgressEvent::Title { key, title })
-        }
+        WorkerEvent::ProgressTitle { key, title } => EngineEvent::Progress(ProgressEvent::Title {
+            key,
+            title: redactor.redact(&title),
+        }),
         WorkerEvent::ProgressFinish { key } => EngineEvent::Progress(ProgressEvent::Finish { key }),
         WorkerEvent::Warning {
             item,
@@ -877,9 +885,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 WarningCode::SourceUnreadable => WarningKind::SourceUnreadable,
                 WarningCode::Unknown => WarningKind::Other,
             },
-            item,
-            during,
-            detail,
+            item: item.map(|item| redactor.redact(&item)),
+            during: redactor.redact(&during),
+            detail: redactor.redact(&detail),
         }),
         // Logs are for the daemon's own log, which gets them under the target
         // `steading::worker`.
@@ -890,7 +898,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 Level::Info => log::Level::Info,
                 Level::Debug => log::Level::Debug,
             };
-            log::log!(target: "steading::worker", level, "{message}");
+            log::log!(target: "steading::worker", level, "{}", redactor.redact(&message));
             return None;
         }
         WorkerEvent::Result(result) => EngineEvent::Succeeded(match result {
@@ -920,7 +928,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
             }),
         }),
         WorkerEvent::Failed { code, detail, .. } => {
-            let detail = detail.unwrap_or_default();
+            let detail = redactor.redact(&detail.unwrap_or_default());
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
@@ -1251,6 +1259,25 @@ mod tests {
                 item: Some("/home/demo/***.txt".to_owned()),
                 during: "reading ***".to_owned(),
                 detail: "denied for ***".to_owned(),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_warning_without_an_item_stays_without_one() {
+        let warning = WorkerEvent::Warning {
+            item: None,
+            during: "scan".to_owned(),
+            code: WarningCode::Unknown,
+            detail: "odd".to_owned(),
+        };
+        assert_eq!(
+            translate(warning, &redactor_of(&["hunter2-demo"])),
+            Some(EngineEvent::Warning(Warning {
+                kind: WarningKind::Other,
+                item: None,
+                during: "scan".to_owned(),
+                detail: "odd".to_owned(),
             }))
         );
     }

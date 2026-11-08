@@ -9,7 +9,7 @@
 
 use std::ffi::OsString;
 
-use domain::secrets::SecretValue;
+use domain::secrets::{SecretValue, url_credentials};
 
 /// The variables a worker keeps, by exact name (case matters). Only what the
 /// worker or the programs it starts (rclone, ssh) need, and that names a
@@ -72,8 +72,11 @@ const PROXY_URLS: [&str; 6] = [
 /// environment, where a program it starts uses them, so the daemon can't
 /// keep them from the worker; it masks them wherever its output shows them.
 pub(crate) fn proxy_credentials(vars: &[(OsString, OsString)]) -> Vec<SecretValue> {
-    let _ = vars;
-    Vec::new()
+    vars.iter()
+        .filter(|(name, _)| PROXY_URLS.iter().any(|proxy| name == proxy))
+        .filter_map(|(_, value)| value.to_str())
+        .flat_map(url_credentials)
+        .collect()
 }
 
 #[cfg(test)]
@@ -198,5 +201,25 @@ mod tests {
             ),
             "via proxy.demo:3128 CANARY-hosts CANARY-other ***"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_proxy_value_that_is_not_text_is_left_alone() {
+        use std::os::unix::ffi::OsStringExt;
+        let base = vec![(
+            OsString::from("HTTPS_PROXY"),
+            OsString::from_vec(b"http://demo:\xff@proxy.demo".to_vec()),
+        )];
+        assert!(proxy_credentials(&base).is_empty());
+    }
+
+    /// The proxy variables are looked at because the worker is given them.
+    #[test]
+    fn every_variable_looked_at_for_proxy_credentials_is_one_a_worker_keeps() {
+        for name in PROXY_URLS {
+            let base = vars(&[(name, "http://demo:CANARY@proxy.demo")]);
+            assert_eq!(scrubbed(base.clone()), base, "{name}");
+        }
     }
 }
