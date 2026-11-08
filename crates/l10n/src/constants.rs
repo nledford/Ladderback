@@ -2,6 +2,8 @@
 //! generates `msg.rs` with it, and, under `cfg(test)`, by the library, because
 //! `cargo test` can't reach a build script's own functions.
 
+use std::collections::BTreeMap;
+
 /// The constant the generator emits for the list of every message, so no
 /// message may be given this name.
 pub(crate) const RESERVED: &str = "ALL";
@@ -9,8 +11,7 @@ pub(crate) const RESERVED: &str = "ALL";
 /// The constant for a message ID: capitals, with `_` for `-`
 /// (`cli-listening` is `CLI_LISTENING`).
 pub(crate) fn constant_name(id: &str) -> String {
-    let _ = id;
-    todo!()
+    id.replace('-', "_").to_uppercase()
 }
 
 /// The `(constant, id)` pairs of `ids`, sorted by constant. Each item is the
@@ -20,8 +21,26 @@ pub(crate) fn constant_name(id: &str) -> String {
 pub(crate) fn constants<'a>(
     ids: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Result<Vec<(String, String)>, String> {
-    let _ = ids;
-    todo!()
+    // Constant -> ID, so the output is sorted whatever the order of `ids`.
+    let mut constants: BTreeMap<String, String> = BTreeMap::new();
+    for (file, id) in ids {
+        let name = constant_name(id);
+        if name == RESERVED {
+            return Err(format!(
+                "`{id}` in {file} would be the constant {name}, which is the list of every message \
+                 that `msg.rs` also defines; give the message another name"
+            ));
+        }
+        if let Some(first) = constants.insert(name.clone(), id.to_owned()) {
+            let reason = if first == id {
+                "defined twice".to_owned()
+            } else {
+                format!("given the constant {name}, which `{first}` already has")
+            };
+            return Err(format!("`{id}` in {file} is {reason}"));
+        }
+    }
+    Ok(constants.into_iter().collect())
 }
 
 #[cfg(test)]
