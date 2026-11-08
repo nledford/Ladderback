@@ -94,6 +94,15 @@ opt-level = 3
 [profile.dev.package.zstd-sys]
 opt-level = 3
 
+# Build scripts, proc macros and their dependencies get no debug info, whatever
+# else a build contains. Left implicit, Cargo gives them the target crates'
+# debug info when the build also contains a target crate that needs the same
+# dependency, so a proc macro's dependencies hash differently for each set of
+# units a command asks for. `cargo test --doc` then rebuilt every proc macro,
+# and everything built with one, after `cargo nextest` had built them.
+[profile.dev.build-override]
+debug = false
+
 [package]
 name = "steading"
 description = "Self-hosted backup manager for rustic"
