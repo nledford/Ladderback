@@ -1,6 +1,6 @@
 # Steading — Design
 
-> **Status:** Draft v0.1 · 2026-11-08
+> **Status:** Draft v0.2 · 2026-11-08
 > **Name:** Steading (binary `steading`). A steading is a farmhouse with its outbuildings: the hub and its agents.
 
 A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a web UI for connecting repositories, defining backup plans and schedules, and watching backup status and errors across several computers. Think "Backrest, but built on `rustic_core`". It is written from scratch in Rust, and the frontend is written in Leptos.
@@ -16,7 +16,7 @@ A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a 
 3. **Lock-free by construction.** Use rustic's lock-free design. Backups on many hosts and a prune can overlap safely. Exactly one place runs `forget`/`prune`/`check` for each repository.
 4. **Compatible with rustic profiles.** Import existing rustic TOML profiles, and export any plan back to a profile, so users can always drop back to the `rustic` CLI. No lock-in.
 5. **Single static binary.** The same program runs as daemon, hub, worker and CLI, with the web UI embedded. It runs headless on servers and as a user service on desktops and laptops.
-6. **Linux and macOS first.** That covers Bazzite desktops, Linux servers and a MacBook. Windows comes later.
+6. **Linux and macOS only.** That covers Bazzite desktops, Linux servers and a MacBook. Windows is out of scope (see §1 non-goals).
 
 ### Non-goals (for v1)
 
@@ -24,6 +24,7 @@ A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a 
 - No support for restic repositories with restic doing maintenance. See §7.3 for why restic must never prune a repository this tool manages.
 - No multi-tenant SaaS. This is one owner and their machines.
 - No mobile app. A responsive web UI is enough.
+- **No Windows support.** Code stays portable where it costs nothing: paths via `std::path`/`camino`, never hard-coded `/`; platform code isolated in the `platform` crate. That way Windows could be added later without a rewrite, but it isn't designed, built or tested for.
 
 ---
 
@@ -157,7 +158,7 @@ Everything an agent has, plus:
 - **Plan registry.** Agents publish their plans (minus secrets), so the hub knows the retention policy for each `(repo, host, label, paths)` group.
 - **Maintenance runner** for **hub-managed repos** (§7.3): forget, prune and check.
 - **Notifications** (§11).
-- **Remote control** (milestone 4b): "run now", cancel, and plan edits pushed to the agent.
+- **Remote control** (milestone 4b): "run now" and cancel. Plans are **view-only from the hub** in v1. Editing them from the hub is a post-v1 feature, opt-in per agent (§15, decision 2).
 
 ### 4.4 Web UI (Leptos CSR)
 
@@ -167,7 +168,7 @@ Pages:
 2. **Machine detail.** Plans, history timeline, logs and an agent settings summary.
 3. **Plans.** Create and edit sources, excludes (globs, iglobs, git-ignore, exclude-if-present), tags and label, schedule, retention, hooks and repository. Also "Import rustic profile…" and "Export as rustic profile".
 4. **Repositories.** Add or connect (local, SFTP, REST, S3, B2, rclone…), test the connection, init, stats (`infos_files`/`infos_index`), and set the maintenance owner and schedule.
-5. **Snapshots.** Filter by host, label, tag or path. Snapshot detail shows the summary and a tree browser (`ls`). Restore to a path on the originating agent, or download a file or directory (`dump` streamed as tar/zip).
+5. **Snapshots.** Filter by host, label, tag or path. Snapshot detail shows the summary and a tree browser (`ls`). Restore to the originating agent, or download a file or directory (`dump` streamed as tar/zip). Restore rules (§10.4): re-enter your password first, and by default restore into a **new folder** (`~/steading-restore/<host>-<snapshot-short-id>-<timestamp>/`). Restoring over the original location is a separate, explicit choice with its own confirmation.
 6. **Operations.** A searchable history with full logs, warnings and a cancel button.
 7. **Settings.** Auth, hub pairing, notifications.
 
@@ -280,7 +281,7 @@ Hub → agent:
 - `Ack { seq }`
 - `RunPlan { plan_id }`, `CancelOp { op_id }` (milestone 4b)
 - `FetchLog { op_id }` → agent replies `LogChunk`
-- `UpdatePlan { plan }` (milestone 4b, opt-in per agent: "allow hub to edit my plans")
+- `UpdatePlan { plan }`: **reserved for post-v1.** Opt-in per agent ("allow hub to edit my plans"). The message type is reserved in protocol v1 so that adding it later isn't a breaking change
 
 The browser never talks to agents directly. When looking at a remote machine, the hub UI calls hub APIs, and the hub forwards requests like "run now" or "fetch log" over the agent's socket.
 
@@ -408,17 +409,45 @@ Retention: logs 30 days, operations 1 year (configurable), snapshot cache rebuil
 
 ### 10.2 Repository secrets
 
-In order of preference:
-1. `password-command`, as rustic supports. For example macOS `security find-generic-password …`, `secret-tool lookup …` or `pass show …`.
-2. OS keyring via `keyring`, which the UI can write to.
-3. `password-file` (mode 0600 enforced).
-4. An inline `password` in config is accepted on import, with a warning and an offer to move it into the keyring.
+Every secret-bearing field can come from any of these sources. That covers the repository password and backend credentials in `options`, such as S3/B2 keys or SFTP passwords:
 
-Secrets are passed to workers through the `JobSpec` on stdin, never as argv or environment variables. **Secrets never leave the agent.** Hub maintenance needs the repo password, so for hub-managed repos the **hub has its own secret entry** for that repo, configured on the hub. Agents don't push passwords.
+| Source | Config form | Typical use |
+|---|---|---|
+| Command | `password-command = "security find-generic-password -s rustic-nas -w"` (rustic-compatible) | macOS Keychain, `secret-tool`, `pass`, 1Password/Bitwarden CLIs |
+| OS keyring | `password-keyring = "steading/nas"` | Desktops. The UI can write the entry for you |
+| File | `password-file = "/run/secrets/nas_password"` (rustic-compatible) | **Docker/Podman secrets**, systemd `LoadCredential=` (`$CREDENTIALS_DIRECTORY/…`), Kubernetes secrets |
+| Environment variable | `password-env = "NAS_PASSWORD"` | Containers, CI, systemd `Environment=`/`EnvironmentFile=` |
+| Inline | `password = "…"` | Accepted (e.g. on import) with a warning and an offer to move it to the keyring |
+
+**Substitution in other fields.** Like Backrest, any string value in `config.toml` may reference `${VAR}` (an environment variable) or `${file:/path}` (a file's contents, trailing newline trimmed). For example:
+
+```toml
+[repositories.b2]
+repository = "opendal:b2"
+password-file = "/run/secrets/b2_repo_password"
+options = { bucket = "my-backups", application_key_id = "${B2_KEY_ID}", application_key = "${file:/run/secrets/b2_app_key}" }
+```
+
+Rules:
+- `$${…}` escapes a literal `${`.
+- Substitution happens **at job start** in the daemon, not when the config is loaded. Rotated secrets are picked up without a restart, and resolved values never get written back to `config.toml` or shown in the UI. The UI shows the reference (`${B2_KEY_ID}`), not the value.
+- A missing variable or file fails the job with a clear error naming the reference. It never silently becomes an empty string.
+- File permissions: Steading warns if a secret file is group- or world-readable, except for files under `/run/secrets/`, `$CREDENTIALS_DIRECTORY` and `/var/run/secrets/`, where container runtimes control permissions.
+- rustic's own environment variables (`RUSTIC_PASSWORD`, `RUSTIC_PASSWORD_FILE`, `RUSTIC_PASSWORD_COMMAND`, `RUSTIC_REPOSITORY`) are recognized on import. They're **not** read implicitly at runtime, so one stray variable can't redirect every plan. Use `password-env` explicitly instead.
+
+Resolved secrets are passed to workers through the `JobSpec` on stdin, never as argv or environment variables. That holds even when a secret was *sourced* from an environment variable: workers get a scrubbed environment. **Secrets never leave the agent.** Hub maintenance needs the repo password, so for hub-managed repos the **hub has its own secret entry** for that repo, configured on the hub. Agents don't push passwords.
 
 ### 10.3 Agent ↔ hub
 
 Ed25519 identities, TLS (pinned or CA), and single-use short-lived pairing tokens. The protocol carries metadata and logs, never file contents or secrets.
+
+### 10.4 Restores
+
+Restores are the most dangerous action because they can overwrite files.
+- **Re-enter your password** before any restore started from the web UI, whether local or from the hub to an agent. This is required even with a valid session, so an unattended open tab isn't enough.
+- **Default destination is a new folder** on the target machine: `~/steading-restore/<host>-<snapshot-short-id>-<timestamp>/` (configurable per agent). Existing files are never touched in this mode.
+- **Restoring in place** (original paths) is a separate option. Its confirmation dialog states how many files would be overwritten or deleted, using a dry-run `prepare_restore` plan first.
+- Every restore is recorded in the op log with who started it and from where (local UI or hub).
 
 ---
 
@@ -449,11 +478,11 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | # | Milestone | Deliverables | Effort |
 |---|---|---|---|
 | **M0** | Skeleton | Workspace, CI (fmt, clippy, test, wasm build), `api` crate, worker protocol with a fake operation, daemon serving an embedded "hello" Leptos app | 1 wk |
-| **M1** | Single machine MVP | Repo connect/init/test; plans in `config.toml`; profile **import** and export; manual backup via worker with live progress in UI; snapshot list; op log and history; forget/prune/check run manually on the local owner | 3–5 wks |
+| **M1** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos (`repo-hot`); secret sources and `${…}` substitution (§10.2); plans in `config.toml`; profile **import** and export; manual backup via worker with live progress in UI; snapshot list; op log and history; forget/prune/check run manually on the local owner | 3–5 wks |
 | **M2** | Schedules and errors | Scheduler with catch-up and jitter; warnings vs failures; notifications (webhook, ntfy, healthchecks); service install (systemd, launchd); auth | 2–3 wks |
-| **M3** | Browse and restore | Snapshot tree browser; restore to path; download via `dump` (tar/zip); repo stats page | 2 wks |
+| **M3** | Browse and restore | Snapshot tree browser; restore to a new folder by default, in-place as an explicit option, re-authentication (§10.4); download via `dump` (tar/zip); repo stats page | 2 wks |
 | **M4a** | Hub: visibility | Pairing, sync protocol, aggregated dashboard, event replay, agent offline alerts | 3–4 wks |
-| **M4b** | Hub: control and maintenance | Hub-managed forget/prune/check with plan-matched retention, unmanaged-group handling, long-backup guard; remote run/cancel; opt-in remote plan edits | 3–4 wks |
+| **M4b** | Hub: control and maintenance | Hub-managed forget/prune/check with plan-matched retention, unmanaged-group handling, long-backup guard; remote run/cancel (plans view-only from the hub) | 3–4 wks |
 | **M5** | Polish | Conditions (AC power / metered), charts, Docker image, release packaging, docs | 2–3 wks |
 
 A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **6–9 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **4–5 months part-time**.
@@ -475,11 +504,19 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 
 ---
 
-## 15. Open questions
+## 15. Decisions
 
-1. ~~**Name.**~~ Settled: Steading.
-2. **Config editing from the hub.** Ship M4b with read-only remote plans, or allow edits from the start (opt-in per agent)?
-3. **Secrets on the hub.** Is a separate hub-side password entry per repo acceptable, or should agents be able to delegate a password to the hub, encrypted to the hub's key?
-4. **Windows.** Is it in scope for v1? (It changes the service install, path handling and VSS snapshots.)
-5. **Hot/cold repos** (`repo-hot`). Support them in the UI from M1, or leave them config-only?
-6. **Restore permissions.** Should restores from the hub UI to an agent require re-authentication or a confirmation on that agent?
+Recorded 2026-11-08.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Name | **Steading** (binary `steading`). |
+| 2 | Editing plans from the hub | **View-only in v1.** The hub shows agents' plans but can't change them. Editing from the hub is post-v1 and opt-in per agent. `UpdatePlan` is reserved in sync protocol v1 (§7.2). |
+| 3 | Secrets on the hub | **The hub has its own secret entry** for each hub-managed repo. Agents never send secrets. Secrets can come from a command, keyring, file (incl. Docker/Podman secrets and systemd credentials), environment variable or inline. `${VAR}` / `${file:…}` substitution is available in any config string (§10.2). |
+| 4 | Windows | **Out of scope.** macOS and Linux only, with code kept portable where it costs nothing (§1). |
+| 5 | Hot/cold repos | **Supported from M1.** Accepted in config and as an optional field on the repository form, passed straight to `rustic_backend`. No dedicated screens. |
+| 6 | Restore safety | **Re-enter your password before every restore. Default to restoring into a new folder.** In-place restore is an explicit option with a dry-run summary (§10.4). |
+
+## 16. Open questions
+
+None at the moment. Add new ones here as they come up.
