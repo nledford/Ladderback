@@ -25,7 +25,7 @@ setup:
     rustup target add wasm32-unknown-unknown
     cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz
     cd ui-tests && npm ci
-    cd ui-tests && npx playwright install chromium
+    cd ui-tests && node_modules/.bin/playwright install chromium
 
 # Format Rust code.
 [group('quality')]
@@ -103,11 +103,14 @@ build: web
 serve: build
     cargo run -- serve
 
-# Run the @ui scenarios in Chromium against a fresh build.
+# Run the @ui scenarios in Chromium against a fresh build. This calls the
+# cucumber-js that `just setup` installs by its path: `npx` (even
+# `npm exec --no`) runs an unrelated registry package of that name, or a cached
+# copy of it, when the local one is missing, and that package exits 0.
 [group('test')]
 [positional-arguments]
 test-ui *args: build
-    cd ui-tests && npx cucumber-js "$@"
+    cd ui-tests && node_modules/.bin/cucumber-js "$@"
 
 # Mutation-test the gated crates' code changed since `base`.
 [group('test')]
