@@ -4,8 +4,9 @@
 //! The daemon writes one [`JobSpec`] as JSON to the worker's stdin and closes
 //! it. The worker answers with one [`WorkerEvent`] per line on stdout, and
 //! ends the stream with a [`WorkerEvent::Result`] or a [`WorkerEvent::Failed`].
-//! The job carries the repository password, so it travels over stdin only:
-//! never as an argument, in the environment or in a file (invariant I4).
+//! The job carries the repository password and every secret its settings
+//! resolved to, so it travels over stdin only: never as an argument, in the
+//! environment or in a file (invariant I4).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -72,14 +73,16 @@ pub struct RepositorySpec {
     /// What the `${…}` references in the repository's settings resolved to
     /// (the password is not among them). They are masked wherever they show,
     /// whatever the option they sit in is called.
-    #[serde(skip)]
+    #[serde(with = "secrets")]
     pub secrets: Vec<SecretValue>,
 }
 
 /// Everything that can hold a secret is masked: the password, the password
-/// in the repository's URL, and the value of every option (`secret_access_key`
-/// and the like). What helps with diagnosing stays: the rest of the URL and
-/// the options' names.
+/// in the repository's URL, every secret the job carries, and the value of
+/// every option (`secret_access_key` and the like). What helps with
+/// diagnosing stays: the rest of the URL and the options' names. The
+/// secrets show as one mask each, so how many there are is visible and what
+/// they are is not.
 impl fmt::Debug for RepositorySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let repository = Redactor::for_repository(
@@ -91,10 +94,12 @@ impl fmt::Debug for RepositorySpec {
         .redact(&self.repository);
         let options: BTreeMap<&String, &str> =
             self.options.keys().map(|name| (name, REDACTED)).collect();
+        let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositorySpec")
             .field("repository", &repository)
             .field("password", &self.password)
             .field("options", &options)
+            .field("secrets", &secrets)
             .finish()
     }
 }
@@ -283,6 +288,31 @@ mod secret {
         deserializer: D,
     ) -> Result<SecretValue, D::Error> {
         String::deserialize(deserializer).map(SecretValue::new)
+    }
+}
+
+/// A list of secrets, each a plain string like [`secret`].
+mod secrets {
+    use domain::secrets::SecretValue;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        secrets: &[SecretValue],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(secrets.len()))?;
+        for secret in secrets {
+            seq.serialize_element(secret.expose())?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<SecretValue>, D::Error> {
+        Vec::<String>::deserialize(deserializer)
+            .map(|values| values.into_iter().map(SecretValue::new).collect())
     }
 }
 

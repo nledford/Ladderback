@@ -46,9 +46,11 @@ const KEPT: [&str; 24] = [
 /// What of `base` a worker may start with: the variables of [`KEPT`], in the
 /// order given, and nothing else.
 pub(crate) fn scrubbed(
-    _base: impl IntoIterator<Item = (OsString, OsString)>,
+    base: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Vec<(OsString, OsString)> {
-    todo!("the variables a worker keeps")
+    base.into_iter()
+        .filter(|(name, _)| KEPT.iter().any(|kept| name == kept))
+        .collect()
 }
 
 #[cfg(test)]

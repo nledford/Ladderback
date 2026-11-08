@@ -5,6 +5,11 @@
 //! `rustic_core` can't be cancelled, keeps whole indexes in memory and runs
 //! its own Tokio runtimes. [`main`] is what `steading worker` does: it routes
 //! rustic's logging into the event stream, exits on SIGTERM, and runs the job.
+//!
+//! Nothing the job holds secret reaches the stream: the worker masks the
+//! password, the secrets its settings resolved to, the credential options and
+//! the passwords in URLs, in every text it writes. What the programs it
+//! starts write to stderr, it can't mask; the daemon does that.
 
 mod convert;
 mod events;
