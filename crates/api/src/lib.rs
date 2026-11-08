@@ -27,10 +27,12 @@ pub enum ErrorCode {
     /// The job's deadline passed before it finished, so the worker stopped it.
     DeadlinePassed,
     /// The engine couldn't be started, for example because its program is
-    /// missing. The detail carries the platform's own message.
+    /// missing, or it refused the job. The detail carries the platform's or
+    /// the adapter's own message.
     EngineUnavailable,
     /// The engine stopped without reporting a result. The argument
-    /// `exit_code` is its exit status, left out when a signal ended it.
+    /// `exit_code` is its exit status, left out when none is known: a signal
+    /// ended it, its status couldn't be read, or the daemon never learned it.
     EngineExited,
     /// The engine reported events out of order. The argument `transition`
     /// names the step the operation refused.
