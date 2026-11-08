@@ -141,8 +141,10 @@ name = "e2e"
 harness = false
 
 [dependencies]
+api.workspace = true
 engine.workspace = true
 http-adapter.workspace = true
+l10n.workspace = true
 axum.workspace = true
 clap.workspace = true
 env_logger.workspace = true

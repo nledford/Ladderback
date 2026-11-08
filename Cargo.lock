@@ -6237,6 +6237,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "steading"
 version = "0.0.0"
 dependencies = [
+ "api",
  "app",
  "async-trait",
  "axum",
@@ -6247,6 +6248,7 @@ dependencies = [
  "env_logger",
  "futures",
  "http-adapter",
+ "l10n",
  "log",
  "platform",
  "rustic_backend",
