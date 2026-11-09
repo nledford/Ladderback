@@ -196,3 +196,10 @@ Feature: Accessibility of the app shell
     And the daemon has stopped
     Then the page shows the heading "Cannot reach Ladderback"
     And the page has no accessibility violations
+
+  Scenario: A page still waiting for the daemon's answer is accessible while it loads
+    Given a demo plan "demo-home" with a scratch repository
+    And the daemon's answers to the UI are delayed
+    When I open the address "/operations"
+    Then the page shows the paragraph "Loading…"
+    And the page has no accessibility violations

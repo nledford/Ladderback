@@ -111,6 +111,12 @@ When("the daemon has stopped", async function () {
   await once(own.child, "exit");
 });
 
+// The page's own loading state (§4.4): every answer the daemon owes the UI
+// arrives late, so the page opens on "Loading…" alone.
+When("the daemon's answers to the UI are delayed", function () {
+  this.slowNetwork = true;
+});
+
 When("I reload the page", async function () {
   await this.page.reload();
   await this.page.getByRole("heading", { level: 1 }).waitFor();

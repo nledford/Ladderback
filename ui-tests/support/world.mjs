@@ -123,6 +123,9 @@ class BrowserWorld extends World {
   contextOptions = { viewport: { width: 1280, height: 800 } };
   /** Stylesheets injected after the page loads, as a reader's would be. */
   readerStyles = [];
+  /** Whether the daemon's API answers arrive late, so a page's loading state
+   * can be tried (§4.4): every `/api/v1/` request waits before it continues. */
+  slowNetwork = false;
   /** The daemon this scenario started, when its Given did; `null` shares the
    *  run's own daemon. */
   ownServer = null;
@@ -133,6 +136,12 @@ class BrowserWorld extends World {
 
   async open(pathname = "/") {
     this.context = await browser.newContext(this.contextOptions);
+    if (this.slowNetwork) {
+      await this.context.route("**/api/v1/**", async (route) => {
+        await new Promise((done) => setTimeout(done, 10_000));
+        await route.continue();
+      });
+    }
     this.page = await this.context.newPage();
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
@@ -148,6 +157,7 @@ setWorldConstructor(BrowserWorld);
 Before(function () {
   this.contextOptions = { viewport: { width: 1280, height: 800 } };
   this.readerStyles = [];
+  this.slowNetwork = false;
   this.ownServer = null;
   this.baseUrl = null;
 });
