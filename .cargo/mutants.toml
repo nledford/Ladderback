@@ -1,7 +1,14 @@
 # cargo mutants (technical design §13.1).
 # The contract suites are test code compiled into `app` behind the `fakes`
 # feature; mutating their assertions measures nothing.
-exclude_globs = ["crates/app/src/contract/**"]
+#
+# `crates/l10n/src/browser.rs` (the browser `Intl` host) compiles only for
+# wasm32 with `browser-intl`, so on the host every mutant of it builds and
+# "survives" without the code ever running. Its tests run in `just test-wasm`
+# (CI lane: #46); a wasm32 mutants run is done by hand when it changes:
+# `CARGO_BUILD_TARGET=wasm32-unknown-unknown`, with the runner `just test-wasm`
+# sets, `cargo mutants -p l10n --features browser-intl --file <it>`.
+exclude_globs = ["crates/app/src/contract/**", "crates/l10n/src/browser.rs"]
 # Core error types implement Display only because `Error` requires it; they
 # carry codes and values, and adapters render them (technical design §8.4).
 exclude_re = ["<impl std::fmt::Display for "]
