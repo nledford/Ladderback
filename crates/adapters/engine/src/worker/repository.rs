@@ -15,17 +15,26 @@ use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
 use crate::job::{Level, RepositorySpec};
 
-/// Opens the repository: reads the config and keys, and then (a local
-/// repository only) cleans up after killed workers. Reports through
-/// `Context::events` how long opening takes, as progress.
+/// Opens the repository, both halves of it when it has a hot one: reads the
+/// config and keys, and then (for each half that is a local folder) cleans up
+/// after killed workers. Reports through `Context::events` how long opening
+/// takes, as progress.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
-    let backends = BackendOptions::default()
+    // rustic gives the cold half `options` and `options_cold`, the hot half
+    // `options` and `options_hot`.
+    let backend_options = BackendOptions::default()
         .repository(spec.repository.clone())
         .options(spec.options.clone())
-        .to_backends()?;
+        .options_hot(spec.options_hot.clone())
+        .options_cold(spec.options_cold.clone());
+    let backends = match &spec.repo_hot {
+        Some(hot) => backend_options.repo_hot(hot.clone()),
+        None => backend_options,
+    }
+    .to_backends()?;
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
         Some(dir) => options.cache_dir(dir),
@@ -39,7 +48,9 @@ pub(crate) fn open(
     let repository = repository.open(&Credentials::password(spec.password.expose()))?;
     // Only a repository that opened is known to be one, so only then is what
     // looks like its leftovers ours to remove.
-    remove_leftovers(ctx, &spec.repository)?;
+    for half in std::iter::once(spec.repository.as_str()).chain(spec.repo_hot.as_deref()) {
+        remove_leftovers(ctx, half)?;
+    }
     Ok(repository)
 }
 
@@ -77,10 +88,12 @@ pub(crate) fn repository_id(repository: &Repository<OpenStatus>) -> Result<Repos
         .map_err(|_| JobError::failed("the repository's ID is not 64 hexadecimal characters"))
 }
 
-/// A killed worker leaves `<id>-tmp-*` files in a local repository (§4.1).
+/// A killed worker leaves `<id>-tmp-*` files in a repository folder, the hot
+/// half's as well as the cold half's (§4.1). `half` is the repository string
+/// of one of them; one that is not a local folder has nothing to clean.
 /// Removing the stale ones is a courtesy, so failing to is only logged.
-fn remove_leftovers(ctx: &Context, repository: &str) -> io::Result<()> {
-    let Ok((SupportedBackend::Local, location)) = location_to_type_and_path(repository) else {
+fn remove_leftovers(ctx: &Context, half: &str) -> io::Result<()> {
+    let Ok((SupportedBackend::Local, location)) = location_to_type_and_path(half) else {
         return Ok(());
     };
     let cleanup = remove_stale_files(Path::new(location.as_str()), SystemTime::now());

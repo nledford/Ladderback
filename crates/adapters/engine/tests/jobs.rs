@@ -4,7 +4,6 @@
 mod support;
 
 use std::fs::{self, File};
-use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use app::ports::{Engine, EngineEvent, EngineResult, RunningJob};
@@ -329,15 +328,6 @@ async fn only_old_temporary_files_are_removed_before_a_job() {
     succeeded(&events);
     assert!(!old_tmp.exists() && !old_config_tmp.exists());
     assert!(fresh_tmp.exists() && old_other.exists());
-}
-
-fn two_days_old(path: &Path) {
-    File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600))
-        .unwrap();
 }
 
 #[tokio::test]

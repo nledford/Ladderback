@@ -51,8 +51,11 @@ fn repository() -> RepositoryId {
 fn identify_job() -> Job {
     Job::Identify(RepositoryAccess {
         repository: "/srv/demo/repo".to_owned(),
+        repo_hot: None,
         password: SecretValue::new("demo-password"),
         options: BTreeMap::new(),
+        options_hot: BTreeMap::new(),
+        options_cold: BTreeMap::new(),
         secrets: Vec::new(),
         id: Some(repository()),
     })

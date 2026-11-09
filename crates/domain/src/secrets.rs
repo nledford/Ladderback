@@ -58,6 +58,29 @@ const MIN_LINE_BYTES: usize = 8;
 /// can't make every redaction slow.
 const MAX_LINES_PER_SECRET: usize = 64;
 
+/// What is known of the secrets of one repository: every text of its
+/// settings that can hold one, and what the references in them resolved to.
+/// A [`Redactor`] for the repository is built from all of it at once, so no
+/// half of a hot/cold repository can be left out. It has no `Debug` form: it
+/// borrows texts that are secrets.
+#[derive(Clone, Copy)]
+pub struct RepositorySecrets<'a> {
+    /// rustic's `repository` string: the cold half of a hot/cold repository.
+    pub repository: &'a str,
+    /// rustic's `repo-hot` string: the hot half, if the repository has one.
+    pub repo_hot: Option<&'a str>,
+    pub password: &'a SecretValue,
+    /// The options both halves get.
+    pub options: &'a BTreeMap<String, String>,
+    /// The options of the hot half only.
+    pub options_hot: &'a BTreeMap<String, String>,
+    /// The options of the cold half only.
+    pub options_cold: &'a BTreeMap<String, String>,
+    /// What the `${…}` references in all of the above resolved to (the
+    /// password is not among them).
+    pub resolved: &'a [SecretValue],
+}
+
 /// Replaces every known secret value, raw or as a URL parser writes it
 /// (percent-encoded in full with either hex case, or as the url crate
 /// encodes a userinfo, a path, a query, a special URL's query or a fragment;
@@ -96,23 +119,35 @@ impl Redactor {
 
     /// A redactor for everything that gives access to a repository: its
     /// password; the password in the userinfo of every URL in its repository
-    /// string (`rest:https://…`) and in the value of any option (an
-    /// `endpoint`), which rustic's and OpenDAL's errors quote; the value of
-    /// every option whose name says it holds a credential
+    /// string and its hot repository string (`rest:https://…`) and in the
+    /// value of any option, shared, hot or cold (an `endpoint`), which
+    /// rustic's and OpenDAL's errors quote; the value of every option, in any
+    /// of the three sets, whose name says it holds a credential
     /// ([`is_secret_option`]), even one written inline; and `resolved`, what
     /// the references in its settings were resolved to.
-    pub fn for_repository(
-        repository: &str,
-        password: &SecretValue,
-        options: &BTreeMap<String, String>,
-        resolved: &[SecretValue],
-    ) -> Self {
+    pub fn for_repository(repository: RepositorySecrets<'_>) -> Self {
+        let RepositorySecrets {
+            repository,
+            repo_hot,
+            password,
+            options,
+            options_hot,
+            options_cold,
+            resolved,
+        } = repository;
+        let option_sets = [options, options_hot, options_cold];
         let url_passwords: Vec<SecretValue> = std::iter::once(repository)
-            .chain(options.values().map(String::as_str))
+            .chain(repo_hot)
+            .chain(
+                option_sets
+                    .iter()
+                    .flat_map(|set| set.values().map(String::as_str)),
+            )
             .flat_map(url_passwords)
             .collect();
-        let credentials: Vec<SecretValue> = options
+        let credentials: Vec<SecretValue> = option_sets
             .iter()
+            .flat_map(|set| set.iter())
             .filter(|(name, _)| is_secret_option(name))
             .map(|(_, value)| SecretValue::new(value.as_str()))
             .collect();
@@ -589,13 +624,48 @@ mod tests {
             .collect()
     }
 
+    /// A repository's settings as a redactor is built from them: only what a
+    /// test sets is there.
+    struct Settings {
+        repository: String,
+        repo_hot: Option<String>,
+        password: SecretValue,
+        options: BTreeMap<String, String>,
+        options_hot: BTreeMap<String, String>,
+        options_cold: BTreeMap<String, String>,
+        resolved: Vec<SecretValue>,
+    }
+
+    impl Settings {
+        fn new(repository: &str) -> Self {
+            Self {
+                repository: repository.to_owned(),
+                repo_hot: None,
+                password: SecretValue::new("hunter2"),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+                resolved: Vec::new(),
+            }
+        }
+
+        fn redactor(&self) -> Redactor {
+            Redactor::for_repository(RepositorySecrets {
+                repository: &self.repository,
+                repo_hot: self.repo_hot.as_deref(),
+                password: &self.password,
+                options: &self.options,
+                options_hot: &self.options_hot,
+                options_cold: &self.options_cold,
+                resolved: &self.resolved,
+            })
+        }
+    }
+
     fn for_repository(repository: &str, password: &str) -> Redactor {
-        Redactor::for_repository(
-            repository,
-            &SecretValue::new(password),
-            &BTreeMap::new(),
-            &[],
-        )
+        let mut settings = Settings::new(repository);
+        settings.password = SecretValue::new(password);
+        settings.redactor()
     }
 
     #[test]
@@ -790,18 +860,14 @@ mod tests {
 
     #[test]
     fn a_repository_redactor_masks_the_value_of_every_option_that_holds_a_credential() {
-        let options = options(&[
+        let mut settings = Settings::new("opendal:azblob");
+        settings.options = options(&[
             ("sas_token", "sv=2024&sig=abc123"),
             ("secret_access_key", "AKIA-demo-secret"),
             ("application_key_id", "0021a7c1"),
             ("bucket", "demo-bucket"),
         ]);
-        let redactor = Redactor::for_repository(
-            "opendal:azblob",
-            &SecretValue::new("hunter2"),
-            &options,
-            &[],
-        );
+        let redactor = settings.redactor();
         assert_eq!(
             redactor.redact(
                 "url: http://nas/demo-bucket/config?sv=2024&sig=abc123 key AKIA-demo-secret id 0021a7c1"
@@ -812,16 +878,12 @@ mod tests {
 
     #[test]
     fn a_repository_redactor_masks_what_the_references_in_its_settings_resolved_to() {
-        let resolved = [
+        let mut settings = Settings::new("opendal:s3");
+        settings.resolved = vec![
             SecretValue::new("canary-from-a-file"),
             SecretValue::new("canary-from-env"),
         ];
-        let redactor = Redactor::for_repository(
-            "opendal:s3",
-            &SecretValue::new("hunter2"),
-            &BTreeMap::new(),
-            &resolved,
-        );
+        let redactor = settings.redactor();
         assert_eq!(
             redactor.redact("GET https://canary-from-env/canary-from-a-file/config failed"),
             "GET https://***/***/config failed"
@@ -832,12 +894,12 @@ mod tests {
     /// userinfo, and OpenDAL's errors quote the URL it built from it.
     #[test]
     fn a_repository_redactor_masks_the_password_of_a_url_an_option_holds() {
-        let options = options(&[
+        let mut settings = Settings::new("opendal:s3");
+        settings.options = options(&[
             ("endpoint", "https://demo:s3cr3t@minio.example:9000"),
             ("root", "/backups/home"),
         ]);
-        let redactor =
-            Redactor::for_repository("opendal:s3", &SecretValue::new("hunter2"), &options, &[]);
+        let redactor = settings.redactor();
         assert_eq!(
             redactor.redact("url: https://demo:s3cr3t@minio.example:9000/demo/config failed"),
             "url: https://demo:***@minio.example:9000/demo/config failed"
@@ -848,18 +910,67 @@ mod tests {
     /// option would pass this test too.
     #[test]
     fn an_option_url_without_a_password_hides_nothing() {
-        let options = options(&[
+        let mut settings = Settings::new("opendal:s3");
+        settings.options = options(&[
             ("endpoint", "https://demo@minio.example:9000/data"),
             ("rest-url", "https://minio.example:9000"),
             ("proxy", "https://demo:s3cr3t@proxy.example:3128"),
         ]);
-        let redactor =
-            Redactor::for_repository("opendal:s3", &SecretValue::new("hunter2"), &options, &[]);
+        let redactor = settings.redactor();
         assert_eq!(
             redactor.redact(
                 "https://demo@minio.example:9000/data/demo/config via https://demo:s3cr3t@proxy.example:3128"
             ),
             "https://demo@minio.example:9000/data/demo/config via https://demo:***@proxy.example:3128"
+        );
+    }
+
+    /// A hot/cold repository is opened through both halves, and the errors
+    /// of rustic and of OpenDAL quote whichever half failed: what only the
+    /// hot half or only the cold half holds is hidden like the rest.
+    #[test]
+    fn a_repository_redactor_masks_the_password_in_the_url_of_the_hot_repository() {
+        let mut settings = Settings::new("/backups/cold");
+        settings.repo_hot = Some("rest:https://demo:hot-s3cr3t@nas:8000/hot".to_owned());
+        assert_eq!(
+            settings
+                .redactor()
+                .redact("URL `rest:https://demo:hot-s3cr3t@nas:8000/hot/` parsing failed"),
+            "URL `rest:https://demo:***@nas:8000/hot/` parsing failed"
+        );
+    }
+
+    #[test]
+    fn a_repository_redactor_masks_the_value_of_every_hot_and_cold_option_that_holds_a_credential()
+    {
+        let mut settings = Settings::new("opendal:s3");
+        settings.repo_hot = Some("opendal:s3".to_owned());
+        settings.options_hot = options(&[
+            ("secret_access_key", "AKIA-hot-secret"),
+            ("region", "eu-hot-1"),
+        ]);
+        settings.options_cold =
+            options(&[("sas_token", "sv=cold&sig=xyz789"), ("region", "eu-cold-1")]);
+        assert_eq!(
+            settings
+                .redactor()
+                .redact("hot AKIA-hot-secret in eu-hot-1, cold sv=cold&sig=xyz789 in eu-cold-1"),
+            "hot *** in eu-hot-1, cold *** in eu-cold-1"
+        );
+    }
+
+    #[test]
+    fn a_repository_redactor_masks_the_password_of_a_url_a_hot_or_cold_option_holds() {
+        let mut settings = Settings::new("opendal:s3");
+        settings.repo_hot = Some("opendal:s3".to_owned());
+        settings.options_hot = options(&[("endpoint", "https://demo:hot-s3cr3t@hot.example:9000")]);
+        settings.options_cold =
+            options(&[("endpoint", "https://demo:cold-s3cr3t@cold.example:9000")]);
+        assert_eq!(
+            settings.redactor().redact(
+                "https://demo:hot-s3cr3t@hot.example:9000/config, https://demo:cold-s3cr3t@cold.example:9000/keys"
+            ),
+            "https://demo:***@hot.example:9000/config, https://demo:***@cold.example:9000/keys"
         );
     }
 

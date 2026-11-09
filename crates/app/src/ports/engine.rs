@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
-use domain::secrets::{REDACTED, Redactor, SecretValue};
+use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use futures::stream::BoxStream;
 
@@ -113,45 +113,80 @@ impl Job {
 #[derive(Clone, PartialEq, Eq)]
 pub struct RepositoryAccess {
     /// rustic's `repository` string: a path, `rest:…`, `opendal:…`, `rclone:…`.
+    /// Next to a `repo_hot`, it is the cold half.
     pub repository: String,
+    /// rustic's `repo-hot`: the hot half of a hot/cold repository. `None` for
+    /// a repository that is all in `repository`.
+    pub repo_hot: Option<String>,
     pub password: SecretValue,
-    /// Backend options, as rustic's `[repository.options]`.
+    /// Backend options, as rustic's `[repository.options]`: both halves get
+    /// them.
     pub options: BTreeMap<String, String>,
+    /// rustic's `options-hot`: the options of the hot half only. They apply
+    /// to nothing without a `repo_hot`.
+    pub options_hot: BTreeMap<String, String>,
+    /// rustic's `options-cold`: the options of the cold half only.
+    pub options_cold: BTreeMap<String, String>,
     /// What the `${…}` references in the repository's settings resolved to.
-    /// They may sit anywhere in `repository` and in `options`, whatever the
-    /// option's name, so the engine hides every one of them wherever it
-    /// reports text (I4, technical design §10.2). The password isn't listed:
-    /// it has a field of its own.
+    /// They may sit anywhere in `repository`, `repo_hot` and the three sets
+    /// of options, whatever the option's name, so the engine hides every one
+    /// of them wherever it reports text (I4, technical design §10.2). The
+    /// password isn't listed: it has a field of its own.
     pub secrets: Vec<SecretValue>,
     /// The repository's ID when already known; the engine uses it to give
     /// each worker its own cache dir. `None` before the first `Identify`.
     pub id: Option<RepositoryId>,
 }
 
+impl RepositoryAccess {
+    /// Everything of this repository that is a secret or can hold one, in the
+    /// one form a [`Redactor`] is built from. A caller with more to hide than
+    /// the repository holds, such as the proxy credentials of the daemon's
+    /// environment, replaces `resolved` with the longer list.
+    pub fn known_secrets(&self) -> RepositorySecrets<'_> {
+        RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &self.password,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &self.secrets,
+        }
+    }
+
+    /// What hides this repository's secrets wherever text about it is shown.
+    pub fn redactor(&self) -> Redactor {
+        Redactor::for_repository(self.known_secrets())
+    }
+}
+
 /// Everything that can hold a secret is masked (I4): the password, the
-/// password in the repository's URL, the passwords in URLs that options
+/// password in the URL of either half, the passwords in URLs that options
 /// hold, every option's value, and what the references resolved to. The rest
-/// of the URL and the options' names stay, for diagnosing.
+/// of the URLs and the options' names stay, for diagnosing.
 impl std::fmt::Debug for RepositoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let repository = Redactor::for_repository(
-            &self.repository,
-            &self.password,
-            &self.options,
-            &self.secrets,
-        )
-        .redact(&self.repository);
-        let options: BTreeMap<&String, &str> =
-            self.options.keys().map(|name| (name, REDACTED)).collect();
+        let redactor = self.redactor();
+        let repository = redactor.redact(&self.repository);
+        let repo_hot = self.repo_hot.as_deref().map(|hot| redactor.redact(hot));
         let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositoryAccess")
             .field("repository", &repository)
+            .field("repo_hot", &repo_hot)
             .field("password", &self.password)
-            .field("options", &options)
+            .field("options", &masked(&self.options))
+            .field("options_hot", &masked(&self.options_hot))
+            .field("options_cold", &masked(&self.options_cold))
             .field("secrets", &secrets)
             .field("id", &self.id)
             .finish()
     }
+}
+
+/// The names of a set of options, each with its value masked.
+fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&String, &'static str> {
+    options.keys().map(|name| (name, REDACTED)).collect()
 }
 
 /// Back up `sources` as a snapshot of the plan named by `tags`.
@@ -310,8 +345,11 @@ mod tests {
     fn access(id: Option<RepositoryId>) -> RepositoryAccess {
         RepositoryAccess {
             repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
             password: SecretValue::new("demo-password"),
             options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id,
         }
@@ -382,8 +420,11 @@ mod tests {
     fn access_at(repository: &str) -> RepositoryAccess {
         RepositoryAccess {
             repository: repository.to_owned(),
+            repo_hot: None,
             password: SecretValue::new("hunter2"),
             options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id: None,
         }
@@ -422,6 +463,60 @@ mod tests {
         }
         assert!(
             debug.contains("rest:https://***:8000/***/backups"),
+            "{debug}"
+        );
+    }
+
+    #[test]
+    fn a_job_never_shows_the_secrets_of_its_hot_and_cold_halves_in_its_debug_form() {
+        let access = RepositoryAccess {
+            repo_hot: Some("rest:https://demo:hot-s3cr3t@hot.example:8000/hot".to_owned()),
+            options_hot: BTreeMap::from([
+                ("secret_access_key".to_owned(), "AKIA-HOT-KEY".to_owned()),
+                ("region".to_owned(), "eu-hot-1".to_owned()),
+            ]),
+            options_cold: BTreeMap::from([
+                ("sas_token".to_owned(), "sv=COLD-TOKEN".to_owned()),
+                ("region".to_owned(), "eu-cold-1".to_owned()),
+            ]),
+            ..access_at("/srv/demo/cold")
+        };
+        let debug = format!("{:?}", Job::Identify(access));
+        for secret in [
+            "hot-s3cr3t",
+            "AKIA-HOT-KEY",
+            "sv=COLD-TOKEN",
+            "eu-hot-1",
+            "eu-cold-1",
+        ] {
+            assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+        }
+        // What helps with diagnosing stays: the hot repository's URL without
+        // its password, and the names of the options of both halves.
+        for kept in [
+            "rest:https://demo:",
+            "@hot.example:8000/hot",
+            "options_hot",
+            "options_cold",
+            "secret_access_key",
+            "sas_token",
+            "region",
+        ] {
+            assert!(debug.contains(kept), "{kept} is gone: {debug}");
+        }
+    }
+
+    #[test]
+    fn a_job_hides_what_its_references_resolved_to_in_the_hot_repository_too() {
+        let access = RepositoryAccess {
+            secrets: vec![SecretValue::new("canary-hot-reference")],
+            repo_hot: Some("rest:https://hot.example:8000/canary-hot-reference/hot".to_owned()),
+            ..access_at("/srv/demo/cold")
+        };
+        let debug = format!("{:?}", Job::Identify(access));
+        assert!(!debug.contains("canary-hot-reference"), "{debug}");
+        assert!(
+            debug.contains("rest:https://hot.example:8000/***/hot"),
             "{debug}"
         );
     }

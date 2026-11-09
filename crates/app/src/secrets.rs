@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use domain::secrets::{
-    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, SecretError, SecretRef, SecretValue,
-    SecretWarning, Template, TemplateError,
+    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, RepositorySecrets, SecretError,
+    SecretRef, SecretValue, SecretWarning, Template, TemplateError,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
@@ -35,7 +35,15 @@ impl std::fmt::Debug for RepositorySettings {
             .inline()
             .cloned()
             .unwrap_or_else(|| SecretValue::new(""));
-        let redactor = Redactor::for_repository(&self.repository, &inline, &self.options, &[]);
+        let redactor = Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &inline,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        });
         f.debug_struct("RepositorySettings")
             .field("repository", &redactor.redact(&self.repository))
             .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
@@ -48,28 +56,13 @@ impl std::fmt::Debug for RepositorySettings {
 }
 
 /// A repository with every reference resolved, ready to hand to the engine.
-#[derive(Clone, PartialEq, Eq)]
+/// `access` masks its own secrets, so this one's `Debug` form is derived.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedRepository {
     /// `id` is `None`: the caller knows whether the repository was seen.
     pub access: RepositoryAccess,
-    pub repo_hot: Option<String>,
-    pub options_hot: BTreeMap<String, String>,
-    pub options_cold: BTreeMap<String, String>,
     /// What the user should know about how the secrets were read, each once.
     pub warnings: Vec<SecretWarning>,
-}
-
-/// `access` masks its own secrets; the hot and cold fields are masked here.
-impl std::fmt::Debug for ResolvedRepository {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ResolvedRepository")
-            .field("access", &self.access)
-            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
-            .field("options_hot", &masked(&self.options_hot))
-            .field("options_cold", &masked(&self.options_cold))
-            .field("warnings", &self.warnings)
-            .finish()
-    }
 }
 
 /// The option names with every value hidden: the names help to diagnose.
@@ -172,14 +165,14 @@ impl ResolveRepository {
         Ok(ResolvedRepository {
             access: RepositoryAccess {
                 repository,
+                repo_hot,
                 password,
                 options,
+                options_hot,
+                options_cold,
                 secrets: run.secrets,
                 id: None,
             },
-            repo_hot,
-            options_hot,
-            options_cold,
             warnings: run.warnings,
         })
     }

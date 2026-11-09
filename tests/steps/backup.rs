@@ -34,11 +34,26 @@ fn credentials() -> Credentials {
     Credentials::password(PASSWORD)
 }
 
+/// Where a scratch repository is: all in `cold`, or with a hot half beside it.
+#[derive(Clone, Debug)]
+pub struct Folders {
+    pub cold: PathBuf,
+    pub hot: Option<PathBuf>,
+}
+
+fn text(path: &Path) -> &str {
+    path.to_str().expect("a UTF-8 scratch path")
+}
+
 /// The scratch repository, without a cache: the tests never write into the
 /// developer's own rustic cache.
-fn repository(path: &Path) -> Repository<()> {
-    let backends = BackendOptions::default()
-        .repository(path.to_str().expect("a UTF-8 scratch path"))
+fn repository(folders: &Folders) -> Repository<()> {
+    let options = BackendOptions::default().repository(text(&folders.cold));
+    let options = match &folders.hot {
+        Some(hot) => options.repo_hot(text(hot)),
+        None => options,
+    };
+    let backends = options
         .to_backends()
         .expect("the scratch repository's backend");
     Repository::new(&RepositoryOptions::default().no_cache(true), &backends)
@@ -46,8 +61,8 @@ fn repository(path: &Path) -> Repository<()> {
 }
 
 /// Every snapshot in the scratch repository, oldest first.
-pub fn snapshots(repo: &Path) -> Vec<SnapshotFile> {
-    let mut snapshots = repository(repo)
+pub fn snapshots(folders: &Folders) -> Vec<SnapshotFile> {
+    let mut snapshots = repository(folders)
         .open(&credentials())
         .expect("the scratch repository opens")
         .get_all_snapshots()
@@ -60,17 +75,35 @@ fn snapshot_id(snapshot: &SnapshotFile) -> SnapshotId {
     SnapshotId::parse(snapshot.id.to_hex().as_str()).expect("rustic's IDs are 64 hex digits")
 }
 
-#[given("a new repository")]
-fn new_repository(agent: &mut Agent) {
-    let path = agent.scratch().join("repo");
-    repository(&path)
+fn init(folders: &Folders) {
+    repository(folders)
         .init(
             &credentials(),
             &KeyOptions::default(),
             &ConfigOptions::default(),
         )
         .expect("the scratch repository initializes");
-    agent.backup.repository = Some(path);
+}
+
+#[given("a new repository")]
+fn new_repository(agent: &mut Agent) {
+    let folders = Folders {
+        cold: agent.scratch().join("repo"),
+        hot: None,
+    };
+    init(&folders);
+    agent.backup.repository = Some(folders.cold);
+}
+
+#[given("a new hot/cold repository")]
+fn new_hot_cold_repository(agent: &mut Agent) {
+    let folders = Folders {
+        cold: agent.scratch().join("repo"),
+        hot: Some(agent.scratch().join("hot")),
+    };
+    init(&folders);
+    agent.backup.repository = Some(folders.cold);
+    agent.backup.hot = folders.hot;
 }
 
 fn new_source(agent: &mut Agent, plan: &str) -> PathBuf {
@@ -199,6 +232,30 @@ fn tagged(agent: &mut Agent) {
     }
 }
 
+/// The backup's snapshot has a file in `half`, one of the folders of the
+/// repository (its `snapshots` folder holds a file for each snapshot). The
+/// snapshot is the one the operation reported: reading it back through
+/// rustic would need the very file that may be missing.
+fn assert_half_holds_the_snapshot(agent: &Agent, half: &Path, name: &str) {
+    let Some(EngineResult::Backup(summary)) = &agent.finished().result else {
+        panic!("the operation made no backup: {:?}", agent.operation());
+    };
+    let file = half.join("snapshots").join(summary.snapshot.as_str());
+    assert!(file.is_file(), "the {name} half has no {}", file.display());
+}
+
+#[then("the snapshot is in the hot half of the repository")]
+fn snapshot_in_the_hot_half(agent: &mut Agent) {
+    let hot = agent.backup.hot.clone().expect("a hot half");
+    assert_half_holds_the_snapshot(agent, &hot, "hot");
+}
+
+#[then("the snapshot is in the cold half of the repository")]
+fn snapshot_in_the_cold_half(agent: &mut Agent) {
+    let cold = agent.repository().cold;
+    assert_half_holds_the_snapshot(agent, &cold, "cold");
+}
+
 #[then("the history shows the backup's snapshot")]
 async fn history_shows_the_snapshot(agent: &mut Agent) {
     let store = agent.store().await;
@@ -237,7 +294,9 @@ fn parent_is_plain(agent: &mut Agent) {
 /// What the backup scenarios set up.
 #[derive(Debug, Default)]
 pub struct BackupSetup {
+    /// The repository's folder; next to a `hot`, its cold half.
     pub repository: Option<PathBuf>,
+    pub hot: Option<PathBuf>,
     pub plan: Option<domain::PlanId>,
     pub source: Option<PathBuf>,
     /// A snapshot made before the one under test.
@@ -246,8 +305,11 @@ pub struct BackupSetup {
 }
 
 impl Agent {
-    fn repository(&self) -> PathBuf {
-        self.backup.repository.clone().expect("a repository")
+    fn repository(&self) -> Folders {
+        Folders {
+            cold: self.backup.repository.clone().expect("a repository"),
+            hot: self.backup.hot.clone(),
+        }
     }
 
     fn source(&self) -> PathBuf {
@@ -260,11 +322,15 @@ impl Agent {
 
     /// The backup job the scenario's setup describes.
     pub fn backup_job(&self) -> Job {
+        let folders = self.repository();
         Job::Backup(BackupJob {
             repository: app::ports::RepositoryAccess {
-                repository: self.repository().to_str().unwrap().to_owned(),
+                repository: text(&folders.cold).to_owned(),
+                repo_hot: folders.hot.as_deref().map(|hot| text(hot).to_owned()),
                 password: domain::secrets::SecretValue::new(PASSWORD),
                 options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
                 secrets: Vec::new(),
                 id: None,
             },
