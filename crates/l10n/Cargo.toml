@@ -28,6 +28,11 @@ icu = [
     "dep:icu_provider",
     "dep:icu_time",
 ]
+# The browser's `Intl` writes numbers and instants (technical design §8.4), for
+# the web UI, on wasm32 only: the feature does nothing elsewhere, so a workspace
+# build that unifies it with the daemon's `icu` still formats with ICU4X. No
+# locale data ships to the browser. `web` is the one that turns it on.
+browser-intl = ["dep:js-sys", "dep:wasm-bindgen"]
 
 [dependencies]
 api.workspace = true
@@ -45,6 +50,10 @@ intl-memoizer.workspace = true
 jiff.workspace = true
 unic-langid.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
 [build-dependencies]
 fluent-syntax.workspace = true
 unic-langid.workspace = true
@@ -55,6 +64,9 @@ fluent-syntax.workspace = true
 l10n = { workspace = true, features = ["icu"] }
 proc-macro2.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true
 
 [lints]
 workspace = true

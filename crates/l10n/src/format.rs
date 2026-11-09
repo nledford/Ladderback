@@ -196,30 +196,50 @@ pub(crate) trait Host {
 /// Where no host formatter is built in: every number and instant is written
 /// plainly. A build with the `icu` feature has no use for it, but the tests
 /// of the interface do.
-#[cfg(any(test, not(feature = "icu")))]
+#[cfg(any(
+    test,
+    not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
+))]
 pub(crate) struct NoHost;
 
 /// What [`NoHost`] builds: formatters that don't exist.
-#[cfg(any(test, not(feature = "icu")))]
+#[cfg(any(
+    test,
+    not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
+))]
 pub(crate) struct Nothing;
 
-#[cfg(any(test, not(feature = "icu")))]
+#[cfg(any(
+    test,
+    not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
+))]
 impl Host for NoHost {
     type Numbers = Nothing;
     type Instants = Nothing;
 }
 
-/// The host a build writes with where the `icu` feature is on: ICU4X's, the
-/// daemon's.
-#[cfg(feature = "icu")]
+/// The host a build writes with where the `browser-intl` feature is on, for
+/// wasm32: the browser's `Intl`, the web UI's. It comes before ICU4X's, which
+/// a test build of `l10n` turns on as well.
+#[cfg(all(feature = "browser-intl", target_arch = "wasm32"))]
+pub(crate) type Active = crate::browser::Browser;
+
+/// The host a build writes with where the `icu` feature is on, and the
+/// browser's is not: ICU4X's, the daemon's.
+#[cfg(all(
+    feature = "icu",
+    not(all(feature = "browser-intl", target_arch = "wasm32"))
+))]
 pub(crate) type Active = crate::icu::Icu;
 
-/// The host a build writes with where the `icu` feature is off: none, as in
-/// the web UI until its `Intl` host exists.
-#[cfg(not(feature = "icu"))]
+/// The host a build writes with where neither feature is on: none.
+#[cfg(not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32"))))]
 pub(crate) type Active = NoHost;
 
-#[cfg(any(test, not(feature = "icu")))]
+#[cfg(any(
+    test,
+    not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
+))]
 impl NumberFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: NumberOptions) -> Option<Self> {
         None
@@ -230,7 +250,10 @@ impl NumberFormatter for Nothing {
     }
 }
 
-#[cfg(any(test, not(feature = "icu")))]
+#[cfg(any(
+    test,
+    not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
+))]
 impl InstantFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: Style) -> Option<Self> {
         None

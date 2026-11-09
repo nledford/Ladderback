@@ -22,5 +22,9 @@ l10n.workspace = true
 leptos.workspace = true
 web-sys.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+api.workspace = true
+wasm-bindgen-test.workspace = true
+
 [lints]
 workspace = true

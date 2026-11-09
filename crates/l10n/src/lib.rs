@@ -35,12 +35,17 @@
 )]
 
 mod args;
+#[cfg(all(feature = "browser-intl", target_arch = "wasm32"))]
+mod browser;
 pub mod catalog;
 pub mod code;
 #[cfg(test)]
 mod constants;
 mod format;
-#[cfg(feature = "icu")]
+#[cfg(all(
+    feature = "icu",
+    not(all(feature = "browser-intl", target_arch = "wasm32"))
+))]
 mod icu;
 mod id;
 mod locale;
