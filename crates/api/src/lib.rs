@@ -200,6 +200,52 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ConfigUnavailable | Self::ConfigSchemaMissing => &[ArgSpec {
+                name: "file",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ConfigTooLarge => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ],
+            Self::ConfigInvalid => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "line",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
+            Self::ConfigSchemaNewer => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "found",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "supported",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::InvalidJobSpec
             | Self::OperationFailed
             | Self::DeadlinePassed
@@ -208,11 +254,6 @@ impl ErrorCode {
             | Self::EngineExitTimedOut
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
-            | Self::ConfigUnavailable
-            | Self::ConfigTooLarge
-            | Self::ConfigInvalid
-            | Self::ConfigSchemaMissing
-            | Self::ConfigSchemaNewer
             | Self::JsonRequired
             | Self::Unknown => &[],
         }
