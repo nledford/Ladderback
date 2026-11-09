@@ -27,6 +27,14 @@ use leptos_router::path;
 // slice's, and until then a build without the gallery leaves these unused.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod announcer;
+// The shared component set, exercised by the gallery in a `gallery` build; a
+// build without the gallery has no user for it yet.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod components;
+// The focus-wrap decision is host-testable; components.rs (the DOM glue
+// around it) runs in a browser via the gallery's @ui scenarios.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod focus;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod formatting;
 #[cfg(feature = "gallery")]
@@ -35,6 +43,11 @@ mod gallery;
 mod live;
 mod page;
 mod routes;
+
+// The toast's arrival and lifetime decisions are host-testable; the DOM
+// glue around them runs in a browser via the gallery's @ui scenarios.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod toast;
 
 use routes::{NotFound, Start};
 

@@ -9,17 +9,18 @@
 # `CARGO_BUILD_TARGET=wasm32-unknown-unknown`, with the runner `just test-wasm`
 # sets, `cargo mutants -p l10n --features browser-intl --file <it>`.
 #
-# The `web` crate's DOM glue (`main.rs`, `live.rs`, `page.rs`, `gallery.rs`)
-# calls `web-sys`, which only works in a browser: on the host every mutant of
-# it builds and "survives" without the code ever running, and a mutant that
-# panics on the host is caught for the wrong reason. The `@ui` scenarios of
-# `features/ui/` run it in Chromium (`just test-ui`). What decides anything on
-# the host stays covered: the announcer's timing (`announcer.rs`) and the page
-# titles (`routes.rs`).
+# The `web` crate's DOM glue (`main.rs`, `components.rs`, `live.rs`,
+# `page.rs`, `gallery.rs`) calls `web-sys`, which only works in a browser: on
+# the host every mutant of it builds and "survives" without the code ever
+# running, and a mutant that panics on the host is caught for the wrong
+# reason. The `@ui` scenarios of `features/ui/` run it in Chromium
+# (`just test-ui`). What decides anything on the host stays covered: the
+# announcer's timing (`announcer.rs`), the page titles (`routes.rs`), the
+# focus wrap (`focus.rs`) and the toast's arrival and lifetime (`toast.rs`).
 exclude_globs = [
     "crates/app/src/contract/**",
     "crates/l10n/src/browser.rs",
-    "crates/web/src/main.rs",
+    "crates/web/src/components.rs",
     "crates/web/src/live.rs",
     "crates/web/src/page.rs",
     "crates/web/src/gallery.rs",

@@ -85,3 +85,93 @@ ui-gallery-modal-polite-button = Say politely in the modal: backup finished
 # The button inside the modal stand-in that queues an urgent message while the
 # modal is open.
 ui-gallery-modal-assertive-button = Say urgently in the modal: restore failed
+
+## The component set's demos, below the announcer's section: one section per
+## component (§4.5), each with demo data only.
+
+# The heading of the gallery's dialog demo.
+ui-gallery-dialog-heading = Dialog
+
+# The button that opens the demo dialog.
+ui-gallery-open-demo-dialog = Open the demo dialog
+
+# The demo dialog's accessible name and heading.
+ui-gallery-demo-dialog = Demo dialog
+
+# A line of body text inside the demo dialog.
+ui-gallery-demo-dialog-body = A dialog traps focus and returns it on close.
+
+# The button inside the demo dialog that closes it.
+ui-gallery-close-demo-dialog = Close the demo dialog
+
+# The heading of the gallery's data table demo.
+ui-gallery-table-heading = Data table
+
+# The data table demo's caption.
+ui-gallery-demo-repositories = Demo repositories
+
+# The column header of the data table demo.
+ui-gallery-repository-column = Repository
+
+# The button in the table header that sorts the rows.
+ui-gallery-sort-by-repository = Sort by repository
+
+# Announced politely when the table is sorted ascending.
+ui-gallery-sorted-ascending = Sorted by repository, ascending.
+
+# A repository row of the data table demo.
+ui-gallery-demo-repo-anchor = anchor
+
+# A repository row of the data table demo.
+ui-gallery-demo-repo-harbor = harbor
+
+# A repository row of the data table demo.
+ui-gallery-demo-repo-moor = moor
+
+# The heading of the gallery's form field demo.
+ui-gallery-form-heading = Form field
+
+# The label of the demo form field.
+ui-gallery-repository-name = Repository name
+
+# The hint under the demo form field, describing its input.
+ui-gallery-repository-hint = The name of the repository to check.
+
+# The button that checks the demo form field.
+ui-gallery-check-repository = Check the repository name
+
+# The error the demo form field shows when its input is empty.
+ui-gallery-repository-required = A repository name is required.
+
+# The heading of the gallery's status badge demo.
+ui-gallery-badge-heading = Status badge
+
+# The loading badge of the status badge demo.
+ui-gallery-badge-loading = Loading
+
+# The empty badge of the status badge demo.
+ui-gallery-badge-empty = Empty
+
+# The error badge of the status badge demo.
+ui-gallery-badge-error = Error
+
+# The success badge of the status badge demo.
+ui-gallery-badge-success = Success
+
+# The heading of the gallery's progress demo.
+ui-gallery-progress-heading = Progress
+
+# The demo progress bar's accessible name.
+ui-gallery-demo-backup-progress = Demo backup progress
+
+# The button that advances the demo progress.
+ui-gallery-advance-progress = Advance the demo progress
+
+# The heading of the gallery's toast demo.
+ui-gallery-toast-heading = Toast
+
+# The button that saves the demo settings and shows a toast.
+ui-gallery-save-settings = Save the demo settings
+
+# The toast shown after the demo settings are saved.
+ui-gallery-settings-saved = Settings saved.

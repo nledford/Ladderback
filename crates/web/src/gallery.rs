@@ -11,31 +11,17 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
-use crate::live::{modal_closed, modal_opened, say};
+use crate::components::{
+    FormField, ModalDialog, Progress, SortableTable, StatusBadge, Toast, show_toast,
+};
+use crate::live::{modal_gone, open_modal, say};
 use crate::routes::PageHeading;
 use crate::text;
 
-/// Opens the dialog that stands in for a modal and tells the announcer, so
-/// messages wait while it is open. A dialog already open is not counted twice.
-fn open_modal(dialog: &web_sys::HtmlDialogElement, counted: RwSignal<bool>) {
-    if !dialog.open() && dialog.show_modal().is_ok() {
-        counted.set(true);
-        modal_opened();
-    }
-}
-
-/// Tells the announcer the modal is gone, once however it went: the `close`
-/// event, which Escape and the Close button both raise, or the page leaving.
-fn modal_gone(counted: RwSignal<bool>) {
-    if counted.try_get_untracked() == Some(true) {
-        counted.set(false);
-        modal_closed();
-    }
-}
-
 #[component]
 pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
-    let t = |id| text(&localizer, id);
+    let localizer_t = Arc::clone(&localizer);
+    let t = move |id| text(&localizer_t, id);
     let (heading, announcer_heading) = (
         t(msg::UI_GALLERY_HEADING),
         t(msg::UI_GALLERY_ANNOUNCER_HEADING),
@@ -69,6 +55,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // without a `close` event, so leaving the page ends the count too.
     let counted = RwSignal::new(false);
     on_cleanup(move || modal_gone(counted));
+    // The demos' state: a form-field error, the progress bar's percent and
+    // the toast text.
+    let form_error = RwSignal::<Option<String>>::new(None);
+    let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
+    let progress = RwSignal::new(40u8);
+    let toast = RwSignal::<Option<String>>::new(None);
+    let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
+    let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
+    let dialog_polite_text = backup_finished.clone();
+    let dialog_polite_label = polite_button.clone();
     view! {
         <PageHeading>{heading}</PageHeading>
         <p><A href="/">{start_link}</A></p>
@@ -137,6 +133,98 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     </button>
                 </p>
             </dialog>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_DIALOG_HEADING)}</h2>
+            <ModalDialog
+                label=t(msg::UI_GALLERY_DEMO_DIALOG)
+                open_label=t(msg::UI_GALLERY_OPEN_DEMO_DIALOG)
+                close_label=t(msg::UI_GALLERY_CLOSE_DEMO_DIALOG)
+            >
+                <p>{dialog_body.clone()}</p>
+                <p>
+                    <button
+                        type="button"
+                        on:click=move |_| say(Politeness::Polite, &dialog_polite_text)
+                    >
+                        {dialog_polite_label.clone()}
+                    </button>
+                </p>
+            </ModalDialog>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABLE_HEADING)}</h2>
+            <SortableTable
+                caption=t(msg::UI_GALLERY_DEMO_REPOSITORIES)
+                column=t(msg::UI_GALLERY_REPOSITORY_COLUMN)
+                sort_label=t(msg::UI_GALLERY_SORT_BY_REPOSITORY)
+                sorted_message=t(msg::UI_GALLERY_SORTED_ASCENDING)
+                rows=vec![
+                    t(msg::UI_GALLERY_DEMO_REPO_MOOR),
+                    t(msg::UI_GALLERY_DEMO_REPO_HARBOR),
+                    t(msg::UI_GALLERY_DEMO_REPO_ANCHOR),
+                ]
+            />
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_FORM_HEADING)}</h2>
+            <FormField
+                label=t(msg::UI_GALLERY_REPOSITORY_NAME)
+                description=t(msg::UI_GALLERY_REPOSITORY_HINT)
+                error=form_error
+            />
+            <p>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        // A second check of a corrected field clears the
+                        // error, rewiring the input's description; only the
+                        // error's arrival is announced.
+                        if form_error.get_untracked().is_some() {
+                            form_error.set(None);
+                        } else {
+                            form_error.set(Some(required_error.clone()));
+                            say(Politeness::Polite, &required_error);
+                        }
+                    }
+                >
+                    {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
+                </button>
+            </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>
+            <p class="flex flex-wrap gap-2">
+                <StatusBadge state="loading" label=t(msg::UI_GALLERY_BADGE_LOADING) />
+                <StatusBadge state="empty" label=t(msg::UI_GALLERY_BADGE_EMPTY) />
+                <StatusBadge state="error" label=t(msg::UI_GALLERY_BADGE_ERROR) />
+                <StatusBadge state="success" label=t(msg::UI_GALLERY_BADGE_SUCCESS) />
+            </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
+            <Progress label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS) value=progress />
+            <p>
+                <button type="button" on:click=move |_| {
+                    if progress.get_untracked() < 100 {
+                        progress.set((progress.get_untracked() + 40).min(100));
+                    }
+                }>
+                    {t(msg::UI_GALLERY_ADVANCE_PROGRESS)}
+                </button>
+            </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
+            <Toast text=toast />
+            <p>
+                <button
+                    type="button"
+                    on:click=move |_| show_toast(toast, settings_saved.clone())
+                >
+                    {t(msg::UI_GALLERY_SAVE_SETTINGS)}
+                </button>
+            </p>
         </section>
     }
 }

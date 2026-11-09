@@ -1,0 +1,2 @@
+/*! tailwindcss v4.1.0 | MIT License | https://tailwindcss.com */
+@layer theme{:root,:host{--spacing:.25rem}}@layer utilities{.visible{visibility:visible}.fixed{position:fixed}.static{position:static}.flex{display:flex}.table{display:table}.grow{flex-grow:1}.flex-wrap{flex-wrap:wrap}.gap-2{gap:calc(var(--spacing)*2)}.text-muted{color:var(--muted)}}
