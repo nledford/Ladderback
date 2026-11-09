@@ -7,6 +7,7 @@ mod catalog;
 mod cli;
 mod codes;
 mod formatting;
+mod icu;
 mod language;
 #[cfg(feature = "pseudo")]
 mod pseudo;

@@ -43,7 +43,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | Leptos 0.8 → 0.9 migration | Keep UI components thin and logic in `api`/view-models. Migrate once 0.9 is stable |
 | Hard-coded strings creep into the UI and make localization a rewrite | Generated message IDs, the unused-ID lint and Playwright pseudolocale runs from M1b (§8.4) |
 | Accessibility erodes as the UI grows | Invariants A1–A6 (§0); one component set with contract tests; role-and-name-only test locators; axe-core in CI; a screen-reader pass in each milestone's definition of done (§4.5) |
-| ICU4X data bloats the daemon binary | Measure in M1b; generate data for shipped locales only if needed (§8.4) |
+| ICU4X data bloats the daemon binary | Measured in M1b: with every locale's data compiled in, ICU4X adds 1.1 MB (4%) to the stripped release daemon, so v1 doesn't trim it. Generate data for the shipped locales only if a later change makes it much larger (§8.4) |
 | macOS TCC permissions | Signed, notarized builds; detect denials and link to the settings pane. Document this in setup |
 | Memory use on very large repos | Worker isolation. Restore and `dump` need the full index (`to_indexed()`); measure early with a large test repo. Document `--no-cache` and cache dir options |
 | Hub is a single point of control | Agents back up without the hub. Agent owner leases last 7 days without renewal, so an outage longer than that pauses agent-run maintenance; backups continue |

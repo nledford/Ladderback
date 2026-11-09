@@ -197,7 +197,7 @@ fn a_size_reads_in_the_unit_the_catalog_names_for_it() {
     let localizer = carrier();
     for (bytes, text) in [
         (0, "0 B"),
-        (1023, "1023 B"),
+        (1023, "1,023 B"),
         (1536, "1.5 KiB"),
         (1_048_575, "1 MiB"),
         (5 << 20, "5 MiB"),
