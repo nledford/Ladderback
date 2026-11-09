@@ -40,6 +40,8 @@ mod operations_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/forget.rs"]
+mod forget_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/snapshots.rs"]
@@ -69,6 +71,7 @@ struct Agent {
     config: config_steps::ConfigSetup,
     repositories: repositories_steps::RepositoriesSetup,
     snapshots: snapshots_steps::SnapshotsSetup,
+    forget: forget_steps::ForgetE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -109,6 +112,7 @@ impl Agent {
             config: config_steps::ConfigSetup::default(),
             repositories: repositories_steps::RepositoriesSetup::default(),
             snapshots: snapshots_steps::SnapshotsSetup::default(),
+            forget: forget_steps::ForgetE2e::default(),
         }
     }
 

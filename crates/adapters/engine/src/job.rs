@@ -61,6 +61,9 @@ pub enum JobKind {
     /// options. It refuses when one already exists there.
     Init(RepositorySpec),
     Backup(BackupJobSpec),
+    /// Removes exactly the snapshots the job names: the selection was made
+    /// by the owner before the job ran (I6).
+    Forget(ForgetJobSpec),
     Prune(PruneJobSpec),
     Check(CheckJobSpec),
     /// Lists the repository's snapshots. A read, never an operation.
@@ -145,11 +148,17 @@ pub struct BackupJobSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgetJobSpec {
+    pub repo: RepositorySpec,
+    /// The snapshots to remove, each a hex snapshot ID.
+    pub ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PruneJobSpec {
     pub repo: RepositorySpec,
     pub keep_delete: SignedDuration,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckJobSpec {
     pub repo: RepositorySpec,
@@ -268,6 +277,7 @@ pub enum OpResult {
         id: RepositoryId,
     },
     Backup(BackupResult),
+    Forget(ForgetResult),
     Prune(PruneResult),
     Check(CheckResult),
     /// A repository's snapshots, newest first.
@@ -307,6 +317,13 @@ pub struct PruneResult {
     pub packs_marked: u64,
     pub packs_deleted: u64,
     pub packs_recovered: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgetResult {
+    pub repository: RepositoryId,
+    /// The snapshots removed, as the job was asked to remove them.
+    pub removed: Vec<SnapshotId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -161,12 +161,105 @@ impl RetentionPolicy {
         ];
         counts.iter().all(|count| count.is_none()) && spans.iter().all(|span| span.is_none())
     }
+
+    /// Whether the policy is set and would keep nothing: every count is
+    /// `0`, every span is zero-length, and no setting keeps anything. A
+    /// forget run refuses such a policy before it removes anything, for its
+    /// whole group would go (technical design §7.3); the user can delete a
+    /// plan's history explicitly instead. An empty policy keeps everything
+    /// and never keeps nothing.
+    pub fn keeps_nothing(&self) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        let Self {
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+            keep_within,
+            keep_within_minutely,
+            keep_within_hourly,
+            keep_within_daily,
+            keep_within_weekly,
+            keep_within_monthly,
+            keep_within_quarter_yearly,
+            keep_within_half_yearly,
+            keep_within_yearly,
+        } = self;
+        [
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+        ]
+        .iter()
+        .all(|count| count.is_none_or(|count| count.get() == 0))
+            && [
+                keep_within,
+                keep_within_minutely,
+                keep_within_hourly,
+                keep_within_daily,
+                keep_within_weekly,
+                keep_within_monthly,
+                keep_within_quarter_yearly,
+                keep_within_half_yearly,
+                keep_within_yearly,
+            ]
+            .iter()
+            .all(|span| span.is_none_or(|span| span.span().is_zero()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_policy_of_only_zero_counts_keeps_nothing() {
+        let policy = RetentionPolicy {
+            keep_last: Some(KeepCount::new(0).expect("a count")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.is_empty());
+        assert!(policy.keeps_nothing());
+    }
+
+    #[test]
+    fn a_policy_of_only_a_zero_length_span_keeps_nothing() {
+        let policy = RetentionPolicy {
+            keep_within: Some("0s".parse::<KeepWithin>().expect("a span")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.is_empty());
+        assert!(policy.keeps_nothing());
+    }
+
+    #[test]
+    fn a_keeps_nothing_policy_mixed_with_a_real_setting_keeps_something() {
+        let policy = RetentionPolicy {
+            keep_last: Some(KeepCount::new(0).expect("a count")),
+            keep_daily: Some(KeepCount::new(1).expect("a count")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.keeps_nothing());
+    }
+
+    #[test]
+    fn an_empty_policy_keeps_everything_not_nothing() {
+        assert!(RetentionPolicy::default().is_empty());
+        assert!(!RetentionPolicy::default().keeps_nothing());
+    }
     fn refused(kind: ValueKind, text: &str) -> InvalidValue {
         InvalidValue::new(kind, text)
     }

@@ -6,7 +6,9 @@
 //! version that added one can still be read; a missing field or an unknown
 //! `type` is an error.
 
-use app::ports::{BackupSummary, CheckSummary, EngineResult, PruneSummary, SnapshotSummary};
+use app::ports::{
+    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PruneSummary, SnapshotSummary,
+};
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,10 @@ pub(crate) enum Summary {
         repository: RepositoryId,
         errors: u64,
         warnings: u64,
+    },
+    Forget {
+        repository: RepositoryId,
+        removed: Vec<SnapshotId>,
     },
     /// A read's result. A listing is never logged as an operation (§9), so
     /// no row ever holds this variant; the format knows it only because
@@ -84,6 +90,10 @@ impl From<&EngineResult> for Summary {
                 packs_marked: summary.packs_marked,
                 packs_deleted: summary.packs_deleted,
                 packs_recovered: summary.packs_recovered,
+            },
+            EngineResult::Forget(summary) => Self::Forget {
+                repository: summary.repository.clone(),
+                removed: summary.removed.clone(),
             },
             EngineResult::Check(summary) => Self::Check {
                 repository: summary.repository.clone(),
@@ -143,6 +153,13 @@ impl From<Summary> for EngineResult {
                 packs_marked,
                 packs_deleted,
                 packs_recovered,
+            }),
+            Summary::Forget {
+                repository,
+                removed,
+            } => Self::Forget(ForgetSummary {
+                repository,
+                removed,
             }),
             Summary::Check {
                 repository,

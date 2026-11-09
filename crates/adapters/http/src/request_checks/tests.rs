@@ -63,6 +63,14 @@ impl crate::Operations for NoOperations {
         Err(crate::StartError::UnknownPlan)
     }
 
+    async fn start_maintenance(
+        &self,
+        _repository: String,
+        _kind: String,
+    ) -> Result<String, crate::MaintenanceStartError> {
+        Err(crate::MaintenanceStartError::UnknownRepository)
+    }
+
     async fn history(
         &self,
         _plan: Option<String>,

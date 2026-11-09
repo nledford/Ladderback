@@ -124,7 +124,7 @@ fn new_source(agent: &mut Agent, plan: &str) -> PathBuf {
 /// A folder of `count` demo files the plan named `plan` backs up: what "a
 /// plan backing up a folder with N files" sets up, for the steps that build
 /// a configuration around one.
-pub(super) fn source_with_files(agent: &mut Agent, plan: &str, count: usize) -> PathBuf {
+pub(crate) fn source_with_files(agent: &mut Agent, plan: &str, count: usize) -> PathBuf {
     let source = new_source(agent, plan);
     for n in 1..=count {
         fs::write(

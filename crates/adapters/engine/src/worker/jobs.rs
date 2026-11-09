@@ -5,19 +5,22 @@
 use domain::execution::plan_tags::PlanTags;
 use std::path::PathBuf;
 
-use rustic_core::repofile::SnapshotFile;
+use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
     BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList,
     SnapshotOptions,
 };
 
 use super::convert::{
-    JobError, backup_result, check_result, prune_options, prune_result, snapshot_ref,
+    JobError, backup_result, check_result, prune_options, prune_result, snapshot_id, snapshot_ref,
     snapshot_result, snapshot_tags,
 };
 use super::repository::{new_repository, open, repository_id};
 use super::{Context, Done};
-use crate::job::{BackupJobSpec, CheckJobSpec, OpResult, PruneJobSpec, RepositorySpec};
+use crate::job::{
+    BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, PruneJobSpec,
+    RepositorySpec,
+};
 
 pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
@@ -39,6 +42,32 @@ pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError>
         .collect::<Result<_, JobError>>()?;
     snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
     Ok(Done::Result(OpResult::Snapshots { snapshots }))
+}
+
+/// Removes exactly the snapshots the job names. Which snapshots those are
+/// was decided before the job ran, by the owner's own selection (I6); the
+/// job deletes them and nothing else.
+pub(crate) fn forget(ctx: &Context, job: &ForgetJobSpec) -> Result<Done, JobError> {
+    // Parsed before the repository is opened, so a malformed ID is refused
+    // before anything is touched.
+    let ids: Vec<RusticSnapshotId> = job
+        .ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .parse()
+                .map_err(|_| JobError::failed(format!("not a snapshot ID: {}", id.as_str())))
+        })
+        .collect::<Result<_, _>>()?;
+    let repository = open(ctx, &job.repo)?;
+    let repository_id = repository_id(&repository)?;
+    ctx.start(None)?;
+    repository.delete_snapshots(&ids)?;
+    let removed = ids.iter().map(snapshot_id).collect::<Result<_, _>>()?;
+    Ok(Done::Result(OpResult::Forget(ForgetResult {
+        repository: repository_id,
+        removed,
+    })))
 }
 
 /// Initialises a repository at the location, with default key options and

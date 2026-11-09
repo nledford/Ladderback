@@ -17,6 +17,7 @@
 pub mod event_bus;
 pub mod execution;
 pub mod history;
+pub mod maintenance;
 pub mod ports;
 pub mod repositories;
 pub mod secrets;

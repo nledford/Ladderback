@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
@@ -60,6 +61,15 @@ pub trait Operations: Send + Sync {
     /// Starts a backup of the plan named in the request, returning the
     /// operation's ID.
     async fn start_backup(&self, plan: String) -> Result<String, StartError>;
+    /// Starts maintenance (forget, prune or check) on the repository named
+    /// in the request, returning the operation's ID. Refusals are typed: an
+    /// unknown repository or kind, a busy repository (I7), or a policy that
+    /// would keep nothing.
+    async fn start_maintenance(
+        &self,
+        repository: String,
+        kind: String,
+    ) -> Result<String, MaintenanceStartError>;
 
     /// One page of the operation history, newest first, including running
     /// operations. `after` continues from a page's `next`; `plan` lists one
@@ -144,6 +154,29 @@ pub enum CancelError {
     Unknown,
     /// The operation has already ended, so there is nothing to stop.
     NotRunning,
+}
+
+/// Why a maintenance request couldn't start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaintenanceStartError {
+    /// No repository by that alias is configured.
+    UnknownRepository,
+    /// The request asks for a maintenance kind this version doesn't run.
+    UnknownKind,
+    /// Another maintenance operation holds the repository (I7). Names the
+    /// one that does.
+    Busy { running: String },
+    /// A plan's retention policy would keep nothing; nothing was removed.
+    /// Names the plan.
+    KeepsNothing { plan: String },
+    /// The repository or its configuration can't be read just now.
+    Unavailable,
+}
+
+/// The body `POST /api/v1/repositories/{alias}/maintenance` takes.
+#[derive(Deserialize)]
+struct RunMaintenanceBody {
+    kind: String,
 }
 
 /// The body `POST /api/v1/operations` takes.
@@ -255,6 +288,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             "/api/v1/repositories/{alias}/snapshots",
             axum::routing::get(list_snapshots),
         )
+        .route(
+            "/api/v1/repositories/{alias}/maintenance",
+            axum::routing::post(run_maintenance),
+        )
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
             let assets = Arc::clone(&assets);
@@ -331,6 +368,56 @@ async fn run_plan(
             vec![("plan", api::MsgArg::Text(plan))],
         ),
         Err(StartError::Unavailable) => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            api::ErrorCode::ConfigUnavailable,
+        ),
+    }
+}
+
+/// Starts maintenance on the repository the path names, of the kind the
+/// body names: forget, prune or check. The answer is the operation's ID,
+/// and the refusals are typed — an unknown repository or kind, a busy
+/// repository (I7), or a retention policy that would keep nothing.
+async fn run_maintenance(
+    State(state): State<AppState>,
+    AxumPath(alias): AxumPath<String>,
+    body: Result<axum::Json<RunMaintenanceBody>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let kind = match body {
+        Ok(axum::Json(RunMaintenanceBody { kind })) => kind,
+        Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
+    };
+    match state
+        .operations
+        .start_maintenance(alias.clone(), kind.clone())
+        .await
+    {
+        Ok(operation) => (
+            StatusCode::ACCEPTED,
+            axum::Json(StartedOperation { operation }),
+        )
+            .into_response(),
+        Err(MaintenanceStartError::UnknownRepository) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::RepositoryUnknown,
+            vec![("alias", api::MsgArg::Text(alias))],
+        ),
+        Err(MaintenanceStartError::UnknownKind) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::MaintenanceKindUnknown,
+            vec![("kind", api::MsgArg::Text(kind))],
+        ),
+        Err(MaintenanceStartError::Busy { running }) => refused_with(
+            StatusCode::CONFLICT,
+            api::ErrorCode::MaintenanceBusy,
+            vec![("operation", api::MsgArg::Text(running))],
+        ),
+        Err(MaintenanceStartError::KeepsNothing { plan }) => refused_with(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            api::ErrorCode::RetentionKeepsNothing,
+            vec![("plan", api::MsgArg::Text(plan))],
+        ),
+        Err(MaintenanceStartError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::ConfigUnavailable,
         ),
@@ -633,6 +720,25 @@ mod tests {
             }
         }
 
+        async fn start_maintenance(
+            &self,
+            repository: String,
+            kind: String,
+        ) -> Result<String, MaintenanceStartError> {
+            match (repository.as_str(), kind.as_str()) {
+                ("demo", "forget") => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
+                ("demo", _) => Err(MaintenanceStartError::UnknownKind),
+                ("missing", _) => Err(MaintenanceStartError::UnknownRepository),
+                ("busy", _) => Err(MaintenanceStartError::Busy {
+                    running: "018f0000-0000-7000-8000-000000000003".to_owned(),
+                }),
+                ("keeps-nothing", _) => Err(MaintenanceStartError::KeepsNothing {
+                    plan: "home".to_owned(),
+                }),
+                _ => Err(MaintenanceStartError::Unavailable),
+            }
+        }
+
         async fn history(
             &self,
             _plan: Option<String>,
@@ -852,6 +958,98 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn maintenance_on_a_repository_is_accepted_with_its_operation() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"forget"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            body(response).await,
+            r#"{"operation":"018f0000-0000-7000-8000-000000000002"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repository_the_configuration_does_not_have_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/missing/maintenance",
+            r#"{"kind":"forget"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_maintenance_kind_this_version_does_not_run_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"rewrite"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"maintenance-kind-unknown","args":{"kind":{"type":"text","value":"rewrite"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_busy_repository_is_refused_with_the_operation_that_holds_it() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/busy/maintenance",
+            r#"{"kind":"prune"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"maintenance-busy","args":{"operation":{"type":"text","value":"018f0000-0000-7000-8000-000000000003"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_policy_that_keeps_nothing_is_refused_with_its_plan() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/keeps-nothing/maintenance",
+            r#"{"kind":"forget"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"retention-keeps-nothing","args":{"plan":{"type":"text","value":"home"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repository_that_cannot_be_read_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/unreachable/maintenance",
+            r#"{"kind":"forget"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body(response).await, r#"{"code":"config-unavailable"}"#);
+    }
     #[tokio::test]
     async fn the_history_route_answers_one_page() {
         let response = get("/api/v1/operations").await;

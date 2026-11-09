@@ -92,6 +92,16 @@ pub enum ErrorCode {
     InvalidCursor,
     /// A request's body is not the JSON the route takes.
     InvalidBody,
+    /// Another maintenance operation already runs on the repository (I7):
+    /// nothing ran. The argument `operation` names the one that holds it.
+    MaintenanceBusy,
+    /// The plan's retention policy is set and would keep nothing, so the
+    /// forget was refused before anything was removed. The argument `plan`
+    /// names it.
+    RetentionKeepsNothing,
+    /// The request asks for a maintenance kind this version doesn't run.
+    /// The argument `kind` is what was sent.
+    MaintenanceKindUnknown,
     #[serde(other)]
     Unknown,
 }
@@ -305,6 +315,21 @@ impl ErrorCode {
             }],
             Self::InvalidCursor => &[ArgSpec {
                 name: "cursor",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::MaintenanceBusy => &[ArgSpec {
+                name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::RetentionKeepsNothing => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::MaintenanceKindUnknown => &[ArgSpec {
+                name: "kind",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -1059,6 +1084,10 @@ pub enum OperationResultDto {
     Check {
         errors: u64,
         warnings: u64,
+        duration_ms: u64,
+    },
+    Forget {
+        removed: u64,
         duration_ms: u64,
     },
 }

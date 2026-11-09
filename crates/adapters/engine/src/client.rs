@@ -11,7 +11,7 @@ use std::time::Duration;
 use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
-    Job, JobControl, ProgressEvent, ProgressKind as AppProgressKind, PruneSummary,
+    ForgetSummary, Job, JobControl, ProgressEvent, ProgressKind as AppProgressKind, PruneSummary,
     RepositoryAccess, RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
@@ -26,9 +26,9 @@ use tokio::sync::{mpsc, watch};
 use crate::cache_lock::CacheLock;
 use crate::environment;
 use crate::job::{
-    BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, JobKind, JobSpec, Level,
-    MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec, RepositorySpec, WorkerEvent,
-    exit_code,
+    BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
+    JobSpec, Level, MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec, RepositorySpec,
+    WorkerEvent, exit_code,
 };
 
 /// How long a worker may keep running after it reported its result, for
@@ -971,6 +971,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 data_added_packed: r.data_added_packed,
                 error_count: r.error_count,
             }),
+            OpResult::Forget(r) => EngineResult::Forget(ForgetSummary {
+                repository: r.repository,
+                removed: r.removed,
+            }),
             OpResult::Prune(r) => EngineResult::Prune(PruneSummary {
                 repository: r.repository,
                 packs_marked: r.packs_marked,
@@ -1031,6 +1035,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ConfigSchemaNewer
                 | ErrorCode::PlanUnknown
                 | ErrorCode::RepositoryUnknown
+                | ErrorCode::MaintenanceBusy
+                | ErrorCode::RetentionKeepsNothing
+                | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor
@@ -1046,6 +1053,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
         Job::Fake(_) => None,
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
         Job::Backup(job) => job.repository.id.as_ref(),
+        Job::Forget(job) => job.repository.id.as_ref(),
         Job::Prune(job) => job.repository.id.as_ref(),
         Job::Check(job) => job.repository.id.as_ref(),
     }
@@ -1060,6 +1068,7 @@ fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
         Job::Fake(_) => return Redactor::new(&extra),
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access,
         Job::Backup(job) => &job.repository,
+        Job::Forget(job) => &job.repository,
         Job::Prune(job) => &job.repository,
         Job::Check(job) => &job.repository,
     };
@@ -1138,6 +1147,10 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .collect(),
             label: job.label,
             deadline_budget: job.deadline_budget,
+        }),
+        Job::Forget(job) => JobKind::Forget(ForgetJobSpec {
+            repo: repository_spec(job.repository),
+            ids: job.ids.iter().map(|id| id.as_str().to_owned()).collect(),
         }),
         Job::Prune(job) => JobKind::Prune(PruneJobSpec {
             repo: repository_spec(job.repository),

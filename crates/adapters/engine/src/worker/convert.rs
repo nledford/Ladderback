@@ -62,7 +62,7 @@ pub(crate) fn snapshot_ref(snapshot: &SnapshotFile) -> Result<SnapshotRef, JobEr
 }
 
 /// Ladderback's form of a snapshot ID: the full 64 hex characters.
-fn snapshot_id(id: &RusticSnapshotId) -> Result<SnapshotId, JobError> {
+pub(crate) fn snapshot_id(id: &RusticSnapshotId) -> Result<SnapshotId, JobError> {
     SnapshotId::parse(id.to_hex().as_str())
         .map_err(|_| JobError::failed("rustic reported a snapshot ID that isn't 64 hex characters"))
 }

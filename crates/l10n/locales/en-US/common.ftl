@@ -143,6 +143,21 @@ error-operation-unknown = There is no operation { $operation }. Refresh the hist
 # $operation (text): the operation's ID.
 error-operation-not-running = Operation { $operation } has already ended, so there is nothing to cancel.
 
+
+# Another maintenance operation already runs on the repository, so the
+# request was refused and nothing ran.
+# $operation (text): the running operation's ID.
+error-maintenance-busy = Operation { $operation } is already maintaining this repository, and one repository runs one maintenance operation at a time. Wait for it to end, then ask again.
+
+# The plan's retention policy would keep nothing, so the forget was refused
+# before anything was removed.
+# $plan (text): the plan's ID, such as home.
+error-retention-keeps-nothing = The policy of plan { $plan } would keep none of its snapshots, so nothing was removed. Give the policy something to keep, or delete the snapshots you mean to delete.
+
+# The request asks for a maintenance kind this version does not run.
+# $kind (text): the kind as it was sent.
+error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, prune or check.
+
 # A history request's cursor is not an operation's ID.
 # $cursor (text): the cursor as it was sent.
 error-invalid-cursor = { -brand-name } could not continue the history from { $cursor }. Use the cursor the previous page gave.

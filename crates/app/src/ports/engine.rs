@@ -71,6 +71,7 @@ pub enum Job {
     /// there, and never overwrites one.
     Init(RepositoryAccess),
     Backup(BackupJob),
+    Forget(ForgetJob),
     Prune(PruneJob),
     Check(CheckJob),
     /// Lists the repository's snapshots, newest first. A read, not an
@@ -86,9 +87,12 @@ impl Job {
         match self {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
-            Self::Identify(_) | Self::Init(_) | Self::Prune(_) | Self::Check(_) | Self::Ls(_) => {
-                None
-            }
+            Self::Forget(_)
+            | Self::Identify(_)
+            | Self::Init(_)
+            | Self::Prune(_)
+            | Self::Check(_)
+            | Self::Ls(_) => None,
         }
     }
 
@@ -99,6 +103,7 @@ impl Job {
             Self::Identify(_) => OperationKind::Identify,
             Self::Init(_) => OperationKind::Init,
             Self::Backup(_) => OperationKind::Backup,
+            Self::Forget(_) => OperationKind::Forget,
             Self::Prune(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
             Self::Ls(_) => OperationKind::Ls,
@@ -112,6 +117,7 @@ impl Job {
             Self::Fake(_) => return Target::default(),
             Self::Identify(access) | Self::Init(access) | Self::Ls(access) => (None, access),
             Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
+            Self::Forget(job) => (None, &job.repository),
             Self::Prune(job) => (None, &job.repository),
             Self::Check(job) => (None, &job.repository),
         };
@@ -229,6 +235,16 @@ pub struct CheckJob {
     pub read_data: bool,
 }
 
+/// Remove exactly `ids` from the repository: the snapshots a forget run's
+/// selection named (I6 — the selection is the owner's own decision, made
+/// before the job runs).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgetJob {
+    pub repository: RepositoryAccess,
+    /// The snapshots to remove, each of them one the selection named.
+    pub ids: Vec<SnapshotId>,
+}
+
 /// A scripted job: count `steps`, waiting `step_delay` before each, report
 /// `warnings` right after starting, then end as `end` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -312,10 +328,10 @@ pub enum EngineResult {
     Backup(BackupSummary),
     Prune(PruneSummary),
     Check(CheckSummary),
+    Forget(ForgetSummary),
     /// A repository's snapshots, newest first.
     Snapshots(Vec<SnapshotSummary>),
 }
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackupSummary {
     pub repository: RepositoryId,
@@ -349,6 +365,15 @@ pub struct CheckSummary {
     pub repository: RepositoryId,
     pub errors: u64,
     pub warnings: u64,
+}
+
+/// What a forget run removed. What survived and why is the selection's own
+/// story, told before the run; this is what the run did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgetSummary {
+    pub repository: RepositoryId,
+    /// The snapshots removed, in the order the job named them.
+    pub removed: Vec<SnapshotId>,
 }
 
 /// One snapshot of a repository's list, as the engine reports it. The wire
