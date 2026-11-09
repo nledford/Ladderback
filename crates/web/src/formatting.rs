@@ -5,8 +5,9 @@
 //! table of every case a host writes is `l10n`'s own lane; this is the check
 //! that `web` is built with that host.
 //!
-//! The catalog is the test's own: the web UI has no message that shows a
-//! number or an instant yet. The first page that does adds the `@ui` scenario.
+//! The catalog is the test's own: the web UI's own instants come out of the
+//! `ui-instant` message, whose browser journeys read through the cells'
+//! `title` attributes; this lane checks the host itself writes `DATETIME`.
 
 use api::{IanaZone, MsgArg};
 use l10n::catalog::{Catalog, Source};
