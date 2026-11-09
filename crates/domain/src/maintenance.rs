@@ -412,4 +412,26 @@ mod tests {
         );
         assert_eq!(partition.managed.len(), 1);
     }
+
+    #[test]
+    fn the_partition_counts_every_snapshot_once() {
+        let snapshots = vec![
+            tagged("home", &agent(), 1),
+            tagged("home", &agent(), 2),
+            tagged("home", &other_agent(), 3),
+            untagged(4),
+        ];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        assert_eq!(partition.len(), 4, "every snapshot appears once");
+        assert!(!partition.is_empty());
+    }
+
+    #[test]
+    fn an_empty_partition_is_empty() {
+        let partition =
+            ForgetSelection::partition(&[], &agent(), &plans(&[("home", home_policy())]));
+        assert_eq!(partition.len(), 0);
+        assert!(partition.is_empty());
+    }
 }

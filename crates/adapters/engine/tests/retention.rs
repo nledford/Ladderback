@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use app::fakes::FakeRetention;
-use app::ports::{EngineEvent, EngineResult, Job, RepositoryAccess, Retention};
+use app::ports::{EngineEvent, EngineResult, Job, RepositoryAccess, Retention, RetentionError};
+use domain::SnapshotId;
+use domain::Timestamp;
 use domain::maintenance::Snapshot;
 use domain::planning::{KeepCount, RetentionPolicy};
 use engine::{RusticRetention, WorkerEngine};
@@ -41,11 +43,10 @@ async fn listed(engine: &WorkerEngine, access: &RepositoryAccess) -> Vec<Snapsho
     group
 }
 
-/// Four backups of changing contents: four distinct snapshots, a minute of
-/// wall-clock time apart at the very least.
-async fn four_snapshots(scratch: &Scratch, access: &RepositoryAccess) -> Vec<Snapshot> {
-    let repository = scratch.local();
-    let _ = repository;
+/// Four backups of changing contents: four distinct snapshots, each made
+/// at least a second of wall-clock time after the last, so no two share a
+/// timestamp and the oldest are unambiguous.
+async fn four_snapshots(_scratch: &Scratch, access: &RepositoryAccess) -> Vec<Snapshot> {
     let group = listed(&engine(), access).await;
     assert_eq!(group.len(), 4, "{group:?}");
     group
@@ -64,6 +65,7 @@ async fn keep_last_removes_the_oldest_as_the_fake_does() {
             scratch.source().join("a.txt"),
             format!("content {number}").as_bytes(),
         );
+        std::thread::sleep(std::time::Duration::from_secs(1));
         repo.backup(
             &BackupOptions::default(),
             &paths,
@@ -90,4 +92,48 @@ async fn keep_last_removes_the_oldest_as_the_fake_does() {
     assert_eq!(real, expected, "the fake and the real adapter agree");
     let oldest: Vec<_> = group[2..].iter().map(|s| s.id.clone()).collect();
     assert_eq!(real, oldest, "the oldest two go: the group is newest first");
+}
+
+#[tokio::test]
+async fn an_error_never_carries_the_repository_credentials() {
+    // A repository string with credentials in it, pointed at a port
+    // nothing listens on: the open fails, and its detail must come back
+    // redacted (I4), like the worker's own errors.
+    let access = RepositoryAccess {
+        repository: "sftp://demo:hunter2@127.0.0.1:1/repo".to_owned(),
+        repo_hot: None,
+        password: domain::secrets::SecretValue::new("e2e-scratch-password"),
+        id: None,
+        options: Default::default(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: Vec::new(),
+    };
+    let group = vec![Snapshot {
+        id: SnapshotId::parse(&"07".repeat(32)).unwrap(),
+        time: Timestamp::from_second(1_800_000_000).unwrap(),
+        hostname: "demo-host".to_owned(),
+        label: String::new(),
+        tags: Vec::new(),
+        paths: vec!["/home/demo".to_owned()],
+    }];
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &group,
+        )
+        .await
+        .expect_err("the unreachable repository fails");
+    let detail = match &error {
+        RetentionError::Engine { detail } => detail.clone(),
+        other => panic!("an engine failure, not {other:?}"),
+    };
+    assert!(
+        !detail.contains("hunter2") && !detail.contains("e2e-scratch-password"),
+        "the detail leaks a credential: {detail}"
+    );
 }

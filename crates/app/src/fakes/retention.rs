@@ -1,7 +1,8 @@
 //! A `Retention` fake for the acceptance runner: it keeps the newest
 //! `keep-last` snapshots and lets the rest go, and refuses a policy that
-//! uses anything else (the shared contract suite checks it against the real
-//! adapter, which is rustic's own retention).
+//! uses anything else, `keep-within` included (the shared contract suite
+//! checks it against the real adapter, which is rustic's own retention,
+//! on the `keep-last` path).
 
 use async_trait::async_trait;
 use domain::SnapshotId;

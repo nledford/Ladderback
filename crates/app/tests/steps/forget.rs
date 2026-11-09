@@ -28,8 +28,8 @@ use super::Agent;
 use app::fakes::{FakeRetention, InMemoryConfigStore};
 use app::maintenance::{MaintenanceError, MaintenanceKind, RunMaintenance};
 use app::ports::{
-    ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job, JobControl,
-    OperationStore, RunningJob, SnapshotSummary, Start,
+    CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
+    JobControl, OperationStore, PruneSummary, RunningJob, SnapshotSummary, Start,
 };
 
 /// The alias every forget scenario's repository goes under.
@@ -277,6 +277,17 @@ impl Engine for Scripted {
                     removed: job.ids.clone(),
                 },
             ))],
+            Job::Prune(_) => vec![EngineEvent::Succeeded(EngineResult::Prune(PruneSummary {
+                repository: self.repository_id.clone(),
+                packs_marked: 0,
+                packs_deleted: 0,
+                packs_recovered: 0,
+            }))],
+            Job::Check(_) => vec![EngineEvent::Succeeded(EngineResult::Check(CheckSummary {
+                repository: self.repository_id.clone(),
+                errors: 0,
+                warnings: 0,
+            }))],
             _ => Vec::new(),
         };
         // Everything but the result flows at once; a forget's result waits
@@ -322,6 +333,12 @@ async fn plan_keeping_last(agent: &mut Agent, plan: String, keep: i64) {
 
 #[given(expr = "a plan {string} keeping nothing")]
 async fn plan_keeping_nothing(agent: &mut Agent, plan: String) {
+    agent.forget.repository().await;
+    agent.forget.plan(&plan, Some(0)).await;
+}
+
+#[given(expr = "a plan {string} keeping nothing that has never backed up")]
+async fn plan_keeping_nothing_never_backed_up(agent: &mut Agent, plan: String) {
     agent.forget.repository().await;
     agent.forget.plan(&plan, Some(0)).await;
 }
@@ -430,6 +447,54 @@ async fn wait_for_forget(agent: &Agent) {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     panic!("the engine was never given the forget job");
+}
+
+#[when("the owner prunes the repository")]
+async fn prune(agent: &mut Agent) {
+    run_maintenance(agent, MaintenanceKind::Prune).await;
+}
+
+#[when("the owner checks the repository")]
+async fn check(agent: &mut Agent) {
+    run_maintenance(agent, MaintenanceKind::Check).await;
+}
+
+/// Prepares and runs one maintenance operation, as the route does.
+async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
+    let use_case = use_case(agent);
+    let prepared = use_case.prepare(operation_id(0xcc), &alias(), kind).await;
+    match prepared {
+        Ok(prepared) => {
+            let runner = Arc::clone(&use_case);
+            let running =
+                tokio::spawn(
+                    async move { runner.execute(prepared, futures::future::pending()).await },
+                );
+            wait_for_job(agent, job_name(kind)).await;
+            agent.forget.release.notify_waiters();
+            agent.finished = Some(running.await.expect("the run ends"));
+        }
+        Err(error) => agent.forget.refused = Some(error),
+    }
+}
+
+fn job_name(kind: MaintenanceKind) -> &'static str {
+    match kind {
+        MaintenanceKind::Forget => "forget",
+        MaintenanceKind::Prune => "prune",
+        MaintenanceKind::Check => "check",
+    }
+}
+
+/// Waits until the scripted engine was given the job of this kind.
+async fn wait_for_job(agent: &Agent, name: &str) {
+    for _ in 0..400 {
+        if agent.forget.jobs().contains(&name) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("the engine was never given the {name} job");
 }
 
 #[then(expr = "the repository keeps the {int} newest snapshots of the plan {string}")]
@@ -551,4 +616,32 @@ fn no_forget_job(agent: &mut Agent) {
         "the engine ran: {:?}",
         agent.forget.jobs()
     );
+}
+
+#[then("the engine was asked to prune the repository")]
+fn pruned(agent: &mut Agent) {
+    assert!(
+        agent.forget.jobs().contains(&"prune"),
+        "the jobs: {:?}",
+        agent.forget.jobs()
+    );
+}
+
+#[then("the engine was asked to check the repository")]
+fn checked(agent: &mut Agent) {
+    assert!(
+        agent.forget.jobs().contains(&"check"),
+        "the jobs: {:?}",
+        agent.forget.jobs()
+    );
+}
+
+#[then("the log holds no operation of this forget")]
+async fn no_operation_of_the_refused_forget(agent: &mut Agent) {
+    let found = agent
+        .store
+        .get(operation_id(0xcc))
+        .await
+        .expect("the log answers");
+    assert_eq!(found, None, "a refused forget leaves nothing in the log");
 }

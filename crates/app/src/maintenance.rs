@@ -172,16 +172,6 @@ impl RunMaintenance {
                 let listed = list(self.engine.as_ref(), op, access.clone()).await?;
                 let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
                 let plans = plans_of(&config, alias);
-                // Checked before anything is selected: a policy that would
-                // keep nothing removes the plan's whole history, which is
-                // the user's decision to make explicitly, not a rule's.
-                for plan in &plans {
-                    if plan.policy.keeps_nothing() {
-                        return Err(MaintenanceError::KeepsNothing {
-                            plan: plan.plan.clone(),
-                        });
-                    }
-                }
                 let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
                 let mut ids = Vec::new();
                 for plan in &plans {
@@ -190,8 +180,19 @@ impl RunMaintenance {
                         .iter()
                         .find(|group| group.plan == plan.plan)
                     else {
+                        // A plan with no snapshots has nothing a policy
+                        // could remove, so its policy refuses nothing.
                         continue;
                     };
+                    // Checked per group, before anything is selected: a
+                    // policy that would keep nothing removes the plan's
+                    // whole history, which is the user's decision to make
+                    // explicitly, not a rule's.
+                    if plan.policy.keeps_nothing() {
+                        return Err(MaintenanceError::KeepsNothing {
+                            plan: plan.plan.clone(),
+                        });
+                    }
                     ids.extend(
                         self.retention
                             .removes(&access, &plan.policy, &group.snapshots)

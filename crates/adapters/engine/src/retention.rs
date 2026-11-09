@@ -31,7 +31,8 @@ impl Retention for RusticRetention {
     ) -> Result<Vec<SnapshotId>, RetentionError> {
         let access = RepositorySpec::of(repository);
         let policy = policy.clone();
-        let wanted: Vec<String> = group.iter().map(|s| s.id.as_str().to_owned()).collect();
+        let wanted: std::collections::HashSet<String> =
+            group.iter().map(|s| s.id.as_str().to_owned()).collect();
         tokio::task::spawn_blocking(move || evaluate(&access, &policy, &wanted))
             .await
             .map_err(|error| RetentionError::Engine {
@@ -71,8 +72,9 @@ impl RepositorySpec {
 fn evaluate(
     spec: &RepositorySpec,
     policy: &RetentionPolicy,
-    wanted: &[String],
+    wanted: &std::collections::HashSet<String>,
 ) -> Result<Vec<SnapshotId>, RetentionError> {
+    let redactor = redactor_of(spec);
     let backends = BackendOptions::default()
         .repository(spec.repository.clone())
         .options(spec.options.clone())
@@ -83,19 +85,16 @@ fn evaluate(
         None => backends,
     }
     .to_backends()
-    .map_err(engine)?;
+    .map_err(|error| engine(&redactor, error))?;
     let repository = Repository::new(&RepositoryOptions::default().no_cache(true), &backends)
-        .map_err(engine)?
+        .map_err(|error| engine(&redactor, error))?
         .open(&Credentials::password(spec.password.clone()))
-        .map_err(engine)?;
+        .map_err(|error| engine(&redactor, error))?;
     let snapshots: Vec<SnapshotFile> = repository
         .get_all_snapshots()
-        .map_err(engine)?
+        .map_err(|error| engine(&redactor, error))?
         .iter()
-        .filter(|snapshot| {
-            let hex = snapshot.id.to_hex();
-            wanted.contains(&hex.to_string())
-        })
+        .filter(|snapshot| wanted.contains(&*snapshot.id.to_hex().to_string()))
         .cloned()
         .collect();
     // One group: the policy belongs to the plan, and every snapshot here is
@@ -120,10 +119,24 @@ fn evaluate(
         .collect())
 }
 
-fn engine(error: impl std::fmt::Display) -> RetentionError {
+fn engine(redactor: &domain::secrets::Redactor, error: impl std::fmt::Display) -> RetentionError {
     RetentionError::Engine {
-        detail: error.to_string(),
+        detail: redactor.redact(&error.to_string()),
     }
+}
+
+/// Everything the open of this repository could let slip into an error
+/// (I4), so the adapter's errors are redacted like the worker's own.
+fn redactor_of(spec: &RepositorySpec) -> domain::secrets::Redactor {
+    domain::secrets::Redactor::for_repository(domain::secrets::RepositorySecrets {
+        repository: &spec.repository,
+        repo_hot: spec.repo_hot.as_deref(),
+        password: &domain::secrets::SecretValue::new(spec.password.clone()),
+        options: &spec.options,
+        options_hot: &spec.options_hot,
+        options_cold: &spec.options_cold,
+        resolved: &[],
+    })
 }
 
 /// The policy as rustic's `KeepOptions` read it. Every field is named, so a

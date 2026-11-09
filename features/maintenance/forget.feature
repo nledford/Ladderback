@@ -48,6 +48,35 @@ Feature: Forget keeps each plan's history within its policy
     Then the forget is refused because the plan's policy keeps nothing
     And the repository still holds the 3 snapshots of the plan "home"
 
+  Scenario: A policy that keeps nothing refuses only where history exists
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "empty" keeping nothing that has never backed up
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the newest snapshot of the plan "home"
+
+  Scenario: A prune runs as maintenance of its own
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner prunes the repository
+    Then the operation ends as succeeded
+    And the engine was asked to prune the repository
+
+  Scenario: A check runs as maintenance of its own
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner checks the repository
+    Then the operation ends as succeeded
+    And the engine was asked to check the repository
+
+  Scenario: A refused forget leaves nothing in the log
+    Given a plan "home" keeping nothing
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the forget is refused because the plan's policy keeps nothing
+    And the log holds no operation of this forget
+
   Scenario: An empty policy keeps everything
     Given a plan "home" with no policy set
     And the repository holds 3 snapshots of the plan "home"

@@ -1039,6 +1039,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_repository_that_cannot_be_read_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/unreachable/maintenance",
+            r#"{"kind":"forget"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body(response).await, r#"{"code":"config-unavailable"}"#);
+    }
+    #[tokio::test]
     async fn the_history_route_answers_one_page() {
         let response = get("/api/v1/operations").await;
         assert_eq!(response.status(), StatusCode::OK);
