@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use app::ports::{HistoryQuery, OperationRecord, OperationStore, StoreError};
+use domain::execution::OperationKind;
 use sqlx::Connection;
 use store::OpenError;
 use support::*;
@@ -233,6 +234,12 @@ async fn a_closed_store_answers_every_call_with_unavailable() {
     assert!(
         matches!(saved, Err(StoreError::Unavailable { .. })),
         "{saved:?}"
+    );
+    let prune = started(queued_on_repository(0x11, OperationKind::Prune));
+    let begun = store.try_start(&prune).await;
+    assert!(
+        matches!(begun, Err(StoreError::Unavailable { .. })),
+        "{begun:?}"
     );
     let found = store.get(id(0x10)).await;
     assert!(

@@ -138,6 +138,19 @@ pub fn queued_backup(n: u128) -> Operation {
     )
 }
 
+/// A queued manual operation of `kind` on the demo repository, for no plan.
+pub fn queued_on_repository(n: u128, kind: OperationKind) -> Operation {
+    queued(
+        n,
+        kind,
+        Trigger::Manual,
+        Target {
+            plan: None,
+            repository: Some(repository()),
+        },
+    )
+}
+
 pub fn started(mut op: Operation) -> Operation {
     op.start(at(10)).expect("a queued operation starts");
     op

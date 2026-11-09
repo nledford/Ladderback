@@ -26,7 +26,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, StoreError,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start, StoreError,
 };
 use async_trait::async_trait;
 use domain::execution::{MAX_STORED_WARNINGS, Operation, OperationStatus};
@@ -213,6 +213,10 @@ impl OperationStore for SqliteStore {
                 .map_err(unavailable)?;
         }
         tx.commit().await.map_err(unavailable)
+    }
+
+    async fn try_start(&self, _operation: &Operation) -> Result<Start, StoreError> {
+        todo!("SqliteStore::try_start")
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

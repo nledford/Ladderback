@@ -134,6 +134,14 @@ pub enum OperationKind {
     Check,
 }
 
+impl OperationKind {
+    /// Whether the operation maintains a repository: forget, prune and check.
+    /// Maintenance operations on one repository run one at a time (I7).
+    pub fn is_maintenance(self) -> bool {
+        todo!("OperationKind::is_maintenance")
+    }
+}
+
 /// What started an operation: the `trigger` the operation log stores (§9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Trigger {
@@ -774,5 +782,22 @@ mod tests {
     fn queued_and_running_are_not_finished() {
         assert!(!OperationStatus::Queued.is_finished());
         assert!(!OperationStatus::Running.is_finished());
+    }
+
+    #[test]
+    fn prune_and_check_are_maintenance() {
+        assert!(OperationKind::Prune.is_maintenance());
+        assert!(OperationKind::Check.is_maintenance());
+    }
+
+    #[test]
+    fn backups_repository_identification_and_diagnostic_jobs_are_not_maintenance() {
+        for kind in [
+            OperationKind::Backup,
+            OperationKind::Identify,
+            OperationKind::Fake,
+        ] {
+            assert!(!kind.is_maintenance(), "{kind:?}");
+        }
     }
 }

@@ -149,9 +149,12 @@ async fn reopening_does_not_apply_the_migrations_again() {
     let scratch = Scratch::new();
     scratch.open().await.close().await;
     let first = migration_rows(&scratch).await;
-    assert_eq!(first.len(), 1, "one migration ships: {first:?}");
-    assert_eq!(first[0].0, 1);
-    assert!(first[0].2, "and it is recorded as applied");
+    let versions: Vec<i64> = first.iter().map(|row| row.0).collect();
+    assert_eq!(versions, [1, 2], "two migrations ship: {first:?}");
+    assert!(
+        first.iter().all(|row| row.2),
+        "and both are recorded as applied"
+    );
 
     let store = scratch.open().await;
     let op = queued_backup(0x10);

@@ -7,7 +7,7 @@ use domain::execution::Operation;
 
 use crate::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
-    StoreError,
+    Start, StoreError,
 };
 
 /// An operation log that lives in memory, for use-case tests and acceptance
@@ -42,6 +42,10 @@ impl OperationStore for InMemoryOperationStore {
         };
         self.stored().insert(operation.id(), detail);
         Ok(())
+    }
+
+    async fn try_start(&self, _operation: &Operation) -> Result<Start, StoreError> {
+        todo!("InMemoryOperationStore::try_start")
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

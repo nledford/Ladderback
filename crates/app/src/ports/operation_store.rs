@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use domain::execution::{Operation, OperationKind, OperationStatus, Target, Trigger, Warning};
-use domain::{OperationId, PlanId, Timestamp};
+use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 
 use crate::ports::EngineResult;
 
@@ -20,7 +20,20 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 /// Contract (checked by `contract::operation_store`):
 /// - [`save`](Self::save) stores an operation under its ID: the first call
 ///   adds it, and every later call replaces what was stored, warnings
-///   included, so a save that failed is made good by the next one.
+///   included, so a save that failed is made good by the next one. It
+///   refuses one thing: a running maintenance operation that would be a
+///   second on its repository (an [`Unavailable`](StoreError::Unavailable)
+///   error, with nothing changed).
+/// - [`try_start`](Self::try_start) stores an operation that has just
+///   started running as `save` does, and enforces I7: maintenance operations
+///   on one repository run one at a time. It decides and stores in one
+///   atomic step, so of any number of starts racing for a repository, through
+///   any number of handles, exactly one wins; the others store nothing and
+///   name the winner. A running maintenance operation that names its
+///   repository holds it ([`OperationRecord::maintaining`]); nothing else
+///   does, so a queued or finished one, a backup, an identify and a
+///   diagnostic job are never refused and never make another operation wait.
+///   The operation that holds a repository may start again.
 /// - [`get`](Self::get) returns exactly what was last saved, as
 ///   [`OperationRecord::of`] describes it, with the warnings in the order the
 ///   operation recorded them. Times are kept to the millisecond.
@@ -35,12 +48,38 @@ pub trait OperationStore: Send + Sync {
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError>;
 
+    /// Stores `operation`, which the caller has just moved to
+    /// [`Running`](OperationStatus::Running), as [`save`](Self::save) would,
+    /// unless it is a maintenance operation and another one is already
+    /// running on its repository (I7): then nothing is stored and the answer
+    /// is [`Start::Refused`], naming the one that is. An operation that isn't
+    /// running is an [`Unavailable`](StoreError::Unavailable) error, with
+    /// nothing stored.
+    ///
+    /// A use case that runs maintenance calls this before it starts the
+    /// engine and fails closed: the engine starts on [`Start::Started`] only,
+    /// not on a refusal and not on an error. An operation that names no
+    /// repository holds none, so the use case must know the repository's ID
+    /// first (an identify reports it).
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError>;
+
     /// The operation with its warnings, or `None` when no such operation was saved.
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError>;
 
     /// One page of history, newest first. The page ends at `query.limit`
     /// operations; [`HistoryPage::next`] says whether older ones remain.
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError>;
+}
+
+/// What [`OperationStore::try_start`] decided.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// The operation is stored as running. A maintenance operation now holds
+    /// its repository.
+    Started,
+    /// Another maintenance operation, `running`, is running on the
+    /// repository, so nothing was stored.
+    Refused { running: OperationId },
 }
 
 /// Why the store couldn't do what it was asked.
@@ -141,6 +180,14 @@ impl OperationRecord {
             warning_count: operation.warning_count(),
             result: result.cloned(),
         }
+    }
+
+    /// The repository this record is running maintenance on: set for a
+    /// running maintenance operation that names its repository, and `None`
+    /// for everything else. A record that has one holds that repository, and
+    /// no other maintenance operation may be running on it (I7).
+    pub fn maintaining(&self) -> Option<&RepositoryId> {
+        todo!("OperationRecord::maintaining")
     }
 }
 
