@@ -4,6 +4,7 @@
 mod clock;
 mod config_store;
 mod engine;
+mod event_bus;
 mod hooks;
 mod operation_store;
 mod secrets;
@@ -11,6 +12,7 @@ mod secrets;
 pub use clock::FakeClock;
 pub use config_store::InMemoryConfigStore;
 pub use engine::SimulatedEngine;
+pub use event_bus::InMemoryEventBus;
 pub use hooks::{FakeHookRunner, HookCall, Scripted};
 pub use operation_store::InMemoryOperationStore;
 pub use secrets::{FakeSecrets, Script};

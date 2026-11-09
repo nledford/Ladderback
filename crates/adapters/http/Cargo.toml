@@ -11,13 +11,16 @@ publish.workspace = true
 name = "http_adapter"
 
 [dependencies]
+app.workspace = true
 api.workspace = true
 axum.workspace = true
+futures.workspace = true
 mime_guess.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
 http-body-util.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

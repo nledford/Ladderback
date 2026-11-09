@@ -59,7 +59,8 @@ store = { path = "crates/adapters/store" }
 testkit = { path = "crates/testkit" }
 
 async-trait = "0.1.92"
-axum = "0.8.9"
+# `ws` carries the live-updates WebSocket at `/api/v1/events` (§4.2).
+axum = { version = "0.8.9", features = ["ws"] }
 clap = { version = "4.6.7", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 # Time goes through `jiff` alone (decision 22): `croner`'s default `chrono`
@@ -117,6 +118,9 @@ signal-hook = "0.4.6"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3.27.0"
 tokio = "1.54.1"
+# The e2e scenarios speak the events WebSocket with this client; no TLS: the
+# daemon listens on loopback.
+tokio-tungstenite = { version = "0.26.2", default-features = false, features = ["connect", "handshake"] }
 # `preserve_order` keeps a table's keys in file order, so the first unknown key
 # the config adapter reports is the first one in the file.
 toml = { version = "1.2.1", features = ["preserve_order"] }
@@ -193,7 +197,10 @@ pseudo = ["l10n/pseudo"]
 
 [dependencies]
 api.workspace = true
+app.workspace = true
+async-trait.workspace = true
 engine.workspace = true
+futures.workspace = true
 http-adapter.workspace = true
 # The daemon formats numbers and instants with ICU4X; the web UI's `l10n` has
 # no `icu` feature, so a browser never downloads the locale data.
@@ -219,9 +226,11 @@ rustic_core.workspace = true
 secrets.workspace = true
 store.workspace = true
 tempfile.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+tokio-tungstenite.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["time"] }
-toml.workspace = true
 
 [lints]
 workspace = true

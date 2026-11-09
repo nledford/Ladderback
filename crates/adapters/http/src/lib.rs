@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::State;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
@@ -29,6 +31,16 @@ use rust_embed::RustEmbed;
 pub use request_checks::{
     InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
 };
+
+use app::ports::EventBus;
+
+/// What the `/api/v1` routes run against (technical design §4.2): the
+/// daemon's event bus, wired by the composition root.
+#[derive(Clone)]
+pub struct AppState {
+    /// Where the daemon's live updates come from.
+    pub events: Arc<dyn EventBus>,
+}
 
 /// A file of the built web UI.
 #[derive(Clone, Debug)]
@@ -100,16 +112,33 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
     })
 }
 
-/// Routes for the web UI: files by path, and `index.html` for any other
-/// extensionless path, which the client-side router handles. A request that
-/// fails `checks` never reaches a route.
-pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks) -> Router {
+/// Routes for the web UI and the API: files by path, `index.html` for any
+/// other extensionless path (the client-side router handles it), and the
+/// live-updates WebSocket under `/api/v1`. A request that fails `checks`
+/// never reaches a route.
+pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/events", axum::routing::get(events))
+        .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
             let assets = Arc::clone(&assets);
             async move { serve(assets.as_ref(), &method, &uri) }
         })
         .layer(from_fn_with_state(checks, request_checks::enforce))
+}
+
+/// The live-updates WebSocket (technical design §4.4): one per tab, carrying
+/// [`api::UiEvent`]s. It sends nothing until an event arrives — the first
+/// state comes over REST — and the client is dropped when a send fails. The
+/// request checks have already allowed this handshake: a foreign `Origin`
+/// never reaches here.
+///
+/// This is commit 1 of the M1b event stream: the route is wired so the
+/// handshake tests have something to reach, and the body is a `todo!()`
+/// stub until the implementation commits (development.md §13.1).
+#[allow(clippy::todo)] // todo!() stubs are commit-1 only (development.md §13.1)
+async fn events(_upgrade: WebSocketUpgrade, State(_state): State<AppState>) -> Response {
+    todo!()
 }
 
 fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
@@ -207,6 +236,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use app::fakes::InMemoryEventBus;
 
     struct Files(HashMap<&'static str, &'static str>);
 
@@ -226,14 +256,41 @@ mod tests {
         ])))
     }
 
+    fn state() -> AppState {
+        AppState {
+            events: Arc::new(InMemoryEventBus::new()),
+        }
+    }
+
     async fn request(assets: Arc<dyn AssetSource>, method: Method, path: &str) -> Response {
-        router(assets, RequestChecks::default())
+        router(assets, RequestChecks::default(), state())
             .oneshot(
                 Request::builder()
                     .method(method)
                     .uri(path)
                     .header(header::HOST, "localhost:9898")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// A WebSocket handshake for `/api/v1/events`, from the UI's own origin,
+    /// exactly as a browser's `new WebSocket(...)` sends it.
+    async fn handshake() -> Response {
+        router(ui(), RequestChecks::default(), state())
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/events")
+                    .header(header::HOST, "localhost:9898")
+                    .header(header::ORIGIN, "http://localhost:9898")
+                    .header(header::CONNECTION, "Upgrade")
+                    .header(header::UPGRADE, "websocket")
+                    .header(header::SEC_WEBSOCKET_VERSION, "13")
+                    .header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -252,6 +309,18 @@ mod tests {
     async fn body(response: Response) -> String {
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_events_handshake_upgrades_to_a_websocket() {
+        let response = handshake().await;
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert!(
+            response
+                .headers()
+                .contains_key(header::SEC_WEBSOCKET_ACCEPT),
+            "an upgrade without the accept key is not a WebSocket"
+        );
     }
 
     #[tokio::test]

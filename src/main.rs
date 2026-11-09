@@ -18,6 +18,7 @@ use api::MsgArg;
 use clap::{Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 
+mod composition;
 mod logging;
 
 #[derive(Parser)]
@@ -116,6 +117,7 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(allowed_hosts),
+            composition::app_state(),
         );
         match axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())

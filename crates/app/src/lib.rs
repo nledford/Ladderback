@@ -1,6 +1,6 @@
-//! Ladderback's application ring (technical design §3.2): use cases and the
-//! port traits they drive. Depends only on `domain`, `async-trait` and
-//! `futures`; time comes from the [`Clock`](ports::Clock) port.
+//! Ladderback's application ring (technical design §3.2): use cases and
+//! the port traits they drive. Depends only on `domain`, `api`, `async-trait`
+//! and `futures`; time comes from the [`Clock`](ports::Clock) port.
 //!
 //! The `fakes` feature adds in-memory port fakes and the port contract
 //! suites that every real adapter runs too.
