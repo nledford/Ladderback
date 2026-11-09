@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use app::ports::{ConfigStore, Engine};
+use app::ports::ConfigStore;
 use app::repositories::{InitOutcome, RepositoryError};
 use app::secrets::ResolveRepository;
 use config_adapter::FileConfigStore;
@@ -203,7 +203,11 @@ async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
         .as_ref()
         .map(|cold| contents(cold))
         .unwrap_or_default();
-    let use_case = app::repositories::InitRepository::new(agent.engine.clone(), Agent::resolver());
+    let use_case = app::repositories::InitRepository::new(
+        agent.engine.clone(),
+        Agent::resolver(),
+        agent.config_store(),
+    );
     agent.repositories.init = Some(
         use_case
             .init(agent.next_op(), &settings(agent), alias)

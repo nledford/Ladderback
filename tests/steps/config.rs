@@ -197,6 +197,7 @@ fn nothing_kept(agent: &mut Agent) {
 
 #[then(expr = "the saved config file gives the repository {string} the {string} {string}")]
 fn saved_gives_key(agent: &mut Agent, alias: String, key: String, value: String) {
+    let value = in_scratch(agent, &value);
     let table = table(agent);
     let found = table["repositories"][alias.as_str()][key.as_str()].as_str();
     assert_eq!(found, Some(value.as_str()));

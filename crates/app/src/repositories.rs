@@ -7,10 +7,14 @@
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
-use domain::planning::RepositorySettings;
+use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
 use domain::{OperationId, RepositoryAlias, RepositoryId};
+use futures::StreamExt;
 
-use crate::ports::{ConfigError, ConfigStore, Engine, EngineError};
+use crate::ports::{
+    ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Problem,
+    RepositoryAccess, RunningJob,
+};
 use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Initialises a repository: resolves the settings, then runs a `Job::Init`
@@ -24,6 +28,7 @@ use crate::secrets::{ResolveError, ResolveRepository};
 pub struct InitRepository {
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
+    config: Arc<dyn ConfigStore>,
 }
 
 /// What an initialisation gave: the new repository's ID, and whether the
@@ -74,23 +79,47 @@ pub enum RepositoryError {
     Config(ConfigError),
 }
 
+// The error of these use cases is a typed code for the caller to match; it
+// is not boxed to satisfy a size rule, for none of its variants is large on
+// its own.
+#[allow(clippy::result_large_err)]
 impl InitRepository {
-    pub fn new(engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
-        Self { engine, resolve }
+    pub fn new(
+        engine: Arc<dyn Engine>,
+        resolve: ResolveRepository,
+        config: Arc<dyn ConfigStore>,
+    ) -> Self {
+        Self {
+            engine,
+            resolve,
+            config,
+        }
     }
 
     /// Initialises the repository the settings describe, and reports its ID.
-    /// Saved only when `alias` is given.
+    /// Saved only when `alias` is given, by the same rule
+    /// [`ConnectRepository`] saves one: an alias the configuration already
+    /// holds is refused.
     pub async fn init(
         &self,
         op: OperationId,
         settings: &RepositorySettings,
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
-        todo!("phase 2 of the repositories slice")
+        let access = access(&self.resolve, settings).await?;
+        let id = run(&*self.engine, op, Job::Init(access)).await?;
+        let saved = match alias {
+            Some(alias) => {
+                save(&*self.config, &alias, settings).await?;
+                true
+            }
+            None => false,
+        };
+        Ok(InitOutcome { id, saved })
     }
 }
 
+#[allow(clippy::result_large_err)]
 impl TestRepository {
     pub fn new(engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
         Self { engine, resolve }
@@ -103,10 +132,12 @@ impl TestRepository {
         op: OperationId,
         settings: &RepositorySettings,
     ) -> Result<RepositoryId, RepositoryError> {
-        todo!("phase 2 of the repositories slice")
+        let access = access(&self.resolve, settings).await?;
+        run(&*self.engine, op, Job::Identify(access)).await
     }
 }
 
+#[allow(clippy::result_large_err)]
 impl ConnectRepository {
     pub fn new(
         engine: Arc<dyn Engine>,
@@ -127,26 +158,125 @@ impl ConnectRepository {
         alias: RepositoryAlias,
         settings: &RepositorySettings,
     ) -> Result<RepositoryId, RepositoryError> {
-        todo!("phase 2 of the repositories slice")
+        let access = access(&self.resolve, settings).await?;
+        let id = run(&*self.engine, op, Job::Identify(access)).await?;
+        save(&*self.config, &alias, settings).await?;
+        Ok(id)
     }
+}
+
+/// The settings with every reference resolved, ready for a job. The resolved
+#[allow(clippy::result_large_err)]
+async fn access(
+    resolve: &ResolveRepository,
+    settings: &RepositorySettings,
+) -> Result<RepositoryAccess, RepositoryError> {
+    Ok(resolve
+        .resolve(settings)
+        .await
+        .map_err(RepositoryError::Resolve)?
+        .access)
+}
+
+/// Runs a repository job to its end and reports the repository's ID. Only the
+/// result and a failure matter here; progress and warnings belong to the
+#[allow(clippy::result_large_err)]
+async fn run(
+    engine: &dyn Engine,
+    op: OperationId,
+    job: Job,
+) -> Result<RepositoryId, RepositoryError> {
+    let RunningJob { events, .. } = engine
+        .run(op, job)
+        .await
+        .map_err(RepositoryError::Engine)?;
+    let mut events = events.fuse();
+    while let Some(event) = events.next().await {
+        match event {
+            EngineEvent::Succeeded(EngineResult::Repository { id }) => return Ok(id),
+            EngineEvent::Failed(reason) => return Err(failed(reason)),
+            _ => {}
+        }
+    }
+    // The stream ended without a result: the engine stopped without reporting.
+    Err(RepositoryError::Failed(FailureReason::EngineExited {
+        exit_code: None,
+    }))
+}
+
+/// A failed job, as these use cases report it: the one typed refusal is a
+/// repository that already exists; the rest keep the engine's reason.
+fn failed(reason: FailureReason) -> RepositoryError {
+    match reason {
+        FailureReason::RepositoryExists => RepositoryError::Exists,
+        reason => RepositoryError::Failed(reason),
+    }
+}
+
+/// Saves `settings` under `alias`, refusing an alias the configuration
+/// already holds. What is saved is the settings as written: a secret stays
+#[allow(clippy::result_large_err)]
+async fn save(
+    config: &dyn ConfigStore,
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+) -> Result<(), RepositoryError> {
+    let loaded = config.load().await.map_err(RepositoryError::Config)?;
+    if loaded.repository(alias).is_some() {
+        return Err(RepositoryError::AliasTaken(alias.clone()));
+    }
+    let mut repositories = loaded.repositories().clone();
+    repositories.insert(
+        alias.clone(),
+        RepositoryConfig {
+            settings: settings.clone(),
+            maintenance: Default::default(),
+            group_by: Default::default(),
+            hooks: Default::default(),
+        },
+    );
+    // Adding a repository can't break a rule that reaches across the parts
+    // (they are about plans, which don't change), so this refusal is not one
+    // the caller can reach; it is handled all the same, for nothing here
+    // panics.
+    let saved = AgentConfig::new(
+        loaded.agent().clone(),
+        loaded.hooks().clone(),
+        repositories,
+        loaded.plans().to_vec(),
+    )
+    .map_err(unwritable)?;
+    config.save(&saved).await.map_err(RepositoryError::Config)
+}
+
+/// A configuration that can't be, as a configuration error: only reachable
+/// through a violation that [`AgentConfig::new`] reports.
+fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
+    RepositoryError::Config(ConfigError::Invalid {
+        file: String::new(),
+        key: None,
+        at: None,
+        problem: Problem::Violation(violation),
+        detail: String::new(),
+    })
 }
 
 #[cfg(all(test, feature = "fakes"))]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, PoisonError};
 
     use async_trait::async_trait;
     use domain::execution::FailureReason;
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
-    use futures::StreamExt;
+
 
     use super::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
     use crate::fakes::{FakeSecrets, InMemoryConfigStore};
     use crate::ports::ConfigStore;
     use crate::ports::{
-        Engine, EngineError, EngineEvent, Job, JobControl, RepositoryAccess, RunningJob,
+        Engine, EngineError, EngineEvent, Job, JobControl, RunningJob,
     };
     use crate::secrets::ResolveRepository;
 
@@ -167,8 +297,11 @@ mod tests {
     #[async_trait]
     impl Engine for Scripted {
         async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-            self.seen.lock().expect("the job log").push(job);
-            let id = match self.outcome.lock().expect("the outcome").clone() {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            let id = match self.outcome.lock().unwrap_or_else(PoisonError::into_inner).clone() {
                 Ok(id) => id,
                 Err(reason) => {
                     return Ok(RunningJob {
@@ -201,12 +334,17 @@ mod tests {
         OperationId::from_uuid(Uuid::from_u128(0x5eed))
     }
 
+    // Fixed demo values; the `panic` they guard never happens, and a helper
+    // outside a test body is production code to clippy.
+    #[allow(clippy::panic)]
     fn alias() -> RepositoryAlias {
-        RepositoryAlias::try_from("demo".to_owned()).expect("a valid alias")
+        RepositoryAlias::try_from("demo".to_owned())
+            .unwrap_or_else(|e| panic!("a valid alias: {e:?}"))
     }
 
+    #[allow(clippy::panic)]
     fn id() -> RepositoryId {
-        RepositoryId::parse(&"a".repeat(64)).expect("a repository ID")
+        RepositoryId::parse(&"a".repeat(64)).unwrap_or_else(|e| panic!("a repository ID: {e:?}"))
     }
 
     #[tokio::test]
@@ -221,12 +359,16 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
         );
         assert_eq!(use_case.test(op(), &settings()).await, Ok(id()));
-        let seen = engine.seen.lock().expect("the job log");
-        let Job::Identify(_) = &seen[0] else {
-            panic!("testing runs Job::Identify, got {:?}", seen[0]);
-        };
-        drop(seen);
-        let saved = config.load().await.expect("the configuration loads");
+        {
+            let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            let Job::Identify(_) = &seen[0] else {
+                panic!("testing runs Job::Identify, got {:?}", seen[0]);
+            };
+        }
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert!(saved.repositories().is_empty(), "testing saves nothing");
     }
 
@@ -243,10 +385,16 @@ mod tests {
             config.clone(),
         );
         assert_eq!(use_case.connect(op(), alias(), &settings()).await, Ok(id()));
-        let saved = config.load().await.expect("the configuration loads");
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
         assert_eq!(
-            saved.repository(&alias()).expect("the repository").settings,
+            saved
+                .repository(&alias())
+                .unwrap_or_else(|| panic!("the repository"))
+                .settings,
             settings()
         );
     }
@@ -269,7 +417,10 @@ mod tests {
             use_case.connect(op(), alias(), &settings()).await,
             Err(RepositoryError::Failed(_))
         ));
-        let saved = config.load().await.expect("the configuration loads");
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert!(saved.repositories().is_empty());
     }
 
@@ -288,12 +439,15 @@ mod tests {
         use_case
             .connect(op(), alias(), &settings())
             .await
-            .expect("the first connect");
+            .unwrap_or_else(|e| panic!("the first connect: {e:?}"));
         assert!(matches!(
             use_case.connect(op(), alias(), &settings()).await,
             Err(RepositoryError::AliasTaken(_))
         ));
-        let saved = config.load().await.expect("the configuration loads");
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
     }
 
@@ -304,15 +458,21 @@ mod tests {
             seen: Mutex::new(Vec::new()),
         });
         let config = Arc::new(InMemoryConfigStore::new());
-        let use_case =
-            InitRepository::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())));
+        let use_case = InitRepository::new(
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
         let outcome = use_case.init(op(), &settings(), None).await;
-        assert_eq!(outcome.expect("the initialisation").saved, false);
+        assert!(!outcome.unwrap_or_else(|e| panic!("the initialisation: {e:?}")).saved);
         use_case
             .init(op(), &settings(), Some(alias()))
             .await
-            .expect("the initialisation with an alias");
-        let saved = config.load().await.expect("the configuration loads");
+            .unwrap_or_else(|e| panic!("the initialisation with an alias: {e:?}"));
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
     }
 
@@ -325,14 +485,17 @@ mod tests {
         let use_case = InitRepository::new(
             engine.clone(),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            Arc::new(InMemoryConfigStore::new()),
         );
         use_case
             .init(op(), &settings(), None)
             .await
-            .expect("the initialisation");
-        let seen = engine.seen.lock().expect("the job log");
-        let Job::Init(_) = &seen[0] else {
-            panic!("initialising runs Job::Init, got {:?}", seen[0]);
-        };
+            .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+        {
+            let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            let Job::Init(_) = &seen[0] else {
+                panic!("initialising runs Job::Init, got {:?}", seen[0]);
+            };
+        }
     }
 }

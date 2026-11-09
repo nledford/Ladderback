@@ -12,7 +12,6 @@ use domain::execution::FailureReason;
 use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
-use futures::StreamExt;
 
 use app::fakes::{FakeSecrets, InMemoryConfigStore};
 use app::ports::{
@@ -194,6 +193,7 @@ async fn initialise(agent: &mut super::Agent, name: Option<String>) {
     let use_case = app::repositories::InitRepository::new(
         agent.repositories.engine.clone(),
         ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        agent.repositories.store.clone(),
     );
     agent.repositories.outcome = Some(
         match use_case
