@@ -1,0 +1,27 @@
+[package]
+name = "hooks"
+description = "Hooks adapter: runs hook commands with a scrubbed environment"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+app.workspace = true
+domain.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+# `signal` stops a hook's process group, as the password-command runner's.
+nix = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+uuid.workspace = true
+
+[lints]
+workspace = true

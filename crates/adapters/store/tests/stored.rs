@@ -331,6 +331,18 @@ fn failures() -> Vec<(
             "[]",
             None,
         ),
+        (
+            FailureReason::HookFailed { exit_code: Some(3) },
+            "hook-failed",
+            r#"[["exit_code",{"type":"text","value":"3"}]]"#,
+            None,
+        ),
+        (
+            FailureReason::HookFailed { exit_code: None },
+            "hook-failed",
+            "[]",
+            None,
+        ),
     ]
 }
 

@@ -90,6 +90,7 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
 pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
     match kind {
         WarningKind::SourceUnreadable => "source-unreadable",
+        WarningKind::Hook => "hook-warning",
         WarningKind::Other => "unknown",
     }
 }
@@ -99,6 +100,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
 pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
     match text {
         "source-unreadable" => WarningKind::SourceUnreadable,
+        "hook-warning" => WarningKind::Hook,
         _ => WarningKind::Other,
     }
 }
@@ -162,6 +164,13 @@ pub(crate) fn encode_failure(
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
+        FailureReason::HookFailed { exit_code } => (
+            "hook-failed",
+            exit_code
+                .map(|code| text_arg("exit_code", code.to_string()))
+                .unwrap_or_default(),
+            None,
+        ),
     };
     Ok(FailureColumns {
         code,
@@ -211,6 +220,9 @@ pub(crate) fn decode_failure(
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
+        "hook-failed" => Ok(FailureReason::HookFailed {
+            exit_code: exit_code(&args)?,
+        }),
         other => Err(bad(
             "error_code",
             format!("{} is not an error code of this version", shown(other)),

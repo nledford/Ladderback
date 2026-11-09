@@ -55,5 +55,6 @@ code_messages!(ERRORS, error_message, ErrorCode {
 
 code_messages!(WARNINGS, warning_message, WarningCode {
     SourceUnreadable => msg::WARNING_SOURCE_UNREADABLE,
+    HookWarning => msg::WARNING_HOOK_WARNING,
     Unknown => msg::WARNING_UNKNOWN,
 });

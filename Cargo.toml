@@ -9,6 +9,7 @@ members = [
     "crates/adapters/config",
     "crates/adapters/engine",
     "crates/adapters/http",
+    "crates/adapters/hooks",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -24,6 +25,7 @@ default-members = [
     "crates/adapters/config",
     "crates/adapters/engine",
     "crates/adapters/http",
+    "crates/adapters/hooks",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -49,6 +51,7 @@ l10n = { path = "crates/l10n", default-features = false }
 # Not `config`: a registry crate of that name is already in the lockfile.
 config-adapter = { path = "crates/adapters/config" }
 engine = { path = "crates/adapters/engine" }
+hooks = { path = "crates/adapters/hooks" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
 secrets = { path = "crates/adapters/secrets" }
@@ -211,6 +214,7 @@ futures.workspace = true
 log.workspace = true
 platform.workspace = true
 rustic_backend.workspace = true
+hooks.workspace = true
 rustic_core.workspace = true
 secrets.workspace = true
 store.workspace = true

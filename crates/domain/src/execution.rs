@@ -73,6 +73,29 @@ pub enum FailureReason {
     /// The engine stopped reporting, but its process stayed alive and didn't
     /// exit in time; it was killed.
     EngineExitTimedOut,
+    /// A `run-before` hook with `on-failure = "error"` stopped the operation
+    /// before the engine started (I4, §6.1). `exit_code` is the hook's exit
+    /// status, or `None` when it timed out or could not be started.
+    HookFailed { exit_code: Option<i32> },
+}
+
+impl FailureReason {
+    /// The failure's stored code (§9): the kebab-case name the operation
+    /// log's `error_code` column and a hook's `LADDERBACK_ERROR` carry.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::EngineUnavailable { .. } => "engine-unavailable",
+            Self::JobRejected { .. } => "invalid-job-spec",
+            Self::EngineExited { .. } => "engine-exited",
+            Self::EngineFailed { .. } => "operation-failed",
+            Self::ProtocolViolated { .. } => "protocol-violated",
+            Self::DeadlinePassed => "deadline-passed",
+            Self::EngineStartTimedOut => "engine-start-timed-out",
+            Self::EngineExitTimedOut => "engine-exit-timed-out",
+            Self::HookFailed { .. } => "hook-failed",
+            Self::RepositoryExists => "repository-exists",
+        }
+    }
 }
 
 /// A problem with a single item that doesn't fail the operation, such as a
@@ -91,10 +114,12 @@ pub struct Warning {
     /// The engine's own message, verbatim.
     pub detail: String,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WarningKind {
     SourceUnreadable,
+    /// A hook command around the operation failed where its `on-failure`
+    /// says to go on: the operation carries it as a warning.
+    Hook,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }
@@ -278,6 +303,28 @@ impl Operation {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
+        self.keep(warning);
+        Ok(())
+    }
+
+    /// Records a warning from outside the running phase, as a hook does:
+    /// before the operation starts, or after it finished. A success that had
+    /// no warnings until then ends as [`OperationStatus::SucceededWithWarnings`];
+    /// a cancelled operation takes none, since its run was given up.
+    pub fn attach_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
+        self.require(Transition::RecordWarning, |s| {
+            !matches!(s, OperationStatus::Cancelled)
+        })?;
+        self.keep(warning);
+        if self.status == OperationStatus::Succeeded {
+            self.status = OperationStatus::SucceededWithWarnings;
+        }
+        Ok(())
+    }
+
+    /// Counts `warning` and keeps a cut copy of it while there is room
+    /// ([`Self::record_warning`]).
+    fn keep(&mut self, warning: Warning) {
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
             // Every field is named, so a text field added to `Warning` must
@@ -289,7 +336,6 @@ impl Operation {
                 detail: cut_warning_text(warning.detail),
             });
         }
-        Ok(())
     }
 
     /// Ends a running operation successfully: `SucceededWithWarnings` if any
@@ -807,5 +853,49 @@ mod tests {
         ] {
             assert!(!kind.is_maintenance(), "{kind:?}");
         }
+    }
+
+    fn hook_warning(detail: &str) -> Warning {
+        Warning {
+            kind: WarningKind::Hook,
+            item: None,
+            during: "before".to_owned(),
+            detail: detail.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_hook_failure_codes_as_hook_failed() {
+        assert_eq!(
+            FailureReason::HookFailed { exit_code: Some(3) }.code(),
+            "hook-failed"
+        );
+        assert_eq!(
+            FailureReason::HookFailed { exit_code: None }.code(),
+            "hook-failed"
+        );
+        assert_eq!(FailureReason::RepositoryExists.code(), "repository-exists");
+    }
+
+    #[test]
+    fn an_attached_warning_promotes_only_a_bare_success() {
+        let mut op = running();
+        op.succeed(t(20)).unwrap();
+        op.attach_warning(hook_warning("3")).unwrap();
+        assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
+
+        let mut op = running();
+        op.fail(FailureReason::EngineExited { exit_code: Some(1) }, t(15))
+            .unwrap();
+        op.attach_warning(hook_warning("timeout")).unwrap();
+        assert_eq!(op.status(), &failed());
+        assert_eq!(op.warnings().len(), 1);
+    }
+
+    #[test]
+    fn a_cancelled_operation_takes_no_attached_warning() {
+        let mut op = running();
+        op.cancel(t(20)).unwrap();
+        assert!(op.attach_warning(hook_warning("3")).is_err());
     }
 }
