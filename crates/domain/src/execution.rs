@@ -12,6 +12,16 @@ use crate::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp};
 /// source with millions of unreadable files can't grow the log without bound.
 pub const MAX_STORED_WARNINGS: usize = 10_000;
 
+/// The most bytes one text field of a kept warning holds: its item, what the
+/// engine was doing and the engine's own message (technical design §9). Longer
+/// text is cut when the warning is recorded and ends in [`WARNING_TEXT_CUT`],
+/// so a worker's megabyte message, kept ten thousand times over, can't grow
+/// the log without bound either.
+pub const MAX_WARNING_TEXT_BYTES: usize = 4 * 1024;
+
+/// What ends a warning's text that was cut to [`MAX_WARNING_TEXT_BYTES`].
+pub const WARNING_TEXT_CUT: &str = "…";
+
 /// Where an operation is in its lifecycle:
 /// `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed` / `Cancelled`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +73,10 @@ pub enum FailureReason {
 
 /// A problem with a single item that doesn't fail the operation, such as a
 /// file that couldn't be read during a backup.
+///
+/// Each text field is as the engine reported it until an operation keeps the
+/// warning, which cuts a field longer than [`MAX_WARNING_TEXT_BYTES`]
+/// ([`Operation::record_warning`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Warning {
     pub kind: WarningKind,
@@ -240,14 +254,23 @@ impl Operation {
     }
 
     /// Records a warning. Only the first [`MAX_STORED_WARNINGS`] are kept,
-    /// but every one is counted ([`Self::warning_count`]).
+    /// but every one is counted ([`Self::warning_count`]). A kept warning's
+    /// text is cut to [`MAX_WARNING_TEXT_BYTES`] in each field, ending in
+    /// [`WARNING_TEXT_CUT`] where it was.
     pub fn record_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
-            self.warnings.push(warning);
+            // Every field is named, so a text field added to `Warning` must
+            // be given its cut, or left whole on purpose, to compile.
+            self.warnings.push(Warning {
+                kind: warning.kind,
+                item: warning.item.map(cut_warning_text),
+                during: cut_warning_text(warning.during),
+                detail: cut_warning_text(warning.detail),
+            });
         }
         Ok(())
     }
@@ -298,6 +321,23 @@ impl Operation {
         self.status = status;
         self.finished_at = Some(at);
     }
+}
+
+/// How much of a cut text is kept: the cap, less the room the marker takes.
+const KEPT_WHEN_CUT: usize = MAX_WARNING_TEXT_BYTES - WARNING_TEXT_CUT.len();
+
+/// `text` as a warning keeps it: whole when it fits [`MAX_WARNING_TEXT_BYTES`],
+/// otherwise its longest prefix that ends on a character boundary and leaves
+/// room for [`WARNING_TEXT_CUT`], which follows it. A cut text also gives back
+/// the memory of the text it was cut from, since a kept warning stays in the
+/// operation until it's saved.
+fn cut_warning_text(mut text: String) -> String {
+    if text.len() > MAX_WARNING_TEXT_BYTES {
+        text.truncate(text.floor_char_boundary(KEPT_WHEN_CUT));
+        text.push_str(WARNING_TEXT_CUT);
+        text.shrink_to_fit();
+    }
+    text
 }
 
 #[cfg(test)]
@@ -398,6 +438,197 @@ mod tests {
         let mut op = queued();
         assert!(op.record_warning(unreadable("/home/demo/a")).is_err());
         assert_eq!(op.warning_count(), 0);
+    }
+
+    /// The most of a text that survives a cut: the cap less the room the
+    /// marker takes.
+    const ROOM: usize = MAX_WARNING_TEXT_BYTES - WARNING_TEXT_CUT.len();
+
+    /// `text` cut after its first `bytes` bytes, and marked.
+    fn cut_after(text: &str, bytes: usize) -> String {
+        format!("{}{WARNING_TEXT_CUT}", &text[..bytes])
+    }
+
+    #[test]
+    fn text_up_to_the_cap_is_kept_whole() {
+        for len in [
+            0,
+            1,
+            ROOM,
+            MAX_WARNING_TEXT_BYTES - 1,
+            MAX_WARNING_TEXT_BYTES,
+        ] {
+            let text = "x".repeat(len);
+            assert_eq!(cut_warning_text(text.clone()), text, "{len} bytes");
+        }
+    }
+
+    #[test]
+    fn text_one_byte_past_the_cap_is_cut_to_the_cap_and_marked() {
+        let text = "x".repeat(MAX_WARNING_TEXT_BYTES + 1);
+        let got = cut_warning_text(text.clone());
+        assert_eq!(got, cut_after(&text, ROOM));
+        assert_eq!(got.len(), MAX_WARNING_TEXT_BYTES);
+    }
+
+    /// A kept warning lives in the operation until it's saved, so a cut text
+    /// must give back the room of the text it was cut from, not only shorten.
+    #[test]
+    fn a_cut_text_holds_no_more_memory_than_the_cap() {
+        let megabyte = "x".repeat(1024 * 1024);
+        let got = cut_warning_text(megabyte);
+        assert!(
+            got.capacity() <= 2 * MAX_WARNING_TEXT_BYTES,
+            "capacity {} after the cut",
+            got.capacity()
+        );
+    }
+
+    /// The other tests state the cap through its constant; this one pins the
+    /// value the design gives, 4 KiB, with the marker inside it.
+    #[test]
+    fn the_cap_is_4096_bytes_and_a_cut_text_is_4093_bytes_and_a_marker() {
+        let whole = "x".repeat(4096);
+        assert_eq!(cut_warning_text(whole.clone()), whole);
+
+        let cut = cut_warning_text("x".repeat(4097));
+        assert_eq!(cut.len(), 4096);
+        assert_eq!(cut, format!("{}…", "x".repeat(4093)));
+    }
+
+    #[test]
+    fn text_as_long_as_a_worker_may_send_is_cut_to_the_cap_too() {
+        // One worker protocol message is at most 1 MiB (technical design §4.1).
+        let text = "x".repeat(1024 * 1024);
+        let got = cut_warning_text(text.clone());
+        assert_eq!(got, cut_after(&text, ROOM));
+        assert_eq!(got.len(), MAX_WARNING_TEXT_BYTES);
+    }
+
+    #[test]
+    fn a_cut_never_splits_a_character_and_keeps_every_whole_one_that_fits() {
+        // 2, 3 and 4 bytes wide.
+        for c in ['é', '€', '😀'] {
+            let width = c.len_utf8();
+            // Every way the cut can fall: just before a `c`, inside one, and
+            // just after one.
+            for pad in (ROOM - width)..=ROOM {
+                let mut text = "a".repeat(pad);
+                while text.len() <= MAX_WARNING_TEXT_BYTES {
+                    text.push(c);
+                }
+                let fits = (ROOM - pad) / width;
+                let want = format!(
+                    "{}{}{WARNING_TEXT_CUT}",
+                    "a".repeat(pad),
+                    c.to_string().repeat(fits)
+                );
+
+                let got = cut_warning_text(text);
+
+                assert_eq!(got, want, "{c:?} after {pad} bytes");
+                assert!(got.len() <= MAX_WARNING_TEXT_BYTES, "{c:?} after {pad}");
+            }
+        }
+    }
+
+    #[test]
+    fn text_of_exactly_the_cap_is_kept_whole_with_a_character_where_a_cut_would_fall() {
+        for c in ['é', '€', '😀'] {
+            let width = c.len_utf8();
+            let mut text = c.to_string().repeat(MAX_WARNING_TEXT_BYTES / width);
+            text.push_str(&"a".repeat(MAX_WARNING_TEXT_BYTES % width));
+            assert_eq!(text.len(), MAX_WARNING_TEXT_BYTES);
+
+            assert_eq!(cut_warning_text(text.clone()), text, "{c:?}");
+        }
+    }
+
+    /// What a running operation keeps of `warning`, recorded alone.
+    fn kept(warning: Warning) -> Warning {
+        let mut op = running();
+        op.record_warning(warning).unwrap();
+        assert_eq!(op.warnings().len(), 1);
+        op.warnings().first().cloned().unwrap()
+    }
+
+    #[test]
+    fn each_text_field_of_a_kept_warning_is_cut_on_its_own() {
+        let short = unreadable("/home/demo/locked.txt");
+        let long = "y".repeat(MAX_WARNING_TEXT_BYTES + 100);
+        let cut = cut_after(&long, ROOM);
+
+        let long_item = Warning {
+            item: Some(long.clone()),
+            ..short.clone()
+        };
+        let long_during = Warning {
+            during: long.clone(),
+            ..short.clone()
+        };
+        let long_detail = Warning {
+            detail: long,
+            ..short.clone()
+        };
+
+        assert_eq!(
+            kept(long_item),
+            Warning {
+                item: Some(cut.clone()),
+                ..short.clone()
+            }
+        );
+        assert_eq!(
+            kept(long_during),
+            Warning {
+                during: cut.clone(),
+                ..short.clone()
+            }
+        );
+        assert_eq!(
+            kept(long_detail),
+            Warning {
+                detail: cut,
+                ..short
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_item_and_empty_text_stay_as_they_are_when_other_text_is_cut() {
+        let long = "x".repeat(MAX_WARNING_TEXT_BYTES + 1);
+        let warning = Warning {
+            kind: WarningKind::Other,
+            item: None,
+            during: String::new(),
+            detail: long.clone(),
+        };
+
+        assert_eq!(
+            kept(warning),
+            Warning {
+                kind: WarningKind::Other,
+                item: None,
+                during: String::new(),
+                detail: cut_after(&long, ROOM),
+            }
+        );
+    }
+
+    #[test]
+    fn a_cut_warning_is_counted_once_like_any_other() {
+        let mut op = running();
+        op.record_warning(unreadable(&"x".repeat(MAX_WARNING_TEXT_BYTES * 2)))
+            .unwrap();
+        assert_eq!(op.warning_count(), 1);
+        assert_eq!(op.warnings().len(), 1);
+        assert_eq!(
+            op.warnings()
+                .first()
+                .and_then(|w| w.item.as_deref())
+                .map(str::len),
+            Some(MAX_WARNING_TEXT_BYTES)
+        );
     }
 
     #[test]

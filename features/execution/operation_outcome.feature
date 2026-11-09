@@ -41,3 +41,16 @@ Feature: Operation outcome
     Then the operation ends as succeeded with warnings
     And the history lists 10000 warnings for the operation
     And the history counts 10005 warnings for the operation
+
+  Scenario Outline: A warning's text past the cap is cut and marked
+    Given the engine will report an unreadable file whose <field> is 100000 characters long
+    When the agent runs the operation
+    Then the operation ends as succeeded with warnings
+    And the history keeps the warning's <field> cut to 4096 bytes, ending in "…"
+    And the history keeps any of the warning's text of 4096 bytes or less whole
+
+    Examples:
+      | field  |
+      | item   |
+      | during |
+      | detail |
