@@ -1,6 +1,6 @@
 //! Shared by the config adapter's integration tests.
 
-#![allow(dead_code)]
+#![allow(dead_code, clippy::result_large_err)]
 
 pub mod model;
 

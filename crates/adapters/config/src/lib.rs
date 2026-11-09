@@ -11,12 +11,21 @@
     clippy::todo,
     clippy::unreachable
 )]
+// `ConfigError` is the port's, and its shape is fixed there: a located error
+// carries the file, the key, the place and the detail, which makes it larger
+// than clippy likes for a `Result`. Loading a file is not a hot path.
+#![allow(clippy::result_large_err)]
 
+#[cfg(test)]
 mod keys;
+mod locate;
 #[cfg(test)]
 mod parity;
+mod read;
 mod schema;
 mod store;
+mod tables;
+mod write;
 
 pub use schema::{
     CURRENT_SCHEMA, KEPT_VERSIONS, MAX_CONFIG_BYTES, MigrationError, Parsed, Schemas, Step, parse,
