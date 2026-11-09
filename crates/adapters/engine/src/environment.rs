@@ -9,13 +9,16 @@
 
 use std::ffi::OsString;
 
+use domain::secrets::{SecretValue, url_credentials};
+
 /// The variables a worker keeps, by exact name (case matters). Only what the
 /// worker or the programs it starts (rclone, ssh) need, and that names a
 /// place or a setting: where the programs and the temporary files are, who
 /// the user is, the locale and time zone, the agent socket, the certificate
 /// locations, rclone's config file, and the proxies. None of these is a
 /// credential. A proxy URL that embeds credentials is the user's choice and
-/// passes as it is.
+/// passes as it is, but it is masked wherever the worker's output shows it:
+/// see [`proxy_credentials`].
 const KEPT: [&str; 24] = [
     "PATH",
     "HOME",
@@ -50,6 +53,29 @@ pub(crate) fn scrubbed(
 ) -> Vec<(OsString, OsString)> {
     base.into_iter()
         .filter(|(name, _)| KEPT.iter().any(|kept| name == kept))
+        .collect()
+}
+
+/// The variables that hold the URL of a proxy, and so may carry credentials
+/// in its userinfo. `NO_PROXY` holds host names, not a URL.
+const PROXY_URLS: [&str; 6] = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+];
+
+/// The credentials in the proxy URLs of `vars`: the userinfo of each (see
+/// [`domain::secrets::url_credentials`]). They stay in the worker's
+/// environment, where a program it starts uses them, so the daemon can't
+/// keep them from the worker; it masks them wherever its output shows them.
+pub(crate) fn proxy_credentials(vars: &[(OsString, OsString)]) -> Vec<SecretValue> {
+    vars.iter()
+        .filter(|(name, _)| PROXY_URLS.iter().any(|proxy| name == proxy))
+        .filter_map(|(_, value)| value.to_str())
+        .flat_map(url_credentials)
         .collect()
 }
 
@@ -125,5 +151,75 @@ mod tests {
     #[test]
     fn nothing_in_gives_nothing_out() {
         assert!(scrubbed(Vec::new()).is_empty());
+    }
+
+    fn masked(pairs: &[(&str, &str)], text: &str) -> String {
+        domain::secrets::Redactor::new(&proxy_credentials(&vars(pairs))).redact(text)
+    }
+
+    #[test]
+    fn the_credentials_of_every_proxy_variable_are_masked_whatever_its_case() {
+        let base = [
+            ("HTTP_PROXY", "http://demo:CANARY-one@proxy.demo:3128"),
+            ("HTTPS_PROXY", "http://demo:CANARY-two@proxy.demo:3128"),
+            ("ALL_PROXY", "socks5://demo:CANARY-three@proxy.demo:1080"),
+            ("http_proxy", "http://demo:CANARY-four@proxy.demo:3128"),
+            ("https_proxy", "http://CANARY-five@proxy.demo:3128"),
+            ("all_proxy", "demo:CANARY-six@proxy.demo:1080"),
+        ];
+        for secret in [
+            "CANARY-one",
+            "CANARY-two",
+            "CANARY-three",
+            "CANARY-four",
+            "CANARY-five",
+            "CANARY-six",
+        ] {
+            assert_eq!(
+                masked(&base, &format!("407 {secret} refused")),
+                "407 *** refused",
+                "{secret} shows"
+            );
+        }
+    }
+
+    #[test]
+    fn only_what_a_proxy_url_holds_as_credentials_is_masked() {
+        let base = [
+            ("HTTPS_PROXY", "http://demo:CANARY-one@proxy.demo:3128"),
+            ("http_proxy", "http://proxy.demo:3128"),
+            // Hosts, not a URL.
+            ("NO_PROXY", "localhost,demo:CANARY-hosts@internal"),
+            ("no_proxy", "demo:CANARY-hosts@internal"),
+            // Not a proxy variable.
+            ("DEMO_URL", "http://demo:CANARY-other@somewhere.demo"),
+        ];
+        assert_eq!(
+            masked(
+                &base,
+                "via proxy.demo:3128 CANARY-hosts CANARY-other CANARY-one"
+            ),
+            "via proxy.demo:3128 CANARY-hosts CANARY-other ***"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_proxy_value_that_is_not_text_is_left_alone() {
+        use std::os::unix::ffi::OsStringExt;
+        let base = vec![(
+            OsString::from("HTTPS_PROXY"),
+            OsString::from_vec(b"http://demo:\xff@proxy.demo".to_vec()),
+        )];
+        assert!(proxy_credentials(&base).is_empty());
+    }
+
+    /// The proxy variables are looked at because the worker is given them.
+    #[test]
+    fn every_variable_looked_at_for_proxy_credentials_is_one_a_worker_keeps() {
+        for name in PROXY_URLS {
+            let base = vars(&[(name, "http://demo:CANARY@proxy.demo")]);
+            assert_eq!(scrubbed(base.clone()), base, "{name}");
+        }
     }
 }
