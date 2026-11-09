@@ -7,6 +7,7 @@ use std::time::Duration;
 use app::contract;
 use app::contract::clock::ClockHarness;
 use app::contract::secrets::SecretsHarness;
+use app::fakes::InMemoryConfigStore;
 use app::fakes::{FakeClock, FakeSecrets, InMemoryOperationStore, Script, SimulatedEngine};
 use app::ports::{Clock, Engine, SecretResolver};
 use async_trait::async_trait;
@@ -156,4 +157,9 @@ impl SecretsHarness for FakeSecretsHarness {
 #[tokio::test]
 async fn fake_secrets_meet_the_secrets_contract() {
     contract::secrets::run(&FakeSecretsHarness::default()).await;
+}
+
+#[tokio::test]
+async fn in_memory_config_store_meets_the_config_store_contract() {
+    contract::config_store::run(&InMemoryConfigStore::new()).await;
 }

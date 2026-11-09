@@ -50,6 +50,22 @@ pub enum ErrorCode {
     OriginNotAllowed,
     /// A mutating request didn't use `Content-Type: application/json` (§10.1).
     JsonRequired,
+    /// The configuration file couldn't be read or written (§6.1). The detail
+    /// carries the operating system's own message.
+    ConfigUnavailable,
+    /// The configuration file is larger than any configuration needs, so it
+    /// wasn't read.
+    ConfigTooLarge,
+    /// The configuration file isn't a valid configuration: a key it shouldn't
+    /// have, a value out of range, a plan that names a repository it doesn't
+    /// have. The detail carries the key and what is wrong with it.
+    ConfigInvalid,
+    /// The configuration file doesn't say which version of the format it is
+    /// in.
+    ConfigSchemaMissing,
+    /// The configuration file is in a version of the format newer than this
+    /// build reads.
+    ConfigSchemaNewer,
     #[serde(other)]
     Unknown,
 }
@@ -184,6 +200,52 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ConfigUnavailable | Self::ConfigSchemaMissing => &[ArgSpec {
+                name: "file",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ConfigTooLarge => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ],
+            Self::ConfigInvalid => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "line",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
+            Self::ConfigSchemaNewer => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "found",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "supported",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::InvalidJobSpec
             | Self::OperationFailed
             | Self::DeadlinePassed
@@ -359,5 +421,42 @@ mod tests {
         for code in [WarningCode::SourceUnreadable, WarningCode::Unknown] {
             assert!(code.args().is_empty(), "{code:?}");
         }
+    }
+
+    #[test]
+    fn config_codes_declare_the_arguments_their_producers_send() {
+        let text = |name, optional| ArgSpec {
+            name,
+            kind: ArgKind::Text,
+            optional,
+        };
+        assert_eq!(ErrorCode::ConfigUnavailable.args(), &[text("file", false)]);
+        assert_eq!(
+            ErrorCode::ConfigTooLarge.args(),
+            &[
+                text("file", false),
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ]
+        );
+        assert_eq!(
+            ErrorCode::ConfigInvalid.args(),
+            &[text("file", false), text("line", true)]
+        );
+        assert_eq!(
+            ErrorCode::ConfigSchemaMissing.args(),
+            &[text("file", false)]
+        );
+        assert_eq!(
+            ErrorCode::ConfigSchemaNewer.args(),
+            &[
+                text("file", false),
+                text("found", false),
+                text("supported", false),
+            ]
+        );
     }
 }

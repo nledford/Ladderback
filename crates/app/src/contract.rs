@@ -3,6 +3,7 @@
 //! a fake can't drift from reality. A suite panics on the first violation.
 
 pub mod clock;
+pub mod config_store;
 pub mod engine;
 pub mod operation_store;
 pub mod secrets;

@@ -53,6 +53,8 @@ pub enum IdKind {
     Repository,
     Snapshot,
     Plan,
+    /// A repository's alias in the config, not its rustic ID.
+    RepositoryAlias,
 }
 
 macro_rules! rustic_id {
@@ -121,13 +123,19 @@ fn parse_rustic_id(value: &str, kind: IdKind) -> Result<String, InvalidId> {
 #[serde(try_from = "String", into = "String")]
 pub struct PlanId(String);
 
+/// Whether `value` is a slug: at most 64 bytes of lowercase letters, digits
+/// and hyphens, the first not a hyphen. What a plan's ID and a repository's
+/// alias are made of.
+fn is_slug(value: &str) -> bool {
+    let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    value.len() <= 64
+        && value.bytes().next().is_some_and(slug)
+        && value.bytes().all(|b| slug(b) || b == b'-')
+}
+
 impl PlanId {
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
-        let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
-        let valid = value.len() <= 64
-            && value.bytes().next().is_some_and(slug)
-            && value.bytes().all(|b| slug(b) || b == b'-');
-        if valid {
+        if is_slug(value) {
             Ok(Self(value.to_owned()))
         } else {
             Err(InvalidId {
@@ -153,6 +161,45 @@ impl TryFrom<String> for PlanId {
 impl From<PlanId> for String {
     fn from(id: PlanId) -> Self {
         id.0
+    }
+}
+
+/// Names a repository within one agent's config: the key of its
+/// `[repositories.<alias>]` table (technical design §6.1, §7.3). The same
+/// slug as a plan's ID. It is only a local alias: a repository is identified
+/// by its [`RepositoryId`], and two machines may call it by different aliases.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct RepositoryAlias(String);
+
+impl RepositoryAlias {
+    pub fn parse(value: &str) -> Result<Self, InvalidId> {
+        if is_slug(value) {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidId {
+                kind: IdKind::RepositoryAlias,
+                value: value.to_owned(),
+            })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for RepositoryAlias {
+    type Error = InvalidId;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<RepositoryAlias> for String {
+    fn from(alias: RepositoryAlias) -> Self {
+        alias.0
     }
 }
 
@@ -227,5 +274,47 @@ mod tests {
         let json = serde_json::to_string(&id).unwrap();
         assert_eq!(json, "\"home-docs\"");
         assert_eq!(serde_json::from_str::<PlanId>(&json).unwrap(), id);
+    }
+
+    #[test]
+    fn a_repository_alias_is_a_short_lowercase_slug() {
+        for value in ["nas", "0", "backup-2026", &"a".repeat(64)] {
+            assert_eq!(RepositoryAlias::parse(value).unwrap().as_str(), value);
+        }
+    }
+
+    #[test]
+    fn an_alias_cannot_be_anything_else() {
+        for value in [
+            "",
+            "-nas",
+            "Nas",
+            "nas.lan",
+            "my nas",
+            "nas/1",
+            "nas_1",
+            "café",
+            &"a".repeat(65),
+        ] {
+            assert_eq!(
+                RepositoryAlias::parse(value),
+                Err(InvalidId {
+                    kind: IdKind::RepositoryAlias,
+                    value: value.to_owned()
+                })
+            );
+        }
+        assert!(serde_json::from_str::<RepositoryAlias>("\"Nas\"").is_err());
+    }
+
+    #[test]
+    fn an_alias_is_stored_as_its_slug() {
+        let alias = RepositoryAlias::parse("nas-2").unwrap();
+        let json = serde_json::to_string(&alias).unwrap();
+        assert_eq!(json, "\"nas-2\"");
+        assert_eq!(
+            serde_json::from_str::<RepositoryAlias>(&json).unwrap(),
+            alias
+        );
     }
 }

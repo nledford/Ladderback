@@ -2,11 +2,13 @@
 //! one passes the same contract suite (`crate::contract`) as its real adapter.
 
 mod clock;
+mod config_store;
 mod engine;
 mod operation_store;
 mod secrets;
 
 pub use clock::FakeClock;
+pub use config_store::InMemoryConfigStore;
 pub use engine::SimulatedEngine;
 pub use operation_store::InMemoryOperationStore;
 pub use secrets::{FakeSecrets, Script};

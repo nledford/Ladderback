@@ -12,6 +12,9 @@ use cucumber::{World, when};
 use domain::execution::{Operation, Trigger};
 use domain::{OperationId, SignedDuration, Timestamp, Uuid};
 
+#[path = "steps/config.rs"]
+mod config_steps;
+
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 
@@ -30,6 +33,7 @@ struct Agent {
     job: FakeJob,
     finished: Option<Finished>,
     secrets: secrets_steps::SecretsWorld,
+    config: config_steps::ConfigWorld,
     maintenance: maintenance_steps::MaintenanceWorld,
 }
 
@@ -60,6 +64,7 @@ impl Agent {
             },
             finished: None,
             secrets: Default::default(),
+            config: Default::default(),
             maintenance: Default::default(),
         }
     }
