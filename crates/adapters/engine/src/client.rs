@@ -982,7 +982,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 errors: r.errors,
                 warnings: r.warnings,
             }),
-            OpResult::Snapshots(list) => EngineResult::Snapshots(
+            OpResult::Snapshots { snapshots: list } => EngineResult::Snapshots(
                 list.into_iter()
                     .map(|s| SnapshotSummary {
                         id: s.id,

@@ -271,7 +271,9 @@ pub enum OpResult {
     Prune(PruneResult),
     Check(CheckResult),
     /// A repository's snapshots, newest first.
-    Snapshots(Vec<SnapshotResult>),
+    Snapshots {
+        snapshots: Vec<SnapshotResult>,
+    },
 }
 
 /// One snapshot of a listing, as the worker reports it.
