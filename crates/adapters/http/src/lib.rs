@@ -227,16 +227,35 @@ async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Res
 }
 
 /// Reads the bus and writes each event to the client, until the client goes
-/// or the daemon does.
+/// or the daemon does. A client's `Ping` is answered with a `Pong`: the
+/// events stream never waits on the client, so the reply races fairly with
+/// the next event.
 async fn forward(mut socket: WebSocket, mut stream: BoxStream<'static, UiEvent>) {
-    while let Some(event) = stream.next().await {
-        // An event that cannot be written is not retryable here: the client
-        // is gone, so the connection ends rather than falling behind.
-        let Ok(text) = serde_json::to_string(&event) else {
-            break;
-        };
-        if socket.send(Message::Text(text.into())).await.is_err() {
-            break;
+    loop {
+        tokio::select! {
+            event = stream.next() => {
+                let Some(event) = event else { break };
+                // An event that cannot be written is not retryable here: the
+                // client is gone, so the connection ends rather than falling
+                // behind.
+                let Ok(text) = serde_json::to_string(&event) else {
+                    break;
+                };
+                if socket.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+            message = socket.recv() => {
+                match message {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
         }
     }
 }
@@ -253,13 +272,17 @@ async fn run_plan(
         Ok(axum::Json(RunPlanBody { plan })) => plan,
         Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
     };
-    match state.operations.start_backup(plan).await {
+    match state.operations.start_backup(plan.clone()).await {
         Ok(operation) => (
             StatusCode::ACCEPTED,
             axum::Json(StartedOperation { operation }),
         )
             .into_response(),
-        Err(StartError::UnknownPlan) => refused(StatusCode::NOT_FOUND, api::ErrorCode::PlanUnknown),
+        Err(StartError::UnknownPlan) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::PlanUnknown,
+            vec![("plan", api::MsgArg::Text(plan))],
+        ),
         Err(StartError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::ConfigUnavailable,
@@ -279,44 +302,97 @@ struct HistoryParams {
 /// One page of the operation history, newest first, including running
 /// operations: the page's initial state, which a client that then subscribes
 /// closes the gap a late subscriber has (§4.2).
-#[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
 async fn list_operations(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HistoryParams>,
 ) -> Response {
-    todo!("E2: answer one page of history, refusing a cursor that isn't an operation ID")
+    match state
+        .operations
+        .history(params.plan, params.after.clone(), params.limit)
+        .await
+    {
+        Ok(page) => (StatusCode::OK, axum::Json(page)).into_response(),
+        Err(HistoryError::BadCursor) => refused_with(
+            StatusCode::BAD_REQUEST,
+            api::ErrorCode::InvalidCursor,
+            params
+                .after
+                .map(|cursor| vec![("cursor", api::MsgArg::Text(cursor))])
+                .unwrap_or_default(),
+        ),
+    }
 }
 
 /// One operation's detail: what happened, with its warnings.
-#[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
 async fn get_operation(
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    todo!("E2: answer one operation, or operation-unknown")
+    match state.operations.operation(id.clone()).await {
+        Ok(detail) => (StatusCode::OK, axum::Json(detail)).into_response(),
+        Err(LookupError::Unknown) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::OperationUnknown,
+            vec![("operation", api::MsgArg::Text(id))],
+        ),
+    }
 }
 
 /// Cancels a running operation (§4.2): the empty JSON body the JSON-body
 /// rule asks of every mutating method, and a polite cancel — the worker
 /// stops, the finally-hooks run, the operation ends cancelled.
-#[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
 async fn cancel_operation(
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
     body: Result<axum::Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    todo!("E2: cancel the operation, or refuse operation-not-running / operation-unknown")
+    if body.is_err() {
+        return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
+    }
+    match state.operations.cancel(id.clone()).await {
+        Ok(()) => (StatusCode::OK, axum::Json(serde_json::json!({}))).into_response(),
+        Err(CancelError::Unknown) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::OperationUnknown,
+            vec![("operation", api::MsgArg::Text(id))],
+        ),
+        Err(CancelError::NotRunning) => refused_with(
+            StatusCode::CONFLICT,
+            api::ErrorCode::OperationNotRunning,
+            vec![("operation", api::MsgArg::Text(id))],
+        ),
+    }
 }
 
-/// The body of a refusal: the code alone, for the UI to render (§8.4).
+/// The body of a refusal: the code, and the arguments its message takes, for
+/// the UI to render (§8.4).
 #[derive(Serialize)]
 struct TypedRefusal {
     code: api::ErrorCode,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    args: std::collections::BTreeMap<&'static str, api::MsgArg>,
 }
 
 /// A typed refusal (§10.1) with `status`.
 fn refused(status: StatusCode, code: api::ErrorCode) -> Response {
-    (status, axum::Json(TypedRefusal { code })).into_response()
+    refused_with(status, code, Vec::new())
+}
+
+/// A typed refusal carrying the arguments its code declares, named as
+/// [`ErrorCode::args`](api::ErrorCode::args) names them.
+fn refused_with(
+    status: StatusCode,
+    code: api::ErrorCode,
+    args: Vec<(&'static str, api::MsgArg)>,
+) -> Response {
+    (
+        status,
+        axum::Json(TypedRefusal {
+            code,
+            args: args.into_iter().collect(),
+        }),
+    )
+        .into_response()
 }
 
 fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
@@ -437,6 +513,27 @@ mod tests {
     /// Answers every plan but `missing`.
     struct Plans;
 
+    /// The one operation the fake log holds, as the wire shows it.
+    fn canned_summary() -> api::OperationSummaryDto {
+        api::OperationSummaryDto::new(
+            "018f0000-0000-7000-8000-000000000001".to_owned(),
+            "home".to_owned(),
+            "backup".to_owned(),
+            "succeeded".to_owned(),
+            "2026-11-09T10:00:00Z".to_owned(),
+            Some("2026-11-09T10:00:01Z".to_owned()),
+            Some("2026-11-09T10:00:02Z".to_owned()),
+            Vec::new(),
+            None,
+            Some(api::OperationResultDto::Backup {
+                files: 3,
+                bytes: 4096,
+                duration_ms: 1000,
+            }),
+        )
+        .unwrap()
+    }
+
     #[async_trait]
     impl Operations for Plans {
         async fn start_backup(&self, plan: String) -> Result<String, StartError> {
@@ -450,18 +547,38 @@ mod tests {
         async fn history(
             &self,
             _plan: Option<String>,
-            _after: Option<String>,
+            after: Option<String>,
             _limit: Option<u64>,
         ) -> Result<api::OperationsPageDto, HistoryError> {
-            todo!("E2: one canned page")
+            // A cursor that names no place to continue from is refused, as
+            // the real log refuses it.
+            if after.is_some_and(|cursor| cursor.parse::<uuid::Uuid>().is_err()) {
+                return Err(HistoryError::BadCursor);
+            }
+            Ok(api::OperationsPageDto {
+                operations: vec![canned_summary()],
+                next: None,
+            })
         }
 
-        async fn operation(&self, _id: String) -> Result<api::OperationDetailDto, LookupError> {
-            todo!("E2: one canned detail")
+        async fn operation(&self, id: String) -> Result<api::OperationDetailDto, LookupError> {
+            if id == "018f0000-0000-7000-8000-000000000001" {
+                Ok(api::OperationDetailDto {
+                    operation: canned_summary(),
+                    warnings: Vec::new(),
+                })
+            } else {
+                Err(LookupError::Unknown)
+            }
         }
 
-        async fn cancel(&self, _id: String) -> Result<(), CancelError> {
-            todo!("E2: a running operation cancels")
+        async fn cancel(&self, id: String) -> Result<(), CancelError> {
+            if id == "018f0000-0000-7000-8000-000000000001" {
+                // The one logged operation finished long ago.
+                Err(CancelError::NotRunning)
+            } else {
+                Err(CancelError::Unknown)
+            }
         }
     }
 

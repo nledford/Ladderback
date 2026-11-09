@@ -920,7 +920,6 @@ impl std::error::Error for InvalidOperation {}
 impl OperationSummaryDto {
     /// Builds the summary, refusing an ID that isn't a hyphenated UUID and
     /// a time that isn't RFC 3339, like [`SnapshotDto::new`].
-    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
     pub fn new(
         id: String,
         plan: String,
@@ -933,8 +932,39 @@ impl OperationSummaryDto {
         failure_code: Option<ErrorCode>,
         result: Option<OperationResultDto>,
     ) -> Result<Self, InvalidOperation> {
-        todo!("E2: validate the ID and times, then build the summary")
+        if !is_uuid(&id) {
+            return Err(InvalidOperation::Id);
+        }
+        for time in std::iter::once(queued_at.as_str())
+            .chain(started_at.as_deref())
+            .chain(finished_at.as_deref())
+        {
+            if time.parse::<jiff::Timestamp>().is_err() {
+                return Err(InvalidOperation::Time);
+            }
+        }
+        Ok(Self {
+            id,
+            plan,
+            kind,
+            status,
+            queued_at,
+            started_at,
+            finished_at,
+            warning_codes,
+            failure_code,
+            result,
+        })
     }
+}
+
+/// A hyphenated UUID: hex digits, with hyphens where a UUID has them.
+fn is_uuid(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
 }
 
 /// One page of the operation history: newest first, and `next` set when
@@ -971,7 +1001,7 @@ pub struct OperationDetailDto {
 /// What a successful operation produced, as the history page shows it: a
 /// small typed summary per kind, mapped from the app's engine result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 pub enum OperationResultDto {
     Backup {
         files: u64,
