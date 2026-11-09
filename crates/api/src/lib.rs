@@ -78,6 +78,15 @@ pub enum ErrorCode {
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
+    /// The request names an operation the log has none of. The argument
+    /// `operation` names it.
+    OperationUnknown,
+    /// The request asked to cancel an operation that is not running, so
+    /// there is nothing to stop. The argument `operation` names it.
+    OperationNotRunning,
+    /// A history request's cursor is not an operation's ID. The argument
+    /// `cursor` is what was sent.
+    InvalidCursor,
     /// A request's body is not the JSON the route takes.
     InvalidBody,
     #[serde(other)]
@@ -278,6 +287,16 @@ impl ErrorCode {
             }],
             Self::PlanUnknown => &[ArgSpec {
                 name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::OperationUnknown | Self::OperationNotRunning => &[ArgSpec {
+                name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::InvalidCursor => &[ArgSpec {
+                name: "cursor",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -854,4 +873,258 @@ mod ui_event_tests {
         let wire = serde_json::json!({"type": "operation-paused"});
         assert!(from_value::<UiEvent>(wire).is_err());
     }
+}
+
+/// One operation of the history page, as the daemon tells the web UI: what
+/// a list view needs — ids, the kind and status, the lifecycle times, and
+/// the typed outcome. Times are RFC 3339, UTC.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OperationSummaryDto {
+    /// A UUID, hyphenated.
+    pub id: String,
+    /// The plan the operation belongs to.
+    pub plan: String,
+    /// `backup`, `prune`, `check`, …
+    pub kind: String,
+    /// `queued`, `running`, `succeeded`, `succeeded-with-warnings`,
+    /// `failed`, `cancelled`.
+    pub status: String,
+    pub queued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    /// Every warning the operation recorded, by code, newest last.
+    pub warning_codes: Vec<WarningCode>,
+    /// Set when the operation failed.
+    pub failure_code: Option<ErrorCode>,
+    /// What the engine reported when the operation succeeded.
+    pub result: Option<OperationResultDto>,
+}
+
+/// Why an operation DTO can't be: an ID that isn't a UUID, or a time that
+/// isn't RFC 3339.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidOperation {
+    Id,
+    Time,
+}
+
+impl std::fmt::Display for InvalidOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for InvalidOperation {}
+
+impl OperationSummaryDto {
+    /// Builds the summary, refusing an ID that isn't a hyphenated UUID and
+    /// a time that isn't RFC 3339, like [`SnapshotDto::new`].
+    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
+    pub fn new(
+        id: String,
+        plan: String,
+        kind: String,
+        status: String,
+        queued_at: String,
+        started_at: Option<String>,
+        finished_at: Option<String>,
+        warning_codes: Vec<WarningCode>,
+        failure_code: Option<ErrorCode>,
+        result: Option<OperationResultDto>,
+    ) -> Result<Self, InvalidOperation> {
+        todo!("E2: validate the ID and times, then build the summary")
+    }
+}
+
+/// One page of the operation history: newest first, and `next` set when
+/// older operations remain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OperationsPageDto {
+    pub operations: Vec<OperationSummaryDto>,
+    pub next: Option<String>,
+}
+
+/// One recorded warning of an operation's detail: its typed code and the
+/// free-form fields the engine reported.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OperationWarningDto {
+    pub code: WarningCode,
+    /// The affected item, usually a path.
+    pub item: Option<String>,
+    /// What the engine was doing.
+    pub during: String,
+    /// The engine's own message, verbatim.
+    pub detail: String,
+}
+
+/// One operation's detail: its summary and the warnings it recorded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OperationDetailDto {
+    pub operation: OperationSummaryDto,
+    pub warnings: Vec<OperationWarningDto>,
+}
+
+/// What a successful operation produced, as the history page shows it: a
+/// small typed summary per kind, mapped from the app's engine result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum OperationResultDto {
+    Backup {
+        files: u64,
+        bytes: u64,
+        duration_ms: u64,
+    },
+    Prune {
+        packs_deleted: u64,
+        duration_ms: u64,
+    },
+    Check {
+        errors: u64,
+        warnings: u64,
+        duration_ms: u64,
+    },
+}
+
+#[cfg(test)]
+mod operation_dto_tests {
+    use serde_json::{from_str, to_string};
+
+    use super::{
+        ErrorCode, InvalidOperation, OperationDetailDto, OperationResultDto, OperationSummaryDto,
+        OperationWarningDto, OperationsPageDto, WarningCode,
+    };
+
+    fn summary() -> OperationSummaryDto {
+        OperationSummaryDto::new(
+            "018f0000-0000-7000-8000-000000000001".to_owned(),
+            "home".to_owned(),
+            "backup".to_owned(),
+            "succeeded".to_owned(),
+            "2026-11-09T10:00:00Z".to_owned(),
+            Some("2026-11-09T10:00:01Z".to_owned()),
+            Some("2026-11-09T10:00:02Z".to_owned()),
+            vec![WarningCode::SourceUnreadable],
+            None,
+            Some(OperationResultDto::Backup {
+                files: 3,
+                bytes: 4096,
+                duration_ms: 1000,
+            }),
+        )
+        .unwrap_or_else(|e| panic!("a valid summary: {e:?}"))
+    }
+
+    #[test]
+    fn a_summary_round_trips_through_json() {
+        let dto = summary();
+        let json = to_string(&dto).unwrap();
+        assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), dto);
+        assert!(
+            json.contains("\"queued-at\""),
+            "times are kebab-case on the wire: {json}"
+        );
+    }
+
+    #[test]
+    fn a_summary_refuses_an_id_that_is_not_a_uuid() {
+        let dto = summary();
+        assert_eq!(
+            OperationSummaryDto::new(
+                "nope".to_owned(),
+                dto.plan,
+                dto.kind,
+                dto.status,
+                dto.queued_at,
+                dto.started_at,
+                dto.finished_at,
+                dto.warning_codes,
+                dto.failure_code,
+                dto.result,
+            ),
+            Err(InvalidOperation::Id)
+        );
+    }
+
+    #[test]
+    fn a_summary_refuses_a_time_that_is_not_rfc_3339() {
+        let dto = summary();
+        assert_eq!(
+            OperationSummaryDto::new(
+                dto.id,
+                dto.plan,
+                dto.kind,
+                dto.status,
+                "not a time".to_owned(),
+                dto.started_at,
+                dto.finished_at,
+                dto.warning_codes,
+                dto.failure_code,
+                dto.result,
+            ),
+            Err(InvalidOperation::Time)
+        );
+    }
+
+    #[test]
+    fn a_detail_round_trips_through_json() {
+        let detail = OperationDetailDto {
+            operation: summary(),
+            warnings: vec![OperationWarningDto {
+                code: WarningCode::SourceUnreadable,
+                item: Some("/home/demo/lost".to_owned()),
+                during: "backup".to_owned(),
+                detail: "unreadable".to_owned(),
+            }],
+        };
+        let json = to_string(&detail).unwrap();
+        assert_eq!(from_str::<OperationDetailDto>(&json).unwrap(), detail);
+    }
+
+    #[test]
+    fn a_page_round_trips_through_json() {
+        let page = OperationsPageDto {
+            operations: vec![summary()],
+            next: Some("018f0000-0000-7000-8000-000000000000".to_owned()),
+        };
+        let json = to_string(&page).unwrap();
+        assert_eq!(from_str::<OperationsPageDto>(&json).unwrap(), page);
+    }
+
+    #[test]
+    fn a_result_names_its_kind_on_the_wire() {
+        let results = [
+            OperationResultDto::Backup {
+                files: 3,
+                bytes: 4096,
+                duration_ms: 1000,
+            },
+            OperationResultDto::Prune {
+                packs_deleted: 2,
+                duration_ms: 1000,
+            },
+            OperationResultDto::Check {
+                errors: 0,
+                warnings: 1,
+                duration_ms: 1000,
+            },
+        ];
+        for result in results {
+            let json = to_string(&result).unwrap();
+            assert_eq!(from_str::<OperationResultDto>(&json).unwrap(), result);
+        }
+        assert_eq!(
+            to_string(&OperationResultDto::Backup {
+                files: 3,
+                bytes: 4096,
+                duration_ms: 1000
+            })
+            .unwrap(),
+            r#"{"type":"backup","files":3,"bytes":4096,"duration-ms":1000}"#
+        );
+    }
+
 }

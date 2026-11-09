@@ -43,9 +43,24 @@ impl crate::Operations for NoOperations {
     async fn start_backup(&self, _plan: String) -> Result<String, crate::StartError> {
         Err(crate::StartError::UnknownPlan)
     }
-}
 
-/// A request with the given headers; `Host` comes first when it's there.
+    async fn history(
+        &self,
+        _plan: Option<String>,
+        _after: Option<String>,
+        _limit: Option<u64>,
+    ) -> Result<api::OperationsPageDto, crate::HistoryError> {
+        Err(crate::HistoryError::BadCursor)
+    }
+
+    async fn operation(&self, _id: String) -> Result<api::OperationDetailDto, crate::LookupError> {
+        Err(crate::LookupError::Unknown)
+    }
+
+    async fn cancel(&self, _id: String) -> Result<(), crate::CancelError> {
+        Err(crate::CancelError::Unknown)
+    }
+}
 fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(path);
     for (name, value) in headers {

@@ -64,6 +64,11 @@ impl Events {
         self.daemon.as_ref().expect("Ladderback is serving")
     }
 
+    /// Where the daemon is serving, for the operation-lifecycle steps.
+    pub fn addr(&self) -> SocketAddr {
+        self.daemon().addr
+    }
+
     fn config_dir(agent: &Agent) -> PathBuf {
         agent.scratch().join("events-config")
     }

@@ -387,6 +387,64 @@ impl Operations for PlanRunner {
         });
         Ok(id_text)
     }
+
+    async fn history(
+        &self,
+        plan: Option<String>,
+        after: Option<String>,
+        limit: Option<u64>,
+    ) -> Result<api::OperationsPageDto, http_adapter::HistoryError> {
+        todo!("E2: list the operation log, newest first, keyset by `after`")
+    }
+
+    async fn operation(
+        &self,
+        id: String,
+    ) -> Result<api::OperationDetailDto, http_adapter::LookupError> {
+        todo!("E2: read one operation from the log")
+    }
+
+    async fn cancel(&self, id: String) -> Result<(), http_adapter::CancelError> {
+        todo!("E2: cancel through the registry, or refuse")
+    }
+}
+
+/// The running operations' cancel switches (§4.2): what the API cancels
+/// through. A handle is registered when an operation starts running and
+/// dropped when it ends, so only a running operation can be cancelled, once.
+struct CancelRegistry {
+    running: std::sync::Mutex<HashMap<OperationId, futures::channel::oneshot::Sender<()>>>,
+}
+
+impl CancelRegistry {
+    fn new() -> Self {
+        Self {
+            running: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Registers `id` as running, returning the future its run ends on when
+    /// the API cancels it.
+    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
+    fn register(&self, id: OperationId) -> futures::channel::oneshot::Receiver<()> {
+        todo!("E2: park the sender and hand out its receiver")
+    }
+
+    /// Cancels `id`: `true` when it was running and is now cancelled, `false`
+    /// when nothing by that ID is running, so there is nothing to cancel.
+    /// A second cancel of the same operation is `false`: the one handle is
+    /// spent.
+    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
+    fn cancel(&self, id: &OperationId) -> bool {
+        todo!("E2: fire the operation's one cancel handle, if it has one")
+    }
+
+    /// The operation ended, cancelled or not: its handle, fired or spent, is
+    /// dropped, so a later cancel is a typed refusal.
+    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
+    fn finish(&self, id: &OperationId) {
+        todo!("E2: forget the ended operation")
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +489,26 @@ mod tests {
                 .args
                 .iter()
                 .any(|(name, value)| *name == "found" && *value == text(999_999u64))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_operation_is_cancelled_once() {
+        let registry = CancelRegistry::new();
+        let id = OperationId::from_uuid(Uuid::new_v4());
+        let cancel = registry.register(id);
+        assert!(registry.cancel(&id), "the running operation cancels");
+        let sleep = tokio::time::sleep(std::time::Duration::from_secs(5));
+        tokio::pin!(sleep);
+        tokio::select! {
+            _ = cancel => {}
+            _ = &mut sleep => panic!("cancelling fired the run's cancel future"),
+        }
+        assert!(!registry.cancel(&id), "one handle, one cancel");
+        registry.finish(&id);
+        assert!(
+            !registry.cancel(&id),
+            "a finished operation no longer cancels"
         );
     }
 }
