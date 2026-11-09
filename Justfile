@@ -113,6 +113,9 @@ test-wasm *args:
     # Node reads this as the viewer's zone: not UTC, so a host that read no zone
     # as the viewer's would fail the tests that expect UTC.
     export TZ=America/New_York
+    # With CARGO_TERM_QUIET set, cargo passes `--quiet` on to the test binary,
+    # and wasm-bindgen-test-runner refuses it.
+    unset CARGO_TERM_QUIET
     cargo test --package l10n --package web --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
 
 # The version of wasm-bindgen that Cargo.lock pins.
