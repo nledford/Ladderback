@@ -13,6 +13,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use api::{ErrorCode, MsgArg, WarningCode};
+use domain::planning::masked_options;
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{AgentId, OperationId, PlanId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -116,17 +117,12 @@ impl fmt::Debug for RepositorySpec {
             .field("repository", &repository)
             .field("repo_hot", &repo_hot)
             .field("password", &self.password)
-            .field("options", &masked(&self.options))
-            .field("options_hot", &masked(&self.options_hot))
-            .field("options_cold", &masked(&self.options_cold))
+            .field("options", &masked_options(&self.options))
+            .field("options_hot", &masked_options(&self.options_hot))
+            .field("options_cold", &masked_options(&self.options_cold))
             .field("secrets", &secrets)
             .finish()
     }
-}
-
-/// The names of a set of options, each with its value masked.
-fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&String, &'static str> {
-    options.keys().map(|name| (name, REDACTED)).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
