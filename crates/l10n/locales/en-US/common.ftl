@@ -135,3 +135,15 @@ warning-source-unreadable = { -brand-name } could not read this item, so it was 
 # $detail (text): the sender's own message. It is shown as it came.
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.
     .with-detail = The operation reported a problem that this version of { -brand-name } cannot describe, and went on: { $detail }
+
+# A repository already exists where one was to be initialised, so nothing was written.
+# $location (text): where the repository is.
+error-repository-exists = { -brand-name } did not initialise a repository at { $location }, because one is already there. Connect the existing repository instead.
+
+# The configuration already holds a repository under this alias.
+# $alias (text): the alias the configuration already uses.
+error-repository-alias-taken = { -brand-name } already has a repository called { $alias }. Choose another name.
+
+# A repository's settings hold a secret reference that could not be resolved.
+# $field (text): where in the settings the reference is.
+error-secret-unresolved = { -brand-name } could not read the secret in the repository's { $field }. Check where the secret is kept.

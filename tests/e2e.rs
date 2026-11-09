@@ -33,6 +33,9 @@ mod request_checks_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/repositories.rs"]
+mod repositories_steps;
+
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
 #[derive(World)]
@@ -52,6 +55,7 @@ struct Agent {
     web: request_checks_steps::Web,
     secrets: secrets_steps::SecretsSetup,
     config: config_steps::ConfigSetup,
+    repositories: repositories_steps::RepositoriesSetup,
 }
 
 impl std::fmt::Debug for Agent {
@@ -87,6 +91,7 @@ impl Agent {
             web: request_checks_steps::Web::default(),
             secrets: secrets_steps::SecretsSetup::default(),
             config: config_steps::ConfigSetup::default(),
+            repositories: repositories_steps::RepositoriesSetup::default(),
         }
     }
 

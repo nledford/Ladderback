@@ -2,16 +2,19 @@
 //! `Started` right before the step the deadline counts from, and returns what
 //! `rustic_core` reported, converted by `convert`.
 
+use domain::execution::plan_tags::PlanTags;
 use std::path::PathBuf;
 
-use domain::execution::plan_tags::PlanTags;
 use rustic_core::repofile::SnapshotFile;
-use rustic_core::{BackupOptions, CheckOptions, ParentOptions, PathList, SnapshotOptions};
+use rustic_core::{
+    BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList,
+    SnapshotOptions,
+};
 
 use super::convert::{
     JobError, backup_result, check_result, prune_options, prune_result, snapshot_ref, snapshot_tags,
 };
-use super::repository::{open, repository_id};
+use super::repository::{new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{BackupJobSpec, CheckJobSpec, OpResult, PruneJobSpec, RepositorySpec};
 
@@ -23,6 +26,46 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
     }))
 }
 
+/// Initialises a repository at the location, with default key options and
+/// both halves of a hot/cold repository. It refuses when a repository
+/// already exists there (`repository-exists`), and never overwrites one.
+pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let repository = new_repository(ctx, spec)?;
+    // The deadline counts from here: the backends are open, so this is the
+    // step that can now take its time, as `identify` does.
+    ctx.start(None)?;
+    let repository = repository
+        .init(
+            &Credentials::password(spec.password.expose()),
+            &KeyOptions::default(),
+            &ConfigOptions::default(),
+        )
+        .map_err(|error| repository_exists(*error))?;
+    // A hot/cold repository keeps its config in both halves: `init` wrote
+    // the cold half's, `init_hot` writes the hot half's.
+    if spec.repo_hot.is_some() {
+        repository.init_hot()?;
+    }
+    Ok(Done::Result(OpResult::Repository {
+        id: repository_id(&repository)?,
+    }))
+}
+
+/// The one refusal `init` gives that the agent reports as a code of its own:
+/// a repository already exists at the location (rustic says so when either
+/// half holds a config file), and nothing was written. Every other failure
+/// keeps rustic's words, as `operation-failed`.
+fn repository_exists(error: rustic_core::RusticError) -> JobError {
+    let detail = error.display_log();
+    if detail.contains("Config file already exists") {
+        JobError::Failed {
+            code: api::ErrorCode::RepositoryExists,
+            detail,
+        }
+    } else {
+        JobError::failed(detail)
+    }
+}
 pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobError> {
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;

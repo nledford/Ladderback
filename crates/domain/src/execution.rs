@@ -63,6 +63,9 @@ pub enum FailureReason {
     /// A backup was still running at its deadline and stopped without
     /// writing a snapshot (I3).
     DeadlinePassed,
+    /// A repository already exists where one was to be initialised, so
+    /// nothing was written. The agent refuses to overwrite one.
+    RepositoryExists,
     /// The engine's process didn't start the operation in time, so it never
     /// ran: it didn't read its job, or read it and sent nothing (not even a
     /// log line) before the start timeout, and it was killed.
@@ -129,6 +132,8 @@ pub enum OperationKind {
     /// A scripted job that touches no repository, for tests and diagnostics.
     Fake,
     Identify,
+    /// Initialises a repository where nothing is yet, and reports its ID.
+    Init,
     Backup,
     Prune,
     Check,
@@ -140,7 +145,7 @@ impl OperationKind {
     pub fn is_maintenance(self) -> bool {
         match self {
             Self::Prune | Self::Check => true,
-            Self::Fake | Self::Identify | Self::Backup => false,
+            Self::Fake | Self::Identify | Self::Init | Self::Backup => false,
         }
     }
 }

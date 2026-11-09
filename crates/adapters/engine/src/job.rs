@@ -57,6 +57,9 @@ pub struct JobSpec {
 pub enum JobKind {
     Fake(FakeJobSpec),
     Identify(RepositorySpec),
+    /// Initialises a repository where nothing is yet, with default key
+    /// options. It refuses when one already exists there.
+    Init(RepositorySpec),
     Backup(BackupJobSpec),
     Prune(PruneJobSpec),
     Check(CheckJobSpec),

@@ -987,6 +987,12 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
+                // A repository that already exists where one was to be
+                // initialised is the one failure the agent reports as a
+                // code of its own: `InitRepository` refuses with it, and
+                // nothing was written. The worker's `location` argument
+                // says where; the job's spec already does.
+                ErrorCode::RepositoryExists => FailureReason::RepositoryExists,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes
@@ -996,6 +1002,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // claims, in its own words.
                 ErrorCode::OperationFailed
                 | ErrorCode::EngineUnavailable
+                | ErrorCode::RepositoryAliasTaken
+                | ErrorCode::SecretUnresolved
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
@@ -1017,7 +1025,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
 fn repository_id(job: &Job) -> Option<&RepositoryId> {
     match job {
         Job::Fake(_) => None,
-        Job::Identify(access) => access.id.as_ref(),
+        Job::Identify(access) | Job::Init(access) => access.id.as_ref(),
         Job::Backup(job) => job.repository.id.as_ref(),
         Job::Prune(job) => job.repository.id.as_ref(),
         Job::Check(job) => job.repository.id.as_ref(),
@@ -1031,7 +1039,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
 fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
     let access = match job {
         Job::Fake(_) => return Redactor::new(&extra),
-        Job::Identify(access) => access,
+        Job::Identify(access) | Job::Init(access) => access,
         Job::Backup(job) => &job.repository,
         Job::Prune(job) => &job.repository,
         Job::Check(job) => &job.repository,
@@ -1096,6 +1104,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
             deadline_budget,
         }),
         Job::Identify(access) => JobKind::Identify(repository_spec(access)),
+        Job::Init(access) => JobKind::Init(repository_spec(access)),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,

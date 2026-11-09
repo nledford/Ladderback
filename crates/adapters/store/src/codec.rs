@@ -18,6 +18,7 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Fake => "fake",
         OperationKind::Identify => "identify",
+        OperationKind::Init => "init",
         OperationKind::Backup => "backup",
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
@@ -28,6 +29,7 @@ pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
     match text {
         "fake" => Some(OperationKind::Fake),
         "identify" => Some(OperationKind::Identify),
+        "init" => Some(OperationKind::Init),
         "backup" => Some(OperationKind::Backup),
         "prune" => Some(OperationKind::Prune),
         "check" => Some(OperationKind::Check),
@@ -157,6 +159,7 @@ pub(crate) fn encode_failure(
             None,
         ),
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
+        FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
     };
@@ -205,6 +208,7 @@ pub(crate) fn decode_failure(
             transition: transition(&args)?,
         }),
         "deadline-passed" => Ok(FailureReason::DeadlinePassed),
+        "repository-exists" => Ok(FailureReason::RepositoryExists),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         other => Err(bad(
@@ -244,5 +248,42 @@ fn transition(args: &[(String, MsgArg)]) -> Result<Transition, BadColumn> {
             )
         }),
         Some(_) => Err(bad("error_args", "transition is not text")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every kind round-trips: what the log writes for an operation is what
+    /// it reads back, `init` included.
+    #[test]
+    fn every_kind_round_trips() {
+        for kind in [
+            OperationKind::Fake,
+            OperationKind::Identify,
+            OperationKind::Init,
+            OperationKind::Backup,
+            OperationKind::Prune,
+            OperationKind::Check,
+        ] {
+            let text = kind_text(kind);
+            assert_eq!(kind_from_text(text), Some(kind), "{text} reads back");
+        }
+    }
+
+    /// A persisted `repository-exists` failure reads back as the typed
+    /// refusal, both directions of the column spelling.
+    #[test]
+    fn repository_exists_round_trips() {
+        let columns = encode_failure(&FailureReason::RepositoryExists)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "repository-exists");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::RepositoryExists);
     }
 }
