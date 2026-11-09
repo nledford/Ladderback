@@ -10,8 +10,8 @@ use std::time::Duration;
 use app::contract::hooks::HooksHarness;
 use app::ports::HookRunner;
 use app::ports::{HookContext, HookPhase, HookStatus};
- use async_trait::async_trait;
- use domain::planning::{HookEntry, OnFailure};
+use async_trait::async_trait;
+use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use hooks::ProcessHookRunner;
 

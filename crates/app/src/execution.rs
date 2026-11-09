@@ -625,4 +625,42 @@ mod tests {
         );
         assert_eq!(super::outcome_detail(&outcome(HookStatus::Succeeded)), "");
     }
+
+    #[tokio::test]
+    async fn ending_hooks_attach_a_warning_only_when_not_ignored() {
+        use crate::fakes::{FakeHookRunner, Scripted};
+
+        let runner = Arc::new(FakeHookRunner::new());
+        runner.script("after-error", Scripted::fails_with(4));
+        runner.script("after-ignore", Scripted::fails_with(5));
+        runner.script("finally-error", Scripted::fails_with(6));
+        let mut plan = Hooks::default();
+        plan.run_after.push(entry("after-error")); // on-failure error
+        plan.run_after.push(
+            HookEntry::new("after-ignore", ["demo"], OnFailure::Ignore)
+                .expect("the demo hook is valid"),
+        );
+        plan.run_finally.push(entry("finally-error")); // on-failure error
+        let use_case = use_case().with_hooks(
+            runner,
+            HookSetup {
+                agent: Hooks::default(),
+                repository: Hooks::default(),
+                plan,
+                plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
+                repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+            },
+        );
+        let mut run = succeeded_run();
+        use_case.run_ending_hooks(&mut run).await;
+        let warnings = run.operation.warnings();
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|warning| warning.detail.as_str())
+                .collect::<Vec<_>>(),
+            ["4", "6"],
+            "the error hooks of both ending loops warn, the ignored one is silent"
+        );
+    }
 }

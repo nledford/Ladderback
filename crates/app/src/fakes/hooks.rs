@@ -175,12 +175,19 @@ impl FakeHookRunner {
                 truncated: false,
             };
         }
+        // The cut can land inside a multi-byte character; step back the
+        // three bytes that take at most, bounded so a walk that does not
+        // shrink the cut stops instead of spinning, and a cut that is not
+        // on a boundary yields nothing rather than panicking.
         let mut cut = MAX_HOOK_OUTPUT_BYTES;
-        while !redacted.is_char_boundary(cut) {
+        for _ in 0..3 {
+            if redacted.is_char_boundary(cut) {
+                break;
+            }
             cut -= 1;
         }
         HookOutput {
-            text: redacted[..cut].to_owned(),
+            text: redacted.get(..cut).unwrap_or_default().to_owned(),
             truncated: true,
         }
     }
@@ -224,7 +231,7 @@ mod tests {
         );
         let outcome = runner.run(&entry(), &context()).await;
         assert!(outcome.stdout.truncated);
-        assert_eq!(outcome.stdout.text.chars().last(), Some('é'));
+        assert_eq!(outcome.stdout.text.len(), MAX_HOOK_OUTPUT_BYTES - 1);
         assert!(outcome.stdout.text.len() <= MAX_HOOK_OUTPUT_BYTES);
     }
 
