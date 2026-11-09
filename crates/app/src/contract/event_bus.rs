@@ -27,6 +27,7 @@ pub async fn run(harness: &dyn EventBusHarness) {
     a_subscriber_receives_what_was_published_in_order(harness).await;
     every_subscriber_receives_the_same_events(harness).await;
     a_lagging_subscriber_loses_progress_first(harness).await;
+    a_lagging_subscriber_never_gives_up_a_state_change_for_progress(harness).await;
 }
 
 fn operation(suffix: &str) -> String {
@@ -148,5 +149,39 @@ async fn a_lagging_subscriber_loses_progress_first(harness: &dyn EventBusHarness
         kept,
         newest.collect::<Vec<_>>(),
         "the events kept are the newest ones, in order"
+    );
+}
+
+/// A queue full of state changes still takes one more state change (the
+/// oldest leaves) and never takes a progress event at a state change's cost.
+async fn a_lagging_subscriber_never_gives_up_a_state_change_for_progress(
+    harness: &dyn EventBusHarness,
+) {
+    let bus = harness.bus();
+    let mut stalled = bus.subscribe().await;
+
+    // More state changes than one buffer: the newest state change still
+    // arrives, displacing the oldest state change.
+    let operations: Vec<String> = (0..(EVENT_BUFFER + 1))
+        .map(|n| operation(&format!("{n:02}")))
+        .collect();
+    let finishes: Vec<UiEvent> = operations.iter().map(|op| succeeded(op)).collect();
+    publish_all(&bus, &finishes).await;
+    let seen = take(&mut stalled, operations.len()).await;
+    assert_eq!(
+        seen.last(),
+        Some(&finishes[EVENT_BUFFER]),
+        "a state change is never dropped, not even for other state changes"
+    );
+
+    // A progress event arrives while the queue holds nothing but state
+    // changes: it is the progress that goes, not the state changes.
+    publish_all(&bus, &finishes).await;
+    publish_all(&bus, &[progress(&operations[0], 0)]).await;
+    let seen = take(&mut stalled, operations.len()).await;
+    assert_eq!(
+        seen,
+        finishes[1..],
+        "progress is dropped before any state change is"
     );
 }
