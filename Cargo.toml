@@ -127,7 +127,7 @@ wasm-bindgen = "0.2.130"
 wasm-bindgen-test = "0.3.80"
 # The browser APIs `web` reads the page's language from, declares it with, and
 # writes the live regions and focus through.
-web-sys = { version = "0.3.107", features = ["Document", "Element", "HtmlDialogElement", "HtmlElement", "Location", "Navigator", "Node", "Performance", "UrlSearchParams", "Window"] }
+web-sys = { version = "0.3.107", features = ["Document", "Element", "HtmlDialogElement", "HtmlElement", "Location", "Navigator", "Node", "NodeList", "Performance", "UrlSearchParams", "Window"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

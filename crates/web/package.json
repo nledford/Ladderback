@@ -1,0 +1,9 @@
+{
+  "name": "ladderback-web-assets",
+  "private": true,
+  "type": "module",
+  "description": "The build-time assets of Ladderback's web UI: Tailwind's CLI, run by trunk's pre-build hook over tailwind.css. Pinned exactly: newer 4.1.x resolve an optional oxide-wasm32-wasi tarball this npm policy refuses",
+  "devDependencies": {
+    "@tailwindcss/cli": "4.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+/*
+ * Tailwind v4's CSS-first entry (technical design §4.5): theme and utilities
+ * only — no preflight, so style.css stays the base stylesheet — with the
+ * tokens of style.css mapped as Tailwind colors. `@theme inline` inlines each
+ * var() into the utility that uses it, so the built CSS keeps pointing at the
+ * tokens of style.css, the single source of truth, in both color schemes.
+ * The classes are scanned from the Rust sources under src/.
+ */
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@source "./src";
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-focus: var(--focus);
+  --color-surface: var(--surface);
+  --color-badge-loading-fg: var(--badge-loading-fg);
+  --color-badge-loading-bg: var(--badge-loading-bg);
+  --color-badge-empty-fg: var(--badge-empty-fg);
+  --color-badge-empty-bg: var(--badge-empty-bg);
+  --color-badge-error-fg: var(--badge-error-fg);
+  --color-badge-error-bg: var(--badge-error-bg);
+  --color-badge-success-fg: var(--badge-success-fg);
+  --color-badge-success-bg: var(--badge-success-bg);
+}
