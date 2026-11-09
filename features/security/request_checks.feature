@@ -158,7 +158,7 @@ Feature: Request checks
       And the request has the header "Origin: http://localhost:{port}"
       And the request asks to upgrade to a WebSocket
       When the request is sent
-      Then the request isn't refused by a request check
+      Then the WebSocket handshake is accepted
 
   Rule: A mutating request from the UI's page must use Content-Type: application/json
 
