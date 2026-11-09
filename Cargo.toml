@@ -210,6 +210,7 @@ clap.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
 env_logger.workspace = true
+hooks.workspace = true
 log.workspace = true
 platform.workspace = true
 secrets.workspace = true

@@ -14,16 +14,18 @@ use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::ports::{
-    BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EventBus, Job,
-    OperationStore, ProgressEvent, RunningJob,
+    BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
+    EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
+    RunningJob,
 };
+use app::history::{GetOperation, ListOperations};
 use app::secrets::ResolveRepository;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{Trigger, WarningKind};
+use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
@@ -31,6 +33,7 @@ use http_adapter::{AppState, Operations, StartError};
 use l10n::{MessageId, msg};
 use platform::SystemClock;
 use platform::{agent_id, dirs};
+use hooks::ProcessHookRunner;
 use secrets::SystemSecrets;
 use store::SqliteStore;
 use uuid::Uuid;
@@ -101,6 +104,8 @@ async fn app_state_at(
         agent_id,
         engine,
         store,
+        registry: Arc::new(CancelRegistry::new()),
+        hooks: Arc::new(ProcessHookRunner::new()),
     });
     Ok(AppState {
         events: bus,
@@ -171,8 +176,7 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
 /// The engine as the daemon runs it (§4.2): every job's events go to the
 /// event bus as [`UiEvent`]s on their way through, in the order the engine
 /// reported them. The daemon never coalesces: that is the worker's, once
-/// (§4.1). Hooks are not wired around API-started runs yet; they arrive with
-/// the scheduler (E2).
+/// (§4.1).
 struct EventEngine {
     inner: Arc<dyn Engine>,
     bus: Arc<dyn EventBus>,
@@ -341,6 +345,10 @@ struct PlanRunner {
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
     store: Arc<dyn OperationStore>,
+    /// The running operations' cancel switches, shared with the routes.
+    registry: Arc<CancelRegistry>,
+    /// Runs the agent, repository and plan hooks around every run (§6.1).
+    hooks: Arc<dyn HookRunner>,
 }
 
 #[async_trait]
@@ -370,15 +378,38 @@ impl Operations for PlanRunner {
             deadline_budget: backup_budget(None, None),
         });
         let operation = OperationId::from_uuid(Uuid::new_v4());
+        let id_text = operation.as_uuid().hyphenated().to_string();
+        // The cancel switch is parked before the run starts, so a cancel
+        // that arrives the instant the route answers finds it (§4.2). A
+        // cancel that fires only resolves; whether the receiver was still
+        // listening is nobody's business here.
+        let registry = Arc::clone(&self.registry);
+        let cancel = async move {
+            let _ = registry.register(operation).await;
+        };
+        // The agent, repository and plan hooks of §6.1 wrap the run, as the
+        // configuration stands now: a rewrite between runs is picked up.
+        let setup = HookSetup {
+            agent: config.hooks().clone(),
+            repository: config
+                .repository(&plan.repository)
+                .map(|repository| repository.hooks.clone())
+                .unwrap_or_default(),
+            plan: plan.hooks.clone(),
+            plan_id: plan.id.clone(),
+            repository_alias: plan.repository.clone(),
+        };
         let engine = Arc::clone(&self.engine);
         let store = Arc::clone(&self.store);
-        let id_text = operation.as_uuid().hyphenated().to_string();
+        let registry = Arc::clone(&self.registry);
+        let hooks = Arc::clone(&self.hooks);
         tokio::spawn(async move {
             // Nothing waits on the run: it reports through the event bus.
-            // Hooks are not part of an API-started run yet (E2 wires them).
             let finished = RunOperation::new(engine, Arc::new(SystemClock), store)
-                .run(operation, Trigger::Manual, job, futures::future::pending())
+                .with_hooks(hooks, setup)
+                .run(operation, Trigger::Manual, job, cancel)
                 .await;
+            registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",
                 finished.operation.id().as_uuid().hyphenated(),
@@ -394,18 +425,197 @@ impl Operations for PlanRunner {
         after: Option<String>,
         limit: Option<u64>,
     ) -> Result<api::OperationsPageDto, http_adapter::HistoryError> {
-        todo!("E2: list the operation log, newest first, keyset by `after`")
+        let empty = || api::OperationsPageDto {
+            operations: Vec::new(),
+            next: None,
+        };
+        // A filter that names no plan that could exist matches nothing.
+        let plan = match plan.map(PlanId::try_from) {
+            Some(Ok(plan)) => Some(plan),
+            Some(Err(invalid)) => {
+                log::warn!("a plan filter no plan could match: {invalid}");
+                return Ok(empty());
+            }
+            None => None,
+        };
+        let after = match after {
+            Some(cursor) => match cursor.parse::<Uuid>() {
+                Ok(uuid) => Some(OperationId::from_uuid(uuid)),
+                Err(_) => return Err(http_adapter::HistoryError::BadCursor),
+            },
+            None => None,
+        };
+        let limit = limit.map(|asked| usize::try_from(asked).unwrap_or(usize::MAX));
+        let page = match ListOperations::new(Arc::clone(&self.store))
+            .list(plan, after, limit)
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Ok(empty());
+            }
+        };
+        Ok(api::OperationsPageDto {
+            operations: page.operations.iter().filter_map(summary).collect(),
+            next: page.next.map(|id| id.as_uuid().hyphenated().to_string()),
+        })
     }
 
     async fn operation(
         &self,
         id: String,
     ) -> Result<api::OperationDetailDto, http_adapter::LookupError> {
-        todo!("E2: read one operation from the log")
+        let id = operation_of(&id).ok_or(http_adapter::LookupError::Unknown)?;
+        let detail = GetOperation::new(Arc::clone(&self.store))
+            .get(id)
+            .await
+            .map_err(|error| {
+                log::error!("the operation log could not be read: {error}");
+                http_adapter::LookupError::Unknown
+            })?
+            .ok_or(http_adapter::LookupError::Unknown)?;
+        let Some(operation) = summary(&detail.record) else {
+            log::error!(
+                "a stored operation the page cannot show: {}",
+                detail.record.id.as_uuid().hyphenated()
+            );
+            return Err(http_adapter::LookupError::Unknown);
+        };
+        Ok(api::OperationDetailDto {
+            operation,
+            warnings: detail
+                .warnings
+                .iter()
+                .map(|warning| api::OperationWarningDto {
+                    code: warning_code(warning.kind),
+                    item: warning.item.clone(),
+                    during: warning.during.clone(),
+                    detail: warning.detail.clone(),
+                })
+                .collect(),
+        })
     }
 
     async fn cancel(&self, id: String) -> Result<(), http_adapter::CancelError> {
-        todo!("E2: cancel through the registry, or refuse")
+        let Some(id) = operation_of(&id) else {
+            return Err(http_adapter::CancelError::Unknown);
+        };
+        // The log says which of the two refusals this is: unknown, or known
+        // but ended. Only a running operation has a handle to fire (§4.2).
+        let running = match GetOperation::new(Arc::clone(&self.store)).get(id).await {
+            Ok(Some(detail)) => !detail.record.status.is_finished(),
+            Ok(None) => return Err(http_adapter::CancelError::Unknown),
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Err(http_adapter::CancelError::Unknown);
+            }
+        };
+        if running && self.registry.cancel(&id) {
+            Ok(())
+        } else {
+            Err(http_adapter::CancelError::NotRunning)
+        }
+    }
+}
+
+/// An operation's ID as the wire carries it, when the text is one.
+fn operation_of(text: &str) -> Option<OperationId> {
+    text.parse::<Uuid>().ok().map(OperationId::from_uuid)
+}
+
+/// One log record as the history page shows it, or `None` when it holds
+/// something no page could show. The page carries the status; the warning
+/// codes come with the detail, where the kept warnings are.
+fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
+    let failure_code = match &record.status {
+        OperationStatus::Failed { reason } => Some(failure(reason).0),
+        _ => None,
+    };
+    api::OperationSummaryDto::new(
+        record.id.as_uuid().hyphenated().to_string(),
+        record
+            .target
+            .plan
+            .as_ref()
+            .map(|plan| plan.as_str().to_owned())
+            .unwrap_or_default(),
+        kind_text(record.kind).to_owned(),
+        status_text(&record.status).to_owned(),
+        record.queued_at.to_string(),
+        record.started_at.map(|at| at.to_string()),
+        record.finished_at.map(|at| at.to_string()),
+        Vec::new(),
+        failure_code,
+        record
+            .result
+            .as_ref()
+            .and_then(|result| result_dto(result, record)),
+    )
+    .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
+    .ok()
+}
+
+/// What a successful operation produced, as the page shows it: the small
+/// typed summary of its kind, with the run's duration.
+fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::OperationResultDto> {
+    let duration_ms = record
+        .started_at
+        .zip(record.finished_at)
+        .and_then(|(from, to)| u64::try_from(to.as_millisecond() - from.as_millisecond()).ok())
+        .unwrap_or(0);
+    match result {
+        EngineResult::Backup(backup) => Some(api::OperationResultDto::Backup {
+            files: backup.files_new + backup.files_changed + backup.files_unmodified,
+            bytes: backup.data_added,
+            duration_ms,
+        }),
+        EngineResult::Prune(prune) => Some(api::OperationResultDto::Prune {
+            packs_deleted: prune.packs_deleted,
+            duration_ms,
+        }),
+        EngineResult::Check(check) => Some(api::OperationResultDto::Check {
+            errors: check.errors,
+            warnings: check.warnings,
+            duration_ms,
+        }),
+        EngineResult::Fake { .. }
+        | EngineResult::Repository { .. }
+        | EngineResult::Snapshots(_) => None,
+    }
+}
+
+/// An operation's kind, as the wire names it.
+fn kind_text(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Fake => "fake",
+        OperationKind::Identify => "identify",
+        OperationKind::Init => "init",
+        OperationKind::Backup => "backup",
+        OperationKind::Prune => "prune",
+        OperationKind::Check => "check",
+        OperationKind::Ls => "ls",
+    }
+}
+
+/// An operation's status, as the wire names it.
+fn status_text(status: &OperationStatus) -> &'static str {
+    match status {
+        OperationStatus::Queued => "queued",
+        OperationStatus::Running => "running",
+        OperationStatus::Succeeded => "succeeded",
+        OperationStatus::SucceededWithWarnings => "succeeded-with-warnings",
+        OperationStatus::Failed { .. } => "failed",
+        OperationStatus::Cancelled => "cancelled",
+    }
+}
+
+/// A warning's kind, as the wire names it.
+fn warning_code(kind: WarningKind) -> WarningCode {
+    match kind {
+        WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
+        WarningKind::Hook => WarningCode::HookWarning,
+        WarningKind::Other => WarningCode::Unknown,
     }
 }
 
@@ -423,27 +633,40 @@ impl CancelRegistry {
         }
     }
 
+    /// The map, recovered even from a poisoned lock: the alternative —
+    /// handing out a receiver whose sender is gone — would cancel every
+    /// operation that starts next.
+    fn running(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<OperationId, futures::channel::oneshot::Sender<()>>>
+    {
+        self.running
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Registers `id` as running, returning the future its run ends on when
     /// the API cancels it.
-    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
     fn register(&self, id: OperationId) -> futures::channel::oneshot::Receiver<()> {
-        todo!("E2: park the sender and hand out its receiver")
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        self.running().insert(id, sender);
+        receiver
     }
 
     /// Cancels `id`: `true` when it was running and is now cancelled, `false`
     /// when nothing by that ID is running, so there is nothing to cancel.
     /// A second cancel of the same operation is `false`: the one handle is
     /// spent.
-    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
     fn cancel(&self, id: &OperationId) -> bool {
-        todo!("E2: fire the operation's one cancel handle, if it has one")
+        self.running()
+            .remove(id)
+            .is_some_and(|sender| sender.send(()).is_ok())
     }
 
     /// The operation ended, cancelled or not: its handle, fired or spent, is
     /// dropped, so a later cancel is a typed refusal.
-    #[allow(clippy::todo)] // commit 1 of the operation lifecycle: red first
     fn finish(&self, id: &OperationId) {
-        todo!("E2: forget the ended operation")
+        let _ = self.running().remove(id);
     }
 }
 
