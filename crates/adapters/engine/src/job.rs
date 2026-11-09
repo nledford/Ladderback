@@ -101,24 +101,32 @@ impl RepositorySpec {
 }
 
 /// Everything that can hold a secret is masked: the password, the password
-/// in the repository's URL, every secret the job carries, and the value of
-/// every option (`secret_access_key` and the like). What helps with
-/// diagnosing stays: the rest of the URL and the options' names. The
-/// secrets show as one mask each, so how many there are is visible and what
-/// they are is not.
+/// in the URL of either half, every secret the job carries, and the value of
+/// every option of the three sets (`secret_access_key` and the like). What
+/// helps with diagnosing stays: the rest of the URLs and the options' names.
+/// The secrets show as one mask each, so how many there are is visible and
+/// what they are is not.
 impl fmt::Debug for RepositorySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repository = self.redactor().redact(&self.repository);
-        let options: BTreeMap<&String, &str> =
-            self.options.keys().map(|name| (name, REDACTED)).collect();
+        let redactor = self.redactor();
+        let repository = redactor.redact(&self.repository);
+        let repo_hot = self.repo_hot.as_deref().map(|hot| redactor.redact(hot));
         let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositorySpec")
             .field("repository", &repository)
+            .field("repo_hot", &repo_hot)
             .field("password", &self.password)
-            .field("options", &options)
+            .field("options", &masked(&self.options))
+            .field("options_hot", &masked(&self.options_hot))
+            .field("options_cold", &masked(&self.options_cold))
             .field("secrets", &secrets)
             .finish()
     }
+}
+
+/// The names of a set of options, each with its value masked.
+fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&String, &'static str> {
+    options.keys().map(|name| (name, REDACTED)).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +396,20 @@ mod tests {
             let spec = spec(job);
             assert_eq!(round_trip(&spec), spec);
         }
+    }
+
+    /// A spec without the options of the hot and cold halves is refused, not
+    /// read as one with none: an old daemon's spec says nothing of a hot half,
+    /// and reading it so would open a hot/cold repository as a cold-only one.
+    /// A missing `repo_hot` alone is `None`, as serde reads any optional field.
+    #[test]
+    fn a_spec_without_the_hot_and_cold_fields_is_refused() {
+        let mut json = serde_json::to_value(spec(JobKind::Identify(repository()))).unwrap();
+        let job = json["job"].as_object_mut().unwrap();
+        for field in ["repo_hot", "options_hot", "options_cold"] {
+            assert!(job.remove(field).is_some(), "{field} is not in the spec");
+        }
+        assert!(serde_json::from_value::<JobSpec>(json).is_err());
     }
 
     #[test]

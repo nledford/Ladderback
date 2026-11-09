@@ -1040,11 +1040,11 @@ fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
 fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
     RepositorySpec {
         repository: access.repository,
-        repo_hot: None,
+        repo_hot: access.repo_hot,
         password: access.password,
         options: access.options,
-        options_hot: Default::default(),
-        options_cold: Default::default(),
+        options_hot: access.options_hot,
+        options_cold: access.options_cold,
         secrets: access.secrets,
     }
 }
