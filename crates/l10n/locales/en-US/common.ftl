@@ -86,20 +86,38 @@ error-origin-not-allowed = { -brand-name } refused this request because it came 
 error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header { "Content-Type: application/json" }.
 
 # The configuration file could not be read or written.
+# $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.
-error-config-unavailable = The configuration file could not be read or written.
-    .with-detail = The configuration file could not be read or written: { $detail }
+error-config-unavailable = { -brand-name } could not read or write its configuration file { $file }. Check that the file and its folder exist and that the user { -brand-name } runs as may read and write them, then try again.
+    .with-detail = { -brand-name } could not read or write its configuration file { $file } ({ $detail }). Check that the file and its folder exist and that the user { -brand-name } runs as may read and write them, then try again.
 
-error-config-too-large = The configuration file is too large to be read.
+# The configuration file is larger than any configuration needs, so it was not read.
+# $file (text): the path of the configuration file. It is shown as it is.
+# $limit (bytes): the largest size { -brand-name } reads, as a size such as 1 MiB.
+error-config-too-large = { -brand-name } did not read its configuration file { $file }, because it is larger than { $limit }. A configuration is far smaller, so check that the file is the right one, and cut it down.
 
-# The configuration file is not valid.
+# The configuration file is not a valid configuration.
+# $file (text): the path of the configuration file. It is shown as it is.
+# $line (text): the line of the file where the problem was found. The sender leaves it out when none is known, and the program then supplies the text none.
 # $detail (text): which setting is wrong and why. It is shown as it came, in English.
-error-config-invalid = The configuration file is not valid.
-    .with-detail = The configuration file is not valid: { $detail }
+error-config-invalid = { $line ->
+    [none] { -brand-name } did not accept its configuration file { $file }. Correct the file, then try again.
+   *[other] { -brand-name } did not accept its configuration file { $file }: the problem is at line { $line }. Correct the file, then try again.
+  }
+    .with-detail = { $line ->
+        [none] { -brand-name } did not accept its configuration file { $file } ({ $detail }). Correct the file, then try again.
+       *[other] { -brand-name } did not accept its configuration file { $file } (line { $line }: { $detail }). Correct the file, then try again.
+      }
 
-error-config-schema-missing = The configuration file does not say which version of the format it is in.
+# The configuration file does not say which version of the format it is in.
+# $file (text): the path of the configuration file. It is shown as it is.
+error-config-schema-missing = { -brand-name } did not read its configuration file { $file }, because the file does not say which version of the format it is in. Add the schema version the file was written for, or restore the file from a backup.
 
-error-config-schema-newer = The configuration file is in a newer version of the format than this version of { -brand-name } reads.
+# The configuration file is in a newer version of the format than this build reads.
+# $file (text): the path of the configuration file. It is shown as it is.
+# $found (text): the version of the format the file is in.
+# $supported (text): the newest version of the format this version of { -brand-name } reads.
+error-config-schema-newer = { -brand-name } did not read its configuration file { $file }, because the file is in version { $found } of the format and this version of { -brand-name } reads up to version { $supported }. Update { -brand-name }, or restore an older copy of the file.
 
 # An error this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.
