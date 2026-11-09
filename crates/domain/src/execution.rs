@@ -160,6 +160,8 @@ pub enum OperationKind {
     /// Initialises a repository where nothing is yet, and reports its ID.
     Init,
     Backup,
+    /// Removes the snapshots a forget run's selection named (I6).
+    Forget,
     Prune,
     Check,
     /// Lists a repository's snapshots. A read, not an operation: it never
@@ -172,7 +174,7 @@ impl OperationKind {
     /// Maintenance operations on one repository run one at a time (I7).
     pub fn is_maintenance(self) -> bool {
         match self {
-            Self::Prune | Self::Check => true,
+            Self::Forget | Self::Prune | Self::Check => true,
             Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls => false,
         }
     }

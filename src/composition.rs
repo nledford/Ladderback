@@ -586,6 +586,10 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             warnings: check.warnings,
             duration_ms,
         }),
+        EngineResult::Forget(forget) => Some(api::OperationResultDto::Forget {
+            removed: u64::try_from(forget.removed.len()).unwrap_or(0),
+            duration_ms,
+        }),
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::Snapshots(_) => None,
@@ -599,6 +603,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Identify => "identify",
         OperationKind::Init => "init",
         OperationKind::Backup => "backup",
+        OperationKind::Forget => "forget",
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",

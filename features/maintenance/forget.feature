@@ -1,0 +1,83 @@
+Feature: Forget keeps each plan's history within its policy
+  Forget is the maintenance owner's to run. It applies each plan's retention
+  to that plan's own snapshots and removes only what the policy lets go:
+  untagged history and history another agent's plan holds survive untouched
+  (I6), and a policy that would keep nothing is refused before anything is
+  removed. A repository runs one maintenance operation at a time (I7), and
+  the slot is taken before the engine is started.
+
+  Scenario: Forget removes only what the plan's retention lets go
+    Given a plan "home" keeping the last 2 snapshots
+    And the repository holds 4 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the 2 newest snapshots of the plan "home"
+
+  Scenario: Untagged history survives a forget
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository holds 2 snapshots no plan owns
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the newest snapshot of the plan "home"
+    And the repository still holds the 2 snapshots no plan owns
+
+  Scenario: History another agent's plan holds survives a forget
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository holds 2 snapshots another agent's plan "home" holds
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the newest snapshot of the plan "home"
+    And the repository still holds the 2 snapshots the other agent's plan holds
+
+  Scenario: Each plan keeps its own policy
+    Given a plan "home" keeping the last 2 snapshots
+    And a plan "photos" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository holds 3 snapshots of the plan "photos"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the 2 newest snapshots of the plan "home"
+    And the repository keeps the newest snapshot of the plan "photos"
+
+  Scenario: A policy that keeps nothing is refused
+    Given a plan "home" keeping nothing
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the forget is refused because the plan's policy keeps nothing
+    And the repository still holds the 3 snapshots of the plan "home"
+
+  Scenario: An empty policy keeps everything
+    Given a plan "home" with no policy set
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository still holds the 3 snapshots of the plan "home"
+
+  Scenario: A forget holds the repository's maintenance slot
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository and a prune is asked while it runs
+    Then the forget ends as succeeded
+    And the prune is refused while the forget holds the repository
+
+  Scenario: A refused forget starts no forget
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And a maintenance operation is already running on the repository
+    When the owner forgets the repository
+    Then the forget is refused while the other operation runs
+    And the engine was never asked to remove anything
+
+  @e2e
+  Scenario: A real forget keeps the newest snapshot and the untagged one
+    Given a new repository
+    And a plan "home" keeping the last 1 snapshot
+    And the plan has been backed up 3 times
+    And the source folder was backed up once without Ladderback
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository has 2 snapshots
+    And the remaining snapshot of the plan is the newest of its 3
+    And the snapshot made without Ladderback is still there

@@ -1061,6 +1061,10 @@ pub enum OperationResultDto {
         warnings: u64,
         duration_ms: u64,
     },
+    Forget {
+        removed: u64,
+        duration_ms: u64,
+    },
 }
 
 #[cfg(test)]

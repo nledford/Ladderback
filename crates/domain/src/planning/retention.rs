@@ -161,12 +161,62 @@ impl RetentionPolicy {
         ];
         counts.iter().all(|count| count.is_none()) && spans.iter().all(|span| span.is_none())
     }
+
+    /// Whether the policy is set and would keep nothing: every count is
+    /// `0`, every span is zero-length, and no setting keeps anything. A
+    /// forget run refuses such a policy before it removes anything, for its
+    /// whole group would go (technical design §7.3); the user can delete a
+    /// plan's history explicitly instead. An empty policy keeps everything
+    /// and never keeps nothing.
+    #[allow(
+        clippy::todo,
+        reason = "red test: commit the refusal scenario before the check exists"
+    )]
+    pub fn keeps_nothing(&self) -> bool {
+        let _ = self;
+        todo!("every count zero and every span zero-length")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_policy_of_only_zero_counts_keeps_nothing() {
+        let policy = RetentionPolicy {
+            keep_last: Some(KeepCount::new(0).expect("a count")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.is_empty());
+        assert!(policy.keeps_nothing());
+    }
+
+    #[test]
+    fn a_policy_of_only_a_zero_length_span_keeps_nothing() {
+        let policy = RetentionPolicy {
+            keep_within: Some("0s".parse::<KeepWithin>().expect("a span")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.is_empty());
+        assert!(policy.keeps_nothing());
+    }
+
+    #[test]
+    fn a_keeps_nothing_policy_mixed_with_a_real_setting_keeps_something() {
+        let policy = RetentionPolicy {
+            keep_last: Some(KeepCount::new(0).expect("a count")),
+            keep_daily: Some(KeepCount::new(1).expect("a count")),
+            ..RetentionPolicy::default()
+        };
+        assert!(!policy.keeps_nothing());
+    }
+
+    #[test]
+    fn an_empty_policy_keeps_everything_not_nothing() {
+        assert!(RetentionPolicy::default().is_empty());
+        assert!(!RetentionPolicy::default().keeps_nothing());
+    }
     fn refused(kind: ValueKind, text: &str) -> InvalidValue {
         InvalidValue::new(kind, text)
     }

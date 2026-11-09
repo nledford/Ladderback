@@ -15,6 +15,7 @@
 
 pub mod execution;
 mod ids;
+pub mod maintenance;
 pub mod planning;
 pub mod secrets;
 pub mod snapshot;

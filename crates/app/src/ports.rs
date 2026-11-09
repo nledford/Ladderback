@@ -6,14 +6,15 @@ mod engine;
 mod event_bus;
 mod hooks;
 mod operation_store;
+mod retention;
 mod secrets;
 
 pub use clock::Clock;
 pub use config_store::{ConfigError, ConfigStore, PasswordProblem, Position, Problem};
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
-    EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
-    PruneSummary, RepositoryAccess, RunningJob, SnapshotSummary,
+    EngineResult, FakeEnd, FakeJob, ForgetJob, ForgetSummary, Job, JobControl, ProgressEvent,
+    ProgressKind, PruneJob, PruneSummary, RepositoryAccess, RunningJob, SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{
@@ -24,4 +25,5 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Start, StoreError, maintained_repository,
 };
+pub use retention::{Retention, RetentionError};
 pub use secrets::{Resolved, SecretResolver};
