@@ -162,6 +162,9 @@ pub enum OperationKind {
     Backup,
     /// Removes the snapshots a forget run's selection named (I6).
     Forget,
+    /// Rewrites foreign history with a plan of this agent's tags (§7.3):
+    /// new snapshot files over the same trees, the originals removed.
+    Adopt,
     Prune,
     Check,
     /// Lists a repository's snapshots. A read, not an operation: it never
@@ -174,7 +177,7 @@ impl OperationKind {
     /// Maintenance operations on one repository run one at a time (I7).
     pub fn is_maintenance(self) -> bool {
         match self {
-            Self::Forget | Self::Prune | Self::Check => true,
+            Self::Forget | Self::Adopt | Self::Prune | Self::Check => true,
             Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls => false,
         }
     }

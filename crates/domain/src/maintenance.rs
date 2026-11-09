@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use crate::execution::plan_tags;
-use crate::planning::RetentionPolicy;
+use crate::planning::{Plan, RetentionPolicy};
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
 
 /// One snapshot as the owner sees it: what a listing reports, minus what
@@ -230,6 +230,86 @@ fn grouped_by_unmanaged_key(snapshots: Vec<Snapshot>) -> Vec<UnmanagedGroup> {
         .collect()
 }
 
+/// Why an adoption found nothing to rewrite: the group names no plan of this
+/// agent, or more than one plan matches it and the owner must say which.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdoptionRefusal {
+    /// No plan of this agent matches the group's host, label and sources,
+    /// or the listing holds no such group.
+    NoMatch,
+    /// Every plan named here matches the group, and there is more than one:
+    /// which one the history belongs to is the owner's decision, not a
+    /// rule's, so nothing is written (the adoption half of I6).
+    Ambiguous { plans: Vec<PlanId> },
+}
+
+/// Partitions adoption's input: which group an adoption rewrites, and which
+/// plan of this agent it becomes history of (§7.3, step 3). Nothing is
+/// decided about tags or trees here; the group's own snapshots are the whole
+/// of what may be rewritten.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AdoptSelection;
+
+impl AdoptSelection {
+    /// The orphaned group tagged `(agent, plan)`, as the listing grouped
+    /// it: the history of one owner's one plan, which this configuration no
+    /// longer knows.
+    pub fn orphaned<'a>(
+        partition: &'a Partition,
+        agent: &str,
+        plan: &str,
+    ) -> Option<&'a OrphanedGroup> {
+        partition.orphaned.iter().find(|group| {
+            group.agent.as_deref() == Some(agent) && group.plan.as_deref() == Some(plan)
+        })
+    }
+
+    /// The unmanaged group whose host, label and paths equal `into`'s host,
+    /// label and sources (`into`'s host is `host`'s when the plan doesn't
+    /// name one, and its label an empty one), and every other plan that
+    /// would claim the same group. The paths are compared as written, in
+    /// order: what a listing reports of a plan's own backups is the plan's
+    /// sources, sanitized.
+    pub fn unmanaged<'a>(
+        partition: &'a Partition,
+        hostname: &str,
+        into: &'a Plan,
+        plans: &'a [Plan],
+    ) -> Result<&'a UnmanagedGroup, AdoptionRefusal> {
+        let key = |plan: &Plan| {
+            (
+                plan.host
+                    .as_ref()
+                    .map(|host| host.as_str().to_owned())
+                    .unwrap_or_else(|| hostname.to_owned()),
+                plan.label.clone().unwrap_or_default(),
+                plan.sources
+                    .iter()
+                    .map(|source| source.as_str().to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let mine = key(into);
+        let Some(group) = partition.unmanaged.iter().find(|group| {
+            (group.hostname.as_str(), &group.label, &group.paths) == (&mine.0, &mine.1, &mine.2)
+        }) else {
+            return Err(AdoptionRefusal::NoMatch);
+        };
+        let also: Vec<PlanId> = plans
+            .iter()
+            .filter(|plan| plan.id != into.id && key(plan) == mine)
+            .map(|plan| plan.id.clone())
+            .collect();
+        if also.is_empty() {
+            Ok(group)
+        } else {
+            let mut ambiguous = vec![into.id.clone()];
+            ambiguous.extend(also);
+            Err(AdoptionRefusal::Ambiguous { plans: ambiguous })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +513,97 @@ mod tests {
             ForgetSelection::partition(&[], &agent(), &plans(&[("home", home_policy())]));
         assert_eq!(partition.len(), 0);
         assert!(partition.is_empty());
+    }
+
+    /// A plan whose host, label and sources match the untagged snapshots'
+    /// hostname, label and paths.
+    fn full_plan(id: &str, source: &str) -> Plan {
+        let mut plan = Plan::new(
+            PlanId::parse(id).expect("a plan ID"),
+            crate::RepositoryAlias::parse("demo").expect("an alias"),
+            vec![crate::planning::Source::parse(source).expect("a source")],
+        );
+        plan.host = Some(crate::planning::Hostname::parse("demo-host").expect("a hostname"));
+        plan
+    }
+
+    #[test]
+    fn the_orphaned_group_is_found_by_its_two_tags() {
+        let snapshots = vec![tagged("home", &other_agent(), 1)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let found = AdoptSelection::orphaned(
+            &partition,
+            &other_agent().as_uuid().hyphenated().to_string(),
+            "home",
+        )
+        .expect("the group is there");
+        assert_eq!(found.snapshots.len(), 1);
+        assert!(
+            AdoptSelection::orphaned(
+                &partition,
+                &agent().as_uuid().hyphenated().to_string(),
+                "home"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_group_matches_the_plan_with_the_same_host_label_and_sources() {
+        let snapshots = vec![untagged(1), untagged(2)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let home = full_plan("home", "/home/demo");
+        let plans = vec![home.clone()];
+        let group = AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans)
+            .expect("the plan matches its own history");
+        assert_eq!(group.snapshots.len(), 2);
+    }
+
+    #[test]
+    fn a_plan_whose_sources_differ_matches_nothing() {
+        let snapshots = vec![untagged(1)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let photos = full_plan("photos", "/srv/photos");
+        let plans = vec![photos.clone()];
+        assert_eq!(
+            AdoptSelection::unmanaged(&partition, "demo-host", &photos, &plans),
+            Err(AdoptionRefusal::NoMatch)
+        );
+    }
+
+    #[test]
+    fn two_plans_with_the_same_host_label_and_sources_are_refused_as_ambiguous() {
+        let snapshots = vec![untagged(1)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let home = full_plan("home", "/home/demo");
+        let mirror = full_plan("mirror", "/home/demo");
+        let plans = vec![home.clone(), mirror.clone()];
+        assert_eq!(
+            AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans),
+            Err(AdoptionRefusal::Ambiguous {
+                plans: vec![
+                    PlanId::parse("home").expect("a plan"),
+                    PlanId::parse("mirror").expect("a plan"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn a_plan_without_a_host_of_its_own_uses_the_agents() {
+        let snapshots = vec![untagged(1)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let mut home = full_plan("home", "/home/demo");
+        home.host = None;
+        let plans = vec![home.clone()];
+        assert!(
+            AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans).is_ok(),
+            "the agent's hostname stands in"
+        );
     }
 }

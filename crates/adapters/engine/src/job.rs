@@ -64,6 +64,10 @@ pub enum JobKind {
     /// Removes exactly the snapshots the job names: the selection was made
     /// by the owner before the job ran (I6).
     Forget(ForgetJobSpec),
+    /// Rewrites exactly the snapshots the job names with the tags given:
+    /// new snapshot files over the same trees, the originals removed. The
+    /// selection was made by the owner before the job ran (§7.3, step 3).
+    Rewrite(RewriteJobSpec),
     Prune(PruneJobSpec),
     Check(CheckJobSpec),
     /// Lists the repository's snapshots. A read, never an operation.
@@ -152,6 +156,16 @@ pub struct ForgetJobSpec {
     pub repo: RepositorySpec,
     /// The snapshots to remove, each a hex snapshot ID.
     pub ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewriteJobSpec {
+    pub repo: RepositorySpec,
+    /// The snapshots to rewrite, each a hex snapshot ID.
+    pub ids: Vec<String>,
+    /// The `ladderback-*` tags the rewritten snapshots carry instead of the
+    /// ones they had. The user's own tags stay.
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +292,7 @@ pub enum OpResult {
     },
     Backup(BackupResult),
     Forget(ForgetResult),
+    Rewrite(RewriteResult),
     Prune(PruneResult),
     Check(CheckResult),
     /// A repository's snapshots, newest first.
@@ -324,6 +339,13 @@ pub struct ForgetResult {
     pub repository: RepositoryId,
     /// The snapshots removed, as the job was asked to remove them.
     pub removed: Vec<SnapshotId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewriteResult {
+    pub repository: RepositoryId,
+    /// The snapshots the rewrite created, as new IDs over the same trees.
+    pub created: Vec<SnapshotId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

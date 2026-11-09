@@ -102,6 +102,12 @@ pub enum ErrorCode {
     /// The request asks for a maintenance kind this version doesn't run.
     /// The argument `kind` is what was sent.
     MaintenanceKindUnknown,
+    /// The group an adoption named matches no plan of this agent: nothing
+    /// was written.
+    AdoptionNoMatch,
+    /// More than one plan matches the group an adoption named. The argument
+    /// `plans` names them all.
+    AdoptionAmbiguous,
     #[serde(other)]
     Unknown,
 }
@@ -330,6 +336,12 @@ impl ErrorCode {
             }],
             Self::MaintenanceKindUnknown => &[ArgSpec {
                 name: "kind",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::AdoptionNoMatch => &[],
+            Self::AdoptionAmbiguous => &[ArgSpec {
+                name: "plans",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -1088,6 +1100,11 @@ pub enum OperationResultDto {
     },
     Forget {
         removed: u64,
+        duration_ms: u64,
+    },
+    /// What an adoption produced: the snapshots rewritten.
+    Adopt {
+        rewritten: u64,
         duration_ms: u64,
     },
 }

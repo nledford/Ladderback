@@ -8,13 +8,15 @@ mod hooks;
 mod operation_store;
 mod retention;
 mod secrets;
+mod sources;
 
 pub use clock::Clock;
 pub use config_store::{ConfigError, ConfigStore, PasswordProblem, Position, Problem};
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, ForgetJob, ForgetSummary, Job, JobControl, ProgressEvent,
-    ProgressKind, PruneJob, PruneSummary, RepositoryAccess, RunningJob, SnapshotSummary,
+    ProgressKind, PruneJob, PruneSummary, RepositoryAccess, RewriteJob, RewriteSummary, RunningJob,
+    SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{
@@ -27,3 +29,4 @@ pub use operation_store::{
 };
 pub use retention::{Retention, RetentionError};
 pub use secrets::{Resolved, SecretResolver};
+pub use sources::{NormalizeSources, SourcesError};

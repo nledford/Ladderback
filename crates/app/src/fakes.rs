@@ -9,6 +9,7 @@ mod hooks;
 mod operation_store;
 mod retention;
 mod secrets;
+mod sources;
 
 pub use clock::FakeClock;
 pub use config_store::InMemoryConfigStore;
@@ -18,3 +19,4 @@ pub use hooks::{FakeHookRunner, HookCall, Scripted};
 pub use operation_store::InMemoryOperationStore;
 pub use retention::FakeRetention;
 pub use secrets::{FakeSecrets, Script};
+pub use sources::FakeSources;

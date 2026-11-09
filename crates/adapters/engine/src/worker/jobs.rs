@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
     BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList,
-    SnapshotOptions,
+    SnapshotOptions, StringList,
 };
 
 use super::convert::{
@@ -21,6 +21,7 @@ use crate::job::{
     BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, PruneJobSpec,
     RepositorySpec,
 };
+use crate::job::{RewriteJobSpec, RewriteResult};
 
 pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
@@ -67,6 +68,81 @@ pub(crate) fn forget(ctx: &Context, job: &ForgetJobSpec) -> Result<Done, JobErro
     Ok(Done::Result(OpResult::Forget(ForgetResult {
         repository: repository_id,
         removed,
+    })))
+}
+
+/// Rewrites exactly the snapshots the job names with the tags given (§7.3,
+/// step 3): each becomes a new snapshot file over the same tree, the
+/// originals are removed, and the user's own tags survive. Which snapshots
+/// those are was decided before the job ran, by the owner's own selection.
+pub(crate) fn rewrite(ctx: &Context, job: &RewriteJobSpec) -> Result<Done, JobError> {
+    // Parsed before the repository is opened, so a malformed ID is refused
+    // before anything is touched.
+    let ids: Vec<RusticSnapshotId> = job
+        .ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .parse()
+                .map_err(|_| JobError::failed(format!("not a snapshot ID: {id}")))
+        })
+        .collect::<Result<_, _>>()?;
+    let repository = open(ctx, &job.repo)?;
+    let repository_id = repository_id(&repository)?;
+    ctx.start(None)?;
+    let mut snapshots = repository.get_snapshots(&job.ids)?;
+    if snapshots.len() != ids.len() {
+        return Err(JobError::failed(
+            "a snapshot the selection named is not in the repository",
+        ));
+    }
+    // The tags the rewritten snapshots carry: the user's own tags survive,
+    // every `ladderback-*` tag is replaced by the two the job carries.
+    let joined = job.tags.join(",");
+    let new_tags: StringList = joined.parse().map_err(|_| {
+        JobError::failed("the adoption's tags are not a list the repository can store")
+    })?;
+    for snapshot in &mut snapshots {
+        let user_tags: Vec<String> = snapshot
+            .tags
+            .to_string()
+            .split(',')
+            .filter(|tag| !tag.is_empty() && !tag.starts_with("ladderback-"))
+            .map(str::to_owned)
+            .collect();
+        let mut tags = new_tags.clone();
+        for tag in user_tags {
+            tags.add(tag);
+        }
+        snapshot.tags = tags;
+    }
+    // The originals' IDs are captured before the save: saving resets them,
+    // and they are what the rewrite removes.
+    let original_ids: Vec<RusticSnapshotId> =
+        snapshots.iter().map(|snapshot| snapshot.id).collect();
+    repository.save_snapshots(snapshots)?;
+    repository.delete_snapshots(&original_ids)?;
+    // What the rewrite created: the snapshots that are new to the repository
+    // and carry both tags the job was given.
+    let created = repository
+        .get_all_snapshots()?
+        .iter()
+        .filter(|snapshot| {
+            !original_ids.contains(&snapshot.id)
+                && job.tags.iter().all(|tag| {
+                    snapshot
+                        .tags
+                        .to_string()
+                        .split(',')
+                        .any(|carried| carried == tag)
+                })
+        })
+        .map(|snapshot| snapshot.id)
+        .collect::<Vec<_>>();
+    let created = created.iter().map(snapshot_id).collect::<Result<_, _>>()?;
+    Ok(Done::Result(OpResult::Rewrite(RewriteResult {
+        repository: repository_id,
+        created,
     })))
 }
 

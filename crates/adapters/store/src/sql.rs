@@ -48,7 +48,7 @@ pub(crate) const INSERT_WARNING: &str =
 /// serves the lookup.
 pub(crate) const FIND_RUNNING_MAINTENANCE: &str = concat!(
     "SELECT id FROM operations WHERE repo_uuid = ? AND status = 'running' ",
-    "AND kind IN ('forget', 'prune', 'check') AND id <> ? LIMIT 1"
+    "AND kind IN ('forget', 'adopt', 'prune', 'check') AND id <> ? LIMIT 1"
 );
 
 /// Parameter: the operation's ID.

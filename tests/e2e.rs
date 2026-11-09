@@ -74,7 +74,6 @@ struct Agent {
     repositories: repositories_steps::RepositoriesSetup,
     snapshots: snapshots_steps::SnapshotsSetup,
     forget: forget_steps::ForgetE2e,
-    #[allow(dead_code, reason = "red test: the run fills it next")]
     adopt: adopt_steps::AdoptE2e,
 }
 
@@ -117,7 +116,7 @@ impl Agent {
             repositories: repositories_steps::RepositoriesSetup::default(),
             snapshots: snapshots_steps::SnapshotsSetup::default(),
             forget: forget_steps::ForgetE2e::default(),
-            adopt: adopt_steps::AdoptE2e,
+            adopt: adopt_steps::AdoptE2e::default(),
         }
     }
 

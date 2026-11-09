@@ -47,7 +47,6 @@ struct Agent {
     maintenance: maintenance_steps::MaintenanceWorld,
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
-    adopt: adopt_steps::AdoptWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -82,7 +81,6 @@ impl Agent {
             hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),
             forget: Default::default(),
-            adopt: Default::default(),
         }
     }
 

@@ -37,7 +37,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
 
   Scenario: An unmanaged group no plan matches is refused
     Given a plan "photos" keeping the last 1 snapshot
-    And the repository holds 2 snapshots no plan owns
+    And the repository holds 2 snapshots no plan owns of another folder
     When the owner adopts the unmanaged history into the plan "photos"
     Then the adoption is refused because no plan matches that history
     And the repository still holds the 2 snapshots no plan owns
@@ -46,7 +46,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
   Scenario: Two plans that both match one history are refused
     Given a plan "home" keeping the last 1 snapshot
     And a plan "mirror" keeping the last 1 snapshot that backs up the same sources
-    And the repository holds 2 snapshots no plan owns
+    And the repository holds 2 snapshots no plan owns that match the plan "home"
     When the owner adopts the unmanaged history into the plan "home"
     Then the adoption is refused because two plans match that history
     And the repository still holds the 2 snapshots no plan owns
@@ -61,7 +61,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
 
   Scenario: A refused adoption leaves nothing in the log
     Given a plan "photos" keeping the last 1 snapshot
-    And the repository holds 2 snapshots no plan owns
+    And the repository holds 2 snapshots no plan owns of another folder
     When the owner adopts the unmanaged history into the plan "photos"
     Then the adoption is refused because no plan matches that history
     And the log holds no operation of this adoption

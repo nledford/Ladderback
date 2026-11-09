@@ -62,7 +62,7 @@ fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus>
 
 /// Every snapshot in the repository: its ID, its time and its tags, oldest
 /// first.
-fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
+pub fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
     let mut snapshots: Vec<_> = open(agent)
         .get_all_snapshots()
         .expect("the snapshots load")
@@ -191,6 +191,8 @@ async fn forget(agent: &mut Agent) {
         Arc::new(engine::RusticRetention),
         Arc::new(config),
         agent.agent_id,
+        platform::hostname(),
+        Arc::new(engine::RusticSources),
     );
     agent.runs += 1;
     let operation = OperationId::from_uuid(Uuid::from_u128(agent.runs));

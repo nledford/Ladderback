@@ -7,7 +7,8 @@
 //! `type` is an error.
 
 use app::ports::{
-    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PruneSummary, SnapshotSummary,
+    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PruneSummary, RewriteSummary,
+    SnapshotSummary,
 };
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,10 @@ pub(crate) enum Summary {
     Forget {
         repository: RepositoryId,
         removed: Vec<SnapshotId>,
+    },
+    Rewrite {
+        repository: RepositoryId,
+        created: Vec<SnapshotId>,
     },
     /// A read's result. A listing is never logged as an operation (§9), so
     /// no row ever holds this variant; the format knows it only because
@@ -94,6 +99,10 @@ impl From<&EngineResult> for Summary {
             EngineResult::Forget(summary) => Self::Forget {
                 repository: summary.repository.clone(),
                 removed: summary.removed.clone(),
+            },
+            EngineResult::Rewrite(summary) => Self::Rewrite {
+                repository: summary.repository.clone(),
+                created: summary.created.clone(),
             },
             EngineResult::Check(summary) => Self::Check {
                 repository: summary.repository.clone(),
@@ -160,6 +169,13 @@ impl From<Summary> for EngineResult {
             } => Self::Forget(ForgetSummary {
                 repository,
                 removed,
+            }),
+            Summary::Rewrite {
+                repository,
+                created,
+            } => Self::Rewrite(RewriteSummary {
+                repository,
+                created,
             }),
             Summary::Check {
                 repository,

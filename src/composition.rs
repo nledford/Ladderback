@@ -14,7 +14,7 @@ use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::history::{GetOperation, ListOperations};
-use app::maintenance::{MaintenanceKind, RunMaintenance};
+use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
 use app::ports::Retention;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
@@ -433,15 +433,27 @@ impl Operations for PlanRunner {
     async fn start_maintenance(
         &self,
         repository: String,
-        kind: String,
+        request: http_adapter::MaintenanceRequest,
     ) -> Result<String, http_adapter::MaintenanceStartError> {
         let alias = RepositoryAlias::parse(&repository)
             .map_err(|_| http_adapter::MaintenanceStartError::UnknownRepository)?;
-        let kind = match kind.as_str() {
-            "forget" => MaintenanceKind::Forget,
-            "prune" => MaintenanceKind::Prune,
-            "check" => MaintenanceKind::Check,
-            _ => return Err(http_adapter::MaintenanceStartError::UnknownKind),
+        let kind = match request {
+            http_adapter::MaintenanceRequest::Forget => MaintenanceKind::Forget,
+            http_adapter::MaintenanceRequest::Prune => MaintenanceKind::Prune,
+            http_adapter::MaintenanceRequest::Check => MaintenanceKind::Check,
+            http_adapter::MaintenanceRequest::Adopt { into, from } => {
+                let into = PlanId::parse(&into)
+                    .map_err(|_| http_adapter::MaintenanceStartError::UnknownPlan { plan: into })?;
+                MaintenanceKind::Adopt(Adoption {
+                    from: match from {
+                        http_adapter::AdoptionFrom::Orphaned { agent, plan } => {
+                            AdoptionSource::Orphaned { agent, plan }
+                        }
+                        http_adapter::AdoptionFrom::Unmanaged => AdoptionSource::Unmanaged,
+                    },
+                    into,
+                })
+            }
         };
         let use_case = RunMaintenance::new(
             Arc::clone(&self.engine),
@@ -451,6 +463,8 @@ impl Operations for PlanRunner {
             Arc::clone(&self.retention),
             Arc::clone(&self.config),
             self.agent_id,
+            platform::hostname(),
+            Arc::new(engine::RusticSources),
         );
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
@@ -468,6 +482,19 @@ impl Operations for PlanRunner {
             Err(app::maintenance::MaintenanceError::KeepsNothing { plan }) => {
                 return Err(http_adapter::MaintenanceStartError::KeepsNothing {
                     plan: plan.as_str().to_owned(),
+                });
+            }
+            Err(app::maintenance::MaintenanceError::UnknownPlan { plan }) => {
+                return Err(http_adapter::MaintenanceStartError::UnknownPlan {
+                    plan: plan.as_str().to_owned(),
+                });
+            }
+            Err(app::maintenance::MaintenanceError::AdoptionNoMatch) => {
+                return Err(http_adapter::MaintenanceStartError::AdoptionNoMatch);
+            }
+            Err(app::maintenance::MaintenanceError::AdoptionAmbiguous { plans }) => {
+                return Err(http_adapter::MaintenanceStartError::AdoptionAmbiguous {
+                    plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
                 });
             }
             Err(_) => return Err(http_adapter::MaintenanceStartError::Unavailable),
@@ -655,6 +682,10 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             removed: u64::try_from(forget.removed.len()).unwrap_or(0),
             duration_ms,
         }),
+        EngineResult::Rewrite(rewrite) => Some(api::OperationResultDto::Adopt {
+            rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
+            duration_ms,
+        }),
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::Snapshots(_) => None,
@@ -669,6 +700,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Init => "init",
         OperationKind::Backup => "backup",
         OperationKind::Forget => "forget",
+        OperationKind::Adopt => "adopt",
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
