@@ -128,6 +128,10 @@ error-unknown = An unexpected error occurred.
 # $plan (text): the plan's ID, such as home.
 error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or run a plan that exists.
 
+# The request names a repository the configuration does not have.
+# $alias (text): the repository's alias, such as demo.
+error-repository-unknown = There is no repository { $alias }. Add it to the configuration, or choose a repository that exists.
+
 # A request's body was not the JSON the route takes.
 error-invalid-body = { -brand-name } could not read the request's body. Send the JSON the route takes.
 

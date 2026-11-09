@@ -78,6 +78,9 @@ pub enum ErrorCode {
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
+    /// The configuration holds no repository by that name. The argument
+    /// `alias` names it.
+    RepositoryUnknown,
     /// The request names an operation the log has none of. The argument
     /// `operation` names it.
     OperationUnknown,
@@ -287,6 +290,11 @@ impl ErrorCode {
             }],
             Self::PlanUnknown => &[ArgSpec {
                 name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::RepositoryUnknown => &[ArgSpec {
+                name: "alias",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -978,6 +986,36 @@ pub struct OperationsPageDto {
     pub next: Option<String>,
 }
 
+/// One plan of the plans list, as the daemon tells the web UI: the ID a
+/// start request names, and the repository its backups go to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PlanSummaryDto {
+    pub id: String,
+    pub repository: String,
+}
+
+/// The plans list: what the operations page offers to start.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PlansDto {
+    pub plans: Vec<PlanSummaryDto>,
+}
+
+/// The repositories list, by alias: what the snapshots page offers to show.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoriesDto {
+    pub repositories: Vec<String>,
+}
+
+/// One repository's snapshots, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SnapshotsDto {
+    pub snapshots: Vec<SnapshotDto>,
+}
+
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1183,5 +1221,57 @@ mod operation_dto_tests {
             .unwrap(),
             r#"{"type":"backup","files":3,"bytes":4096,"duration-ms":1000}"#
         );
+    }
+}
+
+#[cfg(test)]
+mod catalog_dto_tests {
+    use serde_json::{from_str, to_string};
+
+    use super::{PlansDto, PlanSummaryDto, RepositoriesDto, SnapshotsDto, SnapshotDto};
+
+    #[test]
+    fn the_catalog_lists_carry_their_own_field_names() {
+        let plans = PlansDto {
+            plans: vec![PlanSummaryDto {
+                id: "demo-home".to_owned(),
+                repository: "demo".to_owned(),
+            }],
+        };
+        assert_eq!(
+            to_string(&plans).unwrap(),
+            r#"{"plans":[{"id":"demo-home","repository":"demo"}]}"#
+        );
+        assert_eq!(from_str::<PlansDto>(&to_string(&plans).unwrap()).unwrap(), plans);
+
+        let repositories = RepositoriesDto {
+            repositories: vec!["demo".to_owned()],
+        };
+        assert_eq!(
+            to_string(&repositories).unwrap(),
+            r#"{"repositories":["demo"]}"#
+        );
+        assert_eq!(
+            from_str::<RepositoriesDto>(&to_string(&repositories).unwrap()).unwrap(),
+            repositories
+        );
+    }
+
+    #[test]
+    fn a_repository_snapshot_list_round_trips() {
+        let snapshot = SnapshotDto::new(
+            "ab".repeat(32),
+            "2026-11-09T10:15:00Z".to_owned(),
+            "demo-host".to_owned(),
+            "home".to_owned(),
+            vec!["ladderback-plan:demo-home".to_owned()],
+            vec!["/home/demo".to_owned()],
+        )
+        .unwrap_or_else(|e| panic!("a valid snapshot: {e:?}"));
+        let list = SnapshotsDto {
+            snapshots: vec![snapshot],
+        };
+        let wire = to_string(&list).unwrap();
+        assert_eq!(from_str::<SnapshotsDto>(&wire).unwrap(), list);
     }
 }
