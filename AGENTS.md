@@ -4,15 +4,7 @@ Guidance for coding agents working on Steading, a self-hosted backup manager for
 
 ## Status
 
-Milestones M0 (skeleton) and M1a (engine) are in place: the workspace and CI checks, the embedded hello UI, and `steading worker` running identify, backup, prune and check through `rustic_core`, with cancellation and the deadline watchdog.
-
-M1b (single-machine MVP, [docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones)) is in progress. In place so far:
-- secret sources, `${…}` substitution and redaction (§10.2);
-- the operation log and history in SQLite;
-- request checks (§10.1);
-- the `l10n` core with the `en-US` catalog and error codes rendered through it (§8.4).
-
-The rest of the M1b row is still to come; follow-up work is tracked as GitHub issues.
+Early development, working through the milestones in [docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones). What has merged is in the git history, and follow-up work is tracked as GitHub issues.
 
 ## Commands
 
@@ -130,17 +122,6 @@ Several agents may work on the repository at once (§13.5). Each one:
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
 
-## Task tracking
-
-The session that steers the work (the main session, which starts the other agents) keeps a task queue in a Markdown file outside the repository: `~/.local/state/steading-scratch/queue.md`.
-
-- **Sections:** Now, Next, Waiting and Done.
-- **Items:** one item is one maintainer decision or one agent run, and every open item says `running` or `blocked-on: <what>`.
-- **When to read it:** at the start of every session and after every context compaction, before acting.
-- **Keeping it in sync with the to-do list:** the session's to-do list mirrors the queue's Now and Next items, with the same wording and order. Update both in the same step whenever a task starts, finishes, is added, is reordered or gets blocked. Waiting and Done items live only in the queue.
-- **Product follow-ups are GitHub issues,** not queue items. The queue links them as `#N`, and the pull request that fixes one says `Closes #N`.
-- **Other agents don't edit the queue.** They report what they finished and what they deferred, and the main session updates it.
-
 ## Conventions
 
 - **Accessibility:** every UI change meets WCAG 2.2 AA through the shared component set (§4.5). axe-core must be clean and the journey must work by keyboard alone. New components need contract tests.
@@ -154,7 +135,7 @@ The session that steers the work (the main session, which starts the other agent
   - Use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`) with an imperative subject and a body explaining why.
   - The atomic commits are for review; the pull request is squash-merged at the end.
 - **Pull requests:** one coherent feature per pull request, off `main`. Pull requests are squash-merged. Don't push, or open, edit or close a pull request, without the maintainer's approval.
-  - Large work may be split into a stack of dependent pull requests with GitHub's stacked pull requests (`gh stack`). Each layer is one reviewable concern and passes every check on its own. A layer that changes behaviour starts with its own failing `test:` commit; run `just red-first <branch below>` for it. A stack merges bottom-up with `gh stack merge`.
+  - Don't stack pull requests unless it's truly unavoidable, meaning a change that can't land in independent pieces off `main`. Then keep the stack to two pull requests, say "stacked on #N" in both titles and the first line of both descriptions, and use GitHub's stacked pull requests (`gh stack`). Each layer passes every check on its own; a layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`). A stack merges bottom-up with `gh stack merge`.
   - The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade.
   - **Hotfixes go through pull requests too.** Nobody pushes to `main` directly; the ruleset allows no direct push. A bad merge is first undone with a revert pull request, then fixed properly. A hotfix is an ordinary pull request with every required check.
   - **Break-glass:** only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
