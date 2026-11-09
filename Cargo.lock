@@ -2394,6 +2394,7 @@ version = "0.0.0"
 dependencies = [
  "api",
  "app",
+ "async-trait",
  "axum",
  "futures",
  "http-body-util",
@@ -2403,6 +2404,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.26.2",
  "tower",
 ]
 

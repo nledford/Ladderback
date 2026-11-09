@@ -5,6 +5,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{AppState, Asset, AssetSource, router};
+use async_trait::async_trait;
 
 /// A build without a web UI: every request that passes the checks reaches
 /// the UI router and gets its answer, never a refusal's JSON.
@@ -30,6 +31,17 @@ async fn send(request: Request<Body>) -> Response {
 fn test_state() -> AppState {
     AppState {
         events: Arc::new(app::fakes::InMemoryEventBus::new()),
+        operations: Arc::new(NoOperations),
+    }
+}
+
+/// Starts nothing: the checks never reach a route.
+struct NoOperations;
+
+#[async_trait]
+impl crate::Operations for NoOperations {
+    async fn start_backup(&self, _plan: String) -> Result<String, crate::StartError> {
+        Err(crate::StartError::UnknownPlan)
     }
 }
 
