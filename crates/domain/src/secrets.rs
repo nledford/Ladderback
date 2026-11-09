@@ -119,25 +119,35 @@ impl Redactor {
 
     /// A redactor for everything that gives access to a repository: its
     /// password; the password in the userinfo of every URL in its repository
-    /// string (`rest:https://…`) and in the value of any option (an
-    /// `endpoint`), which rustic's and OpenDAL's errors quote; the value of
-    /// every option whose name says it holds a credential
+    /// string and its hot repository string (`rest:https://…`) and in the
+    /// value of any option, shared, hot or cold (an `endpoint`), which
+    /// rustic's and OpenDAL's errors quote; the value of every option, in any
+    /// of the three sets, whose name says it holds a credential
     /// ([`is_secret_option`]), even one written inline; and `resolved`, what
     /// the references in its settings were resolved to.
     pub fn for_repository(repository: RepositorySecrets<'_>) -> Self {
         let RepositorySecrets {
             repository,
+            repo_hot,
             password,
             options,
+            options_hot,
+            options_cold,
             resolved,
-            ..
         } = repository;
+        let option_sets = [options, options_hot, options_cold];
         let url_passwords: Vec<SecretValue> = std::iter::once(repository)
-            .chain(options.values().map(String::as_str))
+            .chain(repo_hot)
+            .chain(
+                option_sets
+                    .iter()
+                    .flat_map(|set| set.values().map(String::as_str)),
+            )
             .flat_map(url_passwords)
             .collect();
-        let credentials: Vec<SecretValue> = options
+        let credentials: Vec<SecretValue> = option_sets
             .iter()
+            .flat_map(|set| set.iter())
             .filter(|(name, _)| is_secret_option(name))
             .map(|(_, value)| SecretValue::new(value.as_str()))
             .collect();
