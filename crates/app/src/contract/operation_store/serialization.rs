@@ -206,7 +206,8 @@ async fn other_operations_neither_hold_a_repository_nor_wait_for_one(store: &dyn
 }
 
 async fn a_repository_is_free_again_once_its_operation_has_ended(store: &dyn OperationStore) {
-    let endings: [(&str, fn(Operation) -> Operation); 4] = [
+    type Ending = fn(Operation) -> Operation;
+    let endings: [(&str, Ending); 4] = [
         ("succeeded", succeeded),
         ("succeeded with warnings", succeeded_with_a_warning),
         ("failed", |op| {
