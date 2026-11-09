@@ -12,7 +12,7 @@ use app::fakes::{FakeClock, InMemoryOperationStore};
 use app::ports::{
     Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, HistoryPage, HistoryQuery,
     Job, JobControl, OperationDetail, OperationRecord, OperationStore, ProgressEvent,
-    RepositoryAccess, RunningJob, StoreError,
+    RepositoryAccess, RunningJob, Start, StoreError,
 };
 use async_trait::async_trait;
 use domain::execution::{
@@ -245,6 +245,11 @@ impl OperationStore for Journal {
         self.inner.save(operation, result).await
     }
 
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        self.writes.lock().unwrap().push(operation.status().clone());
+        self.inner.try_start(operation).await
+    }
+
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         self.inner.get(id).await
     }
@@ -289,6 +294,13 @@ impl OperationStore for Flaky {
             return Err(self.error.clone());
         }
         self.inner.save(operation, result).await
+    }
+
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        if self.writes.fetch_add(1, Ordering::SeqCst) < self.refuse {
+            return Err(self.error.clone());
+        }
+        self.inner.try_start(operation).await
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

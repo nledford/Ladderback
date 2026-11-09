@@ -1,3 +1,5 @@
+mod serialization;
+
 use domain::execution::{
     FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
     Target, Transition, Trigger, Warning, WarningKind,
@@ -36,6 +38,7 @@ pub async fn run(store: &dyn OperationStore) {
     a_page_ends_at_its_limit_and_says_whether_more_remain(store, &fx).await;
     a_page_continues_after_any_cursor(store, &fx).await;
     history_can_be_limited_to_one_plan(store, &fx).await;
+    serialization::run(store, &fx).await;
 }
 
 /// IDs the suite can't build without a fallible parse.

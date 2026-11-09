@@ -9,11 +9,11 @@ use app::fakes::InMemoryOperationStore;
 use app::history::{GetOperation, ListOperations};
 use app::ports::{
     EngineResult, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
-    OperationStore, PageSize, StoreError,
+    OperationStore, PageSize, Start, StoreError,
 };
 use async_trait::async_trait;
 use domain::execution::{
-    Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::{OperationId, PlanId, RepositoryId, Timestamp, Uuid};
 
@@ -188,6 +188,10 @@ impl OperationStore for Broken {
         Err(self.0.clone())
     }
 
+    async fn try_start(&self, _: &Operation) -> Result<Start, StoreError> {
+        Err(self.0.clone())
+    }
+
     async fn get(&self, _: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         Err(self.0.clone())
     }
@@ -275,4 +279,97 @@ fn a_record_describes_the_operation_with_its_times_cut_to_the_millisecond() {
     assert_eq!(record.warning_count, 1);
     assert_eq!(record.result, Some(result));
     assert_eq!(OperationRecord::of(&op, None).result, None);
+}
+
+/// An operation of `kind` on `target`, once in each status it can have.
+fn in_every_status(kind: OperationKind, target: &Target) -> Vec<Operation> {
+    let queued = || Operation::queue(id(8), kind, Trigger::Manual, target.clone(), at(0));
+    let running = || {
+        let mut op = queued();
+        op.start(at(1)).unwrap();
+        op
+    };
+    let warning = Warning {
+        kind: WarningKind::Other,
+        item: None,
+        during: "prune".to_owned(),
+        detail: "odd".to_owned(),
+    };
+    let mut succeeded = running();
+    succeeded.succeed(at(2)).unwrap();
+    let mut with_warnings = running();
+    with_warnings.record_warning(warning).unwrap();
+    with_warnings.succeed(at(2)).unwrap();
+    let mut failed = running();
+    failed
+        .fail(FailureReason::EngineExited { exit_code: None }, at(2))
+        .unwrap();
+    let mut cancelled = running();
+    cancelled.cancel(at(2)).unwrap();
+    vec![
+        queued(),
+        running(),
+        succeeded,
+        with_warnings,
+        failed,
+        cancelled,
+    ]
+}
+
+#[test]
+fn a_record_maintains_a_repository_only_while_a_maintenance_operation_is_running_on_it() {
+    let repository = RepositoryId::parse(&"ab".repeat(32)).unwrap();
+    let targets = [
+        (
+            Target {
+                plan: Some(plan("demo-home")),
+                repository: Some(repository.clone()),
+            },
+            true,
+        ),
+        (
+            Target {
+                plan: None,
+                repository: Some(repository.clone()),
+            },
+            true,
+        ),
+        (
+            Target {
+                plan: Some(plan("demo-home")),
+                repository: None,
+            },
+            false,
+        ),
+        (
+            Target {
+                plan: None,
+                repository: None,
+            },
+            false,
+        ),
+    ];
+    let kinds = [
+        (OperationKind::Prune, true),
+        (OperationKind::Check, true),
+        (OperationKind::Backup, false),
+        (OperationKind::Identify, false),
+        (OperationKind::Fake, false),
+    ];
+    for (kind, is_maintenance) in kinds {
+        for (target, names_a_repository) in &targets {
+            for op in in_every_status(kind, target) {
+                let record = OperationRecord::of(&op, None);
+                let holds = is_maintenance
+                    && *names_a_repository
+                    && record.status == OperationStatus::Running;
+                assert_eq!(
+                    record.maintaining(),
+                    holds.then_some(&repository),
+                    "{kind:?} on {target:?} while {:?}",
+                    record.status
+                );
+            }
+        }
+    }
 }

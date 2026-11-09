@@ -137,6 +137,18 @@ fn unreadable(error: &sqlx::Error) -> String {
     }
 }
 
+/// The ID in a row that holds only an `id`, as the running-maintenance lookup
+/// reads it. A row that holds a bad one is [`StoreError::Corrupt`].
+pub(crate) fn operation_id(row: &SqliteRow) -> Result<OperationId, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "an operation".to_owned(),
+    };
+    let id_text = reader.required_text("id")?;
+    reader.scope = format!("operation {}", shown(&id_text));
+    reader.operation_id(&id_text)
+}
+
 /// An operation's row, as history lists it.
 pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
     let mut reader = Reader {
