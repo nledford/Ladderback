@@ -4,13 +4,14 @@
 
 use crate::secrets::CommandLine;
 
-use super::InvalidValue;
+use super::{InvalidValue, ValueKind};
 
 /// What a failing hook does to the operation it runs for, as rustic's
 /// `on-failure` says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OnFailure {
     /// The operation fails (the default).
+    #[default]
     Error,
     /// The operation goes on, and the failure is a warning.
     Warn,
@@ -18,21 +19,30 @@ pub enum OnFailure {
     Ignore,
 }
 
-impl Default for OnFailure {
-    fn default() -> Self {
-        todo!()
-    }
-}
-
 impl OnFailure {
     /// Reads `error`, `warn` or `ignore`, in lower case.
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        match text {
+            "error" => Ok(Self::Error),
+            "warn" => Ok(Self::Warn),
+            "ignore" => Ok(Self::Ignore),
+            _ => Err(InvalidValue::new(ValueKind::OnFailure, text)),
+        }
     }
 
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Ignore => "ignore",
+        }
     }
+}
+
+/// What a refused command reports: its kind and none of its text, since a
+/// command line may hold a secret (`curl -u demo:hunter2`).
+fn no_command() -> InvalidValue {
+    InvalidValue::new(ValueKind::HookCommand, "")
 }
 
 /// One command to run, and what its failure means.
@@ -49,19 +59,27 @@ impl HookEntry {
     /// An entry written as one string: split into words the way a POSIX
     /// shell splits them, as rustic does, and run without a shell. A failure
     /// is an error, as for rustic.
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let command = CommandLine::parse(text).map_err(|_| no_command())?;
+        Ok(Self {
+            command,
+            on_failure: OnFailure::default(),
+        })
     }
 
     /// An entry written as a table: the program and each argument are taken
     /// as they are, with nothing split, so a path with a space in it is one
     /// word.
     pub fn new(
-        _program: &str,
-        _args: impl IntoIterator<Item = impl Into<String>>,
-        _on_failure: OnFailure,
+        program: &str,
+        args: impl IntoIterator<Item = impl Into<String>>,
+        on_failure: OnFailure,
     ) -> Result<Self, InvalidValue> {
-        todo!()
+        let command = CommandLine::new(program, args).map_err(|_| no_command())?;
+        Ok(Self {
+            command,
+            on_failure,
+        })
     }
 }
 
@@ -76,14 +94,16 @@ pub struct Hooks {
 
 impl Hooks {
     pub fn is_empty(&self) -> bool {
-        todo!()
+        self.run_before.is_empty()
+            && self.run_after.is_empty()
+            && self.run_failed.is_empty()
+            && self.run_finally.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::ValueKind;
 
     /// What a refused command reports: its kind, and none of its text.
     fn no_command() -> InvalidValue {
@@ -177,7 +197,8 @@ mod tests {
     #[test]
     fn hooks_with_a_command_in_any_list_are_not_empty() {
         let one = vec![entry("true")];
-        let lists: [(&str, fn(&mut Hooks, Vec<HookEntry>)); 4] = [
+        type Setter = fn(&mut Hooks, Vec<HookEntry>);
+        let lists: [(&str, Setter); 4] = [
             ("run-before", |h, e| h.run_before = e),
             ("run-after", |h, e| h.run_after = e),
             ("run-failed", |h, e| h.run_failed = e),

@@ -1,9 +1,11 @@
 //! When a plan runs (technical design §5, §6.1): a cron expression, and what
 //! an agent does when the moment has passed or isn't convenient.
 
+use croner::parser::{CronParser, Seconds, Year};
 use jiff::SignedDuration;
 
-use super::InvalidValue;
+use super::duration::within_limits;
+use super::{InvalidValue, ValueKind};
 
 /// The most bytes a cron expression takes. Every value of every field, listed
 /// one by one, fits in 360; the cap bounds what the parser is handed.
@@ -13,16 +15,33 @@ pub const MAX_CRON_BYTES: usize = 512;
 /// (minute, hour, day of month, month, day of week), or one of the nicknames
 /// such as `@daily`. A field for seconds or for a year is refused: a backup
 /// has no use for either, and refusing now leaves them to be allowed later
-/// without breaking a file that was valid.
+/// without breaking a file that was valid. So is an expression that never
+/// fires, such as `0 0 31 2 *`: a plan that can't run is a mistake, and the
+/// scheduler would otherwise search for its next moment in vain.
 ///
 /// Which instants it matches, and in which time zone, is for the scheduler
-/// (§5); this holds only that the expression can be read.
+/// (§5); this holds only that the expression can be read, and fires.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronExpression(String);
 
 impl CronExpression {
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let refused = || InvalidValue::new(ValueKind::Cron, text);
+        if text.len() > MAX_CRON_BYTES {
+            return Err(refused());
+        }
+        let cron = CronParser::builder()
+            .seconds(Seconds::Disallowed)
+            .year(Year::Disallowed)
+            .build()
+            .parse(text)
+            .map_err(|_| refused())?;
+        // A leap year, so that `0 0 29 2 *` has a next moment; the search
+        // gives up at a year of croner's choosing, and that is a refusal.
+        let from = jiff::civil::date(2024, 1, 1).at(0, 0, 0, 0);
+        cron.find_next_occurrence(&from, true)
+            .map(|_| Self(text.to_owned()))
+            .map_err(|_| refused())
     }
 
     pub fn as_str(&self) -> &str {
@@ -43,26 +62,38 @@ pub struct Schedule {
 }
 
 impl Schedule {
-    pub fn new(_cron: CronExpression) -> Self {
-        todo!()
+    pub fn new(cron: CronExpression) -> Self {
+        Self {
+            cron,
+            jitter: None,
+            catch_up: true,
+            on_ac_power: false,
+        }
     }
 
     /// Spreads runs over up to `jitter` after the expression's moment, so
     /// that machines on the same expression don't all start at once. Not below
     /// zero and at most [`MAX_DURATION`](super::MAX_DURATION).
-    pub fn with_jitter(self, _jitter: SignedDuration) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn with_jitter(self, jitter: SignedDuration) -> Result<Self, InvalidValue> {
+        let jitter = within_limits(jitter)?;
+        Ok(Self {
+            jitter: Some(jitter),
+            ..self
+        })
     }
 
     /// Whether a run missed while the agent was off or asleep is made up for
     /// once the agent is back (§5).
-    pub fn with_catch_up(self, _catch_up: bool) -> Self {
-        todo!()
+    pub fn with_catch_up(self, catch_up: bool) -> Self {
+        Self { catch_up, ..self }
     }
 
     /// Whether a run waits for the machine to be on AC power (§5).
-    pub fn with_on_ac_power(self, _on_ac_power: bool) -> Self {
-        todo!()
+    pub fn with_on_ac_power(self, on_ac_power: bool) -> Self {
+        Self {
+            on_ac_power,
+            ..self
+        }
     }
 
     pub fn cron(&self) -> &CronExpression {
@@ -85,7 +116,7 @@ impl Schedule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::{MAX_DURATION, ValueKind};
+    use crate::planning::MAX_DURATION;
 
     fn cron(text: &str) -> CronExpression {
         CronExpression::parse(text).unwrap()

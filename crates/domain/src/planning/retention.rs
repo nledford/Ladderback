@@ -4,14 +4,15 @@
 //! Left out on purpose, because Steading never deletes a snapshot on a rule
 //! it can't tie to a plan (I6): `keep-tags`, `keep-ids`, `keep-none` and
 //! `delete-unchanged`. A policy that sets nothing keeps everything, and no
-//! policy keeps nothing.
+//! policy keeps nothing; a policy of only zero counts, or a zero-length
+//! `keep-within`, is set and keeps nothing (§6.1).
 
 use std::fmt;
 use std::str::FromStr;
 
 use jiff::Span;
 
-use super::InvalidValue;
+use super::{InvalidValue, ValueKind};
 
 /// How many of the newest snapshots of one kind to keep: `-1` keeps all of
 /// them, and `0` or more keeps that many. What rustic's `keep-*` counts take.
@@ -20,8 +21,12 @@ pub struct KeepCount(i32);
 
 impl KeepCount {
     /// Reads a count as the file gives it: `-1`, or `0` up to `i32::MAX`.
-    pub fn new(_count: i64) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn new(count: i64) -> Result<Self, InvalidValue> {
+        i32::try_from(count)
+            .ok()
+            .filter(|count| *count >= -1)
+            .map(Self)
+            .ok_or_else(|| InvalidValue::new(ValueKind::KeepCount, count.to_string()))
     }
 
     /// The count as the file writes it: `-1` for all.
@@ -30,7 +35,7 @@ impl KeepCount {
     }
 
     pub fn is_all(self) -> bool {
-        todo!()
+        self.0 == -1
     }
 }
 
@@ -45,8 +50,12 @@ pub struct KeepWithin(Span);
 
 impl KeepWithin {
     /// Reads a span in `jiff`'s friendly or ISO 8601 form.
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        Span::from_str(text)
+            .ok()
+            .filter(|span| !span.is_negative())
+            .map(Self)
+            .ok_or_else(|| InvalidValue::new(ValueKind::KeepWithin, text))
     }
 
     pub fn span(&self) -> Span {
@@ -55,8 +64,8 @@ impl KeepWithin {
 }
 
 impl PartialEq for KeepWithin {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!()
+    fn eq(&self, other: &Self) -> bool {
+        self.0.fieldwise() == other.0.fieldwise()
     }
 }
 
@@ -64,8 +73,8 @@ impl Eq for KeepWithin {}
 
 /// The compact form `jiff` reads back, such as `1d`, `1w` or `2y`.
 impl fmt::Display for KeepWithin {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:#}", self.0)
     }
 }
 
@@ -106,14 +115,57 @@ impl RetentionPolicy {
     /// Whether nothing is set, which keeps every snapshot: a plan with no
     /// policy is never forgotten from.
     pub fn is_empty(&self) -> bool {
-        todo!()
+        // Every field is named, so that a field added later is a compile
+        // error here until it is counted.
+        let Self {
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+            keep_within,
+            keep_within_minutely,
+            keep_within_hourly,
+            keep_within_daily,
+            keep_within_weekly,
+            keep_within_monthly,
+            keep_within_quarter_yearly,
+            keep_within_half_yearly,
+            keep_within_yearly,
+        } = self;
+        let counts = [
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+        ];
+        let spans = [
+            keep_within,
+            keep_within_minutely,
+            keep_within_hourly,
+            keep_within_daily,
+            keep_within_weekly,
+            keep_within_monthly,
+            keep_within_quarter_yearly,
+            keep_within_half_yearly,
+            keep_within_yearly,
+        ];
+        counts.iter().all(|count| count.is_none()) && spans.iter().all(|span| span.is_none())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::ValueKind;
 
     fn refused(kind: ValueKind, text: &str) -> InvalidValue {
         InvalidValue::new(kind, text)
@@ -201,10 +253,8 @@ mod tests {
     fn a_policy_that_sets_anything_is_not_empty() {
         let count = Some(KeepCount::new(3).unwrap());
         let within = Some(KeepWithin::parse("1 week").unwrap());
-        let setters: [(
-            &str,
-            fn(&mut RetentionPolicy, Option<KeepCount>, Option<KeepWithin>),
-        ); 18] = [
+        type Setter = fn(&mut RetentionPolicy, Option<KeepCount>, Option<KeepWithin>);
+        let setters: [(&str, Setter); 18] = [
             ("keep-last", |p, c, _| p.keep_last = c),
             ("keep-minutely", |p, c, _| p.keep_minutely = c),
             ("keep-hourly", |p, c, _| p.keep_hourly = c),

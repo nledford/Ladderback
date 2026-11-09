@@ -1,41 +1,56 @@
 //! Lengths of time in a configuration, written the way `jiff` reads them:
 //! `5m`, `90 seconds`, `1h 30m` (technical design §6.1).
 
-use jiff::SignedDuration;
+use std::str::FromStr;
 
-use super::InvalidValue;
+use jiff::{SignedDuration, Span, SpanRelativeTo};
 
-/// The longest length of time a configuration may hold: 366 days. A jitter
-/// spreads runs inside a schedule's interval and a retry's back-off is cut at
-/// an hour, so nothing a plan says is longer than a year; a longer one is a
-/// typo, and the arithmetic on instants stays far from their range.
+use super::{InvalidValue, ValueKind};
+
+/// The longest length of time a jitter may be: 366 days. A longer one is a
+/// typo, and the arithmetic on instants stays far from their range. (A retry
+/// back-off is held to an hour, by [`RetryPolicy`](super::RetryPolicy).)
 pub const MAX_DURATION: SignedDuration = SignedDuration::from_hours(366 * 24);
 
 /// Reads a length of time such as a jitter or a retry back-off. Days and
 /// weeks count as 24 hours and seven days; a month or a year has no fixed
 /// length, so it is refused, and so is a time below zero or above
 /// [`MAX_DURATION`].
-pub fn parse_duration(_text: &str) -> Result<SignedDuration, InvalidValue> {
-    todo!()
+pub fn parse_duration(text: &str) -> Result<SignedDuration, InvalidValue> {
+    let refused = || InvalidValue::new(ValueKind::Duration, text);
+    let span = Span::from_str(text).map_err(|_| refused())?;
+    if span.is_negative() {
+        return Err(refused());
+    }
+    let duration = span
+        .to_duration(SpanRelativeTo::days_are_24_hours())
+        .map_err(|_| refused())?;
+    within_limits(duration).map_err(|_| refused())
 }
 
-/// `duration` if it is a length of time a configuration may hold: not below
-/// zero and at most [`MAX_DURATION`]. Whatever builds a jitter or a back-off,
-/// text or code, goes through this.
-pub(crate) fn within_limits(_duration: SignedDuration) -> Result<SignedDuration, InvalidValue> {
-    todo!()
+/// `duration` if it is a length of time a jitter may be: not below zero and
+/// at most [`MAX_DURATION`]. Whatever builds a jitter, text or code, goes
+/// through this.
+pub(crate) fn within_limits(duration: SignedDuration) -> Result<SignedDuration, InvalidValue> {
+    if duration < SignedDuration::ZERO || duration > MAX_DURATION {
+        Err(InvalidValue::new(
+            ValueKind::Duration,
+            format_duration(duration),
+        ))
+    } else {
+        Ok(duration)
+    }
 }
 
 /// The text [`parse_duration`] reads back as `duration`: `jiff`'s compact
 /// form, such as `1h 30m`.
-pub fn format_duration(_duration: SignedDuration) -> String {
-    todo!()
+pub fn format_duration(duration: SignedDuration) -> String {
+    format!("{duration:#}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::ValueKind;
 
     #[test]
     fn a_duration_is_written_the_way_jiff_reads_one() {

@@ -11,7 +11,10 @@ use jiff::SignedDuration;
 use crate::execution::plan_tags::UserTag;
 use crate::{PlanId, RepositoryAlias};
 
-use super::{Hooks, Hostname, InvalidValue, RetentionPolicy, Schedule, Source, SourceFilter};
+use super::{
+    Hooks, Hostname, InvalidValue, RetentionPolicy, Schedule, Source, SourceFilter, ValueKind,
+    format_duration,
+};
 
 /// How a failed backup is tried again (§5): up to `attempts` more times,
 /// waiting `backoff` before the first and doubling the wait each time, to at
@@ -34,11 +37,25 @@ impl RetryPolicy {
     /// run to stop its retries, so the count is what ends them.
     pub const MAX_ATTEMPTS: u32 = 100;
 
-    /// `attempts` is at least 1 and at most `u32::MAX`; `backoff` is at least
+    /// `attempts` is at least 1 and at most
+    /// [`MAX_ATTEMPTS`](Self::MAX_ATTEMPTS); `backoff` is at least
     /// [`MIN_BACKOFF`](Self::MIN_BACKOFF) and at most
-    /// [`MAX_DURATION`](super::MAX_DURATION).
-    pub fn new(_attempts: i64, _backoff: SignedDuration) -> Result<Self, InvalidValue> {
-        todo!()
+    /// [`MAX_BACKOFF`](Self::MAX_BACKOFF).
+    pub fn new(attempts: i64, backoff: SignedDuration) -> Result<Self, InvalidValue> {
+        let counted = u32::try_from(attempts)
+            .ok()
+            .filter(|attempts| (1..=Self::MAX_ATTEMPTS).contains(attempts))
+            .ok_or_else(|| InvalidValue::new(ValueKind::Attempts, attempts.to_string()))?;
+        if !(Self::MIN_BACKOFF..=Self::MAX_BACKOFF).contains(&backoff) {
+            return Err(InvalidValue::new(
+                ValueKind::Duration,
+                format_duration(backoff),
+            ));
+        }
+        Ok(Self {
+            attempts: counted,
+            backoff,
+        })
     }
 
     pub fn attempts(&self) -> u32 {
@@ -100,7 +117,7 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::{MAX_DURATION, ValueKind};
+    use crate::planning::MAX_DURATION;
 
     fn id(text: &str) -> PlanId {
         PlanId::parse(text).unwrap()

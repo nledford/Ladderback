@@ -9,11 +9,11 @@
 
 use std::fmt;
 
-use super::{Hooks, InvalidValue};
+use super::{Hooks, InvalidValue, ValueKind};
 
 /// Which party an agent asks to run forget, prune and check on a repository
 /// (§7.3). The request is not the grant: exactly one owner holds that.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Maintenance {
     /// The hub runs it.
     Hub,
@@ -22,23 +22,27 @@ pub enum Maintenance {
     /// Nobody is asked: the repository is never pruned from here. This is
     /// the default, because a prune is the one operation that deletes data
     /// for good, and an agent that was never told to do it must not.
+    #[default]
     None,
-}
-
-impl Default for Maintenance {
-    fn default() -> Self {
-        todo!()
-    }
 }
 
 impl Maintenance {
     /// Reads `hub`, `local` or `none`, in lower case.
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        match text {
+            "hub" => Ok(Self::Hub),
+            "local" => Ok(Self::Local),
+            "none" => Ok(Self::None),
+            _ => Err(InvalidValue::new(ValueKind::Maintenance, text)),
+        }
     }
 
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Hub => "hub",
+            Self::Local => "local",
+            Self::None => "none",
+        }
     }
 }
 
@@ -55,7 +59,12 @@ pub struct GroupBy {
 impl Default for GroupBy {
     /// Host, label and paths: rustic's own default.
     fn default() -> Self {
-        todo!()
+        Self {
+            host: true,
+            label: true,
+            paths: true,
+            tags: false,
+        }
     }
 }
 
@@ -64,16 +73,46 @@ impl GroupBy {
     /// order, separated by commas. As in rustic, an empty entry is skipped,
     /// so `""` groups by nothing, and a name that is not one of the four is
     /// refused.
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let mut group_by = Self {
+            host: false,
+            label: false,
+            paths: false,
+            tags: false,
+        };
+        for name in text.split(',') {
+            match name {
+                "" => {}
+                "host" => group_by.host = true,
+                "label" => group_by.label = true,
+                "paths" => group_by.paths = true,
+                "tags" => group_by.tags = true,
+                _ => return Err(InvalidValue::new(ValueKind::GroupBy, text)),
+            }
+        }
+        Ok(group_by)
     }
 }
 
 /// The names that are set, in the order `host,label,paths,tags`, joined by
 /// commas: the form [`GroupBy::parse`] reads back.
 impl fmt::Display for GroupBy {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let names = [
+            (self.host, "host"),
+            (self.label, "label"),
+            (self.paths, "paths"),
+            (self.tags, "tags"),
+        ];
+        let mut first = true;
+        for (_, name) in names.into_iter().filter(|(set, _)| *set) {
+            if !first {
+                f.write_str(",")?;
+            }
+            f.write_str(name)?;
+            first = false;
+        }
+        Ok(())
     }
 }
 
@@ -90,7 +129,6 @@ pub struct RepositoryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::ValueKind;
 
     #[test]
     fn a_repository_nobody_was_asked_about_gets_no_maintenance() {
@@ -130,8 +168,11 @@ mod tests {
         assert_eq!(GroupBy::default().to_string(), "host,label,paths");
     }
 
+    /// A name, with the setter of the flag it sets.
+    type Name = (&'static str, fn(&mut GroupBy));
+
     /// The four names, with the flag each one sets.
-    fn names() -> [(&'static str, fn(&mut GroupBy)); 4] {
+    fn names() -> [Name; 4] {
         [
             ("host", |g| g.host = true),
             ("label", |g| g.label = true),

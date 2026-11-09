@@ -5,7 +5,8 @@ use super::{InvalidValue, ValueKind};
 
 /// The most bytes a host name takes: the longest a DNS name can be.
 const MAX_HOSTNAME_BYTES: usize = 255;
-/// The most bytes a path takes: `PATH_MAX` on Linux, and macOS's too.
+/// The most bytes a path takes: Linux's `PATH_MAX`. (macOS's is 1024, so a
+/// longer path can't exist there; the cap is for the file's sake.)
 const MAX_SOURCE_BYTES: usize = 4096;
 /// The most bytes a BCP 47 language tag takes in practice (RFC 5646 §4.6).
 const MAX_LOCALE_BYTES: usize = 35;
@@ -14,14 +15,21 @@ const MAX_SUBTAG_BYTES: usize = 8;
 
 /// The name a machine goes by in its snapshots and on the hub (§7.1): the
 /// agent's own, or a plan's override of it. One to 255 bytes with no control
-/// character; macOS names such as `Nathan's MacBook Pro` have spaces and
+/// character; macOS names such as `Demo's MacBook Pro` have spaces and
 /// apostrophes, so nothing else is refused.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Hostname(String);
 
 impl Hostname {
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let valid = !text.is_empty()
+            && text.len() <= MAX_HOSTNAME_BYTES
+            && !text.chars().any(char::is_control);
+        if valid {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::Hostname, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -39,8 +47,13 @@ impl Hostname {
 pub struct Source(String);
 
 impl Source {
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let valid = text.starts_with('/') && text.len() <= MAX_SOURCE_BYTES && !text.contains('\0');
+        if valid {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::Source, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -57,8 +70,27 @@ impl Source {
 pub struct Locale(String);
 
 impl Locale {
-    pub fn parse(_text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let subtag = |tag: &str, letters_only: bool| {
+            !tag.is_empty()
+                && tag.len() <= MAX_SUBTAG_BYTES
+                && tag.bytes().all(|b| {
+                    if letters_only {
+                        b.is_ascii_alphabetic()
+                    } else {
+                        b.is_ascii_alphanumeric()
+                    }
+                })
+        };
+        let mut subtags = text.split('-');
+        let valid = text.len() <= MAX_LOCALE_BYTES
+            && subtags.next().is_some_and(|first| subtag(first, true))
+            && subtags.all(|rest| subtag(rest, false));
+        if valid {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::Locale, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {

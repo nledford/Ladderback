@@ -123,13 +123,19 @@ fn parse_rustic_id(value: &str, kind: IdKind) -> Result<String, InvalidId> {
 #[serde(try_from = "String", into = "String")]
 pub struct PlanId(String);
 
+/// Whether `value` is a slug: at most 64 bytes of lowercase letters, digits
+/// and hyphens, the first not a hyphen. What a plan's ID and a repository's
+/// alias are made of.
+fn is_slug(value: &str) -> bool {
+    let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    value.len() <= 64
+        && value.bytes().next().is_some_and(slug)
+        && value.bytes().all(|b| slug(b) || b == b'-')
+}
+
 impl PlanId {
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
-        let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
-        let valid = value.len() <= 64
-            && value.bytes().next().is_some_and(slug)
-            && value.bytes().all(|b| slug(b) || b == b'-');
-        if valid {
+        if is_slug(value) {
             Ok(Self(value.to_owned()))
         } else {
             Err(InvalidId {
@@ -167,8 +173,15 @@ impl From<PlanId> for String {
 pub struct RepositoryAlias(String);
 
 impl RepositoryAlias {
-    pub fn parse(_value: &str) -> Result<Self, InvalidId> {
-        todo!()
+    pub fn parse(value: &str) -> Result<Self, InvalidId> {
+        if is_slug(value) {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidId {
+                kind: IdKind::RepositoryAlias,
+                value: value.to_owned(),
+            })
+        }
     }
 
     pub fn as_str(&self) -> &str {

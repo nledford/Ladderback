@@ -2,13 +2,12 @@
 //! settings, the repositories it knows, its plans, and the hooks that wrap
 //! everything. The aggregate of the Planning context.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
-use std::fmt;
 
 use crate::{PlanId, RepositoryAlias};
 
-use super::{Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig};
+use super::{Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, ValueKind};
 
 /// How many operations an agent runs at once: from 1 to
 /// [`MAX`](Self::MAX). The default is 1, so that a laptop does not run two
@@ -20,8 +19,12 @@ pub struct Concurrency(u8);
 impl Concurrency {
     pub const MAX: u8 = 64;
 
-    pub fn new(_value: i64) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn new(value: i64) -> Result<Self, InvalidValue> {
+        u8::try_from(value)
+            .ok()
+            .filter(|count| (1..=Self::MAX).contains(count))
+            .map(Self)
+            .ok_or_else(|| InvalidValue::new(ValueKind::Concurrency, value.to_string()))
     }
 
     pub fn get(self) -> u8 {
@@ -31,7 +34,7 @@ impl Concurrency {
 
 impl Default for Concurrency {
     fn default() -> Self {
-        todo!()
+        Self(1)
     }
 }
 
@@ -44,8 +47,12 @@ pub struct Nice(u8);
 impl Nice {
     pub const MAX: u8 = 19;
 
-    pub fn new(_value: i64) -> Result<Self, InvalidValue> {
-        todo!()
+    pub fn new(value: i64) -> Result<Self, InvalidValue> {
+        u8::try_from(value)
+            .ok()
+            .filter(|nice| *nice <= Self::MAX)
+            .map(Self)
+            .ok_or_else(|| InvalidValue::new(ValueKind::Nice, value.to_string()))
     }
 
     pub fn get(self) -> u8 {
@@ -83,9 +90,9 @@ pub enum Violation {
     NoSources { index: usize, plan: PlanId },
 }
 
-impl fmt::Display for Violation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
+impl std::fmt::Display for Violation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
     }
 }
 
@@ -108,12 +115,39 @@ impl AgentConfig {
     /// not one an earlier plan has, its repository is one of
     /// `repositories`, and it has at least one source.
     pub fn new(
-        _agent: AgentSettings,
-        _hooks: Hooks,
-        _repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
-        _plans: Vec<Plan>,
+        agent: AgentSettings,
+        hooks: Hooks,
+        repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
+        plans: Vec<Plan>,
     ) -> Result<Self, Violation> {
-        todo!()
+        let mut taken = BTreeSet::new();
+        for (index, plan) in plans.iter().enumerate() {
+            if !taken.insert(&plan.id) {
+                return Err(Violation::DuplicatePlan {
+                    index,
+                    plan: plan.id.clone(),
+                });
+            }
+            if !repositories.contains_key(&plan.repository) {
+                return Err(Violation::UnknownRepository {
+                    index,
+                    plan: plan.id.clone(),
+                    repository: plan.repository.clone(),
+                });
+            }
+            if plan.sources.is_empty() {
+                return Err(Violation::NoSources {
+                    index,
+                    plan: plan.id.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            agent,
+            hooks,
+            repositories,
+            plans,
+        })
     }
 
     pub fn agent(&self) -> &AgentSettings {
@@ -147,7 +181,7 @@ impl AgentConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::{GroupBy, Maintenance, Source, ValueKind};
+    use crate::planning::{GroupBy, Maintenance, Source};
 
     fn alias(text: &str) -> RepositoryAlias {
         RepositoryAlias::parse(text).unwrap()
