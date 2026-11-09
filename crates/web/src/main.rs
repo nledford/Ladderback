@@ -18,14 +18,21 @@ use std::sync::Arc;
 
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
+use leptos::wasm_bindgen::JsCast;
 use leptos_router::components::{Route, Router, Routes};
+use leptos_router::hooks::use_location;
 use leptos_router::path;
 
+// Nothing but the gallery announces yet: the first page that does is a later
+// slice's, and until then a build without the gallery leaves these unused.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod announcer;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod formatting;
 #[cfg(feature = "gallery")]
 mod gallery;
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod live;
 mod page;
 mod routes;
 
@@ -49,11 +56,26 @@ fn gallery_page(localizer: Arc<Localizer>) -> AnyView {
     }
 }
 
+/// Watches the router: each path the reader navigates to after the first is
+/// titled (`page::retitle`). The first path is the page load, which
+/// `page::declare` titled. Focus is the page heading's (`routes::PageHeading`).
+#[component]
+fn Arrival(localizer: Arc<Localizer>) -> impl IntoView {
+    let pathname = use_location().pathname;
+    Effect::new(move |previous: Option<()>| {
+        let path = pathname.get();
+        if previous.is_some() {
+            page::retitle(&localizer, &path);
+        }
+    });
+}
+
 #[component]
 fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let not_found = Arc::clone(&localizer);
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
+    let arrival = Arc::clone(&localizer);
     view! {
         // `rel="external"` keeps the router from taking the click: the browser
         // follows the in-page link itself, and focus moves into `<main>`.
@@ -63,6 +85,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         </header>
         <main id="main" tabindex="-1">
             <Router>
+                <Arrival localizer=arrival />
                 <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
                     <Route
                         path=path!("/")
@@ -82,5 +105,15 @@ fn main() {
     console_error_panic_hook::set_once();
     let localizer = Arc::new(page::localizer());
     page::declare(&localizer);
-    leptos::mount::mount_to_body(move || view! { <App localizer=localizer /> });
+    // The app mounts into `#app`, beside the live regions of `index.html`, so
+    // that Leptos never renders over them.
+    let Some(app) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("app"))
+        .and_then(|app| app.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        leptos::logging::error!("index.html has no #app to mount the app into");
+        return;
+    };
+    leptos::mount::mount_to(app, move || view! { <App localizer=localizer /> }).forget();
 }

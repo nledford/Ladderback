@@ -8,13 +8,28 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-use crate::text;
+use crate::{page, text};
+
+/// The `<h1>` of a page, with `tabindex="-1"` so that focus can move to it.
+/// When a reader navigates to the page it takes focus as it is shown
+/// ([`page::focus_on_arrival`]), so the heading is there when focus moves.
+#[component]
+pub(crate) fn PageHeading(children: Children) -> impl IntoView {
+    let heading = NodeRef::<leptos::html::H1>::new();
+    Effect::new(move |_| {
+        if let Some(heading) = heading.get() {
+            page::focus_on_arrival(&heading);
+        }
+    });
+    view! { <h1 node_ref=heading tabindex="-1">{children()}</h1> }
+}
 
 /// The start page, the route `/`.
 #[component]
 pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
+    let heading = text(&localizer, msg::UI_START_HEADING);
     view! {
-        <h1 tabindex="-1">{text(&localizer, msg::UI_START_HEADING)}</h1>
+        <PageHeading>{heading}</PageHeading>
         <p>{text(&localizer, msg::UI_START_BODY)}</p>
     }
 }
@@ -22,8 +37,9 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
 /// What any path nothing serves shows.
 #[component]
 pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
+    let heading = text(&localizer, msg::UI_NOT_FOUND_HEADING);
     view! {
-        <h1 tabindex="-1">{text(&localizer, msg::UI_NOT_FOUND_HEADING)}</h1>
+        <PageHeading>{heading}</PageHeading>
         <p>{text(&localizer, msg::UI_NOT_FOUND_BODY)}</p>
         <p><A href="/">{text(&localizer, msg::UI_NOT_FOUND_LINK)}</A></p>
     }
@@ -33,17 +49,15 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
 /// page's own, in the page's language (technical design §4.5, "Route
 /// changes"). A path with no page is the not-found page, and so is
 /// `/_gallery` in a build without the gallery.
-// Commit 1 of the red-first history: a `todo!()` stub that nothing calls yet.
-// The allowances go with the implementation.
-#[allow(dead_code, clippy::todo)]
 pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
-    let _ = (
-        localizer,
-        path,
-        msg::UI_NOT_FOUND_TITLE,
-        msg::UI_GALLERY_TITLE,
-    );
-    todo!("title")
+    let page = if path == "/" {
+        msg::UI_START_TITLE
+    } else if cfg!(feature = "gallery") && path.strip_suffix('/').unwrap_or(path) == "/_gallery" {
+        msg::UI_GALLERY_TITLE
+    } else {
+        msg::UI_NOT_FOUND_TITLE
+    };
+    text(localizer, page)
 }
 
 #[cfg(test)]
