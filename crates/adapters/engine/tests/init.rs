@@ -76,6 +76,22 @@ async fn initialising_where_a_repository_already_exists_is_refused_and_changes_n
 }
 
 #[tokio::test]
+async fn initialising_where_the_hot_half_holds_a_repository_is_refused_and_changes_nothing() {
+    let scratch = Scratch::new();
+    let location = Location::hot_cold(&scratch.repo_dir(), &scratch.hot_dir());
+    // A repository whose config lives only in the hot half: a local init
+    // into the hot directory, the cold half left empty.
+    off_runtime(|| Location::local(&scratch.hot_dir()).init());
+    let before = contents(&scratch.hot_dir());
+    let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
+    assert!(matches!(
+        failed(&events),
+        domain::execution::FailureReason::RepositoryExists
+    ));
+    assert_eq!(contents(&scratch.hot_dir()), before, "nothing was written");
+}
+
+#[tokio::test]
 async fn a_hot_cold_location_is_initialised_in_both_halves() {
     let scratch = Scratch::new();
     let location = Location::hot_cold(&scratch.repo_dir(), &scratch.hot_dir());
