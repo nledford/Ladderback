@@ -24,7 +24,7 @@ Each agent's plans live in `~/.config/ladderback/config.toml` (Linux) or `~/Libr
 schema = 1                       # config schema version (see below)
 
 [agent]
-hostname = "ogc-mbp-2021"        # defaults to system hostname; must be unique on the hub
+hostname = "demo-laptop"         # defaults to system hostname; must be unique on the hub
 concurrency = 1
 nice = 10
 allow-hub-restore = false        # §10.4
@@ -47,16 +47,16 @@ hooks = { run-before = [], run-after = [], run-failed = [], run-finally = [] }  
 [[plans]]
 id = "home"
 repository = "nas"
-label = "ogc-mbp-2021 home"
+label = "demo-laptop home"
 # host = "..."                   # optional per-plan override of [agent] hostname
-sources = ["/Users/nledford"]
-tags = ["ogc-mbp-2021", "macbookpro", "macbookpro2021", "home"]   # ladderback-* tags are added automatically
+sources = ["/home/demo"]
+tags = ["demo-laptop", "laptop", "home"]   # ladderback-* tags are added automatically
 schedule = { cron = "0 * * * *", jitter = "5m", catch-up = true, on-ac-power = false }
 retry = { attempts = 3, backoff = "10m" }
 git-ignore = true
 exclude-if-present = [".nobackup", "CACHEDIR.TAG"]
 iglobs = ["!.Trash", "!bin", "!node_modules", "!target", "!trash",
-          "!/Users/nledford/Library", "!/Users/nledford/.colima/"]
+          "!/home/demo/Downloads", "!/home/demo/.cache/"]
 hooks = { run-before = [], run-after = [], run-failed = [], run-finally = [] }
 
 [plans.retention]                # = rustic_core::KeepOptions
@@ -105,9 +105,20 @@ Decisions the models make where this document was silent:
 - **Schedule defaults.** No jitter, `catch-up = true`, `on-ac-power = false` (any power source).
 - **An empty `RetentionPolicy` keeps everything.** `RetentionPolicy::is_empty` is true when no setting is set, and a plan without a policy is never forgotten from.
 - **Open question, for the forget slice.** A policy that sets only counts of `0` (`keep-last = 0` and nothing else), or only a zero-length `keep-within` (`"0s"`), is not empty, and keeps nothing: forget would remove every snapshot of the plan. The model accepts it because rustic does, and `0` is a meaningful count beside others. Whether forget should refuse such a policy outright, or run it only after the user's explicit confirmation, is not decided. Either way it must settle that before any snapshot is removed, and I6 bounds the damage to the plan's own snapshots (tagged by it, or adopted or selected by the user). Rustic's own `forget` refuses a policy that sets nothing, so forget must not be asked to run when `is_empty` is true.
-- **`RepositoryConfig` has no backend settings yet.** The repository URL, `password-command`, `options` and the other secret-carrying keys stay with `app::secrets`, whose `RepositorySettings` is being changed by the engine work. They move in with the adapter.
+- **`RepositoryConfig` carries its backend settings.** `RepositorySettings` (the repository string, `repo-hot`, where the password is, and the three option maps) moved from `app::secrets` into `domain::planning`, with its masked `Debug` and `masked_options`; `app::secrets` imports it. Fields and options keep `${VAR}` and `${file:/path}` references exactly as written, to be resolved when a job starts (§10.2).
+- **`ConfigError::Invalid` is typed.** It is `{ file, key, at, problem, detail }`. `problem` is a `Problem` code, never a sentence (§8.4): `NotUtf8`, `Syntax`, `UnknownKey`, `MissingKey`, `WrongType`, `SchemaNotAVersion`, `SchemaTooOld { found, oldest }`, `Migration`, `Value(ValueKind)`, `Id(IdKind)`, `ReservedTag`, `Password(PasswordProblem)`, `Violation(Violation)` and `Unwritable`. `key` is the path of the setting (`plans[1].schedule.cron`) and `at` the line and column, counted from 1, of its value, or of the key for an unknown one; a migrated file has no `at`, because its text is not the user's. `detail` holds only what the parser said: `toml::de::Error::message()`, never its `Display`, which prints the source line, with every quoted text cut out, so `password = 123456789` reports `invalid type: integer, expected a string` and nothing of the number. It is empty when `problem` says it all, and a migration step's own words for `Migration`. Hook commands and passwords are never echoed, not even by `Value(HookCommand)`.
+- **The password sources.** A repository has exactly one of `password`, `password-command`, `password-keyring` (`service/name`), `password-file` (an absolute path, read as rustic reads a password file: its first line) and `password-env`. None or several is `Password(Missing | Several)` at the repository; a relative file, a keyring entry without a `/` and a command that can't be split are refused at their own key. A `${file:…}` password, which reads the whole file, has no key of its own: saving one is `Unwritable`.
+- **Load order.** The syntax; then `schema` alone, so that a file in a newer version is refused for that before anything else in it is read (`SchemaNewer`), a file with none is `SchemaMissing` even if the rest is wrong, and one older than the oldest the build migrates is `SchemaTooOld`; then the migration steps after the file's version, run on a `toml::Table`; then the strict tables, then the domain's types, then `AgentConfig::new`. The first unknown key reported is the first in the file, not the first by name. A file is read up to its cap (1 MiB) plus one byte, so a file that never ends is `TooLarge`; so is a save that would write more.
+- **A table needs what it needs.** A plan has `id`, `repository` and `sources`; a repository has `repository`; a `schedule` has `cron`; a `retry` has both `attempts` and `backoff` (neither has a default); a table hook has `command`. A missing one is `MissingKey`, at the table that lacks it.
+- **Layout of the written file.** `schema` first, then `[agent]`, `[hooks]`, a table for each repository (in alias order) and each plan (in file order) with its `[plans.retention]`. Whatever is at its default isn't written: no `maintenance = "none"`, no default `group-by`, no empty hooks, no `catch-up = true`. Small values (schedule, retry, options, hooks) are inline tables. A hook is its command line as `shell_words` joins it, unless its `on-failure` isn't `error`, and then a table. Comments are not kept when the file is saved. The text is the same for the same configuration. The layout is written by the adapter because `toml`'s serializer moves a list holding tables behind the other keys of its table.
+- **History.** A load that migrates, and every save over an existing file, first keeps the file as it was (even one nobody could read) in `history/` next to it, named `<UTC YYYYMMDDTHHMMSS.mmm>Z-<nn>.toml` after the time of the replacing write, `nn` counting saves in one millisecond, so names sort by time; the 10 newest are kept. Files are 0600 and folders 0700. If the old version can't be kept, nothing is replaced: the load or save fails with `Unavailable`. A save over a file longer than the cap is `TooLarge`, because it can't be kept. A failure to remove an old version doesn't fail the save. The replacement is atomic (a temporary file in the same folder, flushed, then renamed), and one lock serialises every load and save of a store.
+- **A migrated file is written as the current version.** `schema = <current>` and the canonical text, byte for byte what `render` gives for it, so a second load changes nothing. A file in the current version is never rewritten, so a hand-written file keeps its comments and layout until the agent saves.
 
-**Not yet.** The `config` adapter is the next slice (C2): the TOML file, its `deny_unknown_fields` structs and their parity tests, the schema migrations and golden files, the atomic write and the version history, the size cap, and `ConfigStore` over the file with its contract test. The same slice moves `RepositorySettings` into `RepositoryConfig`. The `[hub]` table and the repositories' `prune` and `check` tables are not modelled yet.
+**Built (C2).** The `config` adapter (`crates/adapters/config`, package `config-adapter`, as a registry crate `config` exists): `FileConfigStore` over the file with the contract suite of `ConfigStore`, the strict tables and the parity tests of the four `rustic_core` structs they map onto (and a test that the lists of mapped keys are the keys the tables take), the schema migrations on a `toml::Table` with golden files (`tests/golden/v1.toml`), the atomic write, the history and the size cap. `[hub]` is an unknown key until M4a.
+
+**Not yet.** The adapter is not wired into `main.rs`, so "the daemon refuses to start on a newer schema" holds for the adapter, not yet for the daemon. The repositories' `[prune]` and `[check]` tables are not read (§7.3, item 7), and there are no `timezone`, `every`, overlap or metered keys (M2). The warning for an inline secret and seeding the daemon-wide redactor from the config (security.md §10.2) wait for their consumer. A golden file exists for version 1 only; the first `schema = 2` brings the second.
+
+Known limits of the writer, to settle with the wiring: a save through a symlinked `config.toml` (a dotfile manager's) replaces the link with a regular file, and the history is kept next to the link, not its target; the history's order is its file names', so a clock set back makes the next save drop the newest versions first; the history folder is not flushed after a version is kept in it.
 
 ### 6.2 Importing rustic profiles
 

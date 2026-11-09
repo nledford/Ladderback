@@ -181,7 +181,8 @@ impl AgentConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::{GroupBy, Maintenance, Source};
+    use crate::planning::{GroupBy, Maintenance, RepositorySettings, Source};
+    use crate::secrets::SecretRef;
 
     fn alias(text: &str) -> RepositoryAlias {
         RepositoryAlias::parse(text).unwrap()
@@ -193,6 +194,14 @@ mod tests {
 
     fn repository(maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            settings: RepositorySettings {
+                repository: "/srv/demo-repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
             maintenance,
             group_by: GroupBy::default(),
             hooks: Hooks::default(),

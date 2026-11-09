@@ -1,0 +1,315 @@
+//! From the domain's types to the text of a file. What is left to its
+//! default isn't written, so the file holds what the user chose and a
+//! default that changes later reaches everyone who never set it.
+//!
+//! The layout is a person's: the keys of a table in the order of the struct
+//! that has them, a table for each repository and plan, and the small ones
+//! (schedules, options, hooks) on one line. The serializer of `toml` can't
+//! give that: it moves a list that holds tables behind the other keys of its
+//! table, so the file is laid out here, with `toml` writing each value.
+
+use app::ports::{ConfigError, Problem};
+use domain::planning::{
+    AgentConfig, AgentSettings, GroupBy, HookEntry, Hooks, KeepCount, KeepWithin, Maintenance,
+    Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
+};
+use domain::secrets::{FileRead, SecretRef};
+
+use crate::tables::{
+    AgentTable, FileTable, HookEntryTable, HookValue, HooksTable, PlanTable, Repositories,
+    RepositoryTable, RetentionTable, RetryTable, ScheduleTable,
+};
+
+/// `value` unless it is empty, which isn't written.
+fn some_if_any<T: Clone>(values: &[T]) -> Option<Vec<T>> {
+    (!values.is_empty()).then(|| values.to_vec())
+}
+
+/// The text of `tables`: `schema`, then `[agent]` and `[hooks]`, a table for
+/// each repository, and a table for each plan with its `[plans.retention]`.
+/// `Err` holds what `toml` said when it couldn't write a value.
+pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
+    let toml::Value::Table(root) = inline_value(tables)? else {
+        return Err("the file is not a table".to_owned());
+    };
+    let mut out = String::new();
+    for (key, value) in &root {
+        match (key.as_str(), value) {
+            ("agent" | "hooks", toml::Value::Table(table)) => {
+                section(&mut out, key, false, table, &[])?;
+            }
+            ("repositories", toml::Value::Table(all)) => {
+                for (alias, value) in all {
+                    if let toml::Value::Table(table) = value {
+                        section(
+                            &mut out,
+                            &format!("repositories.{alias}"),
+                            false,
+                            table,
+                            &[],
+                        )?;
+                    }
+                }
+            }
+            ("plans", toml::Value::Array(all)) => {
+                for plan in all {
+                    if let toml::Value::Table(table) = plan {
+                        section(&mut out, "plans", true, table, &["retention"])?;
+                    }
+                }
+            }
+            _ => line(&mut out, key, value)?,
+        }
+    }
+    Ok(out)
+}
+
+/// What `value` serializes to, as a `toml::Value` that keeps the order of its
+/// keys.
+fn inline_value<T: serde::Serialize>(value: &T) -> Result<toml::Value, String> {
+    toml::Value::try_from(value).map_err(|error| error.to_string())
+}
+
+/// A value as `toml` writes it inline: a table is `{ a = 1 }`.
+fn inline(value: &toml::Value) -> Result<String, String> {
+    use serde::Serialize as _;
+    let mut written = String::new();
+    value
+        .serialize(toml::ser::ValueSerializer::new(&mut written))
+        .map_err(|error| error.to_string())?;
+    Ok(written)
+}
+
+/// `key = value` on one line. Every key the writer meets is one of the format's
+/// own, which are bare, and the aliases that head a table are slugs.
+fn line(out: &mut String, key: &str, value: &toml::Value) -> Result<(), String> {
+    out.push_str(key);
+    out.push_str(" = ");
+    out.push_str(&inline(value)?);
+    out.push('\n');
+    Ok(())
+}
+
+/// A table under `[path]`, or `[[path]]` for the next item of an array of
+/// tables, with its keys on lines of their own, and then the `tables` of it
+/// that get a header too, as `[path.name]`.
+fn section(
+    out: &mut String,
+    path: &str,
+    array_item: bool,
+    table: &toml::Table,
+    tables: &[&str],
+) -> Result<(), String> {
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&if array_item {
+        format!("[[{path}]]\n")
+    } else {
+        format!("[{path}]\n")
+    });
+    for (key, value) in table {
+        if !tables.contains(&key.as_str()) {
+            line(out, key, value)?;
+        }
+    }
+    for name in tables {
+        if let Some(toml::Value::Table(sub)) = table.get(*name) {
+            section(out, &format!("{path}.{name}"), false, sub, &[])?;
+        }
+    }
+    Ok(())
+}
+
+/// The tables of `config` as a file in version `schema`, or why it can't be
+/// written: `Err` holds the key of the setting the format can't say.
+pub(crate) fn file(config: &AgentConfig, schema: i64) -> Result<FileTable, String> {
+    let mut repositories = Vec::new();
+    for (alias, repository) in config.repositories() {
+        repositories.push((
+            alias.as_str().to_owned(),
+            repository_table(repository)
+                .map_err(|key| format!("repositories.{}.{key}", alias.as_str()))?,
+        ));
+    }
+    Ok(FileTable {
+        schema: Some(schema),
+        agent: agent(config.agent()),
+        hooks: hooks(config.hooks()),
+        repositories: (!repositories.is_empty()).then_some(Repositories(repositories)),
+        plans: (!config.plans().is_empty()).then(|| config.plans().iter().map(plan).collect()),
+    })
+}
+
+/// The error for a setting the format can't say.
+pub(crate) fn unwritable(file: &str, key: String) -> ConfigError {
+    ConfigError::Invalid {
+        file: file.to_owned(),
+        key: Some(key),
+        at: None,
+        problem: Problem::Unwritable,
+        detail: String::new(),
+    }
+}
+
+fn agent(settings: &AgentSettings) -> Option<AgentTable> {
+    if settings == &AgentSettings::default() {
+        return None;
+    }
+    Some(AgentTable {
+        hostname: settings
+            .hostname
+            .as_ref()
+            .map(|name| name.as_str().to_owned()),
+        concurrency: (settings.concurrency != AgentSettings::default().concurrency)
+            .then(|| i64::from(settings.concurrency.get())),
+        nice: settings.nice.map(|nice| i64::from(nice.get())),
+        allow_hub_restore: settings.allow_hub_restore.then_some(true),
+        locale: settings
+            .locale
+            .as_ref()
+            .map(|locale| locale.as_str().to_owned()),
+    })
+}
+
+fn hooks(hooks: &Hooks) -> Option<HooksTable> {
+    if hooks.is_empty() {
+        return None;
+    }
+    let list =
+        |entries: &[HookEntry]| (!entries.is_empty()).then(|| entries.iter().map(hook).collect());
+    Some(HooksTable {
+        run_before: list(&hooks.run_before),
+        run_after: list(&hooks.run_after),
+        run_failed: list(&hooks.run_failed),
+        run_finally: list(&hooks.run_finally),
+    })
+}
+
+/// A command line as the one string of shell words it reads back from.
+fn words(command: &domain::secrets::CommandLine) -> String {
+    shell_words::join(
+        std::iter::once(command.program()).chain(command.args().iter().map(String::as_str)),
+    )
+}
+
+/// A hook is a string unless it says what to do when it fails.
+fn hook(entry: &HookEntry) -> HookValue {
+    if entry.on_failure == domain::planning::OnFailure::default() {
+        return HookValue::Text(words(&entry.command));
+    }
+    HookValue::Table(HookEntryTable {
+        command: Some(entry.command.program().to_owned()),
+        args: some_if_any(entry.command.args()),
+        on_failure: Some(entry.on_failure.as_str().to_owned()),
+    })
+}
+
+/// The repository's table, or the key of the setting that can't be written.
+fn repository_table(repository: &RepositoryConfig) -> Result<RepositoryTable, &'static str> {
+    let settings = &repository.settings;
+    let mut table = RepositoryTable {
+        repository: Some(settings.repository.clone()),
+        repo_hot: settings.repo_hot.clone(),
+        maintenance: (repository.maintenance != Maintenance::default())
+            .then(|| repository.maintenance.as_str().to_owned()),
+        group_by: (repository.group_by != GroupBy::default())
+            .then(|| repository.group_by.to_string()),
+        options: (!settings.options.is_empty()).then(|| settings.options.clone()),
+        options_hot: (!settings.options_hot.is_empty()).then(|| settings.options_hot.clone()),
+        options_cold: (!settings.options_cold.is_empty()).then(|| settings.options_cold.clone()),
+        hooks: hooks(&repository.hooks),
+        ..RepositoryTable::default()
+    };
+    match &settings.password {
+        SecretRef::Inline(value) => table.password = Some(value.expose().to_owned()),
+        SecretRef::Command(command) => table.password_command = Some(words(command)),
+        SecretRef::Keyring(entry) => table.password_keyring = Some(entry.to_string()),
+        SecretRef::File {
+            path,
+            read: FileRead::FirstLine,
+        } => table.password_file = Some(path.clone()),
+        // `password-file` reads one line: a whole file is what `${file:…}` is for.
+        SecretRef::File {
+            read: FileRead::Whole,
+            ..
+        } => return Err("password"),
+        SecretRef::Env(name) => table.password_env = Some(name.clone()),
+    }
+    Ok(table)
+}
+
+fn plan(plan: &Plan) -> PlanTable {
+    let filter = &plan.filter;
+    PlanTable {
+        id: Some(plan.id.as_str().to_owned()),
+        repository: Some(plan.repository.as_str().to_owned()),
+        host: plan.host.as_ref().map(|host| host.as_str().to_owned()),
+        label: plan.label.clone(),
+        sources: Some(plan.sources.iter().map(|s| s.as_str().to_owned()).collect()),
+        tags: (!plan.tags.is_empty()).then(|| {
+            plan.tags
+                .iter()
+                .map(|tag| tag.as_str().to_owned())
+                .collect()
+        }),
+        globs: some_if_any(&filter.globs),
+        iglobs: some_if_any(&filter.iglobs),
+        glob_files: some_if_any(&filter.glob_files),
+        iglob_files: some_if_any(&filter.iglob_files),
+        git_ignore: filter.git_ignore.then_some(true),
+        no_require_git: filter.no_require_git.then_some(true),
+        custom_ignorefiles: some_if_any(&filter.custom_ignorefiles),
+        exclude_if_present: some_if_any(&filter.exclude_if_present),
+        exclude_if_xattr: some_if_any(&filter.exclude_if_xattr),
+        one_file_system: filter.one_file_system.then_some(true),
+        schedule: plan.schedule.as_ref().map(schedule),
+        retry: plan.retry.as_ref().map(retry),
+        hooks: hooks(&plan.hooks),
+        retention: retention(&plan.retention),
+    }
+}
+
+fn schedule(schedule: &Schedule) -> ScheduleTable {
+    ScheduleTable {
+        cron: Some(schedule.cron().as_str().to_owned()),
+        jitter: schedule.jitter().map(format_duration),
+        catch_up: (!schedule.catch_up()).then_some(false),
+        on_ac_power: schedule.on_ac_power().then_some(true),
+    }
+}
+
+fn retry(retry: &RetryPolicy) -> RetryTable {
+    RetryTable {
+        attempts: Some(i64::from(retry.attempts())),
+        backoff: Some(format_duration(retry.backoff())),
+    }
+}
+
+fn retention(policy: &RetentionPolicy) -> Option<RetentionTable> {
+    if policy.is_empty() {
+        return None;
+    }
+    let count = |count: Option<KeepCount>| count.map(|count| i64::from(count.get()));
+    let within = |within: &Option<KeepWithin>| within.as_ref().map(ToString::to_string);
+    Some(RetentionTable {
+        keep_last: count(policy.keep_last),
+        keep_minutely: count(policy.keep_minutely),
+        keep_hourly: count(policy.keep_hourly),
+        keep_daily: count(policy.keep_daily),
+        keep_weekly: count(policy.keep_weekly),
+        keep_monthly: count(policy.keep_monthly),
+        keep_quarter_yearly: count(policy.keep_quarter_yearly),
+        keep_half_yearly: count(policy.keep_half_yearly),
+        keep_yearly: count(policy.keep_yearly),
+        keep_within: within(&policy.keep_within),
+        keep_within_minutely: within(&policy.keep_within_minutely),
+        keep_within_hourly: within(&policy.keep_within_hourly),
+        keep_within_daily: within(&policy.keep_within_daily),
+        keep_within_weekly: within(&policy.keep_within_weekly),
+        keep_within_monthly: within(&policy.keep_within_monthly),
+        keep_within_quarter_yearly: within(&policy.keep_within_quarter_yearly),
+        keep_within_half_yearly: within(&policy.keep_within_half_yearly),
+        keep_within_yearly: within(&policy.keep_within_yearly),
+    })
+}

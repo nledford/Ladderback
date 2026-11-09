@@ -11,8 +11,10 @@ use cucumber::{given, then, when};
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
     InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
-    RepositoryConfig, RetryPolicy, Schedule, Source, ValueKind, Violation, parse_duration,
+    RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, Source, ValueKind, Violation,
+    parse_duration,
 };
+use domain::secrets::SecretRef;
 use domain::{InvalidId, PlanId, RepositoryAlias, SignedDuration};
 
 use super::Agent;
@@ -214,6 +216,14 @@ fn a_repository(agent: &mut Agent, name: String) {
     agent.config.repositories.insert(
         alias(&name),
         RepositoryConfig {
+            settings: RepositorySettings {
+                repository: "/srv/demo-repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
             maintenance: Maintenance::default(),
             group_by: GroupBy::default(),
             hooks: Hooks::default(),

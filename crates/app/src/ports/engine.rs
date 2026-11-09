@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
+use domain::planning::masked_options;
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use futures::stream::BoxStream;
@@ -175,18 +176,13 @@ impl std::fmt::Debug for RepositoryAccess {
             .field("repository", &repository)
             .field("repo_hot", &repo_hot)
             .field("password", &self.password)
-            .field("options", &masked(&self.options))
-            .field("options_hot", &masked(&self.options_hot))
-            .field("options_cold", &masked(&self.options_cold))
+            .field("options", &masked_options(&self.options))
+            .field("options_hot", &masked_options(&self.options_hot))
+            .field("options_cold", &masked_options(&self.options_cold))
             .field("secrets", &secrets)
             .field("id", &self.id)
             .finish()
     }
-}
-
-/// The names of a set of options, each with its value masked.
-fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&String, &'static str> {
-    options.keys().map(|name| (name, REDACTED)).collect()
 }
 
 /// Back up `sources` as a snapshot of the plan named by `tags`.

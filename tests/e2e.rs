@@ -21,6 +21,9 @@ use store::SqliteStore;
 #[path = "../crates/app/tests/steps/operation.rs"]
 mod operation_steps;
 
+#[path = "steps/config.rs"]
+mod config_steps;
+
 #[path = "steps/backup.rs"]
 mod backup_steps;
 
@@ -48,6 +51,7 @@ struct Agent {
     backup: backup_steps::BackupSetup,
     web: request_checks_steps::Web,
     secrets: secrets_steps::SecretsSetup,
+    config: config_steps::ConfigSetup,
 }
 
 impl std::fmt::Debug for Agent {
@@ -82,6 +86,7 @@ impl Agent {
             backup: backup_steps::BackupSetup::default(),
             web: request_checks_steps::Web::default(),
             secrets: secrets_steps::SecretsSetup::default(),
+            config: config_steps::ConfigSetup::default(),
         }
     }
 

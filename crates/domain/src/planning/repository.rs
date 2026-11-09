@@ -1,15 +1,64 @@
-//! What an agent's config says about one repository, besides where it is and
-//! how to open it (technical design §6.1, §7.3): who is asked to maintain it,
-//! how snapshots without a plan are grouped, and the hooks that wrap every
-//! job on it.
-//!
-//! The repository's location, password source and backend options are not
-//! here yet. They are `RepositorySettings`, which `app::secrets` still owns
-//! (§10.2); they join this type when it moves into `domain`.
+//! What an agent's config says about one repository: where it is and how to
+//! open it (technical design §10.2), who is asked to maintain it (§7.3), how
+//! snapshots without a plan are grouped, and the hooks that wrap every job on
+//! it.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
+use crate::secrets::{REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue};
+
+/// A repository as the configuration describes it: its fields may hold
+/// `${VAR}` and `${file:/path}` references, which are resolved when a job
+/// starts. `password` says where the password is, or is the password.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RepositorySettings {
+    pub repository: String,
+    /// rustic's `repo-hot`: the hot half of a hot/cold repository.
+    pub repo_hot: Option<String>,
+    pub password: SecretRef,
+    pub options: BTreeMap<String, String>,
+    pub options_hot: BTreeMap<String, String>,
+    pub options_cold: BTreeMap<String, String>,
+}
+
+/// An option written in the config can be a secret as it stands, so what the
+/// options hold is masked, and so are the passwords in the repository URLs.
+impl fmt::Debug for RepositorySettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inline = self
+            .password
+            .inline()
+            .cloned()
+            .unwrap_or_else(|| SecretValue::new(""));
+        let redactor = Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &inline,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        });
+        f.debug_struct("RepositorySettings")
+            .field("repository", &redactor.redact(&self.repository))
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
+            .field("password", &self.password)
+            .field("options", &masked_options(&self.options))
+            .field("options_hot", &masked_options(&self.options_hot))
+            .field("options_cold", &masked_options(&self.options_cold))
+            .finish()
+    }
+}
+
+/// The option names with every value hidden: the names help to diagnose.
+pub fn masked_options(options: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
+    options
+        .keys()
+        .map(|name| (name.as_str(), REDACTED))
+        .collect()
+}
 
 /// Which party an agent asks to run forget, prune and check on a repository
 /// (§7.3). The request is not the grant: exactly one owner holds that.
@@ -116,9 +165,11 @@ impl fmt::Display for GroupBy {
     }
 }
 
-/// One repository, as an agent's config describes it besides its location.
+/// One repository, as an agent's config describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepositoryConfig {
+    /// Where it is and how to open it.
+    pub settings: RepositorySettings,
     /// Who is asked to maintain it.
     pub maintenance: Maintenance,
     pub group_by: GroupBy,
@@ -243,5 +294,40 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    fn settings() -> RepositorySettings {
+        RepositorySettings {
+            repository: "rest:http://demo:CANARY-url-password@nas.lan/backups".to_owned(),
+            repo_hot: Some("rest:http://demo:CANARY-hot-password@nas.lan/hot".to_owned()),
+            password: SecretRef::Inline(crate::secrets::SecretValue::new("CANARY-password")),
+            options: BTreeMap::from([("sas_token".to_owned(), "CANARY-option".to_owned())]),
+            options_hot: BTreeMap::from([("region".to_owned(), "CANARY-hot-option".to_owned())]),
+            options_cold: BTreeMap::from([("bucket".to_owned(), "CANARY-cold-option".to_owned())]),
+        }
+    }
+
+    #[test]
+    fn the_debug_form_of_settings_shows_no_secret() {
+        let shown = format!("{:?}", settings());
+        assert!(!shown.contains("CANARY"), "{shown}");
+        for kept in ["nas.lan/backups", "sas_token", "region", "bucket"] {
+            assert!(
+                shown.contains(kept),
+                "{kept:?} helps to diagnose, so it stays: {shown}"
+            );
+        }
+    }
+
+    #[test]
+    fn masked_options_keep_the_names_and_hide_every_value() {
+        let options = BTreeMap::from([
+            ("endpoint".to_owned(), "http://demo:CANARY@host".to_owned()),
+            ("region".to_owned(), String::new()),
+        ]);
+        assert_eq!(
+            masked_options(&options),
+            BTreeMap::from([("endpoint", "***"), ("region", "***")])
+        );
     }
 }

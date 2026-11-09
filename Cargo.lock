@@ -863,6 +863,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "config-adapter"
+version = "0.0.0"
+dependencies = [
+ "app",
+ "async-trait",
+ "domain",
+ "jiff",
+ "rustic_core",
+ "serde",
+ "shell-words",
+ "tempfile",
+ "testkit",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "console"
 version = "0.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3128,6 +3145,7 @@ dependencies = [
  "async-trait",
  "axum",
  "clap",
+ "config-adapter",
  "cucumber",
  "domain",
  "engine",
@@ -3144,6 +3162,7 @@ dependencies = [
  "tempfile",
  "testkit",
  "tokio",
+ "toml",
 ]
 
 [[package]]

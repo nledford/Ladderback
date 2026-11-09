@@ -6,6 +6,7 @@ members = [
     "crates/api",
     "crates/l10n",
     "crates/web",
+    "crates/adapters/config",
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
@@ -20,6 +21,7 @@ default-members = [
     "crates/app",
     "crates/api",
     "crates/l10n",
+    "crates/adapters/config",
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/platform",
@@ -44,6 +46,8 @@ api = { path = "crates/api" }
 # `ladderback` and `web` each pass on through their own `pseudo` feature, so a
 # release build can leave them out (technical design §8.4).
 l10n = { path = "crates/l10n", default-features = false }
+# Not `config`: a registry crate of that name is already in the lockfile.
+config-adapter = { path = "crates/adapters/config" }
 engine = { path = "crates/adapters/engine" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
@@ -109,6 +113,9 @@ signal-hook = "0.4.6"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3.27.0"
 tokio = "1.54.1"
+# `preserve_order` keeps a table's keys in file order, so the first unknown key
+# the config adapter reports is the first one in the file.
+toml = { version = "1.2.1", features = ["preserve_order"] }
 tower = "0.5.3"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = "2.5.8"
@@ -196,6 +203,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sig
 app = { workspace = true, features = ["fakes"] }
 async-trait.workspace = true
 cucumber.workspace = true
+config-adapter.workspace = true
 domain.workspace = true
 futures.workspace = true
 log.workspace = true
@@ -207,6 +215,7 @@ store.workspace = true
 tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["time"] }
+toml.workspace = true
 
 [lints]
 workspace = true
