@@ -623,6 +623,20 @@ fn a_wrong_type_says_what_the_setting_could_have_been() {
 }
 
 #[test]
+fn what_a_wrong_type_says_after_a_quoted_value_is_kept_whatever_the_values_length() {
+    for value in ["a", "ab", "abc", "abcd", "a\\\\", "a\\\\b"] {
+        let result = parsed(&base_with(&format!("schedule = '{value}'\n")));
+        let error = invalid(result);
+        assert_eq!(error.problem, Problem::WrongType, "{value}");
+        assert!(
+            error.detail.starts_with("invalid type: string,") && error.detail.contains("expected"),
+            "{value}: {:?}",
+            error.detail
+        );
+    }
+}
+
+#[test]
 fn a_wrong_type_value_holding_quotes_and_backslashes_is_reported_without_a_word_of_it() {
     // serde quotes a string it can't use with `{:?}`, which writes an inner
     // quote as `\"` and a backslash as `\\`: neither ends the quoted text.
