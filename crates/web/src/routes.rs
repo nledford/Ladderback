@@ -34,6 +34,30 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// The operations page, the route `/operations`: the backup history, live —
+/// a running operation's progress and its end arrive over the events
+/// stream (§4.4). Its decisions are `backend::OperationsState`; its glue is
+/// `ws::watch`.
+#[component]
+pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
+    let heading = text(&localizer, msg::UI_OPERATIONS_HEADING);
+    view! {
+        <PageHeading>{heading}</PageHeading>
+        <p>{text(&localizer, msg::UI_OPERATIONS_BODY)}</p>
+    }
+}
+
+/// The snapshots page, the route `/snapshots`: one repository's snapshots,
+/// newest first, behind a repository picker (§4.4).
+#[component]
+pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
+    let heading = text(&localizer, msg::UI_SNAPSHOTS_HEADING);
+    view! {
+        <PageHeading>{heading}</PageHeading>
+        <p>{text(&localizer, msg::UI_SNAPSHOTS_BODY)}</p>
+    }
+}
+
 /// What any path nothing serves shows.
 #[component]
 pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {

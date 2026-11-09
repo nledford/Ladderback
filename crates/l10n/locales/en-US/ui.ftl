@@ -175,3 +175,19 @@ ui-gallery-save-settings = Save the demo settings
 
 # The toast shown after the demo settings are saved.
 ui-gallery-settings-saved = Settings saved.
+
+## The operations page: the backup history, live (§4.4).
+
+# The operations page's heading: its one main heading.
+ui-operations-heading = Operations
+
+# The operations page's text, until its history loads.
+ui-operations-body = The history of every backup, live.
+
+## The snapshots page: one repository's snapshots, newest first (§4.4).
+
+# The snapshots page's heading: its one main heading.
+ui-snapshots-heading = Snapshots
+
+# The snapshots page's text, until a repository is chosen.
+ui-snapshots-body = The snapshots of a repository, newest first.

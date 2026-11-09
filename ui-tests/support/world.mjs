@@ -4,7 +4,8 @@
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,16 +26,26 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const binary = process.env.LADDERBACK_BIN ?? path.join(repoRoot, "target/debug/ladderback");
 const entryPage = path.join(repoRoot, "crates/web/dist/index.html");
 
+// A real rustic repository, initialized once (see `fixtures/make-demo-repo.rs`)
+// and copied into each scenario's scratch folder: the daemon backs up into it
+// for real, so the journeys see real progress and real snapshots.
+export const fixtureRepo = path.join(repoRoot, "ui-tests", "fixtures", "demo-repo");
+
 let server;
 let baseUrl;
 let browser;
+let serverScratch;
 
-function startServer() {
+// Starts one `ladderback serve` in scratch folders of its own, so two
+// daemons never contend on one database (the e2e suites hit that). `extraEnv`
+// names what a caller has already prepared, such as the config folder of a
+// scenario's demo plan.
+export function startServer(extraEnv = {}) {
   const child = spawn(binary, ["serve", "--listen", "127.0.0.1:0"], {
     stdio: ["ignore", "inherit", "pipe"],
     // The banner below is read in English, whatever language the machine
     // speaks: `C` makes the daemon ignore LANGUAGE, which is cleared too.
-    env: { ...process.env, LC_ALL: "C", LANGUAGE: "" },
+    env: { ...process.env, LC_ALL: "C", LANGUAGE: "", ...extraEnv },
   });
   return new Promise((resolve, reject) => {
     let output = "";
@@ -84,7 +95,11 @@ async function assertServesThisCheckoutsUi(url) {
 }
 
 BeforeAll(async function () {
-  ({ child: server, url: baseUrl } = await startServer());
+  serverScratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-shared-"));
+  ({ child: server, url: baseUrl } = await startServer({
+    LADDERBACK_CONFIG_DIR: path.join(serverScratch, "config"),
+    LADDERBACK_DATA_DIR: path.join(serverScratch, "data"),
+  }));
   try {
     await assertServesThisCheckoutsUi(baseUrl);
   } catch (error) {
@@ -100,6 +115,7 @@ AfterAll(async function () {
     server.kill("SIGTERM");
     await once(server, "exit");
   }
+  await rm(serverScratch, { recursive: true, force: true });
 });
 
 class BrowserWorld extends World {
@@ -107,13 +123,18 @@ class BrowserWorld extends World {
   contextOptions = { viewport: { width: 1280, height: 800 } };
   /** Stylesheets injected after the page loads, as a reader's would be. */
   readerStyles = [];
+  /** The daemon this scenario started, when its Given did; `null` shares the
+   *  run's own daemon. */
+  ownServer = null;
+  /** Where this scenario's pages are served from; `null` is the run's daemon. */
+  baseUrl = null;
   context;
   page;
 
   async open(pathname = "/") {
     this.context = await browser.newContext(this.contextOptions);
     this.page = await this.context.newPage();
-    await this.page.goto(new URL(pathname, baseUrl).href);
+    await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
     await this.page.getByRole("heading", { level: 1 }).waitFor();
     for (const content of this.readerStyles) {
@@ -127,6 +148,8 @@ setWorldConstructor(BrowserWorld);
 Before(function () {
   this.contextOptions = { viewport: { width: 1280, height: 800 } };
   this.readerStyles = [];
+  this.ownServer = null;
+  this.baseUrl = null;
 });
 
 After(async function () {

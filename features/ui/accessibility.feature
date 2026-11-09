@@ -101,3 +101,98 @@ Feature: Accessibility of the app shell
     And I press Enter
     Then focus is inside the dialog "Modal stand-in"
     And the page has no accessibility violations
+
+  # The journeys over the daemon's live data (§4.4): the operations and
+  # snapshots pages, driven by the keyboard alone against a daemon this run
+  # started with a demo plan and a scratch repository, so every backup they
+  # start is real.
+
+  Scenario: Starting a backup from the operations page by keyboard alone
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/operations"
+    Then the page is titled "Operations – Ladderback"
+    And the page has no accessibility violations
+    When I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    Then the polite region reads "Backup started."
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the table "Operations" has a row "demo-home" that shows "Succeeded"
+    And the polite region reads "Backup finished."
+    And the page has no accessibility violations
+
+  Scenario: Cancelling a running backup by keyboard
+    Given a demo plan "demo-home" with a big scratch repository
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And I press Tab until focus is on the button "Cancel demo-home"
+    And I press Enter
+    Then the table "Operations" has a row "demo-home" that shows "Cancelled"
+    And the polite region reads "Backup cancelled."
+    And the page has no accessibility violations
+
+  Scenario: The operations table sorts by keyboard with the sort announced
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has a row "demo-home" that shows "Succeeded"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has 2 rows
+    And I press Tab until focus is on the button "Sort by started"
+    And I press Enter
+    Then the table "Operations" shows its "Started" column newest first
+    And the polite region reads "Sorted by started, newest first."
+
+  Scenario: The snapshots page announces the empty state of a repository without snapshots
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/snapshots"
+    Then the page is titled "Snapshots – Ladderback"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the paragraph "No snapshots yet."
+    And the page has no accessibility violations
+
+  Scenario: The snapshots page lists a repository's snapshots newest first
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has a row "demo-home" that shows "Succeeded"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has 2 rows
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the table "Snapshots" has 2 rows
+    And the table "Snapshots" shows its "Time" column newest first
+    And the page has no accessibility violations
+
+  Scenario: The operations page announces its empty state
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/operations"
+    Then the page shows the paragraph "No operations yet."
+    And the page has no accessibility violations
+
+  Scenario: A page opened mid-run shows the running operation before any event arrives
+    Given a demo plan "demo-home" with a big scratch repository
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup"
+    And I press Enter
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And I reload the page
+    Then the table "Operations" has a row "demo-home" that shows "Running"
+    And the page has no accessibility violations
+
+  # The daemon serves the page itself, so the state where it cannot be
+  # reached is one the page is already open in: it stops while the reader is
+  # looking at it, and the page says so without moving anywhere.
+  Scenario: A page whose daemon has stopped shows an error state of its own
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/operations"
+    And the daemon has stopped
+    Then the page shows the heading "Cannot reach Ladderback"
+    And the page has no accessibility violations

@@ -21,6 +21,7 @@ pseudo = ["l10n/pseudo"]
 gallery = []
 
 [dependencies]
+api.workspace = true
 console_error_panic_hook.workspace = true
 # The browser's `Intl` writes the page's numbers and instants (technical design
 # §8.4); no locale data ships. The feature is on whatever the build, so there
