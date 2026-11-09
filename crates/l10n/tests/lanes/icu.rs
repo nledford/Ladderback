@@ -228,7 +228,10 @@ fn an_instant_no_calendar_can_show_is_written_as_its_count_in_every_locale() {
 #[test]
 fn the_last_instant_a_calendar_can_show_is_written_and_the_next_is_not() {
     let localizer = speaking("en-US");
-    let last = jiff::Timestamp::MAX.as_millisecond();
+    // `jiff` takes milliseconds up to the last whole second of its range, so
+    // the 999 milliseconds after it, which `Timestamp::MAX` has, are not an
+    // instant to write.
+    let last = jiff::Timestamp::MAX.as_second() * 1000;
     assert_eq!(
         instant(&localizer, "at", last, None),
         "at Dec 30, 9999, 10:00\u{202f}PM"
@@ -293,7 +296,7 @@ fn absurd_digit_options_are_capped_before_anything_is_written() {
     assert!(shown.problems().is_empty(), "{:?}", shown.problems());
     let (integer, fraction) = shown.text().split_once('.').unwrap();
     // 21 integer digits, the most there are, and 100 fraction digits.
-    assert_eq!(integer, "000,000,000,000,000,001");
+    assert_eq!(integer, "000,000,000,000,000,000,001");
     assert_eq!(fraction.len(), 100, "{fraction}");
     assert!(fraction.starts_with('5'), "{fraction}");
     assert!(
