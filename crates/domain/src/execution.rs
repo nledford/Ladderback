@@ -468,6 +468,19 @@ mod tests {
         assert_eq!(got.len(), MAX_WARNING_TEXT_BYTES);
     }
 
+    /// A kept warning lives in the operation until it's saved, so a cut text
+    /// must give back the room of the text it was cut from, not only shorten.
+    #[test]
+    fn a_cut_text_holds_no_more_memory_than_the_cap() {
+        let megabyte = "x".repeat(1024 * 1024);
+        let got = cut_warning_text(megabyte);
+        assert!(
+            got.capacity() <= 2 * MAX_WARNING_TEXT_BYTES,
+            "capacity {} after the cut",
+            got.capacity()
+        );
+    }
+
     /// The other tests state the cap through its constant; this one pins the
     /// value the design gives, 4 KiB, with the marker inside it.
     #[test]
