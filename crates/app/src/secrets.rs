@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use domain::secrets::{
-    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, SecretError, SecretRef, SecretValue,
-    SecretWarning, Template, TemplateError,
+    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, RepositorySecrets, SecretError,
+    SecretRef, SecretValue, SecretWarning, Template, TemplateError,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
@@ -35,7 +35,15 @@ impl std::fmt::Debug for RepositorySettings {
             .inline()
             .cloned()
             .unwrap_or_else(|| SecretValue::new(""));
-        let redactor = Redactor::for_repository(&self.repository, &inline, &self.options, &[]);
+        let redactor = Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &inline,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        });
         f.debug_struct("RepositorySettings")
             .field("repository", &redactor.redact(&self.repository))
             .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
@@ -172,8 +180,11 @@ impl ResolveRepository {
         Ok(ResolvedRepository {
             access: RepositoryAccess {
                 repository,
+                repo_hot: None,
                 password,
                 options,
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
                 secrets: run.secrets,
                 id: None,
             },

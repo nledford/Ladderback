@@ -34,6 +34,24 @@ Feature: A worker and its backend never show a secret
       And the failure shows "***"
       And nothing the engine reported or logged shows "CANARY-endpoint-password"
 
+    Scenario: The password in the URL of the hot repository is masked where rustic quotes it
+      Given a repository in a folder that isn't there
+      And the hot repository is "rest:http://demo:CANARY-hot-password@127.0.0.1:99999/hot"
+      When the repository is identified
+      Then the failure shows "127.0.0.1:99999"
+      And the failure shows "***"
+      And nothing the engine reported or logged shows "CANARY-hot-password"
+
+    Scenario: A secret read from a file for the hot half is masked where its backend quotes it
+      Given a repository in a folder that isn't there
+      And a hot S3 repository on a port where nothing listens
+      And the file "{scratch}/hot-endpoint-secret" holds "CANARY-hot-endpoint-file"
+      And the hot repository's option "endpoint" is "http://127.0.0.1:9/${file:{scratch}/hot-endpoint-secret}"
+      When the repository is identified
+      Then the operation ends as failed because the connection to "127.0.0.1:9" was refused
+      And the failure shows "***"
+      And nothing the engine reported or logged shows "CANARY-hot-endpoint-file"
+
   Rule: A worker starts from a scrubbed environment
 
     Scenario: A worker isn't given the variable a secret came from

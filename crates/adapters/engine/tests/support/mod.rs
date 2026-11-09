@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use app::ports::{
     BackupJob, BackupSummary, CheckJob, Engine, EngineEvent, EngineResult, Job, PruneJob,
@@ -29,18 +29,34 @@ use tempfile::TempDir;
 
 pub const PASSWORD: &str = "correct horse battery staple";
 
-/// A repository somewhere under a scratch directory, local or through OpenDAL.
+/// A repository somewhere under a scratch directory, local or through OpenDAL,
+/// in one place or in a hot half and a cold half.
 #[derive(Clone)]
 pub struct Location {
+    /// The repository; next to a `repo_hot`, its cold half.
     pub repository: String,
+    pub repo_hot: Option<String>,
     pub options: BTreeMap<String, String>,
+    pub options_hot: BTreeMap<String, String>,
+    pub options_cold: BTreeMap<String, String>,
 }
 
 impl Location {
     pub fn local(dir: &Path) -> Self {
         Self {
             repository: dir.to_string_lossy().into_owned(),
+            repo_hot: None,
             options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        }
+    }
+
+    /// A hot/cold repository with both halves in local folders.
+    pub fn hot_cold(cold: &Path, hot: &Path) -> Self {
+        Self {
+            repo_hot: Some(hot.to_string_lossy().into_owned()),
+            ..Self::local(cold)
         }
     }
 
@@ -58,25 +74,35 @@ impl Location {
         Self {
             repository: "opendal:fs".to_owned(),
             options,
+            ..Self::local(dir)
         }
     }
 
     pub fn access(&self, password: &str) -> RepositoryAccess {
         RepositoryAccess {
             repository: self.repository.clone(),
+            repo_hot: self.repo_hot.clone(),
             password: SecretValue::new(password),
             options: self.options.clone(),
+            options_hot: self.options_hot.clone(),
+            options_cold: self.options_cold.clone(),
             secrets: Vec::new(),
             id: None,
         }
     }
 
     fn backends(&self) -> RepositoryBackends {
-        BackendOptions::default()
+        let options = BackendOptions::default()
             .repository(self.repository.clone())
             .options(self.options.clone())
-            .to_backends()
-            .unwrap()
+            .options_hot(self.options_hot.clone())
+            .options_cold(self.options_cold.clone());
+        match &self.repo_hot {
+            Some(hot) => options.repo_hot(hot.clone()),
+            None => options,
+        }
+        .to_backends()
+        .unwrap()
     }
 
     pub fn init(&self) -> Repository<OpenStatus> {
@@ -133,12 +159,23 @@ impl Scratch {
         self.dir.path().join("repo")
     }
 
+    /// Where the hot half of a hot/cold repository is.
+    pub fn hot_dir(&self) -> PathBuf {
+        self.dir.path().join("hot")
+    }
+
     pub fn source(&self) -> PathBuf {
         self.dir.path().join("source")
     }
 
     pub fn local(&self) -> Location {
         Location::local(&self.repo_dir())
+    }
+
+    /// A hot/cold repository: the cold half is `repo_dir`, the hot half
+    /// `hot_dir`.
+    pub fn hot_cold(&self) -> Location {
+        Location::hot_cold(&self.repo_dir(), &self.hot_dir())
     }
 
     /// OpenDAL's `fs` service on the scratch repository, writing through a
@@ -160,6 +197,17 @@ pub fn write_file(path: impl AsRef<Path>, contents: &[u8]) {
     let path = path.as_ref();
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, contents).unwrap();
+}
+
+/// Makes `path` look two days old: old enough to be a leftover of a worker
+/// that was killed.
+pub fn two_days_old(path: &Path) {
+    File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600))
+        .unwrap();
 }
 
 /// A worker engine on this crate's own worker binary, with timings short

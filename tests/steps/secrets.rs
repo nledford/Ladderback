@@ -65,7 +65,9 @@ fn capture_the_worker_log() {
 #[derive(Debug, Default)]
 pub struct SecretsSetup {
     repository: String,
+    repo_hot: Option<String>,
     options: BTreeMap<String, String>,
+    options_hot: BTreeMap<String, String>,
     /// The daemon's environment: what `${VAR}` reads, and what a worker is
     /// started from.
     environment: Vec<(String, String)>,
@@ -75,13 +77,22 @@ pub struct SecretsSetup {
     resolved: String,
 }
 
+fn options_of(options: &[(&str, &str)]) -> BTreeMap<String, String> {
+    options
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
 impl SecretsSetup {
     fn backend(&mut self, repository: &str, options: &[(&str, &str)]) {
         self.repository = repository.to_owned();
-        self.options = options
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-            .collect();
+        self.options = options_of(options);
+    }
+
+    fn hot_backend(&mut self, repository: &str, options: &[(&str, &str)]) {
+        self.repo_hot = Some(repository.to_owned());
+        self.options_hot = options_of(options);
     }
 }
 
@@ -105,20 +116,24 @@ fn environment_has(agent: &mut Agent, name: String, value: String) {
 
 /// Without credentials S3 looks for them in the environment and on the
 /// network; these options say not to, so the connection is what fails first.
+const S3_OPTIONS: [(&str, &str); 7] = [
+    ("endpoint", "http://127.0.0.1:9"),
+    ("bucket", "demo"),
+    ("region", "us-east-1"),
+    ("retry", "0"),
+    ("disable_config_load", "true"),
+    ("disable_ec2_metadata", "true"),
+    ("allow_anonymous", "true"),
+];
+
 #[given("an S3 repository on a port where nothing listens")]
 fn s3(agent: &mut Agent) {
-    agent.secrets.backend(
-        "opendal:s3",
-        &[
-            ("endpoint", "http://127.0.0.1:9"),
-            ("bucket", "demo"),
-            ("region", "us-east-1"),
-            ("retry", "0"),
-            ("disable_config_load", "true"),
-            ("disable_ec2_metadata", "true"),
-            ("allow_anonymous", "true"),
-        ],
-    );
+    agent.secrets.backend("opendal:s3", &S3_OPTIONS);
+}
+
+#[given("a hot S3 repository on a port where nothing listens")]
+fn hot_s3(agent: &mut Agent) {
+    agent.secrets.hot_backend("opendal:s3", &S3_OPTIONS);
 }
 
 #[given("an Azure Blob repository on a port where nothing listens")]
@@ -134,10 +149,28 @@ fn azure(agent: &mut Agent) {
     );
 }
 
+/// A cold half that never answers, so what fails first is the hot half.
+#[given("a repository in a folder that isn't there")]
+fn nowhere(agent: &mut Agent) {
+    let folder = agent.scratch().join("no-such-repository");
+    agent.secrets.repository = folder.display().to_string();
+}
+
 #[given(expr = "the repository's option {string} is {string}")]
 fn option_is(agent: &mut Agent, name: String, value: String) {
     let value = in_scratch(agent, &value);
     agent.secrets.options.insert(name, value);
+}
+
+#[given(expr = "the hot repository is {string}")]
+fn hot_repository_is(agent: &mut Agent, repository: String) {
+    agent.secrets.repo_hot = Some(repository);
+}
+
+#[given(expr = "the hot repository's option {string} is {string}")]
+fn hot_option_is(agent: &mut Agent, name: String, value: String) {
+    let value = in_scratch(agent, &value);
+    agent.secrets.options_hot.insert(name, value);
 }
 
 /// The worker is a shell script that writes down what it was given; it is
@@ -172,10 +205,10 @@ async fn identified(agent: &mut Agent) {
     let resolver = SystemSecrets::new().with_environment(agent.secrets.environment.iter().cloned());
     let settings = RepositorySettings {
         repository: agent.secrets.repository.clone(),
-        repo_hot: None,
+        repo_hot: agent.secrets.repo_hot.clone(),
         password: SecretRef::Inline(SecretValue::new(PASSWORD)),
         options: agent.secrets.options.clone(),
-        options_hot: BTreeMap::new(),
+        options_hot: agent.secrets.options_hot.clone(),
         options_cold: BTreeMap::new(),
     };
     let resolved = ResolveRepository::new(Arc::new(resolver))

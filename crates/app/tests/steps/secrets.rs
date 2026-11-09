@@ -326,7 +326,7 @@ fn resolved_repository_size(agent: &mut Agent, bytes: usize) {
 #[then(expr = "the resolved hot repository is {string}")]
 fn resolved_hot_repository(agent: &mut Agent, repository: String) {
     assert_eq!(
-        agent.secrets.resolved().repo_hot.as_deref(),
+        agent.secrets.resolved().access.repo_hot.as_deref(),
         Some(repository.as_str())
     );
 }
@@ -345,13 +345,13 @@ fn resolved_option_size(agent: &mut Agent, name: String, bytes: usize) {
 
 #[then(expr = "the resolved hot option {string} is {string}")]
 fn resolved_hot_option(agent: &mut Agent, name: String, value: String) {
-    let options = &agent.secrets.resolved().options_hot;
+    let options = &agent.secrets.resolved().access.options_hot;
     assert_eq!(options.get(&name), Some(&value));
 }
 
 #[then(expr = "the resolved cold option {string} is {string}")]
 fn resolved_cold_option(agent: &mut Agent, name: String, value: String) {
-    let options = &agent.secrets.resolved().options_cold;
+    let options = &agent.secrets.resolved().access.options_cold;
     assert_eq!(options.get(&name), Some(&value));
 }
 

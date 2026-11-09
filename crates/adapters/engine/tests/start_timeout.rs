@@ -38,8 +38,11 @@ async fn a_worker_stuck_opening_its_repository_is_not_timed_out_as_one_that_neve
     let start_timeout = Duration::from_secs(1);
     let job = Job::Identify(RepositoryAccess {
         repository: format!("rest:http://127.0.0.1:{port}/"),
+        repo_hot: None,
         password: SecretValue::new("demo-password"),
         options: Default::default(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
         secrets: Vec::new(),
         id: None,
     });

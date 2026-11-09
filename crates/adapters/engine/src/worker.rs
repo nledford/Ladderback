@@ -32,7 +32,6 @@ use std::time::Duration;
 
 use api::ErrorCode;
 use domain::execution::deadline::Deadline;
-use domain::secrets::Redactor;
 use domain::{OperationId, SignedDuration, Timestamp};
 
 use crate::cache_lock::CacheLock;
@@ -277,12 +276,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
     };
     // From here on, the secrets of the job never reach the stream (I4).
     if let Some(repository) = repository_of(&spec.job) {
-        events.redact_with(Redactor::for_repository(
-            &repository.repository,
-            &repository.password,
-            &repository.options,
-            &repository.secrets,
-        ));
+        events.redact_with(repository.redactor());
     }
     // The job is taken. The daemon times a worker out that has said nothing
     // by its start timeout, and opening a repository can take longer than
@@ -420,8 +414,11 @@ mod tests {
             watchdog_interval_ms: 10,
             job: JobKind::Identify(RepositorySpec {
                 repository: "/nonexistent/repo".to_owned(),
+                repo_hot: None,
                 password: SecretValue::new("hunter2"),
                 options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
                 secrets: Vec::new(),
             }),
         };
@@ -538,49 +535,53 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_job_that_needs_a_repository_hides_its_password_even_in_a_failure() {
+    /// An Identify job for `repository`, which must fail: what the worker
+    /// reported for it.
+    fn failure_text(repository: RepositorySpec) -> String {
         let spec = JobSpec {
             op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
             cache_dir: None,
             watchdog_interval_ms: 10,
-            job: JobKind::Identify(RepositorySpec {
-                repository: "/nonexistent/hunter2/repo".to_owned(),
-                password: SecretValue::new("hunter2"),
-                options: Default::default(),
-                secrets: Vec::new(),
-            }),
+            job: JobKind::Identify(repository),
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
         let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
         assert_eq!(exit.code(), 1);
-        let text = capture.text();
+        capture.text()
+    }
+
+    /// A repository in one place, with nothing hot or cold and nothing
+    /// resolved.
+    fn repository_at(repository: &str) -> RepositorySpec {
+        RepositorySpec {
+            repository: repository.to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("hunter2"),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+            secrets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_job_that_needs_a_repository_hides_its_password_even_in_a_failure() {
+        let text = failure_text(repository_at("/nonexistent/hunter2/repo"));
         assert!(!text.contains("hunter2"), "the password leaked: {text}");
     }
 
     /// An Identify job on a local path that doesn't exist: it fails with the
     /// path in its message, so what the path holds shows whether it is masked.
     fn failure_text_for(path_part: &str, options: &[(&str, &str)], secrets: &[&str]) -> String {
-        let spec = JobSpec {
-            op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
-            cache_dir: None,
-            watchdog_interval_ms: 10,
-            job: JobKind::Identify(RepositorySpec {
-                repository: format!("/nonexistent/{path_part}/repo"),
-                password: SecretValue::new("hunter2"),
-                options: options
-                    .iter()
-                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-                    .collect(),
-                secrets: secrets.iter().map(|s| SecretValue::new(*s)).collect(),
-            }),
-        };
-        let (events, capture) = capture();
-        let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
-        assert_eq!(exit.code(), 1);
-        let text = capture.text();
+        let text = failure_text(RepositorySpec {
+            options: options
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+            secrets: secrets.iter().map(|s| SecretValue::new(*s)).collect(),
+            ..repository_at(&format!("/nonexistent/{path_part}/repo"))
+        });
         assert!(
             text.contains("nonexistent"),
             "the failure is not about the path: {text}"
@@ -606,6 +607,25 @@ mod tests {
             let text = failure_text_for(canary, &[(name, canary)], &[]);
             assert!(!text.contains(canary), "{name} leaked: {text}");
         }
+    }
+
+    /// The cold half is a path that exists nowhere, so the failure comes from
+    /// the hot half: its URL has no valid port, rustic can't parse it, and its
+    /// error quotes the URL.
+    #[test]
+    fn the_password_in_the_url_of_the_hot_repository_is_hidden_in_a_failure() {
+        let text = failure_text(RepositorySpec {
+            repo_hot: Some("rest:http://demo:CANARY-hot-password@127.0.0.1:99999/hot".to_owned()),
+            ..repository_at("/nonexistent/repo")
+        });
+        assert!(
+            text.contains("127.0.0.1:99999"),
+            "the failure is not about the hot repository: {text}"
+        );
+        assert!(
+            !text.contains("CANARY-hot-password"),
+            "the hot repository's password leaked: {text}"
+        );
     }
 
     #[test]

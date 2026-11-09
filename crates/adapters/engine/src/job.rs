@@ -13,7 +13,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use api::{ErrorCode, MsgArg, WarningCode};
-use domain::secrets::{REDACTED, Redactor, SecretValue};
+use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{AgentId, OperationId, PlanId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -65,16 +65,39 @@ pub enum JobKind {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositorySpec {
     /// rustic's `repository` string: a path, `rest:…`, `opendal:…`, `rclone:…`.
+    /// Next to a `repo_hot`, it is the cold half.
     pub repository: String,
+    /// rustic's `repo-hot`: the hot half of a hot/cold repository.
+    pub repo_hot: Option<String>,
     #[serde(with = "secret")]
     pub password: SecretValue,
-    /// Backend options, as rustic's `[repository.options]`.
+    /// Backend options, as rustic's `[repository.options]`: both halves get
+    /// them.
     pub options: BTreeMap<String, String>,
+    /// rustic's `options-hot`: the options of the hot half only.
+    pub options_hot: BTreeMap<String, String>,
+    /// rustic's `options-cold`: the options of the cold half only.
+    pub options_cold: BTreeMap<String, String>,
     /// What the `${…}` references in the repository's settings resolved to
     /// (the password is not among them). They are masked wherever they show,
     /// whatever the option they sit in is called.
     #[serde(with = "secrets")]
     pub secrets: Vec<SecretValue>,
+}
+
+impl RepositorySpec {
+    /// What hides this repository's secrets wherever the job reports text.
+    pub(crate) fn redactor(&self) -> Redactor {
+        Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &self.password,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &self.secrets,
+        })
+    }
 }
 
 /// Everything that can hold a secret is masked: the password, the password
@@ -85,13 +108,7 @@ pub struct RepositorySpec {
 /// they are is not.
 impl fmt::Debug for RepositorySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repository = Redactor::for_repository(
-            &self.repository,
-            &self.password,
-            &self.options,
-            &self.secrets,
-        )
-        .redact(&self.repository);
+        let repository = self.redactor().redact(&self.repository);
         let options: BTreeMap<&String, &str> =
             self.options.keys().map(|name| (name, REDACTED)).collect();
         let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
@@ -323,8 +340,11 @@ mod tests {
     fn repository() -> RepositorySpec {
         RepositorySpec {
             repository: "/backups/home".to_owned(),
+            repo_hot: None,
             password: SecretValue::new("hunter2"),
             options: BTreeMap::from([("retry".to_owned(), "3".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
             secrets: Vec::new(),
         }
     }
@@ -403,11 +423,14 @@ mod tests {
         let spec = spec(JobKind::Backup(BackupJobSpec {
             repo: RepositorySpec {
                 repository: "rest:https://demo:s3cr3t@nas:8000/backups".to_owned(),
+                repo_hot: None,
                 password: SecretValue::new("hunter2"),
                 options: BTreeMap::from([
                     ("secret_access_key".to_owned(), "AKIAEXAMPLEKEY".to_owned()),
                     ("retry".to_owned(), "3".to_owned()),
                 ]),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
                 secrets: Vec::new(),
             },
             sources: vec!["/home/demo".to_owned()],
@@ -457,6 +480,46 @@ mod tests {
             "{text}"
         );
         assert!(text.contains(r#"secrets: ["***", "***"]"#), "{text}");
+    }
+
+    #[test]
+    fn debug_output_hides_the_secrets_of_the_hot_and_cold_halves_and_keeps_what_names_them() {
+        let mut repo = repository();
+        repo.repo_hot = Some("rest:https://demo:hot-s3cr3t@hot.example:8000/hot".to_owned());
+        repo.options_hot = BTreeMap::from([
+            ("secret_access_key".to_owned(), "AKIA-HOT-KEY".to_owned()),
+            ("region".to_owned(), "eu-hot-1".to_owned()),
+        ]);
+        repo.options_cold = BTreeMap::from([
+            ("sas_token".to_owned(), "sv=COLD-TOKEN".to_owned()),
+            ("region".to_owned(), "eu-cold-1".to_owned()),
+        ]);
+        repo.secrets = vec![SecretValue::new("canary-in-the-hot-url")];
+        repo.repo_hot = repo
+            .repo_hot
+            .map(|hot| format!("{hot}/canary-in-the-hot-url"));
+        let text = format!("{:?}", spec(JobKind::Identify(repo)));
+        for secret in [
+            "hot-s3cr3t",
+            "AKIA-HOT-KEY",
+            "sv=COLD-TOKEN",
+            "eu-hot-1",
+            "eu-cold-1",
+            "canary-in-the-hot-url",
+        ] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        for kept in [
+            "rest:https://demo:",
+            "@hot.example:8000/hot",
+            "options_hot",
+            "options_cold",
+            "secret_access_key",
+            "sas_token",
+            "region",
+        ] {
+            assert!(text.contains(kept), "{kept} is gone: {text}");
+        }
     }
 
     #[test]

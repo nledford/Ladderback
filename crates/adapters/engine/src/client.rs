@@ -16,7 +16,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
-use domain::secrets::{Redactor, SecretValue};
+use domain::secrets::{Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -1031,19 +1031,20 @@ fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
         Job::Check(job) => &job.repository,
     };
     let resolved: Vec<SecretValue> = access.secrets.iter().cloned().chain(extra).collect();
-    Redactor::for_repository(
-        &access.repository,
-        &access.password,
-        &access.options,
-        &resolved,
-    )
+    Redactor::for_repository(RepositorySecrets {
+        resolved: &resolved,
+        ..access.known_secrets()
+    })
 }
 
 fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
     RepositorySpec {
         repository: access.repository,
+        repo_hot: None,
         password: access.password,
         options: access.options,
+        options_hot: Default::default(),
+        options_cold: Default::default(),
         secrets: access.secrets,
     }
 }
@@ -1879,8 +1880,11 @@ mod tests {
     fn identify(password: &str, secrets: &[&str]) -> Job {
         Job::Identify(RepositoryAccess {
             repository: "/backups/demo".to_owned(),
+            repo_hot: None,
             password: domain::secrets::SecretValue::new(password),
             options: std::collections::BTreeMap::new(),
+            options_hot: std::collections::BTreeMap::new(),
+            options_cold: std::collections::BTreeMap::new(),
             secrets: secrets
                 .iter()
                 .map(|secret| domain::secrets::SecretValue::new(*secret))
@@ -2175,6 +2179,92 @@ mod tests {
         let spec: serde_json::Value = serde_json::from_str(&read("spec.json")).unwrap();
         assert_eq!(spec["job"]["password"], "demo-password");
         assert!(!read("args.txt").contains("demo-password"));
+    }
+
+    /// A hot/cold repository: each half has a secret of its own.
+    fn hot_cold_access() -> RepositoryAccess {
+        let options = |pairs: [(&str, &str); 2]| -> BTreeMap<String, String> {
+            pairs
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect()
+        };
+        RepositoryAccess {
+            repository: "opendal:azblob".to_owned(),
+            repo_hot: Some("rest:https://demo:HOT-URL-PASSWORD@hot.example:8000/hot".to_owned()),
+            password: SecretValue::new("demo-password"),
+            options: BTreeMap::new(),
+            options_hot: options([
+                ("secret_access_key", "HOT-ACCESS-KEY"),
+                ("region", "hot-region"),
+            ]),
+            options_cold: options([
+                ("sas_token", "COLD-SAS-TOKEN"),
+                ("container", "cold-container"),
+            ]),
+            secrets: Vec::new(),
+            id: None,
+        }
+    }
+
+    /// A worker can only open both halves of a repository if its job says
+    /// what they are.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_is_given_the_hot_repository_and_the_hot_and_cold_options_of_its_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = format!(
+            "cat > '{dir}/spec.json'; echo '{result}'",
+            dir = dir.path().display(),
+            result = result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let access = hot_cold_access();
+        let events = engine
+            .run(op, Job::Identify(access.clone()))
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let spec: JobSpec =
+            serde_json::from_slice(&std::fs::read(dir.path().join("spec.json")).unwrap()).unwrap();
+        let JobKind::Identify(repository) = spec.job else {
+            panic!("the worker was not given an identify job: {:?}", spec.job);
+        };
+        assert_eq!(repository.repository, access.repository);
+        assert_eq!(repository.repo_hot, access.repo_hot);
+        assert_eq!(repository.options_hot, access.options_hot);
+        assert_eq!(repository.options_cold, access.options_cold);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_secrets_of_both_halves_are_masked_in_what_the_worker_writes_to_stderr() {
+        capture_the_worker_log();
+        let script = format!(
+            "cat >/dev/null; \
+             echo 'redaction two: HOT-URL-PASSWORD HOT-ACCESS-KEY COLD-SAS-TOKEN cold-container' >&2; \
+             echo '{}'",
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, Job::Identify(hot_cold_access()))
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("redaction two:"))
+            .await
+            .expect("the worker's stderr never reached the log");
+        // Only what is a secret goes; the name of the cold container shows.
+        assert_eq!(line, "redaction two: *** *** *** cold-container");
     }
 
     /// More than a pipe holds, written between two events: a stderr that
@@ -2480,8 +2570,11 @@ mod tests {
         let identify = |repository: String| {
             Job::Identify(RepositoryAccess {
                 repository,
+                repo_hot: None,
                 password: SecretValue::new("demo"),
                 options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
                 secrets: Vec::new(),
                 id: Some(id.clone()),
             })

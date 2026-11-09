@@ -103,6 +103,22 @@ Feature: Secrets stay out of what is reported
       Then the debug form of the access shows no "https://s3.example.net/demo"
       And the debug form of the access still shows "endpoint"
 
+    Scenario: The hot repository and the hot and cold options are hidden in the access too
+      Given the hot repository is "rest:https://demo:hunter4@hot.example.net/repo"
+      And the hot option "endpoint" is "https://demo:hunter2@hot-s3.example.net"
+      And the hot option "region" is "eu-hot-1"
+      And the cold option "secret_access_key" is "demo-cold-key"
+      And the cold option "region" is "eu-cold-1"
+      When the repository is resolved
+      Then the debug form of the access shows no "hunter4"
+      And the debug form of the access shows no "hunter2"
+      And the debug form of the access shows no "eu-hot-1"
+      And the debug form of the access shows no "demo-cold-key"
+      And the debug form of the access shows no "eu-cold-1"
+      And the debug form of the access still shows "hot.example.net"
+      And the debug form of the access still shows "endpoint"
+      And the debug form of the access still shows "secret_access_key"
+
   Rule: The debug form of the resolved repository hides the hot and cold fields too
 
     Scenario: The hot repository and the hot and cold options are hidden
