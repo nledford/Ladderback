@@ -50,9 +50,15 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
 /// changes"). A path with no page is the not-found page, and so is
 /// `/_gallery` in a build without the gallery.
 pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
+    title_in(localizer, path, cfg!(feature = "gallery"))
+}
+
+/// [`title`] for a build that has the gallery or not, so that both are tested
+/// whichever one the tests are built as.
+fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
     let page = if path == "/" {
         msg::UI_START_TITLE
-    } else if cfg!(feature = "gallery") && path.strip_suffix('/').unwrap_or(path) == "/_gallery" {
+    } else if gallery && path.strip_suffix('/').unwrap_or(path) == "/_gallery" {
         msg::UI_GALLERY_TITLE
     } else {
         msg::UI_NOT_FOUND_TITLE
@@ -80,6 +86,14 @@ mod tests {
 
     #[test]
     fn the_gallery_has_its_title_only_in_a_build_that_has_it() {
+        let with = title_in(&Localizer::new(&[]), "/_gallery", true);
+        let without = title_in(&Localizer::new(&[]), "/_gallery", false);
+        assert_eq!(with, "Component gallery – Ladderback");
+        assert_eq!(without, "Page not found – Ladderback");
+    }
+
+    #[test]
+    fn the_build_decides_whether_the_gallery_is_a_page() {
         let expected = if cfg!(feature = "gallery") {
             "Component gallery – Ladderback"
         } else {
@@ -90,7 +104,11 @@ mod tests {
 
     #[test]
     fn a_trailing_slash_names_the_same_page() {
-        assert_eq!(title_of("/_gallery/"), title_of("/_gallery"));
+        let localizer = Localizer::new(&[]);
+        assert_eq!(
+            title_in(&localizer, "/_gallery/", true),
+            "Component gallery – Ladderback"
+        );
         assert_eq!(title_of("/no/such/page/"), "Page not found – Ladderback");
     }
 
