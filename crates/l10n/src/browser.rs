@@ -406,4 +406,24 @@ mod tests {
             "Nov 8, 2026, 10:30 PM"
         );
     }
+
+    #[wasm_bindgen_test]
+    fn the_zones_kept_are_capped_and_one_past_the_cap_is_still_read_in_its_zone() {
+        // Zone names come from the input: no more than `MAX_ZONES` of them
+        // are kept, refused ones included, and the rest are built per call.
+        let formatter = Instants::new(&tag("en-US"), Style::DEFAULT).unwrap();
+        for number in 0..MAX_ZONES + 6 {
+            let nowhere = zone(&format!("Nowhere/Zone{number}"));
+            assert!(formatter.format(WINTER, Some(&nowhere)).is_some());
+        }
+        assert_eq!(formatter.zones.lock().unwrap().len(), MAX_ZONES);
+        let tokyo = zone("Asia/Tokyo");
+        for _ in 0..2 {
+            assert_eq!(
+                fold(&formatter.format(WINTER, Some(&tokyo)).unwrap()),
+                "Nov 8, 2026, 10:30 PM"
+            );
+        }
+        assert_eq!(formatter.zones.lock().unwrap().len(), MAX_ZONES);
+    }
 }
