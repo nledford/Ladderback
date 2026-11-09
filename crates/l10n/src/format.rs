@@ -36,11 +36,13 @@
 //!   UTC. A browser's host may read no zone as the viewer's.
 
 use std::borrow::Cow;
+use std::convert::Infallible;
 
 use api::IanaZone;
 use fluent_bundle::concurrent::FluentBundle;
-use fluent_bundle::types::{FluentNumberOptions, FluentType};
+use fluent_bundle::types::{FluentNumber, FluentNumberOptions, FluentType};
 use fluent_bundle::{FluentArgs, FluentValue};
+use intl_memoizer::Memoizable;
 use intl_memoizer::concurrent::IntlLangMemoizer;
 use unic_langid::LanguageIdentifier;
 
@@ -73,8 +75,29 @@ impl From<&FluentNumberOptions> for NumberOptions {
     /// `NUMBER(1.25, maximumFractionDigits: 1)` carries its own decimals as a
     /// minimum, and the author asked for fewer.
     fn from(options: &FluentNumberOptions) -> Self {
-        todo!("cap and reconcile {options:?}")
+        let max_fraction = options
+            .maximum_fraction_digits
+            .map(|digits| capped(digits, MAX_FRACTION_DIGITS));
+        let min_fraction = capped(
+            options.minimum_fraction_digits.unwrap_or(0),
+            MAX_FRACTION_DIGITS,
+        );
+        Self {
+            min_integer: capped(
+                options.minimum_integer_digits.unwrap_or(1),
+                MAX_INTEGER_DIGITS,
+            )
+            .max(1),
+            min_fraction: max_fraction.map_or(min_fraction, |max| min_fraction.min(max)),
+            max_fraction,
+            grouping: options.use_grouping,
+        }
     }
+}
+
+/// `digits`, no more than `cap`.
+fn capped(digits: usize, cap: u8) -> u8 {
+    u8::try_from(digits).map_or(cap, |digits| digits.min(cap))
 }
 
 /// How much of an instant `DATETIME` shows.
@@ -116,7 +139,29 @@ impl Style {
     /// (`dateStyle: "full"`, `timeStyle: "long"`, any other name or any value
     /// that is not text) or `timeZoneName` together with a style.
     pub(crate) fn from_options(options: &FluentArgs) -> Option<Self> {
-        todo!("read {options:?}")
+        let (mut date, mut time, mut zone_name) = (None, None, false);
+        for (name, value) in options.iter() {
+            let FluentValue::String(word) = value else {
+                return None;
+            };
+            match (name, word.as_ref()) {
+                ("dateStyle", "short") => date = Some(DateStyle::Short),
+                ("dateStyle", "medium") => date = Some(DateStyle::Medium),
+                ("dateStyle", "long") => date = Some(DateStyle::Long),
+                ("timeStyle", "short") => time = Some(TimeStyle::Short),
+                ("timeStyle", "medium") => time = Some(TimeStyle::Medium),
+                ("timeZoneName", "short") => zone_name = true,
+                _ => return None,
+            }
+        }
+        match (date, time, zone_name) {
+            (None, None, false) => Some(Self::DEFAULT),
+            (Some(date), None, false) => Some(Self::Date(date)),
+            (None, Some(time), false) => Some(Self::Time(time)),
+            (Some(date), Some(time), false) => Some(Self::DateTime(date, time)),
+            (None, None, true) => Some(Self::ZoneName),
+            (_, _, true) => None,
+        }
     }
 }
 
@@ -160,30 +205,42 @@ impl Host for NoHost {
     type Instants = Nothing;
 }
 
+/// The host a build writes with. Until the ICU4X host is wired in, none.
+pub(crate) type Active = NoHost;
+
 impl NumberFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: NumberOptions) -> Option<Self> {
-        todo!("no number formatter")
+        None
     }
 
     fn format(&self, _: f64) -> Option<String> {
-        todo!("no number to write")
+        None
     }
 }
 
 impl InstantFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: Style) -> Option<Self> {
-        todo!("no instant formatter")
+        None
     }
 
     fn format(&self, _: i64, _: Option<&IanaZone>) -> Option<String> {
-        todo!("no instant to write")
+        None
     }
 }
 
 /// A number written plainly: Fluent's own text for it, padded with zeros to
 /// the options' minimum fraction digits. No grouping, no rounding.
 pub(crate) fn plain_number(value: f64, options: NumberOptions) -> String {
-    todo!("write {value} with {options:?}")
+    let mut text = value.to_string();
+    if value.is_finite() && options.min_fraction > 0 {
+        let present = text.split_once('.').map_or(0, |(_, digits)| digits.len());
+        if present == 0 {
+            text.push('.');
+        }
+        let missing = usize::from(options.min_fraction).saturating_sub(present);
+        text.extend(std::iter::repeat_n('0', missing));
+    }
+    text
 }
 
 /// An instant written plainly, whatever its zone: the parts the style shows,
@@ -192,16 +249,27 @@ pub(crate) fn plain_number(value: f64, options: NumberOptions) -> String {
 /// years a calendar date can show (±9999) is written as its millisecond
 /// count, unless only the zone is asked for.
 pub(crate) fn plain_instant(utc_ms: i64, style: Style) -> String {
-    todo!("write {utc_ms} as {style:?}")
+    match style {
+        Style::ZoneName => "UTC".to_owned(),
+        Style::Date(_) => in_utc(utc_ms, "%Y-%m-%d UTC"),
+        Style::Time(_) => in_utc(utc_ms, "%H:%M:%S UTC"),
+        Style::DateTime(..) => instant(utc_ms),
+    }
 }
 
 /// An instant, as written in a message: `2026-11-08 13:30:45 UTC`. An
 /// instant outside the years a calendar date can show (±9999) is written as
 /// its millisecond count, so no input can make this fail.
-pub(crate) fn instant(utc_ms: i64) -> String {
+fn instant(utc_ms: i64) -> String {
+    in_utc(utc_ms, "%Y-%m-%d %H:%M:%S UTC")
+}
+
+/// An instant in UTC as the `strftime` `pattern` writes it, or its
+/// millisecond count when no calendar date can show it.
+fn in_utc(utc_ms: i64, pattern: &str) -> String {
     jiff::Timestamp::from_millisecond(utc_ms).map_or_else(
         |_| utc_ms.to_string(),
-        |instant| instant.strftime("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        |instant| instant.strftime(pattern).to_string(),
     )
 }
 
@@ -218,21 +286,25 @@ pub(crate) struct Timestamp {
 impl Timestamp {
     /// An instant in the default style.
     pub(crate) fn new(utc_ms: i64, zone: Option<IanaZone>) -> Self {
-        todo!("a timestamp of {utc_ms} in {zone:?}")
+        Self {
+            utc_ms,
+            zone,
+            style: Style::DEFAULT,
+        }
     }
 }
 
 impl FluentType for Timestamp {
     fn duplicate(&self) -> Box<dyn FluentType + Send> {
-        todo!("duplicate {self:?}")
+        Box::new(self.clone())
     }
 
     fn as_string(&self, _: &intl_memoizer::IntlLangMemoizer) -> Cow<'static, str> {
-        todo!("write {self:?} plainly")
+        Cow::Owned(plain_instant(self.utc_ms, self.style))
     }
 
     fn as_string_threadsafe(&self, _: &IntlLangMemoizer) -> Cow<'static, str> {
-        todo!("write {self:?} plainly")
+        Cow::Owned(plain_instant(self.utc_ms, self.style))
     }
 }
 
@@ -241,7 +313,94 @@ impl FluentType for Timestamp {
 /// keeps a count numeric for plural selectors. Call it once per bundle: a
 /// second call finds `DATETIME` already there.
 pub(crate) fn install<H: Host, R>(bundle: &mut FluentBundle<R>) {
-    todo!("install a host on {}", bundle.locales.len())
+    bundle.set_formatter(Some(written::<H>));
+    // An error only means `DATETIME` was already added.
+    let _ = bundle.add_function("DATETIME", datetime);
+}
+
+/// A number formatter of the host `N`, or the lack of one, as the bundle's
+/// memoizer keeps it: one per [`NumberOptions`] of a locale.
+struct NumberMemo<N>(Option<N>);
+
+impl<N: NumberFormatter + Send + Sync + 'static> Memoizable for NumberMemo<N> {
+    type Args = NumberOptions;
+    type Error = Infallible;
+
+    fn construct(locale: LanguageIdentifier, options: NumberOptions) -> Result<Self, Infallible> {
+        Ok(Self(N::new(&locale, options)))
+    }
+}
+
+/// The same for instants: one formatter per [`Style`] of a locale.
+struct InstantMemo<I>(Option<I>);
+
+impl<I: InstantFormatter + Send + Sync + 'static> Memoizable for InstantMemo<I> {
+    type Args = Style;
+    type Error = Infallible;
+
+    fn construct(locale: LanguageIdentifier, style: Style) -> Result<Self, Infallible> {
+        Ok(Self(I::new(&locale, style)))
+    }
+}
+
+/// The bundle's formatter hook: what the host writes for a number or a
+/// [`Timestamp`], and the plain text where it declines. Every other value is
+/// left to Fluent. The memoizer holds its lock while it builds and runs a
+/// formatter, so a host must never panic.
+fn written<H: Host>(value: &FluentValue<'_>, intls: &IntlLangMemoizer) -> Option<String> {
+    if let FluentValue::Number(number) = value {
+        return Some(written_number::<H>(number, intls));
+    }
+    timestamp_of(value).map(|timestamp| written_instant::<H>(timestamp, intls))
+}
+
+/// The [`Timestamp`] a Fluent value holds, if it holds one. The value is
+/// asked through its trait object: a `Box` of it is `Any` itself, and would
+/// never downcast to the type inside.
+fn timestamp_of<'v>(value: &'v FluentValue<'_>) -> Option<&'v Timestamp> {
+    match value {
+        FluentValue::Custom(custom) => custom.as_ref().as_any().downcast_ref(),
+        _ => None,
+    }
+}
+
+fn written_number<H: Host>(number: &FluentNumber, intls: &IntlLangMemoizer) -> String {
+    let options = NumberOptions::from(&number.options);
+    intls
+        .with_try_get::<NumberMemo<H::Numbers>, _, _>(options, |memo| {
+            memo.0
+                .as_ref()
+                .and_then(|formatter| formatter.format(number.value))
+        })
+        .unwrap_or_else(|never| match never {})
+        .unwrap_or_else(|| plain_number(number.value, options))
+}
+
+fn written_instant<H: Host>(timestamp: &Timestamp, intls: &IntlLangMemoizer) -> String {
+    intls
+        .with_try_get::<InstantMemo<H::Instants>, _, _>(timestamp.style, |memo| {
+            memo.0
+                .as_ref()
+                .and_then(|formatter| formatter.format(timestamp.utc_ms, timestamp.zone.as_ref()))
+        })
+        .unwrap_or_else(|never| match never {})
+        .unwrap_or_else(|| plain_instant(timestamp.utc_ms, timestamp.style))
+}
+
+/// `DATETIME($instant, dateStyle: ..., timeStyle: ...)`: the instant with the
+/// style the options ask for, which replace those of an earlier call. A call
+/// outside the vocabulary is an error, which Fluent shows as `DATETIME()`.
+fn datetime<'a>(positional: &[FluentValue<'a>], named: &FluentArgs) -> FluentValue<'a> {
+    let [value] = positional else {
+        return FluentValue::Error;
+    };
+    let (Some(timestamp), Some(style)) = (timestamp_of(value), Style::from_options(named)) else {
+        return FluentValue::Error;
+    };
+    FluentValue::Custom(Box::new(Timestamp {
+        style,
+        ..timestamp.clone()
+    }))
 }
 
 #[cfg(test)]

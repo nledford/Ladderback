@@ -280,9 +280,10 @@ impl Localizer {
     }
 
     /// A message argument as a Fluent value. A number stays a number, so
-    /// plural selectors work; sizes, durations and instants are written by
-    /// the catalog's helper messages and the host's formatters, then passed
-    /// on as text; text is never taken for a number. A count past
+    /// plural selectors work, and the bundle's host writes it; an instant
+    /// stays an instant for `DATETIME` and the host to write; sizes and
+    /// durations are written by the catalog's helper messages, then passed on
+    /// as text; text is never taken for a number. A count past
     /// [`MAX_EXACT_COUNT`] is text too, so its digits are exact, and it
     /// selects the `other` plural form.
     fn value<'a>(
@@ -319,8 +320,8 @@ impl Localizer {
                     problems,
                 )))
             }
-            MsgArg::Timestamp { utc_ms, .. } => {
-                FluentValue::String(Cow::Owned(format::instant(*utc_ms)))
+            MsgArg::Timestamp { utc_ms, zone } => {
+                FluentValue::Custom(Box::new(format::Timestamp::new(*utc_ms, zone.clone())))
             }
         }
     }
@@ -362,6 +363,7 @@ fn new_bundle(locale: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
     // `NUMBER` keeps a count numeric, so plural selectors work. An error only
     // means it was already added.
     let _ = bundle.add_builtins();
+    format::install::<format::Active, _>(&mut bundle);
     for source in catalog.sources {
         // The catalog tests keep every file clean. A bundle in the field
         // takes what parses, and the first of an ID defined twice.
