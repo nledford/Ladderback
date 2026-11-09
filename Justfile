@@ -128,6 +128,13 @@ _wasm-bindgen-version:
 web:
     cd crates/web && trunk build --release
 
+# The UI tests drive the component gallery (`/_gallery`), which a release build
+# leaves out (`just architecture` checks that), so they run against this one.
+[doc('Build the web UI with the gallery into crates/web/dist, for the @ui scenarios.')]
+[group('build')]
+web-test:
+    cd crates/web && trunk build --release --features gallery
+
 # Build the ladderback binary with the current web UI.
 [group('build')]
 build: web
@@ -140,11 +147,14 @@ serve: build
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
-# copy of it, when the local one is missing, and that package exits 0.
-[doc('Run the @ui scenarios in Chromium against a fresh build.')]
+# copy of it, when the local one is missing, and that package exits 0. The
+# binary is built here, after `web-test`, so that it embeds the web UI with the
+# gallery, not the release one `build` makes.
+[doc('Run the @ui scenarios in Chromium against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
-test-ui *args: build _ui-deps
+test-ui *args: web-test _ui-deps
+    cargo build
     cd ui-tests && node_modules/.bin/cucumber-js "$@"
 
 # Installs the UI test dependencies when they are missing or older than the

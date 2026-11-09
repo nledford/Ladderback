@@ -9,7 +9,9 @@
 #   - the inner rings share one banned-call list (clippy.toml);
 #   - a release build leaves out the development pseudolocales' `fluent-pseudo`
 #     (technical design §8.4): `ladderback` and `web` have it by default, and not
-#     when built with `--no-default-features`, as a release is.
+#     when built with `--no-default-features`, as a release is;
+#   - a release build leaves out the component gallery, the dev-only route
+#     `/_gallery` (the `web` feature `gallery`).
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
 # support) may be a dev-dependency only.
 set -euo pipefail
@@ -136,6 +138,34 @@ pseudolocales has ladderback
 pseudolocales has web --target wasm32-unknown-unknown
 pseudolocales lacks ladderback --no-default-features
 pseudolocales lacks web --no-default-features --target wasm32-unknown-unknown
+
+# The component gallery (technical design §4.5) is a dev-only route: the `web`
+# feature `gallery` is off by default, and a release build (`--no-default-features`)
+# leaves it out. `just web-test` turns it on for the UI tests. The feature adds
+# no crate, so the check reads the feature graph. As for the pseudolocales, both
+# sides are checked, so that this cannot pass with nothing to find.
+gallery() {
+  local want=$1
+  shift
+  local tree found
+  # Separate from the pipeline, as in `check`: a failing `cargo tree` must
+  # stop the script, while "no match" must not.
+  tree=$(cargo tree --package web --edges features --invert web --prefix none --target wasm32-unknown-unknown "$@")
+  found=$(grep -F 'web feature "gallery"' <<<"$tree" || true)
+  if [[ $want == has && -z $found ]]; then
+    echo "error: web ${*:-(default features)} lacks the gallery, so the UI tests have no /_gallery" >&2
+    status=1
+  elif [[ $want == lacks && -n $found ]]; then
+    echo "error: web ${*:-(default features)} has the gallery, which a release build must leave out" >&2
+    status=1
+  else
+    echo "ok: web ${*:-(default features)} $want the gallery"
+  fi
+}
+
+gallery has --features gallery
+gallery lacks
+gallery lacks --no-default-features
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   echo "error: crates/domain/clippy.toml and crates/app/clippy.toml differ" >&2
