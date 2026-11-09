@@ -75,11 +75,14 @@ fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardE
     let Some(element) = dialog.get() else {
         return;
     };
-    let Ok(focusables) = element.unchecked_ref::<web_sys::Element>().query_selector_all(
-        "button:not([disabled]), a[href], input:not([disabled]), \
+    let Ok(focusables) = element
+        .unchecked_ref::<web_sys::Element>()
+        .query_selector_all(
+            "button:not([disabled]), a[href], input:not([disabled]), \
          select:not([disabled]), textarea:not([disabled]), \
          [tabindex]:not([tabindex=\"-1\"])",
-    ) else {
+        )
+    else {
         return;
     };
     let first = focusables.item(0);
