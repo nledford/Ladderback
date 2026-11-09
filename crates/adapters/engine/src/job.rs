@@ -360,7 +360,7 @@ mod tests {
     fn spec(job: JobKind) -> JobSpec {
         JobSpec {
             op_id: OperationId::from_uuid(domain::Uuid::from_u128(7)),
-            cache_dir: Some(PathBuf::from("/cache/steading/abc/0")),
+            cache_dir: Some(PathBuf::from("/cache/ladderback/abc/0")),
             watchdog_interval_ms: 5_000,
             job,
         }

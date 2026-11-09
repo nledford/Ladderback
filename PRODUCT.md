@@ -1,4 +1,4 @@
-# Steading
+# Ladderback
 
 <!-- impeccable:product-schema 1 -->
 
@@ -16,11 +16,11 @@ web
 
 People who back up their own machines with [rustic](https://rustic.cli.rs). They might be on a desktop, a laptop or a headless server, and they keep one or more shared repositories. They know backups matter, but they don't want to babysit cron jobs, lock files and per-machine logs. Their job is to know every machine is backed up, notice quickly when one isn't, and get files back without fear.
 
-Steading is built for its author's own fleet first: Bazzite desktops, Linux servers and a MacBook. It is published so other rustic self-hosters can use it, without support promises.
+Ladderback is built for its author's own fleet first: Bazzite desktops, Linux servers and a MacBook. It is published so other rustic self-hosters can use it, without support promises.
 
 ## Problem
 
-Without Steading, each machine runs rustic from its own cron job or timer:
+Without Ladderback, each machine runs rustic from its own cron job or timer:
 
 - Failures surface only if someone reads the logs.
 - A laptop that was asleep at 02:00 silently skips its backup.
@@ -33,7 +33,7 @@ Backrest solves the UI half, but it wraps restic. That brings two problems:
 
 ## Product Purpose
 
-Steading turns rustic into a managed service on each machine, with one place to see them all:
+Ladderback turns rustic into a managed service on each machine, with one place to see them all:
 
 1. **Plans and schedules.** Define what to back up, from which machine, into which repository, how often, and how long to keep it.
 2. **One place to see every machine.** Status, live progress, history, warnings and errors for every connected computer.
@@ -45,7 +45,7 @@ Success means: every machine's last good backup is visible at a glance, and a mi
 
 ## Positioning
 
-"Backrest, but built on rustic_core." Steading links rustic's library instead of shelling out to a CLI, so it inherits rustic's lock-free repository design: many hosts back up while one owner prunes. Missed runs on sleeping laptops catch up by default. The hub never receives agents' secrets.
+"Backrest, but built on rustic_core." Ladderback links rustic's library instead of shelling out to a CLI, so it inherits rustic's lock-free repository design: many hosts back up while one owner prunes. Missed runs on sleeping laptops catch up by default. The hub never receives agents' secrets.
 
 ## Brand Personality
 
@@ -64,7 +64,7 @@ Calm and exact.
 - Linux and macOS only. Windows is out of scope.
 - One owner and their machines: no multiple users, no multi-tenant SaaS.
 - Not a general rustic GUI. `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only in v1.
-- Not a manager for restic repositories that restic also maintains. Restic must never prune a repository Steading manages.
+- Not a manager for restic repositories that restic also maintains. Restic must never prune a repository Ladderback manages.
 - No mobile app. The web UI is responsive.
 - English (`en-US`) only in v1. Every user-facing string is localizable, so a language can be added without touching application code.
 
@@ -86,7 +86,7 @@ Free and open source under MIT OR Apache-2.0.
 
 ## Evidence on Hand
 
-None yet: Steading is in the design stage. There are no users, screenshots, testimonials or benchmarks, and none may be invented.
+None yet: Ladderback is in the design stage. There are no users, screenshots, testimonials or benchmarks, and none may be invented.
 
 ## Stack
 

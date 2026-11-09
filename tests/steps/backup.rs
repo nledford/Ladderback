@@ -1,6 +1,6 @@
 //! Steps for the `@e2e` backup scenarios: real scratch repositories, real
 //! workers. Repositories are set up and inspected with `rustic_core`
-//! directly, never through Steading, so the checks don't trust the code
+//! directly, never through Ladderback, so the checks don't trust the code
 //! under test.
 
 use std::fs;
@@ -182,8 +182,8 @@ fn folder_moved(agent: &mut Agent) {
     agent.backup.source = Some(to);
 }
 
-#[given("the folder was backed up without Steading")]
-fn backed_up_without_steading(agent: &mut Agent) {
+#[given("the folder was backed up without Ladderback")]
+fn backed_up_without_ladderback(agent: &mut Agent) {
     let repo = repository(&agent.repository())
         .open(&credentials())
         .unwrap()
@@ -286,7 +286,7 @@ fn parent_is_previous(agent: &mut Agent) {
     assert_eq!(new_snapshot_parent(agent), agent.backup.earlier);
 }
 
-#[then("the new snapshot's parent is the snapshot made without Steading")]
+#[then("the new snapshot's parent is the snapshot made without Ladderback")]
 fn parent_is_plain(agent: &mut Agent) {
     assert_eq!(new_snapshot_parent(agent), agent.backup.earlier);
 }

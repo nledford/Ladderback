@@ -1,6 +1,6 @@
 [package]
 name = "web"
-description = "Steading's web UI: a Leptos client-side app built with trunk"
+description = "Ladderback's web UI: a Leptos client-side app built with trunk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

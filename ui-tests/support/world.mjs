@@ -1,4 +1,4 @@
-// Starts one real `steading serve` for the run and a fresh browser page per
+// Starts one real `ladderback serve` for the run and a fresh browser page per
 // scenario. The binary must already contain the built web UI.
 
 import { spawn } from "node:child_process";
@@ -20,7 +20,7 @@ import { chromium } from "playwright";
 setDefaultTimeout(30_000);
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const binary = process.env.STEADING_BIN ?? path.join(repoRoot, "target/debug/steading");
+const binary = process.env.LADDERBACK_BIN ?? path.join(repoRoot, "target/debug/ladderback");
 
 let server;
 let baseUrl;
@@ -39,7 +39,7 @@ function startServer() {
     child.on("error", (error) => reject(new Error(`cannot start ${binary}: ${error.message}`)));
     // "close" fires after stderr has been fully read, so `output` is complete.
     child.on("close", () => {
-      if (!listening) reject(new Error(`steading exited before listening:\n${output}`));
+      if (!listening) reject(new Error(`ladderback exited before listening:\n${output}`));
     });
     // A `for await` that returns early destroys the stream, and the server's
     // later stderr writes would then fail with EPIPE. Keep draining instead.

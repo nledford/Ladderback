@@ -2,7 +2,7 @@
 //!
 //! Every crate reports through the `log` facade, and nothing is written until
 //! a logger is installed: the daemon's records, and the lines the worker's
-//! stderr is forwarded as (target `steading::worker`), would be dropped.
+//! stderr is forwarded as (target `ladderback::worker`), would be dropped.
 //!
 //! The daemon logs to stderr, at `info` unless `RUST_LOG` says otherwise.
 
@@ -28,7 +28,7 @@ pub(crate) fn install() {
 /// that is set.
 ///
 /// It logs at [`DEFAULT_LEVEL`] unless `rust_log` names another level, and
-/// env_logger's directives (`debug`, `steading::worker=off`) go on top of
+/// env_logger's directives (`debug`, `ladderback::worker=off`) go on top of
 /// that, so one for a target leaves the others at the default. An empty or
 /// blank `rust_log` says nothing, as none does. Colors are used only when the
 /// target is a terminal.
@@ -119,14 +119,14 @@ mod tests {
 
     #[test]
     fn by_default_errors_warnings_and_infos_are_logged_and_debug_and_trace_are_not() {
-        for target in ["steading", "steading::worker"] {
+        for target in ["ladderback", "ladderback::worker"] {
             assert_eq!(written(None, target), NORMAL, "{target}");
         }
     }
 
     #[test]
     fn rust_log_debug_lets_debug_through_but_not_trace() {
-        for target in ["steading", "steading::worker"] {
+        for target in ["ladderback", "ladderback::worker"] {
             assert_eq!(
                 written(Some("debug"), target),
                 [Level::Error, Level::Warn, Level::Info, Level::Debug],
@@ -137,53 +137,68 @@ mod tests {
 
     #[test]
     fn rust_log_error_drops_warnings() {
-        for target in ["steading", "steading::worker"] {
+        for target in ["ladderback", "ladderback::worker"] {
             assert_eq!(written(Some("error"), target), [Level::Error], "{target}");
         }
     }
 
     #[test]
     fn a_directive_for_one_target_silences_just_that_target() {
-        let worker = written(Some("steading::worker=off"), "steading::worker");
+        let worker = written(Some("ladderback::worker=off"), "ladderback::worker");
         assert!(worker.is_empty(), "the worker still logged: {worker:?}");
-        assert_eq!(written(Some("steading::worker=off"), "steading"), NORMAL);
+        assert_eq!(
+            written(Some("ladderback::worker=off"), "ladderback"),
+            NORMAL
+        );
     }
 
     #[test]
     fn a_directive_for_one_target_leaves_the_others_at_the_default_level() {
         assert_eq!(
-            written(Some("steading::worker=debug"), "steading::worker"),
+            written(Some("ladderback::worker=debug"), "ladderback::worker"),
             [Level::Error, Level::Warn, Level::Info, Level::Debug]
         );
-        assert_eq!(written(Some("steading::worker=debug"), "steading"), NORMAL);
+        assert_eq!(
+            written(Some("ladderback::worker=debug"), "ladderback"),
+            NORMAL
+        );
     }
 
     #[test]
     fn an_empty_or_blank_rust_log_is_the_default() {
         for rust_log in ["", " ", "  \t\n"] {
-            assert_eq!(written(Some(rust_log), "steading"), NORMAL, "{rust_log:?}");
+            assert_eq!(
+                written(Some(rust_log), "ladderback"),
+                NORMAL,
+                "{rust_log:?}"
+            );
         }
     }
 
     #[test]
     fn each_record_is_one_plain_line_with_its_level_target_and_message() {
         let (logger, pipe) = piped(None);
-        log_to(&logger, Level::Warn, "steading::worker", "disk is slow");
-        log_to(&logger, Level::Info, "steading", "steading 0.0.0 starting");
+        log_to(&logger, Level::Warn, "ladderback::worker", "disk is slow");
+        log_to(
+            &logger,
+            Level::Info,
+            "ladderback",
+            "ladderback 0.0.0 starting",
+        );
         let text = pipe.text();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text:?}");
         assert!(
             lines[0].contains("WARN")
-                && lines[0].contains("steading::worker")
+                && lines[0].contains("ladderback::worker")
                 && lines[0].ends_with("disk is slow"),
             "{}",
             lines[0]
         );
         assert!(
             lines[1].contains("INFO")
-                && lines[1].contains("steading")
-                && lines[1].ends_with("steading 0.0.0 starting"),
+                && lines[1].contains("ladderback")
+                && lines[1].ends_with("ladderback 0.0.0 starting"),
             "{}",
             lines[1]
         );

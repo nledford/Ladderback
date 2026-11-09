@@ -24,7 +24,7 @@ tokio = { workspace = true, features = ["process", "io-util", "rt", "macros", "t
 # Signals and process groups: the daemon stops a worker's whole process group
 # with SIGTERM and the worker handles it; the worker also points its file
 # descriptor 1 elsewhere and, on Linux, asks to be told when its parent dies.
-# Steading targets macOS and Linux (technical design §1); elsewhere a stop kills at once.
+# Ladderback targets macOS and Linux (technical design §1); elsewhere a stop kills at once.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs"] }
 signal-hook.workspace = true

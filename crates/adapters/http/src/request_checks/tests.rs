@@ -210,7 +210,7 @@ async fn a_refusal_is_json_with_the_error_code_and_nothing_else() {
 
 #[tokio::test]
 async fn requests_without_an_origin_aren_t_subject_to_the_origin_rule() {
-    // curl, scripts and the `steading` CLI send no Origin.
+    // curl, scripts and the `ladderback` CLI send no Origin.
     for method in ["GET", "HEAD", "OPTIONS"] {
         assert_served(request(method, "/", &[("host", "localhost:9898")]), method).await;
     }

@@ -215,7 +215,7 @@ function scenarioFails(dir, scenario, uiReady) {
     uiReady();
     // The local binary by path, never `npx`: see the Justfile's test-ui.
     result = run("node_modules/.bin/cucumber-js", ["--name", regex], path.join(dir, "ui-tests"), {
-      env: { STEADING_BIN: path.join(targetDir("first"), "debug", "steading") },
+      env: { LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback") },
       timeout: TEST_TIMEOUT_MS,
     });
   }

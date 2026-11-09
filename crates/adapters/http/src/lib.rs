@@ -96,7 +96,7 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
         Some(index) => file(INDEX, index),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
-            "This build of Steading has no web UI. Build crates/web with trunk, then rebuild Steading.",
+            "This build of Ladderback has no web UI. Build crates/web with trunk, then rebuild Ladderback.",
         )
             .into_response(),
     }
@@ -172,7 +172,7 @@ mod tests {
 
     fn ui() -> Arc<dyn AssetSource> {
         Arc::new(Files(HashMap::from([
-            ("index.html", "<!doctype html><title>Steading</title>"),
+            ("index.html", "<!doctype html><title>Ladderback</title>"),
             ("web-1a2b.js", "export default 1;"),
             ("web-1a2b_bg.wasm", "\0asm"),
         ])))
@@ -218,7 +218,7 @@ mod tests {
         );
         assert_eq!(
             body(response).await,
-            "<!doctype html><title>Steading</title>"
+            "<!doctype html><title>Ladderback</title>"
         );
     }
 

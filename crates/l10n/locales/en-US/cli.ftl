@@ -1,5 +1,5 @@
-### Steading's own command-line messages. The program prints each after its
-### name and a colon (`steading: listening on …`); `clap`'s help and usage
+### Ladderback's own command-line messages. The program prints each after its
+### name and a colon (`ladderback: listening on …`); `clap`'s help and usage
 ### errors are not here and stay in English.
 
 # The daemon is up. Scripts and the UI tests read the address after "listening on".

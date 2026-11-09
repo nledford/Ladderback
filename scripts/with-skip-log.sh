@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs a command with STEADING_SKIP_LOG pointing at a fresh file, then lists
+# Runs a command with LADDERBACK_SKIP_LOG pointing at a fresh file, then lists
 # the tests that called `testkit::skip!` during the run, so a skip shows in
 # CI logs instead of passing silently (technical design §13.5). The listing
 # comes last, also when the command fails, and the command's exit status is
@@ -16,7 +16,7 @@ mkdir -p "$target" || exit 1
 target=$(cd "$target" && pwd) || exit 1
 log=$(mktemp "$target/skipped-tests.XXXXXX") || exit 1
 trap 'rm -f "$log"' EXIT
-export STEADING_SKIP_LOG=$log
+export LADDERBACK_SKIP_LOG=$log
 
 "$@"
 status=$?

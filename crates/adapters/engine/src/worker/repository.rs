@@ -81,7 +81,7 @@ fn cache_dir(ctx: &Context) -> io::Result<Option<PathBuf>> {
     }
 }
 
-/// The repository's ID as Steading knows it: 64 lowercase hex characters
+/// The repository's ID as Ladderback knows it: 64 lowercase hex characters
 /// (`Id`'s `Display` is the first 8).
 pub(crate) fn repository_id(repository: &Repository<OpenStatus>) -> Result<RepositoryId, JobError> {
     RepositoryId::parse(repository.config().id.to_hex().as_str())

@@ -16,7 +16,7 @@ use sqlx::{ConnectOptions, Row};
 use store::{OpenError, SqliteStore};
 use tempfile::TempDir;
 
-/// A scratch directory holding one database, `steading.db`.
+/// A scratch directory holding one database, `ladderback.db`.
 pub struct Scratch {
     dir: TempDir,
 }
@@ -24,7 +24,7 @@ pub struct Scratch {
 impl Scratch {
     pub fn new() -> Self {
         let dir = tempfile::Builder::new()
-            .prefix("steading-store-")
+            .prefix("ladderback-store-")
             .tempdir()
             .expect("a scratch directory");
         Self { dir }
@@ -35,7 +35,7 @@ impl Scratch {
     }
 
     pub fn path(&self) -> PathBuf {
-        self.dir.path().join("steading.db")
+        self.dir.path().join("ladderback.db")
     }
 
     /// The store on this scratch database; the first call creates it.

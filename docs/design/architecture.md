@@ -4,12 +4,12 @@
 
 ```
                        ┌──────────────────────── hub machine ─────────────────────────┐
-  Browser ──HTTPS──►   │  steading serve --hub                                         │
+  Browser ──HTTPS──►   │  ladderback serve --hub                                         │
   (Leptos WASM UI)     │   ├─ HTTP API + UI (axum)      ├─ Hub registry (agents, plans,│
                        │   ├─ Scheduler                 │   repo owners)               │
                        │   ├─ Op log (SQLite)           ├─ Maintenance runner          │
                        │   │                            │   (forget/prune/check)       │
-                       │   └─ local agent ──spawns──►  steading worker ──► repo        │
+                       │   └─ local agent ──spawns──►  ladderback worker ──► repo        │
                        └──────────────▲────────────────────────────────────────────────┘
                                       │ WebSocket (agent dials out, TLS, signed identity)
              ┌────────────────────────┼─────────────────────────┐
@@ -25,22 +25,22 @@
 
 | Role | Command | Runs where | Responsibility |
 |---|---|---|---|
-| **Agent** | `steading serve` | every machine | Local config, scheduler, op log, spawning workers, local web UI. Works fully standalone. |
-| **Hub** | `steading serve --hub` | one machine (often a server) | Everything an agent does, plus an agent registry, aggregated history, the repo ownership registry, maintenance for hub-managed repos, notifications |
-| **Worker** | `steading worker` (internal) | spawned per operation | Runs exactly one `rustic_core` operation, streams events to stdout, then exits |
-| **MCP server** | `steading mcp` (started by an MCP client) | wherever the client runs | Lets AI agents and scripts drive a running agent (a hub from M4b), or a headless session of their own, over stdio (§4.6) |
+| **Agent** | `ladderback serve` | every machine | Local config, scheduler, op log, spawning workers, local web UI. Works fully standalone. |
+| **Hub** | `ladderback serve --hub` | one machine (often a server) | Everything an agent does, plus an agent registry, aggregated history, the repo ownership registry, maintenance for hub-managed repos, notifications |
+| **Worker** | `ladderback worker` (internal) | spawned per operation | Runs exactly one `rustic_core` operation, streams events to stdout, then exits |
+| **MCP server** | `ladderback mcp` (started by an MCP client) | wherever the client runs | Lets AI agents and scripts drive a running agent (a hub from M4b), or a headless session of their own, over stdio (§4.6) |
 
 Every agent is useful alone. Hub mode is opt-in, and an agent that can't reach the hub keeps backing up on schedule. It stores events in a persistent outbox and replays them when it reconnects.
 
 ### 3.1 Domain model (DDD)
 
-Steading's hard problems are domain rules, not CRUD: who may prune a repository, which snapshots a policy may delete, when a backup must give up, when a missed run catches up, what a restore may overwrite. Those rules get names, types and tests of their own, independent of rustic, SQLite, axum or the sync protocol.
+Ladderback's hard problems are domain rules, not CRUD: who may prune a repository, which snapshots a policy may delete, when a backup must give up, when a missed run catches up, what a restore may overwrite. Those rules get names, types and tests of their own, independent of rustic, SQLite, axum or the sync protocol.
 
 **Ubiquitous language.** These terms mean exactly this in code, tests, UI copy and docs.
 
 | Term | Meaning |
 |---|---|
-| Agent | One machine running `steading serve`, identified by its agent ID |
+| Agent | One machine running `ladderback serve`, identified by its agent ID |
 | Hub | The agent running `--hub`; holds the registry, ownership and aggregated history |
 | Plan | What to back up, from which agent, into which repository, when, and how long to keep it |
 | Repository | A rustic repository, identified by its **repository ID**. An **alias** is one agent's local name for it |
@@ -48,7 +48,7 @@ Steading's hard problems are domain rules, not CRUD: who may prune a repository,
 | Trigger | What started an operation: `schedule`, `manual`, `catch-up`, `retry`, `hub` or `mcp` |
 | Operation log (history) | The record of every operation: when it was queued, started and finished, how it ended, what the engine reported, and its first 10,000 warnings with the total. It is written as an operation runs and never needed to run one |
 | Snapshot | A rustic snapshot, read from the repository; never created or edited except through an operation |
-| Plan tags | `steading-plan:<id>` and `steading-agent:<id>`; they make a snapshot **managed** by a plan |
+| Plan tags | `ladderback-plan:<id>` and `ladderback-agent:<id>`; they make a snapshot **managed** by a plan |
 | Unmanaged group | Untagged snapshots, grouped by the repository's `group-by` |
 | Orphaned group | Tagged snapshots whose plan or agent no longer exists |
 | Adopt | Retag an unmanaged or orphaned group into a plan |
@@ -90,11 +90,11 @@ Steading's hard problems are domain rules, not CRUD: who may prune a repository,
 
 The sync outbox (§7.2) persists the events the hub needs.
 
-**Retention evaluation stays in rustic.** `ForgetSelection` decides *which* snapshots each policy applies to; applying `keep-*` rules to a group is delegated to the `Retention` port, implemented with rustic's own `ForgetGroups`, so Steading never reimplements retention. The export golden test (§6.2) checks the two agree.
+**Retention evaluation stays in rustic.** `ForgetSelection` decides *which* snapshots each policy applies to; applying `keep-*` rules to a group is delegated to the `Retention` port, implemented with rustic's own `ForgetGroups`, so Ladderback never reimplements retention. The export golden test (§6.2) checks the two agree.
 
 ### 3.2 Code architecture: hexagonal, with a DDD core
 
-Steading's complexity sits at its edges: one set of rules is driven by an HTTP API, a CLI, a scheduler and hub commands, and it drives a rustic engine in a child process, SQLite, a WebSocket, OS keyrings, power and wake signals, notification channels and the clock. Ports and adapters name exactly that, and let every rule be tested with fakes for all of it.
+Ladderback's complexity sits at its edges: one set of rules is driven by an HTTP API, a CLI, a scheduler and hub commands, and it drives a rustic engine in a child process, SQLite, a WebSocket, OS keyrings, power and wake signals, notification channels and the clock. Ports and adapters name exactly that, and let every rule be tested with fakes for all of it.
 
 | Option | Verdict |
 |---|---|
@@ -107,7 +107,7 @@ Steading's complexity sits at its edges: one set of rules is driven by an HTTP A
 flowchart LR
   subgraph Inbound adapters
     HTTP[axum HTTP API + UI]
-    CLI[steading CLI]
+    CLI[ladderback CLI]
     SYNCIN[sync: hub commands / agent reports]
     LOOPS[runtime loops: scheduler, job runner, lease timers]
   end
@@ -149,7 +149,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 
 | Port | Capability | Real adapter | Test double |
 |---|---|---|---|
-| `Engine` | Repository ID, init, test connection, backup, list and delete snapshots, retag (for Adopt), prune, check, restore, ls, stats. `run` returns a `RunningJob`: a stream of `EngineEvent`s plus a `JobControl` whose `stop` ends the job gracefully (SIGTERM, a grace period, then SIGKILL); dropping the `RunningJob` kills the job at once. `dump` returns a byte stream carried on its own pipe, separate from the event stream | Spawns `steading worker` (links `rustic_core`) | Scripted fake engine |
+| `Engine` | Repository ID, init, test connection, backup, list and delete snapshots, retag (for Adopt), prune, check, restore, ls, stats. `run` returns a `RunningJob`: a stream of `EngineEvent`s plus a `JobControl` whose `stop` ends the job gracefully (SIGTERM, a grace period, then SIGKILL); dropping the `RunningJob` kills the job at once. `dump` returns a byte stream carried on its own pipe, separate from the event stream | Spawns `ladderback worker` (links `rustic_core`) | Scripted fake engine |
 | `Retention` | Pure: apply a `RetentionPolicy` to `SnapshotRef`s at a given `now` | `rustic_core::ForgetGroups`, in-process | Small keep-last / keep-within fake; the shared contract suite checks it against the real adapter |
 | `OperationStore` | Operations and queue; `try_start` refuses a second running maintenance operation per repo (I7) | sqlx SQLite | In-memory |
 | `ScheduleStore`, `SnapshotCatalog`, `Outbox`, `LeaseCache` (agent), `OwnershipRegistry` and `AgentRegistry` (hub) | Persistence | sqlx SQLite | In-memory |

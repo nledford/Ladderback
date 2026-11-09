@@ -82,15 +82,15 @@ Feature: Pseudolocales
     When I open the web UI
     Then the page language is "en-US"
     And the text direction is "ltr"
-    And the page is titled "Steading"
-    And the main heading reads "Welcome to Steading"
+    And the page is titled "Ladderback"
+    And the main heading reads "Welcome to Ladderback"
 
   Scenario: A browser language nothing serves leaves the page in American English
     Given the browser's language is "de-DE"
     When I open the web UI
     Then the page language is "en-US"
     And the text direction is "ltr"
-    And the main heading reads "Welcome to Steading"
+    And the main heading reads "Welcome to Ladderback"
 
   Scenario: A browser that lists a pseudolocale among its languages gets it
     Given the browser's language is "ar-XB"
@@ -107,7 +107,7 @@ Feature: Pseudolocales
   Scenario: An address that names no language leaves the page in American English
     When I open the web UI asking for the locale "not a language!"
     Then the page language is "en-US"
-    And the main heading reads "Welcome to Steading"
+    And the main heading reads "Welcome to Ladderback"
 
   Scenario Outline: A locale in the address that names no language is ignored, not obeyed
     The browser's own language, a pseudolocale here, still decides.

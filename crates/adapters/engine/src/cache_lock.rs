@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn a_directory_is_held_by_one_lock_at_a_time() {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("steading").join("ab").join("0");
+        let dir = root.path().join("ladderback").join("ab").join("0");
         let first = CacheLock::acquire(&dir).unwrap();
         assert!(dir.is_dir(), "the directory is made");
         let busy = CacheLock::acquire(&dir).expect_err("a second lock on a held directory");

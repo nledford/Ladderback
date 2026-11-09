@@ -31,6 +31,6 @@ Feature: Backups
     Then the new snapshot's parent is the plan's previous snapshot
 
   Scenario: The first backup of a plan builds on rustic's own choice of parent
-    Given the folder was backed up without Steading
+    Given the folder was backed up without Ladderback
     When the agent backs up the plan
-    Then the new snapshot's parent is the snapshot made without Steading
+    Then the new snapshot's parent is the snapshot made without Ladderback

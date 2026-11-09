@@ -1,4 +1,4 @@
-//! The daemon's log, seen from outside: what `steading serve` writes to its
+//! The daemon's log, seen from outside: what `ladderback serve` writes to its
 //! stderr, with and without `RUST_LOG`.
 
 use std::io::{BufRead, BufReader};
@@ -6,12 +6,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-const STEADING: &str = env!("CARGO_BIN_EXE_steading");
+const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
 /// How long a daemon that was just started gets to say where it listens.
 const STARTUP: Duration = Duration::from_secs(30);
 
-/// A running `steading serve`: stopped, and waited for, when dropped, however
+/// A running `ladderback serve`: stopped, and waited for, when dropped, however
 /// the test ends.
 struct Daemon {
     child: Child,
@@ -22,7 +22,7 @@ impl Daemon {
     /// Starts the daemon on a port of the system's choosing, with `RUST_LOG`
     /// set to `rust_log` or, for `None`, not set at all.
     fn start(rust_log: Option<&str>) -> Self {
-        let mut command = Command::new(STEADING);
+        let mut command = Command::new(LADDERBACK);
         command
             // Port 0: the system picks a free port, and the daemon says which.
             .args(["serve", "--listen", "127.0.0.1:0"])
@@ -41,7 +41,7 @@ impl Daemon {
             Some(rust_log) => command.env("RUST_LOG", rust_log),
             None => command.env_remove("RUST_LOG"),
         };
-        let mut child = command.spawn().expect("steading serve started");
+        let mut child = command.spawn().expect("ladderback serve started");
         let stderr = child.stderr.take().expect("a piped stderr");
         // A thread reads the lines, so that waiting for one can have a limit.
         let (sender, receiver) = mpsc::channel();
@@ -77,7 +77,7 @@ impl Daemon {
                     panic!("no `listening on` line in {STARTUP:?}; stderr so far: {lines:#?}")
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    panic!("steading exited before it listened; stderr: {lines:#?}")
+                    panic!("ladderback exited before it listened; stderr: {lines:#?}")
                 }
             }
         }

@@ -198,7 +198,7 @@ pub struct BackupJob {
     /// ([`PlanTags::parent`]).
     pub tags: PlanTags,
     /// The user's own tags, added next to the plan tags. None uses the
-    /// reserved `steading-` prefix.
+    /// reserved `ladderback-` prefix.
     pub extra_tags: Vec<UserTag>,
     pub label: Option<String>,
     /// See [`Job::deadline_budget`].

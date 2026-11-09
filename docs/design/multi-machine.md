@@ -3,7 +3,7 @@
 ### 7.1 Pairing and identity
 
 1. On the hub: **Settings → Agents → New pairing token**. The token is single-use, with a TTL of 15 min by default.
-2. On the agent: `steading pair https://hub:9899 <token>` (or the same in the agent's UI).
+2. On the agent: `ladderback pair https://hub:9899 <token>` (or the same in the agent's UI).
 3. The agent generates an **Ed25519 keypair** and an **agent ID** (UUIDv7) once, and keeps both in its data dir, never in the database, so `db rebuild` can't change them. A standalone agent has them too, because its backups are tagged with the ID (§7.3). At pairing it sends its agent ID, public key, hostname and the token; the hub records the agent and discards the token. Re-pairing the same identity reuses the existing record. A hostname already registered to another agent is rejected, because the UI, the `host` filter and the `agents` table all identify machines by hostname.
 4. Every later connection is a WebSocket over TLS. The hub sends a nonce, the agent signs it, and the hub checks the signature against the registered key. To revoke an agent, delete it on the hub.
 
@@ -41,7 +41,7 @@ The browser never talks to agents directly. When looking at a remote machine, th
 
 - `hub`: the hub runs forget, prune and check. Required for repos several agents use.
 - `agent:<id>`: one specific agent runs them. Only for repos no other agent uses.
-- `none`: nothing in Steading prunes. Use this if an existing cron job keeps doing it during migration. Set explicitly on the hub's repo page, or by a standalone agent's config.
+- `none`: nothing in Ladderback prunes. Use this if an existing cron job keeps doing it during migration. Set explicitly on the hub's repo page, or by a standalone agent's config.
 
 **Requests and grants.** An agent's `maintenance` setting is a **request**: `local` asks for `agent:<self>`, `hub` asks for `hub`, and `none` makes no claim. With a hub configured, the agent reports it in `ReposSnapshot`, and the hub decides:
 
@@ -53,11 +53,11 @@ A grant is a **lease** with an `epoch` and an `expires_at` (7 days, renewed with
 
 Without a hub, `local` runs directly; the agent then warns if the repository contains snapshots from other hosts, because a second standalone owner can't be detected.
 
-**Snapshot ownership.** Every Steading backup carries the tags `steading-plan:<plan-id>` and `steading-agent:<agent-id>` alongside the user's tags, label and host. Plan IDs must be unique within an agent's config; the importer adds a suffix on slug collisions. A backup's parent is the newest snapshot with the same two tags, passed explicitly in `ParentOptions`; when none exists yet (the first backup, or history imported from plain rustic), it falls back to rustic's default choice of the newest snapshot with the same host, label and paths. Changing a plan's sources, label or the machine's hostname therefore keeps its history attached to the plan.
+**Snapshot ownership.** Every Ladderback backup carries the tags `ladderback-plan:<plan-id>` and `ladderback-agent:<agent-id>` alongside the user's tags, label and host. Plan IDs must be unique within an agent's config; the importer adds a suffix on slug collisions. A backup's parent is the newest snapshot with the same two tags, passed explicitly in `ParentOptions`; when none exists yet (the first backup, or history imported from plain rustic), it falls back to rustic's default choice of the newest snapshot with the same host, label and paths. Changing a plan's sources, label or the machine's hostname therefore keeps its history attached to the plan.
 
 **Forget algorithm (owner):**
 
-1. Load all snapshots. Group tagged snapshots by `(steading-agent, steading-plan)`.
+1. Load all snapshots. Group tagged snapshots by `(ladderback-agent, ladderback-plan)`.
 2. For each group, apply the matching published plan's `KeepOptions`. A tagged group whose plan or agent no longer exists is left alone and listed as "orphaned"; the user can attach a policy, delete it explicitly, or **Adopt** it into another plan (for example after a reinstall that created a new agent ID).
 3. **Untagged snapshots are never touched by default** (I6). They are grouped by the repo's `group-by` (default `host,label,paths`) and listed as "unmanaged groups". When a group's host, label and paths equal a plan's host, label and sources (after the same normalization rustic applies when it records paths), the UI offers **Adopt**: the owner rewrites those snapshot files with the plan's tags (new snapshot IDs, same trees). Examples of unmanaged groups are snapshots from an old cron job or a retired machine, and history imported from plain rustic.
 4. Run a dry run first and log what would be removed. Optionally require manual approval when more than N% of a group's snapshots would be deleted, as a safety net against a bad policy.
@@ -70,8 +70,8 @@ Without a hub, `local` runs directly; the agent then warns if the repository con
 2. **Owner prune guard.** Before pruning, the owner waits for every unfinished backup on that repo that started reading the index before the previous prune **finished** (a backup that reads the index while a prune runs still sees the old index), as seen in heartbeats (online or offline agents) or, for an agent owner, its own running jobs. It waits until each one reports a result or passes its deadline. Only those backups can reference packs this prune may delete, so newer backups never delay it and frequent backups can't starve it. This layer is advisory; layer 1 is the guarantee.
 3. **Duration warnings.** The owner warns when a plan's historical duration gets close to its deadline, and for a first backup that may take longer than `keep-delete` the UI suggests raising it until the backup finishes.
 
-Backups made outside Steading (the rustic or restic CLI) are not covered by the guard.
+Backups made outside Ladderback (the rustic or restic CLI) are not covered by the guard.
 
 **Check** runs weekly by default, with an optional `read-data-subset` such as `5%` for a rolling data check. Forget, prune and check on one repository are serialized (I7).
 
-**Restic warning (I5).** If a restic client must still write to the repo, only its **backups** are safe: they take a non-exclusive lock, which rustic ignores, and restic simply doesn't see packs in `packs_to_delete`. **restic `prune`, `forget`, `rewrite` and `repair` must never run** on a repo Steading maintains. `restic prune` deletes every pack it doesn't index, including the ones rustic marked for delayed deletion, and leaves stale marks behind. `restic check` is safe but reports rustic's marked packs as "additional files" and suggests running `restic prune`; the repo page warns about exactly that suggestion.
+**Restic warning (I5).** If a restic client must still write to the repo, only its **backups** are safe: they take a non-exclusive lock, which rustic ignores, and restic simply doesn't see packs in `packs_to_delete`. **restic `prune`, `forget`, `rewrite` and `repair` must never run** on a repo Ladderback maintains. `restic prune` deletes every pack it doesn't index, including the ones rustic marked for delayed deletion, and leaves stale marks behind. `restic check` is safe but reports rustic's marked packs as "additional files" and suggests running `restic prune`; the repo page warns about exactly that suggestion.

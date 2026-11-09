@@ -5,13 +5,13 @@ Configured on the hub (or on a standalone agent). Each rule is **event → chann
 - Events: `backup.started`, `backup.succeeded`, `backup.failed`, `backup.warning`, `backup.missed` (no success within N × interval), `backup.retrying`, `forget.failed`, `prune.failed`, `prune.refused` (`keep-delete` too small for the margin, §7.3), `check.failed`, `check.errors`, `agent.offline` (> N min), `repo.unmanaged_groups`, `repo.claim_rejected`, `repo.maintenance_paused` (lease not renewed, repo now shared, or not configured on the hub).
 - Channels: generic webhook (JSON), ntfy, Gotify, Discord/Slack webhook, SMTP.
 - **Templates.** Default message text comes from the `notify.ftl` catalog in the configured locale (§8.4). Users may override it with their own templates, which are not localized. Webhook bodies are JSON with stable, unlocalized keys, event names and error codes, plus a localized `message` field. Templates never receive secrets (I4).
-- **healthchecks.io-style pings per plan**: `start`, `success` and `fail` URLs. These are the most robust "it silently stopped" detector, because they work even when the whole Steading system is down.
+- **healthchecks.io-style pings per plan**: `start`, `success` and `fail` URLs. These are the most robust "it silently stopped" detector, because they work even when the whole Ladderback system is down.
 
 ---
 
 ## 12. Packaging and deployment
 
-- **Linux:** a static-ish `x86_64`/`aarch64` binary. `steading install-service [--user|--system]` writes a systemd unit (a user unit on desktops, a system unit on servers).
+- **Linux:** a static-ish `x86_64`/`aarch64` binary. `ladderback install-service [--user|--system]` writes a systemd unit (a user unit on desktops, a system unit on servers).
   - On **Bazzite and other atomic Fedora** systems, put it in `~/.local/bin` (or `/usr/local/bin`, which is writable) with a user unit. No layering needed.
 - **macOS:** a universal binary, signed with a Developer ID and notarized, with `install-service` writing a launchd agent plist. The worker needs **Full Disk Access** (TCC) to read `~/Documents`, `~/Desktop`, Mail and so on.
   - TCC ties the grant to the code signature, so an ad-hoc-signed build loses it on every upgrade. Signing is required, not polish.
@@ -22,7 +22,7 @@ Configured on the hub (or on a standalone agent). Each rule is **event → chann
 
 ### 12.1 Versioning and releases
 
-Steading follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). The **release unit is the product**: the `steading` binary, and from M5 its Docker image. Every crate inherits one version from `[workspace.package]` and none is published, so crate APIs are not a public contract.
+Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). The **release unit is the product**: the `ladderback` binary, and from M5 its Docker image. Every crate inherits one version from `[workspace.package]` and none is published, so crate APIs are not a public contract.
 
 **The public contract**, which decides the bump:
 
@@ -32,7 +32,7 @@ Steading follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html
 | `config.toml` (§6.1) | Dropping the migration from an old `schema`, so a file stops loading | New keys; a new `schema` whose migration runs on load |
 | REST and WebSocket API `/api/v1` | Anything that needs `/api/v2` | New endpoints and optional fields |
 | Sync protocol `/sync/v1` (§7.2) | A new `protocol` number that the previous release can't speak | New optional message fields |
-| Snapshot tags `steading-plan:` / `steading-agent:` (§7.3) | Any change: existing repositories would lose their plan links | — |
+| Snapshot tags `ladderback-plan:` / `ladderback-agent:` (§7.3) | Any change: existing repositories would lose their plan links | — |
 | Webhook JSON: keys, event names, error codes (§11) | Removing or renaming one | New events, keys or codes |
 | Exported rustic profiles (§6.2) | A profile that the pinned rustic CLI reads differently | — |
 | Database and data directory (§9) | A migration with no automatic path | Automatic migrations |
@@ -46,7 +46,7 @@ Not part of the contract: UI layout and wording, log text, the worker protocol (
 - from 1.0.0: breaking bumps the major, a feature the minor, a fix the patch;
 - every breaking change gets an entry under **Breaking** in `CHANGELOG.md`, with the upgrade step.
 
-**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version steading@<version>`.
+**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version ladderback@<version>`.
 
 **Tags.** `vX.Y.Z` on `main`, created only by the release workflow. A tag is never moved or deleted; a bad release is fixed by the next patch, and its GitHub release is marked as such.
 

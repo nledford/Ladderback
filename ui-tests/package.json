@@ -1,8 +1,8 @@
 {
-  "name": "steading-ui-tests",
+  "name": "ladderback-ui-tests",
   "private": true,
   "type": "module",
-  "description": "Runs Steading's @ui scenarios in a real browser: Playwright, axe-core and keyboard-only journeys (technical design §4.5, §13.2)",
+  "description": "Runs Ladderback's @ui scenarios in a real browser: Playwright, axe-core and keyboard-only journeys (technical design §4.5, §13.2)",
   "scripts": {
     "test": "cucumber-js",
     "lint": "node scripts/lint-journeys.mjs"

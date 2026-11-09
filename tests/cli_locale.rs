@@ -1,5 +1,5 @@
 //! The daemon's own messages in a pseudolocale (technical design §8.4): what
-//! `steading serve` says on stderr with `LANGUAGE=en-XA` or `LANGUAGE=ar-XB`,
+//! `ladderback serve` says on stderr with `LANGUAGE=en-XA` or `LANGUAGE=ar-XB`,
 //! when it cannot listen because the address is taken. The text of the
 //! catalog is transformed; the address it was asked for and the operating
 //! system's own words are not, because a person must be able to copy them.
@@ -13,12 +13,12 @@ use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const STEADING: &str = env!("CARGO_BIN_EXE_steading");
+const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
 /// How long a daemon that cannot listen gets to say so and exit.
 const FAILS_WITHIN: Duration = Duration::from_secs(30);
 
-/// What `steading serve` said when it was run on an address that is taken.
+/// What `ladderback serve` said when it was run on an address that is taken.
 struct Said {
     /// The address it was asked to listen on.
     address: String,
@@ -28,7 +28,7 @@ struct Said {
     message: String,
 }
 
-/// Runs `steading serve` on an address another socket holds, with
+/// Runs `ladderback serve` on an address another socket holds, with
 /// `LANGUAGE=language` and no other setting that could name a locale.
 fn serve_on_a_taken_address(language: &str) -> Said {
     let taken = TcpListener::bind("127.0.0.1:0").expect("a free port to take");
@@ -37,7 +37,7 @@ fn serve_on_a_taken_address(language: &str) -> Said {
     let os_error = TcpListener::bind(&address)
         .expect_err("the address is taken")
         .to_string();
-    let mut child = Command::new(STEADING)
+    let mut child = Command::new(LADDERBACK)
         .args(["serve", "--listen", &address])
         // `LC_ALL`, `LC_MESSAGES` and `LANG` decide first: a `C` among them,
         // as a container sets, makes the program ignore `LANGUAGE`.
@@ -49,7 +49,7 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("steading serve started");
+        .expect("ladderback serve started");
     let deadline = Instant::now() + FAILS_WITHIN;
     let status = loop {
         match child.try_wait().expect("the daemon can be waited for") {
@@ -76,7 +76,7 @@ fn serve_on_a_taken_address(language: &str) -> Said {
     );
     let message = stderr
         .lines()
-        .find(|line| line.starts_with("steading: "))
+        .find(|line| line.starts_with("ladderback: "))
         .unwrap_or_else(|| panic!("a message with the program's name in {stderr:?}"))
         .to_owned();
     Said {
@@ -93,7 +93,7 @@ fn en_xa_transforms_the_message_and_leaves_the_address_and_the_systems_words_alo
     assert_eq!(
         said.message,
         format!(
-            "steading: ƈaaƞƞooŧ ŀişŧeeƞ ooƞ {}: {}",
+            "ladderback: ƈaaƞƞooŧ ŀişŧeeƞ ooƞ {}: {}",
             said.address, said.os_error
         )
     );
@@ -106,7 +106,7 @@ fn ar_xb_transforms_the_message_and_leaves_the_address_and_the_systems_words_alo
     assert_eq!(
         said.message,
         format!(
-            "steading: ɔɐuuoʇ ʅısʇǝu ou {}: {}",
+            "ladderback: ɔɐuuoʇ ʅısʇǝu ou {}: {}",
             said.address, said.os_error
         )
     );
@@ -120,7 +120,7 @@ fn a_build_without_pseudolocales_says_it_in_english_whatever_language_is_asked_f
         assert_eq!(
             said.message,
             format!(
-                "steading: cannot listen on {}: {}",
+                "ladderback: cannot listen on {}: {}",
                 said.address, said.os_error
             ),
             "{language}"

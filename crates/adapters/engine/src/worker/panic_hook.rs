@@ -30,7 +30,7 @@ fn report(payload: &(dyn Any + Send), location: Option<&Location<'_>>, events: &
     let place = location.map_or_else(String::new, |place| {
         format!(" at {}:{}:{}", place.file(), place.line(), place.column())
     });
-    events.redact_text(&format!("steading worker panicked{place}: {message}"))
+    events.redact_text(&format!("ladderback worker panicked{place}: {message}"))
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use super::SqliteStore;
 
 async fn scratch_store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("a scratch directory");
-    let store = SqliteStore::open(&dir.path().join("steading.db"))
+    let store = SqliteStore::open(&dir.path().join("ladderback.db"))
         .await
         .expect("the scratch database opens");
     (dir, store)

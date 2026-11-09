@@ -41,7 +41,7 @@ domain = { path = "crates/domain" }
 app = { path = "crates/app" }
 api = { path = "crates/api" }
 # No default features: the dev pseudolocales are a feature of `l10n` that
-# `steading` and `web` each pass on through their own `pseudo` feature, so a
+# `ladderback` and `web` each pass on through their own `pseudo` feature, so a
 # release build can leave them out (technical design §8.4).
 l10n = { path = "crates/l10n", default-features = false }
 engine = { path = "crates/adapters/engine" }
@@ -121,7 +121,7 @@ all = { level = "warn", priority = -1 }
 
 # Every test that opens a repository derives its key with scrypt, and
 # rustic encrypts and compresses every blob; unoptimized, these dominate
-# test time. Only these crates are optimized, so debugging Steading's own
+# test time. Only these crates are optimized, so debugging Ladderback's own
 # code is unaffected.
 [profile.dev.package.scrypt]
 opt-level = 3
@@ -152,7 +152,7 @@ opt-level = 3
 debug = false
 
 [package]
-name = "steading"
+name = "ladderback"
 description = "Self-hosted backup manager for rustic"
 version.workspace = true
 edition.workspace = true

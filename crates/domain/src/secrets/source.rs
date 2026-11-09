@@ -185,19 +185,19 @@ mod tests {
 
     #[test]
     fn a_keyring_entry_is_a_service_and_a_name() {
-        let entry = KeyringEntry::parse("steading/nas").unwrap();
-        assert_eq!(entry.service(), "steading");
+        let entry = KeyringEntry::parse("ladderback/nas").unwrap();
+        assert_eq!(entry.service(), "ladderback");
         assert_eq!(entry.name(), "nas");
-        assert_eq!(entry.to_string(), "steading/nas");
+        assert_eq!(entry.to_string(), "ladderback/nas");
         // Only the first slash separates.
-        let entry = KeyringEntry::parse("steading/nas/backup").unwrap();
-        assert_eq!(entry.service(), "steading");
+        let entry = KeyringEntry::parse("ladderback/nas/backup").unwrap();
+        assert_eq!(entry.service(), "ladderback");
         assert_eq!(entry.name(), "nas/backup");
     }
 
     #[test]
     fn a_keyring_entry_needs_both_parts() {
-        for text in ["", "steading", "/nas", "steading/", "/"] {
+        for text in ["", "ladderback", "/nas", "ladderback/", "/"] {
             assert_eq!(KeyringEntry::parse(text), Err(NotAKeyringEntry), "{text:?}");
         }
     }
@@ -212,7 +212,7 @@ mod tests {
                 path: "/run/secrets/nas".to_owned(),
                 read: FileRead::FirstLine,
             },
-            SecretRef::Keyring(KeyringEntry::parse("steading/nas").unwrap()),
+            SecretRef::Keyring(KeyringEntry::parse("ladderback/nas").unwrap()),
             SecretRef::Command(CommandLine::parse("pass show nas").unwrap()),
         ] {
             assert_eq!(other.inline(), None, "{other:?}");
@@ -239,10 +239,10 @@ mod tests {
         );
         assert_eq!(
             named(SecretRef::Keyring(
-                KeyringEntry::parse("steading/nas").unwrap()
+                KeyringEntry::parse("ladderback/nas").unwrap()
             )),
             Some(SourceName::Keyring {
-                entry: "steading/nas".to_owned()
+                entry: "ladderback/nas".to_owned()
             })
         );
         // The program, not its arguments: `echo hunter2` would leak.

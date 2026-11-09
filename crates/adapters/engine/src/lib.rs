@@ -1,5 +1,5 @@
 //! Engine adapter (technical design §4.1): every operation runs in its own
-//! `steading worker` process. The daemon writes a [`job::JobSpec`] to the
+//! `ladderback worker` process. The daemon writes a [`job::JobSpec`] to the
 //! worker's stdin and reads [`job::WorkerEvent`]s, one JSON object per line,
 //! from its stdout.
 //!

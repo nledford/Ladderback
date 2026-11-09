@@ -1,4 +1,4 @@
-//! Steading's own command-line messages (technical design §8.4): the
+//! Ladderback's own command-line messages (technical design §8.4): the
 //! banner other tools read, and the rule that no message changes the values
 //! it is given.
 

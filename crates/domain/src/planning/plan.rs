@@ -3,7 +3,7 @@
 //!
 //! Left out on purpose, with the `SnapshotOptions` fields of rustic they
 //! would map onto: `description`, `description-from`, `time`, `delete-never`,
-//! `delete-after` and `command`. Steading sets a snapshot's label, tags and
+//! `delete-after` and `command`. Ladderback sets a snapshot's label, tags and
 //! host from the plan, and the rest from the run.
 
 use jiff::SignedDuration;
@@ -82,7 +82,7 @@ pub struct Plan {
     pub label: Option<String>,
     /// What it backs up, in the order it was written.
     pub sources: Vec<Source>,
-    /// Tags its snapshots carry besides the `steading-*` ones, which are
+    /// Tags its snapshots carry besides the `ladderback-*` ones, which are
     /// added when it runs.
     pub tags: Vec<UserTag>,
     /// When it runs. A plan without one runs only when asked to.

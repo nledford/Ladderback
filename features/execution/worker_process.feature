@@ -1,6 +1,6 @@
 @e2e
 Feature: Operations run in a worker process
-  Each operation runs in its own `steading worker` process, so a crash in
+  Each operation runs in its own `ladderback worker` process, so a crash in
   the engine fails that one operation and never takes the agent down.
 
   Scenario: A worker reports warnings and a result

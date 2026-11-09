@@ -19,7 +19,7 @@
 // V8 folds U+202F and U+00A0 to U+0020 before it compares.
 //
 // Where the oracle and ICU4X 2.4 (CLDR 49) write different words, the table has no case
-// (see UNSETTLED): the two disagree about the data, not about what Steading asks of them.
+// (see UNSETTLED): the two disagree about the data, not about what Ladderback asks of them.
 
 import { writeFileSync } from "node:fs";
 import path from "node:path";

@@ -11,8 +11,8 @@
 //! `atomic_write_dir`: without it OpenDAL writes in place, and a kill leaves
 //! half a file under its final name (§4.1).
 //!
-//! `STEADING_KILL_SEED` repeats a run; `STEADING_KILL_ITERATIONS` (default 2
-//! per backend and job) makes it longer; `STEADING_KILL_IN_PLACE=1` leaves
+//! `LADDERBACK_KILL_SEED` repeats a run; `LADDERBACK_KILL_ITERATIONS` (default 2
+//! per backend and job) makes it longer; `LADDERBACK_KILL_IN_PLACE=1` leaves
 //! `atomic_write_dir` out. The seed is printed first, so a failure shows it.
 
 mod support;
@@ -34,7 +34,7 @@ const HOUR: SignedDuration = SignedDuration::from_hours(1);
 const ATTEMPTS: usize = 8;
 
 fn seed() -> u64 {
-    std::env::var("STEADING_KILL_SEED")
+    std::env::var("LADDERBACK_KILL_SEED")
         .ok()
         .and_then(|seed| seed.parse().ok())
         .unwrap_or_else(|| {
@@ -45,7 +45,7 @@ fn seed() -> u64 {
 }
 
 fn iterations() -> usize {
-    std::env::var("STEADING_KILL_ITERATIONS")
+    std::env::var("LADDERBACK_KILL_ITERATIONS")
         .ok()
         .and_then(|n| n.parse().ok())
         .unwrap_or(2)

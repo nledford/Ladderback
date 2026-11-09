@@ -8,8 +8,8 @@ Feature: Start page
     Given the browser asks for "<setting>"
     When I open the web UI
     Then the page has no accessibility violations
-    And the page is titled "Steading"
-    And the main heading reads "Welcome to Steading"
+    And the page is titled "Ladderback"
+    And the main heading reads "Welcome to Ladderback"
     When I press Tab
     Then focus is on the link "Skip to content"
     And no text is clipped

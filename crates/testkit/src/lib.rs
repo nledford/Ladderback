@@ -1,4 +1,4 @@
-//! Test support for Steading's own tests. A dev-dependency only: no
+//! Test support for Ladderback's own tests. A dev-dependency only: no
 //! production crate may depend on it (`scripts/check-architecture.sh`).
 //!
 //! [`skip!`] is how a test says it can't run here (running as root makes
@@ -11,10 +11,10 @@ use std::path::Path;
 
 /// The environment variable naming the file that collects skips. `just test`
 /// sets it and lists the file's lines when the run ends.
-pub const SKIP_LOG_ENV: &str = "STEADING_SKIP_LOG";
+pub const SKIP_LOG_ENV: &str = "LADDERBACK_SKIP_LOG";
 
 /// Skips the current test, visibly: prints `SKIPPED <module path>: <reason>`
-/// to stderr, appends the same line to the file named by `STEADING_SKIP_LOG`
+/// to stderr, appends the same line to the file named by `LADDERBACK_SKIP_LOG`
 /// when that is set, then returns from the enclosing function. The reason
 /// takes `format!` arguments.
 ///
@@ -38,7 +38,7 @@ pub fn skip_line(module: &str, reason: &str) -> String {
     format!("SKIPPED {module}: {reason}")
 }
 
-/// Records a skip on stderr and in the file named by `STEADING_SKIP_LOG`.
+/// Records a skip on stderr and in the file named by `LADDERBACK_SKIP_LOG`.
 pub fn record_skip(module: &str, reason: &str) {
     // This crate's own tests skip on purpose; they must not add lines to
     // the list of the run that is testing it.
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn skips_are_appended_to_the_log() {
-        let dir = std::env::temp_dir().join(format!("steading-testkit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ladderback-testkit-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let log = dir.join("skips.log");
         fs::write(&log, "SKIPPED earlier::test: already there\n").unwrap();
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn a_log_that_cannot_be_written_does_not_fail_the_skip() {
         let missing = std::env::temp_dir()
-            .join(format!("steading-testkit-none-{}", std::process::id()))
+            .join(format!("ladderback-testkit-none-{}", std::process::id()))
             .join("no-such-dir")
             .join("skips.log");
         record_skip_to(Some(&missing), "a::b", "reason");

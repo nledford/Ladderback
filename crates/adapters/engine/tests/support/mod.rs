@@ -180,10 +180,10 @@ impl Scratch {
 
     /// OpenDAL's `fs` service on the scratch repository, writing through a
     /// directory of its own so that a write is all or nothing.
-    /// `STEADING_KILL_IN_PLACE=1` leaves that out, to see what a kill does
+    /// `LADDERBACK_KILL_IN_PLACE=1` leaves that out, to see what a kill does
     /// to a repository that is written in place.
     pub fn opendal_fs(&self) -> Location {
-        let atomic = std::env::var_os("STEADING_KILL_IN_PLACE")
+        let atomic = std::env::var_os("LADDERBACK_KILL_IN_PLACE")
             .is_none()
             .then(|| self.dir.path().join("atomic"));
         if let Some(atomic) = &atomic {
