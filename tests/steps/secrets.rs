@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex, Once, PoisonError};
 use std::time::Duration;
 
 use app::ports::Job;
-use app::secrets::{RepositorySettings, ResolveRepository};
+use app::secrets::ResolveRepository;
 use cucumber::{given, then, when};
 use domain::execution::{FailureReason, OperationStatus};
+use domain::planning::RepositorySettings;
 use domain::secrets::{SecretRef, SecretValue};
 use engine::WorkerEngine;
 use secrets::SystemSecrets;

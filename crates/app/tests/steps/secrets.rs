@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use app::fakes::{FakeSecrets, Script};
 use app::secrets::ResolvedRepository;
-use app::secrets::{Cause, Field, RepositorySettings, ResolveError, ResolveRepository};
+use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use cucumber::{given, then, when};
+use domain::planning::RepositorySettings;
 use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
     SecretValue, SecretWarning, SourceName, TemplateError,

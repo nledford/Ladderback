@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
-use crate::secrets::SecretRef;
+use crate::secrets::{REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue};
 
 /// A repository as the configuration describes it: its fields may hold
 /// `${VAR}` and `${file:/path}` references, which are resolved when a job
@@ -26,14 +26,38 @@ pub struct RepositorySettings {
 /// An option written in the config can be a secret as it stands, so what the
 /// options hold is masked, and so are the passwords in the repository URLs.
 impl fmt::Debug for RepositorySettings {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!("the masked form moves here from app::secrets")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inline = self
+            .password
+            .inline()
+            .cloned()
+            .unwrap_or_else(|| SecretValue::new(""));
+        let redactor = Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &inline,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        });
+        f.debug_struct("RepositorySettings")
+            .field("repository", &redactor.redact(&self.repository))
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
+            .field("password", &self.password)
+            .field("options", &masked_options(&self.options))
+            .field("options_hot", &masked_options(&self.options_hot))
+            .field("options_cold", &masked_options(&self.options_cold))
+            .finish()
     }
 }
 
 /// The option names with every value hidden: the names help to diagnose.
-pub fn masked_options(_options: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
-    todo!("moves here from app::secrets")
+pub fn masked_options(options: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
+    options
+        .keys()
+        .map(|name| (name.as_str(), REDACTED))
+        .collect()
 }
 
 /// Which party an agent asks to run forget, prune and check on a repository

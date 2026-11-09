@@ -5,55 +5,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use domain::planning::RepositorySettings;
 use domain::secrets::{
-    MAX_SECRET_BYTES, Part, REDACTED, Redactor, Reference, RepositorySecrets, SecretError,
-    SecretRef, SecretValue, SecretWarning, Template, TemplateError,
+    MAX_SECRET_BYTES, Part, Reference, SecretError, SecretRef, SecretValue, SecretWarning,
+    Template, TemplateError,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
-
-/// A repository as the configuration describes it: its fields may hold
-/// `${VAR}` and `${file:/path}` references, which are resolved when a job
-/// starts. `password` says where the password is, or is the password.
-#[derive(Clone, PartialEq, Eq)]
-pub struct RepositorySettings {
-    pub repository: String,
-    /// rustic's `repo-hot`: the hot half of a hot/cold repository.
-    pub repo_hot: Option<String>,
-    pub password: SecretRef,
-    pub options: BTreeMap<String, String>,
-    pub options_hot: BTreeMap<String, String>,
-    pub options_cold: BTreeMap<String, String>,
-}
-
-/// An option written in the config can be a secret as it stands, so what the
-/// options hold is masked, and so are the passwords in the repository URLs.
-impl std::fmt::Debug for RepositorySettings {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let inline = self
-            .password
-            .inline()
-            .cloned()
-            .unwrap_or_else(|| SecretValue::new(""));
-        let redactor = Redactor::for_repository(RepositorySecrets {
-            repository: &self.repository,
-            repo_hot: self.repo_hot.as_deref(),
-            password: &inline,
-            options: &self.options,
-            options_hot: &self.options_hot,
-            options_cold: &self.options_cold,
-            resolved: &[],
-        });
-        f.debug_struct("RepositorySettings")
-            .field("repository", &redactor.redact(&self.repository))
-            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
-            .field("password", &self.password)
-            .field("options", &masked(&self.options))
-            .field("options_hot", &masked(&self.options_hot))
-            .field("options_cold", &masked(&self.options_cold))
-            .finish()
-    }
-}
 
 /// A repository with every reference resolved, ready to hand to the engine.
 /// `access` masks its own secrets, so this one's `Debug` form is derived.
@@ -63,14 +21,6 @@ pub struct ResolvedRepository {
     pub access: RepositoryAccess,
     /// What the user should know about how the secrets were read, each once.
     pub warnings: Vec<SecretWarning>,
-}
-
-/// The option names with every value hidden: the names help to diagnose.
-fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
-    options
-        .keys()
-        .map(|name| (name.as_str(), REDACTED))
-        .collect()
 }
 
 /// Where in a repository's settings a secret failed to resolve.
