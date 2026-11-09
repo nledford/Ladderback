@@ -40,13 +40,17 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 /// What the `/api/v1` routes run against (technical design §4.2): the
-/// daemon's event bus and operations, wired by the composition root.
+/// daemon's event bus, operations and catalog, wired by the composition
+/// root.
 #[derive(Clone)]
 pub struct AppState {
     /// Where the daemon's live updates come from.
     pub events: Arc<dyn EventBus>,
     /// How a request starts an operation.
     pub operations: Arc<dyn Operations>,
+    /// How a request reads the configuration's plans, repositories and
+    /// snapshots.
+    pub catalog: Arc<dyn Catalog>,
 }
 
 /// The operations the API asks of the daemon (technical design §4.2): the
@@ -82,6 +86,39 @@ pub enum StartError {
     UnknownPlan,
     /// A plan is there but cannot be started just now, for example because
     /// its configuration or repository cannot be read.
+    Unavailable,
+}
+
+/// The catalog the API asks of the daemon (§4.2): the plans the operations
+/// page can start, the repositories the snapshots page can show, and one
+/// repository's snapshots, fetched live — nothing stores them.
+#[async_trait]
+pub trait Catalog: Send + Sync {
+    /// The configured plans, in the order they were written.
+    async fn plans(&self) -> Result<api::PlansDto, CatalogError>;
+
+    /// The configured repositories' aliases, in the order of their aliases.
+    async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError>;
+
+    /// One repository's snapshots, newest first.
+    async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError>;
+}
+
+/// Why a catalog request couldn't be answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatalogError {
+    /// The configuration cannot be read, so nothing is known.
+    Unavailable,
+}
+
+/// Why a snapshot listing couldn't be answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotsError {
+    /// The configuration has no repository by that name.
+    Unknown,
+    /// The repository is there but its snapshots cannot be read just now,
+    /// for example because its secrets cannot be resolved or the engine
+    /// cannot be started.
     Unavailable,
 }
 
@@ -193,9 +230,10 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 
 /// Routes for the web UI and the API: files by path, `index.html` for any
 /// other extensionless path (the client-side router handles it), the
-/// live-updates WebSocket under `/api/v1`, and the operations routes: start,
-/// history, one operation, cancel. A request that fails `checks` never
-/// reaches a route.
+/// live-updates WebSocket under `/api/v1`, the operations routes — start,
+/// history, one operation, cancel — and the catalog routes the pages read:
+/// the plans, the repositories, one repository's snapshots. A request that
+/// fails `checks` never reaches a route.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -207,6 +245,15 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/operations/{id}/cancel",
             axum::routing::post(cancel_operation),
+        )
+        .route("/api/v1/plans", axum::routing::get(list_plans))
+        .route(
+            "/api/v1/repositories",
+            axum::routing::get(list_repositories),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/snapshots",
+            axum::routing::get(list_snapshots),
         )
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
@@ -360,6 +407,48 @@ async fn cancel_operation(
             StatusCode::CONFLICT,
             api::ErrorCode::OperationNotRunning,
             vec![("operation", api::MsgArg::Text(id))],
+        ),
+    }
+}
+
+/// The configured plans: what the operations page can start.
+async fn list_plans(State(state): State<AppState>) -> Response {
+    match state.catalog.plans().await {
+        Ok(plans) => (StatusCode::OK, axum::Json(plans)).into_response(),
+        Err(CatalogError::Unavailable) => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            api::ErrorCode::ConfigUnavailable,
+        ),
+    }
+}
+
+/// The configured repositories' aliases: what the snapshots page can show.
+async fn list_repositories(State(state): State<AppState>) -> Response {
+    match state.catalog.repositories().await {
+        Ok(repositories) => (StatusCode::OK, axum::Json(repositories)).into_response(),
+        Err(CatalogError::Unavailable) => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            api::ErrorCode::ConfigUnavailable,
+        ),
+    }
+}
+
+/// One repository's snapshots, newest first, fetched live (§9): a read is
+/// safe to run alongside anything, so it takes no slot and stores nothing.
+async fn list_snapshots(
+    State(state): State<AppState>,
+    axum::extract::Path(alias): axum::extract::Path<String>,
+) -> Response {
+    match state.catalog.snapshots(alias.clone()).await {
+        Ok(snapshots) => (StatusCode::OK, axum::Json(snapshots)).into_response(),
+        Err(SnapshotsError::Unknown) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::RepositoryUnknown,
+            vec![("alias", api::MsgArg::Text(alias))],
+        ),
+        Err(SnapshotsError::Unavailable) => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            api::ErrorCode::EngineUnavailable,
         ),
     }
 }
@@ -582,10 +671,54 @@ mod tests {
         }
     }
 
+    /// Answers every repository but `missing`, with one snapshot.
+    struct DemoCatalog;
+
+    fn demo_snapshot() -> api::SnapshotDto {
+        api::SnapshotDto::new(
+            "ab".repeat(32),
+            "2026-11-09T10:15:00Z".to_owned(),
+            "demo-host".to_owned(),
+            "home".to_owned(),
+            vec!["ladderback-plan:demo-home".to_owned()],
+            vec!["/home/demo".to_owned()],
+        )
+        .unwrap()
+    }
+
+    #[async_trait]
+    impl Catalog for DemoCatalog {
+        async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
+            Ok(api::PlansDto {
+                plans: vec![api::PlanSummaryDto {
+                    id: "home".to_owned(),
+                    repository: "demo".to_owned(),
+                }],
+            })
+        }
+
+        async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
+            Ok(api::RepositoriesDto {
+                repositories: vec!["demo".to_owned()],
+            })
+        }
+
+        async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError> {
+            if alias == "missing" {
+                Err(SnapshotsError::Unknown)
+            } else {
+                Ok(api::SnapshotsDto {
+                    snapshots: vec![demo_snapshot()],
+                })
+            }
+        }
+    }
+
     fn state() -> AppState {
         AppState {
             events: Arc::new(InMemoryEventBus::new()),
             operations: Arc::new(Plans),
+            catalog: Arc::new(DemoCatalog),
         }
     }
 
@@ -618,6 +751,7 @@ mod tests {
         let state = AppState {
             events: events.clone(),
             operations: Arc::new(Plans),
+            catalog: Arc::new(DemoCatalog),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -906,5 +1040,41 @@ mod tests {
                 assert!(read_ui_file(&ui, path).is_none(), "{path}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn the_plans_and_repositories_are_listed() {
+        let plans = get("/api/v1/plans").await;
+        assert_eq!(plans.status(), StatusCode::OK);
+        assert_eq!(
+            body(plans).await,
+            r#"{"plans":[{"id":"home","repository":"demo"}]}"#
+        );
+
+        let repositories = get("/api/v1/repositories").await;
+        assert_eq!(repositories.status(), StatusCode::OK);
+        assert_eq!(body(repositories).await, r#"{"repositories":["demo"]}"#);
+    }
+
+    #[tokio::test]
+    async fn a_repository_snapshots_are_listed_newest_first() {
+        let response = get("/api/v1/repositories/demo/snapshots").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+        assert_eq!(
+            wire["snapshots"][0]["id"],
+            "ab".repeat(32),
+            "the snapshot the fake catalog holds"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repository_the_configuration_does_not_have_is_a_typed_refusal() {
+        let response = get("/api/v1/repositories/missing/snapshots").await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
+        );
     }
 }

@@ -1030,6 +1030,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ConfigSchemaMissing
                 | ErrorCode::ConfigSchemaNewer
                 | ErrorCode::PlanUnknown
+                | ErrorCode::RepositoryUnknown
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor

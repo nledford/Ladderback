@@ -141,13 +141,15 @@ fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
     source_with_files(agent, &plan, count);
 }
 
-#[given(expr = "a plan {string} backing up a folder with a 4 GiB file")]
+#[given(expr = "a plan {string} backing up a folder with a 16 GiB file")]
 fn plan_with_large_file(agent: &mut Agent, plan: String) {
     let source = new_source(agent, &plan);
-    // Sparse: costs no disk, yet rustic must read and hash all of it.
+    // Sparse: costs no disk, yet rustic must read and hash all of it. Large
+    // enough that no runner finishes hashing before the cancel lands; the
+    // run is abandoned at the cancel, so a bigger file costs no test time.
     fs::File::create(source.join("large.bin"))
         .unwrap()
-        .set_len(4 << 30)
+        .set_len(16 << 30)
         .unwrap();
 }
 

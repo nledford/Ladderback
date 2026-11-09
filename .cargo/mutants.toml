@@ -10,13 +10,18 @@
 # sets, `cargo mutants -p l10n --features browser-intl --file <it>`.
 #
 # The `web` crate's DOM glue (`main.rs`, `components.rs`, `live.rs`,
-# `page.rs`, `gallery.rs`) calls `web-sys`, which only works in a browser: on
-# the host every mutant of it builds and "survives" without the code ever
-# running, and a mutant that panics on the host is caught for the wrong
-# reason. The `@ui` scenarios of `features/ui/` run it in Chromium
+# `page.rs`, `gallery.rs`, `ws.rs`) calls `web-sys`, which only works in a
+# browser: on the host every mutant of it builds and "survives" without the
+# code ever running, and a mutant that panics on the host is caught for the
+# wrong reason. The `@ui` scenarios of `features/ui/` run it in Chromium
 # (`just test-ui`). What decides anything on the host stays covered: the
 # announcer's timing (`announcer.rs`), the page titles (`routes.rs`), the
-# focus wrap (`focus.rs`) and the toast's arrival and lifetime (`toast.rs`).
+# focus wrap (`focus.rs`), the toast's arrival and lifetime (`toast.rs`) and
+# the live pages' state, event application, merge and back-off
+# (`backend.rs`), with the events URL and the statuses a run ends with.
+# `ws.rs` is only the glue around them: the fetch and WebSocket calls whose
+# results the journeys check, and the settle-poll's budget; every decision
+# a settle or a reconnect makes on those results lives in `backend.rs`.
 exclude_globs = [
     "crates/app/src/contract/**",
     "crates/l10n/src/browser.rs",
@@ -24,6 +29,7 @@ exclude_globs = [
     "crates/web/src/live.rs",
     "crates/web/src/page.rs",
     "crates/web/src/gallery.rs",
+    "crates/web/src/ws.rs",
 ]
 # Core error types implement Display only because `Error` requires it; they
 # carry codes and values, and adapters render them (technical design §8.4).

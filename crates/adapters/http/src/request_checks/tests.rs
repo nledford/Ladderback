@@ -32,6 +32,25 @@ fn test_state() -> AppState {
     AppState {
         events: Arc::new(app::fakes::InMemoryEventBus::new()),
         operations: Arc::new(NoOperations),
+        catalog: Arc::new(EmptyCatalog),
+    }
+}
+
+/// Lists nothing: the checks never reach a route.
+struct EmptyCatalog;
+
+#[async_trait]
+impl crate::Catalog for EmptyCatalog {
+    async fn plans(&self) -> Result<api::PlansDto, crate::CatalogError> {
+        Ok(api::PlansDto::default())
+    }
+
+    async fn repositories(&self) -> Result<api::RepositoriesDto, crate::CatalogError> {
+        Ok(api::RepositoriesDto::default())
+    }
+
+    async fn snapshots(&self, _alias: String) -> Result<api::SnapshotsDto, crate::SnapshotsError> {
+        Ok(api::SnapshotsDto::default())
     }
 }
 

@@ -41,15 +41,22 @@ mod formatting;
 mod gallery;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod live;
+// The live pages' decisions (host-tested) and their DOM glue; see
+// `backend.rs` for why the fetch-and-socket glue is only covered by the
+// browser journeys.
+mod backend;
+// The live pages' fetch and WebSocket glue; see `backend.rs` for why this
+// one is only covered by the browser journeys.
 mod page;
 mod routes;
+mod ws;
 
 // The toast's arrival and lifetime decisions are host-testable; the DOM
 // glue around them runs in a browser via the gallery's @ui scenarios.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod toast;
 
-use routes::{NotFound, Start};
+use routes::{NotFound, Operations, Snapshots, Start};
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
@@ -88,6 +95,8 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let not_found = Arc::clone(&localizer);
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
+    let operations = Arc::clone(&localizer);
+    let snapshots = Arc::clone(&localizer);
     let arrival = Arc::clone(&localizer);
     let main = NodeRef::<leptos::html::Main>::new();
     view! {
@@ -122,6 +131,14 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                     <Route
                         path=path!("/_gallery")
                         view=move || gallery_page(Arc::clone(&gallery))
+                    />
+                    <Route
+                        path=path!("/operations")
+                        view=move || view! { <Operations localizer=Arc::clone(&operations) /> }
+                    />
+                    <Route
+                        path=path!("/snapshots")
+                        view=move || view! { <Snapshots localizer=Arc::clone(&snapshots) /> }
                     />
                 </Routes>
             </Router>

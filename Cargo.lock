@@ -7645,9 +7645,15 @@ version = "0.0.0"
 dependencies = [
  "api",
  "console_error_panic_hook",
+ "futures",
+ "gloo-net",
+ "gloo-timers",
+ "jiff",
  "l10n",
  "leptos",
  "leptos_router",
+ "serde",
+ "serde_json",
  "wasm-bindgen-test",
  "web-sys",
 ]

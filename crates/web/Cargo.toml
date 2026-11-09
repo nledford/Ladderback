@@ -21,7 +21,22 @@ pseudo = ["l10n/pseudo"]
 gallery = []
 
 [dependencies]
+api.workspace = true
 console_error_panic_hook.workspace = true
+# The REST client of the live pages (§4.4): `fetch` with typed JSON bodies,
+# and the events WebSocket.
+gloo-net = { workspace = true, features = ["websocket"] }
+# Driving the events WebSocket's message stream needs the `Stream` trait in
+# scope, and waiting between reconnects and settle-poll reads is the
+# browser's own time (§4.4).
+futures.workspace = true
+gloo-timers.workspace = true
+# The live pages' request bodies and typed refusals cross as JSON (§4.4).
+serde.workspace = true
+serde_json.workspace = true
+# The live pages' instants are parsed RFC 3339 and handed to the catalog as
+# timestamps (§8.4); `jiff` only, never `chrono` (decision 22).
+jiff.workspace = true
 # The browser's `Intl` writes the page's numbers and instants (technical design
 # §8.4); no locale data ships. The feature is on whatever the build, so there
 # is no `web` feature for it.

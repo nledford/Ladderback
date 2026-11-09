@@ -5,3 +5,4 @@ node_modules/
 /ui-tests/reports
 /.worktrees/
 /target-clippy
+/crates/*/target
