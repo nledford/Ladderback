@@ -79,6 +79,24 @@ pub enum FailureReason {
     HookFailed { exit_code: Option<i32> },
 }
 
+impl FailureReason {
+    /// The failure's stored code (§9): the kebab-case name the operation
+    /// log's `error_code` column and a hook's `LADDERBACK_ERROR` carry.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::EngineUnavailable { .. } => "engine-unavailable",
+            Self::JobRejected { .. } => "invalid-job-spec",
+            Self::EngineExited { .. } => "engine-exited",
+            Self::EngineFailed { .. } => "operation-failed",
+            Self::ProtocolViolated { .. } => "protocol-violated",
+            Self::DeadlinePassed => "deadline-passed",
+            Self::EngineStartTimedOut => "engine-start-timed-out",
+            Self::EngineExitTimedOut => "engine-exit-timed-out",
+            Self::HookFailed { .. } => "hook-failed",
+        }
+    }
+}
+
 /// A problem with a single item that doesn't fail the operation, such as a
 /// file that couldn't be read during a backup.
 ///
@@ -95,10 +113,12 @@ pub struct Warning {
     /// The engine's own message, verbatim.
     pub detail: String,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WarningKind {
     SourceUnreadable,
+    /// A hook command around the operation failed where its `on-failure`
+    /// says to go on: the operation carries it as a warning.
+    Hook,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }
@@ -282,6 +302,28 @@ impl Operation {
         self.require(Transition::RecordWarning, |s| {
             *s == OperationStatus::Running
         })?;
+        self.keep(warning);
+        Ok(())
+    }
+
+    /// Records a warning from outside the running phase, as a hook does:
+    /// before the operation starts, or after it finished. A success that had
+    /// no warnings until then ends as [`OperationStatus::SucceededWithWarnings`];
+    /// a cancelled operation takes none, since its run was given up.
+    pub fn attach_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
+        self.require(Transition::RecordWarning, |s| {
+            !matches!(s, OperationStatus::Cancelled)
+        })?;
+        self.keep(warning);
+        if self.status == OperationStatus::Succeeded {
+            self.status = OperationStatus::SucceededWithWarnings;
+        }
+        Ok(())
+    }
+
+    /// Counts `warning` and keeps a cut copy of it while there is room
+    /// ([`Self::record_warning`]).
+    fn keep(&mut self, warning: Warning) {
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
             // Every field is named, so a text field added to `Warning` must
@@ -293,7 +335,6 @@ impl Operation {
                 detail: cut_warning_text(warning.detail),
             });
         }
-        Ok(())
     }
 
     /// Ends a running operation successfully: `SucceededWithWarnings` if any
