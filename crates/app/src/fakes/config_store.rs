@@ -28,11 +28,11 @@ impl InMemoryConfigStore {
 #[async_trait]
 impl ConfigStore for InMemoryConfigStore {
     async fn load(&self) -> Result<AgentConfig, ConfigError> {
-        drop(self.saved());
-        todo!()
+        Ok(self.saved().clone().unwrap_or_default())
     }
 
-    async fn save(&self, _config: &AgentConfig) -> Result<(), ConfigError> {
-        todo!()
+    async fn save(&self, config: &AgentConfig) -> Result<(), ConfigError> {
+        *self.saved() = Some(config.clone());
+        Ok(())
     }
 }
