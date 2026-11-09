@@ -1086,6 +1086,28 @@ mod operation_dto_tests {
     }
 
     #[test]
+    fn a_summary_refuses_an_id_of_the_wrong_length() {
+        let dto = summary();
+        // A digit short: the right shape, not a UUID.
+        let short = "018f0000-0000-7000-8000-00000000000".to_owned();
+        assert_eq!(
+            OperationSummaryDto::new(
+                short,
+                dto.plan,
+                dto.kind,
+                dto.status,
+                dto.queued_at,
+                dto.started_at,
+                dto.finished_at,
+                dto.warning_codes,
+                dto.failure_code,
+                dto.result,
+            ),
+            Err(InvalidOperation::Id)
+        );
+    }
+
+    #[test]
     fn a_summary_refuses_a_time_that_is_not_rfc_3339() {
         let dto = summary();
         assert_eq!(
