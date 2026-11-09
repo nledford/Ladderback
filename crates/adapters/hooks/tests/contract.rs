@@ -9,8 +9,10 @@ use std::time::Duration;
 
 use app::contract::hooks::HooksHarness;
 use app::ports::HookRunner;
-use async_trait::async_trait;
-use domain::planning::{HookEntry, OnFailure};
+use app::ports::{HookContext, HookPhase, HookStatus};
+ use async_trait::async_trait;
+ use domain::planning::{HookEntry, OnFailure};
+use domain::{OperationId, PlanId, RepositoryAlias};
 use hooks::ProcessHookRunner;
 
 struct ProcessHooksHarness {
@@ -130,4 +132,38 @@ impl HooksHarness for ProcessHooksHarness {
 #[tokio::test]
 async fn process_hooks_meet_the_hooks_contract() {
     app::contract::hooks::run(&ProcessHooksHarness::new()).await;
+}
+
+/// The stop sequence a hook that ignores SIGTERM is killed by: TERM first
+/// (the hook's trap fires), then SIGKILL after the 5 s grace. A plain
+/// `sleep` hook dies on the first signal, so it cannot tell the two apart.
+#[tokio::test]
+async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
+    let harness = ProcessHooksHarness::new();
+    let hook = harness.script(
+        "ignores-term",
+        None,
+        "trap 'echo term >> \"$LOG\"' TERM\nwhile :; do sleep 1 & wait $!; done",
+    );
+    let started = std::time::Instant::now();
+    let context = HookContext {
+        phase: HookPhase::Before,
+        plan: PlanId::parse("demo-plan").expect("the demo plan parses"),
+        repository: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+        operation: OperationId::from_uuid(uuid::Uuid::from_u128(7)),
+        snapshot: None,
+        error: None,
+    };
+    let outcome = harness.runner().run(&hook, &context).await;
+    assert_eq!(outcome.status, HookStatus::TimedOut);
+    let lines = harness.written().await;
+    assert!(
+        lines.iter().any(|line| line.contains("term")),
+        "SIGTERM reached the group before the kill: {lines:?}"
+    );
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(30),
+        "TERM, then the 5 s grace, then KILL: {elapsed:?}"
+    );
 }

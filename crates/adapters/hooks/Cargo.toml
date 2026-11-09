@@ -21,6 +21,7 @@ nix = { workspace = true, features = ["signal"] }
 app = { workspace = true, features = ["fakes"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+uuid.workspace = true
 
 [lints]
 workspace = true
