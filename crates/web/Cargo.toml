@@ -23,6 +23,11 @@ gallery = []
 [dependencies]
 api.workspace = true
 console_error_panic_hook.workspace = true
+# The REST client of the live pages (§4.4): `fetch` with typed JSON bodies.
+gloo-net.workspace = true
+# The live pages' instants are parsed RFC 3339 and handed to the catalog as
+# timestamps (§8.4); `jiff` only, never `chrono` (decision 22).
+jiff.workspace = true
 # The browser's `Intl` writes the page's numbers and instants (technical design
 # §8.4); no locale data ships. The feature is on whatever the build, so there
 # is no `web` feature for it.

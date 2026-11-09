@@ -78,6 +78,8 @@ fluent-langneg = "0.13.1"
 fluent-pseudo = "0.3.3"
 fluent-syntax = "0.12.0"
 futures = "0.3.34"
+# The web UI's REST client (§4.4): `fetch` with typed JSON bodies, on wasm.
+gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 http-body-util = "0.1.5"
 # ICU4X writes the daemon's numbers and instants (technical design §8.4), behind
 # `l10n`'s `icu` feature. No defaults: `compiled_data` bakes in the locale data
@@ -133,8 +135,8 @@ uuid = { version = "1.29.1", features = ["serde"] }
 wasm-bindgen = "0.2.130"
 wasm-bindgen-test = "0.3.80"
 # The browser APIs `web` reads the page's language from, declares it with, and
-# writes the live regions and focus through.
-web-sys = { version = "0.3.107", features = ["Document", "Element", "HtmlDialogElement", "HtmlElement", "Location", "Navigator", "Node", "NodeList", "Performance", "UrlSearchParams", "Window"] }
+# writes the live regions, focus and the events WebSocket through (§4.4).
+web-sys = { version = "0.3.107", features = ["BinaryType", "CloseEvent", "Document", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "UrlSearchParams", "WebSocket", "Window"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

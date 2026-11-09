@@ -7645,6 +7645,8 @@ version = "0.0.0"
 dependencies = [
  "api",
  "console_error_panic_hook",
+ "gloo-net",
+ "jiff",
  "l10n",
  "leptos",
  "leptos_router",
