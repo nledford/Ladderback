@@ -13,6 +13,6 @@ pub use engine::{
 };
 pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
-    OperationStore, PageSize, Start, StoreError,
+    OperationStore, PageSize, Start, StoreError, maintained_repository,
 };
 pub use secrets::{Resolved, SecretResolver};

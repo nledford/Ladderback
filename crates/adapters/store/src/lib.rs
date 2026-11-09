@@ -26,8 +26,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
-    Start, StoreError,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start, StoreError,
+    maintained_repository,
 };
 use async_trait::async_trait;
 use domain::execution::{MAX_STORED_WARNINGS, Operation, OperationStatus};
@@ -271,7 +271,9 @@ impl OperationStore for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        if let Some(repository) = OperationRecord::of(operation, None).maintaining() {
+        if let Some(repository) =
+            maintained_repository(operation.kind(), operation.status(), operation.target())
+        {
             let holder = sqlx::query(sql::FIND_RUNNING_MAINTENANCE)
                 .bind(repository.as_str())
                 .bind(encoded.id.as_str())

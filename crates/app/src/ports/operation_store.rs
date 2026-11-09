@@ -85,7 +85,11 @@ pub enum Start {
 /// Why the store couldn't do what it was asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
-    /// The database couldn't be read or written. `detail` is its own message.
+    /// The database couldn't be read or written, or the store refused the
+    /// write under I7 (a `save` that would be a second running maintenance
+    /// operation, a `try_start` of an operation that isn't running); the
+    /// latter can't succeed until the holder ends, so it isn't worth
+    /// retrying as is. `detail` is its own message.
     Unavailable { detail: String },
     /// A stored row isn't something this version wrote, so it can't be read
     /// back as an operation. `detail` names what was wrong with it.
@@ -187,11 +191,23 @@ impl OperationRecord {
     /// for everything else. A record that has one holds that repository, and
     /// no other maintenance operation may be running on it (I7).
     pub fn maintaining(&self) -> Option<&RepositoryId> {
-        if self.kind.is_maintenance() && self.status == OperationStatus::Running {
-            self.target.repository.as_ref()
-        } else {
-            None
-        }
+        maintained_repository(self.kind, &self.status, &self.target)
+    }
+}
+
+/// The repository an operation of this kind, status and target holds (I7):
+/// the one a running maintenance operation names, and nothing otherwise. It
+/// is [`OperationRecord::maintaining`] for a stored record, and lets a store
+/// ask the same of an [`Operation`] without copying it into a record.
+pub fn maintained_repository<'a>(
+    kind: OperationKind,
+    status: &OperationStatus,
+    target: &'a Target,
+) -> Option<&'a RepositoryId> {
+    if kind.is_maintenance() && *status == OperationStatus::Running {
+        target.repository.as_ref()
+    } else {
+        None
     }
 }
 
