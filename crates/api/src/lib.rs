@@ -1003,7 +1003,11 @@ pub struct OperationDetailDto {
 /// What a successful operation produced, as the history page shows it: a
 /// small typed summary per kind, mapped from the app's engine result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
 pub enum OperationResultDto {
     Backup {
         files: u64,
@@ -1026,7 +1030,7 @@ mod operation_dto_tests {
     use serde_json::{from_str, to_string};
 
     use super::{
-        ErrorCode, InvalidOperation, OperationDetailDto, OperationResultDto, OperationSummaryDto,
+        InvalidOperation, OperationDetailDto, OperationResultDto, OperationSummaryDto,
         OperationWarningDto, OperationsPageDto, WarningCode,
     };
 
@@ -1158,5 +1162,4 @@ mod operation_dto_tests {
             r#"{"type":"backup","files":3,"bytes":4096,"duration-ms":1000}"#
         );
     }
-
 }

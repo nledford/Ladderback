@@ -39,7 +39,6 @@ pub struct Ops {
     page: Option<Page>,
 }
 
-
 impl std::fmt::Debug for Ops {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Ops")
