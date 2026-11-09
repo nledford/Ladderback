@@ -12,6 +12,7 @@
 )]
 
 pub mod agent_id;
+pub mod dirs;
 
 use app::ports::Clock;
 use async_trait::async_trait;

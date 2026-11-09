@@ -91,6 +91,15 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         }
     };
     runtime.block_on(async {
+        // Before the listener: a daemon that cannot serve must not print
+        // that it is listening.
+        let state = match composition::app_state().await {
+            Ok(state) => state,
+            Err(refused) => {
+                say(&localizer, refused.message, &refused.args);
+                return ExitCode::FAILURE;
+            }
+        };
         let listener = match tokio::net::TcpListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -117,7 +126,7 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(allowed_hosts),
-            composition::app_state(),
+            state,
         );
         match axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())

@@ -111,6 +111,7 @@ fn start(agent: &mut Agent) -> Outcome {
     let mut child = Command::new(super::LADDERBACK)
         .args(["serve", "--listen", "127.0.0.1:0"])
         .env("LADDERBACK_CONFIG_DIR", Events::config_dir(agent))
+        .env("LADDERBACK_DATA_DIR", agent.scratch().join("events-data"))
         .stderr(Stdio::piped())
         .spawn()
         .expect("ladderback serve starts");
@@ -208,8 +209,54 @@ async fn connect(agent: &Agent) -> Page {
 }
 
 #[given(expr = "Ladderback is serving on loopback with the plan {string}")]
-async fn serving_with_plan(agent: &mut Agent, _plan: String) {
-    std::fs::create_dir_all(Events::config_dir(agent)).expect("the config folder");
+async fn serving_with_plan(agent: &mut Agent, plan: String) {
+    // A real plan the daemon can run: a real scratch repository, a folder of
+    // demo files, and a config.toml naming both.
+    let repository = super::backup_steps::new_repository(agent);
+    let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+    let source = super::backup_steps::source_with_files(agent, &plan, 3);
+    let config = domain::planning::AgentConfig::new(
+        domain::planning::AgentSettings::default(),
+        domain::planning::Hooks::default(),
+        std::collections::BTreeMap::from([(
+            alias.clone(),
+            domain::planning::RepositoryConfig {
+                settings: domain::planning::RepositorySettings {
+                    repository: repository.to_str().expect("a UTF-8 path").to_owned(),
+                    repo_hot: None,
+                    password: domain::secrets::SecretRef::Inline(
+                        domain::secrets::SecretValue::new(super::backup_steps::PASSWORD),
+                    ),
+                    options: Default::default(),
+                    options_hot: Default::default(),
+                    options_cold: Default::default(),
+                },
+                maintenance: domain::planning::Maintenance::None,
+                group_by: Default::default(),
+                hooks: Default::default(),
+            },
+        )]),
+        vec![domain::planning::Plan::new(
+            domain::PlanId::parse(&plan).expect("a plan ID"),
+            alias,
+            vec![
+                domain::planning::Source::parse(source.to_str().expect("a UTF-8 path"))
+                    .expect("a source"),
+            ],
+        )],
+    )
+    .expect("a valid configuration");
+    let dir = Events::config_dir(agent);
+    std::fs::create_dir_all(&dir).expect("the config folder");
+    app::ports::ConfigStore::save(
+        &config_adapter::FileConfigStore::new(
+            dir.join("config.toml"),
+            std::sync::Arc::new(platform::SystemClock),
+        ),
+        &config,
+    )
+    .await
+    .expect("the config saves");
     match start(agent) {
         Outcome::Listening(_) => {}
         Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),

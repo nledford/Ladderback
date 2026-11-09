@@ -86,13 +86,20 @@ fn init(folders: &Folders) {
 }
 
 #[given("a new repository")]
-fn new_repository(agent: &mut Agent) {
+fn a_new_repository(agent: &mut Agent) {
+    new_repository(agent);
+}
+
+/// A scratch repository the scenario's plan backs up into: what "a new
+/// repository" sets up, for the steps that build a configuration around one.
+pub(super) fn new_repository(agent: &mut Agent) -> PathBuf {
     let folders = Folders {
         cold: agent.scratch().join("repo"),
         hot: None,
     };
     init(&folders);
-    agent.backup.repository = Some(folders.cold);
+    agent.backup.repository = Some(folders.cold.clone());
+    folders.cold
 }
 
 #[given("a new hot/cold repository")]
@@ -114,9 +121,11 @@ fn new_source(agent: &mut Agent, plan: &str) -> PathBuf {
     source
 }
 
-#[given(expr = "a plan {string} backing up a folder with {int} files")]
-fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
-    let source = new_source(agent, &plan);
+/// A folder of `count` demo files the plan named `plan` backs up: what "a
+/// plan backing up a folder with N files" sets up, for the steps that build
+/// a configuration around one.
+pub(super) fn source_with_files(agent: &mut Agent, plan: &str, count: usize) -> PathBuf {
+    let source = new_source(agent, plan);
     for n in 1..=count {
         fs::write(
             source.join(format!("file-{n}.txt")),
@@ -124,6 +133,12 @@ fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
         )
         .unwrap();
     }
+    source
+}
+
+#[given(expr = "a plan {string} backing up a folder with {int} files")]
+fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
+    source_with_files(agent, &plan, count);
 }
 
 #[given(expr = "a plan {string} backing up a folder with a 4 GiB file")]

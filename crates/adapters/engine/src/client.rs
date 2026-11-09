@@ -1029,6 +1029,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ConfigInvalid
                 | ErrorCode::ConfigSchemaMissing
                 | ErrorCode::ConfigSchemaNewer
+                | ErrorCode::PlanUnknown
+                | ErrorCode::InvalidBody
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

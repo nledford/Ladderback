@@ -27,3 +27,45 @@ cli-server-error = server error: { $detail }
 # $address (text): the address it was asked to listen on, such as 192.168.1.5:9898.
 # `127.0.0.1` and `::1` are addresses, typed as they are: keep them string literals.
 cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" })
+
+# The daemon could not say where its own program file is, so it cannot start
+# workers.
+# $detail (text): the operating system's message. It is shown as it came.
+cli-cannot-find-own-path = cannot find this program's own path: { $detail }
+
+# The platform gives the daemon no configuration folder to read.
+cli-no-config-dir = no configuration folder: set LADDERBACK_CONFIG_DIR, or run as a user with a home directory
+
+# The platform gives the daemon no data folder for its operation log.
+cli-no-data-dir = no data folder: set LADDERBACK_DATA_DIR, or run as a user with a home directory
+
+# The daemon could not make its data folder, or open the operation log in it.
+# $path (text): the folder or database file, as the user wrote it.
+# $detail (text): the operating system's or the store's own message. It is shown as it came.
+cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
+
+# The configuration file could not be read.
+# $file (text): the path of the configuration file.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-config-unavailable = cannot read the configuration { $file }: { $detail }
+
+# The configuration file is longer than any configuration needs.
+# $file (text): the path of the configuration file.
+# $limit (bytes): the most bytes the daemon reads.
+cli-config-too-large = the configuration { $file } is larger than { $limit }, so it was not read
+
+# The configuration file doesn't say which version of the format it is in.
+# $file (text): the path of the configuration file.
+cli-config-schema-missing = the configuration { $file } does not say which version of the format it is in, so the daemon did not start
+
+# The configuration file is in a newer version of the format than this build reads.
+# $file (text): the path of the configuration file.
+# $found (text): the version the file says it is in, such as 999999.
+# $supported (text): the newest version this build reads.
+cli-config-schema-newer = the configuration { $file } is in schema version { $found }, newer than the newest this build reads ({ $supported }), so the daemon did not start
+
+# The configuration file is not a valid configuration.
+# $file (text): the path of the configuration file.
+# $where (text): the setting at fault and where in the file it is, when the reader could tell; otherwise "an earlier rule".
+# $detail (text): what is wrong, as the reader reported it.
+cli-config-invalid = the configuration { $file } is not valid at { $where }: { $detail }
