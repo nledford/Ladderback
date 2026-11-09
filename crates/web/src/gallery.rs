@@ -15,13 +15,21 @@ use crate::live::{modal_closed, modal_opened, say};
 use crate::routes::PageHeading;
 use crate::text;
 
-/// Opens the dialog that stands in for a modal. Its `close` event, which
-/// Escape and the Close button both raise, tells the announcer the modal is
-/// gone, so polite messages wait while it is open.
-fn open_modal(dialog: &web_sys::HtmlDialogElement) {
-    // `showModal` fails on a dialog already open, which must not count twice.
-    if dialog.show_modal().is_ok() {
+/// Opens the dialog that stands in for a modal and tells the announcer, so
+/// messages wait while it is open. A dialog already open is not counted twice.
+fn open_modal(dialog: &web_sys::HtmlDialogElement, counted: RwSignal<bool>) {
+    if !dialog.open() && dialog.show_modal().is_ok() {
+        counted.set(true);
         modal_opened();
+    }
+}
+
+/// Tells the announcer the modal is gone, once however it went: the `close`
+/// event, which Escape and the Close button both raise, or the page leaving.
+fn modal_gone(counted: RwSignal<bool>) {
+    if counted.try_get_untracked() == Some(true) {
+        counted.set(false);
+        modal_closed();
     }
 }
 
@@ -44,16 +52,23 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         t(msg::UI_GALLERY_ASSERTIVE_BUTTON),
         t(msg::UI_GALLERY_OPEN_MODAL),
     );
-    let (modal_heading, modal_polite_button, close_modal_button) = (
+    let (modal_heading, modal_polite_button, modal_assertive_button, close_modal_button) = (
         t(msg::UI_GALLERY_MODAL_HEADING),
         t(msg::UI_GALLERY_MODAL_POLITE_BUTTON),
+        t(msg::UI_GALLERY_MODAL_ASSERTIVE_BUTTON),
         t(msg::UI_GALLERY_CLOSE_MODAL),
     );
     let backup_finished = t(msg::UI_GALLERY_BACKUP_FINISHED);
     let agent_online = t(msg::UI_GALLERY_AGENT_ONLINE);
     let restore_failed = t(msg::UI_GALLERY_RESTORE_FAILED);
     let backup_finished_in_modal = backup_finished.clone();
+    let restore_failed_in_modal = restore_failed.clone();
     let dialog = NodeRef::<leptos::html::Dialog>::new();
+    // Whether the announcer counts the dialog as an open modal. Taking the page
+    // away while it is open, with the back button say, removes the dialog
+    // without a `close` event, so leaving the page ends the count too.
+    let counted = RwSignal::new(false);
+    on_cleanup(move || modal_gone(counted));
     view! {
         <PageHeading>{heading}</PageHeading>
         <p><A href="/">{start_link}</A></p>
@@ -80,7 +95,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     type="button"
                     on:click=move |_| {
                         if let Some(dialog) = dialog.get() {
-                            open_modal(&dialog);
+                            open_modal(&dialog, counted);
                         }
                     }
                 >
@@ -90,7 +105,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <dialog
                 node_ref=dialog
                 aria-labelledby="gallery-modal-heading"
-                on:close=move |_| modal_closed()
+                on:close=move |_| modal_gone(counted)
             >
                 <h2 id="gallery-modal-heading">{modal_heading}</h2>
                 <p>
@@ -99,6 +114,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         on:click=move |_| say(Politeness::Polite, &backup_finished_in_modal)
                     >
                         {modal_polite_button}
+                    </button>
+                </p>
+                <p>
+                    <button
+                        type="button"
+                        on:click=move |_| say(Politeness::Assertive, &restore_failed_in_modal)
+                    >
+                        {modal_assertive_button}
                     </button>
                 </p>
                 <p>

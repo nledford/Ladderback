@@ -81,3 +81,7 @@ ui-gallery-restore-failed = Restore failed.
 # The button inside the modal stand-in that queues a polite message while the
 # modal is open.
 ui-gallery-modal-polite-button = Say politely in the modal: backup finished
+
+# The button inside the modal stand-in that queues an urgent message while the
+# modal is open.
+ui-gallery-modal-assertive-button = Say urgently in the modal: restore failed

@@ -13,9 +13,13 @@
 //! - **Polite messages are merged.** The first opens a [`MERGE_WINDOW`]; every
 //!   polite message in it joins one write when it closes, in order, a text
 //!   already in the batch said once.
-//! - **Assertive messages go straight through**, even while a modal is open.
-//! - **While a modal is open polite messages wait,** and are written at once
-//!   when the last modal closes. At most [`MAX_HELD`] wait.
+//! - **Assertive messages skip the merge window:** one is written at once,
+//!   clear then set, and a second for the same region joins the set still waiting.
+//! - **While a modal is open every message waits,** polite and assertive: the
+//!   modal makes the regions inert, and some screen readers (VoiceOver, JAWS)
+//!   say nothing for a live region in inert content. They are written at once
+//!   when the last modal closes, assertive first. At most [`MAX_HELD`] wait
+//!   per region.
 //! - **Progress is never announced.**
 
 use std::time::Duration;
@@ -26,8 +30,9 @@ pub(crate) const MERGE_WINDOW: Duration = Duration::from_secs(2);
 /// How long after a region is cleared its text is set.
 pub(crate) const SET_DELAY: Duration = Duration::from_millis(50);
 
-/// The most polite messages held for one write. Messages come from the page's
-/// own events, but a modal left open must not grow the queue without bound.
+/// The most messages held for one write, per region. Messages come from the
+/// page's own events, but a modal left open must not grow the queue without
+/// bound.
 pub(crate) const MAX_HELD: usize = 16;
 
 /// Where the announcer reads the time: a duration since any fixed origin that
@@ -86,6 +91,8 @@ pub(crate) struct Announcer<C> {
     clock: C,
     /// Polite texts waiting for one write, in arrival order.
     held: Vec<String>,
+    /// Assertive texts waiting for the last modal to close, in arrival order.
+    held_assertive: Vec<String>,
     /// When the window that `held` began in closes.
     window_ends: Option<Duration>,
     /// How many modal dialogs are open.
@@ -99,6 +106,7 @@ impl<C: Clock> Announcer<C> {
         Self {
             clock,
             held: Vec::new(),
+            held_assertive: Vec::new(),
             window_ends: None,
             open_modals: 0,
             polite_set: None,
@@ -117,11 +125,15 @@ impl<C: Clock> Announcer<C> {
             return Vec::new();
         }
         match politeness {
-            Politeness::Assertive => self.schedule_set(Politeness::Assertive, text),
+            Politeness::Assertive if self.open_modals == 0 => {
+                self.schedule_set(Politeness::Assertive, text)
+            }
+            Politeness::Assertive => {
+                hold(&mut self.held_assertive, text);
+                Vec::new()
+            }
             Politeness::Polite => {
-                if self.held.len() < MAX_HELD && !self.held.contains(&text) {
-                    self.held.push(text);
-                }
+                hold(&mut self.held, text);
                 if self.open_modals == 0 && self.window_ends.is_none() && !self.held.is_empty() {
                     self.window_ends = Some(self.clock.now() + MERGE_WINDOW);
                 }
@@ -130,30 +142,35 @@ impl<C: Clock> Announcer<C> {
         }
     }
 
-    /// A modal dialog opened: polite messages wait until the last one closes.
+    /// A modal dialog opened: messages wait until the last one closes.
     pub(crate) fn modal_opened(&mut self) {
         self.open_modals = self.open_modals.saturating_add(1);
     }
 
-    /// A modal dialog closed. When it was the last, returns the write of the
-    /// polite messages that waited. A close with no modal open is ignored.
+    /// A modal dialog closed. When it was the last, returns the writes of the
+    /// messages that waited. A close with no modal open is ignored.
     pub(crate) fn modal_closed(&mut self) -> Vec<Effect> {
         if self.open_modals == 0 {
             return Vec::new();
         }
         self.open_modals -= 1;
-        if self.open_modals == 0 {
-            self.flush_held()
-        } else {
-            Vec::new()
+        if self.open_modals > 0 {
+            return Vec::new();
         }
+        let mut effects = self.flush_held_assertive();
+        effects.extend(self.flush_held());
+        effects
     }
 
-    /// The writes that have come due since the last call.
+    /// The writes that have come due since the last call. While a modal is
+    /// open nothing is written: the regions are inert.
     pub(crate) fn poll(&mut self) -> Vec<Effect> {
+        if self.open_modals > 0 {
+            return Vec::new();
+        }
         let now = self.clock.now();
         let mut effects = Vec::new();
-        for politeness in [Politeness::Polite, Politeness::Assertive] {
+        for politeness in [Politeness::Assertive, Politeness::Polite] {
             let slot = self.pending_set(politeness);
             if slot.as_ref().is_some_and(|pending| pending.due <= now)
                 && let Some(pending) = slot.take()
@@ -161,21 +178,23 @@ impl<C: Clock> Announcer<C> {
                 effects.push(Effect::Set(politeness, pending.text));
             }
         }
-        if self.open_modals == 0 && self.window_ends.is_some_and(|ends| ends <= now) {
+        if self.window_ends.is_some_and(|ends| ends <= now) {
             effects.extend(self.flush_held());
         }
         effects
     }
 
     /// How long from now the next write falls due, or `None` when nothing is
-    /// waiting on the clock (a held batch behind an open modal waits on the
+    /// waiting on the clock (everything behind an open modal waits on the
     /// modal).
     pub(crate) fn next_wakeup(&self) -> Option<Duration> {
-        let window = self.window_ends.filter(|_| self.open_modals == 0);
+        if self.open_modals > 0 {
+            return None;
+        }
         [
             self.polite_set.as_ref().map(|pending| pending.due),
             self.assertive_set.as_ref().map(|pending| pending.due),
-            window,
+            self.window_ends,
         ]
         .into_iter()
         .flatten()
@@ -200,6 +219,15 @@ impl<C: Clock> Announcer<C> {
         self.schedule_set(Politeness::Polite, text)
     }
 
+    /// Writes the assertive texts that waited for a modal to close.
+    fn flush_held_assertive(&mut self) -> Vec<Effect> {
+        if self.held_assertive.is_empty() {
+            return Vec::new();
+        }
+        let text = std::mem::take(&mut self.held_assertive).join(" ");
+        self.schedule_set(Politeness::Assertive, text)
+    }
+
     /// Clears the region now and sets `text` a tick later. A region still
     /// waiting to be set takes the text into that set instead, so no text is
     /// lost.
@@ -218,6 +246,14 @@ impl<C: Clock> Announcer<C> {
                 vec![Effect::Clear(politeness)]
             }
         }
+    }
+}
+
+/// Holds `text` for the next write: in arrival order, a text already held
+/// once, and no more than [`MAX_HELD`].
+fn hold(held: &mut Vec<String>, text: String) {
+    if held.len() < MAX_HELD && !held.contains(&text) {
+        held.push(text);
     }
 }
 
@@ -462,11 +498,80 @@ mod tests {
     }
 
     #[test]
-    fn an_assertive_message_is_not_held_by_a_modal() {
+    fn an_assertive_message_waits_for_a_modal_to_close_like_any_other() {
+        // The modal makes the regions inert, and VoiceOver and JAWS say
+        // nothing for a live region in inert content: the message would be
+        // lost, and it is the urgent one.
         let mut page = Page::new();
         page.announcer.modal_opened();
+        assert_eq!(page.say(Assertive, "Restore failed."), []);
+        assert_eq!(page.writes_between(1, 10_000), []);
+        assert_eq!(page.announcer.next_wakeup(), None);
+        page.at(10_000);
+        assert_eq!(page.announcer.modal_closed(), [Clear(Assertive)]);
+        assert_eq!(page.poll_at(10_049), []);
+        assert_eq!(page.poll_at(10_050), [set(Assertive, "Restore failed.")]);
+    }
+
+    #[test]
+    fn held_assertive_messages_are_merged_and_written_before_the_polite_ones() {
+        let mut page = Page::new();
+        page.announcer.modal_opened();
+        page.polite("Backup finished.");
+        page.say(Assertive, "Restore failed.");
+        page.say(Assertive, "Prune failed.");
+        page.say(Assertive, "Restore failed.");
+        assert_eq!(
+            page.announcer.modal_closed(),
+            [Clear(Assertive), Clear(Polite)]
+        );
+        assert_eq!(
+            page.poll_at(50),
+            [
+                set(Assertive, "Restore failed. Prune failed."),
+                set(Polite, "Backup finished.")
+            ]
+        );
+    }
+
+    #[test]
+    fn assertive_messages_wait_for_the_last_of_nested_modals() {
+        let mut page = Page::new();
+        page.announcer.modal_opened();
+        page.announcer.modal_opened();
+        page.say(Assertive, "Restore failed.");
+        assert_eq!(page.announcer.modal_closed(), []);
+        assert_eq!(page.poll_at(5_000), []);
+        assert_eq!(page.announcer.modal_closed(), [Clear(Assertive)]);
+    }
+
+    #[test]
+    fn a_modal_left_open_holds_at_most_a_bounded_number_of_assertive_messages() {
+        let mut page = Page::new();
+        page.announcer.modal_opened();
+        for number in 0..MAX_HELD + 5 {
+            page.say(Assertive, &format!("Failure {number}."));
+        }
+        assert_eq!(page.announcer.modal_closed(), [Clear(Assertive)]);
+        let expected = (0..MAX_HELD)
+            .map(|number| format!("Failure {number}."))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(page.poll_at(50), [set(Assertive, &expected)]);
+    }
+
+    #[test]
+    fn a_write_waiting_when_a_modal_opens_is_made_after_it_closes() {
+        let mut page = Page::new();
         assert_eq!(page.say(Assertive, "Restore failed."), [Clear(Assertive)]);
-        assert_eq!(page.poll_at(50), [set(Assertive, "Restore failed.")]);
+        page.at(10);
+        page.announcer.modal_opened();
+        assert_eq!(page.writes_between(11, 5_000), []);
+        assert_eq!(page.announcer.next_wakeup(), None);
+        page.at(6_000);
+        assert_eq!(page.announcer.modal_closed(), []);
+        assert_eq!(page.announcer.next_wakeup(), Some(Duration::ZERO));
+        assert_eq!(page.poll_at(6_000), [set(Assertive, "Restore failed.")]);
     }
 
     #[test]

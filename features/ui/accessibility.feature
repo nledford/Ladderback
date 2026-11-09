@@ -83,6 +83,18 @@ Feature: Accessibility of the app shell
     And I press Enter
     Then the polite region reads "Backup finished."
 
+  Scenario: An urgent message sent while a modal is open is spoken after it closes
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
+    And I press Enter
+    Then focus is inside the dialog "Modal stand-in"
+    When I press Tab until focus is on the button "Say urgently in the modal: restore failed"
+    And I press Enter
+    Then the assertive region stays empty
+    When I press Tab until focus is on the button "Close the modal stand-in"
+    And I press Enter
+    Then the assertive region reads "Restore failed."
+
   Scenario: The gallery has no accessibility violations while a modal is open
     When I open the component gallery
     And I press Tab until focus is on the button "Open the modal stand-in"
