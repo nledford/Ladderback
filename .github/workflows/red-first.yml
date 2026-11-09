@@ -59,6 +59,16 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,trunk
+      # The wasm lane of the check (scripts/red-first.mjs) runs a test: commit's
+      # new wasm-bindgen tests under Node. The runner must be the version of
+      # `wasm-bindgen` that Cargo.lock pins; the wasm32 target comes with the
+      # toolchain (rust-toolchain.toml). The binaries are a download of a few
+      # seconds, so they are installed always.
+      - id: wasm-bindgen
+        run: echo "version=$(just _wasm-bindgen-version)" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: npm ci && npx playwright install --with-deps chromium
         working-directory: ui-tests
       # The parts of the cache key that aren't a file hash. rust-toolchain.toml

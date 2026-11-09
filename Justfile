@@ -24,6 +24,7 @@ alias v := verify
 setup:
     rustup target add wasm32-unknown-unknown
     cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz
+    cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium
 
@@ -88,6 +89,34 @@ test-acceptance *args:
 test-e2e *args:
     scripts/with-skip-log.sh cargo test --workspace --test e2e -- "$@"
 
+# The runner is `wasm-bindgen-test-runner` from wasm-bindgen-cli, whose version
+# must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is
+# Cargo's runner for wasm32 in this recipe only, so no other command changes.
+# The packages are the ones with wasm-bindgen tests (`scripts/red-first.mjs`
+# finds them by their `wasm-bindgen-test` dependency): add a package here when
+# it gets its first. Selecting both unifies their features, and `--all-features`
+# turns on those that only matter on wasm32 (`l10n`'s `browser-intl`). Zero
+# tests is a pass.
+[doc("Run the wasm-bindgen tests under Node (the browser lanes).")]
+[group('test')]
+[positional-arguments]
+test-wasm *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want=$(just _wasm-bindgen-version)
+    have=$(wasm-bindgen-test-runner --version 2>/dev/null | awk '{print $2}' || true)
+    if [[ $have != "$want" ]]; then
+        echo "error: wasm-bindgen-test-runner is ${have:-not installed}, Cargo.lock has wasm-bindgen $want; run: cargo binstall --no-confirm --version $want wasm-bindgen-cli" >&2
+        exit 1
+    fi
+    export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
+    cargo test --package l10n --package web --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
+
+# The version of wasm-bindgen that Cargo.lock pins.
+[private]
+_wasm-bindgen-version:
+    @grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p'
+
 # Build the web UI into crates/web/dist, where the binary embeds it from.
 [group('build')]
 web:
@@ -146,7 +175,7 @@ red-first base='origin/main':
 
 # Run every check CI runs, except mutation testing and the red-first check.
 [group('quality')]
-verify: fmt-check lint architecture test test-ui
+verify: fmt-check lint architecture test test-wasm test-ui
 
 # Shows the version bump and CHANGELOG.md entry that the release PR would
 # contain for the committed history (§12.1). Changes nothing.

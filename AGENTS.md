@@ -12,16 +12,17 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 
 | Command | Does |
 |---|---|
-| `just setup` | Installs the wasm target, trunk, cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
-| `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-ui` |
+| `just setup` | Installs the wasm target, trunk, wasm-bindgen-cli (at the version of `Cargo.lock`'s `wasm-bindgen`), cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
+| `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-wasm`, `test-ui` |
 | `just fmt` | Formats Rust code |
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, `fluent-pseudo` in a default build of `ladderback` and `web` and out of a `--no-default-features` one, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
+| `just test-wasm [args]` | The `wasm-bindgen-test` tests of `l10n` and `web`, built for `wasm32-unknown-unknown` and run under Node by `wasm-bindgen-test-runner` (which `just setup` installs at the version of `Cargo.lock`'s `wasm-bindgen`). Zero tests passes. CI runs it in the non-required job `Wasm tests (Node)`; `just verify` runs it too, `just test` doesn't |
 | `just test-ui [args]` | Builds the web UI and the binary, installs the UI test dependencies if they are missing or stale, then runs the `@ui` scenarios |
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists; further `args` go to `cargo mutants` (e.g. `--jobs 3`) |
-| `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests fail at run time (§13.1) |
+| `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests, host and `wasm_bindgen_test`, and scenarios fail at run time (§13.1) |
 | `just serve` | Builds everything and runs `ladderback serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
 
