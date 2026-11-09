@@ -152,11 +152,18 @@ impl OperationsState {
         // What is still held is not in the page: keep only the runs it could
         // be ahead of, and keep them first, because a run the page has not
         // written yet is the newest thing on the page.
-        rows.splice(
-            0..0,
-            held.into_values()
-                .filter(|row| rank(&row.summary.status) < TERMINAL),
-        );
+        let mut live: Vec<OperationRow> = held
+            .into_values()
+            .filter(|row| rank(&row.summary.status) < TERMINAL)
+            .collect();
+        // The order of a map is nobody's: a run the page has not written
+        // yet is newest, and between two of them the queue decides.
+        live.sort_by(|a, b| {
+            (a.summary.queued_at.as_str(), a.summary.id.as_str())
+                .cmp(&(b.summary.queued_at.as_str(), b.summary.id.as_str()))
+        });
+        live.reverse();
+        rows.splice(0..0, live);
         self.rows = rows;
         self.next = page.next;
     }
@@ -192,6 +199,19 @@ pub(crate) fn reconnect_backoff(attempt: u32) -> Duration {
 /// the sixth attempt and every later one wait the cap.
 const SHIFTS_TO_THE_CAP: u32 = 5;
 
+/// The events stream's URL: the page's own origin, over WebSocket. `http` is
+/// the prefix of `https` too, so both schemes become their WebSocket one.
+pub(crate) fn events_url(base: &str) -> String {
+    format!("{}/api/v1/events", base.trim_end_matches('/')).replacen("http", "ws", 1)
+}
+
+/// Whether `status` is an operation's last: anything but queued or running.
+/// The announcement effect and the settle-poll both ask, so the answer lives
+/// here, host-tested, and not twice.
+pub(crate) fn ended(status: &str) -> bool {
+    rank(status) >= TERMINAL
+}
+
 #[cfg(test)]
 mod tests {
     // The decisions of §4.4, one test each; commit 1 wrote the red ones
@@ -200,7 +220,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{OperationsState, Progress, reconnect_backoff};
+    use super::{OperationsState, Progress, ended, events_url, reconnect_backoff};
     use api::{
         ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode,
     };
@@ -472,6 +492,85 @@ mod tests {
             reconnect_backoff(60),
             Duration::from_secs(30),
             "the cap holds"
+        );
+    }
+    #[test]
+    fn the_events_url_is_the_origin_over_websocket() {
+        assert_eq!(
+            events_url("http://127.0.0.1:8080"),
+            "ws://127.0.0.1:8080/api/v1/events"
+        );
+        assert_eq!(
+            events_url("https://demo.example"),
+            "wss://demo.example/api/v1/events"
+        );
+        assert_eq!(
+            events_url("https://demo.example/"),
+            "wss://demo.example/api/v1/events",
+            "a trailing slash is not doubled"
+        );
+    }
+
+    #[test]
+    fn ended_names_the_statuses_a_run_ends_with() {
+        for status in ["queued", "running"] {
+            assert!(!ended(status), "{status} is still going");
+        }
+        for status in [
+            "succeeded",
+            "succeeded-with-warnings",
+            "cancelled",
+            "failed",
+        ] {
+            assert!(ended(status), "{status} is an end");
+        }
+    }
+
+    #[test]
+    fn a_reconnects_refetch_corrects_a_stale_row_and_keeps_an_advanced_one() {
+        // FIRST was read before the disconnect and ended while the page was
+        // away; SECOND was advanced by an event the store had not written
+        // when the socket dropped. The re-fetch adopts FIRST's end and
+        // leaves SECOND ahead of the store, newest.
+        let mut state = OperationsState::from_history(
+            vec![
+                summary(SECOND, "queued", false, false),
+                summary(FIRST, "running", true, false),
+            ],
+            None,
+        );
+        state.apply(&UiEvent::OperationStarted {
+            operation: id(SECOND),
+            repository: Some("demo".to_owned()),
+            started_at: "2026-11-09T10:00:02Z".to_owned(),
+        });
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(SECOND),
+            current: 4,
+            total: Some(9),
+        });
+        let mut failed = summary(FIRST, "failed", true, true);
+        failed.failure_code = Some(ErrorCode::RepositoryUnknown);
+        state.merge(page(vec![failed], None));
+        let (second, first) = (&state.rows[0], &state.rows[1]);
+        assert_eq!(
+            first.summary.status, "failed",
+            "the re-read corrects the row that went stale"
+        );
+        assert_eq!(
+            second.summary.status, "running",
+            "an event's advance survives the re-read"
+        );
+        assert_eq!(
+            second.summary.started_at.as_deref(),
+            Some("2026-11-09T10:00:02Z")
+        );
+        assert_eq!(
+            second.progress,
+            Some(Progress {
+                current: 4,
+                total: Some(9)
+            })
         );
     }
 }

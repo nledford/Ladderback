@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use crate::backend::{OperationsState, reconnect_backoff};
+use crate::backend::{OperationsState, ended, events_url, reconnect_backoff};
 use api::{ErrorCode, MsgArg, OperationsPageDto, UiEvent};
 use futures::StreamExt;
 use gloo_net::http::Request;
@@ -108,12 +108,22 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
     let base = base.to_owned();
     spawn_local(async move {
         let mut attempt = 0u32;
+        // The first answer builds the state; every answer after a disconnect
+        // merges into it (§4.4): a status an event advanced is never handed
+        // back to the store's lagging write, and a live row the store has
+        // not written yet stays.
+        let mut first = true;
         loop {
             match read::<OperationsPageDto>(&format!("{base}/api/v1/operations")).await {
                 Some(page) => {
                     attempt = 0;
                     phase.set(Phase::Ready);
-                    state.set(OperationsState::from_history(page.operations, page.next));
+                    if first {
+                        first = false;
+                        state.set(OperationsState::from_history(page.operations, page.next));
+                    } else {
+                        state.update(|state| state.merge(page));
+                    }
                     stream(&base, &state).await;
                     // The stream ended: a closed socket is a failure like any
                     // other, and the next round waits for it.
@@ -146,17 +156,13 @@ async fn stream(base: &str, state: &RwSignal<OperationsState>) {
     }
 }
 
-/// The events stream's URL: the page's own origin, over WebSocket. `http` is
-/// the prefix of `https` too, so both schemes become their WebSocket one.
-fn events_url(base: &str) -> String {
-    format!("{}/api/v1/events", base.trim_end_matches('/')).replacen("http", "ws", 1)
-}
-
 /// After a start or a cancel, polls the history into `state` until
 /// `operation` has ended: a start announces before the first event can
 /// arrive, and a cancelled run emits no `UiEvent` at all, so the page does
 /// not guess — it reads the store until the store says the run settled.
-pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operation: &str) {
+/// `false` is the budget running out with no end in sight: the caller says
+/// so, rather than leave the reader watching a row that stopped moving.
+pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operation: &str) -> bool {
     let url = format!("{base}/api/v1/operations");
     for _ in 0..(SETTLE_FOR_MS / POLL_EVERY_MS) {
         if let Some(page) = read::<OperationsPageDto>(&url).await {
@@ -166,22 +172,18 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
                 .any(|summary| summary.id == operation && ended(&summary.status));
             state.update(|state| state.merge(page));
             if settled {
-                return;
+                return true;
             }
         }
         sleep(POLL_EVERY).await;
     }
+    false
 }
 
 /// How long a settle-poll keeps reading, and how often.
 const SETTLE_FOR_MS: u32 = 120_000;
 const POLL_EVERY_MS: u32 = 250;
 const POLL_EVERY: Duration = Duration::from_millis(POLL_EVERY_MS as u64);
-
-/// Whether `status` is an operation's last: anything but queued or running.
-pub(crate) fn ended(status: &str) -> bool {
-    status != "queued" && status != "running"
-}
 
 /// Waits `for_`, in the browser's own time.
 async fn sleep(for_: Duration) {

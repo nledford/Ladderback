@@ -291,3 +291,7 @@ ui-snapshots-of = Snapshots of { $alias }
 
 # What the snapshots page says when the repository holds no snapshots.
 ui-no-snapshots = No snapshots yet.
+
+# Announced politely when the settle-poll after a start or a cancel ran out
+# of its budget without the store ever saying how the run ended.
+ui-still-waiting = Still waiting for Ladderback to say how the run ended.

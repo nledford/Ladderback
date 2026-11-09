@@ -15,7 +15,7 @@ use std::cmp::Reverse;
 use std::str::FromStr;
 
 use crate::announcer::Politeness;
-use crate::backend::{OperationRow, OperationsState};
+use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{Progress, StatusBadge};
 use crate::live::say;
 use crate::ws::{self, Phase, Posted};
@@ -91,11 +91,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let sorted_newest = text(&localizer, msg::UI_SORTED_NEWEST);
     let sorted_oldest = text(&localizer, msg::UI_SORTED_OLDEST);
     let empty = text(&localizer, msg::UI_NO_OPERATIONS);
-    let (started_text, backup_cancelled, backup_failed, backup_finished) = (
+    let (started_text, backup_cancelled, backup_failed, backup_finished, still_waiting) = (
         text(&localizer, msg::UI_BACKUP_STARTED),
         text(&localizer, msg::UI_BACKUP_CANCELLED),
         text(&localizer, msg::UI_BACKUP_FAILED),
         text(&localizer, msg::UI_BACKUP_FINISHED),
+        text(&localizer, msg::UI_STILL_WAITING),
     );
     let localizer_for_errors = Arc::clone(&localizer);
     // The state the page shows, and the connection that fills it: the history
@@ -128,7 +129,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 let status = row.summary.status.clone();
                 let previous = seen.insert(row.summary.id.clone(), status.clone());
                 let changed = previous.is_some_and(|previous| {
-                    (previous == "queued" || previous == "running") && ws::ended(&status)
+                    (previous == "queued" || previous == "running") && ended(&status)
                 });
                 if changed {
                     match status.as_str() {
@@ -176,6 +177,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                         .into_iter()
                         .map(|plan| {
                             let started = started_text.clone();
+                            let still_waiting = still_waiting.clone();
                             let url = format!("{}/api/v1/operations", start_base);
                             let ops = start_ops;
                             let base = start_base.clone();
@@ -188,6 +190,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         let url = url.clone();
                                         let base = base.clone();
                                         let started = started.clone();
+                                        let still_waiting = still_waiting.clone();
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let ops = ops;
                                         spawn_local(async move {
@@ -196,8 +199,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                     say(Politeness::Polite, &started);
                                                     if let Some(operation) =
                                                         ws::started_operation(&answer)
+                                                        && !ws::settle(&base, ops, &operation).await
                                                     {
-                                                        ws::settle(&base, ops, &operation).await;
+                                                        say(Politeness::Polite, &still_waiting);
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args)) => {
@@ -338,6 +342,7 @@ fn row_view(
         msg::UI_CANCEL_PLAN,
         &[("plan", MsgArg::Text(plan.clone()))],
     );
+    let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
     let cancellable = row.summary.status == "queued" || row.summary.status == "running";
     let progress = row.progress.map(|progress| {
         let percent = progress
@@ -374,13 +379,16 @@ fn row_view(
                             on:click=move |_| {
                                 let error_localizer = Arc::clone(&error_localizer);
                                 let base = base.clone();
+                                let still_waiting = still_waiting.clone();
                                 let operation = operation.clone();
                                 let url = url.clone();
                                 let ops = ops;
                                 spawn_local(async move {
                                     match ws::post(&url, &Empty {}).await {
                                         Some(Posted::Done(_)) => {
-                                            ws::settle(&base, ops, &operation).await;
+                                            if !ws::settle(&base, ops, &operation).await {
+                                                say(Politeness::Polite, &still_waiting);
+                                            }
                                         }
                                         Some(Posted::Refused(code, args)) => {
                                             error.set(Some(refusal(
