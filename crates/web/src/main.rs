@@ -76,14 +76,29 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
     let arrival = Arc::clone(&localizer);
+    let main = NodeRef::<leptos::html::Main>::new();
     view! {
-        // `rel="external"` keeps the router from taking the click: the browser
-        // follows the in-page link itself, and focus moves into `<main>`.
-        <a class="skip-link" href="#main" rel="external">{text(&localizer, msg::UI_SKIP_LINK)}</a>
+        // The skip link moves focus into `<main>` itself and stops the click
+        // there. The router takes any click on a same-origin link it was not
+        // told to leave alone, and only scrolls to the target, so focus would
+        // stay where it was. A handler that has already stopped the click is
+        // left alone by the router, and the address stays as it was.
+        <a
+            class="skip-link"
+            href="#main"
+            on:click=move |event| {
+                event.prevent_default();
+                if let Some(main) = main.get() {
+                    let _ = main.focus();
+                }
+            }
+        >
+            {text(&localizer, msg::UI_SKIP_LINK)}
+        </a>
         <header class="site-header">
             <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
         </header>
-        <main id="main" tabindex="-1">
+        <main id="main" tabindex="-1" node_ref=main>
             <Router>
                 <Arrival localizer=arrival />
                 <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
