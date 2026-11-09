@@ -602,6 +602,26 @@ fn a_value_of_the_wrong_type_is_reported_without_the_value() {
 }
 
 #[test]
+fn a_wrong_type_value_holding_quotes_and_backslashes_is_reported_without_a_word_of_it() {
+    // serde quotes a string it can't use with `{:?}`, which writes an inner
+    // quote as `\"` and a backslash as `\\`: neither ends the quoted text.
+    let rows = [
+        "schedule = 'curl -H \"Authorization: CANARY-bearer\" https://nas.demo'\n",
+        "schedule = 'a \\\\\"CANARY-after-a-backslash\" b'\n",
+        "schedule = 'a \\\\ \"CANARY-after-two\" b'\n",
+    ];
+    for row in rows {
+        let result = parsed(&base_with(row));
+        let shown = format!("{result:?}");
+        let error = invalid(result);
+        assert_eq!(error.problem, Problem::WrongType, "{row}");
+        assert_eq!(error.key.as_deref(), Some("plans[0].schedule"), "{row}");
+        assert!(!shown.contains("CANARY"), "{row}: {shown}");
+        assert!(error.detail.contains("string"), "{:?}", error.detail);
+    }
+}
+
+#[test]
 fn text_that_is_not_toml_is_reported_where_it_stops_without_quoting_it() {
     let text = "schema = 1\n\n[repositories.nas]\npassword = \"hunter2\" oops\n";
     let result = parsed(text);

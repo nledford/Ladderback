@@ -161,12 +161,17 @@ fn in_value(value: &DeValue<'_>, span: &Range<usize>, at: &Path) -> Option<(Path
 
 /// What a parser said, without any text of the file in it: what is between
 /// backticks or double quotes is a value that was in the file, and the file
-/// may hold a secret.
+/// may hold a secret. A double-quoted text is written as Rust's `{:?}` writes
+/// a string, so a backslash escapes the character after it: `\"` is part of
+/// the text, not its end.
 pub(crate) fn scrub(message: &str) -> String {
     let mut kept = String::with_capacity(message.len());
     let mut inside: Option<char> = None;
+    let mut escaped = false;
     for c in message.chars() {
         match inside {
+            Some(_) if escaped => escaped = false,
+            Some('"') if c == '\\' => escaped = true,
             Some(quote) if c == quote => inside = None,
             Some(_) => {}
             None if c == '`' || c == '"' => inside = Some(c),
