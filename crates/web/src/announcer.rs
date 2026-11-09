@@ -18,11 +18,6 @@
 //!   when the last modal closes. At most [`MAX_HELD`] wait.
 //! - **Progress is never announced.**
 
-// Commit 1 of the red-first history: the bodies are `todo!()` stubs, and
-// nothing but the tests uses the module yet. Both allowances go with the
-// implementation.
-#![allow(dead_code, clippy::todo)]
-
 use std::time::Duration;
 
 /// How long a polite message waits for company before it is written.
@@ -113,31 +108,116 @@ impl<C: Clock> Announcer<C> {
 
     /// Takes in a message. Returns the writes due now.
     pub(crate) fn announce(&mut self, announcement: Announcement) -> Vec<Effect> {
-        let _ = announcement;
-        todo!("announce")
+        let Announcement {
+            kind,
+            politeness,
+            text,
+        } = announcement;
+        if kind == Kind::Progress || text.trim().is_empty() {
+            return Vec::new();
+        }
+        match politeness {
+            Politeness::Assertive => self.schedule_set(Politeness::Assertive, text),
+            Politeness::Polite => {
+                if self.held.len() < MAX_HELD && !self.held.contains(&text) {
+                    self.held.push(text);
+                }
+                if self.open_modals == 0 && self.window_ends.is_none() && !self.held.is_empty() {
+                    self.window_ends = Some(self.clock.now() + MERGE_WINDOW);
+                }
+                Vec::new()
+            }
+        }
     }
 
     /// A modal dialog opened: polite messages wait until the last one closes.
     pub(crate) fn modal_opened(&mut self) {
-        todo!("modal_opened")
+        self.open_modals = self.open_modals.saturating_add(1);
     }
 
     /// A modal dialog closed. When it was the last, returns the write of the
     /// polite messages that waited. A close with no modal open is ignored.
     pub(crate) fn modal_closed(&mut self) -> Vec<Effect> {
-        todo!("modal_closed")
+        if self.open_modals == 0 {
+            return Vec::new();
+        }
+        self.open_modals -= 1;
+        if self.open_modals == 0 {
+            self.flush_held()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The writes that have come due since the last call.
     pub(crate) fn poll(&mut self) -> Vec<Effect> {
-        todo!("poll")
+        let now = self.clock.now();
+        let mut effects = Vec::new();
+        for politeness in [Politeness::Polite, Politeness::Assertive] {
+            let slot = self.pending_set(politeness);
+            if slot.as_ref().is_some_and(|pending| pending.due <= now)
+                && let Some(pending) = slot.take()
+            {
+                effects.push(Effect::Set(politeness, pending.text));
+            }
+        }
+        if self.open_modals == 0 && self.window_ends.is_some_and(|ends| ends <= now) {
+            effects.extend(self.flush_held());
+        }
+        effects
     }
 
     /// How long from now the next write falls due, or `None` when nothing is
     /// waiting on the clock (a held batch behind an open modal waits on the
     /// modal).
     pub(crate) fn next_wakeup(&self) -> Option<Duration> {
-        todo!("next_wakeup")
+        let window = self.window_ends.filter(|_| self.open_modals == 0);
+        [
+            self.polite_set.as_ref().map(|pending| pending.due),
+            self.assertive_set.as_ref().map(|pending| pending.due),
+            window,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(|due| due.saturating_sub(self.clock.now()))
+    }
+
+    fn pending_set(&mut self, politeness: Politeness) -> &mut Option<PendingSet> {
+        match politeness {
+            Politeness::Polite => &mut self.polite_set,
+            Politeness::Assertive => &mut self.assertive_set,
+        }
+    }
+
+    /// Ends the window: the held texts become one write.
+    fn flush_held(&mut self) -> Vec<Effect> {
+        self.window_ends = None;
+        if self.held.is_empty() {
+            return Vec::new();
+        }
+        let text = std::mem::take(&mut self.held).join(" ");
+        self.schedule_set(Politeness::Polite, text)
+    }
+
+    /// Clears the region now and sets `text` a tick later. A region still
+    /// waiting to be set takes the text into that set instead, so no text is
+    /// lost.
+    fn schedule_set(&mut self, politeness: Politeness, text: String) -> Vec<Effect> {
+        let due = self.clock.now() + SET_DELAY;
+        match self.pending_set(politeness) {
+            Some(pending) => {
+                if pending.text != text {
+                    pending.text.push(' ');
+                    pending.text.push_str(&text);
+                }
+                Vec::new()
+            }
+            slot @ None => {
+                *slot = Some(PendingSet { due, text });
+                vec![Effect::Clear(politeness)]
+            }
+        }
     }
 }
 

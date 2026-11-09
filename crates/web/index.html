@@ -10,5 +10,10 @@
   </head>
   <body>
     <noscript>Ladderback's web UI needs JavaScript and WebAssembly.</noscript>
+    <!-- The announcer's two regions (technical design §4.5): outside the mount
+         point, so they exist, empty, before anything is written to them. -->
+    <div id="live-polite" class="live-region" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="live-assertive" class="live-region" role="alert" aria-live="assertive" aria-atomic="true"></div>
+    <div id="app"></div>
   </body>
 </html>
