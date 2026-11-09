@@ -8,16 +8,19 @@
 //! announcer ([`crate::live`]) speaks what §4.5 says is spoken, and nothing
 //! else: a progress bar's value is never announced.
 
-use std::time::Duration;
-
+use crate::announcer::Politeness;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 
-use crate::announcer::Politeness;
+use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::{modal_gone, open_modal, say};
+use crate::toast::{ToastTimers, arrival};
 
-/// How long a toast stays on screen before it goes, unannounced.
-const TOAST_MS: u64 = 3_000;
+thread_local! {
+    /// The generations of the toasts shown so far, so an older toast's expiry
+    /// no longer clears the text a newer toast is showing.
+    static TOAST_TIMERS: ToastTimers = ToastTimers::default();
+}
 
 /// A modal dialog (`<dialog>` + `showModal`): focus is trapped inside while it
 /// is open (the browser's trap, backed by an explicit Tab wrap, since a
@@ -67,11 +70,9 @@ pub fn ModalDialog(
 
 /// Wraps Tab focus from the dialog's last focusable back to its first (and
 /// Shift-Tab from the first to the last), keeping keyboard focus inside the
-/// open dialog however the Tab key was pressed.
+/// open dialog however the Tab key was pressed. The wrap decision is
+/// [`crate::focus::focus_wrap`], tested there; this is the DOM glue.
 fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardEvent) {
-    if event.key() != "Tab" {
-        return;
-    }
     let Some(element) = dialog.get() else {
         return;
     };
@@ -93,21 +94,33 @@ fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardE
     let active = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.active_element());
-    if let (Some(active), Some(first), Some(last)) = (active, first, last) {
-        if first.is_same_node(Some(&last)) {
-            return;
-        }
-        if active.is_same_node(Some(&last)) && !event.shift_key() {
+    let Some((active, first, last)) = active.zip(first).zip(last).map(|((a, f), l)| (a, f, l))
+    else {
+        return;
+    };
+    let single = first.is_same_node(Some(&last));
+    let on_last = active.is_same_node(Some(&last));
+    let on_first = active.is_same_node(Some(&first));
+    match focus_wrap(
+        event.key() == "Tab",
+        event.shift_key(),
+        single,
+        on_last,
+        on_first,
+    ) {
+        Some(FocusWrap::First) => {
             event.prevent_default();
             if let Some(el) = first.dyn_ref::<web_sys::HtmlElement>() {
                 let _ = el.focus();
             }
-        } else if active.is_same_node(Some(&first)) && event.shift_key() {
+        }
+        Some(FocusWrap::Last) => {
             event.prevent_default();
             if let Some(el) = last.dyn_ref::<web_sys::HtmlElement>() {
                 let _ = el.focus();
             }
         }
+        None => {}
     }
 }
 
@@ -198,6 +211,7 @@ pub fn FormField(
                     described_in_attr.clone()
                 }
             }
+            aria-invalid=move || error.get().is_some().then_some("true")
         />
         <p id=described_by.clone()>{description}</p>
         {move || {
@@ -250,10 +264,20 @@ pub fn Toast(text: RwSignal<Option<String>>) -> impl IntoView {
     }
 }
 
-/// Shows `message` as a toast for [`TOAST_MS`], announcing its arrival
-/// politely; its disappearance is not announced.
+/// Shows `message` as a toast for the lifetime [`crate::toast::arrival`]
+/// picks, announcing its arrival politely; its disappearance is not
+/// announced, and an older toast's expiry no longer clears it.
 pub(crate) fn show_toast(text: RwSignal<Option<String>>, message: String) {
+    let plan = arrival();
+    let generation = TOAST_TIMERS.with(ToastTimers::arrive);
     text.set(Some(message.clone()));
-    say(Politeness::Polite, &message);
-    set_timeout(move || text.set(None), Duration::from_millis(TOAST_MS));
+    say(plan.politeness, &message);
+    set_timeout(
+        move || {
+            if TOAST_TIMERS.with(|timers| timers.still_current(generation)) {
+                text.set(None);
+            }
+        },
+        plan.shown_for,
+    );
 }

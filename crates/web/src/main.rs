@@ -31,6 +31,10 @@ mod announcer;
 // build without the gallery has no user for it yet.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod components;
+// The focus-wrap decision is host-testable; components.rs (the DOM glue
+// around it) runs in a browser via the gallery's @ui scenarios.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod focus;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod formatting;
 #[cfg(feature = "gallery")]
@@ -39,6 +43,11 @@ mod gallery;
 mod live;
 mod page;
 mod routes;
+
+// The toast's arrival and lifetime decisions are host-testable; the DOM
+// glue around them runs in a browser via the gallery's @ui scenarios.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+mod toast;
 
 use routes::{NotFound, Start};
 
