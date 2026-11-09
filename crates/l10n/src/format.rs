@@ -14,7 +14,7 @@
 //! - `format` returns `None` for a value it can't write.
 //!
 //! The plain text is Fluent's own number, and an instant in UTC. It is what a
-//! build without a host (the web UI, until its `Intl` host exists) writes.
+//! build without a host (neither the daemon's nor the web UI's) writes.
 //!
 //! No input makes formatting fail, panic or allocate without limit: digit
 //! counts are capped before a host sees them, and an instant no calendar can

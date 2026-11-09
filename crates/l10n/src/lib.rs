@@ -17,12 +17,13 @@
 //! pseudolocales `en-XA` and `ar-XB`: the `en-US` catalog, transformed, to show
 //! what is written in the code instead. A release build leaves them out.
 //!
-//! Numbers and instants are written as their locale writes them where the
-//! `icu` feature is on, as it is in the daemon: ICU4X formats them, and `jiff`
-//! gives the offset of an instant in its zone. A catalog asks for a style with
-//! `NUMBER` and `DATETIME`, whose options are a closed vocabulary. Without the
-//! feature, as in the web UI until its `Intl` host exists, they are written
-//! plainly: Fluent's own number output and UTC. Either way it plugs in behind
+//! Numbers and instants are written as their locale writes them where a host
+//! is on. The `icu` feature is the daemon's: ICU4X formats them, and `jiff`
+//! gives the offset of an instant in its zone. The `browser-intl` feature is
+//! the web UI's, on wasm32: the browser's `Intl` formats them, and no locale
+//! data ships. A catalog asks for a style with `NUMBER` and `DATETIME`, whose
+//! options are a closed vocabulary. Without a host they are written plainly:
+//! Fluent's own number output and UTC. Either way it plugs in behind
 //! [`Localizer`] and changes no caller.
 
 #![deny(
