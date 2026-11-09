@@ -194,20 +194,32 @@ pub(crate) trait Host {
 }
 
 /// Where no host formatter is built in: every number and instant is written
-/// plainly.
+/// plainly. A build with the `icu` feature has no use for it, but the tests
+/// of the interface do.
+#[cfg(any(test, not(feature = "icu")))]
 pub(crate) struct NoHost;
 
 /// What [`NoHost`] builds: formatters that don't exist.
+#[cfg(any(test, not(feature = "icu")))]
 pub(crate) struct Nothing;
 
+#[cfg(any(test, not(feature = "icu")))]
 impl Host for NoHost {
     type Numbers = Nothing;
     type Instants = Nothing;
 }
 
-/// The host a build writes with. Until the ICU4X host is wired in, none.
+/// The host a build writes with where the `icu` feature is on: ICU4X's, the
+/// daemon's.
+#[cfg(feature = "icu")]
+pub(crate) type Active = crate::icu::Icu;
+
+/// The host a build writes with where the `icu` feature is off: none, as in
+/// the web UI until its `Intl` host exists.
+#[cfg(not(feature = "icu"))]
 pub(crate) type Active = NoHost;
 
+#[cfg(any(test, not(feature = "icu")))]
 impl NumberFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: NumberOptions) -> Option<Self> {
         None
@@ -218,6 +230,7 @@ impl NumberFormatter for Nothing {
     }
 }
 
+#[cfg(any(test, not(feature = "icu")))]
 impl InstantFormatter for Nothing {
     fn new(_: &LanguageIdentifier, _: Style) -> Option<Self> {
         None

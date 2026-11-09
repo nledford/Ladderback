@@ -57,6 +57,8 @@ clap = { version = "4.6.7", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 cucumber = "0.23.0"
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
+# ICU4X's decimal type: the number a locale-aware formatter writes.
+fixed_decimal = { version = "0.7.3", default-features = false }
 fluent-bundle = "0.16.0"
 # Not 0.14: it negotiates `icu_locid` identifiers, which `unic-langid`, and so
 # Fluent's bundles, can't take.
@@ -66,6 +68,18 @@ fluent-pseudo = "0.3.3"
 fluent-syntax = "0.12.0"
 futures = "0.3.34"
 http-body-util = "0.1.5"
+# ICU4X writes the daemon's numbers and instants (technical design §8.4), behind
+# `l10n`'s `icu` feature. No defaults: `compiled_data` bakes in the locale data
+# for the formatters used, `alloc` is what parsing a locale and writing a
+# decimal need, and `ixdtf` (parsing dates) is not used. `icu_provider`'s `sync`
+# makes the formatters `Send + Sync`, which a bundle's memoizer needs: without
+# it, their data payloads hold an `Rc`.
+icu_calendar = { version = "2.4.0", default-features = false }
+icu_datetime = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
+icu_decimal = { version = "2.4.0", default-features = false, features = ["alloc", "compiled_data"] }
+icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc"] }
+icu_provider = { version = "2.4.0", default-features = false, features = ["sync"] }
+icu_time = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 intl-memoizer = "0.5.3"
 jiff = { version = "0.2.40", features = ["serde"] }
 keyring = { version = "3.6.3", default-features = false }
@@ -159,7 +173,9 @@ pseudo = ["l10n/pseudo"]
 api.workspace = true
 engine.workspace = true
 http-adapter.workspace = true
-l10n.workspace = true
+# The daemon formats numbers and instants with ICU4X; the web UI's `l10n` has
+# no `icu` feature, so a browser never downloads the locale data.
+l10n = { workspace = true, features = ["icu"] }
 axum.workspace = true
 clap.workspace = true
 env_logger.workspace = true

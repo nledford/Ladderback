@@ -19,13 +19,28 @@ pseudo = ["dep:fluent-pseudo"]
 # ICU4X's formatting of numbers and instants (technical design §8.4). Only the
 # daemon turns it on: a browser must never download the locale data, so `web`
 # depends on `l10n` without it, and `scripts/check-architecture.sh` checks it.
-icu = []
+icu = [
+    "dep:fixed_decimal",
+    "dep:icu_calendar",
+    "dep:icu_datetime",
+    "dep:icu_decimal",
+    "dep:icu_locale_core",
+    "dep:icu_provider",
+    "dep:icu_time",
+]
 
 [dependencies]
 api.workspace = true
+fixed_decimal = { workspace = true, optional = true }
 fluent-bundle.workspace = true
 fluent-langneg.workspace = true
 fluent-pseudo = { workspace = true, optional = true }
+icu_calendar = { workspace = true, optional = true }
+icu_datetime = { workspace = true, optional = true }
+icu_decimal = { workspace = true, optional = true }
+icu_locale_core = { workspace = true, optional = true }
+icu_provider = { workspace = true, optional = true }
+icu_time = { workspace = true, optional = true }
 intl-memoizer.workspace = true
 jiff.workspace = true
 unic-langid.workspace = true
