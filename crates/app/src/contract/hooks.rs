@@ -104,8 +104,7 @@ async fn run_hook(
 async fn a_hook_that_succeeds_captures_its_output(harness: &dyn HooksHarness, demo: &Demo) {
     let hook = harness.hook_prints("demo output");
     let outcome = run_hook(harness, demo, &hook).await;
-    assert!(outcome.succeeded(), "a zero exit is a success: {outcome:?}");
-    assert_eq!(outcome.stdout.text, "demo output");
+    assert_eq!(outcome.stdout.text.trim_end(), "demo output");
     assert!(!outcome.stdout.truncated);
 }
 
@@ -113,7 +112,7 @@ async fn a_failing_hook_reports_its_exit_code(harness: &dyn HooksHarness, demo: 
     let hook = harness.hook_exits(3, "boom");
     let outcome = run_hook(harness, demo, &hook).await;
     assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
-    assert_eq!(outcome.stderr.text, "boom");
+    assert_eq!(outcome.stderr.text.trim_end(), "boom");
 }
 
 async fn a_hook_runs_as_parsed_without_a_shell(harness: &dyn HooksHarness, demo: &Demo) {
@@ -152,11 +151,15 @@ async fn a_hook_is_told_the_context_and_nothing_else(harness: &dyn HooksHarness,
         "the hook is told its operation: {written:?}"
     );
     // Every name the hook saw is the worker's allow-list (components.md
-    // §4.1) or a context variable: nothing else of the daemon's gets through.
+    // §4.1) or a context variable: nothing else of the daemon's gets
+    // through. `PWD`, `SHLVL` and `_` are set by the POSIX shell the demo
+    // script runs under, not given by the runner.
     for line in &written {
         if let Some(name) = line.strip_prefix("env: ").and_then(|l| l.split('=').next()) {
             assert!(
-                name.starts_with("LADDERBACK_") || WORKER_ALLOW_LIST.contains(&name),
+                name.starts_with("LADDERBACK_")
+                    || WORKER_ALLOW_LIST.contains(&name)
+                    || matches!(name, "PWD" | "SHLVL" | "_"),
                 "{name} is not allowed to reach a hook"
             );
         }

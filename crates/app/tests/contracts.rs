@@ -181,7 +181,7 @@ struct FakeHooksHarness {
 impl Default for FakeHooksHarness {
     fn default() -> Self {
         Self {
-            runner: Arc::new(FakeHookRunner::new()),
+            runner: Arc::new(FakeHookRunner::new().with_secret(Self::secret())),
             written: Arc::new(Mutex::new(Vec::new())),
             counter: AtomicUsize::new(0),
         }
@@ -221,12 +221,11 @@ impl HooksHarness for FakeHooksHarness {
     fn hook_env(&self, arg: &str) -> domain::planning::HookEntry {
         let program = self.program();
         let written = self.written.clone();
-        let arg = arg.to_owned();
-        let name = program.clone();
-        self.runner.simulate(&program, move |_, context| {
+        self.runner.simulate(&program, move |entry, context| {
             if let Ok(mut lines) = written.lock() {
-                lines.push(format!("argv: {name}"));
-                lines.push(format!("argv: {arg}"));
+                for argument in entry.command.args() {
+                    lines.push(format!("argv: {argument}"));
+                }
                 lines.push("env: PATH=/usr/bin".to_owned());
                 lines.push("env: HOME=/home/demo".to_owned());
                 lines.push(format!("env: LADDERBACK_HOOK={}", context.phase.as_env()));
@@ -242,7 +241,8 @@ impl HooksHarness for FakeHooksHarness {
             }
             outcome(HookStatus::Succeeded)
         });
-        no_op_entry(&program)
+        domain::planning::HookEntry::new(&program, [arg], domain::planning::OnFailure::Error)
+            .expect("the demo hook is valid")
     }
 
     fn hook_exits(&self, code: i32, text: &str) -> domain::planning::HookEntry {

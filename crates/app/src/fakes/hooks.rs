@@ -6,8 +6,11 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use domain::planning::HookEntry;
+use domain::secrets::{Redactor, SecretValue};
 
-use crate::ports::{HookContext, HookOutcome, HookOutput, HookRunner, HookStatus};
+use crate::ports::{
+    HookContext, HookOutcome, HookOutput, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES,
+};
 
 /// What the fake does with one hook: the status it reports, and the text it
 /// claims the hook wrote to each stream.
@@ -58,14 +61,24 @@ pub struct HookCall {
 
 /// The fake runner. Outcomes are scripted by the hook's program name, so
 /// different hooks in one scenario can be told apart; a program with no
-/// script succeeds and writes nothing. Scripted text is returned as the
-/// capped, redacted capture, so the fake passes the same contract checks as
-/// the real runner.
-#[derive(Default)]
+/// script never started. Scripted text is returned as the capped, redacted
+/// capture, so the fake passes the same contract checks as the real runner.
 pub struct FakeHookRunner {
     scripts: Mutex<Vec<(String, Scripted)>>,
     simulated: Mutex<Vec<Simulated>>,
     calls: Mutex<Vec<HookCall>>,
+    redactor: Redactor,
+}
+
+impl Default for FakeHookRunner {
+    fn default() -> Self {
+        Self {
+            scripts: Mutex::new(Vec::new()),
+            simulated: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
+            redactor: Redactor::new([]),
+        }
+    }
 }
 
 /// A hook whose outcome is computed from the call itself, by program name.
@@ -77,6 +90,14 @@ type Simulated = (
 impl FakeHookRunner {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Adds a secret the scripted text is redacted against, as a real run's
+    /// secrets would be.
+    pub fn with_secret(mut self, secret: &str) -> Self {
+        let value = SecretValue::new(secret);
+        self.redactor = Redactor::new([&value]);
+        self
     }
 
     /// Scripts every hook whose program is `program`.
@@ -110,12 +131,57 @@ impl FakeHookRunner {
 #[async_trait]
 impl HookRunner for FakeHookRunner {
     async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome {
-        let _ = entry;
-        let _ = context;
+        let program = entry.command.program();
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.push(HookCall {
+                entry: entry.clone(),
+                context: context.clone(),
+            });
+        }
+        // The latest behaviour registered for the program wins, so a
+        // scenario can change its mind.
+        if let Ok(simulated) = self.simulated.lock()
+            && let Some((_, behaviour)) = simulated.iter().rev().find(|(name, _)| name == program)
+        {
+            return behaviour(entry, context);
+        }
+        if let Ok(scripts) = self.scripts.lock()
+            && let Some((_, scripted)) = scripts.iter().rev().find(|(name, _)| name == program)
+        {
+            return HookOutcome {
+                status: scripted.status.clone(),
+                stdout: self.capture(&scripted.stdout),
+                stderr: self.capture(&scripted.stderr),
+            };
+        }
         HookOutcome {
-            status: HookStatus::Succeeded,
+            status: HookStatus::NotStarted {
+                detail: format!("{program} is not scripted"),
+            },
             stdout: HookOutput::default(),
             stderr: HookOutput::default(),
+        }
+    }
+}
+
+impl FakeHookRunner {
+    /// The scripted text of one stream, redacted and capped as a real
+    /// capture is.
+    fn capture(&self, text: &str) -> HookOutput {
+        let redacted = self.redactor.redact(text);
+        if redacted.len() <= MAX_HOOK_OUTPUT_BYTES {
+            return HookOutput {
+                text: redacted,
+                truncated: false,
+            };
+        }
+        let mut cut = MAX_HOOK_OUTPUT_BYTES;
+        while !redacted.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        HookOutput {
+            text: redacted[..cut].to_owned(),
+            truncated: true,
         }
     }
 }

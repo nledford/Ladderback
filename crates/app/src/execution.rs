@@ -3,15 +3,16 @@
 use std::pin::pin;
 use std::sync::Arc;
 
-use domain::OperationId;
 use domain::execution::deadline::Deadline;
-use domain::execution::{FailureReason, Operation, Trigger};
+use domain::execution::{FailureReason, Operation, OperationStatus, Trigger, Warning, WarningKind};
+use domain::planning::{HookEntry, OnFailure};
+use domain::{OperationId, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, HookRunner, HookSetup, Job,
-    OperationStore, RunningJob, StoreError,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, HookContext, HookOutcome, HookPhase,
+    HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
 
 /// Runs one operation on the engine and records its lifecycle in the
@@ -38,10 +39,6 @@ pub struct RunOperation {
 }
 
 /// The runner and the three levels of hooks one run wraps (§6.1).
-#[allow(
-    dead_code,
-    reason = "read by the commit-1 hook stubs' bodies in HooksImpl"
-)]
 struct HookPlan {
     runner: Arc<dyn HookRunner>,
     setup: HookSetup,
@@ -64,6 +61,9 @@ struct Run {
     operation: Operation,
     result: Option<EngineResult>,
     recording_errors: Vec<StoreError>,
+    /// A before-hook with `on-failure = error` stopped the run before the
+    /// engine: only the finally-hooks still run.
+    stopped_by_hook: bool,
 }
 
 impl RunOperation {
@@ -101,12 +101,15 @@ impl RunOperation {
             operation: Operation::queue(id, job.kind(), trigger, job.target(), self.clock.now()),
             result: None,
             recording_errors: Vec::new(),
+            stopped_by_hook: false,
         };
         // Queued before the engine is asked for anything, so an operation
         // that never gets going is in the history too.
         self.record(&mut run).await;
         self.run_before_hooks(&mut run).await;
-        self.drive(&mut run, job, cancel).await;
+        if !run.stopped_by_hook {
+            self.drive(&mut run, job, cancel).await;
+        }
         self.run_ending_hooks(&mut run).await;
         self.record(&mut run).await;
         Finished {
@@ -234,34 +237,175 @@ impl RunOperation {
     }
 
     /// Runs the before-hooks of the three levels, in §6.1's order: agent,
-    /// repository, plan. A failing one stops the run before the engine
-    /// starts, as its `on-failure` says.
-    #[allow(
-        clippy::todo,
-        reason = "commit-1 stub; the red tests land with the implementation"
-    )]
+    /// repository, plan. A failing one ends the run before the engine
+    /// starts, as its `on-failure` says: `error` fails the operation with
+    /// the hook's own exit, `warn` attaches a warning and the run goes on,
+    /// `ignore` changes nothing.
     async fn run_before_hooks(&self, run: &mut Run) {
-        if self.hooks.is_some() {
-            todo!("before-hooks run here (HooksImpl)")
+        let Some(hooks) = &self.hooks else {
+            return;
+        };
+        let setup = hooks.setup.clone();
+        for entry in before_list(&setup) {
+            let context = self.context(run, &setup, HookPhase::Before);
+            let outcome = hooks.runner.run(entry, &context).await;
+            if outcome.succeeded() {
+                continue;
+            }
+            if entry.on_failure == OnFailure::Error {
+                self.fail(
+                    run,
+                    FailureReason::HookFailed {
+                        exit_code: exit_code_of(&outcome),
+                    },
+                );
+                run.stopped_by_hook = true;
+                return;
+            }
+            if entry.on_failure == OnFailure::Warn {
+                self.warn(run, HookPhase::Before, &outcome);
+            }
         }
-        let _ = run;
     }
 
     /// Runs the after-hooks on success or the failed-hooks on failure, then
-    /// the finally-hooks of the three levels, in §6.1's order. None of them
-    /// changes how a finished operation ended.
-    #[allow(
-        clippy::todo,
-        reason = "commit-1 stub; the red tests land with the implementation"
-    )]
+    /// the finally-hooks of the three levels, in §6.1's order: plan,
+    /// repository, agent. None of them changes how a finished operation
+    /// ended: a hook that failed with `error` or `warn` attaches a warning,
+    /// and `ignore` changes nothing.
     async fn run_ending_hooks(&self, run: &mut Run) {
-        if self.hooks.is_some() {
-            todo!("after, failed and finally hooks run here (HooksImpl)")
+        let Some(hooks) = &self.hooks else {
+            return;
+        };
+        let setup = hooks.setup.clone();
+        let status = run.operation.status().clone();
+        let phase = ending_phase(&status, run.stopped_by_hook);
+        if let Some(phase) = phase {
+            for entry in ending_list(&setup, phase) {
+                let context = self.context(run, &setup, phase);
+                let outcome = hooks.runner.run(entry, &context).await;
+                if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
+                    self.warn(run, phase, &outcome);
+                }
+            }
         }
-        let _ = run;
+        for entry in ending_list(&setup, HookPhase::Finally) {
+            let context = self.context(run, &setup, HookPhase::Finally);
+            let outcome = hooks.runner.run(entry, &context).await;
+            if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
+                self.warn(run, HookPhase::Finally, &outcome);
+            }
+        }
+    }
+
+    /// The context every hook of `phase` runs in. After success the
+    /// snapshot is known; after a failure its code is.
+    fn context(&self, run: &Run, setup: &HookSetup, phase: HookPhase) -> HookContext {
+        HookContext {
+            phase,
+            plan: setup.plan_id.clone(),
+            repository: setup.repository_alias.clone(),
+            operation: run.operation.id(),
+            snapshot: run.result.as_ref().and_then(snapshot_of),
+            error: match run.operation.status() {
+                OperationStatus::Failed { reason }
+                    if phase == HookPhase::Failed || phase == HookPhase::Finally =>
+                {
+                    Some(reason.code().to_owned())
+                }
+                _ => None,
+            },
+        }
+    }
+
+    /// Attaches a hook's failure as a warning, with how it ended and no
+    /// English: a code's own words are the renderer's business (§8.4).
+    fn warn(&self, run: &mut Run, phase: HookPhase, outcome: &HookOutcome) {
+        let warning = Warning {
+            kind: WarningKind::Hook,
+            item: None,
+            during: phase.as_env().to_owned(),
+            detail: outcome_detail(outcome),
+        };
+        let _ = run.operation.attach_warning(warning);
     }
 
     fn fail(&self, run: &mut Run, reason: FailureReason) {
         let _ = run.operation.fail(reason, self.clock.now());
+    }
+}
+
+/// The before-hooks of the three levels in §6.1's order: agent,
+/// repository, plan.
+fn before_list(setup: &HookSetup) -> impl Iterator<Item = &'_ HookEntry> {
+    setup
+        .agent
+        .run_before
+        .iter()
+        .chain(&setup.repository.run_before)
+        .chain(&setup.plan.run_before)
+}
+
+/// The `phase` hooks of the three levels in §6.1's order: plan,
+/// repository, agent.
+fn ending_list(setup: &HookSetup, phase: HookPhase) -> impl Iterator<Item = &'_ HookEntry> {
+    let plan = match phase {
+        HookPhase::After => &setup.plan.run_after,
+        HookPhase::Failed => &setup.plan.run_failed,
+        _ => &setup.plan.run_finally,
+    };
+    let repository = match phase {
+        HookPhase::After => &setup.repository.run_after,
+        HookPhase::Failed => &setup.repository.run_failed,
+        _ => &setup.repository.run_finally,
+    };
+    let agent = match phase {
+        HookPhase::After => &setup.agent.run_after,
+        HookPhase::Failed => &setup.agent.run_failed,
+        _ => &setup.agent.run_finally,
+    };
+    plan.iter().chain(repository).chain(agent)
+}
+
+/// Which ending list runs for `status`: the after-hooks on a success, the
+/// failed-hooks on a failure, and neither when a before-hook stopped the run
+/// or the operation was cancelled. The finally-hooks always run.
+fn ending_phase(status: &OperationStatus, stopped_by_hook: bool) -> Option<HookPhase> {
+    match status {
+        OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings => {
+            Some(HookPhase::After)
+        }
+        OperationStatus::Failed { .. } if !stopped_by_hook => Some(HookPhase::Failed),
+        _ => None,
+    }
+}
+
+/// The exit a hook's outcome reports, when it ran and gave one.
+fn exit_code_of(outcome: &HookOutcome) -> Option<i32> {
+    match outcome.status {
+        HookStatus::Failed { exit_code } => exit_code,
+        _ => None,
+    }
+}
+
+/// How a failing hook ended, as a code the renderer can describe: its exit
+/// status, `timeout`, or `not-started`.
+fn outcome_detail(outcome: &HookOutcome) -> String {
+    match outcome.status {
+        HookStatus::Failed {
+            exit_code: Some(code),
+        } => code.to_string(),
+        HookStatus::Failed { exit_code: None } => "no-exit".to_owned(),
+        HookStatus::TimedOut => "timeout".to_owned(),
+        HookStatus::NotStarted { .. } => "not-started".to_owned(),
+        HookStatus::Succeeded => String::new(),
+    }
+}
+
+/// The snapshot a successful backup produced, when it was one.
+fn snapshot_of(result: &EngineResult) -> Option<SnapshotId> {
+    match result {
+        EngineResult::Backup(summary) => Some(summary.snapshot.clone()),
+        _ => None,
     }
 }
