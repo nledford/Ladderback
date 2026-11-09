@@ -42,7 +42,7 @@ jobs:
 
   release:
     name: Tag and publish the GitHub release
-    if: github.event_name == 'push' && github.repository == 'nledford/Steading'
+    if: github.event_name == 'push' && github.repository == 'nledford/Ladderback'
     runs-on: ubuntu-latest
     permissions:
       contents: write
