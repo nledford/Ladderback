@@ -16,6 +16,11 @@ use unic_langid::LanguageIdentifier;
 /// A pseudolocale. It is asked for by its exact tag, and a localizer looks
 /// messages up in it where it would look them up in `en-US`: it is that
 /// catalog, transformed, in English's plural rules.
+///
+/// The `pseudo` feature gates the variants, not a twin of each function. With
+/// it off the type has no value, so nothing is left that could ask for one,
+/// and there is no second copy of the code for `cargo mutants` to mutate and
+/// report missed: it mutates code a build leaves out.
 #[derive(Clone, Copy)]
 pub(crate) enum Pseudo {
     /// `en-XA`: every letter accented and the vowels doubled, so that text
