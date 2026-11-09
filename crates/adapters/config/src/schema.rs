@@ -18,6 +18,12 @@ use crate::write;
 /// ends can't fill the memory.
 pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
+/// Whether a file of `len` bytes is over [`MAX_CONFIG_BYTES`]: one at the cap
+/// is not.
+pub(crate) fn over_cap(len: usize) -> bool {
+    u64::try_from(len).is_ok_and(|len| len > MAX_CONFIG_BYTES)
+}
+
 /// How many earlier versions of the file are kept in its history.
 pub const KEPT_VERSIONS: usize = 10;
 
@@ -219,11 +225,25 @@ pub(crate) fn render_as(
     let tables = write::file(config, schema).map_err(|key| write::unwritable(&name, key))?;
     let text =
         write::text(&tables).map_err(|error| invalid(&name, Problem::Unwritable, scrub(&error)))?;
-    if u64::try_from(text.len()).is_ok_and(|len| len > MAX_CONFIG_BYTES) {
+    if over_cap(text.len()) {
         return Err(ConfigError::TooLarge {
             file: name,
             limit: MAX_CONFIG_BYTES,
         });
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_is_over_the_cap_from_one_byte_past_it() {
+        let cap = usize::try_from(MAX_CONFIG_BYTES).expect("a size");
+        assert!(!over_cap(0));
+        assert!(!over_cap(cap - 1));
+        assert!(!over_cap(cap));
+        assert!(over_cap(cap + 1));
+    }
 }

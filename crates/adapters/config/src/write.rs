@@ -80,17 +80,10 @@ fn inline(value: &toml::Value) -> Result<String, String> {
     Ok(written)
 }
 
-/// `key = value` on one line.
+/// `key = value` on one line. Every key the writer meets is one of the format's
+/// own, which are bare, and the aliases that head a table are slugs.
 fn line(out: &mut String, key: &str, value: &toml::Value) -> Result<(), String> {
-    let bare = !key.is_empty()
-        && key
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    if bare {
-        out.push_str(key);
-    } else {
-        out.push_str(&inline(&toml::Value::String(key.to_owned()))?);
-    }
+    out.push_str(key);
     out.push_str(" = ");
     out.push_str(&inline(value)?);
     out.push('\n');

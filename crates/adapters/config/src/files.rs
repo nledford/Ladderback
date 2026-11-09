@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use domain::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::schema::{KEPT_VERSIONS, MAX_CONFIG_BYTES};
+use crate::schema::{KEPT_VERSIONS, MAX_CONFIG_BYTES, over_cap};
 
 /// What reading the config file found.
 pub(crate) enum Contents {
@@ -31,7 +31,7 @@ pub(crate) fn read(path: &Path) -> io::Result<Contents> {
     };
     let mut bytes = Vec::new();
     file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes)?;
-    if u64::try_from(bytes.len()).is_ok_and(|len| len > MAX_CONFIG_BYTES) {
+    if over_cap(bytes.len()) {
         Ok(Contents::TooLarge)
     } else {
         Ok(Contents::Bytes(bytes))
@@ -142,4 +142,20 @@ fn forget_old(folder: &Path) -> io::Result<()> {
         fs::remove_file(folder.join(name))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_on_its_own_is_in_the_current_folder() {
+        assert_eq!(folder_of(Path::new("config.toml")), Path::new("."));
+        assert_eq!(folder_of(Path::new("/")), Path::new("."));
+        assert_eq!(
+            folder_of(Path::new("/home/demo/config.toml")),
+            Path::new("/home/demo")
+        );
+        assert_eq!(folder_of(Path::new("demo/config.toml")), Path::new("demo"));
+    }
 }
