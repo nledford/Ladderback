@@ -15,6 +15,10 @@ publish.workspace = true
 # leaves them out.
 default = ["pseudo"]
 pseudo = ["l10n/pseudo"]
+# The component gallery, the dev-only route `/_gallery` where Playwright drives
+# the shared components (technical design §4.5). Off by default and off in a
+# release build; `just test-ui` builds the UI with it on.
+gallery = []
 
 [dependencies]
 console_error_panic_hook.workspace = true
@@ -23,6 +27,7 @@ console_error_panic_hook.workspace = true
 # is no `web` feature for it.
 l10n = { workspace = true, features = ["browser-intl"] }
 leptos.workspace = true
+leptos_router.workspace = true
 web-sys.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

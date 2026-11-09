@@ -1,9 +1,9 @@
 //! Ladderback's web UI (technical design §4.4), a Leptos client-side app
 //! built with trunk and embedded in the `ladderback` binary.
 //!
-//! The page skeleton every page will share: a skip link, landmarks and a
-//! single `<h1>` (§4.5). Every visible text comes out of the `l10n` catalog, in
-//! the language [`page`] negotiates (§8.4); none is written here.
+//! The page skeleton every page shares: a skip link, landmarks and a single
+//! `<h1>` per route (§4.5). Every visible text comes out of the `l10n`
+//! catalog, in the language [`page`] negotiates (§8.4); none is written here.
 
 #![deny(
     clippy::unwrap_used,
@@ -18,26 +18,62 @@ use std::sync::Arc;
 
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::path;
 
+mod announcer;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod formatting;
+#[cfg(feature = "gallery")]
+mod gallery;
 mod page;
+mod routes;
+
+use routes::{NotFound, Start};
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
     localizer.message(id, &[]).into_text()
 }
 
+/// The page of `/_gallery`: the component gallery in a build that has it, and
+/// a path nothing serves in one that doesn't.
+fn gallery_page(localizer: Arc<Localizer>) -> AnyView {
+    #[cfg(feature = "gallery")]
+    {
+        view! { <gallery::Gallery localizer=localizer /> }.into_any()
+    }
+    #[cfg(not(feature = "gallery"))]
+    {
+        view! { <NotFound localizer=localizer /> }.into_any()
+    }
+}
+
 #[component]
 fn App(localizer: Arc<Localizer>) -> impl IntoView {
+    let not_found = Arc::clone(&localizer);
+    let start = Arc::clone(&localizer);
+    let gallery = Arc::clone(&localizer);
     view! {
-        <a class="skip-link" href="#main">{text(&localizer, msg::UI_SKIP_LINK)}</a>
+        // `rel="external"` keeps the router from taking the click: the browser
+        // follows the in-page link itself, and focus moves into `<main>`.
+        <a class="skip-link" href="#main" rel="external">{text(&localizer, msg::UI_SKIP_LINK)}</a>
         <header class="site-header">
             <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
         </header>
         <main id="main" tabindex="-1">
-            <h1>{text(&localizer, msg::UI_START_HEADING)}</h1>
-            <p>{text(&localizer, msg::UI_START_BODY)}</p>
+            <Router>
+                <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
+                    <Route
+                        path=path!("/")
+                        view=move || view! { <Start localizer=Arc::clone(&start) /> }
+                    />
+                    <Route
+                        path=path!("/_gallery")
+                        view=move || gallery_page(Arc::clone(&gallery))
+                    />
+                </Routes>
+            </Router>
         </main>
     }
 }
