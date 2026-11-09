@@ -602,6 +602,27 @@ fn a_value_of_the_wrong_type_is_reported_without_the_value() {
 }
 
 #[test]
+fn a_wrong_type_says_what_the_setting_could_have_been() {
+    let error = invalid(parsed(&base_with("hooks = { run-before = [5] }\n")));
+    assert_eq!(error.problem, Problem::WrongType);
+    assert_eq!(error.key.as_deref(), Some("plans[0].hooks.run-before[0]"));
+    assert!(
+        error.detail.ends_with("expected a command line or a table"),
+        "{:?}",
+        error.detail
+    );
+
+    let error = invalid(parsed("schema = 1\nrepositories = 5\n"));
+    assert_eq!(error.problem, Problem::WrongType);
+    assert_eq!(error.key.as_deref(), Some("repositories"));
+    assert!(
+        error.detail.ends_with("expected a table of repositories"),
+        "{:?}",
+        error.detail
+    );
+}
+
+#[test]
 fn a_wrong_type_value_holding_quotes_and_backslashes_is_reported_without_a_word_of_it() {
     // serde quotes a string it can't use with `{:?}`, which writes an inner
     // quote as `\"` and a backslash as `\\`: neither ends the quoted text.

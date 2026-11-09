@@ -144,6 +144,21 @@ async fn a_config_path_that_cannot_be_read_is_unavailable() {
 }
 
 #[tokio::test]
+async fn a_config_path_below_a_file_is_unavailable_not_an_empty_configuration() {
+    let scratch = Scratch::new();
+    let blocker = scratch.dir.path().join("not-a-folder");
+    std::fs::write(&blocker, "a file where a folder should be").expect("a file");
+    let path = blocker.join("config.toml");
+    let store = config_adapter::FileConfigStore::new(path.clone(), scratch.clock.clone());
+    let loaded = store.load().await;
+    assert!(
+        matches!(&loaded, Err(ConfigError::Unavailable { file, .. })
+            if *file == path.display().to_string()),
+        "{loaded:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_file_that_is_not_a_config_is_refused_and_left_alone() {
     let scratch = Scratch::new();
     let cases: [(&str, ConfigError); 3] = [

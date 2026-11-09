@@ -235,3 +235,44 @@ fn a_secret_is_written_where_the_user_put_it_and_nowhere_else() {
         Some("CANARY-inline")
     );
 }
+
+#[test]
+fn the_file_is_laid_out_as_a_person_would_write_it() {
+    let settings = AgentSettings {
+        concurrency: domain::planning::Concurrency::new(2).expect("a concurrency"),
+        ..AgentSettings::default()
+    };
+    let hooks = Hooks {
+        run_before: vec![HookEntry::parse("echo hi").expect("a hook")],
+        ..Hooks::default()
+    };
+    let config = AgentConfig::new(
+        settings,
+        hooks,
+        BTreeMap::from([(
+            alias("nas"),
+            repository(SecretRef::Env("DEMO_PASSWORD".to_owned())),
+        )]),
+        vec![home()],
+    )
+    .expect("a valid configuration");
+    assert_eq!(
+        render(file(), &config).expect("written"),
+        "schema = 1\n\
+         \n\
+         [agent]\n\
+         concurrency = 2\n\
+         \n\
+         [hooks]\n\
+         run-before = [\"echo hi\"]\n\
+         \n\
+         [repositories.nas]\n\
+         repository = \"/srv/demo-repo\"\n\
+         password-env = \"DEMO_PASSWORD\"\n\
+         \n\
+         [[plans]]\n\
+         id = \"home\"\n\
+         repository = \"nas\"\n\
+         sources = [\"/home/demo\"]\n"
+    );
+}
