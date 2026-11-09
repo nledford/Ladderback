@@ -10,8 +10,8 @@ use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, OperationStore, RunningJob,
-    StoreError,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, HookRunner, HookSetup, Job,
+    OperationStore, RunningJob, StoreError,
 };
 
 /// Runs one operation on the engine and records its lifecycle in the
@@ -34,6 +34,17 @@ pub struct RunOperation {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
     store: Arc<dyn OperationStore>,
+    hooks: Option<HookPlan>,
+}
+
+/// The runner and the three levels of hooks one run wraps (§6.1).
+#[allow(
+    dead_code,
+    reason = "read by the commit-1 hook stubs' bodies in HooksImpl"
+)]
+struct HookPlan {
+    runner: Arc<dyn HookRunner>,
+    setup: HookSetup,
 }
 
 /// How a run ended: the operation as it finished, what the engine reported
@@ -65,7 +76,16 @@ impl RunOperation {
             engine,
             clock,
             store,
+            hooks: None,
         }
+    }
+
+    /// Runs the agent, repository and plan hooks of `setup` around the
+    /// operation (§6.1): before-hooks before the engine, after-hooks on
+    /// success, failed-hooks on failure, finally-hooks either way.
+    pub fn with_hooks(mut self, runner: Arc<dyn HookRunner>, setup: HookSetup) -> Self {
+        self.hooks = Some(HookPlan { runner, setup });
+        self
     }
 
     /// Runs `job`, started by `trigger`. When `cancel` completes, the
@@ -85,7 +105,9 @@ impl RunOperation {
         // Queued before the engine is asked for anything, so an operation
         // that never gets going is in the history too.
         self.record(&mut run).await;
+        self.run_before_hooks(&mut run).await;
         self.drive(&mut run, job, cancel).await;
+        self.run_ending_hooks(&mut run).await;
         self.record(&mut run).await;
         Finished {
             operation: run.operation,
@@ -209,6 +231,34 @@ impl RunOperation {
     // it already has.
     fn cancel(&self, run: &mut Run) {
         let _ = run.operation.cancel(self.clock.now());
+    }
+
+    /// Runs the before-hooks of the three levels, in §6.1's order: agent,
+    /// repository, plan. A failing one stops the run before the engine
+    /// starts, as its `on-failure` says.
+    #[allow(
+        clippy::todo,
+        reason = "commit-1 stub; the red tests land with the implementation"
+    )]
+    async fn run_before_hooks(&self, run: &mut Run) {
+        if self.hooks.is_some() {
+            todo!("before-hooks run here (HooksImpl)")
+        }
+        let _ = run;
+    }
+
+    /// Runs the after-hooks on success or the failed-hooks on failure, then
+    /// the finally-hooks of the three levels, in §6.1's order. None of them
+    /// changes how a finished operation ended.
+    #[allow(
+        clippy::todo,
+        reason = "commit-1 stub; the red tests land with the implementation"
+    )]
+    async fn run_ending_hooks(&self, run: &mut Run) {
+        if self.hooks.is_some() {
+            todo!("after, failed and finally hooks run here (HooksImpl)")
+        }
+        let _ = run;
     }
 
     fn fail(&self, run: &mut Run, reason: FailureReason) {

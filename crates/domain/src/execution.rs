@@ -73,6 +73,10 @@ pub enum FailureReason {
     /// The engine stopped reporting, but its process stayed alive and didn't
     /// exit in time; it was killed.
     EngineExitTimedOut,
+    /// A `run-before` hook with `on-failure = "error"` stopped the operation
+    /// before the engine started (I4, §6.1). `exit_code` is the hook's exit
+    /// status, or `None` when it timed out or could not be started.
+    HookFailed { exit_code: Option<i32> },
 }
 
 /// A problem with a single item that doesn't fail the operation, such as a

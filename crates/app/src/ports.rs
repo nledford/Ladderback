@@ -3,6 +3,7 @@
 mod clock;
 mod config_store;
 mod engine;
+mod hooks;
 mod operation_store;
 mod secrets;
 
@@ -12,6 +13,10 @@ pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
     PruneSummary, RepositoryAccess, RunningJob,
+};
+pub use hooks::{
+    HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
+    HookStatus, MAX_HOOK_OUTPUT_BYTES,
 };
 pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,

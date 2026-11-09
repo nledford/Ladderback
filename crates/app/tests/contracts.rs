@@ -1,15 +1,19 @@
 //! The in-memory fakes pass the same contract suites as the real adapters.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use app::contract;
 use app::contract::clock::ClockHarness;
+use app::contract::hooks::HooksHarness;
 use app::contract::secrets::SecretsHarness;
 use app::fakes::InMemoryConfigStore;
-use app::fakes::{FakeClock, FakeSecrets, InMemoryOperationStore, Script, SimulatedEngine};
-use app::ports::{Clock, Engine, SecretResolver};
+use app::fakes::{
+    FakeClock, FakeHookRunner, FakeSecrets, InMemoryOperationStore, Script, SimulatedEngine,
+};
+use app::ports::{Clock, Engine, HookOutcome, HookOutput, HookStatus, SecretResolver};
 use async_trait::async_trait;
 use domain::secrets::{CommandLine, KeyringEntry};
 use domain::{SignedDuration, Timestamp};
@@ -162,4 +166,155 @@ async fn fake_secrets_meet_the_secrets_contract() {
 #[tokio::test]
 async fn in_memory_config_store_meets_the_config_store_contract() {
     contract::config_store::run(&InMemoryConfigStore::new()).await;
+}
+
+/// The fake hook runner, set up through the contract's harness. The
+/// simulated environment follows the worker's rule (components.md §4.1):
+/// the allow-list plus the `LADDERBACK_*` context variables, and nothing
+/// else of the daemon's.
+struct FakeHooksHarness {
+    runner: Arc<FakeHookRunner>,
+    written: Arc<Mutex<Vec<String>>>,
+    counter: AtomicUsize,
+}
+
+impl Default for FakeHooksHarness {
+    fn default() -> Self {
+        Self {
+            runner: Arc::new(FakeHookRunner::new()),
+            written: Arc::new(Mutex::new(Vec::new())),
+            counter: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl FakeHooksHarness {
+    /// A fresh program name, so every scripted hook is its own.
+    fn program(&self) -> String {
+        format!("demo-hook-{}", self.counter.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn secret() -> &'static str {
+        "hunter2-demo"
+    }
+}
+
+#[async_trait]
+impl HooksHarness for FakeHooksHarness {
+    fn runner(&self) -> &dyn app::ports::HookRunner {
+        self.runner.as_ref()
+    }
+
+    fn hook_logging(&self, label: &str) -> domain::planning::HookEntry {
+        let program = self.program();
+        let written = self.written.clone();
+        let label = label.to_owned();
+        self.runner.simulate(&program, move |_, _| {
+            if let Ok(mut lines) = written.lock() {
+                lines.push(format!("log: {label}"));
+            }
+            outcome(HookStatus::Succeeded)
+        });
+        no_op_entry(&program)
+    }
+
+    fn hook_env(&self, arg: &str) -> domain::planning::HookEntry {
+        let program = self.program();
+        let written = self.written.clone();
+        let arg = arg.to_owned();
+        let name = program.clone();
+        self.runner.simulate(&program, move |_, context| {
+            if let Ok(mut lines) = written.lock() {
+                lines.push(format!("argv: {name}"));
+                lines.push(format!("argv: {arg}"));
+                lines.push("env: PATH=/usr/bin".to_owned());
+                lines.push("env: HOME=/home/demo".to_owned());
+                lines.push(format!("env: LADDERBACK_HOOK={}", context.phase.as_env()));
+                lines.push(format!("env: LADDERBACK_PLAN={}", context.plan.as_str()));
+                lines.push(format!(
+                    "env: LADDERBACK_REPOSITORY={}",
+                    context.repository.as_str()
+                ));
+                lines.push(format!(
+                    "env: LADDERBACK_OPERATION_ID={}",
+                    context.operation.as_uuid()
+                ));
+            }
+            outcome(HookStatus::Succeeded)
+        });
+        no_op_entry(&program)
+    }
+
+    fn hook_exits(&self, code: i32, text: &str) -> domain::planning::HookEntry {
+        let program = self.program();
+        self.runner.script(
+            &program,
+            app::fakes::Scripted {
+                status: HookStatus::Failed {
+                    exit_code: Some(code),
+                },
+                stdout: text.to_owned(),
+                stderr: text.to_owned(),
+            },
+        );
+        no_op_entry(&program)
+    }
+
+    fn hook_hangs(&self) -> domain::planning::HookEntry {
+        let program = self.program();
+        self.runner
+            .script(&program, app::fakes::Scripted::times_out());
+        no_op_entry(&program)
+    }
+
+    fn hook_missing(&self) -> domain::planning::HookEntry {
+        no_op_entry("no-such-demo-program")
+    }
+
+    fn hook_prints(&self, text: &str) -> domain::planning::HookEntry {
+        let program = self.program();
+        self.runner.script(
+            &program,
+            app::fakes::Scripted {
+                status: HookStatus::Succeeded,
+                stdout: text.to_owned(),
+                stderr: String::new(),
+            },
+        );
+        no_op_entry(&program)
+    }
+
+    fn secret(&self) -> String {
+        Self::secret().to_owned()
+    }
+
+    fn leaked_env_var(&self) -> String {
+        "LADDERBACK_DEMO_SECRET".to_owned()
+    }
+
+    async fn written(&self) -> Vec<String> {
+        self.written
+            .lock()
+            .map(|lines| lines.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// A quiet success outcome.
+fn outcome(status: HookStatus) -> HookOutcome {
+    HookOutcome {
+        status,
+        stdout: HookOutput::default(),
+        stderr: HookOutput::default(),
+    }
+}
+
+/// An entry whose program is `program`: the fake behaves as scripted.
+fn no_op_entry(program: &str) -> domain::planning::HookEntry {
+    domain::planning::HookEntry::new(program, ["demo"], domain::planning::OnFailure::Error).unwrap()
+}
+
+#[tokio::test]
+async fn fake_hooks_meet_the_hooks_contract() {
+    contract::hooks::run(&FakeHooksHarness::default()).await;
 }

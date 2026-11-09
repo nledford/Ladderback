@@ -18,14 +18,16 @@ use futures::channel::oneshot;
 use platform::SystemClock;
 use store::SqliteStore;
 
+#[path = "steps/backup.rs"]
+mod backup_steps;
 #[path = "../crates/app/tests/steps/operation.rs"]
 mod operation_steps;
 
 #[path = "steps/config.rs"]
 mod config_steps;
 
-#[path = "steps/backup.rs"]
-mod backup_steps;
+#[path = "steps/hooks.rs"]
+mod hooks_steps;
 
 #[path = "steps/request_checks.rs"]
 mod request_checks_steps;
@@ -53,6 +55,7 @@ struct Agent {
     agent_id: AgentId,
     backup: backup_steps::BackupSetup,
     web: request_checks_steps::Web,
+    hooks: hooks_steps::HooksE2e,
     secrets: secrets_steps::SecretsSetup,
     config: config_steps::ConfigSetup,
     repositories: repositories_steps::RepositoriesSetup,
@@ -88,6 +91,7 @@ impl Agent {
             scratch,
             agent_id,
             backup: backup_steps::BackupSetup::default(),
+            hooks: hooks_steps::HooksE2e::new(),
             web: request_checks_steps::Web::default(),
             secrets: secrets_steps::SecretsSetup::default(),
             config: config_steps::ConfigSetup::default(),
@@ -145,7 +149,10 @@ impl Agent {
         let store = self.store().await;
         self.runs += 1;
         let id = OperationId::from_uuid(Uuid::from_u128(self.runs));
-        let use_case = RunOperation::new(engine, Arc::new(SystemClock), store);
+        let mut use_case = RunOperation::new(engine, Arc::new(SystemClock), store);
+        if !self.hooks.setup.is_empty() {
+            use_case = use_case.with_hooks(self.hooks.runner.clone(), self.hooks.setup.clone());
+        }
         self.finished = Some(use_case.run(id, Trigger::Manual, job, cancel).await);
     }
 

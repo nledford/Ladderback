@@ -24,6 +24,8 @@ mod operation_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/hooks.rs"]
+mod hooks_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 
@@ -35,6 +37,7 @@ struct Agent {
     store: Arc<InMemoryOperationStore>,
     job: FakeJob,
     finished: Option<Finished>,
+    hooks: hooks_steps::HooksWorld,
     secrets: secrets_steps::SecretsWorld,
     config: config_steps::ConfigWorld,
     maintenance: maintenance_steps::MaintenanceWorld,
@@ -70,6 +73,7 @@ impl Agent {
             secrets: Default::default(),
             config: Default::default(),
             maintenance: Default::default(),
+            hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),
         }
     }
@@ -83,8 +87,11 @@ impl Agent {
     }
 
     async fn run_operation_until(&mut self, cancel: impl Future<Output = ()> + Send) {
-        let use_case =
+        let mut use_case =
             RunOperation::new(self.engine.clone(), self.clock.clone(), self.store.clone());
+        if !self.hooks.setup.is_empty() {
+            use_case = use_case.with_hooks(self.hooks.runner.clone(), self.hooks.setup.clone());
+        }
         let id = OperationId::from_uuid(Uuid::from_u128(1));
         let job = Job::Fake(self.job.clone());
         self.finished = Some(use_case.run(id, Trigger::Manual, job, cancel).await);

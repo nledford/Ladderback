@@ -2348,6 +2348,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hooks"
+version = "0.0.0"
+dependencies = [
+ "app",
+ "async-trait",
+ "domain",
+ "nix 0.31.3",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "html-escape"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3151,6 +3163,7 @@ dependencies = [
  "engine",
  "env_logger",
  "futures",
+ "hooks",
  "http-adapter",
  "l10n",
  "log",
