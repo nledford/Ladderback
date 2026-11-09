@@ -93,6 +93,7 @@ impl FailureReason {
             Self::EngineStartTimedOut => "engine-start-timed-out",
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
+            Self::RepositoryExists => "repository-exists",
         }
     }
 }
@@ -873,6 +874,7 @@ mod tests {
             FailureReason::HookFailed { exit_code: None }.code(),
             "hook-failed"
         );
+        assert_eq!(FailureReason::RepositoryExists.code(), "repository-exists");
     }
 
     #[test]
