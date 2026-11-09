@@ -63,8 +63,9 @@ pub enum FailureReason {
     /// A backup was still running at its deadline and stopped without
     /// writing a snapshot (I3).
     DeadlinePassed,
-    /// The engine's process started but never took its job: it didn't read
-    /// it in time, so the operation never ran.
+    /// The engine's process didn't start the operation in time, so it never
+    /// ran: it didn't read its job, or read it and sent nothing (not even a
+    /// log line) before the start timeout, and it was killed.
     EngineStartTimedOut,
     /// The engine stopped reporting, but its process stayed alive and didn't
     /// exit in time; it was killed.

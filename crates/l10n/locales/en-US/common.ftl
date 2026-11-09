@@ -65,8 +65,8 @@ error-engine-exited = { $exit_code ->
 # $transition (text): the step of the operation that was refused, such as report-progress. It is a technical name and is shown as sent.
 error-protocol-violated = { -brand-name } could not accept the engine's report (step “{ $transition }”), so it stopped the operation. Run it again, and report this if it happens twice.
 
-# The engine's process never took its job.
-error-engine-start-timed-out = The engine did not take its job in time, so the operation never ran. Run it again.
+# The engine's process did not start the operation in time: it never took its job, or took it and said nothing.
+error-engine-start-timed-out = The engine did not start the operation in time, so it never ran. Run it again.
 
 # The engine stopped reporting, but its process stayed alive.
 error-engine-exit-timed-out = The engine stopped reporting, so { -brand-name } ended its process. Check the repository, then run the operation again.

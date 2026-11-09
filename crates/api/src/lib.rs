@@ -37,7 +37,8 @@ pub enum ErrorCode {
     /// The engine reported events out of order. The argument `transition`
     /// names the step the operation refused.
     ProtocolViolated,
-    /// The engine's process never took its job, so the operation never ran.
+    /// The engine's process didn't start the operation in time, so it never
+    /// ran: it didn't take its job, or took it and sent nothing.
     EngineStartTimedOut,
     /// The engine stopped reporting, but its process stayed alive and was
     /// killed.

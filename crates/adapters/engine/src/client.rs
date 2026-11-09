@@ -41,8 +41,9 @@ const AFTER_RESULT_GRACE: Duration = Duration::from_secs(10);
 /// long as it lives, and the events end with the worker, not with it.
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(1);
 
-/// How long writing a job to a new worker may take before the worker counts
-/// as hung and is killed: the default of [`WorkerEngine::with_start_timeout`].
+/// How long a new worker may take to take its job, which it shows with its
+/// first line of output, before it counts as hung and is killed: the default
+/// of [`WorkerEngine::with_start_timeout`].
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a worker that closed its output may go on living before it is
@@ -63,8 +64,8 @@ const MAX_CACHE_SLOTS: u32 = 64;
 /// a [`RunningJob`] before its result kills the worker at once; after the
 /// result, the worker gets a grace period to finish its cleanup.
 ///
-/// A worker that hangs doesn't hold the daemon. One that doesn't read its job
-/// within the start timeout, and one that closes its output but is still
+/// A worker that hangs doesn't hold the daemon. One that doesn't take its
+/// job within the start timeout, and one that closes its output but is still
 /// there after the exit timeout, are killed.
 ///
 /// A worker starts with a scrubbed environment (invariant I4): only the
@@ -130,16 +131,30 @@ impl WorkerEngine {
         self
     }
 
-    /// How long writing a job to a new worker's stdin may take, 30 seconds by
-    /// default. A worker that doesn't read its job, because it hung before it
-    /// got to it, leaves the write blocked once the pipe is full, which a job
-    /// spec larger than the pipe's buffer (64 KiB on Linux) does. When the
-    /// time has passed, the worker and what it started are killed, and
-    /// [`Engine::run`] fails with [`EngineError::StartTimedOut`]. Only the
-    /// write is bounded, however slowly the worker reads: a smaller spec is
-    /// buffered at once, whether or not the worker reads it, so it is not
-    /// covered; a write that finishes in time is not affected, and one that
-    /// fails is [`EngineError::Unavailable`], as ever.
+    /// How long a new worker has to take its job, 30 seconds by default: one
+    /// deadline, counted from the start of the write of the job to its stdin
+    /// and ending with the worker's first line of output. A worker that
+    /// doesn't read its job, because it hung before it got to it, leaves the
+    /// write blocked once the pipe is full, which a job spec larger than the
+    /// pipe's buffer (64 KiB on Linux) does. A worker that took its job and
+    /// then says nothing is the other case. A worker says it has its job with
+    /// a debug `log` line, written once the spec is read and before anything
+    /// else is done, so what follows is not on this clock: opening a
+    /// repository, which a slow backend can make take longer than the
+    /// timeout, is not bounded by it. A line of any kind counts, and a line is
+    /// there when its newline is.
+    ///
+    /// When the time has passed, the worker and what it started are killed.
+    /// A write still blocked then fails [`Engine::run`] with
+    /// [`EngineError::StartTimedOut`]. A worker that has taken its job is
+    /// not waited for in `run`, which would hold back the job's control and
+    /// so a user's cancel: its events are one
+    /// `Failed(EngineStartTimedOut)` and end. Once the first line has come
+    /// the worker is not on this clock any more, however quiet it goes. A
+    /// smaller spec is buffered at once, whether or not the worker reads it,
+    /// so only the wait for the first line covers it; a write that fails is
+    /// [`EngineError::Unavailable`], as ever. A timeout too long to
+    /// represent, such as [`Duration::MAX`], never passes.
     #[must_use]
     pub fn with_start_timeout(mut self, timeout: Duration) -> Self {
         self.start_timeout = timeout;
@@ -238,9 +253,18 @@ impl Engine for WorkerEngine {
         let Some(mut stdin) = child.stdin.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdin"));
         };
+        // The deadline for the job to be taken and answered: see
+        // `Reading::first_line_by`. `None` is a timeout too long to
+        // represent, which never passes.
+        let first_line_by = tokio::time::Instant::now().checked_add(self.start_timeout);
         // A worker that never reads its job, because it hung before it got to
         // it, leaves this write blocked once the pipe is full.
-        match tokio::time::timeout(self.start_timeout, stdin.write_all(&spec)).await {
+        let write = stdin.write_all(&spec);
+        let written = match first_line_by {
+            Some(at) => tokio::time::timeout_at(at, write).await,
+            None => Ok(write.await),
+        };
+        match written {
             Ok(written) => written.map_err(|e| failed_to_start(&self.program, e))?,
             Err(_) => {
                 // The worker is not waited for: nothing here may be able to
@@ -284,6 +308,7 @@ impl Engine for WorkerEngine {
             drain_until: None,
             redactor,
             exit_timeout: self.exit_timeout,
+            first_line_by,
         };
         Ok(RunningJob {
             events: stream::unfold(reading, Reading::next).boxed(),
@@ -306,7 +331,8 @@ fn failed_to_start(program: &Path, error: impl std::fmt::Display) -> EngineError
 enum Order {
     /// SIGTERM, then SIGKILL after the grace period.
     Stop,
-    /// SIGKILL at once: the worker closed its output and lives on.
+    /// SIGKILL at once: the worker closed its output and lives on, or sent
+    /// nothing in the time it had to start.
     Kill,
     /// The worker reported its result and may finish its cleanup.
     ResultReported,
@@ -572,6 +598,11 @@ struct Reading {
     redactor: Redactor,
     /// How long the exit of a worker that closed its output is waited for.
     exit_timeout: Duration,
+    /// When the worker's first complete line is due, until it has come: the
+    /// start timeout counted from the start of the write of the job.
+    /// `None` once a line has come, or for a timeout that can't be
+    /// represented.
+    first_line_by: Option<tokio::time::Instant>,
 }
 
 impl Reading {
@@ -586,7 +617,18 @@ impl Reading {
                 return None;
             }
             match read {
-                Ok(Line::Complete) => {}
+                Ok(Line::Complete) => self.first_line_by = None,
+                // No line, not even a `log` one, by the time it was due: the
+                // worker is killed without waiting for the job's control,
+                // which may be held for as long as its owner likes.
+                Ok(Line::Silent) => {
+                    self.done = true;
+                    let _ = self.commands.send(Order::Kill);
+                    return Some((
+                        EngineEvent::Failed(FailureReason::EngineStartTimedOut),
+                        self,
+                    ));
+                }
                 // A line without its newline was cut off by a worker that
                 // died mid-write, say at its deadline.
                 Ok(Line::Cut) => return self.exited().await,
@@ -621,25 +663,36 @@ impl Reading {
 
     /// Reads the next line of the worker's output into `self.line`.
     ///
-    /// While the worker runs, the wait is as long as it takes. Once it has
-    /// exited, what it wrote is in the pipe already, so reading goes on for
-    /// that, but for [`DRAIN_AFTER_EXIT`] in all: nothing is waited for on a
-    /// pipe that another process holds open.
+    /// While the worker runs, the wait is as long as it takes, but for the
+    /// first line, which is due by [`Reading::first_line_by`]. Once the
+    /// worker has exited, what it wrote is in the pipe already, so reading
+    /// goes on for that, but for [`DRAIN_AFTER_EXIT`] in all: nothing is
+    /// waited for on a pipe that another process holds open.
     async fn read_next_line(&mut self) -> std::io::Result<Line> {
         let Self {
             stdout,
             line,
             exited,
             drain_until,
+            first_line_by,
             ..
         } = self;
         let reading = read_line(stdout, line);
         tokio::pin!(reading);
+        let silent = async {
+            match *first_line_by {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
-            // What is in the pipe goes before the worker's exit.
+            // What is in the pipe goes before the worker's exit, and a
+            // worker that has exited is not a silent one: its exit is told
+            // by what follows.
             biased;
             read = &mut reading => return read,
             () = worker_exited(exited) => {}
+            () = silent => return Ok(Line::Silent),
         }
         let until = *drain_until
             .get_or_insert_with(|| deadline_after(tokio::time::Instant::now(), DRAIN_AFTER_EXIT));
@@ -706,6 +759,8 @@ enum Line {
     /// The output ended before the line's newline.
     Cut,
     TooLong,
+    /// No line was complete by the time the first was due.
+    Silent,
 }
 
 /// Reads one line, newline included, into `line`, holding at most
@@ -2460,6 +2515,242 @@ mod tests {
             spec.cache_dir,
             Some(cache_dir(&cache_root, &id, 0)),
             "the slot of the worker that timed out stayed taken"
+        );
+    }
+
+    // The first-line deadline: a worker that took its job and then says
+    // nothing is as hung as one that never read it, and the daemon can't
+    // tell it from one that is slowly opening a repository, except by the
+    // time that passed since the job was written.
+
+    /// A worker that read its job (the script says so with `cat`) and then
+    /// stays silent: nothing it could still do makes it a worker to wait for.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_reads_its_job_but_stays_silent_is_failed_when_the_start_timeout_passes()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("worker.pid");
+        let script = format!(
+            "cat >/dev/null; echo $$ >'{}'; exec sleep 30",
+            pid_file.display()
+        );
+        // Long enough for a loaded machine to start the shell.
+        let timeout = Duration::from_secs(1);
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_start_timeout(timeout);
+        let began = Instant::now();
+        let RunningJob {
+            events,
+            mut control,
+        } = run_within(Duration::from_secs(10), &engine, fake_job())
+            .await
+            .expect("`run` has no first event to wait for, and must not fail");
+        let events = collected_within(Duration::from_secs(6), events).await;
+        let took = began.elapsed();
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineStartTimedOut)]
+        );
+        assert!(
+            took >= timeout.saturating_sub(Duration::from_millis(50)),
+            "gave up before the start timeout: {took:?}"
+        );
+        let worker = pid_from(&pid_file).await;
+        assert!(
+            gone_soon(worker).await,
+            "the silent worker outlived the start timeout"
+        );
+        // Nobody stopped the job, and its control is still here: the worker
+        // is gone all the same.
+        tokio::time::timeout(Duration::from_secs(5), control.stop())
+            .await
+            .expect("stopping a worker that was killed already hung");
+    }
+
+    /// As everywhere a worker ends, what it started goes with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_start_timeout_of_a_silent_worker_also_kills_the_processes_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let child_file = dir.path().join("child.pid");
+        // The child's output goes elsewhere, so that the worker's own
+        // descriptor is the last one on the pipe.
+        let script = format!(
+            "cat >/dev/null; sleep 30 >/dev/null & echo $! >'{}'; exec sleep 30",
+            child_file.display()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()])
+            .with_start_timeout(Duration::from_secs(1));
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(10), &engine, fake_job())
+            .await
+            .expect("`run` must not fail");
+        let events = collected_within(Duration::from_secs(6), events).await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineStartTimedOut)]
+        );
+        let child = pid_from(&child_file).await;
+        assert!(
+            gone_soon(child).await,
+            "the process the worker started outlived the start timeout"
+        );
+    }
+
+    /// One deadline covers the write of the job and the wait for the first
+    /// line: a worker that is slow to read its job has that much less time to
+    /// answer. The job is larger than a pipe, so the write waits for the
+    /// worker's reading.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_start_timeout_counts_from_the_start_of_the_write_of_the_job() {
+        let script = "sleep 3; cat >/dev/null; exec sleep 30";
+        let timeout = Duration::from_secs(4);
+        let engine = WorkerEngine::new("sh", ["-c", script]).with_start_timeout(timeout);
+        let began = Instant::now();
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(10), &engine, job_larger_than_a_pipe())
+            .await
+            .expect("a worker that read its job in time was timed out");
+        let events = collected_within(Duration::from_secs(10), events).await;
+        let took = began.elapsed();
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineStartTimedOut)]
+        );
+        assert!(
+            took < Duration::from_millis(5500),
+            "the wait for the first line started over after the write: {took:?}"
+        );
+    }
+
+    /// A line is not there before its newline: a worker that starts one and
+    /// stalls has not said anything yet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_stalls_in_its_first_line_is_failed_when_the_start_timeout_passes() {
+        let script = r#"cat >/dev/null; printf '{"event":"star'; exec sleep 30"#;
+        let engine =
+            WorkerEngine::new("sh", ["-c", script]).with_start_timeout(Duration::from_secs(1));
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(10), &engine, fake_job())
+            .await
+            .expect("`run` must not fail");
+        let events = collected_within(Duration::from_secs(6), events).await;
+        assert_eq!(
+            events,
+            [EngineEvent::Failed(FailureReason::EngineStartTimedOut)]
+        );
+    }
+
+    fn started_line() -> String {
+        serde_json::to_string(&WorkerEvent::Started {
+            op_id: OperationId::from_uuid(Uuid::from_u128(1)),
+            pid: 1,
+            index_read_at: domain::Timestamp::from_second(1_800_000_000).unwrap(),
+        })
+        .unwrap()
+    }
+
+    fn log_line() -> String {
+        serde_json::to_string(&WorkerEvent::Log {
+            level: Level::Info,
+            message: "opening the repository".to_owned(),
+        })
+        .unwrap()
+    }
+
+    /// Runs `script`, which reads its job first, under a start timeout of
+    /// `timeout`, and returns the events.
+    #[cfg(unix)]
+    async fn events_under_a_start_timeout(timeout: Duration, script: &str) -> Vec<EngineEvent> {
+        let engine = WorkerEngine::new("sh", ["-c", script]).with_start_timeout(timeout);
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(10), &engine, fake_job())
+            .await
+            .expect("`run` must not fail");
+        collected_within(Duration::from_secs(15), events).await
+    }
+
+    /// Once the worker has been heard from it is not on the clock any more:
+    /// a repository can be slow to open, and then a backup slow to finish.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_sent_its_first_event_in_time_may_go_quiet_for_longer_than_the_start_timeout()
+     {
+        let script = format!(
+            "cat >/dev/null; echo '{}'; sleep 2.5; echo '{}'",
+            started_line(),
+            result_line()
+        );
+        let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
+        assert!(
+            matches!(
+                events.as_slice(),
+                [EngineEvent::Started { .. }, EngineEvent::Succeeded(_)]
+            ),
+            "{events:?}"
+        );
+    }
+
+    /// A `log` line is a line like any other: it shows that the worker lives,
+    /// and the `started` that follows may be slow, for it comes once the
+    /// repository is open.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_whose_first_line_is_a_log_line_may_go_quiet_for_longer_than_the_start_timeout()
+     {
+        let script = format!(
+            "cat >/dev/null; echo '{}'; sleep 2.5; echo '{}'",
+            log_line(),
+            result_line()
+        );
+        let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
+        assert!(
+            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
+            "{events:?}"
+        );
+    }
+
+    /// The timeout bounds the wait for the first line, not the worker: one
+    /// that answers in time is reported as it always was.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_answers_within_the_start_timeout_is_not_timed_out() {
+        let script = format!("cat >/dev/null; sleep 0.3; echo '{}'", result_line());
+        let events = events_under_a_start_timeout(Duration::from_secs(5), &script).await;
+        assert!(
+            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
+            "{events:?}"
+        );
+    }
+
+    /// A timeout too long to be a time never passes, and doesn't panic
+    /// where it is added to the clock.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_start_timeout_too_long_to_represent_never_passes() {
+        let script = format!("cat >/dev/null; sleep 0.3; echo '{}'", result_line());
+        let engine =
+            WorkerEngine::new("sh", ["-c", script.as_str()]).with_start_timeout(Duration::MAX);
+        let RunningJob {
+            events,
+            control: _control,
+        } = run_within(Duration::from_secs(10), &engine, fake_job())
+            .await
+            .expect("`run` must not fail");
+        let events = collected_within(Duration::from_secs(10), events).await;
+        assert!(
+            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
+            "{events:?}"
         );
     }
 
