@@ -316,4 +316,28 @@ mod tests {
         assert_eq!(instant("en-US", Style::DEFAULT, i64::MAX, None), None);
         assert_eq!(instant("en-US", Style::DEFAULT, i64::MIN, None), None);
     }
+
+    #[test]
+    fn the_ends_of_the_range_are_written_or_declined_in_every_calendar_and_zone() {
+        let first = jiff::Timestamp::MIN.as_millisecond();
+        let last = jiff::Timestamp::MAX.as_second() * 1000;
+        let tokyo = zone("Asia/Tokyo");
+        let honolulu = zone("Pacific/Honolulu");
+        for locale in ["en-US", "ja", "th", "fa", "ar"] {
+            for style in [
+                Style::DEFAULT,
+                Style::Date(DateStyle::Long),
+                Style::Time(TimeStyle::Medium),
+                Style::ZoneName,
+            ] {
+                // In UTC both ends are instants; in a zone the wall clock may leave
+                // the calendar, and then the instant is declined. Nothing panics.
+                for utc_ms in [first, last] {
+                    assert!(instant(locale, style, utc_ms, None).is_some());
+                    instant(locale, style, utc_ms, Some(&tokyo));
+                    instant(locale, style, utc_ms, Some(&honolulu));
+                }
+            }
+        }
+    }
 }

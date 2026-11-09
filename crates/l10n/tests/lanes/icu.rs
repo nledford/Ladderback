@@ -147,6 +147,31 @@ fn the_table_holds_for_japanese() {
 }
 
 #[test]
+fn the_table_holds_for_arabic() {
+    the_table_holds("ar");
+}
+
+#[test]
+fn the_table_holds_for_bengali() {
+    the_table_holds("bn");
+}
+
+#[test]
+fn the_table_holds_for_hindi() {
+    the_table_holds("hi");
+}
+
+#[test]
+fn the_table_holds_for_persian() {
+    the_table_holds("fa");
+}
+
+#[test]
+fn the_table_holds_for_thai() {
+    the_table_holds("th");
+}
+
+#[test]
 fn a_count_is_written_by_its_locale_and_still_picks_its_plural_form() {
     for (locale, one, many) in [
         ("en-US", "1 file", "1,234,567 files"),

@@ -17,13 +17,32 @@
 // The one difference: CLDR 48 writes U+202F before AM and PM in en-US, as does
 // ICU4X, where V8 writes U+0020. The table keeps CLDR's, so a host running on
 // V8 folds U+202F and U+00A0 to U+0020 before it compares.
+//
+// Where the oracle and ICU4X 2.4 (CLDR 49) write different words, the table has no case
+// (see UNSETTLED): the two disagree about the data, not about what Steading asks of them.
 
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const LOCALES = ["en-US", "de", "ja"];
+// The last five write digits or dates unlike the first three: other digits (ar, bn, hi), and a
+// calendar other than the Gregorian (fa: Persian, th: Buddhist), which an instant is converted to.
+const LOCALES = ["en-US", "de", "ja", "ar", "bn", "hi", "fa", "th"];
+
+// Cases left out, because Node's ICU (CLDR 48) and ICU4X's data (CLDR 49) write different words:
+//   - ar: the short names of zones (V8 writes "غرينتش+1" where ICU4X puts U+200E before the sign).
+//   - ar, bn: the short name of UTC (V8 writes "UTC", ICU4X the locale's own name for it).
+//   - th: the short date, whose year V8 writes with two digits and ICU4X with four.
+//   - hi: the long date, which ICU4X writes with a comma after the month.
+const READ_AS_UTC = [undefined, "UTC", "Europe/Atlantis"];
+const UNSETTLED = [
+  (locale, options) => locale === "ar" && options.timeZoneName === "short",
+  (locale, options, zone) =>
+    locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
+  (locale, options) => locale === "th" && options.dateStyle === "short",
+  (locale, options) => locale === "hi" && options.dateStyle === "long",
+];
 
 // Instants, in milliseconds since the epoch.
 const WINTER = 1794144645000; // 2026-11-08 13:30:45 UTC: standard time in Berlin, New York and Tokyo.
@@ -33,12 +52,17 @@ const AFTER_GAP = 1774746000000; // 2026-03-29 01:00:00 UTC: the first of summer
 const EPOCH = 0;
 const BEFORE_EPOCH = -1; // 1969-12-31 23:59:59.999 UTC.
 const LEAP_DAY = 1709208000000; // 2024-02-29 12:00:00 UTC.
+const TOKYO_NEXT_DAY = 1794151800000; // 2026-11-08 15:30:00 UTC: already Nov 9 in Tokyo.
+const NEW_YORK_PREVIOUS_DAY = 1794108600000; // 2026-11-08 03:30:00 UTC: still Nov 7 in New York.
+const PACIFIC_YEARS = 1263556800000; // 2010-01-15 12:00:00 UTC: Metlakatla was on Pacific time.
+const ALASKA_YEARS = 1579089600000; // 2020-01-15 12:00:00 UTC: and is on Alaska time.
 
 const BERLIN = "Europe/Berlin";
 const NEW_YORK = "America/New_York";
 const TOKYO = "Asia/Tokyo";
 const UTC = "UTC";
 const NOWHERE = "Europe/Atlantis"; // A zone nobody has.
+const METLAKATLA = "America/Metlakatla"; // Its short name changed with its metazone in 2015.
 
 // --- The oracle -------------------------------------------------------------
 
@@ -155,6 +179,12 @@ const numbers = [
   // Grouping off.
   ["1234567", { useGrouping: "false" }],
   ["-1234.5", { useGrouping: "false" }],
+  // Signs and magnitudes at the edges.
+  ["-0"],
+  ["-0.04", { maximumFractionDigits: 1 }],
+  ["0.0000001"],
+  ["-0.0000001", { maximumFractionDigits: 3 }],
+  ["123456789012345680000"],
 ];
 
 const counts = ["0", "1234567", "9007199254740992", "18446744073709551615"];
@@ -204,6 +234,18 @@ const instants = [
   [BEFORE_EPOCH, UTC, { timeStyle: "medium" }],
   [LEAP_DAY, UTC, {}],
   [LEAP_DAY, UTC, { dateStyle: "long" }],
+  // The date is the zone's, not UTC's.
+  [TOKYO_NEXT_DAY, TOKYO, {}],
+  [TOKYO_NEXT_DAY, TOKYO, { dateStyle: "long" }],
+  [TOKYO_NEXT_DAY, UTC, { dateStyle: "long" }],
+  [NEW_YORK_PREVIOUS_DAY, NEW_YORK, {}],
+  [NEW_YORK_PREVIOUS_DAY, NEW_YORK, { dateStyle: "short", timeStyle: "medium" }],
+  [NEW_YORK_PREVIOUS_DAY, UTC, { dateStyle: "short" }],
+  // A zone's name follows its metazone through time, not only daylight saving time.
+  [PACIFIC_YEARS, METLAKATLA, { timeZoneName: "short" }],
+  [ALASKA_YEARS, METLAKATLA, { timeZoneName: "short" }],
+  [PACIFIC_YEARS, METLAKATLA, {}],
+  [ALASKA_YEARS, METLAKATLA, {}],
 ];
 
 // --- The table --------------------------------------------------------------
@@ -219,6 +261,7 @@ for (const locale of LOCALES) {
     cases.push({ locale, duration: milliseconds, expect: duration(locale, milliseconds) });
   }
   for (const [utcMs, zone, options] of instants) {
+    if (UNSETTLED.some((unsettled) => unsettled(locale, options, zone))) continue;
     const when = { utcMs, ...(zone && { zone }) };
     const shown = instant(locale, utcMs, zone, options);
     cases.push({ locale, instant: when, ...(Object.keys(options).length > 0 && { options }), expect: shown });
