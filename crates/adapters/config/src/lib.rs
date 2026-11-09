@@ -16,6 +16,7 @@
 // than clippy likes for a `Result`. Loading a file is not a hot path.
 #![allow(clippy::result_large_err)]
 
+mod files;
 #[cfg(test)]
 mod keys;
 mod locate;

@@ -211,12 +211,15 @@ async fn an_older_file_is_kept_whole_then_replaced_by_the_current_version() {
     assert_eq!(mode_of(&scratch.history_dir().join(&kept[0].0)), 0o600);
 
     let now = scratch.read();
+    assert!(now.starts_with("schema = 2\n"), "{now}");
+    // `render` writes the version this build has (1); this store's chain makes
+    // the current one 2, so the files differ in the schema line and no more.
+    let rendered = render(std::path::Path::new(&scratch.name()), &loaded).expect("written");
     assert_eq!(
-        now,
-        render(std::path::Path::new(&scratch.name()), &loaded).expect("written"),
+        now.strip_prefix("schema = 2\n"),
+        rendered.strip_prefix("schema = 1\n"),
         "the file is the configuration, in the current version"
     );
-    assert!(now.starts_with("schema = 2\n"), "{now}");
 
     // Now current: loaded again, it is not rewritten and nothing more is kept.
     scratch.clock.advance(domain::SignedDuration::from_secs(5));

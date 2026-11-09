@@ -80,8 +80,9 @@ fn rename_name(table: &mut toml::Table) -> Result<(), MigrationError> {
 #[given(expr = "a config file holding:")]
 fn a_config_file(agent: &mut Agent, step: &Step) {
     let text = step.docstring.as_deref().expect("the step has a text");
-    // A docstring has no final newline, and an editor adds one.
-    let text = format!("{}\n", in_scratch(agent, text));
+    // cucumber hands a docstring over with the newline after its opening
+    // quotes, and without the one a file ends with, which an editor adds.
+    let text = format!("{}\n", in_scratch(agent, text.trim_start_matches('\n')));
     let path = config_path(agent);
     fs::create_dir_all(path.parent().expect("a folder")).unwrap();
     fs::write(&path, &text).unwrap();
