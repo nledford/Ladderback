@@ -84,6 +84,7 @@ pub enum ErrorCode {
 #[serde(rename_all = "kebab-case")]
 pub enum WarningCode {
     SourceUnreadable,
+    HookWarning,
     #[serde(other)]
     Unknown,
 }
@@ -288,6 +289,18 @@ impl WarningCode {
     /// The arguments this code's message takes (see [`ErrorCode::args`]).
     pub const fn args(self) -> &'static [ArgSpec] {
         match self {
+            Self::HookWarning => &[
+                ArgSpec {
+                    name: "phase",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "exit_code",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::SourceUnreadable | Self::Unknown => &[],
         }
     }

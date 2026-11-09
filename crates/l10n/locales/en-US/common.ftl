@@ -131,6 +131,18 @@ error-unknown = An unexpected error occurred.
 warning-source-unreadable = { -brand-name } could not read this item, so it was left out of the snapshot. Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
     .with-detail = { -brand-name } could not read this item, so it was left out of the snapshot ({ $detail }). Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
 
+# A hook command around the operation failed where its `on-failure` said to go on.
+# $phase (text): which hook list it ran from: before, after, failed or finally.
+# $exit_code (text): the hook's exit status, or `none` when it timed out or could not be started.
+warning-hook-warning = { $exit_code ->
+    [none] A { $phase } hook command around the operation timed out or could not be started, so { -brand-name } went on without it. Check the hook's command, or set its `on-failure` to `error` to stop the operation when it fails.
+   *[other] A { $phase } hook command around the operation failed with exit status { $exit_code }, so { -brand-name } went on without it. Check the hook's command, or set its `on-failure` to `error` to stop the operation when it fails.
+  }
+    .with-detail = { $exit_code ->
+    [none] A { $phase } hook command around the operation timed out or could not be started, so { -brand-name } went on without it: { $detail }. Check the hook's command, or set its `on-failure` to `error` to stop the operation when it fails.
+   *[other] A { $phase } hook command around the operation failed with exit status { $exit_code }, so { -brand-name } went on without it: { $detail }. Check the hook's command, or set its `on-failure` to `error` to stop the operation when it fails.
+  }
+
 # A warning this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.

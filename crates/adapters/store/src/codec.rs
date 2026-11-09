@@ -90,6 +90,7 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
 pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
     match kind {
         WarningKind::SourceUnreadable => "source-unreadable",
+        WarningKind::Hook => "hook-warning",
         WarningKind::Other => "unknown",
     }
 }
@@ -99,6 +100,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
 pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
     match text {
         "source-unreadable" => WarningKind::SourceUnreadable,
+        "hook-warning" => WarningKind::Hook,
         _ => WarningKind::Other,
     }
 }

@@ -938,6 +938,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         } => EngineEvent::Warning(Warning {
             kind: match code {
                 WarningCode::SourceUnreadable => WarningKind::SourceUnreadable,
+                WarningCode::HookWarning => WarningKind::Hook,
                 WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact(&item)),
@@ -1083,6 +1084,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .map(|w| FakeWarning {
                     code: match w.kind {
                         WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
+                        WarningKind::Hook => WarningCode::HookWarning,
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,
