@@ -414,7 +414,7 @@ mod tests {
         );
         assert!(matches!(
             use_case.connect(op(), alias(), &settings()).await,
-            Err(RepositoryError::Failed(_))
+            Err(RepositoryError::Failed(FailureReason::EngineFailed { .. }))
         ));
         let saved = config
             .load()
