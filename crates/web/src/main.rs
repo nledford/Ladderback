@@ -41,15 +41,14 @@ mod formatting;
 mod gallery;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod live;
-// The live pages' decisions (host-tested) and their DOM glue. Commit 1 of
-// the live-pages slice stubs them; nothing reads them until the pages do.
-#[allow(dead_code)]
+// The live pages' decisions (host-tested) and their DOM glue; see
+// `backend.rs` for why the fetch-and-socket glue is only covered by the
+// browser journeys.
 mod backend;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod page;
 mod routes;
-#[allow(dead_code)]
 mod ws;
 
 // The toast's arrival and lifetime decisions are host-testable; the DOM

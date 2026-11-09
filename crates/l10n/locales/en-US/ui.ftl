@@ -178,16 +178,116 @@ ui-gallery-settings-saved = Settings saved.
 
 ## The operations page: the backup history, live (§4.4).
 
+# The operations page's title, as the browser's tab and history show it.
+ui-operations-title = Operations – { -brand-name }
+
 # The operations page's heading: its one main heading.
 ui-operations-heading = Operations
 
 # The operations page's text, until its history loads.
 ui-operations-body = The history of every backup, live.
 
+# The operations table's caption.
+ui-operations-caption = Operations
+
+# The operations table's column of plan names.
+ui-column-plan = Plan
+
+# The operations table's column of statuses.
+ui-column-status = Status
+
+# The operations table's column of the instants runs started.
+ui-column-started = Started
+
+# The operations table's column of what a row offers to do.
+ui-column-actions = Actions
+
+# The button that starts a plan's backup.
+ui-start-backup = Start backup
+
+# The button that cancels a plan's running or queued backup, named with its
+# row's plan.
+ui-cancel-plan = Cancel { $plan }
+
+# The button in the operations header that re-sorts the rows.
+ui-sort-by-started = Sort by started
+
+# Announced politely when the rows are sorted newest first.
+ui-sorted-newest = Sorted by started, newest first.
+
+# Announced politely when the rows are sorted oldest first.
+ui-sorted-oldest = Sorted by started, oldest first.
+
+# What the operations page says when the daemon holds no operations.
+ui-no-operations = No operations yet.
+
+# The label of a running backup's progress bar.
+ui-backup-progress = Backup progress
+
+# A status label: the operation waits for its turn.
+ui-status-queued = Queued
+
+# A status label: the operation runs.
+ui-status-running = Running
+
+# A status label: the operation ended well.
+ui-status-succeeded = Succeeded
+
+# A status label: the operation ended well, with warnings.
+ui-status-succeeded-with-warnings = Succeeded with warnings
+
+# A status label: the operation ended badly.
+ui-status-failed = Failed
+
+# A status label: the operation was cancelled.
+ui-status-cancelled = Cancelled
+
+# Announced politely when a backup has been asked for.
+ui-backup-started = Backup started.
+
+# Announced politely when a backup ends well.
+ui-backup-finished = Backup finished.
+
+# Announced politely when a backup is cancelled.
+ui-backup-cancelled = Backup cancelled.
+
+# Announced assertively when a backup ends badly.
+ui-backup-failed = Backup failed.
+
+# An instant, as the page's locale writes it.
+ui-instant = { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
+
+# The heading a live page shows when the daemon cannot be reached at all.
+ui-unreachable-heading = Cannot reach { -brand-name }
+
+# What that page says about its state.
+ui-unreachable-body = The daemon that serves this page is not answering. It comes back on its own.
+
+# What a live page says while its first answer is still on its way.
+ui-loading = Loading…
+
 ## The snapshots page: one repository's snapshots, newest first (§4.4).
+
+# The snapshots page's title, as the browser's tab and history show it.
+ui-snapshots-title = Snapshots – { -brand-name }
 
 # The snapshots page's heading: its one main heading.
 ui-snapshots-heading = Snapshots
 
 # The snapshots page's text, until a repository is chosen.
 ui-snapshots-body = The snapshots of a repository, newest first.
+
+# The snapshots table's caption.
+ui-snapshots-caption = Snapshots
+
+# The snapshots table's column of snapshot IDs.
+ui-column-snapshot = Snapshot
+
+# The snapshots table's column of the instants snapshots were taken.
+ui-column-time = Time
+
+# The button that shows one repository's snapshots, named with the repository.
+ui-snapshots-of = Snapshots of { $alias }
+
+# What the snapshots page says when the repository holds no snapshots.
+ui-no-snapshots = No snapshots yet.
