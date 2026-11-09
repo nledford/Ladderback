@@ -81,6 +81,9 @@ pub enum Problem {
     Syntax,
     /// A key the format doesn't have, at the setting named by the error's key.
     UnknownKey,
+    /// A key the setting needs isn't there: the error's key is the one that
+    /// is missing, and its place is the table that should have it.
+    MissingKey,
     /// A value of another type than the setting takes: a number where it
     /// wants text, say.
     WrongType,
