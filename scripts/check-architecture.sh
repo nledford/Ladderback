@@ -57,8 +57,10 @@ icu='^(fixed_decimal|icu_(calendar|datetime|decimal|plurals|time)(_data)?)$'
 default_crates() {
   local package=$1 tree
   shift
-  # Separate from the pipeline: a failing `cargo tree` must stop the script.
-  tree=$(cargo tree --package "$package" --edges normal,build --prefix none --format '{p}' "$@")
+  # Separate from the pipeline, and `|| exit`: the caller runs this in a
+  # command substitution, where `set -e` is off, so a failing `cargo tree`
+  # would otherwise read as a tree with no ICU4X in it.
+  tree=$(cargo tree --package "$package" --edges normal,build --prefix none --format '{p}' "$@") || exit 1
   awk '{print $1}' <<<"$tree" | sort -u
 }
 
