@@ -26,14 +26,15 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start, StoreError,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
+    Start, StoreError,
 };
 use async_trait::async_trait;
 use domain::execution::{MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
-use sqlx::SqlitePool;
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::report::cap;
 use crate::summary::Summary;
@@ -144,14 +145,17 @@ fn encoding(error: impl Display) -> StoreError {
     }
 }
 
-#[async_trait]
-impl OperationStore for SqliteStore {
-    async fn save(
-        &self,
-        operation: &Operation,
-        result: Option<&EngineResult>,
-    ) -> Result<(), StoreError> {
-        let id = operation.id().as_uuid().to_string();
+/// An operation as its columns hold it, worked out before the write lock is
+/// taken: whatever can fail to encode fails before the database is touched.
+struct Encoded<'a> {
+    id: String,
+    failure: Option<codec::FailureColumns<'a>>,
+    summary: Option<String>,
+    snapshot: Option<&'a str>,
+}
+
+impl<'a> Encoded<'a> {
+    fn new(operation: &'a Operation, result: Option<&'a EngineResult>) -> Result<Self, StoreError> {
         let failure = match operation.status() {
             OperationStatus::Failed { reason } => {
                 Some(codec::encode_failure(reason).map_err(encoding)?)
@@ -166,57 +170,125 @@ impl OperationStore for SqliteStore {
             Some(EngineResult::Backup(backup)) => Some(backup.snapshot.as_str()),
             _ => None,
         };
-        let target = operation.target();
+        Ok(Self {
+            id: operation.id().as_uuid().to_string(),
+            failure,
+            summary,
+            snapshot,
+        })
+    }
+}
 
+/// Writes the operation, replacing what an earlier save left of it, and its
+/// warnings, on a connection that is inside a write transaction.
+async fn write(
+    conn: &mut SqliteConnection,
+    operation: &Operation,
+    encoded: &Encoded<'_>,
+) -> Result<(), StoreError> {
+    let id = encoded.id.as_str();
+    let target = operation.target();
+    sqlx::query(sql::UPSERT_OPERATION)
+        .bind(id)
+        .bind(LOCAL_AGENT)
+        .bind(codec::kind_text(operation.kind()))
+        .bind(target.plan.as_ref().map(PlanId::as_str))
+        .bind(target.repository.as_ref().map(RepositoryId::as_str))
+        .bind(codec::trigger_text(operation.trigger()))
+        .bind(codec::status_text(operation.status()))
+        .bind(operation.queued_at().as_millisecond())
+        .bind(operation.started_at().map(Timestamp::as_millisecond))
+        .bind(operation.finished_at().map(Timestamp::as_millisecond))
+        .bind(encoded.snapshot)
+        .bind(encoded.summary.as_deref())
+        .bind(encoded.failure.as_ref().map(|failure| failure.code))
+        .bind(
+            encoded
+                .failure
+                .as_ref()
+                .map(|failure| failure.args.as_str()),
+        )
+        .bind(encoded.failure.as_ref().and_then(|failure| failure.detail))
+        .bind(i64::try_from(operation.warning_count()).unwrap_or(i64::MAX))
+        .execute(&mut *conn)
+        .await
+        .map_err(unavailable)?;
+    sqlx::query(sql::DELETE_WARNINGS)
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(unavailable)?;
+    for warning in operation.warnings().iter().take(MAX_STORED_WARNINGS) {
+        sqlx::query(sql::INSERT_WARNING)
+            .bind(id)
+            .bind(warning.item.as_deref())
+            .bind(warning.during.as_str())
+            .bind(codec::warning_code_text(warning.kind))
+            .bind(warning.detail.as_str())
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+    }
+    Ok(())
+}
+
+#[async_trait]
+impl OperationStore for SqliteStore {
+    async fn save(
+        &self,
+        operation: &Operation,
+        result: Option<&EngineResult>,
+    ) -> Result<(), StoreError> {
+        let encoded = Encoded::new(operation, result)?;
         // The write lock is taken up front, so the busy timeout covers the
         // wait for it, and the whole save is one transaction: it all
-        // happens or none of it does.
+        // happens or none of it does. The one-maintenance index is the
+        // backstop for I7: a save that would make a second running
+        // maintenance operation fails here and stores nothing.
         let mut tx = self
             .pool
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        sqlx::query(sql::UPSERT_OPERATION)
-            .bind(id.as_str())
-            .bind(LOCAL_AGENT)
-            .bind(codec::kind_text(operation.kind()))
-            .bind(target.plan.as_ref().map(PlanId::as_str))
-            .bind(target.repository.as_ref().map(RepositoryId::as_str))
-            .bind(codec::trigger_text(operation.trigger()))
-            .bind(codec::status_text(operation.status()))
-            .bind(operation.queued_at().as_millisecond())
-            .bind(operation.started_at().map(Timestamp::as_millisecond))
-            .bind(operation.finished_at().map(Timestamp::as_millisecond))
-            .bind(snapshot)
-            .bind(summary.as_deref())
-            .bind(failure.as_ref().map(|failure| failure.code))
-            .bind(failure.as_ref().map(|failure| failure.args.as_str()))
-            .bind(failure.as_ref().and_then(|failure| failure.detail))
-            .bind(i64::try_from(operation.warning_count()).unwrap_or(i64::MAX))
-            .execute(&mut *tx)
-            .await
-            .map_err(unavailable)?;
-        sqlx::query(sql::DELETE_WARNINGS)
-            .bind(id.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(unavailable)?;
-        for warning in operation.warnings().iter().take(MAX_STORED_WARNINGS) {
-            sqlx::query(sql::INSERT_WARNING)
-                .bind(id.as_str())
-                .bind(warning.item.as_deref())
-                .bind(warning.during.as_str())
-                .bind(codec::warning_code_text(warning.kind))
-                .bind(warning.detail.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(unavailable)?;
-        }
+        write(&mut tx, operation, &encoded).await?;
         tx.commit().await.map_err(unavailable)
     }
 
-    async fn try_start(&self, _operation: &Operation) -> Result<Start, StoreError> {
-        todo!("SqliteStore::try_start")
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        if !matches!(operation.status(), OperationStatus::Running) {
+            return Err(StoreError::Unavailable {
+                detail: cap(format!(
+                    "only a running operation can be started, not a {} one",
+                    codec::status_text(operation.status())
+                )),
+            });
+        }
+        let encoded = Encoded::new(operation, None)?;
+        // The lock is taken before the lookup, so no other handle can start a
+        // maintenance operation between the lookup and the write.
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        if let Some(repository) = OperationRecord::of(operation, None).maintaining() {
+            let holder = sqlx::query(sql::FIND_RUNNING_MAINTENANCE)
+                .bind(repository.as_str())
+                .bind(encoded.id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+            if let Some(holder) = holder {
+                // A holder that can't be read is an error, never a way in: a
+                // return here drops the transaction, which rolls it back.
+                let running = row::operation_id(&holder)?;
+                tx.rollback().await.map_err(unavailable)?;
+                return Ok(Start::Refused { running });
+            }
+        }
+        write(&mut tx, operation, &encoded).await?;
+        tx.commit().await.map_err(unavailable)?;
+        Ok(Start::Started)
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

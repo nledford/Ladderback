@@ -42,6 +42,15 @@ pub(crate) const DELETE_WARNINGS: &str = "DELETE FROM op_warnings WHERE op_id = 
 pub(crate) const INSERT_WARNING: &str =
     "INSERT INTO op_warnings (op_id, item, during, code, detail) VALUES (?, ?, ?, ?, ?)";
 
+/// The ID of a running maintenance operation on a repository, other than the
+/// operation being started. Parameters: the repository, the operation's own ID.
+/// The literals are those of the `one_maintenance_per_repo` index, so it
+/// serves the lookup.
+pub(crate) const FIND_RUNNING_MAINTENANCE: &str = concat!(
+    "SELECT id FROM operations WHERE repo_uuid = ? AND status = 'running' ",
+    "AND kind IN ('forget', 'prune', 'check') AND id <> ? LIMIT 1"
+);
+
 /// Parameter: the operation's ID.
 pub(crate) const GET_OPERATION: &str = select_operations!(" WHERE id = ?");
 
