@@ -160,3 +160,93 @@ Feature: An agent's configuration
       When the hook-command "login --password hunter2 'never closed" is read
       Then the value is refused as hook-command
       And the refusal doesn't mention "hunter2"
+
+  @e2e
+  Rule: The configuration is kept in a file that a person edits
+
+    Scenario: A valid file is loaded as it was written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the agent loads the config file
+      Then the agent has the plan "home" backing up "/home/demo" into "nas"
+      And the config file is exactly as it was written
+
+    Scenario: A key nobody knows is refused where it is written, and no secret is repeated
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password = "CANARY-inline-password"
+        colour = "red"
+        """
+      When the agent loads the config file
+      Then the load is refused because the key "repositories.nas.colour" is unknown
+      And the refusal points at line 6 of the config file
+      And the refusal never shows "CANARY-inline-password"
+
+    Scenario: A file that doesn't say which version it is in is refused
+      Given a config file holding:
+        """
+        [agent]
+        concurrency = 2
+        """
+      When the agent loads the config file
+      Then the load is refused because the file names no schema version
+      And the config file is exactly as it was written
+
+    Scenario: A file from a newer version is refused and left as it is
+      Given a config file holding:
+        """
+        schema = 99
+
+        [hub]
+        url = "https://hub.example.lan:9899"
+        """
+      When the agent loads the config file
+      Then the load is refused because the file is in version 99 and the agent reads version 1
+      And the config file is exactly as it was written
+      And no earlier version of the config file is kept
+
+    Scenario: Secrets are kept as references when the configuration is saved again
+      Given the file "{scratch}/s3-key" holds "CANARY-file-secret"
+      And a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "s3:s3.example.lan/demo-bucket"
+        password-command = "security find-generic-password -s demo-nas -w"
+        options = { key = "${file:{scratch}/s3-key}" }
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded
+      Then the saved config file gives the repository "nas" the "password-command" "security find-generic-password -s demo-nas -w"
+      And the saved config file gives the repository "nas" the option "key" as "${file:{scratch}/s3-key}"
+      And the saved config file doesn't hold "CANARY-file-secret"
+
+    Scenario: The old file is kept before a migration replaces it
+      Given a config file holding:
+        """
+        schema = 1
+
+        [agent]
+        name = "demo-host"
+        """
+      And the agent reads version 2 of the format, where an agent's name became its hostname
+      When the agent loads the config file
+      Then the agent's hostname is "demo-host"
+      And the history of the config file holds the old file exactly as it was written
+      And the config file now says it is in version 2

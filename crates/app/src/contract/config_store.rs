@@ -4,11 +4,32 @@ use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
     KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RepositoryConfig,
-    RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
+    RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
 };
+use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, SignedDuration};
 
 use crate::ports::ConfigStore;
+
+/// Settings for a repository at `repository`, with a password from the
+/// environment and no options: the caller sets what it is about.
+fn settings(repository: &str) -> RepositorySettings {
+    RepositorySettings {
+        repository: repository.to_owned(),
+        repo_hot: None,
+        password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+        options: BTreeMap::new(),
+        options_hot: BTreeMap::new(),
+        options_cold: BTreeMap::new(),
+    }
+}
+
+fn strings_by_name(items: &[(&str, &str)]) -> BTreeMap<String, String> {
+    items
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
 
 /// Run against an empty store: the first check is that it loads the empty
 /// configuration. The suite saves a handful of configurations over one
@@ -85,7 +106,7 @@ fn strings(items: &[&str]) -> Vec<String> {
 /// Every part set, to values that no default and no neighbouring part
 /// shares, and with the characters a file format has to quote.
 fn rich() -> Option<AgentConfig> {
-    let settings = AgentSettings {
+    let agent_settings = AgentSettings {
         hostname: Some(Hostname::parse("demo-host").ok()?),
         concurrency: Concurrency::new(4).ok()?,
         nice: Some(Nice::new(10).ok()?),
@@ -106,6 +127,20 @@ fn rich() -> Option<AgentConfig> {
         (
             nas.clone(),
             RepositoryConfig {
+                settings: RepositorySettings {
+                    password: SecretRef::Command(
+                        CommandLine::new(
+                            "security",
+                            ["find-generic-password", "-s", "demo nas", "-w"],
+                        )
+                        .ok()?,
+                    ),
+                    options: strings_by_name(&[(
+                        "sftp.command",
+                        "ssh -o 'x y' backup@nas.lan -s sftp",
+                    )]),
+                    ..settings("sftp://backup@nas.lan/backups/demo")
+                },
                 maintenance: Maintenance::Hub,
                 group_by: GroupBy {
                     host: true,
@@ -124,6 +159,19 @@ fn rich() -> Option<AgentConfig> {
         (
             cloud.clone(),
             RepositoryConfig {
+                settings: RepositorySettings {
+                    repo_hot: Some("/srv/demo-hot".to_owned()),
+                    password: SecretRef::Keyring(
+                        KeyringEntry::parse("ladderback/demo cloud").ok()?,
+                    ),
+                    options: strings_by_name(&[
+                        ("endpoint", "https://${DEMO_HOST}/path"),
+                        ("key", "${file:/home/demo/.s3 key}"),
+                    ]),
+                    options_hot: strings_by_name(&[("region", "us-east-1")]),
+                    options_cold: strings_by_name(&[("storage-class", "GLACIER")]),
+                    ..settings("s3:s3.example.lan/demo-bucket")
+                },
                 maintenance: Maintenance::Local,
                 group_by: GroupBy::default(),
                 hooks: Hooks {
@@ -135,6 +183,13 @@ fn rich() -> Option<AgentConfig> {
         (
             usb,
             RepositoryConfig {
+                settings: RepositorySettings {
+                    password: SecretRef::File {
+                        path: "/home/demo/.usb password".to_owned(),
+                        read: FileRead::FirstLine,
+                    },
+                    ..settings("/media/demo/usb backups")
+                },
                 maintenance: Maintenance::None,
                 group_by: GroupBy {
                     host: false,
@@ -146,6 +201,30 @@ fn rich() -> Option<AgentConfig> {
                     run_finally: vec![hook("echo 'usb finally'")?],
                     ..Hooks::default()
                 },
+            },
+        ),
+        (
+            alias("vault")?,
+            RepositoryConfig {
+                settings: RepositorySettings {
+                    password: SecretRef::Env("DEMO_VAULT_PASSWORD".to_owned()),
+                    ..settings("/srv/demo-vault")
+                },
+                maintenance: Maintenance::Local,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
+            },
+        ),
+        (
+            alias("scratch")?,
+            RepositoryConfig {
+                settings: RepositorySettings {
+                    password: SecretRef::Inline(SecretValue::new("demo \"inline\" #password")),
+                    ..settings("/srv/demo-scratch")
+                },
+                maintenance: Maintenance::None,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
             },
         ),
     ]);
@@ -247,7 +326,7 @@ fn rich() -> Option<AgentConfig> {
     };
 
     AgentConfig::new(
-        settings,
+        agent_settings,
         agent_hooks,
         repositories,
         vec![home, work, photos],
@@ -260,6 +339,7 @@ fn rich() -> Option<AgentConfig> {
 fn minimal() -> Option<AgentConfig> {
     let nas = alias("nas")?;
     let repository = RepositoryConfig {
+        settings: settings("/srv/demo-repo"),
         maintenance: Maintenance::None,
         group_by: GroupBy::default(),
         hooks: Hooks::default(),

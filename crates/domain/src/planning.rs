@@ -24,7 +24,7 @@ pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub use names::{Hostname, Locale, Source};
 pub use plan::{Plan, RetryPolicy};
-pub use repository::{GroupBy, Maintenance, RepositoryConfig};
+pub use repository::{GroupBy, Maintenance, RepositoryConfig, RepositorySettings, masked_options};
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
 pub use schedule::{CronExpression, Schedule};
 

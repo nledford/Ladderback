@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use domain::planning::AgentConfig;
+use domain::IdKind;
+use domain::planning::{AgentConfig, ValueKind, Violation};
 
 /// Keeps the agent's configuration: the plans, repositories and settings the
 /// user wrote, as one whole (technical design §3.2 and §6.1).
@@ -58,13 +59,66 @@ pub enum ConfigError {
     },
     /// The file is not a valid configuration. `key` is the setting at fault,
     /// as a path such as `plans[1].schedule.cron`, and `at` where in the
-    /// file it is, when the store can tell.
+    /// file it is, when the store can tell. `problem` says what is wrong as a
+    /// code, and `detail` holds only what the parser said about it, with every
+    /// value left out; it is empty when `problem` says it all.
     Invalid {
         file: String,
         key: Option<String>,
         at: Option<Position>,
+        problem: Problem,
         detail: String,
     },
+}
+
+/// What is wrong with a file that is not a valid configuration. A code, never
+/// a sentence: the words are the caller's to choose (technical design §8.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Problem {
+    /// The file is not UTF-8 text.
+    NotUtf8,
+    /// The file is not TOML.
+    Syntax,
+    /// A key the format doesn't have, at the setting named by the error's key.
+    UnknownKey,
+    /// A value of another type than the setting takes: a number where it
+    /// wants text, say.
+    WrongType,
+    /// `schema` is not a whole number that is zero or more.
+    SchemaNotAVersion,
+    /// The file is in a version older than the oldest this build migrates.
+    SchemaTooOld { found: u64, oldest: u64 },
+    /// A migration step from an older version failed.
+    Migration,
+    /// A value that isn't the kind of value the setting is for.
+    Value(ValueKind),
+    /// A plan ID or a repository alias that isn't one.
+    Id(IdKind),
+    /// A tag that starts with the prefix Ladderback's own tags have.
+    ReservedTag,
+    /// The repository's password isn't given as the format needs.
+    Password(PasswordProblem),
+    /// The settings are each valid, but they disagree with one another.
+    Violation(Violation),
+    /// The configuration can't be written in the format.
+    Unwritable,
+}
+
+/// How a repository's password is wrongly given: it takes exactly one of
+/// `password`, `password-command`, `password-keyring`, `password-file` and
+/// `password-env`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PasswordProblem {
+    /// None of the five is there.
+    Missing,
+    /// More than one is there.
+    Several,
+    /// `password-file` isn't an absolute path.
+    RelativeFile,
+    /// `password-keyring` isn't `service/name`.
+    NotAKeyringEntry,
+    /// `password-command` can't be split into words.
+    BadCommand,
 }
 
 impl std::fmt::Display for ConfigError {

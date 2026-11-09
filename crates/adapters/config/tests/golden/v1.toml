@@ -1,0 +1,88 @@
+schema = 1
+
+[agent]
+hostname = "demo-laptop"
+concurrency = 2
+nice = 10
+allow-hub-restore = true
+locale = "en-US"
+
+[hooks]
+run-before = ["echo 'agent starting'"]
+run-finally = [{ command = "true", on-failure = "ignore" }]
+
+[repositories.nas]
+repository = "sftp://backup@nas.lan/backups/demo"
+password-command = "security find-generic-password -s demo-nas -w"
+maintenance = "hub"
+group-by = "host,label,paths"
+options = { "sftp.command" = "ssh -o 'StrictHostKeyChecking yes' backup@nas.lan -s sftp" }
+hooks = { run-before = ["echo 'repository ready'"] }
+
+[repositories.cloud]
+repository = "s3:s3.example.lan/demo-bucket"
+repo-hot = "/srv/demo-hot"
+password-keyring = "ladderback/demo-cloud"
+maintenance = "local"
+group-by = "tags,host"
+options = { endpoint = "https://${DEMO_HOST}/path", key = "${file:/home/demo/.s3-key}" }
+options-hot = { region = "us-east-1" }
+options-cold = { storage-class = "GLACIER" }
+
+[repositories.usb]
+repository = "/media/demo/usb backups"
+password-file = "/home/demo/.usb-password"
+
+[repositories.vault]
+repository = "/srv/demo-vault"
+password-env = "DEMO_VAULT_PASSWORD"
+group-by = ""
+
+[repositories.scratch]
+repository = "/srv/demo-scratch"
+password = "demo \"inline\" #password"
+
+[[plans]]
+id = "home"
+repository = "nas"
+host = "demo-laptop"
+label = "Demo \"home\" backup #1 – café"
+sources = ["/home/demo", "/srv/demo data/it's here", "/home/demo/é/日本"]
+tags = ["demo", "laptop", "Home Dir"]
+schedule = { cron = "0 3 * * 1-5", jitter = "90s", catch-up = false, on-ac-power = true }
+retry = { attempts = 3, backoff = "10m" }
+globs = ["*.tmp", "!keep.tmp"]
+iglobs = ["*.LOG"]
+glob-files = ["/home/demo/.excludes"]
+iglob-files = ["/home/demo/.iexcludes"]
+git-ignore = true
+no-require-git = true
+custom-ignorefiles = [".backupignore"]
+exclude-if-present = [".nobackup", "CACHEDIR.TAG"]
+exclude-if-xattr = ["com.example.skip"]
+one-file-system = true
+hooks = { run-before = ["echo 'plan starting' --now"], run-after = [{ command = "/opt/demo tools/notify", args = ["done", "two words"], on-failure = "warn" }, "echo second"] }
+
+[plans.retention]
+keep-last = 1
+keep-hourly = 3
+keep-daily = 7
+keep-weekly = 4
+keep-monthly = 12
+keep-quarter-yearly = 0
+keep-yearly = -1
+keep-within = "36 hours"
+keep-within-weekly = "1 month"
+keep-within-yearly = "2 years"
+
+[[plans]]
+id = "work"
+repository = "cloud"
+sources = ["/home/demo/work"]
+
+[[plans]]
+id = "photos"
+repository = "cloud"
+label = ""
+sources = ["/home/demo/photos", "/home/demo/video"]
+schedule = { cron = "@daily" }

@@ -7,7 +7,7 @@ mod operation_store;
 mod secrets;
 
 pub use clock::Clock;
-pub use config_store::{ConfigError, ConfigStore, Position};
+pub use config_store::{ConfigError, ConfigStore, PasswordProblem, Position, Problem};
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
