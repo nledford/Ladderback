@@ -15,9 +15,12 @@
 
 pub mod execution;
 mod ids;
+pub mod planning;
 pub mod secrets;
 pub mod snapshot;
 
-pub use ids::{AgentId, IdKind, InvalidId, OperationId, PlanId, RepositoryId, SnapshotId};
+pub use ids::{
+    AgentId, IdKind, InvalidId, OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId,
+};
 pub use jiff::{SignedDuration, Timestamp};
 pub use uuid::Uuid;

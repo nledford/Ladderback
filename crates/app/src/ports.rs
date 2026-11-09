@@ -1,11 +1,13 @@
 //! Outbound ports. Object-safe, used as `Arc<dyn Port>` (technical design §3.2).
 
 mod clock;
+mod config_store;
 mod engine;
 mod operation_store;
 mod secrets;
 
 pub use clock::Clock;
+pub use config_store::{ConfigError, ConfigStore, Position};
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,

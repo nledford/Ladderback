@@ -42,6 +42,11 @@ code_messages!(ERRORS, error_message, ErrorCode {
     HostNotAllowed => msg::ERROR_HOST_NOT_ALLOWED,
     OriginNotAllowed => msg::ERROR_ORIGIN_NOT_ALLOWED,
     JsonRequired => msg::ERROR_JSON_REQUIRED,
+    ConfigUnavailable => msg::ERROR_CONFIG_UNAVAILABLE,
+    ConfigTooLarge => msg::ERROR_CONFIG_TOO_LARGE,
+    ConfigInvalid => msg::ERROR_CONFIG_INVALID,
+    ConfigSchemaMissing => msg::ERROR_CONFIG_SCHEMA_MISSING,
+    ConfigSchemaNewer => msg::ERROR_CONFIG_SCHEMA_NEWER,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

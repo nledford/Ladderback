@@ -85,6 +85,22 @@ error-origin-not-allowed = { -brand-name } refused this request because it came 
 # `Content-Type: application/json` is a header, typed as it is: keep it a string literal.
 error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header { "Content-Type: application/json" }.
 
+# The configuration file could not be read or written.
+# $detail (text): the platform's message. It is shown as it came.
+error-config-unavailable = The configuration file could not be read or written.
+    .with-detail = The configuration file could not be read or written: { $detail }
+
+error-config-too-large = The configuration file is too large to be read.
+
+# The configuration file is not valid.
+# $detail (text): which setting is wrong and why. It is shown as it came, in English.
+error-config-invalid = The configuration file is not valid.
+    .with-detail = The configuration file is not valid: { $detail }
+
+error-config-schema-missing = The configuration file does not say which version of the format it is in.
+
+error-config-schema-newer = The configuration file is in a newer version of the format than this version of { -brand-name } reads.
+
 # An error this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.
 error-unknown = An unexpected error occurred.

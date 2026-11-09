@@ -989,10 +989,11 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
-                // words for what the daemon saw, and the request-check codes
-                // belong to the HTTP adapter: a worker that sent one has failed
-                // in a way this side doesn't know, so it is reported as the
-                // failure it claims, in its own words.
+                // words for what the daemon saw, the request-check codes
+                // belong to the HTTP adapter, and the configuration codes to
+                // the config store: a worker that sent one has failed in a way
+                // this side doesn't know, so it is reported as the failure it
+                // claims, in its own words.
                 ErrorCode::OperationFailed
                 | ErrorCode::EngineUnavailable
                 | ErrorCode::EngineExited
@@ -1002,6 +1003,11 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired
+                | ErrorCode::ConfigUnavailable
+                | ErrorCode::ConfigTooLarge
+                | ErrorCode::ConfigInvalid
+                | ErrorCode::ConfigSchemaMissing
+                | ErrorCode::ConfigSchemaNewer
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }
