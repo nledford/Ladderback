@@ -1,8 +1,10 @@
 // Starts one real `ladderback serve` for the run and a fresh browser page per
-// scenario. The binary must already contain the built web UI.
+// scenario. The daemon must serve the web UI this checkout built, which the
+// run checks before its first scenario.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +23,7 @@ setDefaultTimeout(30_000);
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const binary = process.env.LADDERBACK_BIN ?? path.join(repoRoot, "target/debug/ladderback");
+const entryPage = path.join(repoRoot, "crates/web/dist/index.html");
 
 let server;
 let baseUrl;
@@ -60,8 +63,34 @@ function startServer() {
   });
 }
 
+// A development binary reads the UI from the folder it was compiled for, so one
+// restored from another checkout's build cache serves that checkout's UI, or
+// answers 503 where it has none (#47). Every scenario would then time out
+// without saying why, so the run stops here and names the cause.
+async function assertServesThisCheckoutsUi(url) {
+  const shown = path.relative(repoRoot, entryPage);
+  const built = await readFile(entryPage, "utf8").catch(() => undefined);
+  if (built === undefined) {
+    throw new Error(`the web UI is not built: ${shown} does not exist. Run \`just web\`.`);
+  }
+  const response = await fetch(url);
+  const served = await response.text();
+  if (response.status !== 200 || served !== built) {
+    throw new Error(
+      `the daemon at ${url} does not serve this checkout's ${shown} (HTTP ${response.status}). ` +
+        "Its binary was built for another checkout, or embeds an older UI: rebuild it with `just build`.",
+    );
+  }
+}
+
 BeforeAll(async function () {
   ({ child: server, url: baseUrl } = await startServer());
+  try {
+    await assertServesThisCheckoutsUi(baseUrl);
+  } catch (error) {
+    server.kill("SIGTERM");
+    throw error;
+  }
   browser = await chromium.launch();
 });
 
