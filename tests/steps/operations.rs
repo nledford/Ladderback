@@ -203,7 +203,9 @@ fn page_ids(page: &serde_json::Value) -> Vec<String> {
 }
 
 /// Reads the history page until the operation `id` is there with `status`,
-/// or fails when it ends any other way or never arrives.
+/// or fails when it ends any other way or never arrives. A state on the way
+/// — `queued` before the engine starts — is not an ending: the page keeps
+/// waiting.
 async fn shows_status(agent: &Agent, id: &str, status: &str) {
     let started = Instant::now();
     loop {
@@ -217,12 +219,15 @@ async fn shows_status(agent: &Agent, id: &str, status: &str) {
             });
         if let Some(Some(op)) = found {
             let now = op.get("status").and_then(serde_json::Value::as_str);
-            assert_eq!(
+            if now == Some(status) {
+                return;
+            }
+            if matches!(
                 now,
-                Some(status),
-                "operation {id} is {now:?}, not {status:?}"
-            );
-            return;
+                Some("succeeded" | "succeeded-with-warnings" | "failed" | "cancelled")
+            ) {
+                panic!("operation {id} is {now:?}, not {status:?}");
+            }
         }
         assert!(
             started.elapsed() < STATE_TIMEOUT,

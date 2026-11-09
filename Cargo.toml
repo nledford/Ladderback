@@ -216,7 +216,7 @@ platform.workspace = true
 secrets.workspace = true
 store.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
-uuid.workspace = true
+uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

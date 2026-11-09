@@ -377,7 +377,8 @@ impl Operations for PlanRunner {
             label: plan.label.clone(),
             deadline_budget: backup_budget(None, None),
         });
-        let operation = OperationId::from_uuid(Uuid::new_v4());
+        // A UUIDv7: the log orders by ID, so the newest run is the highest.
+        let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
         // The cancel switch is parked before the run starts, so a cancel
         // that arrives the instant the route answers finds it (§4.2). A
