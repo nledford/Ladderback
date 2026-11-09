@@ -347,8 +347,9 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn a_number_is_rounded_half_away_from_zero_on_its_shortest_digits() {
-        // `Intl` rounds the exact binary value of 1.005, which is below the
-        // half; the interface rounds its shortest decimal digits.
+        // The interface rounds the shortest decimal digits of a value, half
+        // away from zero, so 1.005 at two digits is 1.01, not 1.00 (the
+        // value's exact binary expansion is below the half). V8 agrees.
         let numbers = Numbers::new(&tag("en-US"), digits(Some(2))).unwrap();
         assert_eq!(numbers.format(1.005).as_deref(), Some("1.01"));
         assert_eq!(numbers.format(-1.005).as_deref(), Some("-1.01"));
