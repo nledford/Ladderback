@@ -804,6 +804,19 @@ mod tests {
         assert_eq!(short_id("0123456789abcdef"), "01234567");
         assert_eq!(short_id("abc123"), "abc123");
     }
+    #[test]
+    fn a_message_with_its_arguments_is_the_catalogs_own_text() {
+        assert_eq!(
+            text_with(
+                &Localizer::new(&[]),
+                msg::UI_SNAPSHOTS_OF,
+                &[("alias", MsgArg::Text("demo".to_owned()))],
+            )
+            .replace(['\u{2066}', '\u{2069}'], ""),
+            "Snapshots of demo",
+            "isolation marks aside, the catalog's text and nothing else"
+        );
+    }
 
     #[test]
     fn only_a_run_that_is_still_going_can_be_cancelled() {
