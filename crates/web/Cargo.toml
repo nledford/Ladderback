@@ -7,9 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The development pseudolocales `en-XA` and `ar-XB`, which a page asks for with
+# `?locale=` (technical design §8.4). They bring `fluent-pseudo` and its regex
+# engine along, so a release build passes `--no-default-features` (`trunk build
+# --release --no-default-features`), and `just architecture` checks that this
+# leaves them out.
+default = ["pseudo"]
+pseudo = ["l10n/pseudo"]
+
 [dependencies]
 console_error_panic_hook.workspace = true
+l10n.workspace = true
 leptos.workspace = true
+web-sys.workspace = true
 
 [lints]
 workspace = true
