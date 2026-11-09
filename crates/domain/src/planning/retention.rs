@@ -168,13 +168,56 @@ impl RetentionPolicy {
     /// whole group would go (technical design §7.3); the user can delete a
     /// plan's history explicitly instead. An empty policy keeps everything
     /// and never keeps nothing.
-    #[allow(
-        clippy::todo,
-        reason = "red test: commit the refusal scenario before the check exists"
-    )]
     pub fn keeps_nothing(&self) -> bool {
-        let _ = self;
-        todo!("every count zero and every span zero-length")
+        if self.is_empty() {
+            return false;
+        }
+        let Self {
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+            keep_within,
+            keep_within_minutely,
+            keep_within_hourly,
+            keep_within_daily,
+            keep_within_weekly,
+            keep_within_monthly,
+            keep_within_quarter_yearly,
+            keep_within_half_yearly,
+            keep_within_yearly,
+        } = self;
+        [
+            keep_last,
+            keep_minutely,
+            keep_hourly,
+            keep_daily,
+            keep_weekly,
+            keep_monthly,
+            keep_quarter_yearly,
+            keep_half_yearly,
+            keep_yearly,
+        ]
+        .iter()
+        .all(|count| count.is_none_or(|count| count.get() == 0))
+            && [
+                keep_within,
+                keep_within_minutely,
+                keep_within_hourly,
+                keep_within_daily,
+                keep_within_weekly,
+                keep_within_monthly,
+                keep_within_quarter_yearly,
+                keep_within_half_yearly,
+                keep_within_yearly,
+            ]
+            .iter()
+            .all(|span| span.is_none_or(|span| span.span().is_zero()))
     }
 }
 

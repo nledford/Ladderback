@@ -71,6 +71,7 @@ impl std::error::Error for ResolveError {}
 /// Resolves a repository's settings: the password from its source, and every
 /// `${…}` reference in the repository string and the options from the
 /// environment or a file.
+#[derive(Clone)]
 pub struct ResolveRepository {
     resolver: Arc<dyn SecretResolver>,
 }

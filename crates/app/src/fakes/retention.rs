@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use domain::SnapshotId;
 use domain::maintenance::Snapshot;
-use domain::planning::{KeepCount, RetentionPolicy};
+use domain::planning::RetentionPolicy;
 
 use crate::ports::{RepositoryAccess, Retention, RetentionError};
 
@@ -45,12 +45,5 @@ impl Retention for FakeRetention {
             .skip(keep)
             .map(|snapshot| snapshot.id.clone())
             .collect())
-    }
-}
-
-impl FakeRetention {
-    /// The count a policy of `keep-last N` holds, for tests that build one.
-    pub fn count(n: i64) -> KeepCount {
-        KeepCount::new(n).expect("a count")
     }
 }

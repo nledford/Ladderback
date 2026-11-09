@@ -59,7 +59,7 @@ Feature: Forget keeps each plan's history within its policy
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"
     When the owner forgets the repository and a prune is asked while it runs
-    Then the forget ends as succeeded
+    Then the operation ends as succeeded
     And the prune is refused while the forget holds the repository
 
   Scenario: A refused forget starts no forget
@@ -75,7 +75,7 @@ Feature: Forget keeps each plan's history within its policy
     Given a new repository
     And a plan "home" keeping the last 1 snapshot
     And the plan has been backed up 3 times
-    And the source folder was backed up once without Ladderback
+    And the folder was backed up without Ladderback
     When the owner forgets the repository
     Then the operation ends as succeeded
     And the repository has 2 snapshots

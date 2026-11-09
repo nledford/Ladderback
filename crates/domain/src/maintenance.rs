@@ -10,6 +10,8 @@
 //! decided here: retention is evaluated with rustic's own rules, through the
 //! `Retention` port in `app` (§3.2).
 
+use std::collections::BTreeMap;
+
 use crate::execution::plan_tags;
 use crate::planning::RetentionPolicy;
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
@@ -127,14 +129,105 @@ impl ForgetSelection {
     /// `ladderback-` tag is unmanaged whatever else it carries; a snapshot
     /// tagged by this agent and a plan in `plans` is managed; anything else
     /// tagged is orphaned. Each group's snapshots are newest first.
-    #[allow(
-        clippy::todo,
-        reason = "red test: commit the scenarios before the partition exists"
-    )]
     pub fn partition(snapshots: &[Snapshot], agent: &AgentId, plans: &[ManagedPlan]) -> Partition {
-        let _ = (snapshots, agent, plans);
-        todo!("the partition: managed, orphaned, unmanaged")
+        let own = agent.as_uuid().hyphenated().to_string();
+        let mut partition = Partition::default();
+        // Managed groups follow the plans' own order; each group's
+        // snapshots are newest first.
+        for plan in plans {
+            let mut group: Vec<Snapshot> = snapshots
+                .iter()
+                .filter(|snapshot| {
+                    snapshot.agent() == Some(own.as_str())
+                        && snapshot.plan() == Some(plan.plan.as_str())
+                })
+                .cloned()
+                .collect();
+            if !group.is_empty() {
+                sort_newest_first(&mut group);
+                partition.managed.push(ManagedGroup {
+                    plan: plan.plan.clone(),
+                    snapshots: group,
+                });
+            }
+        }
+        let mut orphaned = Vec::new();
+        let mut unmanaged = Vec::new();
+        for snapshot in snapshots {
+            let tagged = snapshot.agent().is_some() || snapshot.plan().is_some();
+            let managed = snapshot.agent() == Some(own.as_str())
+                && plans
+                    .iter()
+                    .any(|plan| snapshot.plan() == Some(plan.plan.as_str()));
+            if !tagged {
+                unmanaged.push(snapshot.clone());
+            } else if !managed {
+                orphaned.push(snapshot.clone());
+            }
+        }
+        partition.orphaned = grouped_by_tag(orphaned);
+        partition.unmanaged = grouped_by_unmanaged_key(unmanaged);
+        partition
     }
+}
+
+/// Newest first.
+fn sort_newest_first(snapshots: &mut [Snapshot]) {
+    snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.time));
+}
+
+/// Tagged snapshots by their `(agent, plan)` tag pair, ordered by agent
+/// then plan, each group newest first.
+fn grouped_by_tag(snapshots: Vec<Snapshot>) -> Vec<OrphanedGroup> {
+    let mut groups: BTreeMap<(Option<String>, Option<String>), Vec<Snapshot>> = BTreeMap::new();
+    for snapshot in snapshots {
+        groups
+            .entry((
+                snapshot.agent().map(str::to_owned),
+                snapshot.plan().map(str::to_owned),
+            ))
+            .or_default()
+            .push(snapshot);
+    }
+    groups
+        .into_iter()
+        .map(|((agent, plan), mut snapshots)| {
+            sort_newest_first(&mut snapshots);
+            OrphanedGroup {
+                agent,
+                plan,
+                snapshots,
+            }
+        })
+        .collect()
+}
+
+/// Untagged snapshots by `(host, label, paths)`, ordered by that key, each
+/// group newest first.
+fn grouped_by_unmanaged_key(snapshots: Vec<Snapshot>) -> Vec<UnmanagedGroup> {
+    let mut groups: BTreeMap<(String, String, Vec<String>), Vec<Snapshot>> = BTreeMap::new();
+    for snapshot in snapshots {
+        groups
+            .entry((
+                snapshot.hostname.clone(),
+                snapshot.label.clone(),
+                snapshot.paths.clone(),
+            ))
+            .or_default()
+            .push(snapshot);
+    }
+    groups
+        .into_iter()
+        .map(|((hostname, label, paths), mut snapshots)| {
+            sort_newest_first(&mut snapshots);
+            UnmanagedGroup {
+                hostname,
+                label,
+                paths,
+                snapshots,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

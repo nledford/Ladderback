@@ -14,6 +14,8 @@ use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::history::{GetOperation, ListOperations};
+use app::maintenance::{MaintenanceKind, RunMaintenance};
+use app::ports::Retention;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
@@ -107,6 +109,7 @@ async fn app_state_at(
         agent_id,
         engine: Arc::clone(&engine),
         store,
+        retention: Arc::new(engine::RusticRetention),
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
     });
@@ -350,6 +353,8 @@ struct PlanRunner {
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
     store: Arc<dyn OperationStore>,
+    /// Evaluates each plan's retention for a forget run (§7.3).
+    retention: Arc<dyn Retention>,
     /// The running operations' cancel switches, shared with the routes.
     registry: Arc<CancelRegistry>,
     /// Runs the agent, repository and plan hooks around every run (§6.1).
@@ -416,6 +421,66 @@ impl Operations for PlanRunner {
                 .with_hooks(hooks, setup)
                 .run(operation, Trigger::Manual, job, cancel)
                 .await;
+            registry.finish(&operation);
+            log::info!(
+                "operation {} ended: {:?}",
+                finished.operation.id().as_uuid().hyphenated(),
+                finished.operation.status()
+            );
+        });
+        Ok(id_text)
+    }
+    async fn start_maintenance(
+        &self,
+        repository: String,
+        kind: String,
+    ) -> Result<String, http_adapter::MaintenanceStartError> {
+        let alias = RepositoryAlias::parse(&repository)
+            .map_err(|_| http_adapter::MaintenanceStartError::UnknownRepository)?;
+        let kind = match kind.as_str() {
+            "forget" => MaintenanceKind::Forget,
+            "prune" => MaintenanceKind::Prune,
+            "check" => MaintenanceKind::Check,
+            _ => return Err(http_adapter::MaintenanceStartError::UnknownKind),
+        };
+        let use_case = RunMaintenance::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            Arc::clone(&self.store),
+            self.resolve.as_ref().clone(),
+            Arc::clone(&self.retention),
+            Arc::clone(&self.config),
+            self.agent_id,
+        );
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        let id_text = operation.as_uuid().hyphenated().to_string();
+        let prepared = use_case.prepare(operation, &alias, kind).await;
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(app::maintenance::MaintenanceError::UnknownRepository) => {
+                return Err(http_adapter::MaintenanceStartError::UnknownRepository);
+            }
+            Err(app::maintenance::MaintenanceError::Busy { running }) => {
+                return Err(http_adapter::MaintenanceStartError::Busy {
+                    running: running.as_uuid().hyphenated().to_string(),
+                });
+            }
+            Err(app::maintenance::MaintenanceError::KeepsNothing { plan }) => {
+                return Err(http_adapter::MaintenanceStartError::KeepsNothing {
+                    plan: plan.as_str().to_owned(),
+                });
+            }
+            Err(_) => return Err(http_adapter::MaintenanceStartError::Unavailable),
+        };
+        // The slot is held; the run happens on a task of its own, and its
+        // cancel switch is parked before it starts (§4.2).
+        let cancel = self.registry.register(operation);
+        let cancel = async move {
+            let _ = cancel.await;
+        };
+        let registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            let finished = use_case.execute(prepared, cancel).await;
             registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",
@@ -963,6 +1028,7 @@ mod tests {
             resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
             agent_id: agent_id::load_or_create(&data_dir).expect("an agent ID"),
             engine: Arc::new(ParkedEngine),
+            retention: Arc::new(engine::RusticRetention),
             store: Arc::new(
                 SqliteStore::open(&data_dir.join("ladderback.db"))
                     .await

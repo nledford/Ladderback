@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use cucumber::{given, then, when};
 use domain::planning::{
@@ -17,16 +16,13 @@ use domain::planning::{
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, SnapshotId, Timestamp, Uuid};
 
-use app::fakes::FakeRetention;
 use app::maintenance::{MaintenanceKind, RunMaintenance};
-use app::ports::{ConfigStore, RepositoryAccess, Retention, RetentionError};
-use domain::maintenance::Snapshot;
-use domain::planning::RetentionPolicy;
+use app::ports::ConfigStore;
 use secrets::SystemSecrets;
 
 use super::Agent;
 
-const PASSWORD: &str = "demo-password";
+const PASSWORD: &str = "e2e-scratch-password";
 
 /// What the e2e forget scenario set up, and what the run did.
 #[derive(Default)]
@@ -101,7 +97,7 @@ async fn save_config(agent: &mut Agent, keep_last: Option<i64>) {
         ],
     );
     if let Some(keep) = keep_last {
-        plan.retention.keep_last = Some(FakeRetention::count(keep));
+        plan.retention.keep_last = Some(domain::planning::KeepCount::new(keep).expect("a count"));
     }
     let mut repositories = BTreeMap::new();
     repositories.insert(
@@ -138,33 +134,6 @@ async fn save_config(agent: &mut Agent, keep_last: Option<i64>) {
     agent.forget.alias = Some(alias());
 }
 
-/// `keep-last`, as the run evaluates it: newest first, the rest goes.
-/// The shared contract suite checks this against rustic's own retention;
-/// the run's own port is swapped in where it differs.
-struct KeepLast;
-
-#[async_trait]
-impl Retention for KeepLast {
-    async fn removes(
-        &self,
-        _repository: &RepositoryAccess,
-        policy: &RetentionPolicy,
-        group: &[Snapshot],
-    ) -> Result<Vec<SnapshotId>, RetentionError> {
-        let keep = policy.keep_last.map(|count| {
-            if count.is_all() {
-                usize::MAX
-            } else {
-                usize::try_from(count.get()).unwrap_or(0)
-            }
-        });
-        Ok(match keep {
-            None => Vec::new(),
-            Some(keep) => group.iter().skip(keep).map(|s| s.id.clone()).collect(),
-        })
-    }
-}
-
 /// The snapshots carrying the plan tag, oldest first.
 fn snapshots_tagged(agent: &Agent, plan: &str) -> Vec<SnapshotId> {
     let tag = format!("ladderback-plan:{plan}");
@@ -192,11 +161,7 @@ async fn backed_up_times(agent: &mut Agent, times: u64) {
         let files = fs::read_dir(&source).expect("the source folder");
         for file in files {
             let file = file.expect("a file").path();
-            let name = file
-                .file_name()
-                .expect("a name")
-                .to_string_lossy()
-                .to_owned();
+            let name = file.file_name().expect("a name").to_string_lossy();
             fs::write(&file, format!("{name} {}\n", std::process::id())).expect("writes");
         }
     }
@@ -223,7 +188,7 @@ async fn forget(agent: &mut Agent) {
         Arc::new(platform::SystemClock),
         agent.store().await,
         resolve,
-        Arc::new(KeepLast),
+        Arc::new(engine::RusticRetention),
         Arc::new(config),
         agent.agent_id,
     );
@@ -233,6 +198,12 @@ async fn forget(agent: &mut Agent) {
         .prepare(operation, &alias(), MaintenanceKind::Forget)
         .await
         .expect("the repository is free");
+    let plan = agent.backup.plan.clone().expect("a plan");
+    let tagged = snapshots_tagged(agent, plan.as_str());
+    agent.forget.unmanaged = snapshots_of(agent)
+        .into_iter()
+        .find(|(id, _, _)| !tagged.contains(id))
+        .map(|(id, _, _)| id);
     agent.finished = Some(use_case.execute(prepared, futures::future::pending()).await);
 }
 

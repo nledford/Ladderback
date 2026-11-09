@@ -56,6 +56,9 @@ code_messages!(ERRORS, error_message, ErrorCode {
     OperationUnknown => msg::ERROR_OPERATION_UNKNOWN,
     OperationNotRunning => msg::ERROR_OPERATION_NOT_RUNNING,
     InvalidCursor => msg::ERROR_INVALID_CURSOR,
+    MaintenanceBusy => msg::ERROR_MAINTENANCE_BUSY,
+    RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
+    MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

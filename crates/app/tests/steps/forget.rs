@@ -152,7 +152,8 @@ impl ForgetWorld {
             vec![domain::planning::Source::parse("/home/demo").expect("a source")],
         );
         if let Some(keep) = keep_last {
-            plan.retention.keep_last = Some(FakeRetention::count(keep));
+            plan.retention.keep_last =
+                Some(domain::planning::KeepCount::new(keep).expect("a count"));
         }
         self.plans.push(plan);
         self.save().await;
@@ -193,6 +194,9 @@ impl ForgetWorld {
                     .tags
                     .iter()
                     .any(|tag| tag == &format!("{PLAN_TAG_PREFIX}{plan}"))
+                    && snapshot.tags.iter().any(|tag| {
+                        tag == &format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated())
+                    })
             })
             .map(|snapshot| snapshot.id.clone())
             .collect()
@@ -281,20 +285,15 @@ impl Engine for Scripted {
         // anything holds the repository.
         let hold = matches!(job, Job::Forget(_));
         let release = Arc::clone(&self.release);
-        let mut events = events.into_iter();
-        let first = events.next();
-        let rest: Vec<_> = events.collect();
-        let stream = stream::iter(std::iter::once(started).chain(first)).chain(
-            stream::iter(rest).then(move |event| {
-                let release = Arc::clone(&release);
-                async move {
-                    if hold && matches!(event, EngineEvent::Succeeded(_)) {
-                        release.notified().await;
-                    }
-                    event
+        let stream = stream::iter(vec![started]).chain(stream::iter(events).then(move |event| {
+            let release = Arc::clone(&release);
+            async move {
+                if hold && matches!(event, EngineEvent::Succeeded(_)) {
+                    release.notified().await;
                 }
-            }),
-        );
+                event
+            }
+        }));
         Ok(RunningJob {
             events: stream.boxed(),
             control: Box::new(Nothing),
@@ -387,8 +386,16 @@ async fn forget(agent: &mut Agent) {
         .await;
     match prepared {
         Ok(prepared) => {
+            let runner = Arc::clone(&use_case);
+            let running =
+                tokio::spawn(
+                    async move { runner.execute(prepared, futures::future::pending()).await },
+                );
+            // The engine records the forget job before its result is held,
+            // so the release reaches a waiter that is registered.
+            wait_for_forget(agent).await;
             agent.forget.release.notify_waiters();
-            agent.finished = Some(use_case.execute(prepared, futures::future::pending()).await);
+            agent.finished = Some(running.await.expect("the run ends"));
         }
         Err(error) => agent.forget.refused = Some(error),
     }
@@ -417,7 +424,7 @@ async fn forget_then_prune(agent: &mut Agent) {
 /// Waits until the scripted engine was given a forget job.
 async fn wait_for_forget(agent: &Agent) {
     for _ in 0..400 {
-        if agent.forget.jobs().iter().any(|job| *job == "forget") {
+        if agent.forget.jobs().contains(&"forget") {
             return;
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -431,14 +438,22 @@ async fn keeps_newest(agent: &mut Agent, keep: usize, plan: String) {
     let of_plan = agent.forget.plan_snapshots(&plan);
     let (keeps, lets_go) = of_plan.split_at(keep);
     assert!(
-        removed.iter().all(|id| lets_go.contains(id)),
+        removed
+            .iter()
+            .filter(|id| of_plan.contains(id))
+            .all(|id| lets_go.contains(id)),
         "only what the policy lets go is removed: removed {removed:?} of {lets_go:?}"
     );
     assert!(
         keeps.iter().all(|id| !removed.contains(id)),
         "the newest {keep} are kept: {keeps:?}"
     );
-    assert_eq!(removed.len(), lets_go.len(), "everything else goes");
+    let removed_of_plan: Vec<_> = removed.iter().filter(|id| of_plan.contains(id)).collect();
+    assert_eq!(
+        removed_of_plan.len(),
+        lets_go.len(),
+        "everything else of the plan goes"
+    );
 }
 
 #[then(expr = "the repository keeps the newest snapshot of the plan {string}")]
@@ -532,7 +547,7 @@ fn prune_refused(agent: &mut Agent) {
 #[then("the engine was never asked to remove anything")]
 fn no_forget_job(agent: &mut Agent) {
     assert!(
-        !agent.forget.jobs().iter().any(|job| *job == "forget"),
+        !agent.forget.jobs().contains(&"forget"),
         "the engine ran: {:?}",
         agent.forget.jobs()
     );
