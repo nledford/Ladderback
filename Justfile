@@ -199,7 +199,7 @@ red-first base='origin/main':
 
 # Run every check CI runs, except mutation testing and the red-first check.
 [group('quality')]
-verify: fmt-check lint architecture test test-wasm test-ui
+verify: fmt-check lint architecture test test-contrast test-wasm test-ui
 
 # Shows the version bump and CHANGELOG.md entry that the release PR would
 # contain for the committed history (§12.1). Changes nothing.
