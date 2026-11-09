@@ -380,13 +380,14 @@ impl Operations for PlanRunner {
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
-        // The cancel switch is parked before the run starts, so a cancel
-        // that arrives the instant the route answers finds it (§4.2). A
-        // cancel that fires only resolves; whether the receiver was still
-        // listening is nobody's business here.
-        let registry = Arc::clone(&self.registry);
+        // The cancel switch is parked before the run starts — not lazily
+        // when the run first polls it — so a cancel that arrives the
+        // instant the route answers finds it (§4.2). A cancel that fires
+        // only resolves; whether the receiver was still listening is
+        // nobody's business here.
+        let cancel = self.registry.register(operation);
         let cancel = async move {
-            let _ = registry.register(operation).await;
+            let _ = cancel.await;
         };
         // The agent, repository and plan hooks of §6.1 wrap the run, as the
         // configuration stands now: a rewrite between runs is picked up.
@@ -823,8 +824,10 @@ mod tests {
             options_hot: Default::default(),
             options_cold: Default::default(),
         };
-        let mut hooks = domain::planning::Hooks::default();
-        hooks.run_before = vec![domain::planning::HookEntry::parse("true").expect("a hook")];
+        let hooks = domain::planning::Hooks {
+            run_before: vec![domain::planning::HookEntry::parse("true").expect("a hook")],
+            ..Default::default()
+        };
         let config = domain::planning::AgentConfig::new(
             domain::planning::AgentSettings::default(),
             hooks,
