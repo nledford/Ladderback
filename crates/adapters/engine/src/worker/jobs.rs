@@ -2,8 +2,8 @@
 //! `Started` right before the step the deadline counts from, and returns what
 //! `rustic_core` reported, converted by `convert`.
 
-use std::path::PathBuf;
 use domain::execution::plan_tags::PlanTags;
+use std::path::PathBuf;
 
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{

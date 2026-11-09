@@ -16,7 +16,7 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | Milestone | Feature files |
 |---|---|
 | M1a | `execution/backup.feature` (warnings), `execution/cancel.feature`, `execution/deadline.feature` (`@e2e` with a real worker) |
-| M1b | `planning/config.feature`, `planning/hooks.feature`, `interop/import.feature`, `interop/export.feature`, `maintenance/forget.feature`, `maintenance/adopt.feature`, `maintenance/serialization.feature`, `secrets/substitution.feature`, `secrets/redaction.feature`, `security/request_checks.feature` (`@e2e`), `ui/accessibility.feature` (`@ui`: first backup by keyboard alone; announcements; reflow; form errors) |
+| M1b | `planning/config.feature`, `planning/hooks.feature`, `repositories/connect.feature` (init/test/connect; `@e2e` against scratch repositories), `interop/import.feature`, `interop/export.feature`, `maintenance/forget.feature`, `maintenance/adopt.feature`, `maintenance/serialization.feature`, `secrets/substitution.feature`, `secrets/redaction.feature`, `security/request_checks.feature` (`@e2e`), `ui/accessibility.feature` (`@ui`: first backup by keyboard alone; announcements; reflow; form errors) |
 | M2 | `execution/schedule.feature` (catch-up, wake, time zones), `execution/retry.feature`, `execution/overlap.feature`, `notifications/rules.feature` |
 | M3 | `restore/restore.feature`, `restore/download.feature`, `automation/mcp.feature` |
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |

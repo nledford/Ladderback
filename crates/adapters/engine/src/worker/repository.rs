@@ -19,7 +19,10 @@ use crate::job::{Level, RepositorySpec};
 /// the backends, the cache this worker may use, and the progress reporting
 /// through `Context::events`. Opening it — or initialising it — is the
 /// caller's step.
-pub(crate) fn new_repository(ctx: &Context, spec: &RepositorySpec) -> Result<Repository<()>, JobError> {
+pub(crate) fn new_repository(
+    ctx: &Context,
+    spec: &RepositorySpec,
+) -> Result<Repository<()>, JobError> {
     // rustic gives the cold half `options` and `options_cold`, the hot half
     // `options` and `options_hot`.
     let backend_options = BackendOptions::default()
@@ -52,8 +55,8 @@ pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
-    let repository = new_repository(ctx, spec)?
-        .open(&Credentials::password(spec.password.expose()))?;
+    let repository =
+        new_repository(ctx, spec)?.open(&Credentials::password(spec.password.expose()))?;
     // Only a repository that opened is known to be one, so only then is what
     // looks like its leftovers ours to remove.
     for half in std::iter::once(spec.repository.as_str()).chain(spec.repo_hot.as_deref()) {

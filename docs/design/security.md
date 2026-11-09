@@ -84,6 +84,8 @@ Resolved secrets are passed to workers through the `JobSpec` on stdin, never as 
 
 Hook and notification templates never receive secrets (Backrest leaks them this way, [#1170](https://github.com/garethgeorge/backrest/issues/1170)); hooks get the same scrubbed environment when they are built. **Secrets never leave the agent.** Hub maintenance and hub downloads need the repo password, so for hub-managed repos the **hub has its own secret entry** for that repo, configured on the hub. Agents don't push passwords.
 
+Connecting a repository saves the settings **as written**: a `password-keyring`, `password-file` or `${…}` reference stays a reference in `config.toml`, never the value it resolved to; the resolved value lives only inside the job it was resolved for. The `@e2e` scenario covers this with a file reference — no test writes a real OS-keyring entry — and a keyring reference round-trips the same way through the config store.
+
 **Not yet in place.** Mapping `SecretError` and `TemplateError` to operation failure reasons, API error codes and their localized messages belongs to the job-runner, operation-log and `l10n` work. The warning for an inline secret, and seeding a daemon-wide redactor with every secret at config load, belong to the config work.
 
 ### 10.3 Agent ↔ hub

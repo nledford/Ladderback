@@ -186,10 +186,7 @@ async fn run(
     op: OperationId,
     job: Job,
 ) -> Result<RepositoryId, RepositoryError> {
-    let RunningJob { events, .. } = engine
-        .run(op, job)
-        .await
-        .map_err(RepositoryError::Engine)?;
+    let RunningJob { events, .. } = engine.run(op, job).await.map_err(RepositoryError::Engine)?;
     let mut events = events.fuse();
     while let Some(event) = events.next().await {
         match event {
@@ -271,13 +268,10 @@ mod tests {
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
 
-
     use super::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
     use crate::fakes::{FakeSecrets, InMemoryConfigStore};
     use crate::ports::ConfigStore;
-    use crate::ports::{
-        Engine, EngineError, EngineEvent, Job, JobControl, RunningJob,
-    };
+    use crate::ports::{Engine, EngineError, EngineEvent, Job, JobControl, RunningJob};
     use crate::secrets::ResolveRepository;
 
     /// An engine that answers every repository job with the scripted outcome,
@@ -301,7 +295,12 @@ mod tests {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(job);
-            let id = match self.outcome.lock().unwrap_or_else(PoisonError::into_inner).clone() {
+            let id = match self
+                .outcome
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+            {
                 Ok(id) => id,
                 Err(reason) => {
                     return Ok(RunningJob {
@@ -464,7 +463,11 @@ mod tests {
             config.clone(),
         );
         let outcome = use_case.init(op(), &settings(), None).await;
-        assert!(!outcome.unwrap_or_else(|e| panic!("the initialisation: {e:?}")).saved);
+        assert!(
+            !outcome
+                .unwrap_or_else(|e| panic!("the initialisation: {e:?}"))
+                .saved
+        );
         use_case
             .init(op(), &settings(), Some(alias()))
             .await
