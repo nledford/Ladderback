@@ -284,6 +284,13 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             &repository.secrets,
         ));
     }
+    // The job is taken. The daemon times a worker out that has said nothing
+    // by its start timeout, and opening a repository can take longer than
+    // that: this line, which holds nothing of the job, comes before it.
+    events.emit(&WorkerEvent::Log {
+        level: Level::Debug,
+        message: "job accepted".to_owned(),
+    })?;
     let ctx = Context::new(events.clone(), &spec, pid, process);
     let outcome = match &spec.job {
         JobKind::Fake(job) => fake::run(&ctx, job),
