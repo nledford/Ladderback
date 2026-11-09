@@ -50,7 +50,7 @@ impl EventBus for BroadcastEventBus {
         }
     }
 
-    async fn subscribe(&self) -> BoxStream<UiEvent> {
+    async fn subscribe(&self) -> BoxStream<'static, UiEvent> {
         let queue = Arc::new(Queue::default());
         let mut subscribers = self
             .subscribers

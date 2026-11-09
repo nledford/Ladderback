@@ -23,7 +23,8 @@ pub trait EventBus: Send + Sync {
     /// Hands `event` to every current subscriber.
     async fn publish(&self, event: UiEvent);
 
-    /// The events published from now on, in order, ending only when the bus
-    /// is dropped. [`EVENT_BUFFER`] events can wait per subscriber.
-    async fn subscribe(&self) -> BoxStream<UiEvent>;
+    /// The events published from now on, in order, as a stream of its own
+    /// that outlives the bus it came from. [`EVENT_BUFFER`] events can wait
+    /// per subscriber.
+    async fn subscribe(&self) -> BoxStream<'static, UiEvent>;
 }
