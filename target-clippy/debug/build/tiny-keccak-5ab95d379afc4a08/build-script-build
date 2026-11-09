@@ -1,2 +1,0 @@
-#!/bin/sh
-MBX_BUILD_SCRIPT_SHIM_PATH="$0" exec "$(dirname "$0")/../../.mbx-build-script-shims/872d53e77b17c7ff/mbx" "$@"
