@@ -118,6 +118,14 @@ test-wasm *args:
     unset CARGO_TERM_QUIET
     cargo test --package l10n --package web --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
 
+
+# The color tokens in style.css must meet WCAG 2.2 AA in every pair the UI
+# uses (§4.5): 4.5:1 for text, 3:1 for UI parts like the focus ring.
+[doc('Check the style.css token pairs for WCAG 2.2 AA contrast.')]
+[group('test')]
+test-contrast:
+    node scripts/check-contrast.mjs crates/web/style.css
+
 # The version of wasm-bindgen that Cargo.lock pins.
 [private]
 _wasm-bindgen-version:
