@@ -357,11 +357,14 @@ fn still_serving(agent: &mut Agent) {
         .write_all(request.as_bytes())
         .expect("the request is sent");
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).expect("a response");
+    stream.read_to_end(&raw).expect("a response");
     let text = String::from_utf8_lossy(&raw);
+    // Liveness, not the UI: a build without crates/web/dist answers 503, and
+    // CI's Check job runs no trunk build. Any status line — and a body the
+    // daemon produced — proves the stalled page cost it nothing.
     assert!(
-        text.starts_with("HTTP/1.1 200"),
-        "the daemon still serves the UI:\n{text}"
+        text.starts_with("HTTP/1.1 "),
+        "the daemon answers no more:\n{text}"
     );
 }
 
