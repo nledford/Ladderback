@@ -15,10 +15,22 @@
 // Usage: node scripts/red-first.mjs <base-ref>
 // Exit status: 0 when every new test fails at run time, 1 otherwise.
 // Needs git, cargo, and, for @ui scenarios, trunk and npm.
+//
+// Wasm tests (`#[wasm_bindgen_test]`, run under Node by wasm-bindgen-test-runner,
+// as `just test-wasm` does) count too: when the commit adds one, both trees are
+// built for wasm32-unknown-unknown, and each new wasm test must fail at run time.
+// That needs the wasm32 target and wasm-bindgen-cli at Cargo.lock's version
+// (`just setup`), and Node.
+// @ui scenarios build the UI with the tree's `just web-test` when it has one.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
+
+const WASM_TARGET = "wasm32-unknown-unknown";
+const WASM_RUNNER = "wasm-bindgen-test-runner";
+// Cargo's runner for the target, for the wasm calls only (as `just test-wasm`).
+const WASM_ENV = { CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: WASM_RUNNER };
 
 // Generous limits: builds from cold caches are slow, but a hung command must
 // fail the check instead of holding the runner until the job timeout.
@@ -152,6 +164,84 @@ function rustTests(dir) {
   return { ok: true, tests };
 }
 
+// --- Wasm tests ------------------------------------------------------------
+
+/**
+ * Whether the test: commit adds a wasm-bindgen test. The wasm lane costs two
+ * builds, so it runs only for a commit that shows one in its added lines. A
+ * test that this misses shows up in the host or scenario count, or not at all.
+ */
+function addsWasmTests(mergeBase, first) {
+  const diff = spawnSync("git", ["diff", "-U0", "--no-color", mergeBase, first, "--", "*.rs"], {
+    cwd: repo,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (diff.status !== 0) throw new Error(`git diff failed:\n${diff.stderr}`);
+  return diff.stdout.split("\n").some((line) => line.startsWith("+") && /#\[(\w+::)*wasm_bindgen_test\b/.test(line));
+}
+
+/**
+ * Builds the wasm-bindgen test binaries of the packages that depend on
+ * `wasm-bindgen-test` and lists their tests, as `rustTests` does. A package
+ * gets everything the Justfile's `test-wasm` gives it: all its features, and
+ * the runner as Cargo's for the target (set per call, no `.cargo/config.toml`).
+ */
+function wasmTests(dir) {
+  if (!existsSync(path.join(dir, "Cargo.toml"))) {
+    return { ok: true, tests: new Map() };
+  }
+  const metadata = run("cargo", ["metadata", "--no-deps", "--format-version", "1"], dir);
+  if (metadata.status !== 0) {
+    return { ok: false, output: metadata.output };
+  }
+  // Cargo's own notes (or a wrapper's) can share the stream; the JSON is the line that opens with a brace.
+  const json = metadata.output.split("\n").find((line) => line.startsWith("{"));
+  const packages = JSON.parse(json)
+    .packages.filter((pkg) => pkg.dependencies.some((dependency) => dependency.name === "wasm-bindgen-test"))
+    .flatMap((pkg) => ["--package", pkg.name]);
+  if (packages.length === 0) {
+    return { ok: true, tests: new Map() };
+  }
+  const build = run(
+    "cargo",
+    ["test", ...packages, "--lib", "--bins", "--tests", "--all-features"]
+      .concat(["--target", WASM_TARGET, "--no-run", "--message-format=json"]),
+    dir,
+    { env: WASM_ENV },
+  );
+  if (build.status !== 0) {
+    return { ok: false, output: build.output };
+  }
+  const tests = new Map();
+  for (const line of build.output.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    const message = JSON.parse(line);
+    if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable) {
+      continue;
+    }
+    const source = path.relative(dir, message.target.src_path);
+    const cwd = path.dirname(message.manifest_path);
+    const env = { CARGO_MANIFEST_DIR: cwd, CARGO_PKG_NAME: packageName(message.package_id) };
+    const listed = run(WASM_RUNNER, [message.executable, "--list", "--format", "terse"], cwd, {
+      env,
+      timeout: TEST_TIMEOUT_MS,
+    });
+    // A runner that can't list (its version must equal Cargo.lock's
+    // wasm-bindgen: `just setup`) must stop the check, not read as no tests.
+    if (listed.status !== 0) {
+      throw new Error(`${WASM_RUNNER} --list ${message.executable} failed:\n${listed.output}`);
+    }
+    for (const entry of listed.output.split("\n")) {
+      const match = entry.match(/^(.+): test$/);
+      if (match) {
+        tests.set(`${source}::${match[1]}`, { exe: message.executable, name: match[1], cwd, env });
+      }
+    }
+  }
+  return { ok: true, tests };
+}
+
 // --- Scenarios -------------------------------------------------------------
 
 function featureFiles(dir) {
@@ -253,10 +343,19 @@ treesRoot = realpathSync(path.join(redFirst, "trees"));
 const trees = { base: path.join(treesRoot, "base"), first: path.join(treesRoot, "first") };
 try {
   for (const dir of Object.values(trees)) removeTree(dir);
-  git("worktree", "add", "--detach", trees.base, git("merge-base", base, first));
+  const mergeBase = git("merge-base", base, first);
+  git("worktree", "add", "--detach", trees.base, mergeBase);
   const before = rustTests(trees.base);
   if (!before.ok) {
     throw new Error(`the base doesn't build:\n${before.output}`);
+  }
+  // The wasm lane is built only for a test: commit that adds a wasm test, so
+  // that other pull requests don't pay for two more builds. It goes before the
+  // seed, which copies the base tree's target dir.
+  const wasm = addsWasmTests(mergeBase, first);
+  const beforeWasm = wasm ? wasmTests(trees.base) : { ok: true, tests: new Map() };
+  if (!beforeWasm.ok) {
+    throw new Error(`the base doesn't build for ${WASM_TARGET}:\n${beforeWasm.output}`);
   }
   seedFirstTarget();
   git("worktree", "add", "--detach", trees.first, first);
@@ -264,11 +363,18 @@ try {
   if (!after.ok) {
     throw new Error(`the test: commit doesn't compile; a compile error doesn't count as red:\n${after.output}`);
   }
+  const afterWasm = wasm ? wasmTests(trees.first) : { ok: true, tests: new Map() };
+  if (!afterWasm.ok) {
+    throw new Error(
+      `the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`,
+    );
+  }
   const newTests = [...after.tests].filter(([key]) => !before.tests.has(key));
+  const newWasmTests = [...afterWasm.tests].filter(([key]) => !beforeWasm.tests.has(key));
   const oldScenarios = scenarios(trees.base);
   const newScenarios = [...scenarios(trees.first)].filter(([key]) => !oldScenarios.has(key));
 
-  if (newTests.length === 0 && newScenarios.length === 0) {
+  if (newTests.length === 0 && newWasmTests.length === 0 && newScenarios.length === 0) {
     fail("the test: commit adds no tests or scenarios, so it specifies nothing new");
   }
 
@@ -278,12 +384,28 @@ try {
     console.log(`${failed ? "red " : "GREEN"} ${key}`);
     if (!failed) fail(`${key} doesn't fail on the test: commit:\n${result.output}`);
   }
+  for (const [key, test] of newWasmTests) {
+    const result = run(WASM_RUNNER, [test.exe, "--exact", test.name], test.cwd, {
+      env: test.env,
+      timeout: TEST_TIMEOUT_MS,
+    });
+    const failed = result.status !== 0 && /\b1 failed\b/.test(result.output);
+    console.log(`${failed ? "red " : "GREEN"} ${key} (wasm32)`);
+    if (!failed) fail(`${key} doesn't fail on the test: commit (wasm32):\n${result.output}`);
+  }
 
   let uiBuilt = false;
   const uiReady = () => {
     if (uiBuilt) return;
+    // A tree that defines a `web-test` recipe builds its UI for the scenarios
+    // with it, as `just test-ui` does (it may need features a release build
+    // leaves out). A tree without one gets the plain release build.
+    const webTest =
+      existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
     for (const [command, args, cwd] of [
-      ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
+      webTest
+        ? ["just", ["web-test"], trees.first]
+        : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
       ["cargo", ["build"], trees.first],
       ["npm", ["ci"], path.join(trees.first, "ui-tests")],
     ]) {
