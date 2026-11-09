@@ -33,7 +33,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/nledford/Steading"
+repository = "https://github.com/nledford/Ladderback"
 publish = false
 
 [workspace.dependencies]
