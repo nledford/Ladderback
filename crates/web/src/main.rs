@@ -27,9 +27,9 @@ use leptos_router::path;
 // slice's, and until then a build without the gallery leaves these unused.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod announcer;
-// Stubbed red for commit 1 (§13.1): the gallery wiring arrives with the
-// implementation commits.
-#[allow(dead_code)]
+// The shared component set, exercised by the gallery in a `gallery` build; a
+// build without the gallery has no user for it yet.
+#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod components;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod formatting;

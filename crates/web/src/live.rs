@@ -8,6 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
+use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::wasm_bindgen::closure::Closure;
 
@@ -124,4 +125,22 @@ fn schedule(wakeup: Option<Duration>) {
             timer.handle.set(handle);
         }
     });
+}
+
+/// Opens the dialog that stands in for a modal and tells the announcer, so
+/// messages wait while it is open. A dialog already open is not counted twice.
+pub(crate) fn open_modal(dialog: &web_sys::HtmlDialogElement, counted: RwSignal<bool>) {
+    if !dialog.open() && dialog.show_modal().is_ok() {
+        counted.set(true);
+        modal_opened();
+    }
+}
+
+/// Tells the announcer the modal is gone, once however it went: the `close`
+/// event, which Escape and the Close button both raise, or the page leaving.
+pub(crate) fn modal_gone(counted: RwSignal<bool>) {
+    if counted.try_get_untracked() == Some(true) {
+        counted.set(false);
+        modal_closed();
+    }
 }

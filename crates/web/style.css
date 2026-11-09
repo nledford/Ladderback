@@ -13,6 +13,14 @@
   --accent: #1d4ed8;
   --focus: #1d4ed8;
   --surface: #f3f4f6;
+  --badge-loading-fg: #172554;
+  --badge-loading-bg: #dbeafe;
+  --badge-empty-fg: #111827;
+  --badge-empty-bg: #e5e7eb;
+  --badge-error-fg: #691717;
+  --badge-error-bg: #fee2e2;
+  --badge-success-fg: #052e16;
+  --badge-success-bg: #dcfce7;
   color-scheme: light dark;
 }
 
@@ -24,6 +32,14 @@
     --accent: #8ab4f8;
     --focus: #8ab4f8;
     --surface: #1d2229;
+    --badge-loading-fg: #dbeafe;
+    --badge-loading-bg: #172554;
+    --badge-empty-fg: #e5e7eb;
+    --badge-empty-bg: #26303f;
+    --badge-error-fg: #fee2e2;
+    --badge-error-bg: #691717;
+    --badge-success-fg: #dcfce7;
+    --badge-success-bg: #052e16;
   }
 }
 
@@ -117,4 +133,59 @@ main:focus {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+ * Status badges (§4.5): a short labeled state on a colored pill, its text
+ * token on its background token — the pairs scripts/check-contrast.mjs checks.
+ */
+.badge {
+  display: inline-block;
+  border-radius: 9999px;
+  padding-block: 0.125rem;
+  padding-inline: 0.5rem;
+}
+
+.badge-loading {
+  color: var(--badge-loading-fg);
+  background-color: var(--badge-loading-bg);
+}
+
+.badge-empty {
+  color: var(--badge-empty-fg);
+  background-color: var(--badge-empty-bg);
+}
+
+.badge-error {
+  color: var(--badge-error-fg);
+  background-color: var(--badge-error-bg);
+}
+
+.badge-success {
+  color: var(--badge-success-fg);
+  background-color: var(--badge-success-bg);
+}
+
+/* The demo progress bar: a filled track whose width follows aria-valuenow. */
+.progress-track {
+  background-color: var(--surface);
+  block-size: 0.5rem;
+  border-radius: 9999px;
+  inline-size: 16rem;
+}
+
+.progress-fill {
+  background-color: var(--focus);
+  block-size: 100%;
+  border-radius: inherit;
+}
+
+/* A toast: visually above its neighbors while it lasts (§4.5). */
+.toast {
+  background-color: var(--surface);
+  border: 1px solid var(--focus);
+  border-radius: 0.25rem;
+  margin-block: 0.5rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.75rem;
 }
