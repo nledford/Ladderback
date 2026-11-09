@@ -70,7 +70,7 @@ async fn initialising_where_a_repository_already_exists_is_refused_and_changes_n
     let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
     assert!(matches!(
         failed(&events),
-        domain::execution::FailureReason::EngineFailed { .. }
+        domain::execution::FailureReason::RepositoryExists
     ));
     assert_eq!(contents(&scratch.repo_dir()), before, "nothing was written");
 }

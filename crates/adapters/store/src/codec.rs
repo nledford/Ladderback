@@ -159,6 +159,7 @@ pub(crate) fn encode_failure(
             None,
         ),
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
+        FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
     };
@@ -207,6 +208,7 @@ pub(crate) fn decode_failure(
             transition: transition(&args)?,
         }),
         "deadline-passed" => Ok(FailureReason::DeadlinePassed),
+        "repository-exists" => Ok(FailureReason::RepositoryExists),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         other => Err(bad(
