@@ -137,15 +137,28 @@ async fn process_hooks_meet_the_hooks_contract() {
 /// The stop sequence a hook that ignores SIGTERM is killed by: TERM first
 /// (the hook's trap fires), then SIGKILL after the 5 s grace. A plain
 /// `sleep` hook dies on the first signal, so it cannot tell the two apart.
+/// The trap only holds once the shell has reached it: under load the
+/// process can still be starting when the timeout fires, and the group's
+/// TERM kills it before it ever traps, which reads as a clean stop with no
+/// marker. So the script says when its trap is in place, the runner gets a
+/// timeout of its own, and only a `ready` attempt counts; the markers, not
+/// the clock, say what happened.
 #[tokio::test]
 async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
     let harness = ProcessHooksHarness::new();
     let hook = harness.script(
         "ignores-term",
         None,
-        "trap 'echo term >> \"$LOG\"' TERM\nwhile :; do sleep 1 & wait $!; done",
+        concat!(
+            r#"echo started >> "$LOG""#,
+            "\n",
+            r#"trap 'echo term >> "$LOG"' TERM"#,
+            "\n",
+            r#"echo ready >> "$LOG""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
     );
-    let started = std::time::Instant::now();
     let context = HookContext {
         phase: HookPhase::Before,
         plan: PlanId::parse("demo-plan").expect("the demo plan parses"),
@@ -154,16 +167,32 @@ async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
         snapshot: None,
         error: None,
     };
-    let outcome = harness.runner().run(&hook, &context).await;
-    assert_eq!(outcome.status, HookStatus::TimedOut);
-    let lines = harness.written().await;
-    assert!(
-        lines.iter().any(|line| line.contains("term")),
-        "SIGTERM reached the group before the kill: {lines:?}"
-    );
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(30),
-        "TERM, then the 5 s grace, then KILL: {elapsed:?}"
-    );
+    // A whole process to start, on a runner that may be loaded: the
+    // harness's half second is not always enough for the shell to reach
+    // its trap.
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(5));
+    for attempt in 0..3 {
+        std::fs::write(&harness.log, "").expect("the log is cleared");
+        let started = std::time::Instant::now();
+        let outcome = runner.run(&hook, &context).await;
+        let elapsed = started.elapsed();
+        assert_eq!(outcome.status, HookStatus::TimedOut);
+        let lines = harness.written().await;
+        if lines.iter().any(|line| line == "ready") {
+            // The trap was in place before the timeout could fire, so the
+            // marker says what really reached the hook.
+            assert!(
+                lines.iter().any(|line| line == "term"),
+                "SIGTERM reached the group before the kill: {lines:?}"
+            );
+            assert!(
+                elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(30),
+                "TERM, then the 5 s grace, then KILL: {elapsed:?}"
+            );
+            return;
+        }
+        // Still starting when the timeout fired; nothing was proven, so
+        // nothing is asserted. Try again while attempts remain.
+        assert!(attempt < 2, "the hook never reached its trap: {lines:?}");
+    }
 }

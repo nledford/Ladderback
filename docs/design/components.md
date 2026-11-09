@@ -69,7 +69,8 @@ enum WorkerEvent {
 - **Job runner.** It spawns workers, consumes events, writes the op log (queued, running, finished; a write the store refuses never changes how the operation ends, §9) and broadcasts to UI clients. If a hub is configured, it also writes events to the sync outbox.
 - **Store.** SQLite via `sqlx`, in WAL mode (§9).
 - **Logging.** `serve` installs `env_logger` first, writing one plain line per record to stderr, with millisecond timestamps and colour only on a terminal. The default level is `info`, because env_logger's own would hide the worker's warnings (§4.1); `RUST_LOG` directives layer on top of that default, and an unset, empty or blank value means the default. It logs `ladderback <version> starting` before it binds; the `listening on` line stays a plain `eprintln!`, and `ladderback worker` installs no logger.
-- **Config.** `config.toml` in the platform config dir is the source of truth (§6.1).
+- **Config** (§6.1). `config.toml` in the platform config dir, `LADDERBACK_CONFIG_DIR` when set (a non-empty value; tests and a second daemon use it). The platform folders: macOS `~/Library/Application Support/ladderback` for both config and data; Linux `$XDG_CONFIG_HOME|$HOME/.config/ladderback` and `$XDG_DATA_HOME|$HOME/.local/share/ladderback`; `LADDERBACK_DATA_DIR` overrides the data dir, which holds `ladderback.db` and the agent ID. No home directory and no override is a typed exit, not a guess. `serve` reads the config before it binds: a file this build cannot read — unreadable, too large, missing or newer schema, invalid — is a typed startup exit (the catalog's `cli-config-*` messages) that names the file and the version it found; it never starts on a silent empty configuration, and never prints "listening on" first. An empty configuration is fine: an agent with nothing to do still serves.
+- **Operations API.** `POST /api/v1/operations` with `{"plan": …}` starts a backup of a named plan and answers `202` with the operation's ID; refusals are typed (`plan-unknown`, `invalid-body`, `config-unavailable`). This is the minimal route E2 grows into the operations page (cancel, polling, history). Hooks are not wired around API-started runs yet; they arrive with the scheduler.
 - **Secrets** (§10.2).
 - **Hub client** (§7). It keeps an outbound WebSocket open, with reconnect, backoff and outbox replay.
 
@@ -100,7 +101,7 @@ Every page follows §4.5. Pages:
 6. **Operations.** A searchable history with full logs, warnings and a cancel button.
 7. **Settings.** Auth, hub pairing, notifications.
 
-Live updates come from one WebSocket per tab carrying `UiEvent` (operation started/progress/finished, agent online/offline). The page fetches initial state over REST.
+Live updates come from one WebSocket per tab carrying `UiEvent` (operation started/progress/finished, agent online/offline). The page fetches initial state over REST. The daemon forwards the worker's events to subscribers unchanged: coalescing happens once, in the worker (§4.1), and the daemon never re-coalesces. Progress bars are stateful per key on the way out (`Begin` publishes 0, `Advance` adds, `Length` sets the total; a title or a finished bar publishes nothing), so a page sees current-of-total numbers, not deltas.
 
 ### 4.5 Accessibility
 

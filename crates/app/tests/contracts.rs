@@ -11,9 +11,10 @@ use app::contract::hooks::HooksHarness;
 use app::contract::secrets::SecretsHarness;
 use app::fakes::InMemoryConfigStore;
 use app::fakes::{
-    FakeClock, FakeHookRunner, FakeSecrets, InMemoryOperationStore, Script, SimulatedEngine,
+    FakeClock, FakeHookRunner, FakeSecrets, InMemoryEventBus, InMemoryOperationStore, Script,
+    SimulatedEngine,
 };
-use app::ports::{Clock, Engine, HookOutcome, HookOutput, HookStatus, SecretResolver};
+use app::ports::{Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, SecretResolver};
 use async_trait::async_trait;
 use domain::secrets::{CommandLine, KeyringEntry};
 use domain::{SignedDuration, Timestamp};
@@ -317,4 +318,18 @@ fn no_op_entry(program: &str) -> domain::planning::HookEntry {
 #[tokio::test]
 async fn fake_hooks_meet_the_hooks_contract() {
     contract::hooks::run(&FakeHooksHarness::default()).await;
+}
+
+struct InMemoryEventBusHarness;
+
+#[async_trait]
+impl contract::event_bus::EventBusHarness for InMemoryEventBusHarness {
+    fn bus(&self) -> Arc<dyn EventBus> {
+        Arc::new(InMemoryEventBus::new())
+    }
+}
+
+#[tokio::test]
+async fn the_in_memory_event_bus_meets_the_event_bus_contract() {
+    contract::event_bus::run(&InMemoryEventBusHarness).await;
 }

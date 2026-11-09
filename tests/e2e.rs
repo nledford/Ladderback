@@ -32,6 +32,8 @@ mod hooks_steps;
 #[path = "steps/request_checks.rs"]
 mod request_checks_steps;
 
+#[path = "steps/events.rs"]
+mod events_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
@@ -58,6 +60,7 @@ struct Agent {
     backup: backup_steps::BackupSetup,
     web: request_checks_steps::Web,
     hooks: hooks_steps::HooksE2e,
+    events: events_steps::Events,
     secrets: secrets_steps::SecretsSetup,
     config: config_steps::ConfigSetup,
     repositories: repositories_steps::RepositoriesSetup,
@@ -96,6 +99,7 @@ impl Agent {
             backup: backup_steps::BackupSetup::default(),
             hooks: hooks_steps::HooksE2e::new(),
             web: request_checks_steps::Web::default(),
+            events: events_steps::Events::default(),
             secrets: secrets_steps::SecretsSetup::default(),
             config: config_steps::ConfigSetup::default(),
             repositories: repositories_steps::RepositoriesSetup::default(),

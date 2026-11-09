@@ -4,7 +4,8 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use super::*;
-use crate::{Asset, AssetSource, router};
+use crate::{AppState, Asset, AssetSource, router};
+use async_trait::async_trait;
 
 /// A build without a web UI: every request that passes the checks reaches
 /// the UI router and gets its answer, never a refusal's JSON.
@@ -20,10 +21,28 @@ const NAME: &str = "nas.demo.test";
 
 async fn send(request: Request<Body>) -> Response {
     let checks = RequestChecks::new([NAME.to_owned()]);
-    router(Arc::new(NoUi), checks)
+    router(Arc::new(NoUi), checks, test_state())
         .oneshot(request)
         .await
         .unwrap()
+}
+
+/// A state with the in-memory event bus: these tests only check the checks.
+fn test_state() -> AppState {
+    AppState {
+        events: Arc::new(app::fakes::InMemoryEventBus::new()),
+        operations: Arc::new(NoOperations),
+    }
+}
+
+/// Starts nothing: the checks never reach a route.
+struct NoOperations;
+
+#[async_trait]
+impl crate::Operations for NoOperations {
+    async fn start_backup(&self, _plan: String) -> Result<String, crate::StartError> {
+        Err(crate::StartError::UnknownPlan)
+    }
 }
 
 /// A request with the given headers; `Host` comes first when it's there.
@@ -681,7 +700,7 @@ fn a_configured_name_the_host_header_could_never_match_is_refused() {
 async fn configured_names_match_whatever_their_case() {
     let checks = RequestChecks::new(["NAS.Example.COM".to_owned()]);
     for host in ["nas.example.com", "NAS.EXAMPLE.COM:9898"] {
-        let response = router(Arc::new(NoUi), checks.clone())
+        let response = router(Arc::new(NoUi), checks.clone(), test_state())
             .oneshot(request("GET", "/", &[("host", host)]))
             .await
             .unwrap();

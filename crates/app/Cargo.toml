@@ -11,6 +11,7 @@ publish.workspace = true
 fakes = []
 
 [dependencies]
+api.workspace = true
 domain.workspace = true
 async-trait.workspace = true
 futures.workspace = true

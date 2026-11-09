@@ -11,17 +11,23 @@ publish.workspace = true
 name = "http_adapter"
 
 [dependencies]
+app.workspace = true
+async-trait.workspace = true
 api.workspace = true
 axum.workspace = true
+futures.workspace = true
+serde_json.workspace = true
 mime_guess.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+app = { workspace = true, features = ["fakes"] }
 http-body-util.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tokio-tungstenite = { workspace = true }
 tower.workspace = true
 
 [lints]

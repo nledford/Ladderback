@@ -3,6 +3,7 @@
 mod clock;
 mod config_store;
 mod engine;
+mod event_bus;
 mod hooks;
 mod operation_store;
 mod secrets;
@@ -14,6 +15,7 @@ pub use engine::{
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
     PruneSummary, RepositoryAccess, RunningJob, SnapshotSummary,
 };
+pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,

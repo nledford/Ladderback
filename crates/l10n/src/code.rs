@@ -50,6 +50,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
     SecretUnresolved => msg::ERROR_SECRET_UNRESOLVED,
+    PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
+    InvalidBody => msg::ERROR_INVALID_BODY,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

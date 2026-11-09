@@ -173,7 +173,9 @@ fn exchange(addr: SocketAddr, request: &Request) -> Response {
         "the steps read bodies with a Content-Length only: {headers:?}"
     );
     let mut body = Vec::new();
-    if request.method != "HEAD" {
+    // A 101 Switching Protocols response has no body: the connection is the
+    // WebSocket now, so reading to its end would wait for the timeout.
+    if request.method != "HEAD" && status != 101 {
         match length {
             Some(length) => {
                 body.resize(length, 0);
@@ -319,6 +321,19 @@ fn refused(agent: &mut Agent, status: u16, code: String) {
         response.body
     );
     assert_eq!(response.header("content-type"), Some("application/json"));
+}
+
+#[then("the WebSocket handshake is accepted")]
+fn handshake_accepted(agent: &mut Agent) {
+    let response = agent.web.response();
+    assert_eq!(response.status, 101, "body {:?}", response.body);
+    assert_eq!(response.header("upgrade"), Some("websocket"));
+    // The key the upgrade step sends is the RFC 6455 sample key, whose
+    // accept is the sample accept.
+    assert_eq!(
+        response.header("sec-websocket-accept"),
+        Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+    );
 }
 
 #[then(expr = "the response has no {string} header")]
