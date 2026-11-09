@@ -12,7 +12,8 @@ use rustic_core::{
 };
 
 use super::convert::{
-    JobError, backup_result, check_result, prune_options, prune_result, snapshot_ref, snapshot_tags,
+    JobError, backup_result, check_result, prune_options, prune_result, snapshot_ref,
+    snapshot_result, snapshot_tags,
 };
 use super::repository::{new_repository, open, repository_id};
 use super::{Context, Done};
@@ -24,6 +25,20 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
     Ok(Done::Result(OpResult::Repository {
         id: repository_id(&repository)?,
     }))
+}
+
+/// Lists the repository's snapshots, newest first. A read: it emits `Started`
+/// after the open, as `identify` does, and then one final result.
+pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let repository = open(ctx, spec)?;
+    ctx.start(None)?;
+    let mut snapshots: Vec<_> = repository
+        .get_all_snapshots()?
+        .iter()
+        .map(snapshot_result)
+        .collect::<Result<_, JobError>>()?;
+    snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
+    Ok(Done::Result(OpResult::Snapshots { snapshots }))
 }
 
 /// Initialises a repository at the location, with default key options and

@@ -497,3 +497,153 @@ mod tests {
         );
     }
 }
+
+/// How many paths one listed snapshot may carry. An input-derived size,
+/// capped (§13.5): a snapshot lists at most a handful of roots.
+pub const MAX_SNAPSHOT_PATHS: usize = 64;
+
+/// One snapshot of a repository's list, as the daemon tells the web UI:
+/// what a list view needs — id, when it was taken (RFC 3339), which host,
+/// its label, tags and paths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotDto {
+    /// 64 hex digits, as rustic writes a snapshot's ID.
+    pub id: String,
+    /// RFC 3339, UTC.
+    pub time: String,
+    pub hostname: String,
+    /// Empty when the snapshot carries no label.
+    pub label: String,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
+}
+
+/// Why a snapshot DTO can't be: an ID that isn't 64 hex digits, a time that
+/// isn't RFC 3339, or more paths than [`MAX_SNAPSHOT_PATHS`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidSnapshot {
+    Id,
+    Time,
+    Paths,
+}
+
+impl std::fmt::Display for InvalidSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for InvalidSnapshot {}
+
+impl SnapshotDto {
+    /// Builds the DTO from what the engine reported, refusing an ID that
+    /// isn't 64 hex digits, a time that isn't RFC 3339, and more paths than
+    /// [`MAX_SNAPSHOT_PATHS`] (an input-derived size, capped).
+    pub fn new(
+        id: String,
+        time: String,
+        hostname: String,
+        label: String,
+        tags: Vec<String>,
+        paths: Vec<String>,
+    ) -> Result<Self, InvalidSnapshot> {
+        if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(InvalidSnapshot::Id);
+        }
+        if time.parse::<jiff::Timestamp>().is_err() {
+            return Err(InvalidSnapshot::Time);
+        }
+        if paths.len() > MAX_SNAPSHOT_PATHS {
+            return Err(InvalidSnapshot::Paths);
+        }
+        Ok(Self {
+            id,
+            time,
+            hostname,
+            label,
+            tags,
+            paths,
+        })
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::{InvalidSnapshot, MAX_SNAPSHOT_PATHS, SnapshotDto};
+
+    fn dto() -> SnapshotDto {
+        SnapshotDto {
+            id: "ab".repeat(32),
+            time: "2026-11-09T10:15:00Z".to_owned(),
+            hostname: "demo-host".to_owned(),
+            label: "home".to_owned(),
+            tags: vec!["ladderback-plan:demo-home".to_owned()],
+            paths: vec!["/home/demo".to_owned()],
+        }
+    }
+
+    #[test]
+    fn a_snapshot_round_trips_through_json() {
+        let dto = dto();
+        let built = SnapshotDto::new(
+            dto.id.clone(),
+            dto.time.clone(),
+            dto.hostname.clone(),
+            dto.label.clone(),
+            dto.tags.clone(),
+            dto.paths.clone(),
+        )
+        .unwrap_or_else(|e| panic!("a valid snapshot: {e:?}"));
+        let json = serde_json::to_string(&built).unwrap();
+        assert_eq!(serde_json::from_str::<SnapshotDto>(&json).unwrap(), built);
+        assert_eq!(built, dto);
+    }
+
+    #[test]
+    fn an_id_that_is_not_64_hex_digits_is_refused() {
+        let dto = dto();
+        assert_eq!(
+            SnapshotDto::new(
+                "nope".to_owned(),
+                dto.time,
+                dto.hostname,
+                dto.label,
+                dto.tags,
+                dto.paths,
+            ),
+            Err(InvalidSnapshot::Id)
+        );
+    }
+
+    #[test]
+    fn a_time_that_is_not_rfc_3339_is_refused() {
+        let dto = dto();
+        assert_eq!(
+            SnapshotDto::new(
+                dto.id,
+                "not a time".to_owned(),
+                dto.hostname,
+                dto.label,
+                dto.tags,
+                dto.paths,
+            ),
+            Err(InvalidSnapshot::Time)
+        );
+    }
+
+    #[test]
+    fn paths_beyond_the_cap_are_refused() {
+        let dto = dto();
+        assert_eq!(
+            SnapshotDto::new(
+                dto.id,
+                dto.time,
+                dto.hostname,
+                dto.label,
+                dto.tags,
+                vec!["/home/demo".to_owned(); MAX_SNAPSHOT_PATHS + 1],
+            ),
+            Err(InvalidSnapshot::Paths)
+        );
+    }
+}

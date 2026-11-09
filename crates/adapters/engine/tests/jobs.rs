@@ -40,6 +40,34 @@ async fn identify_reports_the_full_repository_id() {
 }
 
 #[tokio::test]
+async fn ls_lists_the_snapshots_newest_first() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    let repo = location.open().to_indexed_ids().unwrap();
+    let paths = PathList::from_iter([scratch.source()]).sanitize().unwrap();
+    for label in ["first", "second", "third"] {
+        repo.backup(
+            &BackupOptions::default(),
+            &paths,
+            SnapshotOptions::default()
+                .label(label.to_owned())
+                .to_snapshot()
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    let events = run_to_end(&engine(), app::ports::Job::Ls(location.access(PASSWORD))).await;
+    let EngineResult::Snapshots(listed) = succeeded(&events) else {
+        panic!("not a snapshots result: {events:?}");
+    };
+    assert_eq!(listed.len(), 3, "{listed:?}");
+    let labels: Vec<&str> = listed.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(labels, ["third", "second", "first"]);
+}
+
+#[tokio::test]
 async fn a_backup_writes_a_snapshot_with_the_plan_tags_extra_tags_and_label() {
     let scratch = Scratch::new();
     let location = scratch.local();

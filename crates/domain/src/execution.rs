@@ -162,6 +162,9 @@ pub enum OperationKind {
     Backup,
     Prune,
     Check,
+    /// Lists a repository's snapshots. A read, not an operation: it never
+    /// takes an I7 slot and is never written to the operation log (§9).
+    Ls,
 }
 
 impl OperationKind {
@@ -170,7 +173,7 @@ impl OperationKind {
     pub fn is_maintenance(self) -> bool {
         match self {
             Self::Prune | Self::Check => true,
-            Self::Fake | Self::Identify | Self::Init | Self::Backup => false,
+            Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls => false,
         }
     }
 }
