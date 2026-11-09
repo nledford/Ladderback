@@ -14,6 +14,8 @@
 mod request_checks;
 
 use std::borrow::Cow;
+#[cfg(debug_assertions)]
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
@@ -50,6 +52,14 @@ impl AssetSource for EmbeddedUi {
     fn get(&self, path: &str) -> Option<Asset> {
         <Self as RustEmbed>::get(path).map(|file| Asset { bytes: file.data })
     }
+}
+
+/// A file of the web UI as a debug build reads it: from `folder`, when it is
+/// asked for. `None` when the UI isn't built, and for a `path` that is not a
+/// plain relative file path.
+#[cfg(debug_assertions)]
+fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
+    todo!("read {path} from {folder:?}")
 }
 
 /// Routes for the web UI: files by path, and `index.html` for any other
@@ -288,6 +298,49 @@ mod tests {
         ] {
             let response = request(Arc::new(Anything), Method::GET, path).await;
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    /// What a debug build reads the UI from: the folder, as it is when a file
+    /// is asked for.
+    #[cfg(debug_assertions)]
+    mod ui_folder {
+        use std::fs;
+
+        use super::*;
+
+        #[test]
+        fn files_built_after_the_binary_are_served() {
+            let ui = tempfile::tempdir().unwrap();
+            assert!(read_ui_file(ui.path(), "index.html").is_none());
+            fs::create_dir(ui.path().join("assets")).unwrap();
+            fs::write(ui.path().join("index.html"), "<title>built</title>").unwrap();
+            fs::write(ui.path().join("assets/app.js"), "export default 1;").unwrap();
+
+            let index = read_ui_file(ui.path(), "index.html").unwrap();
+            assert_eq!(index.bytes.as_ref(), b"<title>built</title>");
+            let script = read_ui_file(ui.path(), "assets/app.js").unwrap();
+            assert_eq!(script.bytes.as_ref(), b"export default 1;");
+        }
+
+        #[test]
+        fn an_unbuilt_ui_has_no_files() {
+            let scratch = tempfile::tempdir().unwrap();
+            let missing = scratch.path().join("dist");
+            assert!(read_ui_file(&missing, "index.html").is_none());
+        }
+
+        #[test]
+        fn paths_that_leave_the_folder_are_refused() {
+            let scratch = tempfile::tempdir().unwrap();
+            let ui = scratch.path().join("dist");
+            fs::create_dir_all(ui.join("assets")).unwrap();
+            let secret = scratch.path().join("secret.txt");
+            fs::write(&secret, "secret").unwrap();
+            let absolute = secret.to_str().unwrap();
+            for path in ["../secret.txt", "assets/../../secret.txt", absolute] {
+                assert!(read_ui_file(&ui, path).is_none(), "{path}");
+            }
         }
     }
 }
