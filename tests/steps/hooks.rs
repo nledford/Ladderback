@@ -135,7 +135,10 @@ fn env_named(agent: &mut Agent) {
     );
     for name in read.lines().filter_map(|l| l.split('=').next()) {
         assert!(
-            name.starts_with("LADDERBACK_") || ALLOWED.contains(&name),
+            name.starts_with("LADDERBACK_")
+                || ALLOWED.contains(&name)
+                // Set by the POSIX shell the demo script runs under.
+                || matches!(name, "PWD" | "SHLVL" | "_"),
             "{name} is not allowed to reach a hook"
         );
     }
