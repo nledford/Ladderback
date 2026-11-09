@@ -18,7 +18,6 @@ use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Lists a repository's snapshots. Saves nothing: the list is fetched live
 /// every time, for a read is safe to run alongside anything (§9).
-#[allow(dead_code)] // phase 1: the body is stubbed; phase 2 wires these up
 pub struct ListSnapshots {
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
@@ -44,8 +43,10 @@ impl ListSnapshots {
         op: OperationId,
         settings: &RepositorySettings,
     ) -> Result<Vec<SnapshotSummary>, SnapshotError> {
-        let _ = (op, settings);
-        todo!("phase 2: run Job::Ls and return its list, newest first")
+        let job = Job::Ls(access(&self.resolve, settings).await?);
+        let mut snapshots = run(self.engine.as_ref(), op, job).await?;
+        snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
+        Ok(snapshots)
     }
 }
 
@@ -140,10 +141,12 @@ mod tests {
 
     use crate::ports::EngineEvent;
 
+    #[allow(clippy::panic)]
     fn snapshot(n: u8, at: i64, label: &str) -> SnapshotSummary {
         SnapshotSummary {
-            id: SnapshotId::parse(&format!("{n:0>64}")).expect("64 hex digits"),
-            time: Timestamp::from_second(at).expect("a valid instant"),
+            id: SnapshotId::parse(&format!("{n:0>64}"))
+                .unwrap_or_else(|e| panic!("64 hex digits: {e:?}")),
+            time: Timestamp::from_second(at).unwrap_or_else(|e| panic!("a valid instant: {e:?}")),
             hostname: "demo-host".to_owned(),
             label: label.to_owned(),
             tags: Vec::new(),
