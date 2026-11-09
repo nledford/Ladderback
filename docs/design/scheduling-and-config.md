@@ -118,6 +118,8 @@ Decisions the models make where this document was silent:
 
 **Not yet.** The adapter is not wired into `main.rs`, so "the daemon refuses to start on a newer schema" holds for the adapter, not yet for the daemon. The repositories' `[prune]` and `[check]` tables are not read (§7.3, item 7), and there are no `timezone`, `every`, overlap or metered keys (M2). The warning for an inline secret and seeding the daemon-wide redactor from the config (security.md §10.2) wait for their consumer. A golden file exists for version 1 only; the first `schema = 2` brings the second.
 
+Known limits of the writer, to settle with the wiring: a save through a symlinked `config.toml` (a dotfile manager's) replaces the link with a regular file, and the history is kept next to the link, not its target; the history's order is its file names', so a clock set back makes the next save drop the newest versions first; the history folder is not flushed after a version is kept in it.
+
 ### 6.2 Importing rustic profiles
 
 `ladderback import-profile <file.toml> [--repo-name nas]` reads a rustic profile and produces repos and plans. Profiles named by `use-profiles` are resolved the way rustic does: the platform config dir (`~/.config/rustic` on Linux, `~/Library/Application Support/rustic` on macOS), then `/etc/rustic`, then the current directory; a file's own values beat the profiles it uses. The same function is used by the UI's "Import…" dialog. Mapping for your current laptop profile:
