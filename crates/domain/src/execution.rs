@@ -328,11 +328,14 @@ const KEPT_WHEN_CUT: usize = MAX_WARNING_TEXT_BYTES - WARNING_TEXT_CUT.len();
 
 /// `text` as a warning keeps it: whole when it fits [`MAX_WARNING_TEXT_BYTES`],
 /// otherwise its longest prefix that ends on a character boundary and leaves
-/// room for [`WARNING_TEXT_CUT`], which follows it.
+/// room for [`WARNING_TEXT_CUT`], which follows it. A cut text also gives back
+/// the memory of the text it was cut from, since a kept warning stays in the
+/// operation until it's saved.
 fn cut_warning_text(mut text: String) -> String {
     if text.len() > MAX_WARNING_TEXT_BYTES {
         text.truncate(text.floor_char_boundary(KEPT_WHEN_CUT));
         text.push_str(WARNING_TEXT_CUT);
+        text.shrink_to_fit();
     }
     text
 }

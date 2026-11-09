@@ -16,7 +16,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   requested_by TEXT,              -- restores: local UI or hub (§10.4)
   snapshot_id TEXT,               -- for backups
   summary_json TEXT,              -- OpResult (files new/changed, bytes added, duration, …)
-  error_code TEXT, error_args TEXT, error_detail TEXT,   -- api::ErrorCode, JSON MsgArgs, rustic's verbatim text (§8.4)
+  error_code TEXT, error_args TEXT, error_detail TEXT,   -- api::ErrorCode, stored arguments (§9), rustic's verbatim text (§8.4)
   warning_count INTEGER DEFAULT 0
 );
 CREATE INDEX ops_by_plan ON operations(plan_id, started_at DESC);
