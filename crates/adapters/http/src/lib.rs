@@ -15,7 +15,7 @@ mod request_checks;
 
 use std::borrow::Cow;
 #[cfg(debug_assertions)]
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::Arc;
 
 use axum::Router;
@@ -23,6 +23,7 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
+#[cfg(not(debug_assertions))]
 use rust_embed::RustEmbed;
 
 pub use request_checks::{
@@ -35,22 +36,47 @@ pub struct Asset {
     pub bytes: Cow<'static, [u8]>,
 }
 
-/// Where the web UI's files come from: embedded in the binary, or a map in tests.
+/// Where the web UI's files come from: the UI build, or a map in tests.
 pub trait AssetSource: Send + Sync + 'static {
     /// `path` is relative to the UI root, without a leading slash.
     fn get(&self, path: &str) -> Option<Asset>;
 }
 
-/// The trunk build output of `crates/web`, embedded at compile time in
-/// release builds and read from disk in debug builds.
+/// The trunk build output of `crates/web`. A release build embeds it in the
+/// binary; a debug build reads it as the daemon runs, from the
+/// `crates/web/dist` of the checkout the crate was compiled in.
+pub struct EmbeddedUi;
+
+#[cfg(not(debug_assertions))]
 #[derive(RustEmbed)]
 #[folder = "../../web/dist"]
 #[allow_missing = true]
-pub struct EmbeddedUi;
+struct ReleaseUi;
+
+// A debug build doesn't use rust-embed's disk mode (#47). That mode takes the
+// folder from CARGO_MANIFEST_DIR inside its derive macro, a read rustc doesn't
+// record, and checks each file against the folder path as it was when the
+// macro ran. A build cache that shares compiled crates between checkouts (mbx
+// does) therefore keyed the crate on its sources alone and restored the copy
+// another checkout had compiled, which looks for the UI in that checkout. And
+// a crate compiled before `trunk build` has a folder path with `..` in it that
+// no file matches, so its daemon answered 503 after the build. Here `env!`
+// puts CARGO_MANIFEST_DIR in the crate's dep-info, so a cache keys the crate
+// on its checkout's path, and nothing in the crate depends on whether the
+// folder existed when it was compiled. A release build embeds the files, and a
+// cache keys the crate on their contents.
+#[cfg(debug_assertions)]
+const UI_FOLDER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist");
 
 impl AssetSource for EmbeddedUi {
+    #[cfg(not(debug_assertions))]
     fn get(&self, path: &str) -> Option<Asset> {
-        <Self as RustEmbed>::get(path).map(|file| Asset { bytes: file.data })
+        ReleaseUi::get(path).map(|file| Asset { bytes: file.data })
+    }
+
+    #[cfg(debug_assertions)]
+    fn get(&self, path: &str) -> Option<Asset> {
+        read_ui_file(Path::new(UI_FOLDER), path)
     }
 }
 
@@ -59,7 +85,19 @@ impl AssetSource for EmbeddedUi {
 /// plain relative file path.
 #[cfg(debug_assertions)]
 fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
-    todo!("read {path} from {folder:?}")
+    // `serve` already refuses `..`, `%` and backslashes. This is the function
+    // that touches the disk, so it doesn't rely on its caller to keep a lookup
+    // inside the folder.
+    if !Path::new(path)
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)))
+    {
+        return None;
+    }
+    let bytes = std::fs::read(folder.join(path)).ok()?;
+    Some(Asset {
+        bytes: Cow::Owned(bytes),
+    })
 }
 
 /// Routes for the web UI: files by path, and `index.html` for any other

@@ -120,7 +120,7 @@ test-wasm *args:
 _wasm-bindgen-version:
     @grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p'
 
-# Build the web UI into crates/web/dist, where the binary embeds it from.
+# Build the web UI into crates/web/dist: a release binary embeds it, a debug one reads it as it runs.
 [group('build')]
 web:
     cd crates/web && trunk build --release
