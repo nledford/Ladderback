@@ -11,19 +11,19 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
+use crate::live::{modal_closed, modal_opened, say};
+use crate::routes::PageHeading;
 use crate::text;
 
-/// Sends `text` to the live region of `politeness`, through the page's
-/// announcer.
-fn say(politeness: Politeness, text: &str) {
-    let _ = (politeness, text);
+/// Opens the dialog that stands in for a modal. Its `close` event, which
+/// Escape and the Close button both raise, tells the announcer the modal is
+/// gone, so polite messages wait while it is open.
+fn open_modal(dialog: &web_sys::HtmlDialogElement) {
+    // `showModal` fails on a dialog already open, which must not count twice.
+    if dialog.show_modal().is_ok() {
+        modal_opened();
+    }
 }
-
-/// The dialog that stands in for a modal: opening and closing it tells the
-/// announcer, so polite messages wait while it is open.
-fn open_modal() {}
-
-fn close_modal() {}
 
 #[component]
 pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
@@ -53,8 +53,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let agent_online = t(msg::UI_GALLERY_AGENT_ONLINE);
     let restore_failed = t(msg::UI_GALLERY_RESTORE_FAILED);
     let backup_finished_in_modal = backup_finished.clone();
+    let dialog = NodeRef::<leptos::html::Dialog>::new();
     view! {
-        <h1 tabindex="-1">{heading}</h1>
+        <PageHeading>{heading}</PageHeading>
         <p><A href="/">{start_link}</A></p>
         <p><A href="/_missing">{missing_link}</A></p>
         <section>
@@ -75,11 +76,22 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 </button>
             </p>
             <p>
-                <button type="button" on:click=move |_| open_modal()>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        if let Some(dialog) = dialog.get() {
+                            open_modal(&dialog);
+                        }
+                    }
+                >
                     {open_modal_button}
                 </button>
             </p>
-            <dialog aria-labelledby="gallery-modal-heading">
+            <dialog
+                node_ref=dialog
+                aria-labelledby="gallery-modal-heading"
+                on:close=move |_| modal_closed()
+            >
                 <h2 id="gallery-modal-heading">{modal_heading}</h2>
                 <p>
                     <button
@@ -90,7 +102,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     </button>
                 </p>
                 <p>
-                    <button type="button" on:click=move |_| close_modal()>
+                    <button
+                        type="button"
+                        on:click=move |_| {
+                            if let Some(dialog) = dialog.get() {
+                                dialog.close();
+                            }
+                        }
+                    >
                         {close_modal_button}
                     </button>
                 </p>
