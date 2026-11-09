@@ -11,7 +11,8 @@ use unic_langid::LanguageIdentifier;
 
 use crate::args::{MAX_ARGS, clamp_text, duration_parts, size_parts};
 use crate::catalog::Catalog;
-use crate::locale::negotiate;
+use crate::locale::{negotiate, source};
+use crate::pseudo::{self, Pseudo};
 use crate::{Direction, MessageId, code, format, msg};
 
 type Bundle = FluentBundle<FluentResource>;
@@ -70,6 +71,12 @@ impl fmt::Display for Formatted {
 /// leave messages out. The helper messages `size` and `duration`, which
 /// arrange the parts of a [`MsgArg::Bytes`] or [`MsgArg::DurationMs`], are
 /// looked up from the locale that formats the message onward.
+///
+/// A development build can be asked for a pseudolocale, `en-XA` or `ar-XB`.
+/// It is the `en-US` catalog with its text transformed, and it stands in for
+/// `en-US` in the chain: `[de, ar-XB, en-US]`, where `ar-XB` has every
+/// message `en-US` has. What is asked for after a pseudolocale is not
+/// reached, and a build without the `pseudo` feature has none.
 pub struct Localizer {
     locales: Vec<LanguageIdentifier>,
     bundles: Vec<Bundle>,
@@ -100,10 +107,17 @@ impl Localizer {
             .filter_map(|catalog| Some((catalog.tag.parse().ok()?, catalog)))
             .collect();
         let tags: Vec<LanguageIdentifier> = known.iter().map(|(tag, _)| tag.clone()).collect();
+        let (asked, pseudo) = pseudo::split(preferences);
         let mut locales = Vec::new();
         let mut bundles = Vec::new();
-        for locale in negotiate(preferences, &tags) {
+        for locale in negotiate(asked, &tags) {
             if let Some((_, catalog)) = known.iter().find(|(tag, _)| *tag == locale) {
+                // A pseudolocale is looked up where `en-US` would be, ahead of
+                // it. Without an `en-US` catalog there is nothing to transform.
+                if let Some(pseudo) = pseudo.filter(|_| locale == source()) {
+                    bundles.push(pseudo_bundle(pseudo, &locale, catalog));
+                    locales.push(pseudo.tag());
+                }
                 bundles.push(new_bundle(&locale, catalog));
                 locales.push(locale);
             }
@@ -132,13 +146,16 @@ impl Localizer {
     /// `ar-XB` declares `ar`, so that a right-to-left page is tested as one.
     /// `en-US` when the localizer has no catalog at all.
     pub fn language(&self) -> LanguageIdentifier {
-        todo!()
+        match self.locales.first() {
+            Some(first) => Pseudo::from_tag(first).map_or_else(|| first.clone(), Pseudo::language),
+            None => source(),
+        }
     }
 
     /// The direction text of [`language`](Self::language) runs, for the
     /// page's `dir` attribute.
     pub fn direction(&self) -> Direction {
-        todo!()
+        Direction::of(&self.language())
     }
 
     /// The message `id`, with `args` for its variables. At most 32 arguments
@@ -352,5 +369,14 @@ fn new_bundle(locale: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
             .unwrap_or_else(|(resource, _)| resource);
         let _ = bundle.add_resource(resource);
     }
+    bundle
+}
+
+/// The bundle of a pseudolocale: the catalog of the source locale, in that
+/// locale, so that its plural rules are English's, with every text of it run
+/// through the pseudolocale's transform.
+fn pseudo_bundle(pseudo: Pseudo, source: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
+    let mut bundle = new_bundle(source, catalog);
+    bundle.set_transform(Some(pseudo.transform()));
     bundle
 }

@@ -5,7 +5,7 @@
 //! Tags are parsed and never used as file names, because the catalogs are
 //! compiled in. A preference that doesn't parse is ignored.
 
-use unic_langid::LanguageIdentifier;
+use unic_langid::{CharacterDirection, LanguageIdentifier, langid};
 
 /// The most preferences one environment variable contributes. `LANGUAGE`
 /// is a list, and the environment is outside input.
@@ -85,14 +85,18 @@ impl Direction {
     /// names a script that is written left to right. The vertical scripts run
     /// left to right: HTML's `dir` has no vertical value.
     pub fn of(language: &LanguageIdentifier) -> Self {
-        let _ = language;
-        todo!()
+        match language.character_direction() {
+            CharacterDirection::RTL => Self::Rtl,
+            CharacterDirection::LTR | CharacterDirection::TTB => Self::Ltr,
+        }
     }
 
     /// The attribute's value: `ltr` or `rtl`.
     pub const fn as_str(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
+        }
     }
 }
 
@@ -115,7 +119,16 @@ impl BrowserLanguages {
     /// [`MAX_PREFERENCES`] of the browser's languages are kept, from the
     /// first four times as many looked at.
     pub fn preferences(&self) -> Vec<LanguageIdentifier> {
-        todo!()
+        let requested = self.requested.as_deref().and_then(browser_tag);
+        // Bounded, because the browser's list is outside input: at most four
+        // entries are looked at for each one kept.
+        let listed = self
+            .languages
+            .iter()
+            .take(MAX_PREFERENCES * 4)
+            .filter_map(|name| browser_tag(name))
+            .take(MAX_PREFERENCES);
+        requested.into_iter().chain(listed).collect()
     }
 }
 
@@ -123,16 +136,39 @@ impl BrowserLanguages {
 /// (`en-US`), or `None` for `C`, `POSIX`, an empty value and anything that
 /// isn't a language tag.
 pub(crate) fn posix_tag(raw: &str) -> Option<LanguageIdentifier> {
-    let raw = raw.trim();
-    if raw.len() > MAX_NAME_LEN {
-        return None;
-    }
-    let name = raw.split(['.', '@']).next().unwrap_or_default();
+    let name = bounded(raw)?.split(['.', '@']).next().unwrap_or_default();
     if name.is_empty() || is_c_locale(name) {
         return None;
     }
+    parse_tag(name)
+}
+
+/// Normalizes one name a browser gives (`pt_br`, `ar-XB`) to a language tag,
+/// or `None` for anything that isn't one, and for `und`. Unlike a POSIX
+/// value, a browser's has no codeset or modifier to drop, so `en_US.UTF-8`
+/// is not a language tag here.
+fn browser_tag(raw: &str) -> Option<LanguageIdentifier> {
+    parse_tag(bounded(raw)?)
+}
+
+/// `raw` without the space around it, unless it is longer than any locale
+/// name is: [`MAX_NAME_LEN`] bytes.
+fn bounded(raw: &str) -> Option<&str> {
+    let raw = raw.trim();
+    (raw.len() <= MAX_NAME_LEN).then_some(raw)
+}
+
+/// `name` as a language tag, read with `_` for `-` and in any case. `und`,
+/// which stands for no language, is no preference.
+fn parse_tag(name: &str) -> Option<LanguageIdentifier> {
     let tag: LanguageIdentifier = name.replace('_', "-").parse().ok()?;
     (tag.language.as_str() != "und").then_some(tag)
+}
+
+/// The source locale, `en-US`: the locale every message exists in, and the
+/// one every chain of locales ends with.
+pub(crate) fn source() -> LanguageIdentifier {
+    langid!("en-US")
 }
 
 /// Whether a POSIX locale value is the untranslated `C` or `POSIX` locale,
@@ -152,7 +188,7 @@ pub(crate) fn negotiate(
     preferences: &[LanguageIdentifier],
     available: &[LanguageIdentifier],
 ) -> Vec<LanguageIdentifier> {
-    let default: LanguageIdentifier = unic_langid::langid!("en-US");
+    let default = source();
     let mut chain = Vec::new();
     for locale in fluent_langneg::negotiate_languages(
         preferences,

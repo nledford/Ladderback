@@ -1,6 +1,10 @@
 ### Words and helpers every surface shares, and the messages of the API's error
 ### and warning codes (technical design §8.4). A code's message is named after
 ### its name on the wire: `error-<code>` or `warning-<code>`.
+###
+### What a person types or looks up elsewhere, such as an address, an option or
+### a header, is a string literal: `{ "--allowed-host" }`. It is no text of a
+### language, so no translation changes it, and a pseudolocale leaves it as it is.
 
 # The product's name. A message that says it uses this term.
 -brand-name = Steading
@@ -71,11 +75,15 @@ error-engine-start-timed-out = The engine did not start the operation in time, s
 # The engine stopped reporting, but its process stayed alive.
 error-engine-exit-timed-out = The engine stopped reporting, so { -brand-name } ended its process. Check the repository, then run the operation again.
 
-error-host-not-allowed = { -brand-name } refused this request because it names a host that { -brand-name } does not answer for. Open { -brand-name } at localhost or 127.0.0.1, or allow the host with --allowed-host.
+# The request named a host the daemon does not answer for.
+# `localhost`, `127.0.0.1` and `--allowed-host` are typed as they are: keep them string literals.
+error-host-not-allowed = { -brand-name } refused this request because it names a host that { -brand-name } does not answer for. Open { -brand-name } at { "localhost" } or { "127.0.0.1" }, or allow the host with { "--allowed-host" }.
 
 error-origin-not-allowed = { -brand-name } refused this request because it came from a different site. Open { -brand-name } at its own address and try again.
 
-error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header Content-Type: application/json.
+# A request that changes something was not sent as JSON.
+# `Content-Type: application/json` is a header, typed as it is: keep it a string literal.
+error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header { "Content-Type: application/json" }.
 
 # An error this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.

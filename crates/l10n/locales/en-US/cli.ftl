@@ -25,4 +25,5 @@ cli-server-error = server error: { $detail }
 
 # Sign-in is off, so the daemon only listens on loopback addresses.
 # $address (text): the address it was asked to listen on, such as 192.168.1.5:9898.
-cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses (127.0.0.1, ::1)
+# `127.0.0.1` and `::1` are addresses, typed as they are: keep them string literals.
+cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" })

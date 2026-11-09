@@ -6,10 +6,16 @@
 //! - [`msg`] has one constant per message of the `en-US` catalog in
 //!   `locales/en-US/`. Every call site names its message through one, so a
 //!   typo doesn't compile.
-//! - [`PosixEnv`] reads the locales a command-line program is asked to speak.
+//! - [`PosixEnv`] reads the locales a command-line program is asked to speak,
+//!   and [`BrowserLanguages`] the ones a web page is asked for.
 //! - [`Localizer`] formats messages, and renders the codes of the API
 //!   ([`Localizer::error`], [`Localizer::warning`]), in a chain of locales that
-//!   always ends in `en-US`.
+//!   always ends in `en-US`. It also tells a page which `lang` and which
+//!   [`Direction`] to declare.
+//!
+//! A development build, with the `pseudo` feature, can also speak the
+//! pseudolocales `en-XA` and `ar-XB`: the `en-US` catalog, transformed, to show
+//! what is written in the code instead. A release build leaves them out.
 //!
 //! Numbers and dates are written plainly for now: Fluent's own number output
 //! and UTC. Locale-aware formatting plugs in behind [`Localizer`] and changes
@@ -34,6 +40,7 @@ mod id;
 mod locale;
 mod localizer;
 pub mod msg;
+mod pseudo;
 
 pub use id::MessageId;
 pub use locale::{BrowserLanguages, Direction, PosixEnv};
