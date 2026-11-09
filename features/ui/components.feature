@@ -13,9 +13,9 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Open the demo dialog"
     And I press Enter
     Then focus is inside the dialog "Demo dialog"
-    When I press Tab until focus is on the button "Close the demo dialog"
+    And I press Tab until focus is on the button "Close the demo dialog"
     And I press Tab
-    Then focus is inside the dialog "Demo dialog"
+    Then focus is on the first control of the dialog "Demo dialog"
     When I press Escape
     Then focus is on the button "Open the demo dialog"
 
@@ -32,7 +32,12 @@ Feature: The shared components in the gallery
     And I press Enter
     Then the field "Repository name" shows the error "A repository name is required."
     And the field "Repository name" is described by "A repository name is required."
+    And the field "Repository name" is marked invalid
     And the polite region reads "A repository name is required."
+    When I press Enter
+    Then the field "Repository name" shows no error
+    And the field "Repository name" is described only by "The name of the repository to check."
+    And the field "Repository name" is not marked invalid
 
   Scenario: The progress bar's value changes without any announcement
     When I open the component gallery

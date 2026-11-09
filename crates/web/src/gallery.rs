@@ -174,10 +174,20 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 error=form_error
             />
             <p>
-                <button type="button" on:click=move |_| {
-                    form_error.set(Some(required_error.clone()));
-                    say(Politeness::Polite, &required_error);
-                }>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        // A second check of a corrected field clears the
+                        // error, rewiring the input's description; only the
+                        // error's arrival is announced.
+                        if form_error.get_untracked().is_some() {
+                            form_error.set(None);
+                        } else {
+                            form_error.set(Some(required_error.clone()));
+                            say(Politeness::Polite, &required_error);
+                        }
+                    }
+                >
                     {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
                 </button>
             </p>

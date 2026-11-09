@@ -39,6 +39,23 @@ Then("the table {string} is sorted by repository ascending", async function (nam
   );
 });
 
+// The wrap the dialog's own trap does: Tab on its last control puts focus on
+// its first, not just anywhere inside.
+Then(
+  "focus is on the first control of the dialog {string}",
+  async function (name) {
+    const first = this.page
+      .getByRole("dialog", { name })
+      .locator(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      .first();
+    await journey(this.page).assertFocused(
+      first,
+      `the first control of the dialog ${JSON.stringify(name)}`,
+    );
+  },
+);
 Then("the field {string} shows the error {string}", async function (name, error) {
   await expect(this.page.getByText(error)).toBeVisible();
   const input = this.page.getByRole("textbox", { name });
@@ -75,6 +92,53 @@ Then("the field {string} is described by {string}", async function (name, descri
   );
 });
 
+Then("the field {string} is marked invalid", async function (name) {
+  await expect(this.page.getByRole("textbox", { name })).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+});
+
+Then("the field {string} is not marked invalid", async function (name) {
+  await expect(this.page.getByRole("textbox", { name })).not.toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+});
+
+Then("the field {string} shows no error", async function (name) {
+  const describedBy = await this.page
+    .getByRole("textbox", { name })
+    .getAttribute("aria-describedby");
+  const shown = await Promise.all(
+    (describedBy ?? "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => this.page.locator(`#${id}`).textContent()),
+  );
+  assert.ok(
+    !shown.includes("A repository name is required."),
+    `the field ${JSON.stringify(name)} still shows the error`,
+  );
+});
+
+Then("the field {string} is described only by {string}", async function (name, description) {
+  const describedBy = await this.page
+    .getByRole("textbox", { name })
+    .getAttribute("aria-describedby");
+  const text = (
+    await Promise.all(
+      (describedBy ?? "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => this.page.locator(`#${id}`).textContent()),
+    )
+  ).join(" ");
+  assert.ok(
+    text === description,
+    `the field ${JSON.stringify(name)} is described by ${JSON.stringify(text)}, not only ${JSON.stringify(description)}`,
+  );
+});
 Then("the progress bar {string} shows {int} percent", async function (name, percent) {
   await expect(this.page.getByRole("progressbar", { name })).toHaveAttribute(
     "aria-valuenow",
