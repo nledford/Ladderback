@@ -131,6 +131,18 @@ error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or
 # A request's body was not the JSON the route takes.
 error-invalid-body = { -brand-name } could not read the request's body. Send the JSON the route takes.
 
+# The request names an operation the log has none of.
+# $operation (text): the operation's ID.
+error-operation-unknown = There is no operation { $operation }. Refresh the history page, or run a new operation.
+
+# The request asked to cancel an operation that has already ended.
+# $operation (text): the operation's ID.
+error-operation-not-running = Operation { $operation } has already ended, so there is nothing to cancel.
+
+# A history request's cursor is not an operation's ID.
+# $cursor (text): the cursor as it was sent.
+error-invalid-cursor = { -brand-name } could not continue the history from { $cursor }. Use the cursor the previous page gave.
+
 ## Warning codes
 
 # A file or folder the backup could not read.

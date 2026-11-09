@@ -13,9 +13,11 @@ use std::sync::Arc;
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
+use app::history::{GetOperation, ListOperations};
 use app::ports::{
-    BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EventBus, Job,
-    OperationStore, ProgressEvent, RunningJob,
+    BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
+    EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
+    RunningJob,
 };
 use app::secrets::ResolveRepository;
 use async_trait::async_trait;
@@ -23,10 +25,11 @@ use config_adapter::FileConfigStore;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{Trigger, WarningKind};
+use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
+use hooks::ProcessHookRunner;
 use http_adapter::{AppState, Operations, StartError};
 use l10n::{MessageId, msg};
 use platform::SystemClock;
@@ -101,6 +104,8 @@ async fn app_state_at(
         agent_id,
         engine,
         store,
+        registry: Arc::new(CancelRegistry::new()),
+        hooks: Arc::new(ProcessHookRunner::new()),
     });
     Ok(AppState {
         events: bus,
@@ -171,8 +176,7 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
 /// The engine as the daemon runs it (§4.2): every job's events go to the
 /// event bus as [`UiEvent`]s on their way through, in the order the engine
 /// reported them. The daemon never coalesces: that is the worker's, once
-/// (§4.1). Hooks are not wired around API-started runs yet; they arrive with
-/// the scheduler (E2).
+/// (§4.1).
 struct EventEngine {
     inner: Arc<dyn Engine>,
     bus: Arc<dyn EventBus>,
@@ -341,6 +345,10 @@ struct PlanRunner {
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
     store: Arc<dyn OperationStore>,
+    /// The running operations' cancel switches, shared with the routes.
+    registry: Arc<CancelRegistry>,
+    /// Runs the agent, repository and plan hooks around every run (§6.1).
+    hooks: Arc<dyn HookRunner>,
 }
 
 #[async_trait]
@@ -369,16 +377,41 @@ impl Operations for PlanRunner {
             label: plan.label.clone(),
             deadline_budget: backup_budget(None, None),
         });
-        let operation = OperationId::from_uuid(Uuid::new_v4());
+        // A UUIDv7: the log orders by ID, so the newest run is the highest.
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        let id_text = operation.as_uuid().hyphenated().to_string();
+        // The cancel switch is parked before the run starts — not lazily
+        // when the run first polls it — so a cancel that arrives the
+        // instant the route answers finds it (§4.2). A cancel that fires
+        // only resolves; whether the receiver was still listening is
+        // nobody's business here.
+        let cancel = self.registry.register(operation);
+        let cancel = async move {
+            let _ = cancel.await;
+        };
+        // The agent, repository and plan hooks of §6.1 wrap the run, as the
+        // configuration stands now: a rewrite between runs is picked up.
+        let setup = HookSetup {
+            agent: config.hooks().clone(),
+            repository: config
+                .repository(&plan.repository)
+                .map(|repository| repository.hooks.clone())
+                .unwrap_or_default(),
+            plan: plan.hooks.clone(),
+            plan_id: plan.id.clone(),
+            repository_alias: plan.repository.clone(),
+        };
         let engine = Arc::clone(&self.engine);
         let store = Arc::clone(&self.store);
-        let id_text = operation.as_uuid().hyphenated().to_string();
+        let registry = Arc::clone(&self.registry);
+        let hooks = Arc::clone(&self.hooks);
         tokio::spawn(async move {
             // Nothing waits on the run: it reports through the event bus.
-            // Hooks are not part of an API-started run yet (E2 wires them).
             let finished = RunOperation::new(engine, Arc::new(SystemClock), store)
-                .run(operation, Trigger::Manual, job, futures::future::pending())
+                .with_hooks(hooks, setup)
+                .run(operation, Trigger::Manual, job, cancel)
                 .await;
+            registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",
                 finished.operation.id().as_uuid().hyphenated(),
@@ -387,11 +420,262 @@ impl Operations for PlanRunner {
         });
         Ok(id_text)
     }
+
+    async fn history(
+        &self,
+        plan: Option<String>,
+        after: Option<String>,
+        limit: Option<u64>,
+    ) -> Result<api::OperationsPageDto, http_adapter::HistoryError> {
+        let empty = || api::OperationsPageDto {
+            operations: Vec::new(),
+            next: None,
+        };
+        // A filter that names no plan that could exist matches nothing.
+        let plan = match plan.map(PlanId::try_from) {
+            Some(Ok(plan)) => Some(plan),
+            Some(Err(invalid)) => {
+                log::warn!("a plan filter no plan could match: {invalid}");
+                return Ok(empty());
+            }
+            None => None,
+        };
+        let after = match after {
+            Some(cursor) => match cursor.parse::<Uuid>() {
+                Ok(uuid) => Some(OperationId::from_uuid(uuid)),
+                Err(_) => return Err(http_adapter::HistoryError::BadCursor),
+            },
+            None => None,
+        };
+        let limit = limit.map(|asked| usize::try_from(asked).unwrap_or(usize::MAX));
+        let page = match ListOperations::new(Arc::clone(&self.store))
+            .list(plan, after, limit)
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Ok(empty());
+            }
+        };
+        Ok(api::OperationsPageDto {
+            operations: page.operations.iter().filter_map(summary).collect(),
+            next: page.next.map(|id| id.as_uuid().hyphenated().to_string()),
+        })
+    }
+
+    async fn operation(
+        &self,
+        id: String,
+    ) -> Result<api::OperationDetailDto, http_adapter::LookupError> {
+        let id = operation_of(&id).ok_or(http_adapter::LookupError::Unknown)?;
+        let detail = GetOperation::new(Arc::clone(&self.store))
+            .get(id)
+            .await
+            .map_err(|error| {
+                log::error!("the operation log could not be read: {error}");
+                http_adapter::LookupError::Unknown
+            })?
+            .ok_or(http_adapter::LookupError::Unknown)?;
+        let Some(operation) = summary(&detail.record) else {
+            log::error!(
+                "a stored operation the page cannot show: {}",
+                detail.record.id.as_uuid().hyphenated()
+            );
+            return Err(http_adapter::LookupError::Unknown);
+        };
+        Ok(api::OperationDetailDto {
+            operation,
+            warnings: detail
+                .warnings
+                .iter()
+                .map(|warning| api::OperationWarningDto {
+                    code: warning_code(warning.kind),
+                    item: warning.item.clone(),
+                    during: warning.during.clone(),
+                    detail: warning.detail.clone(),
+                })
+                .collect(),
+        })
+    }
+
+    async fn cancel(&self, id: String) -> Result<(), http_adapter::CancelError> {
+        let Some(id) = operation_of(&id) else {
+            return Err(http_adapter::CancelError::Unknown);
+        };
+        // The log says which of the two refusals this is: unknown, or known
+        // but ended. Only a running operation has a handle to fire (§4.2).
+        let running = match GetOperation::new(Arc::clone(&self.store)).get(id).await {
+            Ok(Some(detail)) => !detail.record.status.is_finished(),
+            Ok(None) => return Err(http_adapter::CancelError::Unknown),
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Err(http_adapter::CancelError::Unknown);
+            }
+        };
+        if running && self.registry.cancel(&id) {
+            Ok(())
+        } else {
+            Err(http_adapter::CancelError::NotRunning)
+        }
+    }
+}
+
+/// An operation's ID as the wire carries it, when the text is one.
+fn operation_of(text: &str) -> Option<OperationId> {
+    text.parse::<Uuid>().ok().map(OperationId::from_uuid)
+}
+
+/// One log record as the history page shows it, or `None` when it holds
+/// something no page could show. The page carries the status; the warning
+/// codes come with the detail, where the kept warnings are.
+fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
+    let failure_code = match &record.status {
+        OperationStatus::Failed { reason } => Some(failure(reason).0),
+        _ => None,
+    };
+    api::OperationSummaryDto::new(
+        record.id.as_uuid().hyphenated().to_string(),
+        record
+            .target
+            .plan
+            .as_ref()
+            .map(|plan| plan.as_str().to_owned())
+            .unwrap_or_default(),
+        kind_text(record.kind).to_owned(),
+        status_text(&record.status).to_owned(),
+        record.queued_at.to_string(),
+        record.started_at.map(|at| at.to_string()),
+        record.finished_at.map(|at| at.to_string()),
+        Vec::new(),
+        failure_code,
+        record
+            .result
+            .as_ref()
+            .and_then(|result| result_dto(result, record)),
+    )
+    .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
+    .ok()
+}
+
+/// What a successful operation produced, as the page shows it: the small
+/// typed summary of its kind, with the run's duration.
+fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::OperationResultDto> {
+    let duration_ms = record
+        .started_at
+        .zip(record.finished_at)
+        .and_then(|(from, to)| u64::try_from(to.as_millisecond() - from.as_millisecond()).ok())
+        .unwrap_or(0);
+    match result {
+        EngineResult::Backup(backup) => Some(api::OperationResultDto::Backup {
+            files: backup.files_new + backup.files_changed + backup.files_unmodified,
+            bytes: backup.data_added,
+            duration_ms,
+        }),
+        EngineResult::Prune(prune) => Some(api::OperationResultDto::Prune {
+            packs_deleted: prune.packs_deleted,
+            duration_ms,
+        }),
+        EngineResult::Check(check) => Some(api::OperationResultDto::Check {
+            errors: check.errors,
+            warnings: check.warnings,
+            duration_ms,
+        }),
+        EngineResult::Fake { .. }
+        | EngineResult::Repository { .. }
+        | EngineResult::Snapshots(_) => None,
+    }
+}
+
+/// An operation's kind, as the wire names it.
+fn kind_text(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Fake => "fake",
+        OperationKind::Identify => "identify",
+        OperationKind::Init => "init",
+        OperationKind::Backup => "backup",
+        OperationKind::Prune => "prune",
+        OperationKind::Check => "check",
+        OperationKind::Ls => "ls",
+    }
+}
+
+/// An operation's status, as the wire names it.
+fn status_text(status: &OperationStatus) -> &'static str {
+    match status {
+        OperationStatus::Queued => "queued",
+        OperationStatus::Running => "running",
+        OperationStatus::Succeeded => "succeeded",
+        OperationStatus::SucceededWithWarnings => "succeeded-with-warnings",
+        OperationStatus::Failed { .. } => "failed",
+        OperationStatus::Cancelled => "cancelled",
+    }
+}
+
+/// A warning's kind, as the wire names it.
+fn warning_code(kind: WarningKind) -> WarningCode {
+    match kind {
+        WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
+        WarningKind::Hook => WarningCode::HookWarning,
+        WarningKind::Other => WarningCode::Unknown,
+    }
+}
+
+/// The running operations' cancel switches (§4.2): what the API cancels
+/// through. A handle is registered when an operation starts running and
+/// dropped when it ends, so only a running operation can be cancelled, once.
+struct CancelRegistry {
+    running: std::sync::Mutex<HashMap<OperationId, futures::channel::oneshot::Sender<()>>>,
+}
+
+impl CancelRegistry {
+    fn new() -> Self {
+        Self {
+            running: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The map, recovered even from a poisoned lock: the alternative —
+    /// handing out a receiver whose sender is gone — would cancel every
+    /// operation that starts next.
+    fn running(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<OperationId, futures::channel::oneshot::Sender<()>>>
+    {
+        self.running
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Registers `id` as running, returning the future its run ends on when
+    /// the API cancels it.
+    fn register(&self, id: OperationId) -> futures::channel::oneshot::Receiver<()> {
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        self.running().insert(id, sender);
+        receiver
+    }
+
+    /// Cancels `id`: `true` when it was running and is now cancelled, `false`
+    /// when nothing by that ID is running, so there is nothing to cancel.
+    /// A second cancel of the same operation is `false`: the one handle is
+    /// spent.
+    fn cancel(&self, id: &OperationId) -> bool {
+        self.running()
+            .remove(id)
+            .is_some_and(|sender| sender.send(()).is_ok())
+    }
+
+    /// The operation ended, cancelled or not: its handle, fired or spent, is
+    /// dropped, so a later cancel is a typed refusal.
+    fn finish(&self, id: &OperationId) {
+        let _ = self.running().remove(id);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use app::ports::{HookContext, HookOutcome, HookStatus, JobControl};
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
     /// ever been written to the first.
@@ -432,5 +716,172 @@ mod tests {
                 .iter()
                 .any(|(name, value)| *name == "found" && *value == text(999_999u64))
         );
+    }
+
+    #[tokio::test]
+    async fn a_running_operation_is_cancelled_once() {
+        let registry = CancelRegistry::new();
+        let id = OperationId::from_uuid(Uuid::new_v4());
+        let cancel = registry.register(id);
+        assert!(registry.cancel(&id), "the running operation cancels");
+        let sleep = tokio::time::sleep(std::time::Duration::from_secs(5));
+        tokio::pin!(sleep);
+        tokio::select! {
+            _ = cancel => {}
+            _ = &mut sleep => panic!("cancelling fired the run's cancel future"),
+        }
+        assert!(!registry.cancel(&id), "one handle, one cancel");
+        registry.finish(&id);
+        assert!(
+            !registry.cancel(&id),
+            "a finished operation no longer cancels"
+        );
+    }
+
+    /// A hook runner that reports a run has entered its before-hooks and
+    /// parks there until the test opens the gate.
+    struct GateHooks {
+        entered: std::sync::Arc<tokio::sync::watch::Sender<u32>>,
+        open: std::sync::Arc<tokio::sync::Mutex<tokio::sync::watch::Receiver<bool>>>,
+    }
+
+    impl GateHooks {
+        fn new() -> (
+            Self,
+            tokio::sync::watch::Receiver<u32>,
+            tokio::sync::watch::Sender<bool>,
+        ) {
+            let (entered_tx, entered_rx) = tokio::sync::watch::channel(0);
+            let (open_tx, open_rx) = tokio::sync::watch::channel(false);
+            let open_gate = open_tx.clone();
+            let hooks = Self {
+                entered: std::sync::Arc::new(entered_tx),
+                open: std::sync::Arc::new(tokio::sync::Mutex::new(open_rx)),
+            };
+            (hooks, entered_rx, open_gate)
+        }
+    }
+
+    #[async_trait]
+    impl HookRunner for GateHooks {
+        async fn run(
+            &self,
+            _entry: &domain::planning::HookEntry,
+            _context: &HookContext,
+        ) -> HookOutcome {
+            self.entered.send_modify(|seen| *seen += 1);
+            let mut open = self.open.lock().await;
+            while !*open.borrow_and_update() {
+                open.changed().await.expect("the gate stays open");
+            }
+            HookOutcome {
+                status: HookStatus::Succeeded,
+                stdout: Default::default(),
+                stderr: Default::default(),
+            }
+        }
+    }
+
+    /// An engine whose jobs report nothing: the run parks, as a real backup
+    /// does while it works, and stopping it is a no-op.
+    struct ParkedEngine;
+
+    #[async_trait]
+    impl Engine for ParkedEngine {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Ok(RunningJob {
+                events: futures::stream::pending().boxed(),
+                control: Box::new(Parked),
+            })
+        }
+    }
+
+    struct Parked;
+
+    #[async_trait]
+    impl JobControl for Parked {
+        async fn stop(&mut self) {}
+    }
+
+    /// A cancel that arrives the instant the route answers finds the
+    /// operation, not an "already ended" refusal (§4.2): the cancel switch
+    /// is parked before the run starts, while the run is still in its
+    /// before-hooks.
+    #[tokio::test]
+    async fn a_cancel_in_the_start_window_stops_the_operation() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config_dir, data_dir) = own_folders(scratch.path());
+        let source = scratch.path().join("source");
+        std::fs::create_dir_all(&source).expect("the source folder");
+        let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+        let settings = domain::planning::RepositorySettings {
+            repository: scratch.path().join("repo").display().to_string(),
+            repo_hot: None,
+            password: domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
+                "demo-password",
+            )),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let hooks = domain::planning::Hooks {
+            run_before: vec![domain::planning::HookEntry::parse("true").expect("a hook")],
+            ..Default::default()
+        };
+        let config = domain::planning::AgentConfig::new(
+            domain::planning::AgentSettings::default(),
+            hooks,
+            std::collections::BTreeMap::from([(
+                alias.clone(),
+                domain::planning::RepositoryConfig {
+                    settings,
+                    maintenance: domain::planning::Maintenance::None,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            )]),
+            vec![domain::planning::Plan::new(
+                domain::PlanId::parse("home").expect("a plan ID"),
+                alias,
+                vec![
+                    domain::planning::Source::parse(source.display().to_string().as_str())
+                        .expect("a source"),
+                ],
+            )],
+        )
+        .expect("a valid configuration");
+        let (hooks, mut entered, open_gate) = GateHooks::new();
+        let config_store = Arc::new(FileConfigStore::new(
+            config_dir.join("config.toml"),
+            Arc::new(SystemClock),
+        ));
+        app::ports::ConfigStore::save(&*config_store, &config)
+            .await
+            .expect("the config saves");
+        let runner = PlanRunner {
+            config: config_store,
+            resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+            agent_id: agent_id::load_or_create(&data_dir).expect("an agent ID"),
+            engine: Arc::new(ParkedEngine),
+            store: Arc::new(
+                SqliteStore::open(&data_dir.join("ladderback.db"))
+                    .await
+                    .expect("the store opens"),
+            ),
+            registry: Arc::new(CancelRegistry::new()),
+            hooks: Arc::new(hooks),
+        };
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        // The run is in its before-hooks now, parked at the gate and not yet
+        // at the engine, so the switch must already be parked for a cancel.
+        entered.changed().await.expect("the run reaches its hooks");
+        // The cancel is answered while the gate is still closed: a switch
+        // parked any later than the route's answer is a refusal here.
+        let cancel = runner.cancel(id).await;
+        open_gate.send(true).expect("the gate opens");
+        cancel.expect("a cancel in the start window is accepted");
     }
 }

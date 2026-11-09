@@ -210,12 +210,13 @@ clap.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
 env_logger.workspace = true
+hooks.workspace = true
 log.workspace = true
 platform.workspace = true
 secrets.workspace = true
 store.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
-uuid.workspace = true
+uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

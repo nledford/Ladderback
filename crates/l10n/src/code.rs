@@ -52,6 +52,9 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretUnresolved => msg::ERROR_SECRET_UNRESOLVED,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
     InvalidBody => msg::ERROR_INVALID_BODY,
+    OperationUnknown => msg::ERROR_OPERATION_UNKNOWN,
+    OperationNotRunning => msg::ERROR_OPERATION_NOT_RUNNING,
+    InvalidCursor => msg::ERROR_INVALID_CURSOR,
     Unknown => msg::ERROR_UNKNOWN,
 });
 
