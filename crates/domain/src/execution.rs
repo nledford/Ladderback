@@ -853,4 +853,47 @@ mod tests {
             assert!(!kind.is_maintenance(), "{kind:?}");
         }
     }
+
+    fn hook_warning(detail: &str) -> Warning {
+        Warning {
+            kind: WarningKind::Hook,
+            item: None,
+            during: "before".to_owned(),
+            detail: detail.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_hook_failure_codes_as_hook_failed() {
+        assert_eq!(
+            FailureReason::HookFailed { exit_code: Some(3) }.code(),
+            "hook-failed"
+        );
+        assert_eq!(
+            FailureReason::HookFailed { exit_code: None }.code(),
+            "hook-failed"
+        );
+    }
+
+    #[test]
+    fn an_attached_warning_promotes_only_a_bare_success() {
+        let mut op = running();
+        op.succeed(t(20)).unwrap();
+        op.attach_warning(hook_warning("3")).unwrap();
+        assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
+
+        let mut op = running();
+        op.fail(FailureReason::EngineExited { exit_code: Some(1) }, t(15))
+            .unwrap();
+        op.attach_warning(hook_warning("timeout")).unwrap();
+        assert_eq!(op.status(), &failed());
+        assert_eq!(op.warnings().len(), 1);
+    }
+
+    #[test]
+    fn a_cancelled_operation_takes_no_attached_warning() {
+        let mut op = running();
+        op.cancel(t(20)).unwrap();
+        assert!(op.attach_warning(hook_warning("3")).is_err());
+    }
 }

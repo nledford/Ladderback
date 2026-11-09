@@ -134,3 +134,39 @@ impl HookOutcome {
 pub trait HookRunner: Send + Sync {
     async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome;
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use domain::planning::{HookEntry, Hooks, OnFailure};
+    use domain::{PlanId, RepositoryAlias};
+
+    use super::{HOOK_TIMEOUT, HookSetup, MAX_HOOK_OUTPUT_BYTES};
+
+    fn setup(plan: Hooks) -> HookSetup {
+        HookSetup {
+            agent: Hooks::default(),
+            repository: Hooks::default(),
+            plan,
+            plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
+            repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+        }
+    }
+
+    #[test]
+    fn the_limits_are_the_documented_ones() {
+        assert_eq!(HOOK_TIMEOUT, Duration::from_secs(300));
+        assert_eq!(MAX_HOOK_OUTPUT_BYTES, 64 * 1024);
+    }
+
+    #[test]
+    fn a_setup_is_empty_only_when_no_list_holds_anything() {
+        assert!(setup(Hooks::default()).is_empty());
+        let entry = HookEntry::new("demo-hook", ["demo"], OnFailure::Error)
+            .expect("the demo hook is valid");
+        let mut plan = Hooks::default();
+        plan.run_finally.push(entry);
+        assert!(!setup(plan).is_empty());
+    }
+}

@@ -27,6 +27,7 @@ Feature: Hooks
     Given a before hook at the plan level that exits 3 with on-failure warn
     When the agent runs the operation
     Then the operation ends as succeeded with warnings
+    And the operation carries a hook warning from the before phase with detail "3"
     And the operation lists 1 warning
 
   Scenario: A failing before-hook with on-failure ignore is not reported
@@ -57,6 +58,22 @@ Feature: Hooks
     When the agent runs the operation
     Then the operation ends as succeeded with warnings
     And the operation lists 1 warning
+    And the operation carries a hook warning from the after phase with detail "4"
+
+  Scenario: An ignored failing after-hook attaches no warning
+    Given an after hook at the plan level that exits 4 with on-failure ignore
+    When the agent runs the operation
+    Then the operation ends as succeeded
+    And the operation carries no hook warning
+
+  Scenario: A before-hook stop runs no failed-hooks
+    Given a before hook at the plan level that exits 3 with on-failure error
+    And a failed hook at the plan level that succeeds
+    And a finally hook at the plan level that succeeds
+    When the agent runs the operation
+    Then the operation ends as failed because a hook failed with exit code 3
+    And the failed hook at the plan level never ran
+    And the finally hook at the plan level ran
 
   @e2e
   Scenario: A hook that runs past the timeout is stopped

@@ -185,3 +185,62 @@ impl FakeHookRunner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use domain::planning::{HookEntry, OnFailure};
+    use domain::{OperationId, PlanId, RepositoryAlias};
+
+    use super::{FakeHookRunner, Scripted};
+    use crate::ports::{HookContext, HookPhase, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES};
+
+    fn entry() -> HookEntry {
+        HookEntry::new("demo-hook", ["demo"], OnFailure::Error).expect("the demo hook is valid")
+    }
+
+    fn context() -> HookContext {
+        HookContext {
+            phase: HookPhase::Before,
+            plan: PlanId::parse("demo-plan").expect("the demo plan parses"),
+            repository: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+            operation: OperationId::from_uuid(uuid::Uuid::from_u128(7)),
+            snapshot: None,
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_capture_cut_mid_character_steps_back_to_a_boundary() {
+        // The cut lands inside a two-byte character, so the walk back to a
+        // boundary is what keeps the text a valid string.
+        let runner = FakeHookRunner::new();
+        runner.script(
+            "demo-hook",
+            Scripted {
+                status: HookStatus::Succeeded,
+                stdout: format!("aaa{}", "é".repeat(MAX_HOOK_OUTPUT_BYTES / 2 + 9)),
+                stderr: String::new(),
+            },
+        );
+        let outcome = runner.run(&entry(), &context()).await;
+        assert!(outcome.stdout.truncated);
+        assert_eq!(outcome.stdout.text.chars().last(), Some('é'));
+        assert!(outcome.stdout.text.len() <= MAX_HOOK_OUTPUT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn a_short_capture_is_kept_whole() {
+        let runner = FakeHookRunner::new();
+        runner.script(
+            "demo-hook",
+            Scripted {
+                status: HookStatus::Succeeded,
+                stdout: "demo output".to_owned(),
+                stderr: String::new(),
+            },
+        );
+        let outcome = runner.run(&entry(), &context()).await;
+        assert_eq!(outcome.stdout.text, "demo output");
+        assert!(!outcome.stdout.truncated);
+    }
+}

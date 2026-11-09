@@ -61,7 +61,7 @@ pub async fn run(harness: &dyn HooksHarness) {
     output_past_the_cap_is_cut(harness, &demo).await;
     a_secret_in_the_output_is_redacted(harness, &demo).await;
     a_secret_straddling_the_cap_leaks_nothing(harness, &demo).await;
- }
+}
 
 /// The suite's own demo identifiers, parsed once.
 struct Demo {

@@ -409,3 +409,220 @@ fn snapshot_of(result: &EngineResult) -> Option<SnapshotId> {
         _ => None,
     }
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use domain::execution::{
+        FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger,
+    };
+    use domain::planning::{HookEntry, Hooks, OnFailure};
+    use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp};
+
+    use super::{HookPhase, HookSetup, Run, RunOperation, ending_list, ending_phase, snapshot_of};
+    use crate::fakes::{FakeClock, InMemoryOperationStore, SimulatedEngine};
+    use crate::ports::{BackupSummary, EngineResult};
+
+    fn t(seconds: i64) -> Timestamp {
+        Timestamp::from_second(1_800_000_000 + seconds).expect("the demo time is valid")
+    }
+
+    fn entry(name: &str) -> HookEntry {
+        HookEntry::new(name, ["demo"], OnFailure::Error).expect("the demo hook is valid")
+    }
+
+    /// A setup with one named hook in every list of every level, so a list
+    /// that runs the wrong phase is told apart by the program name.
+    fn setup() -> HookSetup {
+        let lists = |word: &str| Hooks {
+            run_before: vec![entry(&format!("{word}-before"))],
+            run_after: vec![entry(&format!("{word}-after"))],
+            run_failed: vec![entry(&format!("{word}-failed"))],
+            run_finally: vec![entry(&format!("{word}-finally"))],
+        };
+        HookSetup {
+            agent: lists("agent"),
+            repository: lists("repository"),
+            plan: lists("plan"),
+            plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
+            repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+        }
+    }
+
+    fn use_case() -> RunOperation {
+        let clock = Arc::new(FakeClock::new(t(0)));
+        RunOperation::new(
+            Arc::new(SimulatedEngine::new(clock.clone())),
+            clock,
+            Arc::new(InMemoryOperationStore::new()),
+        )
+    }
+
+    fn run_of(operation: Operation) -> Run {
+        Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        }
+    }
+
+    fn operation(kind: OperationKind) -> Operation {
+        Operation::queue(
+            OperationId::from_uuid(uuid::Uuid::from_u128(7)),
+            kind,
+            Trigger::Manual,
+            Target::default(),
+            t(0),
+        )
+    }
+
+    fn failed_run() -> Run {
+        let mut op = operation(OperationKind::Backup);
+        op.start(t(1)).expect("the demo operation starts");
+        op.fail(FailureReason::EngineExited { exit_code: Some(1) }, t(2))
+            .expect("the demo operation fails");
+        run_of(op)
+    }
+
+    fn succeeded_run() -> Run {
+        let mut op = operation(OperationKind::Backup);
+        op.start(t(1)).expect("the demo operation starts");
+        op.succeed(t(2)).expect("the demo operation succeeds");
+        run_of(op)
+    }
+
+    #[test]
+    fn only_the_failed_and_finally_phases_carry_the_error_code() {
+        let run = failed_run();
+        let setup = setup();
+        let use_case = use_case();
+        for phase in [
+            HookPhase::Before,
+            HookPhase::After,
+            HookPhase::Failed,
+            HookPhase::Finally,
+        ] {
+            let want = matches!(phase, HookPhase::Failed | HookPhase::Finally)
+                .then(|| "engine-exited".to_owned());
+            assert_eq!(
+                use_case.context(&run, &setup, phase).error,
+                want,
+                "LADDERBACK_ERROR of {phase:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_phase_of_a_success_carries_an_error_code() {
+        let run = succeeded_run();
+        let setup = setup();
+        let use_case = use_case();
+        for phase in [
+            HookPhase::Before,
+            HookPhase::After,
+            HookPhase::Failed,
+            HookPhase::Finally,
+        ] {
+            assert_eq!(
+                use_case.context(&run, &setup, phase).error,
+                None,
+                "LADDERBACK_ERROR of {phase:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_ending_list_holds_only_its_own_phase() {
+        let setup = setup();
+        for (phase, word) in [
+            (HookPhase::After, "after"),
+            (HookPhase::Failed, "failed"),
+            (HookPhase::Finally, "finally"),
+        ] {
+            let ran: Vec<String> = ending_list(&setup, phase)
+                .map(|entry| entry.command.program().to_owned())
+                .collect();
+            assert_eq!(
+                ran,
+                [
+                    format!("plan-{word}"),
+                    format!("repository-{word}"),
+                    format!("agent-{word}")
+                ],
+                "the {word}-hooks of the three levels, in order"
+            );
+        }
+    }
+
+    #[test]
+    fn a_before_hook_stop_runs_neither_after_nor_failed_hooks() {
+        let failed = OperationStatus::Failed {
+            reason: FailureReason::EngineExited { exit_code: Some(1) },
+        };
+        assert_eq!(ending_phase(&failed, true), None);
+        assert_eq!(ending_phase(&failed, false), Some(HookPhase::Failed));
+    }
+
+    #[test]
+    fn a_success_runs_the_after_hooks_even_with_warnings() {
+        assert_eq!(
+            ending_phase(&OperationStatus::Succeeded, false),
+            Some(HookPhase::After)
+        );
+        assert_eq!(
+            ending_phase(&OperationStatus::SucceededWithWarnings, false),
+            Some(HookPhase::After)
+        );
+    }
+
+    #[test]
+    fn only_a_backup_result_carries_a_snapshot() {
+        let snapshot = SnapshotId::parse(&"1".repeat(64)).expect("the demo snapshot parses");
+        let backup = EngineResult::Backup(BackupSummary {
+            repository: RepositoryId::parse(&"1".repeat(64)).expect("the demo repository parses"),
+            snapshot: snapshot.clone(),
+            parent: None,
+            files_new: 1,
+            files_changed: 0,
+            files_unmodified: 0,
+            data_added: 10,
+            data_added_packed: 5,
+            error_count: 0,
+        });
+        assert_eq!(snapshot_of(&backup), Some(snapshot));
+        assert_eq!(
+            snapshot_of(&EngineResult::Fake { steps_completed: 1 }),
+            None
+        );
+    }
+
+    #[test]
+    fn a_hook_warning_names_how_the_hook_ended() {
+        use crate::ports::{HookOutcome, HookOutput, HookStatus};
+        let outcome = |status: HookStatus| HookOutcome {
+            status,
+            stdout: HookOutput::default(),
+            stderr: HookOutput::default(),
+        };
+        assert_eq!(
+            super::outcome_detail(&outcome(HookStatus::Failed { exit_code: Some(3) })),
+            "3"
+        );
+        assert_eq!(
+            super::outcome_detail(&outcome(HookStatus::Failed { exit_code: None })),
+            "no-exit"
+        );
+        assert_eq!(
+            super::outcome_detail(&outcome(HookStatus::TimedOut)),
+            "timeout"
+        );
+        assert_eq!(
+            super::outcome_detail(&outcome(HookStatus::NotStarted {
+                detail: "gone".to_owned()
+            })),
+            "not-started"
+        );
+        assert_eq!(super::outcome_detail(&outcome(HookStatus::Succeeded)), "");
+    }
+}

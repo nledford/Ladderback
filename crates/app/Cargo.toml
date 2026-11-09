@@ -19,6 +19,7 @@ futures.workspace = true
 app = { workspace = true, features = ["fakes"] }
 cucumber.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+uuid.workspace = true
 
 [[test]]
 name = "acceptance"

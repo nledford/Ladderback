@@ -8,7 +8,7 @@ use cucumber::{given, then};
 
 use app::fakes::{FakeHookRunner, Scripted};
 use app::ports::HookSetup;
-use domain::execution::{FailureReason, OperationStatus};
+use domain::execution::{FailureReason, OperationStatus, WarningKind};
 use domain::planning::{HookEntry, Hooks, OnFailure};
 use domain::{PlanId, RepositoryAlias};
 
@@ -193,4 +193,33 @@ fn failed_by_timeout(agent: &mut Agent) {
             reason: FailureReason::HookFailed { exit_code: None }
         }
     ));
+}
+
+#[then(expr = "the operation carries a hook warning from the {word} phase with detail {string}")]
+fn hook_warning(agent: &mut Agent, phase: String, detail: String) {
+    let during = phase_word(&phase);
+    assert!(
+        agent
+            .operation()
+            .warnings()
+            .iter()
+            .any(|warning| warning.kind == WarningKind::Hook
+                && warning.during == during
+                && warning.detail == detail),
+        "a hook warning from the {phase} phase with detail {detail:?}: {:?}",
+        agent.operation().warnings()
+    );
+}
+
+#[then("the operation carries no hook warning")]
+fn no_hook_warning(agent: &mut Agent) {
+    assert!(
+        agent
+            .operation()
+            .warnings()
+            .iter()
+            .all(|warning| warning.kind != WarningKind::Hook),
+        "no hook warning: {:?}",
+        agent.operation().warnings()
+    );
 }

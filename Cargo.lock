@@ -147,6 +147,7 @@ dependencies = [
  "domain",
  "futures",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
