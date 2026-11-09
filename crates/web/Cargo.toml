@@ -18,7 +18,10 @@ pseudo = ["l10n/pseudo"]
 
 [dependencies]
 console_error_panic_hook.workspace = true
-l10n.workspace = true
+# The browser's `Intl` writes the page's numbers and instants (technical design
+# §8.4); no locale data ships. The feature is on whatever the build, so there
+# is no `web` feature for it.
+l10n = { workspace = true, features = ["browser-intl"] }
 leptos.workspace = true
 web-sys.workspace = true
 
