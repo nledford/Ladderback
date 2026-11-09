@@ -75,6 +75,11 @@ pub enum ErrorCode {
     /// A repository's settings hold a secret reference that couldn't be
     /// resolved. The argument `field` names where it is.
     SecretUnresolved,
+    /// The configuration holds no plan by that name. The argument `plan`
+    /// names it.
+    PlanUnknown,
+    /// A request's body is not the JSON the route takes.
+    InvalidBody,
     #[serde(other)]
     Unknown,
 }
@@ -271,7 +276,13 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::InvalidJobSpec
+            Self::PlanUnknown => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::InvalidBody
+            | Self::InvalidJobSpec
             | Self::OperationFailed
             | Self::DeadlinePassed
             | Self::EngineUnavailable
@@ -571,12 +582,8 @@ impl SnapshotDto {
 /// agent came or went. Identifiers are text, counts are numbers, and times
 /// are RFC 3339 strings. The daemon forwards these unchanged: coalescing is
 /// the worker's, once (§4.1).
-///
-/// This is commit 1 of the M1b event stream: the wire shape is pinned by the
-/// tests below, and the serialization is stubbed until the implementation
-/// commits replace it with the derives.
-#[allow(clippy::todo)] // todo!() stubs are commit-1 only (development.md §13.1)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum UiEvent {
     /// An operation left the queue and is running.
     OperationStarted {
@@ -614,26 +621,6 @@ pub enum UiEvent {
     AgentOnline { agent: String, at: String },
     /// An agent left the fleet.
     AgentOffline { agent: String, at: String },
-}
-
-#[allow(clippy::todo)] // todo!() stubs are commit-1 only (development.md §13.1)
-impl Serialize for UiEvent {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        todo!()
-    }
-}
-
-#[allow(clippy::todo)] // todo!() stubs are commit-1 only (development.md §13.1)
-impl<'de> Deserialize<'de> for UiEvent {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        todo!()
-    }
 }
 
 #[cfg(test)]

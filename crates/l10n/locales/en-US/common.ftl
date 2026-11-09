@@ -124,6 +124,13 @@ error-config-schema-newer = { -brand-name } did not read its configuration file 
 error-unknown = An unexpected error occurred.
     .with-detail = An unexpected error occurred: { $detail }
 
+# The request names a plan the configuration does not have.
+# $plan (text): the plan's ID, such as home.
+error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or run a plan that exists.
+
+# A request's body was not the JSON the route takes.
+error-invalid-body = { -brand-name } could not read the request's body. Send the JSON the route takes.
+
 ## Warning codes
 
 # A file or folder the backup could not read.
