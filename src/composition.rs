@@ -674,6 +674,7 @@ impl CancelRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use app::ports::{HookContext, HookOutcome, HookStatus, JobControl};
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
     /// ever been written to the first.
@@ -734,5 +735,150 @@ mod tests {
             !registry.cancel(&id),
             "a finished operation no longer cancels"
         );
+    }
+
+    /// A hook runner that reports a run has entered its before-hooks and
+    /// parks there until the test opens the gate.
+    struct GateHooks {
+        entered: std::sync::Arc<tokio::sync::watch::Sender<u32>>,
+        open: std::sync::Arc<tokio::sync::Mutex<tokio::sync::watch::Receiver<bool>>>,
+    }
+
+    impl GateHooks {
+        fn new() -> (
+            Self,
+            tokio::sync::watch::Receiver<u32>,
+            tokio::sync::watch::Sender<bool>,
+        ) {
+            let (entered_tx, entered_rx) = tokio::sync::watch::channel(0);
+            let (open_tx, open_rx) = tokio::sync::watch::channel(false);
+            let open_gate = open_tx.clone();
+            let hooks = Self {
+                entered: std::sync::Arc::new(entered_tx),
+                open: std::sync::Arc::new(tokio::sync::Mutex::new(open_rx)),
+            };
+            (hooks, entered_rx, open_gate)
+        }
+    }
+
+    #[async_trait]
+    impl HookRunner for GateHooks {
+        async fn run(
+            &self,
+            _entry: &domain::planning::HookEntry,
+            _context: &HookContext,
+        ) -> HookOutcome {
+            self.entered.send_modify(|seen| *seen += 1);
+            let mut open = self.open.lock().await;
+            while !*open.borrow_and_update() {
+                open.changed().await.expect("the gate stays open");
+            }
+            HookOutcome {
+                status: HookStatus::Succeeded,
+                stdout: Default::default(),
+                stderr: Default::default(),
+            }
+        }
+    }
+
+    /// An engine whose jobs report nothing: the run parks, as a real backup
+    /// does while it works, and stopping it is a no-op.
+    struct ParkedEngine;
+
+    #[async_trait]
+    impl Engine for ParkedEngine {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Ok(RunningJob {
+                events: futures::stream::pending().boxed(),
+                control: Box::new(Parked),
+            })
+        }
+    }
+
+    struct Parked;
+
+    #[async_trait]
+    impl JobControl for Parked {
+        async fn stop(&mut self) {}
+    }
+
+    /// A cancel that arrives the instant the route answers finds the
+    /// operation, not an "already ended" refusal (§4.2): the cancel switch
+    /// is parked before the run starts, while the run is still in its
+    /// before-hooks.
+    #[tokio::test]
+    async fn a_cancel_in_the_start_window_stops_the_operation() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config_dir, data_dir) = own_folders(scratch.path());
+        let source = scratch.path().join("source");
+        std::fs::create_dir_all(&source).expect("the source folder");
+        let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+        let settings = domain::planning::RepositorySettings {
+            repository: scratch.path().join("repo").display().to_string(),
+            repo_hot: None,
+            password: domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
+                "demo-password",
+            )),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let mut hooks = domain::planning::Hooks::default();
+        hooks.run_before = vec![domain::planning::HookEntry::parse("true").expect("a hook")];
+        let config = domain::planning::AgentConfig::new(
+            domain::planning::AgentSettings::default(),
+            hooks,
+            std::collections::BTreeMap::from([(
+                alias.clone(),
+                domain::planning::RepositoryConfig {
+                    settings,
+                    maintenance: domain::planning::Maintenance::None,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            )]),
+            vec![domain::planning::Plan::new(
+                domain::PlanId::parse("home").expect("a plan ID"),
+                alias,
+                vec![
+                    domain::planning::Source::parse(source.display().to_string().as_str())
+                        .expect("a source"),
+                ],
+            )],
+        )
+        .expect("a valid configuration");
+        let (hooks, mut entered, open_gate) = GateHooks::new();
+        let config_store = Arc::new(FileConfigStore::new(
+            config_dir.join("config.toml"),
+            Arc::new(SystemClock),
+        ));
+        app::ports::ConfigStore::save(&*config_store, &config)
+            .await
+            .expect("the config saves");
+        let runner = PlanRunner {
+            config: config_store,
+            resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+            agent_id: agent_id::load_or_create(&data_dir).expect("an agent ID"),
+            engine: Arc::new(ParkedEngine),
+            store: Arc::new(
+                SqliteStore::open(&data_dir.join("ladderback.db"))
+                    .await
+                    .expect("the store opens"),
+            ),
+            registry: Arc::new(CancelRegistry::new()),
+            hooks: Arc::new(hooks),
+        };
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        // The run is in its before-hooks now, parked at the gate and not yet
+        // at the engine, so the switch must already be parked for a cancel.
+        entered.changed().await.expect("the run reaches its hooks");
+        // The cancel is answered while the gate is still closed: a switch
+        // parked any later than the route's answer is a refusal here.
+        let cancel = runner.cancel(id).await;
+        open_gate.send(true).expect("the gate opens");
+        cancel.expect("a cancel in the start window is accepted");
     }
 }
