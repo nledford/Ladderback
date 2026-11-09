@@ -1,0 +1,11 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/console-e6f4bde54b10714c.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/common_term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/kb.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/unix_term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/utils.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/ansi.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/libconsole-e6f4bde54b10714c.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/common_term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/kb.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/unix_term.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/utils.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/ansi.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/common_term.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/kb.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/term.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/unix_term.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/utils.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.6/src/ansi.rs:

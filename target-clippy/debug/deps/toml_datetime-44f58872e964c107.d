@@ -1,0 +1,8 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/toml_datetime-44f58872e964c107.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/datetime.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/de.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/ser.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/libtoml_datetime-44f58872e964c107.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/datetime.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/de.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/ser.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/datetime.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/de.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.3+spec-1.1.0/src/ser.rs:

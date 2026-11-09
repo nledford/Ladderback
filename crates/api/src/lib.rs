@@ -919,7 +919,9 @@ impl std::error::Error for InvalidOperation {}
 
 impl OperationSummaryDto {
     /// Builds the summary, refusing an ID that isn't a hyphenated UUID and
-    /// a time that isn't RFC 3339, like [`SnapshotDto::new`].
+    /// a time that isn't RFC 3339, like [`SnapshotDto::new`]. The arity is
+    /// the wire's: one argument per field of the published shape.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         plan: String,

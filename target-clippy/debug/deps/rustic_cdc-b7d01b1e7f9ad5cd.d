@@ -1,0 +1,10 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/rustic_cdc-b7d01b1e7f9ad5cd.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/chunk.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/polynom.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/rolling_hash.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/separator.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/tree.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/librustic_cdc-b7d01b1e7f9ad5cd.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/chunk.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/polynom.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/rolling_hash.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/separator.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/tree.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/chunk.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/polynom.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/rolling_hash.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/separator.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustic_cdc-0.3.1/src/tree.rs:

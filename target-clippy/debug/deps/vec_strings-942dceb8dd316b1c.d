@@ -1,0 +1,10 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/vec_strings-942dceb8dd316b1c.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/serde.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/small_array_box.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings_no_index.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/two_strs.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/libvec_strings-942dceb8dd316b1c.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/serde.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/small_array_box.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings_no_index.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/two_strs.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/serde.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/small_array_box.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/strings_no_index.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vec-strings-0.4.8/src/two_strs.rs:

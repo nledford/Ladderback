@@ -29,6 +29,7 @@ const STATE_TIMEOUT: Duration = Duration::from_secs(120);
 const MANY_FILES: usize = 3000;
 
 /// What the operation-lifecycle scenarios keep between steps.
+#[derive(Default)]
 pub struct Ops {
     /// The operations the scenario started, oldest first.
     started: Vec<String>,
@@ -38,15 +39,6 @@ pub struct Ops {
     page: Option<Page>,
 }
 
-impl Default for Ops {
-    fn default() -> Self {
-        Self {
-            started: Vec::new(),
-            refusal: None,
-            page: None,
-        }
-    }
-}
 
 impl std::fmt::Debug for Ops {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

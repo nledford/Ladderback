@@ -1,0 +1,10 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/mime_guess-dfa701f3d5112e64.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs /Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/build/mime_guess-bdfa7c6de1b8bdf6/out/mime_types_generated.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/deps/libmime_guess-dfa701f3d5112e64.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs /Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/build/mime_guess-bdfa7c6de1b8bdf6/out/mime_types_generated.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs:
+/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/build/mime_guess-bdfa7c6de1b8bdf6/out/mime_types_generated.rs:
+
+# env-dep:MIME_TYPES_GENERATED_PATH=/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/build/mime_guess-bdfa7c6de1b8bdf6/out/mime_types_generated.rs

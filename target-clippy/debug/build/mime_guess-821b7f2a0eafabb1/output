@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/nledford/Projects/rust/Steading/.worktrees/api-operations/target-clippy/debug/build/mime_guess-821b7f2a0eafabb1/out/mime_types_generated.rs
