@@ -40,6 +40,8 @@ mod operations_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/adopt.rs"]
+mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/repositories.rs"]
@@ -72,6 +74,8 @@ struct Agent {
     repositories: repositories_steps::RepositoriesSetup,
     snapshots: snapshots_steps::SnapshotsSetup,
     forget: forget_steps::ForgetE2e,
+    #[allow(dead_code, reason = "red test: the run fills it next")]
+    adopt: adopt_steps::AdoptE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -113,6 +117,7 @@ impl Agent {
             repositories: repositories_steps::RepositoriesSetup::default(),
             snapshots: snapshots_steps::SnapshotsSetup::default(),
             forget: forget_steps::ForgetE2e::default(),
+            adopt: adopt_steps::AdoptE2e,
         }
     }
 

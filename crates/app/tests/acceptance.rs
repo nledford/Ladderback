@@ -21,6 +21,8 @@ mod maintenance_steps;
 #[path = "steps/operation.rs"]
 mod operation_steps;
 
+#[path = "steps/adopt.rs"]
+mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/secrets.rs"]
@@ -45,6 +47,7 @@ struct Agent {
     maintenance: maintenance_steps::MaintenanceWorld,
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
+    adopt: adopt_steps::AdoptWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -79,6 +82,7 @@ impl Agent {
             hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),
             forget: Default::default(),
+            adopt: Default::default(),
         }
     }
 
