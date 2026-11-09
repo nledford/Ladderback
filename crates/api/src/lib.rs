@@ -547,8 +547,23 @@ impl SnapshotDto {
         tags: Vec<String>,
         paths: Vec<String>,
     ) -> Result<Self, InvalidSnapshot> {
-        let _ = (id, time, hostname, label, tags, paths);
-        todo!("phase 2: validate the id, the time and the path cap")
+        if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(InvalidSnapshot::Id);
+        }
+        if time.parse::<jiff::Timestamp>().is_err() {
+            return Err(InvalidSnapshot::Time);
+        }
+        if paths.len() > MAX_SNAPSHOT_PATHS {
+            return Err(InvalidSnapshot::Paths);
+        }
+        Ok(Self {
+            id,
+            time,
+            hostname,
+            label,
+            tags,
+            paths,
+        })
     }
 }
 
