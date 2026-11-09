@@ -63,6 +63,8 @@ pub enum JobKind {
     Backup(BackupJobSpec),
     Prune(PruneJobSpec),
     Check(CheckJobSpec),
+    /// Lists the repository's snapshots. A read, never an operation.
+    Ls(RepositorySpec),
 }
 
 /// A repository and what it takes to open it.
@@ -259,11 +261,28 @@ pub enum Level {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum OpResult {
-    Fake { steps_completed: u32 },
-    Repository { id: RepositoryId },
+    Fake {
+        steps_completed: u32,
+    },
+    Repository {
+        id: RepositoryId,
+    },
     Backup(BackupResult),
     Prune(PruneResult),
     Check(CheckResult),
+    /// A repository's snapshots, newest first.
+    Snapshots(Vec<SnapshotResult>),
+}
+
+/// One snapshot of a listing, as the worker reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotResult {
+    pub id: SnapshotId,
+    pub time: Timestamp,
+    pub hostname: String,
+    pub label: String,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

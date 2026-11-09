@@ -22,6 +22,7 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Backup => "backup",
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
+        OperationKind::Ls => "ls",
     }
 }
 
@@ -33,6 +34,7 @@ pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
         "backup" => Some(OperationKind::Backup),
         "prune" => Some(OperationKind::Prune),
         "check" => Some(OperationKind::Check),
+        "ls" => Some(OperationKind::Ls),
         _ => None,
     }
 }

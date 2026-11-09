@@ -19,6 +19,7 @@ pub mod history;
 pub mod ports;
 pub mod repositories;
 pub mod secrets;
+pub mod snapshots;
 
 #[cfg(feature = "fakes")]
 pub mod contract;

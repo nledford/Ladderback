@@ -37,6 +37,8 @@ mod secrets_steps;
 
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
+#[path = "steps/snapshots.rs"]
+mod snapshots_steps;
 
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
@@ -59,6 +61,7 @@ struct Agent {
     secrets: secrets_steps::SecretsSetup,
     config: config_steps::ConfigSetup,
     repositories: repositories_steps::RepositoriesSetup,
+    snapshots: snapshots_steps::SnapshotsSetup,
 }
 
 impl std::fmt::Debug for Agent {
@@ -96,6 +99,7 @@ impl Agent {
             secrets: secrets_steps::SecretsSetup::default(),
             config: config_steps::ConfigSetup::default(),
             repositories: repositories_steps::RepositoriesSetup::default(),
+            snapshots: snapshots_steps::SnapshotsSetup::default(),
         }
     }
 

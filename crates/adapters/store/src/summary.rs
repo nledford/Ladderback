@@ -6,8 +6,8 @@
 //! version that added one can still be read; a missing field or an unknown
 //! `type` is an error.
 
-use app::ports::{BackupSummary, CheckSummary, EngineResult, PruneSummary};
-use domain::{RepositoryId, SnapshotId};
+use app::ports::{BackupSummary, CheckSummary, EngineResult, PruneSummary, SnapshotSummary};
+use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -41,6 +41,24 @@ pub(crate) enum Summary {
         errors: u64,
         warnings: u64,
     },
+    /// A read's result. A listing is never logged as an operation (§9), so
+    /// no row ever holds this variant; the format knows it only because
+    /// [`EngineResult`] does.
+    Snapshots {
+        snapshots: Vec<Snapshot>,
+    },
+}
+
+/// One snapshot of a listing, as the summary keeps it: spelled out here
+/// rather than taken from `app`, like every other part of [`Summary`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Snapshot {
+    pub id: SnapshotId,
+    pub time: Timestamp,
+    pub hostname: String,
+    pub label: String,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
 }
 
 impl From<&EngineResult> for Summary {
@@ -71,6 +89,19 @@ impl From<&EngineResult> for Summary {
                 repository: summary.repository.clone(),
                 errors: summary.errors,
                 warnings: summary.warnings,
+            },
+            EngineResult::Snapshots(snapshots) => Self::Snapshots {
+                snapshots: snapshots
+                    .iter()
+                    .map(|s| Snapshot {
+                        id: s.id.clone(),
+                        time: s.time,
+                        hostname: s.hostname.clone(),
+                        label: s.label.clone(),
+                        tags: s.tags.clone(),
+                        paths: s.paths.clone(),
+                    })
+                    .collect(),
             },
         }
     }
@@ -122,6 +153,19 @@ impl From<Summary> for EngineResult {
                 errors,
                 warnings,
             }),
+            Summary::Snapshots { snapshots } => Self::Snapshots(
+                snapshots
+                    .into_iter()
+                    .map(|s| SnapshotSummary {
+                        id: s.id,
+                        time: s.time,
+                        hostname: s.hostname,
+                        label: s.label,
+                        tags: s.tags,
+                        paths: s.paths,
+                    })
+                    .collect(),
+            ),
         }
     }
 }

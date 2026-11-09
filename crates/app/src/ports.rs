@@ -12,7 +12,7 @@ pub use config_store::{ConfigError, ConfigStore, PasswordProblem, Position, Prob
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, Job, JobControl, ProgressEvent, ProgressKind, PruneJob,
-    PruneSummary, RepositoryAccess, RunningJob,
+    PruneSummary, RepositoryAccess, RunningJob, SnapshotSummary,
 };
 pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,

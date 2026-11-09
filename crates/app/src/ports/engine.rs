@@ -73,6 +73,10 @@ pub enum Job {
     Backup(BackupJob),
     Prune(PruneJob),
     Check(CheckJob),
+    /// Lists the repository's snapshots, newest first. A read, not an
+    /// operation: it takes no I7 slot and is never written to the operation
+    /// log (§9).
+    Ls(RepositoryAccess),
 }
 
 impl Job {
@@ -82,7 +86,9 @@ impl Job {
         match self {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
-            Self::Identify(_) | Self::Init(_) | Self::Prune(_) | Self::Check(_) => None,
+            Self::Identify(_) | Self::Init(_) | Self::Prune(_) | Self::Check(_) | Self::Ls(_) => {
+                None
+            }
         }
     }
 
@@ -95,6 +101,7 @@ impl Job {
             Self::Backup(_) => OperationKind::Backup,
             Self::Prune(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
+            Self::Ls(_) => OperationKind::Ls,
         }
     }
 
@@ -103,7 +110,7 @@ impl Job {
     pub fn target(&self) -> Target {
         let (plan, access) = match self {
             Self::Fake(_) => return Target::default(),
-            Self::Identify(access) | Self::Init(access) => (None, access),
+            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => (None, access),
             Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
             Self::Prune(job) => (None, &job.repository),
             Self::Check(job) => (None, &job.repository),
@@ -296,11 +303,17 @@ pub enum ProgressKind {
 /// What a successful operation produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineResult {
-    Fake { steps_completed: u32 },
-    Repository { id: RepositoryId },
+    Fake {
+        steps_completed: u32,
+    },
+    Repository {
+        id: RepositoryId,
+    },
     Backup(BackupSummary),
     Prune(PruneSummary),
     Check(CheckSummary),
+    /// A repository's snapshots, newest first.
+    Snapshots(Vec<SnapshotSummary>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,6 +349,20 @@ pub struct CheckSummary {
     pub repository: RepositoryId,
     pub errors: u64,
     pub warnings: u64,
+}
+
+/// One snapshot of a repository's list, as the engine reports it. The wire
+/// form the UI sees is `api`'s snapshot DTO.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotSummary {
+    pub id: SnapshotId,
+    /// When the snapshot was taken.
+    pub time: Timestamp,
+    pub hostname: String,
+    pub label: String,
+    pub tags: Vec<String>,
+    /// The snapshot's paths, capped (an input-derived size).
+    pub paths: Vec<String>,
 }
 
 #[cfg(test)]

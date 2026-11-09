@@ -26,6 +26,13 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
     }))
 }
 
+/// Lists the repository's snapshots, newest first. A read: it emits `Started`
+/// after the open, as `identify` does, and then one final result.
+pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let _ = (ctx, spec);
+    todo!("phase 2: open the repository, list its snapshots, newest first")
+}
+
 /// Initialises a repository at the location, with default key options and
 /// both halves of a hot/cold repository. It refuses when a repository
 /// already exists there (`repository-exists`), and never overwrites one.
