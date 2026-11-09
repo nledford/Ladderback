@@ -56,7 +56,7 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CACHE_SLOTS: u32 = 64;
 
 /// Runs each operation in a new worker process: `program args…`, normally
-/// `steading worker`. A worker leads a process group of its own, and what is
+/// `ladderback worker`. A worker leads a process group of its own, and what is
 /// done to the worker is done to the group, so the programs it started (an
 /// rclone, say) end with it.
 ///
@@ -108,7 +108,7 @@ impl WorkerEngine {
     }
 
     /// Gives each worker of a repository with a known ID its own rustic cache
-    /// under `root/steading/<repository id>/<slot>`. Without a root, workers
+    /// under `root/ladderback/<repository id>/<slot>`. Without a root, workers
     /// run without a cache.
     #[must_use]
     pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
@@ -819,7 +819,7 @@ async fn forward_stderr(
             Ok(Some(cut)) => {
                 if !line.is_empty() || cut {
                     log::log!(
-                        target: "steading::worker",
+                        target: "ladderback::worker",
                         log::Level::Warn,
                         "{}{}",
                         redacted_log_line(&line, cut, &redactor),
@@ -945,7 +945,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
             detail: redactor.redact(&detail),
         }),
         // Logs are for the daemon's own log, which gets them under the target
-        // `steading::worker`.
+        // `ladderback::worker`.
         WorkerEvent::Log { level, message } => {
             let level = match level {
                 Level::Error => log::Level::Error,
@@ -953,7 +953,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 Level::Info => log::Level::Info,
                 Level::Debug => log::Level::Debug,
             };
-            log::log!(target: "steading::worker", level, "{}", redactor.redact(&message));
+            log::log!(target: "ladderback::worker", level, "{}", redactor.redact(&message));
             return None;
         }
         WorkerEvent::Result(result) => EngineEvent::Succeeded(match result {
@@ -1136,7 +1136,7 @@ impl CacheSlots {
     /// `None` when every slot is taken: that worker runs without a cache.
     fn acquire(self: &Arc<Self>, root: &Path, repository: &RepositoryId) -> Option<CacheSlot> {
         let directory = |number: u32| {
-            root.join("steading")
+            root.join("ladderback")
                 .join(repository.as_str())
                 .join(number.to_string())
         };
@@ -1382,7 +1382,7 @@ mod tests {
     }
 
     fn cache_dir(root: &Path, id: &RepositoryId, slot: u32) -> PathBuf {
-        root.join("steading")
+        root.join("ladderback")
             .join(id.as_str())
             .join(slot.to_string())
     }
@@ -1464,7 +1464,7 @@ mod tests {
     /// daemon dropping the job must not kill it mid-way.
     #[tokio::test]
     async fn a_worker_may_finish_after_reporting_its_result() {
-        let scratch = std::env::temp_dir().join(format!("steading-reap-{}", std::process::id()));
+        let scratch = std::env::temp_dir().join(format!("ladderback-reap-{}", std::process::id()));
         let _ = std::fs::remove_file(&scratch);
         let result =
             serde_json::to_string(&WorkerEvent::Result(OpResult::Fake { steps_completed: 0 }))
@@ -1555,7 +1555,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_a_running_job_kills_the_worker_at_once() {
-        let scratch = std::env::temp_dir().join(format!("steading-drop-{}", std::process::id()));
+        let scratch = std::env::temp_dir().join(format!("ladderback-drop-{}", std::process::id()));
         let _ = std::fs::remove_file(&scratch);
         let script = format!("cat >/dev/null; sleep 1; touch '{}'", scratch.display());
         let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
@@ -1781,14 +1781,14 @@ mod tests {
         }
     }
 
-    /// What the capturing logger was given for `steading::worker`.
+    /// What the capturing logger was given for `ladderback::worker`.
     static WORKER_LOG: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
 
     struct CapturingLogger;
 
     impl log::Log for CapturingLogger {
         fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-            metadata.target() == "steading::worker"
+            metadata.target() == "ladderback::worker"
         }
 
         fn log(&self, record: &log::Record<'_>) {
@@ -2375,7 +2375,7 @@ mod tests {
         });
         // A program that can't start, so only the check before spawning can
         // produce the cap's message.
-        let engine = WorkerEngine::new("/nonexistent/steading-worker", ["worker"]);
+        let engine = WorkerEngine::new("/nonexistent/ladderback-worker", ["worker"]);
         let error = engine
             .run(OperationId::from_uuid(Uuid::from_u128(1)), job)
             .await

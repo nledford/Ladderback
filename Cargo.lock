@@ -3110,6 +3110,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ladderback"
+version = "0.0.0"
+dependencies = [
+ "api",
+ "app",
+ "async-trait",
+ "axum",
+ "clap",
+ "cucumber",
+ "domain",
+ "engine",
+ "env_logger",
+ "futures",
+ "http-adapter",
+ "l10n",
+ "log",
+ "platform",
+ "rustic_backend",
+ "rustic_core",
+ "secrets",
+ "store",
+ "tempfile",
+ "testkit",
+ "tokio",
+]
+
+[[package]]
 name = "lazy-regex"
 version = "3.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6456,33 +6483,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "steading"
-version = "0.0.0"
-dependencies = [
- "api",
- "app",
- "async-trait",
- "axum",
- "clap",
- "cucumber",
- "domain",
- "engine",
- "env_logger",
- "futures",
- "http-adapter",
- "l10n",
- "log",
- "platform",
- "rustic_backend",
- "rustic_core",
- "secrets",
- "store",
- "tempfile",
- "testkit",
- "tokio",
-]
 
 [[package]]
 name = "store"

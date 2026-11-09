@@ -4,12 +4,12 @@
 use crate::snapshot::SnapshotRef;
 use crate::{AgentId, PlanId, SnapshotId};
 
-/// The prefix of every tag Steading reserves for itself.
-pub const RESERVED_TAG_PREFIX: &str = "steading-";
+/// The prefix of every tag Ladderback reserves for itself.
+pub const RESERVED_TAG_PREFIX: &str = "ladderback-";
 /// The tag prefix naming the plan that made a snapshot.
-pub const PLAN_TAG_PREFIX: &str = "steading-plan:";
+pub const PLAN_TAG_PREFIX: &str = "ladderback-plan:";
 /// The tag prefix naming the agent that made a snapshot.
-pub const AGENT_TAG_PREFIX: &str = "steading-agent:";
+pub const AGENT_TAG_PREFIX: &str = "ladderback-agent:";
 
 /// A tag the user adds to a plan's snapshots. It never starts with
 /// [`RESERVED_TAG_PREFIX`], in any case, so it can't make a snapshot look like
@@ -35,7 +35,7 @@ impl UserTag {
     }
 }
 
-/// A tag that uses Steading's reserved prefix.
+/// A tag that uses Ladderback's reserved prefix.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReservedTag {
     pub tag: String,
@@ -49,7 +49,7 @@ impl std::fmt::Display for ReservedTag {
 
 impl std::error::Error for ReservedTag {}
 
-/// `steading-plan:<plan>` and `steading-agent:<agent>`: every Steading backup
+/// `ladderback-plan:<plan>` and `ladderback-agent:<agent>`: every Ladderback backup
 /// carries both, and they make the snapshot managed by that plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanTags {
@@ -126,8 +126,8 @@ mod tests {
         }
     }
 
-    const PLAN: &str = "steading-plan:home";
-    const AGENT: &str = "steading-agent:00000000-0000-0000-0000-000000000001";
+    const PLAN: &str = "ladderback-plan:home";
+    const AGENT: &str = "ladderback-agent:00000000-0000-0000-0000-000000000001";
 
     #[test]
     fn a_plan_tags_its_snapshots_with_plan_and_agent() {
@@ -136,17 +136,22 @@ mod tests {
 
     #[test]
     fn a_user_tag_cannot_use_the_reserved_prefix() {
-        for tag in ["daily", "steading", "my-steading-plan:home", "steadingx"] {
+        for tag in [
+            "daily",
+            "ladderback",
+            "my-ladderback-plan:home",
+            "ladderbackx",
+        ] {
             assert_eq!(
                 UserTag::new(tag).map(|t| t.as_str().to_owned()),
                 Ok(tag.to_owned())
             );
         }
         for tag in [
-            "steading-plan:other",
-            "steading-agent:x",
-            "steading-",
-            "Steading-Plan:other",
+            "ladderback-plan:other",
+            "ladderback-agent:x",
+            "ladderback-",
+            "Ladderback-Plan:other",
         ] {
             assert_eq!(
                 UserTag::new(tag),
@@ -163,7 +168,7 @@ mod tests {
         assert!(tags().mark(&snapshot(1, 0, &["daily", AGENT, PLAN])));
         assert!(!tags().mark(&snapshot(1, 0, &[PLAN])));
         assert!(!tags().mark(&snapshot(1, 0, &[AGENT])));
-        assert!(!tags().mark(&snapshot(1, 0, &["steading-plan:home-old", AGENT])));
+        assert!(!tags().mark(&snapshot(1, 0, &["ladderback-plan:home-old", AGENT])));
         let other_agent = PlanTags::new(PlanId::parse("home").unwrap(), agent(2));
         assert!(!other_agent.mark(&snapshot(1, 0, &[PLAN, AGENT])));
     }

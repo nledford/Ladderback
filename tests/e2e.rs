@@ -1,5 +1,5 @@
-//! Runs the `@e2e` scenarios in `features/` against the real `steading`
-//! binary: operations run in real `steading worker` processes (§13.2).
+//! Runs the `@e2e` scenarios in `features/` against the real `ladderback`
+//! binary: operations run in real `ladderback worker` processes (§13.2).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,7 +30,7 @@ mod request_checks_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
-const STEADING: &str = env!("CARGO_BIN_EXE_steading");
+const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -66,7 +66,7 @@ impl Agent {
         let agent_id =
             platform::agent_id::load_or_create(&scratch.path().join("data")).expect("an agent ID");
         Self {
-            engine: Arc::new(WorkerEngine::new(STEADING, ["worker"])),
+            engine: Arc::new(WorkerEngine::new(LADDERBACK, ["worker"])),
             job: FakeJob {
                 steps: 1,
                 step_delay: Duration::from_millis(10),
@@ -90,7 +90,7 @@ impl Agent {
     }
 
     fn make_engine_unavailable(&mut self) {
-        let missing = std::env::temp_dir().join("steading-e2e-no-such-binary");
+        let missing = std::env::temp_dir().join("ladderback-e2e-no-such-binary");
         self.engine = Arc::new(WorkerEngine::new(missing, ["worker"]));
     }
 
@@ -150,7 +150,7 @@ impl Agent {
     /// The operation log the runs write to.
     async fn store(&mut self) -> Arc<dyn OperationStore> {
         if self.store.is_none() {
-            let path = self.scratch().join("data").join("steading.db");
+            let path = self.scratch().join("data").join("ladderback.db");
             let opened = SqliteStore::open(&path)
                 .await
                 .expect("the operation log opens");

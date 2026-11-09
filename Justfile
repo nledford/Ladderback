@@ -1,4 +1,4 @@
-# Steading's workflows, for people and agents alike. CI runs these same
+# Ladderback's workflows, for people and agents alike. CI runs these same
 # recipes. `just` lists them; `just verify` runs everything CI checks.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
@@ -93,7 +93,7 @@ test-e2e *args:
 web:
     cd crates/web && trunk build --release
 
-# Build the steading binary with the current web UI.
+# Build the ladderback binary with the current web UI.
 [group('build')]
 build: web
     cargo build
@@ -157,7 +157,7 @@ release-preview:
     set -euo pipefail
     scratch=$(mktemp -d)
     trap 'rm -rf "$scratch"' EXIT
-    git clone --quiet --no-local '{{ root }}' "$scratch/steading"
-    cd "$scratch/steading"
+    git clone --quiet --no-local '{{ root }}' "$scratch/ladderback"
+    cd "$scratch/ladderback"
     release-plz update
     git --no-pager diff -- Cargo.toml CHANGELOG.md

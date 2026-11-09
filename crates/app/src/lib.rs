@@ -1,4 +1,4 @@
-//! Steading's application ring (technical design §3.2): use cases and the
+//! Ladderback's application ring (technical design §3.2): use cases and the
 //! port traits they drive. Depends only on `domain`, `async-trait` and
 //! `futures`; time comes from the [`Clock`](ports::Clock) port.
 //!

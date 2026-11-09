@@ -114,13 +114,13 @@ impl SecretsHarness for FakeSecretsHarness {
     }
 
     fn set_keyring_entry(&self, name: &str, secret: &str) -> KeyringEntry {
-        let entry = KeyringEntry::parse(&format!("steading-demo/{name}")).unwrap();
+        let entry = KeyringEntry::parse(&format!("ladderback-demo/{name}")).unwrap();
         self.secrets.set_keyring_entry(&entry, secret);
         entry
     }
 
     fn empty_keyring_entry(&self) -> KeyringEntry {
-        KeyringEntry::parse("steading-demo/empty").unwrap()
+        KeyringEntry::parse("ladderback-demo/empty").unwrap()
     }
 
     fn printing(&self, stdout: &[u8]) -> CommandLine {

@@ -47,7 +47,7 @@ impl From<io::Error> for JobError {
     }
 }
 
-/// What Steading knows of a snapshot rustic listed.
+/// What Ladderback knows of a snapshot rustic listed.
 pub(crate) fn snapshot_ref(snapshot: &SnapshotFile) -> Result<SnapshotRef, JobError> {
     let mut paths: Vec<String> = snapshot.paths.iter().cloned().collect();
     paths.sort();
@@ -61,7 +61,7 @@ pub(crate) fn snapshot_ref(snapshot: &SnapshotFile) -> Result<SnapshotRef, JobEr
     })
 }
 
-/// Steading's form of a snapshot ID: the full 64 hex characters.
+/// Ladderback's form of a snapshot ID: the full 64 hex characters.
 fn snapshot_id(id: &RusticSnapshotId) -> Result<SnapshotId, JobError> {
     SnapshotId::parse(id.to_hex().as_str())
         .map_err(|_| JobError::failed("rustic reported a snapshot ID that isn't 64 hex characters"))
@@ -197,7 +197,7 @@ mod tests {
             hostname: "laptop".to_owned(),
             label: "home".to_owned(),
             paths: list(&["/home/demo", "/etc"]),
-            tags: list(&["steading-plan:home", "weekly,odd"]),
+            tags: list(&["ladderback-plan:home", "weekly,odd"]),
             ..SnapshotFile::default()
         }
     }
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(reference.label, "home");
         assert_eq!(reference.paths, ["/etc", "/home/demo"]);
         // A tag with a comma stays one tag.
-        assert_eq!(reference.tags, ["steading-plan:home", "weekly,odd"]);
+        assert_eq!(reference.tags, ["ladderback-plan:home", "weekly,odd"]);
     }
 
     fn summarized(parent: Option<RusticSnapshotId>) -> SnapshotFile {
@@ -306,8 +306,8 @@ mod tests {
             tags,
             [
                 "a,b",
-                "steading-agent:00000000-0000-0000-0000-000000000001",
-                "steading-plan:home",
+                "ladderback-agent:00000000-0000-0000-0000-000000000001",
+                "ladderback-plan:home",
             ]
         );
     }
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn an_extra_tag_with_the_reserved_prefix_is_refused() {
         assert!(matches!(
-            snapshot_tags(&plan_tags(), &["steading-plan:other".to_owned()]),
+            snapshot_tags(&plan_tags(), &["ladderback-plan:other".to_owned()]),
             Err(JobError::Failed { .. })
         ));
     }

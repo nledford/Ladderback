@@ -33,7 +33,7 @@ mod tests {
     /// Set in the process the test starts, which then runs [`detached`]
     /// instead of starting one more: redirecting descriptor 1 inside the
     /// test run itself would swallow the harness's own output.
-    const CHILD: &str = "STEADING_TEST_DETACH_STDOUT";
+    const CHILD: &str = "LADDERBACK_TEST_DETACH_STDOUT";
 
     const TEST: &str = "worker::stdio::tests::what_is_written_to_stdout_after_detaching_never_reaches_the_event_pipe";
 

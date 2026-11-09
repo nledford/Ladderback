@@ -31,14 +31,14 @@ const PASSWORD: &str = "demo-password";
 const STAND_IN_WORKER: &str = "cat > \"$1/spec.json\"; env > \"$1/environment.txt\"; \
      printf '%s\\n' \"$0\" \"$@\" > \"$1/arguments.txt\"";
 
-/// Everything the daemon logged for `steading::worker`.
+/// Everything the daemon logged for `ladderback::worker`.
 static WORKER_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 struct CapturingLogger;
 
 impl log::Log for CapturingLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.target() == "steading::worker"
+        metadata.target() == "ladderback::worker"
     }
 
     fn log(&self, record: &log::Record<'_>) {

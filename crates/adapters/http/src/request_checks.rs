@@ -216,7 +216,7 @@ impl std::fmt::Display for NonLoopbackBind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "refusing to listen on {}: sign-in is off, so Steading only listens on loopback addresses (127.0.0.1, ::1)",
+            "refusing to listen on {}: sign-in is off, so Ladderback only listens on loopback addresses (127.0.0.1, ::1)",
             self.0
         )
     }

@@ -22,7 +22,7 @@ mod logging;
 
 #[derive(Parser)]
 #[command(
-    name = "steading",
+    name = "ladderback",
     version,
     about = "Self-hosted backup manager for rustic"
 )]
@@ -67,7 +67,7 @@ fn main() -> ExitCode {
 
 fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
     logging::install();
-    log::info!("steading {} starting", env!("CARGO_PKG_VERSION"));
+    log::info!("ladderback {} starting", env!("CARGO_PKG_VERSION"));
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
     if let Err(refusal) = http_adapter::require_loopback(listen) {
@@ -134,9 +134,9 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
     })
 }
 
-/// Prints one of Steading's own messages on stderr after the program's name.
+/// Prints one of Ladderback's own messages on stderr after the program's name.
 fn say(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) {
-    eprintln!("steading: {}", localizer.message(id, args));
+    eprintln!("ladderback: {}", localizer.message(id, args));
 }
 
 /// A value shown as the text it prints as.

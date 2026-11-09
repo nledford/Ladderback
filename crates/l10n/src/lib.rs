@@ -1,4 +1,4 @@
-//! Steading's localization (technical design §8.4): the Fluent catalogs, the
+//! Ladderback's localization (technical design §8.4): the Fluent catalogs, the
 //! generated message IDs, locale selection and the rendering of the API's
 //! error codes. A presentation library: it depends on [`api`] for the codes
 //! and arguments, and `domain` and `app` never use it.

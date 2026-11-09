@@ -1,7 +1,7 @@
-# Steading — Technical design
+# Ladderback — Technical design
 
 > **Status:** Draft v0.6 · 2026-11-08
-> **Name:** Steading (binary `steading`). A steading is a farmhouse with its outbuildings: the hub and its agents.
+> **Name:** Ladderback (binary `ladderback`). A ladderback is a rustic chair style, a nod to Backrest. Ladderback is inspired by Backrest, never derived from it: Backrest is GPL-3.0, this project is MIT OR Apache-2.0.
 
 A self-hosted backup manager for [rustic](https://rustic.cli.rs). It provides a web UI for connecting repositories, defining backup plans and schedules, and watching backup status and errors across several computers. Think "[Backrest](https://github.com/garethgeorge/backrest), but built on `rustic_core`". It is written from scratch in Rust, and the frontend is written in Leptos.
 
@@ -75,9 +75,9 @@ Every later section serves these. Each one has a single enforcing component and 
 |---|---|---|---|
 | I1 | Among agents registered to a hub, each repository has at most one maintenance owner, keyed by its rustic repository ID. Ownership is a lease, so a lost or revoked owner stops on its own. A standalone agent can't rule out a second standalone owner and warns instead. | Hub ownership registry with leases; standalone warning (§7.3) | Two agents request `local` for one repo: the second is rejected; an expired lease stops scheduled maintenance |
 | I2 | Prune never uses `instant-delete` or `early-delete-index`. | `engine` builds `PruneOptions` itself; no config key exposes either flag (§7.3) | Unit test on the mapping; a config containing either key fails to load |
-| I3 | No Steading backup writes a snapshot after its deadline (index read start + `keep-delete` − prune margin), except a snapshot write already in progress at the deadline, which the margin covers. | `Deadline` rule in `domain`; kill decision in `app`; worker watchdog and daemon kill; backed by the owner's prune guard (§7.3) | Fake-clock tests of the rule and the kill decision; one `@e2e` scenario with a real worker, a short deadline and a scratch repo asserting no snapshot is written |
+| I3 | No Ladderback backup writes a snapshot after its deadline (index read start + `keep-delete` − prune margin), except a snapshot write already in progress at the deadline, which the margin covers. | `Deadline` rule in `domain`; kill decision in `app`; worker watchdog and daemon kill; backed by the owner's prune guard (§7.3) | Fake-clock tests of the rule and the kill decision; one `@e2e` scenario with a real worker, a short deadline and a scratch repo asserting no snapshot is written |
 | I4 | Resolved secrets never appear in argv, worker or hook environments, logs, hook templates, sync messages or the UI. | `JobSpec` on stdin, scrubbed environments and the `Redactor` (§3.1, §10.2) | A canary secret is absent from every log, event and child environment |
-| I5 | Destructive restic commands (`prune`, `forget`, `rewrite`, `repair`) are never run against a Steading-maintained repo, and the UI says so. | Repo page warning; Steading never invokes restic (§7.3) | Doc and UI review |
+| I5 | Destructive restic commands (`prune`, `forget`, `rewrite`, `repair`) are never run against a Ladderback-maintained repo, and the UI says so. | Repo page warning; Ladderback never invokes restic (§7.3) | Doc and UI review |
 | I6 | Forget, run by any owner, only deletes snapshots that a plan owns, by tag, or that the user explicitly adopted or selected. | Forget algorithm (§7.3) | Untagged snapshots survive a forget run |
 | I7 | Maintenance operations on one repository run one at a time. | `OperationStore::try_start`, backed by a partial unique index (§9) | Store contract test: a second maintenance start on the same repo is refused; `maintenance/serialization.feature` |
 
@@ -98,24 +98,24 @@ The web UI meets **WCAG 2.2 AA** ([PRODUCT.md](../../PRODUCT.md)). These rules b
 
 ## 1. Scope
 
-Users, purpose, positioning and product boundaries live in [PRODUCT.md](../../PRODUCT.md). This document covers how Steading delivers them. Engineering consequences of those boundaries:
+Users, purpose, positioning and product boundaries live in [PRODUCT.md](../../PRODUCT.md). This document covers how Ladderback delivers them. Engineering consequences of those boundaries:
 
 - **Exactly one place runs `forget`/`prune`/`check` per repository** (I1). Backups on many hosts and a prune overlap safely within the limits in §2.2.
 - **Profile compatibility is two-way:** import (§6.2) and export, checked by a golden test against the `rustic` CLI.
 - **One binary** runs as daemon, hub, worker and CLI, with the web UI embedded (§12).
 - **No Windows, but no needless barriers to it.** Paths go through `std::path`/`camino`, never a hard-coded `/`, and platform code is isolated in `adapters/platform`. Windows could be added later without a rewrite, but it isn't designed, built or tested for.
-- **v1 command scope:** `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only. Restic must never maintain a Steading-managed repository (§7.3).
+- **v1 command scope:** `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only. Restic must never maintain a Ladderback-managed repository (§7.3).
 
 ### Relationship to Backrest
 
-Backrest wraps the `restic` CLI. Steading keeps its user-facing model (repos, plans, schedules, hooks, an op log, restore into a new folder) and changes what restic's locking and Backrest's single-host origins force on it.
+Backrest wraps the `restic` CLI. Ladderback keeps its user-facing model (repos, plans, schedules, hooks, an op log, restore into a new folder) and changes what restic's locking and Backrest's single-host origins force on it.
 
-| | Backrest | Steading |
+| | Backrest | Ladderback |
 |---|---|---|
 | Engine | Shells out to `restic` | Links `rustic_core`, runs each operation in a child process (§4.1) |
 | Forget with shared repos | Per-plan `restic forget` after each backup takes an exclusive lock and blocks other hosts' backups ([#244](https://github.com/garethgeorge/backrest/issues/244)) | One maintenance owner per repo; backups never wait for a lock (§7.3) |
 | Missed runs on laptops | Skipped unless the schedule uses the last-run clock ([#372](https://github.com/garethgeorge/backrest/issues/372)) | Catch-up by default (§5) |
-| Plan ↔ snapshot link | Tags `plan:<id>` and `created-by:<instance>` | Same idea: tags `steading-plan:<id>` and `steading-agent:<id>` (§7.3) |
+| Plan ↔ snapshot link | Tags `plan:<id>` and `created-by:<instance>` | Same idea: tags `ladderback-plan:<id>` and `ladderback-agent:<id>` (§7.3) |
 | Multi-host | Peer sync; shared repos are pushed to clients **including passwords and backend keys** | Hub and agents; the hub keeps its own secrets and agents never send theirs (§10.2) |
 | Secrets in config | Plaintext in `config.json`; `${VAR}` in repo URI, env and flags; a missing variable becomes empty | Command, keyring, file, env or inline sources; a missing reference fails the job (§10.2) |
 | Retention | Counts only | Full `KeepOptions`, including `keep-within-*` |

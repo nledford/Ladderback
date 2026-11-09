@@ -1,6 +1,6 @@
 [package]
 name = "domain"
-description = "Steading's domain model: aggregates, value objects and domain services, with no I/O"
+description = "Ladderback's domain model: aggregates, value objects and domain services, with no I/O"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

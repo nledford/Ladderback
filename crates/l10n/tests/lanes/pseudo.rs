@@ -127,12 +127,12 @@ fn a_term_is_transformed_with_the_message_that_reads_it() {
     let en_xa = speaking("en-XA").error(ErrorCode::DeadlinePassed, &[], None);
     assert_eq!(
         en_xa.text(),
-        "Ŧħee ooƥeeřaaŧiooƞ ƥaaşşeeḓ iŧş ḓeeaaḓŀiƞee, şoo Şŧeeaaḓiƞɠ şŧooƥƥeeḓ iŧ. Řuuƞ iŧ aaɠaaiƞ."
+        "Ŧħee ooƥeeřaaŧiooƞ ƥaaşşeeḓ iŧş ḓeeaaḓŀiƞee, şoo Ŀaaḓḓeeřƀaaƈķ şŧooƥƥeeḓ iŧ. Řuuƞ iŧ aaɠaaiƞ."
     );
     let ar_xb = speaking("ar-XB").error(ErrorCode::DeadlinePassed, &[], None);
     assert_eq!(
         ar_xb.text(),
-        "⊥ɥǝ odǝɹɐʇıou dɐssǝp ıʇs pǝɐpʅıuǝ, so Sʇǝɐpıuƃ sʇoddǝp ıʇ. ᴚnu ıʇ ɐƃɐıu."
+        "⊥ɥǝ odǝɹɐʇıou dɐssǝp ıʇs pǝɐpʅıuǝ, so ⅂ɐppǝɹqɐɔʞ sʇoddǝp ıʇ. ᴚnu ıʇ ɐƃɐıu."
     );
 }
 

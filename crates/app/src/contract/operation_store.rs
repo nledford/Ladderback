@@ -309,7 +309,7 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
     let awkward = "unknown field `foo` at line 1 column 9\nsecond \"line\", 'single', \\ and ☃ ✓ 日本語\ttab \u{0} nul";
     let reasons = [
         FailureReason::EngineUnavailable {
-            detail: "/usr/local/bin/steading: No such file or directory (os error 2)".to_owned(),
+            detail: "/usr/local/bin/ladderback: No such file or directory (os error 2)".to_owned(),
         },
         FailureReason::EngineUnavailable {
             detail: String::new(),

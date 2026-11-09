@@ -76,7 +76,7 @@ async fn refusal_of_a_damaged_database(damage: &str) -> OpenError {
     );
     assert_eq!(
         entries(scratch.dir()),
-        ["steading.db"],
+        ["ladderback.db"],
         "and a refused open leaves no connection to it behind"
     );
     error
@@ -141,7 +141,7 @@ async fn a_directory_that_does_not_exist_is_refused_and_not_created() {
     let scratch = Scratch::new();
     let missing = scratch.dir().join("missing");
 
-    let error = open_error(&missing.join("steading.db")).await;
+    let error = open_error(&missing.join("ladderback.db")).await;
 
     assert!(
         matches!(&error, OpenError::Database { detail } if !detail.is_empty()),
@@ -186,7 +186,7 @@ async fn a_directory_that_cannot_be_written_is_refused() {
         testkit::skip!("this user can write to a directory without write permission");
     }
 
-    let error = open_error(&locked.join("steading.db")).await;
+    let error = open_error(&locked.join("ladderback.db")).await;
 
     assert!(
         matches!(&error, OpenError::Database { detail } if !detail.is_empty()),
@@ -202,7 +202,7 @@ async fn a_path_with_spaces_and_odd_characters_works() {
     // special to the store, whatever it would mean in a URL.
     let dir = scratch.dir().join("demo data #1 ?x=y%20 ☃");
     fs::create_dir(&dir).expect("the directory is created");
-    let path = dir.join("steading.db");
+    let path = dir.join("ladderback.db");
     let op = queued_backup(0x10);
 
     let store = store::SqliteStore::open(&path)

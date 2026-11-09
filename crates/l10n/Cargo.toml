@@ -1,6 +1,6 @@
 [package]
 name = "l10n"
-description = "Steading's localization: Fluent catalogs, generated message IDs, locale selection and the rendering of the API's error codes"
+description = "Ladderback's localization: Fluent catalogs, generated message IDs, locale selection and the rendering of the API's error codes"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ build = "build.rs"
 # `en-XA` and `ar-XB` (technical design §8.4), made from the en-US catalog by
 # `fluent-pseudo`. They are a development tool and stay out of release builds.
 # On by default so that this crate's own tests and mutation runs cover them;
-# the workspace dependency turns defaults off, and `steading` and `web` pass
+# the workspace dependency turns defaults off, and `ladderback` and `web` pass
 # the feature on through their own.
 default = ["pseudo"]
 pseudo = ["dep:fluent-pseudo"]

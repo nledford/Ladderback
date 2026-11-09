@@ -1,4 +1,4 @@
-//! Steps for `features/security/request_checks.feature`: the real `steading
+//! Steps for `features/security/request_checks.feature`: the real `ladderback
 //! serve` process, spoken to in raw HTTP so each scenario controls every
 //! header byte, `Host` included, which an HTTP client library would set for
 //! itself.
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use cucumber::{given, then, when};
 
-use super::{Agent, STEADING};
+use super::{Agent, LADDERBACK};
 
 /// How long a freshly started daemon may take to listen or give up.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
@@ -68,14 +68,14 @@ struct Response {
 
 static LOGS: AtomicUsize = AtomicUsize::new(0);
 
-/// Starts `steading serve` with `args`, and waits until it listens or exits.
+/// Starts `ladderback serve` with `args`, and waits until it listens or exits.
 fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
     let log_path = scratch.join(format!(
         "serve-{}.log",
         LOGS.fetch_add(1, Ordering::Relaxed)
     ));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
-    let mut child = Command::new(STEADING)
+    let mut child = Command::new(LADDERBACK)
         .arg("serve")
         .args(args)
         .stdin(Stdio::null())
@@ -87,7 +87,7 @@ fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
         .env("LC_ALL", "C")
         .env_remove("LANGUAGE")
         .spawn()
-        .expect("steading starts");
+        .expect("ladderback starts");
     let started = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();
@@ -103,7 +103,7 @@ fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
         }
         assert!(
             started.elapsed() < START_TIMEOUT,
-            "steading neither listened nor exited within {START_TIMEOUT:?}: {text}"
+            "ladderback neither listened nor exited within {START_TIMEOUT:?}: {text}"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -202,7 +202,7 @@ impl Response {
 
 impl Web {
     fn server(&self) -> &Server {
-        self.server.as_ref().expect("Steading is serving")
+        self.server.as_ref().expect("Ladderback is serving")
     }
 
     fn request(&mut self) -> &mut Request {
@@ -214,7 +214,7 @@ impl Web {
     }
 }
 
-#[given(expr = "Steading is serving on loopback, configured for the host name {string}")]
+#[given(expr = "Ladderback is serving on loopback, configured for the host name {string}")]
 fn serving(agent: &mut Agent, name: String) {
     let (child, outcome) = start(
         agent.scratch(),
@@ -222,7 +222,7 @@ fn serving(agent: &mut Agent, name: String) {
     );
     match outcome {
         Outcome::Listening(addr) => agent.web.server = Some(Server { child, addr }),
-        Outcome::Exited(status, log) => panic!("steading exited with {status}: {log}"),
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
     }
 }
 
@@ -326,7 +326,7 @@ fn no_header(agent: &mut Agent, name: String) {
     assert_eq!(agent.web.response().header(&name), None);
 }
 
-#[when(expr = "Steading is started with the arguments {string}")]
+#[when(expr = "Ladderback is started with the arguments {string}")]
 fn started_with(agent: &mut Agent, arguments: String) {
     let args: Vec<&str> = arguments.split_whitespace().collect();
     let (child, outcome) = start(agent.scratch(), &args);
@@ -339,20 +339,20 @@ fn started_with(agent: &mut Agent, arguments: String) {
 
 /// The daemon's exit status and log, when it didn't start listening.
 fn exited(agent: &Agent) -> (ExitStatus, &str) {
-    match agent.web.start.as_ref().expect("Steading was started") {
-        Outcome::Listening(addr) => panic!("Steading is listening on {addr}"),
+    match agent.web.start.as_ref().expect("Ladderback was started") {
+        Outcome::Listening(addr) => panic!("Ladderback is listening on {addr}"),
         Outcome::Exited(status, log) => (*status, log),
     }
 }
 
-#[then("Steading refuses to start")]
+#[then("Ladderback refuses to start")]
 fn refuses(agent: &mut Agent) {
     let (status, log) = exited(agent);
     // Exit code 1 is a refusal; a panic (101) or a signal isn't.
     assert_eq!(status.code(), Some(1), "log: {log}");
 }
 
-#[then(expr = "Steading rejects the argument {string}")]
+#[then(expr = "Ladderback rejects the argument {string}")]
 fn rejects(agent: &mut Agent, value: String) {
     let (status, log) = exited(agent);
     // Exit code 2 is how the argument parser rejects a value.

@@ -323,7 +323,7 @@ mod tests {
     fn the_process_environment_is_read_through_the_four_variables() {
         // The test changes no variable of this process. It runs itself again
         // with the variables set, and that copy does the checking.
-        const IN_COPY: &str = "STEADING_L10N_ENV_TEST_COPY";
+        const IN_COPY: &str = "LADDERBACK_L10N_ENV_TEST_COPY";
         const NAME: &str =
             "locale::tests::the_process_environment_is_read_through_the_four_variables";
         if std::env::var_os(IN_COPY).is_some() {

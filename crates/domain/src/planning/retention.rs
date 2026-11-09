@@ -1,7 +1,7 @@
 //! How much history a plan keeps (technical design §6.1): rustic's
 //! `forget` policy, `KeepOptions`, under the keys rustic's profiles use.
 //!
-//! Left out on purpose, because Steading never deletes a snapshot on a rule
+//! Left out on purpose, because Ladderback never deletes a snapshot on a rule
 //! it can't tie to a plan (I6): `keep-tags`, `keep-ids`, `keep-none` and
 //! `delete-unchanged`. A policy that sets nothing keeps everything, and no
 //! policy keeps nothing; a policy of only zero counts, or a zero-length

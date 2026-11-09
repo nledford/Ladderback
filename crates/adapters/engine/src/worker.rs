@@ -3,7 +3,7 @@
 //!
 //! The worker is a process of its own (technical design §4.1) because
 //! `rustic_core` can't be cancelled, keeps whole indexes in memory and runs
-//! its own Tokio runtimes. [`main`] is what `steading worker` does: it routes
+//! its own Tokio runtimes. [`main`] is what `ladderback worker` does: it routes
 //! rustic's logging into the event stream, exits on SIGTERM, and runs the job.
 //!
 //! Nothing the job holds secret reaches the stream: the worker masks the
@@ -63,7 +63,7 @@ impl Exit {
     }
 }
 
-/// What `steading worker` does. Never returns normally: the process exits
+/// What `ladderback worker` does. Never returns normally: the process exits
 /// with the job's [`Exit`] code, or 74 when the events can't be written.
 pub fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
@@ -110,7 +110,7 @@ pub fn main() -> ExitCode {
 /// A line on stderr, for whoever started the worker. A worker that can't
 /// write to stderr has nothing better to do.
 fn say(text: &str) {
-    let _ = writeln!(io::stderr(), "steading worker: {text}");
+    let _ = writeln!(io::stderr(), "ladderback worker: {text}");
 }
 
 /// Asks the kernel for a SIGTERM when the process that started this worker

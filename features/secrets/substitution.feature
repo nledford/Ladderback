@@ -273,8 +273,8 @@ Feature: Secret references in a repository's settings
       Then the resolved password is "command-password"
 
     Scenario: A password in the keyring
-      Given the keyring holds "keyring-password" under "steading/demo"
-      And the repository's password is in the keyring under "steading/demo"
+      Given the keyring holds "keyring-password" under "ladderback/demo"
+      And the repository's password is in the keyring under "ladderback/demo"
       When the repository is resolved
       Then the resolved password is "keyring-password"
 
@@ -319,10 +319,10 @@ Feature: Secret references in a repository's settings
       And the problem is that it is larger than 65536 bytes
 
     Scenario: A keyring entry that holds nothing
-      Given the repository's password is in the keyring under "steading/demo"
+      Given the repository's password is in the keyring under "ladderback/demo"
       When the repository is resolved
       Then the resolution fails for the field "password"
-      And the failure names the keyring entry "steading/demo"
+      And the failure names the keyring entry "ladderback/demo"
       And the problem is that it is missing
 
     Scenario: A command that fails is told by its status and what it said

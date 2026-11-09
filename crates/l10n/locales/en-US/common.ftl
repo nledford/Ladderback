@@ -7,7 +7,7 @@
 ### language, so no translation changes it, and a pseudolocale leaves it as it is.
 
 # The product's name. A message that says it uses this term.
--brand-name = Steading
+-brand-name = Ladderback
 
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.

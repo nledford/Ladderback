@@ -90,12 +90,13 @@ impl SecretsHarness for RealHarness {
 
     fn set_keyring_entry(&self, name: &str, secret: &str) -> KeyringEntry {
         let name = format!("{name}-{}", self.next());
-        self.keyring.set("steading-demo", &name, secret.as_bytes());
-        KeyringEntry::parse(&format!("steading-demo/{name}")).unwrap()
+        self.keyring
+            .set("ladderback-demo", &name, secret.as_bytes());
+        KeyringEntry::parse(&format!("ladderback-demo/{name}")).unwrap()
     }
 
     fn empty_keyring_entry(&self) -> KeyringEntry {
-        KeyringEntry::parse("steading-demo/nothing-here").unwrap()
+        KeyringEntry::parse("ladderback-demo/nothing-here").unwrap()
     }
 
     fn printing(&self, stdout: &[u8]) -> CommandLine {
@@ -626,7 +627,7 @@ impl KeyringStore for Locked {
 
 #[tokio::test]
 async fn a_keyring_that_cannot_be_reached_is_unreachable_and_says_why() {
-    let entry = KeyringEntry::parse("steading-demo/nas").unwrap();
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
     let result = resolver(Duration::from_secs(1))
         .with_keyring(Arc::new(Locked))
         .resolve(&SecretRef::Keyring(entry))
@@ -635,7 +636,7 @@ async fn a_keyring_that_cannot_be_reached_is_unreachable_and_says_why() {
         result,
         Err(SecretError {
             source: SourceName::Keyring {
-                entry: "steading-demo/nas".to_owned()
+                entry: "ladderback-demo/nas".to_owned()
             },
             problem: Problem::Unreachable {
                 detail: "the keychain is locked".to_owned()
@@ -657,7 +658,7 @@ impl KeyringStore for Stuck {
 
 #[tokio::test]
 async fn a_keyring_that_does_not_answer_in_time_is_timed_out() {
-    let entry = KeyringEntry::parse("steading-demo/nas").unwrap();
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
     let started = Instant::now();
     let result = resolver(Duration::from_millis(300))
         .with_keyring(Arc::new(Stuck(Duration::from_secs(3))))
@@ -667,7 +668,7 @@ async fn a_keyring_that_does_not_answer_in_time_is_timed_out() {
         result,
         Err(SecretError {
             source: SourceName::Keyring {
-                entry: "steading-demo/nas".to_owned()
+                entry: "ladderback-demo/nas".to_owned()
             },
             problem: Problem::TimedOut { seconds: 1 },
         })
@@ -682,25 +683,25 @@ async fn a_keyring_that_does_not_answer_in_time_is_timed_out() {
 #[tokio::test]
 async fn a_keyring_secret_is_text_and_within_the_limit() {
     let memory = Arc::new(Memory::default());
-    memory.set("steading-demo", "binary", &[b'a', 0xff]);
+    memory.set("ladderback-demo", "binary", &[b'a', 0xff]);
     memory.set(
-        "steading-demo",
+        "ladderback-demo",
         "big",
         "x".repeat(MAX_SECRET_BYTES + 1).as_bytes(),
     );
     memory.set(
-        "steading-demo",
+        "ladderback-demo",
         "limit",
         "x".repeat(MAX_SECRET_BYTES).as_bytes(),
     );
     let secrets = resolver(Duration::from_secs(1)).with_keyring(memory);
     let read = |name: &str| {
-        let entry = KeyringEntry::parse(&format!("steading-demo/{name}")).unwrap();
+        let entry = KeyringEntry::parse(&format!("ladderback-demo/{name}")).unwrap();
         let secrets = &secrets;
         async move { secrets.resolve(&SecretRef::Keyring(entry)).await }
     };
     let source = |name: &str| SourceName::Keyring {
-        entry: format!("steading-demo/{name}"),
+        entry: format!("ladderback-demo/{name}"),
     };
     assert_eq!(
         read("binary").await,
@@ -722,11 +723,11 @@ async fn a_keyring_secret_is_text_and_within_the_limit() {
 }
 
 /// The real store of the session. It needs one (an unlocked keychain, a
-/// Secret Service), so it runs only when `STEADING_TEST_OS_KEYRING=1`.
+/// Secret Service), so it runs only when `LADDERBACK_TEST_OS_KEYRING=1`.
 #[tokio::test]
 async fn the_os_keyring_keeps_and_gives_back_a_secret() {
     let name = format!("probe-{}", std::process::id());
-    let entry = KeyringEntry::parse(&format!("steading-test/{name}")).unwrap();
+    let entry = KeyringEntry::parse(&format!("ladderback-test/{name}")).unwrap();
     let secret = SecretRef::Keyring(entry);
     let secrets = SystemSecrets::new();
 
@@ -743,12 +744,12 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
         "{before:?}"
     );
 
-    if std::env::var_os("STEADING_TEST_OS_KEYRING").is_none_or(|value| value != "1") {
-        testkit::skip!("STEADING_TEST_OS_KEYRING is not 1");
+    if std::env::var_os("LADDERBACK_TEST_OS_KEYRING").is_none_or(|value| value != "1") {
+        testkit::skip!("LADDERBACK_TEST_OS_KEYRING is not 1");
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        let entry = keyring::Entry::new("steading-test", &name).unwrap();
+        let entry = keyring::Entry::new("ladderback-test", &name).unwrap();
         entry.set_password("hunter2").unwrap();
         let read = secrets.resolve(&secret).await;
         entry.delete_credential().unwrap();

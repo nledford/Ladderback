@@ -253,14 +253,14 @@ mod tests {
 
     #[test]
     fn the_credentials_directory_is_exempt_when_there_is_one() {
-        let directory = Some("/run/credentials/steading.service");
+        let directory = Some("/run/credentials/ladderback.service");
         assert!(!warns(
-            "/run/credentials/steading.service/nas",
+            "/run/credentials/ladderback.service/nas",
             0o644,
             directory
         ));
         assert!(!warns(
-            "/run/credentials/steading.service/sub/nas",
+            "/run/credentials/ladderback.service/sub/nas",
             0o644,
             directory
         ));
@@ -270,7 +270,11 @@ mod tests {
             0o644,
             directory
         ));
-        assert!(warns("/run/credentials/steading.service/nas", 0o644, None));
+        assert!(warns(
+            "/run/credentials/ladderback.service/nas",
+            0o644,
+            None
+        ));
         // Still exempt without it: the fixed directories.
         assert!(!warns("/run/secrets/nas", 0o644, directory));
     }

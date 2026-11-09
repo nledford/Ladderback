@@ -2,13 +2,13 @@
 Feature: Request checks
   The web UI can set hooks and the password command, so an API that a web page
   can reach would let any site run commands on this machine, through DNS
-  rebinding or a cross-site POST. Steading checks every request, whether or not
+  rebinding or a cross-site POST. Ladderback checks every request, whether or not
   sign-in is on (§10.1). A request names the daemon's own loopback address as
   its Host unless a step says otherwise. In the examples, "{port}" stands for
   the port the daemon is listening on.
 
   Background:
-    Given Steading is serving on loopback, configured for the host name "nas.demo.test"
+    Given Ladderback is serving on loopback, configured for the host name "nas.demo.test"
 
   Rule: The Host header must be a loopback address or a configured name
 
@@ -308,17 +308,17 @@ Feature: Request checks
         | //sync/v1                   |
         | /api/v1/plans?next=/sync/v1 |
 
-  Rule: Without sign-in, Steading only listens on loopback
+  Rule: Without sign-in, Ladderback only listens on loopback
 
-    Scenario: Steading refuses to listen on every IPv4 address
-      When Steading is started with the arguments "--listen 0.0.0.0:0"
-      Then Steading refuses to start
+    Scenario: Ladderback refuses to listen on every IPv4 address
+      When Ladderback is started with the arguments "--listen 0.0.0.0:0"
+      Then Ladderback refuses to start
 
     @needs-ipv6
-    Scenario: Steading refuses to listen on every IPv6 address
-      When Steading is started with the arguments "--listen [::]:0"
-      Then Steading refuses to start
+    Scenario: Ladderback refuses to listen on every IPv6 address
+      When Ladderback is started with the arguments "--listen [::]:0"
+      Then Ladderback refuses to start
 
-    Scenario: Steading refuses a host name that includes a port
-      When Steading is started with the arguments "--allowed-host nas.demo.test:9898"
-      Then Steading rejects the argument "nas.demo.test:9898"
+    Scenario: Ladderback refuses a host name that includes a port
+      When Ladderback is started with the arguments "--allowed-host nas.demo.test:9898"
+      Then Ladderback rejects the argument "nas.demo.test:9898"

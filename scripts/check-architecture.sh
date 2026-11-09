@@ -5,10 +5,10 @@
 #     through `jiff`, decision 22), with any feature enabled;
 #   - `domain` builds for wasm32-unknown-unknown;
 #   - ICU4X's locale data is the daemon's alone: `l10n` and `web` build
-#     without it, and `steading` builds with it (technical design §8.4);
+#     without it, and `ladderback` builds with it (technical design §8.4);
 #   - the inner rings share one banned-call list (clippy.toml);
 #   - a release build leaves out the development pseudolocales' `fluent-pseudo`
-#     (technical design §8.4): `steading` and `web` have it by default, and not
+#     (technical design §8.4): `ladderback` and `web` have it by default, and not
 #     when built with `--no-default-features`, as a release is.
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
 # support) may be a dev-dependency only.
@@ -81,17 +81,17 @@ check_no_icu() {
 check_no_icu l10n
 check_no_icu web --target wasm32-unknown-unknown
 
-daemon=$(default_crates steading)
+daemon=$(default_crates ladderback)
 daemon_has_icu=1
 for crate in icu_decimal icu_datetime; do
   if ! grep -qx "$crate" <<<"$daemon"; then
-    echo "error: steading doesn't build with $crate: the daemon lacks l10n's \`icu\` feature" >&2
+    echo "error: ladderback doesn't build with $crate: the daemon lacks l10n's \`icu\` feature" >&2
     daemon_has_icu=0
     status=1
   fi
 done
 if ((daemon_has_icu)); then
-  echo "ok: steading builds with ICU4X"
+  echo "ok: ladderback builds with ICU4X"
 fi
 
 # testkit is test support: a dev-dependency only. `cargo tree --invert` lists
@@ -109,7 +109,7 @@ else
 fi
 
 # The development pseudolocales stay out of a release build (technical design
-# §8.4). `steading` and `web` each pass their `pseudo` feature on to `l10n`,
+# §8.4). `ladderback` and `web` each pass their `pseudo` feature on to `l10n`,
 # which brings in `fluent-pseudo` and, with it, a regex engine: about a
 # megabyte of the web UI. Both sides are checked, so that a change that blinds
 # this check cannot pass it with nothing to find.
@@ -132,9 +132,9 @@ pseudolocales() {
   fi
 }
 
-pseudolocales has steading
+pseudolocales has ladderback
 pseudolocales has web --target wasm32-unknown-unknown
-pseudolocales lacks steading --no-default-features
+pseudolocales lacks ladderback --no-default-features
 pseudolocales lacks web --no-default-features --target wasm32-unknown-unknown
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then

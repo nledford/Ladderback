@@ -1,5 +1,5 @@
-//! Steading's web UI (technical design §4.4), a Leptos client-side app
-//! built with trunk and embedded in the `steading` binary.
+//! Ladderback's web UI (technical design §4.4), a Leptos client-side app
+//! built with trunk and embedded in the `ladderback` binary.
 //!
 //! The page skeleton every page will share: a skip link, landmarks and a
 //! single `<h1>` (§4.5). Every visible text comes out of the `l10n` catalog, in
