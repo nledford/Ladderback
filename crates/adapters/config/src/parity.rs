@@ -187,6 +187,38 @@ fn every_snapshot_option_is_mapped_or_left_out_on_purpose() {
     );
 }
 
+/// The keys of every list, sorted.
+fn listed(lists: &[&[&'static str]]) -> Vec<&'static str> {
+    let mut keys: Vec<_> = lists.iter().flat_map(|list| list.iter().copied()).collect();
+    keys.sort_unstable();
+    keys
+}
+
+#[test]
+fn the_retention_table_has_the_keys_the_list_says_and_no_others() {
+    assert_eq!(
+        keys_of::<crate::tables::RetentionTable>(),
+        listed(&[RETENTION_MAPPED])
+    );
+}
+
+#[test]
+fn a_plans_table_has_its_own_keys_and_the_mapped_ones_and_no_others() {
+    let own: &[&str] = &[
+        "id",
+        "repository",
+        "sources",
+        "schedule",
+        "retry",
+        "hooks",
+        "retention",
+    ];
+    assert_eq!(
+        keys_of::<crate::tables::PlanTable>(),
+        listed(&[own, EXCLUDES_MAPPED, FILTER_MAPPED, SNAPSHOT_MAPPED])
+    );
+}
+
 #[test]
 fn the_file_takes_the_keep_options_it_maps_and_refuses_the_others() {
     assert_the_file_follows(
