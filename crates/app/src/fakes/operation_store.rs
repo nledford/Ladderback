@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::OperationId;
-use domain::execution::Operation;
+use domain::execution::{Operation, OperationStatus};
 
 use crate::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
@@ -29,6 +29,20 @@ impl InMemoryOperationStore {
     }
 }
 
+/// The ID of a running maintenance operation, other than `record`, on the
+/// repository `record` maintains: the one that would make `record` a second.
+fn holder_other_than(
+    stored: &BTreeMap<OperationId, OperationDetail>,
+    record: &OperationRecord,
+) -> Option<OperationId> {
+    let repository = record.maintaining()?;
+    stored
+        .values()
+        .map(|detail| &detail.record)
+        .find(|other| other.id != record.id && other.maintaining() == Some(repository))
+        .map(|other| other.id)
+}
+
 #[async_trait]
 impl OperationStore for InMemoryOperationStore {
     async fn save(
@@ -36,16 +50,40 @@ impl OperationStore for InMemoryOperationStore {
         operation: &Operation,
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
+        let record = OperationRecord::of(operation, result);
+        let mut stored = self.stored();
+        // The backstop: a second running maintenance operation never gets in
+        // by `save` either.
+        if holder_other_than(&stored, &record).is_some() {
+            return Err(StoreError::Unavailable {
+                detail: "another maintenance operation is running on the repository".to_owned(),
+            });
+        }
         let detail = OperationDetail {
-            record: OperationRecord::of(operation, result),
+            record,
             warnings: operation.warnings().to_vec(),
         };
-        self.stored().insert(operation.id(), detail);
+        stored.insert(operation.id(), detail);
         Ok(())
     }
 
-    async fn try_start(&self, _operation: &Operation) -> Result<Start, StoreError> {
-        todo!("InMemoryOperationStore::try_start")
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        let record = OperationRecord::of(operation, None);
+        if record.status != OperationStatus::Running {
+            return Err(StoreError::Unavailable {
+                detail: "only a running operation can be started".to_owned(),
+            });
+        }
+        let mut stored = self.stored();
+        if let Some(running) = holder_other_than(&stored, &record) {
+            return Ok(Start::Refused { running });
+        }
+        let detail = OperationDetail {
+            record,
+            warnings: operation.warnings().to_vec(),
+        };
+        stored.insert(operation.id(), detail);
+        Ok(Start::Started)
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

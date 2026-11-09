@@ -187,7 +187,11 @@ impl OperationRecord {
     /// for everything else. A record that has one holds that repository, and
     /// no other maintenance operation may be running on it (I7).
     pub fn maintaining(&self) -> Option<&RepositoryId> {
-        todo!("OperationRecord::maintaining")
+        if self.kind.is_maintenance() && self.status == OperationStatus::Running {
+            self.target.repository.as_ref()
+        } else {
+            None
+        }
     }
 }
 
