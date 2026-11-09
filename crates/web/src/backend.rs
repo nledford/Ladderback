@@ -573,4 +573,16 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn a_merged_page_drops_a_run_that_already_ended_and_it_does_not_hold() {
+        // The re-read is the truth for what it holds: a run that ended while
+        // the page was away and has already left the store's first page is
+        // gone, not kept forever as a zombie.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "succeeded", true, true)], None);
+        state.merge(page(vec![succeeded_backup(SECOND)], None));
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.rows[0].summary.id, id(SECOND));
+    }
 }

@@ -91,11 +91,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let sorted_newest = text(&localizer, msg::UI_SORTED_NEWEST);
     let sorted_oldest = text(&localizer, msg::UI_SORTED_OLDEST);
     let empty = text(&localizer, msg::UI_NO_OPERATIONS);
-    let (started_text, backup_cancelled, backup_failed, backup_finished, still_waiting) = (
+    let (started_text, still_waiting) = (
         text(&localizer, msg::UI_BACKUP_STARTED),
-        text(&localizer, msg::UI_BACKUP_CANCELLED),
-        text(&localizer, msg::UI_BACKUP_FAILED),
-        text(&localizer, msg::UI_BACKUP_FINISHED),
         text(&localizer, msg::UI_STILL_WAITING),
     );
     let localizer_for_errors = Arc::clone(&localizer);
@@ -122,23 +119,19 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // sees the end first. The first sight of a row only seeds its status.
     let seen = StoredValue::new(HashMap::<String, String>::new());
     let announced_ops = ops;
+    let announced_localizer = Arc::clone(&localizer);
     Effect::new(move |_| {
         let rows = announced_ops.get().rows;
         seen.update_value(|seen| {
             for row in &rows {
                 let status = row.summary.status.clone();
                 let previous = seen.insert(row.summary.id.clone(), status.clone());
-                let changed = previous.is_some_and(|previous| {
-                    (previous == "queued" || previous == "running") && ended(&status)
-                });
+                let changed = previous.is_some_and(|previous| announces_end(&previous, &status));
                 if changed {
-                    match status.as_str() {
-                        "failed" => say(Politeness::Assertive, &backup_failed),
-                        "cancelled" => say(Politeness::Polite, &backup_cancelled),
-                        // A run that warned its way to the end counts as
-                        // finished: its warnings are the row's own story.
-                        _ => say(Politeness::Polite, &backup_finished),
-                    }
+                    // A run that warned its way to the end counts as
+                    // finished: its warnings are the row's own story.
+                    let (politeness, id) = end_display(&status);
+                    say(politeness, &text_with(&announced_localizer, id, &[]));
                 }
             }
         });
@@ -343,16 +336,11 @@ fn row_view(
         &[("plan", MsgArg::Text(plan.clone()))],
     );
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
-    let cancellable = row.summary.status == "queued" || row.summary.status == "running";
+    let cancellable = cancellable(&row.summary.status);
     let progress = row.progress.map(|progress| {
-        let percent = progress
-            .total
-            .filter(|total| *total > 0)
-            .map(|total| ((progress.current.saturating_mul(100)) / total) as u8)
-            .unwrap_or(0);
         (
             text(&localizer, msg::UI_BACKUP_PROGRESS),
-            RwSignal::new(percent),
+            RwSignal::new(percent(progress.current, progress.total)),
         )
     });
     let url = format!("{base}/api/v1/operations/{}/cancel", row.summary.id);
@@ -432,6 +420,38 @@ fn status_display(status: &str) -> Option<(&'static str, MessageId)> {
         "failed" => Some(("error", msg::UI_STATUS_FAILED)),
         "cancelled" => Some(("empty", msg::UI_STATUS_CANCELLED)),
         _ => None,
+    }
+}
+
+/// Whether a row in `status` can still be stopped: a run that has not begun
+/// or is still going. An ended run is history.
+fn cancellable(status: &str) -> bool {
+    status == "queued" || status == "running"
+}
+
+/// A run's progress as a whole percent of its total. A total of nothing or
+/// zero cannot be a share, so it shows none rather than a wrong one.
+fn percent(current: u64, total: Option<u64>) -> u8 {
+    total
+        .filter(|total| *total > 0)
+        .map(|total| (current.saturating_mul(100) / total) as u8)
+        .unwrap_or(0)
+}
+
+/// Whether the change from `previous` to `status` is a run's end arriving:
+/// only a run that was still going can end, and only an end is news.
+fn announces_end(previous: &str, status: &str) -> bool {
+    (previous == "queued" || previous == "running") && ended(status)
+}
+
+/// How a run's end is told: which politeness, which message. A failure is
+/// said assertively; a cancellation and a finish (warnings included — they
+/// are the row's own story) politely.
+fn end_display(status: &str) -> (Politeness, MessageId) {
+    match status {
+        "failed" => (Politeness::Assertive, msg::UI_BACKUP_FAILED),
+        "cancelled" => (Politeness::Polite, msg::UI_BACKUP_CANCELLED),
+        _ => (Politeness::Polite, msg::UI_BACKUP_FINISHED),
     }
 }
 
@@ -696,5 +716,150 @@ mod tests {
     fn a_path_that_only_starts_like_a_page_is_not_that_page() {
         assert_eq!(title_of("/_gallery-2"), "Page not found – Ladderback");
         assert_eq!(title_of("//"), "Page not found – Ladderback");
+    }
+
+    /// A summary as the store sends it, with the fields the key reads.
+    fn summary(started: Option<&str>, queued: &str) -> crate::backend::OperationRow {
+        crate::backend::OperationRow {
+            summary: api::OperationSummaryDto::new(
+                "018f0000-0000-7000-8000-000000000001".to_owned(),
+                "demo-home".to_owned(),
+                "backup".to_owned(),
+                "succeeded".to_owned(),
+                queued.to_owned(),
+                started.map(str::to_owned),
+                None,
+                Vec::new(),
+                None,
+                None,
+            )
+            .unwrap_or_else(|problem| panic!("a valid summary: {problem:?}")),
+            progress: None,
+        }
+    }
+
+    #[test]
+    fn the_row_order_key_is_when_the_row_started_or_was_queued() {
+        let started = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:01Z");
+        assert_eq!(key(&started), "2026-11-09T10:00:02Z");
+        let queued = summary(None, "2026-11-09T10:00:01Z");
+        assert_eq!(key(&queued), "2026-11-09T10:00:01Z");
+    }
+
+    #[test]
+    fn every_status_the_store_names_has_its_pill_and_its_message() {
+        let pills = [
+            ("queued", "empty", msg::UI_STATUS_QUEUED),
+            ("running", "loading", msg::UI_STATUS_RUNNING),
+            ("succeeded", "success", msg::UI_STATUS_SUCCEEDED),
+            (
+                "succeeded-with-warnings",
+                "success",
+                msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS,
+            ),
+            ("failed", "error", msg::UI_STATUS_FAILED),
+            ("cancelled", "empty", msg::UI_STATUS_CANCELLED),
+        ];
+        for (status, pill, label) in pills {
+            assert_eq!(status_display(status), Some((pill, label)), "{status}");
+        }
+        assert_eq!(
+            status_display("pausing"),
+            None,
+            "a status this build doesn't know is no pill, not a guess"
+        );
+    }
+
+    #[test]
+    fn an_instant_is_written_in_the_pages_locale_and_one_that_does_not_parse_stands_as_it_came() {
+        let localizer = Localizer::new(&[]);
+        assert_ne!(
+            instant(&localizer, "2026-11-09T10:00:02Z"),
+            "2026-11-09T10:00:02Z",
+            "a parsed instant is the locale's own writing, not the wire's"
+        );
+        assert_eq!(
+            instant(&localizer, "not-an-instant"),
+            "not-an-instant",
+            "never a blank cell, never a guess"
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_written_through_the_catalog_with_its_argument() {
+        let shown = refusal(
+            &Localizer::new(&[]),
+            ErrorCode::PlanUnknown,
+            &[("plan".to_owned(), MsgArg::Text("demo-home".to_owned()))],
+        );
+        assert!(!shown.is_empty(), "a refusal is never a bare absence");
+        assert!(
+            shown.contains("demo-home"),
+            "the argument is part of the message: {shown}"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_id_shows_its_first_eight_digits_and_a_short_one_whole() {
+        assert_eq!(short_id("0123456789abcdef"), "01234567");
+        assert_eq!(short_id("abc123"), "abc123");
+    }
+
+    #[test]
+    fn only_a_run_that_is_still_going_can_be_cancelled() {
+        assert!(cancellable("queued"));
+        assert!(cancellable("running"));
+        for ended in [
+            "succeeded",
+            "succeeded-with-warnings",
+            "failed",
+            "cancelled",
+        ] {
+            assert!(!cancellable(ended), "{ended} is history");
+        }
+    }
+
+    #[test]
+    fn progress_is_a_whole_percent_of_a_known_total_and_nothing_without_one() {
+        assert_eq!(percent(3, Some(4)), 75);
+        assert_eq!(percent(1, Some(3)), 33);
+        assert_eq!(percent(5, Some(0)), 0, "zero of nothing is no share");
+        assert_eq!(percent(9, None), 0);
+    }
+
+    #[test]
+    fn only_a_change_from_going_to_ended_is_announced() {
+        assert!(announces_end("running", "succeeded"));
+        assert!(announces_end("queued", "failed"));
+        assert!(
+            !announces_end("running", "running"),
+            "still going is no news"
+        );
+        assert!(!announces_end("queued", "running"), "a start is not an end");
+        assert!(
+            !announces_end("succeeded", "failed"),
+            "history does not move"
+        );
+    }
+
+    #[test]
+    fn the_end_of_a_run_is_told_by_its_own_politeness_and_message() {
+        assert_eq!(
+            end_display("failed"),
+            (Politeness::Assertive, msg::UI_BACKUP_FAILED)
+        );
+        assert_eq!(
+            end_display("cancelled"),
+            (Politeness::Polite, msg::UI_BACKUP_CANCELLED)
+        );
+        assert_eq!(
+            end_display("succeeded"),
+            (Politeness::Polite, msg::UI_BACKUP_FINISHED)
+        );
+        assert_eq!(
+            end_display("succeeded-with-warnings"),
+            (Politeness::Polite, msg::UI_BACKUP_FINISHED),
+            "a run that warned its way to the end counts as finished"
+        );
     }
 }

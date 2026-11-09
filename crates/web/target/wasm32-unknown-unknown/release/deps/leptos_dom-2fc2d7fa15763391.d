@@ -1,0 +1,10 @@
+/Users/nledford/Projects/rust/Steading/.worktrees/web-live/crates/web/target/wasm32-unknown-unknown/release/deps/leptos_dom-2fc2d7fa15763391.d: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/helpers.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/macro_helpers/mod.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/logging.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/web-live/crates/web/target/wasm32-unknown-unknown/release/deps/libleptos_dom-2fc2d7fa15763391.rlib: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/helpers.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/macro_helpers/mod.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/logging.rs
+
+/Users/nledford/Projects/rust/Steading/.worktrees/web-live/crates/web/target/wasm32-unknown-unknown/release/deps/libleptos_dom-2fc2d7fa15763391.rmeta: /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/lib.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/helpers.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/macro_helpers/mod.rs /Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/logging.rs
+
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/lib.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/helpers.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/macro_helpers/mod.rs:
+/Users/nledford/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_dom-0.8.8/src/logging.rs:
