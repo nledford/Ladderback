@@ -81,7 +81,6 @@ pub struct RepositoriesSetup {
     cold: Option<PathBuf>,
     hot: Option<PathBuf>,
     settings: Option<RepositorySettings>,
-    id: Option<RepositoryId>,
     init: Option<Result<InitOutcome, RepositoryError>>,
     test: Option<Result<RepositoryId, RepositoryError>>,
     connect: Option<Result<RepositoryId, RepositoryError>>,
