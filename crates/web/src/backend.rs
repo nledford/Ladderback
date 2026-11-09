@@ -10,9 +10,10 @@
 //! and the event, and the reconnect path re-fetches the whole history
 //! instead of guessing what was lost.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use api::{OperationSummaryDto, UiEvent};
+use api::{OperationSummaryDto, OperationsPageDto, UiEvent};
 
 /// The live progress of a running operation. Transient: never part of the
 /// stored history, and gone the moment the operation ends.
@@ -42,22 +43,140 @@ pub(crate) struct OperationsState {
 }
 
 impl OperationsState {
-    /// The state after the initial REST fetch, which is also the state a
-    /// reconnect returns to: the REST history is the source of truth, and
-    /// the stream resumes onto it.
-    #[allow(clippy::todo)]
     pub(crate) fn from_history(operations: Vec<OperationSummaryDto>, next: Option<String>) -> Self {
-        let _ = (operations, next);
-        todo!("commit 1 stub: the red tests in this module say what it does")
+        Self {
+            rows: operations
+                .into_iter()
+                .map(|summary| OperationRow {
+                    summary,
+                    progress: None,
+                })
+                .collect(),
+            next,
+        }
     }
 
     /// Applies one live event. An event about an operation the state doesn't
     /// hold is ignored: the missed part of the story is what the next
     /// initial fetch brings back, never a half-invented row.
-    #[allow(clippy::todo)]
     pub(crate) fn apply(&mut self, event: &UiEvent) {
-        let _ = event;
-        todo!("commit 1 stub: the red tests in this module say what it does")
+        match event {
+            UiEvent::OperationStarted {
+                operation,
+                started_at,
+                ..
+            } => {
+                if let Some(row) = self.row_mut(operation) {
+                    row.summary.status = "running".to_owned();
+                    row.summary.started_at = Some(started_at.clone());
+                }
+            }
+            UiEvent::OperationProgress {
+                operation,
+                current,
+                total,
+            } => {
+                if let Some(row) = self.row_mut(operation) {
+                    row.progress = Some(Progress {
+                        current: *current,
+                        total: *total,
+                    });
+                }
+            }
+            UiEvent::OperationWarning {
+                operation, code, ..
+            } => {
+                if let Some(row) = self.row_mut(operation) {
+                    row.summary.warning_codes.push(*code);
+                }
+            }
+            UiEvent::OperationSucceeded {
+                operation,
+                finished_at,
+            } => {
+                if let Some(row) = self.row_mut(operation) {
+                    // A run that warned its way to the end is its own status,
+                    // not a plain success the warnings merely accompany.
+                    row.summary.status = if row.summary.warning_codes.is_empty() {
+                        "succeeded".to_owned()
+                    } else {
+                        "succeeded-with-warnings".to_owned()
+                    };
+                    row.summary.finished_at = Some(finished_at.clone());
+                    row.progress = None;
+                }
+            }
+            UiEvent::OperationFailed {
+                operation,
+                code,
+                finished_at,
+                ..
+            } => {
+                if let Some(row) = self.row_mut(operation) {
+                    row.summary.status = "failed".to_owned();
+                    row.summary.failure_code = Some(*code);
+                    row.summary.finished_at = Some(finished_at.clone());
+                    row.progress = None;
+                }
+            }
+            // The fleet's comings and goings are no row of this table.
+            UiEvent::AgentOnline { .. } | UiEvent::AgentOffline { .. } => {}
+        }
+    }
+
+    /// Merges a page the page just re-read: the settle-poll after a cancel
+    /// (a cancelled run emits no `UiEvent`) and the refetch a reconnect
+    /// starts from. The page is the source of truth for what it holds, but
+    /// it never regresses a status an event advanced — a `Started` event can
+    /// beat the store's own write — and a live row the page doesn't hold yet
+    /// stays, newest: dropping it would unshow a run the reader is watching.
+    pub(crate) fn merge(&mut self, page: OperationsPageDto) {
+        let mut held: HashMap<String, OperationRow> = self
+            .rows
+            .drain(..)
+            .map(|row| (row.summary.id.clone(), row))
+            .collect();
+        let mut rows = Vec::with_capacity(page.operations.len());
+        for summary in page.operations {
+            let live = held.remove(&summary.id);
+            rows.push(match live {
+                // The held row is at least as far along as the page says:
+                // what the events said wins, progress included.
+                Some(row) if rank(&row.summary.status) >= rank(&summary.status) => row,
+                _ => OperationRow {
+                    summary,
+                    progress: None,
+                },
+            });
+        }
+        // What is still held is not in the page: keep only the runs it could
+        // be ahead of, and keep them first, because a run the page has not
+        // written yet is the newest thing on the page.
+        rows.splice(
+            0..0,
+            held.into_values()
+                .filter(|row| rank(&row.summary.status) < TERMINAL),
+        );
+        self.rows = rows;
+        self.next = page.next;
+    }
+
+    /// The row of `operation`, when the state holds it.
+    fn row_mut(&mut self, operation: &str) -> Option<&mut OperationRow> {
+        self.rows.iter_mut().find(|row| row.summary.id == operation)
+    }
+}
+
+/// Where a status stands in an operation's life: still queued, running, or
+/// ended. Every ended status is `TERMINAL`; only their common rank matters
+/// here, because an operation ends once.
+const TERMINAL: u8 = 2;
+
+fn rank(status: &str) -> u8 {
+    match status {
+        "queued" => 0,
+        "running" => 1,
+        _ => TERMINAL,
     }
 }
 
@@ -65,22 +184,26 @@ impl OperationsState {
 /// `attempt`-th failure, counting from 1: doubling from one second, capped
 /// at thirty (§4.4). A cap keeps an unreachable daemon from backing off into
 /// silence while keeping the load on it bounded.
-#[allow(clippy::todo)]
 pub(crate) fn reconnect_backoff(attempt: u32) -> Duration {
-    let _ = attempt;
-    todo!("commit 1 stub: the red tests in this module say what it does")
+    Duration::from_secs((1u64 << (attempt - 1).min(SHIFTS_TO_THE_CAP)).min(30))
 }
+
+/// The doublings it takes to pass the thirty-second cap: five of them, so
+/// the sixth attempt and every later one wait the cap.
+const SHIFTS_TO_THE_CAP: u32 = 5;
 
 #[cfg(test)]
 mod tests {
-    // Every test here is red against the `todo!()` stubs above: commit 1 of
-    // the live-pages slice. The tests say what the decisions are; the code
-    // that passes them is the next commits'.
+    // The decisions of §4.4, one test each; commit 1 wrote the red ones
+    // against the stubs, and the merge and failed/warning tests came with
+    // the code that passes them.
 
     use std::time::Duration;
 
     use super::{OperationsState, Progress, reconnect_backoff};
-    use api::{OperationResultDto, OperationSummaryDto, UiEvent};
+    use api::{
+        ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode,
+    };
 
     /// The full operation ID of a test operation.
     fn id(short: &str) -> String {
@@ -232,6 +355,111 @@ mod tests {
             state.apply(&event);
         }
         assert_eq!(state, before, "no half-invented row");
+    }
+
+    #[test]
+    fn a_failed_event_ends_the_row_with_its_code() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationFailed {
+            operation: id(FIRST),
+            code: ErrorCode::EngineUnavailable,
+            args: Vec::new(),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        let row = &state.rows[0];
+        assert_eq!(row.summary.status, "failed");
+        assert_eq!(row.summary.failure_code, Some(ErrorCode::EngineUnavailable));
+        assert_eq!(
+            row.summary.finished_at.as_deref(),
+            Some("2026-11-09T10:05:00Z")
+        );
+        assert_eq!(row.progress, None, "progress is transient");
+    }
+
+    #[test]
+    fn a_warning_is_recorded_and_a_success_after_warnings_is_its_own_status() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        });
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [WarningCode::SourceUnreadable]
+        );
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        assert_eq!(state.rows[0].summary.status, "succeeded-with-warnings");
+    }
+
+    #[test]
+    fn a_merged_page_never_regresses_a_status_an_event_advanced() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "queued", false, false)], None);
+        state.apply(&UiEvent::OperationStarted {
+            operation: id(FIRST),
+            repository: Some("demo".to_owned()),
+            started_at: "2026-11-09T10:00:01Z".to_owned(),
+        });
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            current: 3,
+            total: Some(10),
+        });
+        // The store's write of the start can lag the event: the re-read still
+        // says queued.
+        state.merge(page(vec![summary(FIRST, "queued", false, false)], None));
+        let row = &state.rows[0];
+        assert_eq!(row.summary.status, "running");
+        assert_eq!(
+            row.summary.started_at.as_deref(),
+            Some("2026-11-09T10:00:01Z")
+        );
+        assert_eq!(
+            row.progress,
+            Some(Progress {
+                current: 3,
+                total: Some(10)
+            }),
+            "the live part of the row survives the merge"
+        );
+    }
+
+    #[test]
+    fn a_merged_page_adopts_the_end_the_store_has_and_the_page_does_not_hold() {
+        // The settle-poll after a cancel: no event ends a cancelled run, the
+        // re-read is where the end comes from.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.merge(page(vec![summary(FIRST, "cancelled", true, true)], None));
+        assert_eq!(state.rows[0].summary.status, "cancelled");
+
+        // A run the events stream holds that the page has not written yet
+        // stays, first, because it is the newest thing on the page.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.merge(page(vec![succeeded_backup(SECOND)], Some(id(SECOND))));
+        assert_eq!(
+            state
+                .rows
+                .iter()
+                .map(|row| row.summary.id.as_str())
+                .collect::<Vec<_>>(),
+            [id(FIRST).as_str(), id(SECOND).as_str()],
+            "the run the page does not hold yet stays, newest"
+        );
+        assert_eq!(state.rows[0].summary.status, "running");
+        assert_eq!(state.next, Some(id(SECOND)));
+    }
+
+    /// A page of the history, as the daemon answers it.
+    fn page(operations: Vec<OperationSummaryDto>, next: Option<String>) -> OperationsPageDto {
+        OperationsPageDto { operations, next }
     }
 
     #[test]

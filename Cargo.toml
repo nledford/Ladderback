@@ -81,6 +81,9 @@ futures = "0.3.34"
 # The web UI's REST client (§4.4): `fetch` with typed JSON bodies, on wasm.
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 http-body-util = "0.1.5"
+# The web UI's `sleep` (§4.4): the reconnect backoff and the settle-poll wait
+# in the browser's own time.
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
 # ICU4X writes the daemon's numbers and instants (technical design §8.4), behind
 # `l10n`'s `icu` feature. No defaults: `compiled_data` bakes in the locale data
 # for the formatters used, `alloc` is what parsing a locale and writing a
