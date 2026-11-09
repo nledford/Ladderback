@@ -110,6 +110,9 @@ test-wasm *args:
         exit 1
     fi
     export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
+    # Node reads this as the viewer's zone: not UTC, so a host that read no zone
+    # as the viewer's would fail the tests that expect UTC.
+    export TZ=America/New_York
     cargo test --package l10n --package web --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
 
 # The version of wasm-bindgen that Cargo.lock pins.
