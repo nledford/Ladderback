@@ -18,6 +18,8 @@ pub struct Text {
     pub variables: BTreeSet<String>,
     /// The variables handed to `NUMBER`, which only a count survives.
     pub numbers: BTreeSet<String>,
+    /// The variables handed to `DATETIME`, which only a timestamp survives.
+    pub datetimes: BTreeSet<String>,
     /// The select expressions, in order of appearance.
     pub selects: Vec<Select>,
     /// The variables read anywhere but inside a select that has a `[none]`
@@ -157,6 +159,11 @@ fn walk_inline(inline: &ast::InlineExpression<&str>, guarded: &[String], text: &
                     && let ast::InlineExpression::VariableReference { id } = positional
                 {
                     text.numbers.insert(id.name.to_owned());
+                }
+                if id.name == "DATETIME"
+                    && let ast::InlineExpression::VariableReference { id } = positional
+                {
+                    text.datetimes.insert(id.name.to_owned());
                 }
                 walk_inline(positional, guarded, text);
             }
@@ -449,6 +456,14 @@ pub fn sample_args(text: &Text) -> Vec<Vec<(String, MsgArg)>> {
                 .map(|name| {
                     let sample = if text.numbers.contains(name) {
                         MsgArg::Count(3)
+                    } else if text.datetimes.contains(name) {
+                        // `DATETIME` renders only a timestamp; any other
+                        // sample is a function error, and its placeholder is
+                        // the same in every language.
+                        MsgArg::Timestamp {
+                            utc_ms: 1_762_700_000_000,
+                            zone: None,
+                        }
                     } else {
                         MsgArg::Text("demo".to_owned())
                     };

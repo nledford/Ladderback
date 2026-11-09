@@ -266,8 +266,11 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 );
                 // The helpers that write a size and a duration hold bits of
                 // a unit, which a transform may leave as they were ("3 s"
-                // upside down): `the_helpers_that_write_a_size_...` has them.
-                if id == msg::SIZE || id == msg::DURATION {
+                // upside down), and `ui-instant` is a `DATETIME` call
+                // through and through: the host's format is not the
+                // catalog's to transform (§8.4). `the_helpers_that_write_...`
+                // has them.
+                if id == msg::SIZE || id == msg::DURATION || id == msg::UI_INSTANT {
                     continue;
                 }
                 let unchanged = plain.message(id, &args);
