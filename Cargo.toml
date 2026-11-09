@@ -40,7 +40,10 @@ publish = false
 domain = { path = "crates/domain" }
 app = { path = "crates/app" }
 api = { path = "crates/api" }
-l10n = { path = "crates/l10n" }
+# No default features: the dev pseudolocales are a feature of `l10n` that
+# `steading` and `web` each pass on through their own `pseudo` feature, so a
+# release build can leave them out (technical design §8.4).
+l10n = { path = "crates/l10n", default-features = false }
 engine = { path = "crates/adapters/engine" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
@@ -58,6 +61,8 @@ fluent-bundle = "0.16.0"
 # Not 0.14: it negotiates `icu_locid` identifiers, which `unic-langid`, and so
 # Fluent's bundles, can't take.
 fluent-langneg = "0.13.1"
+# The dev pseudolocales' transform, optional in `l10n` (technical design §8.4).
+fluent-pseudo = "0.3.3"
 fluent-syntax = "0.12.0"
 futures = "0.3.34"
 http-body-util = "0.1.5"
@@ -87,6 +92,8 @@ tower = "0.5.3"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = "2.5.8"
 uuid = { version = "1.29.1", features = ["serde"] }
+# The browser APIs `web` reads the page's language from and declares it with.
+web-sys = { version = "0.3.107", features = ["Document", "Element", "Location", "Navigator", "UrlSearchParams", "Window"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -139,6 +146,13 @@ publish.workspace = true
 [[test]]
 name = "e2e"
 harness = false
+
+[features]
+# The dev pseudolocales `en-XA` and `ar-XB` for the daemon's messages
+# (technical design §8.4). A release build passes `--no-default-features`, and
+# `just architecture` checks that this leaves `fluent-pseudo` out of it.
+default = ["pseudo"]
+pseudo = ["l10n/pseudo"]
 
 [dependencies]
 api.workspace = true

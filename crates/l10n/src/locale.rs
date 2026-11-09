@@ -5,7 +5,7 @@
 //! Tags are parsed and never used as file names, because the catalogs are
 //! compiled in. A preference that doesn't parse is ignored.
 
-use unic_langid::LanguageIdentifier;
+use unic_langid::{CharacterDirection, LanguageIdentifier, langid};
 
 /// The most preferences one environment variable contributes. `LANGUAGE`
 /// is a list, and the environment is outside input.
@@ -71,20 +71,104 @@ impl PosixEnv {
     }
 }
 
+/// Which way a language's text runs: the value of the `dir` attribute of a
+/// page written in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Ltr,
+    Rtl,
+}
+
+impl Direction {
+    /// The direction `language` is written in. Languages written right to
+    /// left (Arabic, Hebrew, Persian, Urdu) run right to left, unless the tag
+    /// names a script that is written left to right. The vertical scripts run
+    /// left to right: HTML's `dir` has no vertical value.
+    pub fn of(language: &LanguageIdentifier) -> Self {
+        match language.character_direction() {
+            CharacterDirection::RTL => Self::Rtl,
+            CharacterDirection::LTR | CharacterDirection::TTB => Self::Ltr,
+        }
+    }
+
+    /// The attribute's value: `ltr` or `rtl`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
+        }
+    }
+}
+
+/// What a web page asks for, in the order of its authority (technical design
+/// §8.4): the dev `?locale=` of the page's address, then the languages the
+/// browser lists in `navigator.languages`. Both are outside input, so each
+/// is read within bounds, like the POSIX environment.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BrowserLanguages {
+    /// The `locale` parameter of the page's address, as it was given.
+    pub requested: Option<String>,
+    /// `navigator.languages`, as the browser gave it, best first.
+    pub languages: Vec<String>,
+}
+
+impl BrowserLanguages {
+    /// The languages asked for, best first: the requested locale, then the
+    /// browser's languages. A name that is not a language tag, or is longer
+    /// than [`MAX_NAME_LEN`] bytes, is left out, and so is `und`. At most
+    /// [`MAX_PREFERENCES`] of the browser's languages are kept, from the
+    /// first four times as many looked at.
+    pub fn preferences(&self) -> Vec<LanguageIdentifier> {
+        let requested = self.requested.as_deref().and_then(browser_tag);
+        // Bounded, because the browser's list is outside input: at most four
+        // entries are looked at for each one kept.
+        let listed = self
+            .languages
+            .iter()
+            .take(MAX_PREFERENCES * 4)
+            .filter_map(|name| browser_tag(name))
+            .take(MAX_PREFERENCES);
+        requested.into_iter().chain(listed).collect()
+    }
+}
+
 /// Normalizes one POSIX locale value (`en_US.UTF-8@euro`) to a language tag
 /// (`en-US`), or `None` for `C`, `POSIX`, an empty value and anything that
 /// isn't a language tag.
 pub(crate) fn posix_tag(raw: &str) -> Option<LanguageIdentifier> {
-    let raw = raw.trim();
-    if raw.len() > MAX_NAME_LEN {
-        return None;
-    }
-    let name = raw.split(['.', '@']).next().unwrap_or_default();
+    let name = bounded(raw)?.split(['.', '@']).next().unwrap_or_default();
     if name.is_empty() || is_c_locale(name) {
         return None;
     }
+    parse_tag(name)
+}
+
+/// Normalizes one name a browser gives (`pt_br`, `ar-XB`) to a language tag,
+/// or `None` for anything that isn't one, and for `und`. Unlike a POSIX
+/// value, a browser's has no codeset or modifier to drop, so `en_US.UTF-8`
+/// is not a language tag here.
+fn browser_tag(raw: &str) -> Option<LanguageIdentifier> {
+    parse_tag(bounded(raw)?)
+}
+
+/// `raw` without the space around it, unless it is longer than any locale
+/// name is: [`MAX_NAME_LEN`] bytes.
+fn bounded(raw: &str) -> Option<&str> {
+    let raw = raw.trim();
+    (raw.len() <= MAX_NAME_LEN).then_some(raw)
+}
+
+/// `name` as a language tag, read with `_` for `-` and in any case. `und`,
+/// which stands for no language, is no preference.
+fn parse_tag(name: &str) -> Option<LanguageIdentifier> {
     let tag: LanguageIdentifier = name.replace('_', "-").parse().ok()?;
     (tag.language.as_str() != "und").then_some(tag)
+}
+
+/// The source locale, `en-US`: the locale every message exists in, and the
+/// one every chain of locales ends with.
+pub(crate) fn source() -> LanguageIdentifier {
+    langid!("en-US")
 }
 
 /// Whether a POSIX locale value is the untranslated `C` or `POSIX` locale,
@@ -104,7 +188,7 @@ pub(crate) fn negotiate(
     preferences: &[LanguageIdentifier],
     available: &[LanguageIdentifier],
 ) -> Vec<LanguageIdentifier> {
-    let default: LanguageIdentifier = unic_langid::langid!("en-US");
+    let default = source();
     let mut chain = Vec::new();
     for locale in fluent_langneg::negotiate_languages(
         preferences,
@@ -333,5 +417,135 @@ mod tests {
         let chain = |preferences: &[&str]| negotiate(&tags(preferences), &available);
         assert_eq!(chain(&["en-US", "de"]), tags(&["en-US"]));
         assert_eq!(chain(&["de", "en-US", "ja"]), tags(&["de", "en-US"]));
+    }
+
+    fn owned(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|raw| (*raw).to_owned()).collect()
+    }
+
+    fn browser(requested: Option<&str>, languages: &[&str]) -> BrowserLanguages {
+        BrowserLanguages {
+            requested: requested.map(str::to_owned),
+            languages: owned(languages),
+        }
+    }
+
+    /// A language tag of exactly `len` bytes: `en` and enough variants.
+    fn tag_of_len(len: usize) -> String {
+        let mut name = String::from("en");
+        for variant in ('a'..='z').take((len - name.len()) / 9) {
+            name.push('-');
+            name.extend(std::iter::repeat_n(variant, 8));
+        }
+        let rest = len - name.len();
+        if rest > 0 {
+            name.push('-');
+            name.extend(std::iter::repeat_n('z', rest - 1));
+        }
+        name
+    }
+
+    #[test]
+    fn the_locale_in_the_address_comes_before_the_languages_of_the_browser() {
+        let both = browser(Some("ar-XB"), &["de-DE", "en-US"]);
+        assert_eq!(both.preferences(), tags(&["ar-XB", "de-DE", "en-US"]));
+        let listed = browser(None, &["de-DE", "en-US"]);
+        assert_eq!(listed.preferences(), tags(&["de-DE", "en-US"]));
+        let requested = browser(Some("en-XA"), &[]);
+        assert_eq!(requested.preferences(), tags(&["en-XA"]));
+        assert_eq!(BrowserLanguages::default().preferences(), tags(&[]));
+    }
+
+    #[test]
+    fn a_browser_name_is_read_with_either_separator_in_any_case_and_trimmed() {
+        let requested = browser(Some(" ar_xb "), &["EN-us", "pt_br"]);
+        assert_eq!(requested.preferences(), tags(&["ar-XB", "en-US", "pt-BR"]));
+    }
+
+    #[test]
+    fn what_is_not_a_language_tag_asks_for_nothing() {
+        let too_long = "a".repeat(MAX_NAME_LEN + 1);
+        for raw in [
+            "",
+            "   ",
+            "und",
+            "not a locale!",
+            "../../etc/passwd",
+            "en/US",
+            "<b>en</b>",
+            "en_US.UTF-8",
+            too_long.as_str(),
+        ] {
+            let requested = browser(Some(raw), &["de"]);
+            assert_eq!(requested.preferences(), tags(&["de"]), "requested {raw:?}");
+            let listed = browser(None, &[raw, "de"]);
+            assert_eq!(listed.preferences(), tags(&["de"]), "listed {raw:?}");
+        }
+    }
+
+    #[test]
+    fn the_languages_of_the_browser_are_read_up_to_four_entries_for_each_one_kept() {
+        let looked_at = MAX_PREFERENCES * 4;
+        // Entries that aren't language tags, then a language: it is read as
+        // the last entry looked at, and not as the one after.
+        let mut last = vec!["1"; looked_at - 1];
+        last.push("de");
+        assert_eq!(browser(None, &last).preferences(), tags(&["de"]));
+        let mut past = vec!["1"; looked_at];
+        past.push("de");
+        assert_eq!(browser(None, &past).preferences(), tags(&[]));
+    }
+
+    #[test]
+    fn at_most_sixteen_languages_are_kept_besides_the_one_in_the_address() {
+        let many = vec!["de"; 100];
+        assert_eq!(browser(None, &many).preferences().len(), MAX_PREFERENCES);
+        let with_address = browser(Some("fr"), &many).preferences();
+        assert_eq!(with_address.len(), MAX_PREFERENCES + 1);
+        assert_eq!(with_address.first(), Some(&tag("fr")));
+    }
+
+    #[test]
+    fn a_browser_name_of_the_longest_length_read_is_read_and_one_byte_more_is_not() {
+        let longest = tag_of_len(MAX_NAME_LEN);
+        assert_eq!(longest.len(), MAX_NAME_LEN);
+        let expected = tags(&[longest.as_str()]);
+        assert_eq!(browser(Some(&longest), &[]).preferences(), expected);
+        assert_eq!(browser(None, &[longest.as_str()]).preferences(), expected);
+        let one_more = tag_of_len(MAX_NAME_LEN + 1);
+        assert_eq!(one_more.len(), MAX_NAME_LEN + 1);
+        assert_eq!(browser(Some(&one_more), &[]).preferences(), tags(&[]));
+        assert_eq!(browser(None, &[one_more.as_str()]).preferences(), tags(&[]));
+    }
+
+    #[test]
+    fn a_hostile_address_and_language_list_are_read_within_bounds() {
+        let huge = "a".repeat(1 << 20);
+        assert_eq!(browser(Some(&huge), &[]).preferences(), tags(&[]));
+        let flood = vec!["de"; 100_000];
+        let preferences = browser(Some(&huge), &flood).preferences();
+        assert_eq!(preferences.len(), MAX_PREFERENCES);
+    }
+
+    #[test]
+    fn languages_written_right_to_left_run_right_to_left() {
+        for raw in ["ar", "ar-EG", "he", "fa", "ur", "az-Arab"] {
+            assert_eq!(Direction::of(&tag(raw)), Direction::Rtl, "{raw}");
+        }
+    }
+
+    #[test]
+    fn every_other_language_runs_left_to_right() {
+        // Including an Arabic-language tag in a Latin script, and the vertical
+        // script, which `dir` can't express.
+        for raw in ["en-US", "de", "ja", "zh-Hans", "ar-Latn", "mn-Mong", "und"] {
+            assert_eq!(Direction::of(&tag(raw)), Direction::Ltr, "{raw}");
+        }
+    }
+
+    #[test]
+    fn a_direction_is_spelled_as_the_dir_attribute_spells_it() {
+        assert_eq!(Direction::Ltr.as_str(), "ltr");
+        assert_eq!(Direction::Rtl.as_str(), "rtl");
     }
 }

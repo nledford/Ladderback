@@ -81,6 +81,11 @@ fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log)
+        // The banner is read in English, whatever language the machine or a
+        // pseudolocale asks for: `C` makes the program ignore `LANGUAGE`,
+        // which is removed too.
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE")
         .spawn()
         .expect("steading starts");
     let started = Instant::now();

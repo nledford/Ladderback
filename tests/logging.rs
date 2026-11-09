@@ -31,7 +31,12 @@ impl Daemon {
             .stderr(Stdio::piped())
             // Colors would put escape codes inside the lines read here.
             .env("NO_COLOR", "1")
-            .env_remove("CLICOLOR_FORCE");
+            .env_remove("CLICOLOR_FORCE")
+            // The banner is read in English, whatever language the machine
+            // or a pseudolocale asks for: `C` makes the program ignore
+            // `LANGUAGE`, which is removed too.
+            .env("LC_ALL", "C")
+            .env_remove("LANGUAGE");
         match rust_log {
             Some(rust_log) => command.env("RUST_LOG", rust_log),
             None => command.env_remove("RUST_LOG"),

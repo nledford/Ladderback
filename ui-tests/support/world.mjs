@@ -29,6 +29,9 @@ let browser;
 function startServer() {
   const child = spawn(binary, ["serve", "--listen", "127.0.0.1:0"], {
     stdio: ["ignore", "inherit", "pipe"],
+    // The banner below is read in English, whatever language the machine
+    // speaks: `C` makes the daemon ignore LANGUAGE, which is cleared too.
+    env: { ...process.env, LC_ALL: "C", LANGUAGE: "" },
   });
   return new Promise((resolve, reject) => {
     let output = "";
