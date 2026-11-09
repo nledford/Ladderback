@@ -22,10 +22,12 @@ const PASSWORD = "demo-password";
 // enough for a big scratch source to finish, in a debug build.
 const ROW_PATIENCE_MS = 120_000;
 
-// The two sources a demo plan backs up: `small` ends quickly, so a journey
-// sees a whole operation through; `big` outlives the moment a journey
-// cancels it or reloads the page mid-run.
-const SOURCE_FILES = { small: 3, big: 2500 };
+// The two sources a demo plan backs up: `small` runs long enough that its
+// Running row is there to be read (a second or two) and then ends; `big`
+// outlives the moment a journey cancels it or reloads the page mid-run
+// (about ten seconds). Each file's content is unique to its number, so the
+// repository cannot collapse the source into one chunk and end at once.
+const SOURCE_FILES = { small: 10_000, big: 50_000 };
 const FILE_BYTES = 2048;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -56,9 +58,8 @@ async function serveDemoPlan(world, plan, size) {
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");
   await mkdir(source);
-  const contents = "d".repeat(FILE_BYTES);
   for (let n = 1; n <= SOURCE_FILES[size]; n += 1) {
-    await writeFile(path.join(source, `demo-${n}.txt`), contents);
+    await writeFile(path.join(source, `demo-${n}.txt`), `${n}:` + "d".repeat(FILE_BYTES));
   }
   // The shape of the e2e `serving_with_plan` step: one repository, one plan
   // backing the source up into it, nothing else set.

@@ -29,9 +29,21 @@ When("I open the address {string}", async function (address) {
   await this.open(address);
 });
 
+// A name the page built from fetched text carries bidi isolation marks
+// around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
+// journey's "Cancel demo-home". The marks are optional wherever they may
+// stand, and the anchors keep the match whole.
+const ISOLATION = "[\\u2066-\\u2069]*";
+const namePattern = (name) =>
+  new RegExp(
+    `^${[...name]
+      .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join(ISOLATION)}${ISOLATION}$`,
+  );
+
 When("I press Tab until focus is on the {word} {string}", async function (role, name) {
   const keys = journey(this.page);
-  const target = keys.byRole(role, { name });
+  const target = keys.byRole(role, { name: namePattern(name) });
   const focused = async () =>
     (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
   for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
@@ -86,6 +98,24 @@ Then("the {word} region reads {string}", async function (politeness, expected) {
     actual = await textOf(found);
   }
   assert.equal(actual, expected, `the ${politeness} region`);
+});
+
+// The regions merge what arrives within the merge window (§4.5), so a live
+// page's announcement shares the region with the ones before it, and a run
+// that ends quickly may finish before the journey reads the start: what a
+// journey checks is that the region comes to contain the message it expects.
+Then("the {word} region comes to contain {string}", async function (politeness, expected) {
+  const found = await region(this, politeness);
+  const deadline = Date.now() + REGION_PATIENCE_MS;
+  let actual = await textOf(found);
+  while (!actual.includes(expected) && Date.now() < deadline) {
+    await sleep(100);
+    actual = await textOf(found);
+  }
+  assert.ok(
+    actual.includes(expected),
+    `the ${politeness} region (last read ${JSON.stringify(actual)})`,
+  );
 });
 
 Then("the {word} region is empty", async function (politeness) {

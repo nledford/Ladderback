@@ -114,10 +114,10 @@ Feature: Accessibility of the app shell
     And the page has no accessibility violations
     When I press Tab until focus is on the button "Start backup"
     And I press Enter
-    Then the polite region reads "Backup started."
-    And the table "Operations" has a row "demo-home" that shows "Running"
+    Then the table "Operations" has a row "demo-home" that shows "Running"
+    And the polite region comes to contain "Backup started."
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
-    And the polite region reads "Backup finished."
+    And the polite region comes to contain "Backup finished."
     And the page has no accessibility violations
 
   Scenario: Cancelling a running backup by keyboard
@@ -129,7 +129,7 @@ Feature: Accessibility of the app shell
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
     Then the table "Operations" has a row "demo-home" that shows "Cancelled"
-    And the polite region reads "Backup cancelled."
+    And the polite region comes to contain "Backup cancelled."
     And the page has no accessibility violations
 
   Scenario: The operations table sorts by keyboard with the sort announced
@@ -144,7 +144,7 @@ Feature: Accessibility of the app shell
     And I press Tab until focus is on the button "Sort by started"
     And I press Enter
     Then the table "Operations" shows its "Started" column newest first
-    And the polite region reads "Sorted by started, newest first."
+    And the polite region comes to contain "Sorted by started, newest first."
 
   Scenario: The snapshots page announces the empty state of a repository without snapshots
     Given a demo plan "demo-home" with a scratch repository
