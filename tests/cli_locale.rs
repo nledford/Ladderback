@@ -31,6 +31,18 @@ struct Said {
 /// Runs `ladderback serve` on an address another socket holds, with
 /// `LANGUAGE=language` and no other setting that could name a locale.
 fn serve_on_a_taken_address(language: &str) -> Said {
+    static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    // The daemon opens its store and reads its config before it binds; two
+    // daemons in the platform's shared folders contend on the same database
+    // and that failure, not the taken address, is what would print. Each
+    // daemon gets its own empty scratch folders.
+    let scratch = std::env::temp_dir().join(format!(
+        "ladderback-cli-locale-{}-{}",
+        std::process::id(),
+        CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("the scratch dir is made");
     let taken = TcpListener::bind("127.0.0.1:0").expect("a free port to take");
     let address = taken.local_addr().expect("the address taken").to_string();
     // Binding it again fails the way the daemon's bind does.
@@ -45,6 +57,8 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .env_remove("LC_MESSAGES")
         .env_remove("LANG")
         .env("LANGUAGE", language)
+        .env("LADDERBACK_CONFIG_DIR", &scratch)
+        .env("LADDERBACK_DATA_DIR", &scratch)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -79,6 +93,7 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .find(|line| line.starts_with("ladderback: "))
         .unwrap_or_else(|| panic!("a message with the program's name in {stderr:?}"))
         .to_owned();
+    let _ = std::fs::remove_dir_all(&scratch);
     Said {
         address,
         os_error,
