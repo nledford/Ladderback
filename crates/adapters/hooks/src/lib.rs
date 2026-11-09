@@ -237,9 +237,19 @@ impl Captured {
         child.wait().await
     }
 
-    /// The kept, redacted text of one stream.
+    /// The kept, redacted text of one stream. A stream that was cut first
+    /// loses as many bytes of its end as the longest secret has, less one:
+    /// a secret straddling the cut can't leave its first characters
+    /// behind, for the mask only finds what is whole. The engine client's
+    /// log lines are cut the same way.
     fn stream(&self, text: &[u8], truncated: bool, redactor: &Redactor) -> HookOutput {
-        let read = String::from_utf8_lossy(text);
+        let kept = if truncated {
+            text.len()
+                .saturating_sub(redactor.longest_match().saturating_sub(1))
+        } else {
+            text.len()
+        };
+        let read = String::from_utf8_lossy(text.get(..kept).unwrap_or(text));
         HookOutput {
             text: redactor.redact(&read),
             truncated,
