@@ -12,6 +12,7 @@ Feature: Forget keeps each plan's history within its policy
     When the owner forgets the repository
     Then the operation ends as succeeded
     And the repository keeps the 2 newest snapshots of the plan "home"
+    And the log shows the forget removed 2 snapshots
 
   Scenario: Untagged history survives a forget
     Given a plan "home" keeping the last 1 snapshot

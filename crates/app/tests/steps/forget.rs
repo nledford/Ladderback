@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cucumber::{given, then, when};
+use domain::execution::OperationStatus;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::planning::{
@@ -121,6 +122,11 @@ impl ForgetWorld {
             release: Arc::clone(&self.release),
             repository_id: self.repository_id.clone(),
         })
+    }
+
+    /// How many snapshots the scripted engine lists.
+    pub fn listed(&self) -> usize {
+        self.snapshots.len()
     }
 
     /// Saves the draft as it stands.
@@ -466,9 +472,13 @@ async fn forget(agent: &mut Agent) {
             // The prepared run carries the operation the route answered
             // with, and a forget carries what it decided.
             assert_eq!(prepared.operation().id(), operation_id(0xcc));
-            assert!(
-                prepared.partition().is_some(),
-                "a forget partitions before it deletes"
+            assert_eq!(
+                prepared
+                    .partition()
+                    .expect("a forget partitions before it deletes")
+                    .len(),
+                agent.forget.listed(),
+                "the partition sees every snapshot once"
             );
             let runner = Arc::clone(&use_case);
             let running =
@@ -697,10 +707,11 @@ fn refused_engine(agent: &mut Agent) {
 #[then("the forget is refused because the listing failed")]
 fn refused_listing(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    assert!(
-        matches!(error, MaintenanceError::Failed(_)),
-        "a failed read, not {error:?}"
-    );
+    let MaintenanceError::Failed(domain::execution::FailureReason::EngineFailed { detail }) = error
+    else {
+        panic!("the engine's own failure, not {error:?}")
+    };
+    assert_eq!(detail, "the listing failed");
 }
 
 #[then("the forget is refused because the policy is not one the engine accepts")]
@@ -729,6 +740,21 @@ fn checked(agent: &mut Agent) {
         "the jobs: {:?}",
         agent.forget.jobs()
     );
+}
+
+#[then(expr = "the log shows the forget removed {int} snapshots")]
+async fn log_shows_the_forget(agent: &mut Agent, removed: usize) {
+    let detail = agent
+        .store
+        .get(operation_id(0xcc))
+        .await
+        .expect("the log answers")
+        .expect("the forget is in the log");
+    assert_eq!(detail.record.status, OperationStatus::Succeeded);
+    let Some(EngineResult::Forget(summary)) = detail.record.result else {
+        panic!("the log carries the forget's summary: {:?}", detail.record);
+    };
+    assert_eq!(summary.removed.len(), removed, "{summary:?}");
 }
 
 #[then("the log holds no operation of this forget")]
