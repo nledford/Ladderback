@@ -4,7 +4,10 @@
 #     runtime, I/O, engine or presentation crates, or on `chrono` (time goes
 #     through `jiff`, decision 22), with any feature enabled;
 #   - `domain` builds for wasm32-unknown-unknown;
-#   - the inner rings share one banned-call list (clippy.toml).
+#   - the inner rings share one banned-call list (clippy.toml);
+#   - a release build leaves out the development pseudolocales' `fluent-pseudo`
+#     (technical design §8.4): `steading` and `web` have it by default, and not
+#     when built with `--no-default-features`, as a release is.
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
 # support) may be a dev-dependency only.
 set -euo pipefail
@@ -50,6 +53,35 @@ if [[ -n $testkit_users ]]; then
 else
   echo "ok: testkit is a dev-dependency only"
 fi
+
+# The development pseudolocales stay out of a release build (technical design
+# §8.4). `steading` and `web` each pass their `pseudo` feature on to `l10n`,
+# which brings in `fluent-pseudo` and, with it, a regex engine: about a
+# megabyte of the web UI. Both sides are checked, so that a change that blinds
+# this check cannot pass it with nothing to find.
+pseudolocales() {
+  local want=$1 package=$2
+  shift 2
+  local tree found
+  # Separate from the pipeline, as in `check`: a failing `cargo tree` must
+  # stop the script, while "no match" must not.
+  tree=$(cargo tree --package "$package" --edges normal,build --prefix none --format '{p}' "$@")
+  found=$(awk '{print $1}' <<<"$tree" | sort -u | grep -Fx fluent-pseudo || true)
+  if [[ $want == has && -z $found ]]; then
+    echo "error: $package ${*:-(default features)} lacks fluent-pseudo, so a development build has no pseudolocales" >&2
+    status=1
+  elif [[ $want == lacks && -n $found ]]; then
+    echo "error: $package ${*:-(default features)} depends on fluent-pseudo, which a release build must leave out" >&2
+    status=1
+  else
+    echo "ok: $package ${*:-(default features)} $want fluent-pseudo"
+  fi
+}
+
+pseudolocales has steading
+pseudolocales has web --target wasm32-unknown-unknown
+pseudolocales lacks steading --no-default-features
+pseudolocales lacks web --no-default-features --target wasm32-unknown-unknown
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   echo "error: crates/domain/clippy.toml and crates/app/clippy.toml differ" >&2
