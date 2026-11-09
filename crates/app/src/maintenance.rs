@@ -440,3 +440,17 @@ fn retention_failed(error: RetentionError) -> MaintenanceError {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_manual_prune_keeps_packs_marked_for_six_days() {
+        assert_eq!(
+            default_keep_delete().get(),
+            SignedDuration::from_hours(24 * 6),
+            "just under the weekly prune interval (decision 9)"
+        );
+    }
+}

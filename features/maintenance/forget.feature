@@ -77,6 +77,29 @@ Feature: Forget keeps each plan's history within its policy
     Then the forget is refused because the plan's policy keeps nothing
     And the log holds no operation of this forget
 
+  Scenario: An engine that cannot be reached refuses the forget
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the engine cannot be reached
+    When the owner forgets the repository
+    Then the forget is refused because the engine cannot be reached
+    And the engine was never asked to remove anything
+
+  Scenario: A listing that fails refuses the forget
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository's listing fails
+    When the owner forgets the repository
+    Then the forget is refused because the listing failed
+    And the engine was never asked to remove anything
+
+  Scenario: A policy the retention evaluator refuses fails the forget
+    Given a plan "home" keeping within 1 day
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the forget is refused because the policy is not one the engine accepts
+    And the engine was never asked to remove anything
+
   Scenario: An empty policy keeps everything
     Given a plan "home" with no policy set
     And the repository holds 3 snapshots of the plan "home"

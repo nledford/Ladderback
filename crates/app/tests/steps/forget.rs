@@ -57,6 +57,17 @@ fn at(second: i64) -> Timestamp {
     Timestamp::from_second(1_800_000_000 + second).expect("a time in range")
 }
 
+/// How a scenario makes the scripted engine fail a maintenance read.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReadFailure {
+    #[default]
+    None,
+    /// `run` itself refuses: the engine cannot be reached.
+    Unreachable,
+    /// The listing answers a failure event.
+    Listing,
+}
+
 /// What the forget scenarios set up and what the runs answered.
 pub struct ForgetWorld {
     /// The configuration store the use case loads: the repository and its
@@ -76,6 +87,8 @@ pub struct ForgetWorld {
     release: Arc<Notify>,
     /// What a refused run answered.
     refused: Option<MaintenanceError>,
+    /// How the scripted engine fails a read, when a scenario asks for it.
+    fail: ReadFailure,
     /// The repository's ID, as the scripted identify reports it.
     repository_id: RepositoryId,
 }
@@ -91,6 +104,7 @@ impl Default for ForgetWorld {
             jobs: Arc::new(Mutex::new(Vec::new())),
             release: Arc::new(Notify::new()),
             refused: None,
+            fail: ReadFailure::None,
             repository_id: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
         }
     }
@@ -102,6 +116,7 @@ impl ForgetWorld {
     pub fn engine(&self) -> Arc<dyn Engine> {
         Arc::new(Scripted {
             snapshots: self.snapshots.clone(),
+            fail: self.fail,
             jobs: Arc::clone(&self.jobs),
             release: Arc::clone(&self.release),
             repository_id: self.repository_id.clone(),
@@ -140,6 +155,17 @@ impl ForgetWorld {
                 hooks: Hooks::default(),
             },
         );
+        self.save().await;
+    }
+
+    /// Makes the scripted engine fail reads the given way.
+    pub fn fail_read(&mut self, fail: ReadFailure) {
+        self.fail = fail;
+    }
+
+    /// Adds a plan as drafted, with whatever policy it carries.
+    pub async fn plan_raw(&mut self, plan: Plan) {
+        self.plans.push(plan);
         self.save().await;
     }
 
@@ -242,6 +268,7 @@ impl ForgetWorld {
 /// can be held.
 struct Scripted {
     snapshots: Vec<SnapshotSummary>,
+    fail: ReadFailure,
     jobs: Arc<Mutex<Vec<Job>>>,
     release: Arc<Notify>,
     repository_id: RepositoryId,
@@ -257,6 +284,11 @@ impl JobControl for Nothing {
 #[async_trait]
 impl Engine for Scripted {
     async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        if self.fail == ReadFailure::Unreachable && matches!(job, Job::Identify(_) | Job::Ls(_)) {
+            return Err(EngineError::Unavailable {
+                detail: "the engine is down".to_owned(),
+            });
+        }
         self.jobs
             .lock()
             .expect("the job list answers")
@@ -268,6 +300,11 @@ impl Engine for Scripted {
             Job::Identify(_) => vec![EngineEvent::Succeeded(EngineResult::Repository {
                 id: self.repository_id.clone(),
             })],
+            Job::Ls(_) if self.fail == ReadFailure::Listing => vec![EngineEvent::Failed(
+                domain::execution::FailureReason::EngineFailed {
+                    detail: "the listing failed".to_owned(),
+                },
+            )],
             Job::Ls(_) => vec![EngineEvent::Succeeded(EngineResult::Snapshots(
                 self.snapshots.clone(),
             ))],
@@ -370,6 +407,29 @@ async fn another_agents_snapshots(agent: &mut Agent, count: u64, plan: String) {
         .await;
 }
 
+#[given("the engine cannot be reached")]
+async fn engine_unreachable(agent: &mut Agent) {
+    agent.forget.fail_read(ReadFailure::Unreachable);
+}
+
+#[given("the repository's listing fails")]
+async fn listing_fails(agent: &mut Agent) {
+    agent.forget.fail_read(ReadFailure::Listing);
+}
+
+#[given(expr = "a plan {string} keeping within {int} day(s)")]
+async fn plan_keeping_within(agent: &mut Agent, plan: String, days: i64) {
+    agent.forget.repository().await;
+    let mut draft = Plan::new(
+        PlanId::parse(&plan).expect("a plan ID"),
+        alias(),
+        vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+    );
+    draft.retention.keep_within =
+        Some(domain::planning::KeepWithin::parse(&format!("{days} day")).expect("a span"));
+    agent.forget.plan_raw(draft).await;
+}
+
 #[given("a maintenance operation is already running on the repository")]
 async fn maintenance_running(agent: &mut Agent) {
     let mut operation = Operation::queue(
@@ -403,6 +463,13 @@ async fn forget(agent: &mut Agent) {
         .await;
     match prepared {
         Ok(prepared) => {
+            // The prepared run carries the operation the route answered
+            // with, and a forget carries what it decided.
+            assert_eq!(prepared.operation().id(), operation_id(0xcc));
+            assert!(
+                prepared.partition().is_some(),
+                "a forget partitions before it deletes"
+            );
             let runner = Arc::clone(&use_case);
             let running =
                 tokio::spawn(
@@ -616,6 +683,34 @@ fn no_forget_job(agent: &mut Agent) {
         "the engine ran: {:?}",
         agent.forget.jobs()
     );
+}
+
+#[then("the forget is refused because the engine cannot be reached")]
+fn refused_engine(agent: &mut Agent) {
+    let error = agent.forget.refused.take().expect("the forget was refused");
+    assert!(
+        matches!(error, MaintenanceError::Engine { .. }),
+        "an engine failure, not {error:?}"
+    );
+}
+
+#[then("the forget is refused because the listing failed")]
+fn refused_listing(agent: &mut Agent) {
+    let error = agent.forget.refused.take().expect("the forget was refused");
+    assert!(
+        matches!(error, MaintenanceError::Failed(_)),
+        "a failed read, not {error:?}"
+    );
+}
+
+#[then("the forget is refused because the policy is not one the engine accepts")]
+fn refused_policy(agent: &mut Agent) {
+    let error = agent.forget.refused.take().expect("the forget was refused");
+    let MaintenanceError::Failed(domain::execution::FailureReason::EngineFailed { detail }) = error
+    else {
+        panic!("a failed policy evaluation, not {error:?}")
+    };
+    assert_eq!(detail, "the retention policy is not one the engine accepts");
 }
 
 #[then("the engine was asked to prune the repository")]
