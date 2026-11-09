@@ -164,6 +164,7 @@ Feature: Accessibility of the app shell
     And I press Tab until focus is on the button "Start backup"
     And I press Enter
     And the table "Operations" has 2 rows
+    And the table "Operations" has a row "demo-home" that shows "Succeeded"
     When I open the address "/snapshots"
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
