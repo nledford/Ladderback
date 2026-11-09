@@ -19,6 +19,8 @@ use std::sync::Arc;
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 
+#[cfg(all(test, target_arch = "wasm32"))]
+mod formatting;
 mod page;
 
 /// The text of message `id` in the page's language.

@@ -85,6 +85,9 @@ icu_provider = { version = "2.4.0", default-features = false, features = ["sync"
 icu_time = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 intl-memoizer = "0.5.3"
 jiff = { version = "0.2.40", features = ["serde"] }
+# The browser's `Intl`, which `l10n`'s `browser-intl` feature writes the web UI's
+# numbers and instants with (technical design §8.4).
+js-sys = "0.3.107"
 keyring = { version = "3.6.3", default-features = false }
 leptos = { version = "0.8.23", features = ["csr"] }
 log = "0.4.35"
@@ -110,6 +113,10 @@ tower = "0.5.3"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = "2.5.8"
 uuid = { version = "1.29.1", features = ["serde"] }
+# `JsValue` for the browser host, and the `wasm-bindgen-test` lanes that run
+# under Node (`just test-wasm`).
+wasm-bindgen = "0.2.130"
+wasm-bindgen-test = "0.3.80"
 # The browser APIs `web` reads the page's language from and declares it with.
 web-sys = { version = "0.3.107", features = ["Document", "Element", "Location", "Navigator", "UrlSearchParams", "Window"] }
 
