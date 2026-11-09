@@ -138,7 +138,10 @@ impl OperationKind {
     /// Whether the operation maintains a repository: forget, prune and check.
     /// Maintenance operations on one repository run one at a time (I7).
     pub fn is_maintenance(self) -> bool {
-        todo!("OperationKind::is_maintenance")
+        match self {
+            Self::Prune | Self::Check => true,
+            Self::Fake | Self::Identify | Self::Backup => false,
+        }
     }
 }
 
