@@ -162,23 +162,31 @@ impl RepositoryAccess {
 }
 
 /// Everything that can hold a secret is masked (I4): the password, the
-/// password in the repository's URL, the passwords in URLs that options
+/// password in the URL of either half, the passwords in URLs that options
 /// hold, every option's value, and what the references resolved to. The rest
-/// of the URL and the options' names stay, for diagnosing.
+/// of the URLs and the options' names stay, for diagnosing.
 impl std::fmt::Debug for RepositoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let repository = self.redactor().redact(&self.repository);
-        let options: BTreeMap<&String, &str> =
-            self.options.keys().map(|name| (name, REDACTED)).collect();
+        let redactor = self.redactor();
+        let repository = redactor.redact(&self.repository);
+        let repo_hot = self.repo_hot.as_deref().map(|hot| redactor.redact(hot));
         let secrets: Vec<&str> = self.secrets.iter().map(|_| REDACTED).collect();
         f.debug_struct("RepositoryAccess")
             .field("repository", &repository)
+            .field("repo_hot", &repo_hot)
             .field("password", &self.password)
-            .field("options", &options)
+            .field("options", &masked(&self.options))
+            .field("options_hot", &masked(&self.options_hot))
+            .field("options_cold", &masked(&self.options_cold))
             .field("secrets", &secrets)
             .field("id", &self.id)
             .finish()
     }
+}
+
+/// The names of a set of options, each with its value masked.
+fn masked(options: &BTreeMap<String, String>) -> BTreeMap<&String, &'static str> {
+    options.keys().map(|name| (name, REDACTED)).collect()
 }
 
 /// Back up `sources` as a snapshot of the plan named by `tags`.
