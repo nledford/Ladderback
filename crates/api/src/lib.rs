@@ -66,6 +66,15 @@ pub enum ErrorCode {
     /// The configuration file is in a version of the format newer than this
     /// build reads.
     ConfigSchemaNewer,
+    /// A repository already exists where one was to be initialised, so
+    /// nothing was written. The argument `location` is where it is.
+    RepositoryExists,
+    /// The configuration already holds a repository under the alias. The
+    /// argument `alias` names it.
+    RepositoryAliasTaken,
+    /// A repository's settings hold a secret reference that couldn't be
+    /// resolved. The argument `field` names where it is.
+    SecretUnresolved,
     #[serde(other)]
     Unknown,
 }
@@ -246,6 +255,21 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
+            Self::RepositoryExists => &[ArgSpec {
+                name: "location",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::RepositoryAliasTaken => &[ArgSpec {
+                name: "alias",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::SecretUnresolved => &[ArgSpec {
+                name: "field",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::InvalidJobSpec
             | Self::OperationFailed
             | Self::DeadlinePassed

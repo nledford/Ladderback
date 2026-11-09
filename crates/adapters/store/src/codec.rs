@@ -18,6 +18,7 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Fake => "fake",
         OperationKind::Identify => "identify",
+        OperationKind::Init => "init",
         OperationKind::Backup => "backup",
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
@@ -28,6 +29,7 @@ pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
     match text {
         "fake" => Some(OperationKind::Fake),
         "identify" => Some(OperationKind::Identify),
+        "init" => Some(OperationKind::Init),
         "backup" => Some(OperationKind::Backup),
         "prune" => Some(OperationKind::Prune),
         "check" => Some(OperationKind::Check),

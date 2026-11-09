@@ -47,6 +47,9 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ConfigInvalid => msg::ERROR_CONFIG_INVALID,
     ConfigSchemaMissing => msg::ERROR_CONFIG_SCHEMA_MISSING,
     ConfigSchemaNewer => msg::ERROR_CONFIG_SCHEMA_NEWER,
+    RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
+    RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
+    SecretUnresolved => msg::ERROR_SECRET_UNRESOLVED,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

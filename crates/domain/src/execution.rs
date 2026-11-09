@@ -129,6 +129,8 @@ pub enum OperationKind {
     /// A scripted job that touches no repository, for tests and diagnostics.
     Fake,
     Identify,
+    /// Initialises a repository where nothing is yet, and reports its ID.
+    Init,
     Backup,
     Prune,
     Check,
@@ -140,7 +142,7 @@ impl OperationKind {
     pub fn is_maintenance(self) -> bool {
         match self {
             Self::Prune | Self::Check => true,
-            Self::Fake | Self::Identify | Self::Backup => false,
+            Self::Fake | Self::Identify | Self::Init | Self::Backup => false,
         }
     }
 }

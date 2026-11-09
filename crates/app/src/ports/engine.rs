@@ -66,6 +66,10 @@ pub enum Job {
     Fake(FakeJob),
     /// Opens a repository and reports its ID.
     Identify(RepositoryAccess),
+    /// Initialises a repository at the location, with default key options,
+    /// and reports its ID. It refuses when a repository already exists
+    /// there, and never overwrites one.
+    Init(RepositoryAccess),
     Backup(BackupJob),
     Prune(PruneJob),
     Check(CheckJob),
@@ -78,7 +82,7 @@ impl Job {
         match self {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
-            Self::Identify(_) | Self::Prune(_) | Self::Check(_) => None,
+            Self::Identify(_) | Self::Init(_) | Self::Prune(_) | Self::Check(_) => None,
         }
     }
 
@@ -87,6 +91,7 @@ impl Job {
         match self {
             Self::Fake(_) => OperationKind::Fake,
             Self::Identify(_) => OperationKind::Identify,
+            Self::Init(_) => OperationKind::Init,
             Self::Backup(_) => OperationKind::Backup,
             Self::Prune(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
@@ -98,7 +103,7 @@ impl Job {
     pub fn target(&self) -> Target {
         let (plan, access) = match self {
             Self::Fake(_) => return Target::default(),
-            Self::Identify(access) => (None, access),
+            Self::Identify(access) | Self::Init(access) => (None, access),
             Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
             Self::Prune(job) => (None, &job.repository),
             Self::Check(job) => (None, &job.repository),

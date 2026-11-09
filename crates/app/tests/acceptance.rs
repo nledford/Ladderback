@@ -24,6 +24,9 @@ mod operation_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/repositories.rs"]
+mod repositories_steps;
+
 #[derive(World)]
 #[world(init = Self::new)]
 struct Agent {
@@ -35,6 +38,7 @@ struct Agent {
     secrets: secrets_steps::SecretsWorld,
     config: config_steps::ConfigWorld,
     maintenance: maintenance_steps::MaintenanceWorld,
+    repositories: repositories_steps::RepositoriesWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -66,6 +70,7 @@ impl Agent {
             secrets: Default::default(),
             config: Default::default(),
             maintenance: Default::default(),
+            repositories: Default::default(),
         }
     }
 

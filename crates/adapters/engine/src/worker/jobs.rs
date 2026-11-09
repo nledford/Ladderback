@@ -23,6 +23,12 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
     }))
 }
 
+/// Initialises a repository at the location, with default key options and
+/// both halves of a hot/cold repository. It refuses when a repository
+/// already exists there (`repository-exists`), and never overwrites one.
+pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    todo!("phase 2 of the repositories slice")
+}
 pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobError> {
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;

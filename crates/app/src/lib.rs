@@ -17,6 +17,7 @@
 pub mod execution;
 pub mod history;
 pub mod ports;
+pub mod repositories;
 pub mod secrets;
 
 #[cfg(feature = "fakes")]
