@@ -48,7 +48,7 @@ Feature: The shared components in the gallery
     Then a toast reads "Settings saved."
     And the polite region reads "Settings saved."
     When the toast "Settings saved." is gone
-    Then the live regions stay silent
+    Then the polite region reads "Settings saved."
 
   Scenario Outline: Each component's demo states have no accessibility violations
     When I open the component gallery

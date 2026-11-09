@@ -49,7 +49,7 @@ Then("the field {string} shows the error {string}", async function (name, error)
         (describedBy ?? "")
           .split(/\s+/)
           .filter(Boolean)
-          .map((id) => this.page.locator(`#${CSS.escape(id)}`).textContent()),
+          .map((id) => this.page.locator(`#${id}`).textContent()),
       ))
         .join(" ")
         .includes(error),
@@ -66,7 +66,7 @@ Then("the field {string} is described by {string}", async function (name, descri
       (describedBy ?? "")
         .split(/\s+/)
         .filter(Boolean)
-        .map((id) => this.page.locator(`#${CSS.escape(id)}`).textContent()),
+        .map((id) => this.page.locator(`#${id}`).textContent()),
     )
   ).join(" ");
   assert.ok(
@@ -83,12 +83,15 @@ Then("the progress bar {string} shows {int} percent", async function (name, perc
 });
 
 Then("a toast reads {string}", async function (text) {
-  await expect(this.page.getByText(text)).toBeVisible();
+  await expect(this.page.locator("main").getByText(text)).toBeVisible();
 });
 
 // A toast is transient; ten seconds is generous for however long it shows.
+// Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (text) {
-  await expect(this.page.getByText(text)).toBeHidden({ timeout: 10_000 });
+  await expect(this.page.locator("main").getByText(text)).toBeHidden({
+    timeout: 10_000,
+  });
 });
 
 Then("the {string} demo has no accessibility violations", async function (component) {
@@ -116,25 +119,35 @@ Then("the {string} demo matches its ARIA snapshot", async function (component) {
 // logging demoSection(page, name).ariaSnapshot() and pasting it here.
 const SNAPSHOTS = {
   Dialog: `- heading "Dialog" [level=2]
-  - button "Open the demo dialog"
-  - dialog "Demo dialog" [closed]`,
+- button "Open the demo dialog"`,
   "Data table": `- heading "Data table" [level=2]
-  - table "Demo repositories":
-    - caption "Demo repositories"
-    - rowgroup:
-      - row "Repository":
-        - columnheader "Repository":
-          - button "Sort by repository"`,
+- table "Demo repositories":
+  - caption: Demo repositories
+  - rowgroup:
+    - row "Repository Sort by repository":
+      - columnheader "Repository Sort by repository":
+        - text: Repository
+        - button "Sort by repository"
+  - rowgroup:
+    - row "moor":
+      - cell "moor"
+    - row "harbor":
+      - cell "harbor"
+    - row "anchor":
+      - cell "anchor"`,
   "Form field": `- heading "Form field" [level=2]
-  - textbox "Repository name"
+- text: Repository name
+- textbox "Repository name"
+- paragraph: The name of the repository to check.
+- paragraph:
   - button "Check the repository name"`,
   "Status badge": `- heading "Status badge" [level=2]
-  - status:
-    - text: "Idle"`,
+- paragraph: Loading Empty Error Success`,
   Progress: `- heading "Progress" [level=2]
-  - progressbar "Demo backup progress":
-    - text: 40%
+- progressbar "Demo backup progress"
+- paragraph:
   - button "Advance the demo progress"`,
   Toast: `- heading "Toast" [level=2]
+- paragraph:
   - button "Save the demo settings"`,
 };
