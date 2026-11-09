@@ -1228,7 +1228,7 @@ mod operation_dto_tests {
 mod catalog_dto_tests {
     use serde_json::{from_str, to_string};
 
-    use super::{PlansDto, PlanSummaryDto, RepositoriesDto, SnapshotsDto, SnapshotDto};
+    use super::{PlanSummaryDto, PlansDto, RepositoriesDto, SnapshotDto, SnapshotsDto};
 
     #[test]
     fn the_catalog_lists_carry_their_own_field_names() {
@@ -1242,7 +1242,10 @@ mod catalog_dto_tests {
             to_string(&plans).unwrap(),
             r#"{"plans":[{"id":"demo-home","repository":"demo"}]}"#
         );
-        assert_eq!(from_str::<PlansDto>(&to_string(&plans).unwrap()).unwrap(), plans);
+        assert_eq!(
+            from_str::<PlansDto>(&to_string(&plans).unwrap()).unwrap(),
+            plans
+        );
 
         let repositories = RepositoriesDto {
             repositories: vec!["demo".to_owned()],

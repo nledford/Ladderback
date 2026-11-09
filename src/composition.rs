@@ -20,8 +20,10 @@ use app::ports::{
     RunningJob,
 };
 use app::secrets::ResolveRepository;
+use app::snapshots::ListSnapshots;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
+use domain::RepositoryAlias;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
@@ -30,7 +32,7 @@ use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
-use http_adapter::{AppState, Operations, StartError};
+use http_adapter::{AppState, Catalog, CatalogError, Operations, SnapshotsError, StartError};
 use l10n::{MessageId, msg};
 use platform::SystemClock;
 use platform::{agent_id, dirs};
@@ -70,7 +72,7 @@ async fn app_state_at(
     // The configuration first: a file this build cannot read is a refusal,
     // whatever the rest of the machine says.
     let config_dir = config_dir.ok_or_else(|| plain(msg::CLI_NO_CONFIG_DIR))?;
-    let config = Arc::new(FileConfigStore::new(
+    let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
         config_dir.join("config.toml"),
         Arc::new(SystemClock),
     ));
@@ -98,18 +100,21 @@ async fn app_state_at(
         bus: Arc::clone(&bus),
         clock: Arc::new(SystemClock),
     });
+    let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
     let operations: Arc<dyn Operations> = Arc::new(PlanRunner {
-        config,
-        resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+        config: Arc::clone(&config),
+        resolve: Arc::clone(&resolve),
         agent_id,
-        engine,
+        engine: Arc::clone(&engine),
         store,
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
     });
+    let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
     Ok(AppState {
         events: bus,
         operations,
+        catalog,
     })
 }
 
@@ -626,6 +631,96 @@ fn warning_code(kind: WarningKind) -> WarningCode {
 /// dropped when it ends, so only a running operation can be cancelled, once.
 struct CancelRegistry {
     running: std::sync::Mutex<HashMap<OperationId, futures::channel::oneshot::Sender<()>>>,
+}
+
+/// The catalog the API asks of the daemon (§4.2): the configuration's plans
+/// and repositories, and one repository's snapshots, listed live through the
+/// engine (§9: a read stores nothing and takes no slot).
+struct ConfigCatalog {
+    config: Arc<dyn ConfigStore>,
+    engine: Arc<dyn Engine>,
+}
+
+#[async_trait]
+impl Catalog for ConfigCatalog {
+    async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|_| CatalogError::Unavailable)?;
+        Ok(api::PlansDto {
+            plans: config
+                .plans()
+                .iter()
+                .map(|plan| api::PlanSummaryDto {
+                    id: plan.id.as_str().to_owned(),
+                    repository: plan.repository.as_str().to_owned(),
+                })
+                .collect(),
+        })
+    }
+
+    async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|_| CatalogError::Unavailable)?;
+        Ok(api::RepositoriesDto {
+            repositories: config
+                .repositories()
+                .keys()
+                .map(|alias| alias.as_str().to_owned())
+                .collect(),
+        })
+    }
+
+    async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError> {
+        // An alias no repository could have is as unknown as one the
+        // configuration happens not to have.
+        let alias = RepositoryAlias::parse(&alias).map_err(|_| SnapshotsError::Unknown)?;
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|_| SnapshotsError::Unavailable)?;
+        let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
+        let listed = ListSnapshots::new(
+            Arc::clone(&self.engine),
+            ResolveRepository::new(Arc::new(SystemSecrets::default())),
+        )
+        .list(OperationId::from_uuid(Uuid::now_v7()), &repository.settings)
+        .await
+        .map_err(|error| {
+            log::warn!(
+                "the snapshots of {} could not be listed: {error:?}",
+                alias.as_str()
+            );
+            SnapshotsError::Unavailable
+        })?;
+        let snapshots = listed
+            .iter()
+            .filter_map(|snapshot| {
+                api::SnapshotDto::new(
+                    snapshot.id.as_str().to_owned(),
+                    snapshot.time.to_string(),
+                    snapshot.hostname.clone(),
+                    snapshot.label.clone(),
+                    snapshot.tags.clone(),
+                    snapshot.paths.clone(),
+                )
+                .map_err(|problem| {
+                    log::error!(
+                        "a snapshot of {} the page cannot show: {problem:?}",
+                        alias.as_str()
+                    );
+                })
+                .ok()
+            })
+            .collect();
+        Ok(api::SnapshotsDto { snapshots })
+    }
 }
 
 impl CancelRegistry {
