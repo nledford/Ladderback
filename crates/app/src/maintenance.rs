@@ -219,14 +219,12 @@ pub struct AdoptPreview {
 }
 
 impl AdoptPreview {
-    /// The fingerprint of what the adoption rewrites.
+    /// The fingerprint of what the adoption rewrites and where it goes.
     pub fn selection(&self) -> SelectionToken {
-        let ids: Vec<SnapshotId> = self
-            .snapshots
-            .iter()
-            .map(|snapshot| snapshot.id.clone())
-            .collect();
-        SelectionToken::of(&ids)
+        SelectionToken::of_adoption(
+            &self.into,
+            self.snapshots.iter().map(|snapshot| &snapshot.id),
+        )
     }
 }
 

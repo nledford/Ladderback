@@ -318,3 +318,13 @@ Feature: A maintenance preview tells what a run would do before it does anything
     And the repository holds 2 snapshots only the plan tag "home" marks
     When the owner lists the repository's groups
     Then the groups list an orphaned group of 2 snapshots that no plan could adopt
+
+  Scenario: An adoption confirmed into another plan than the one previewed is refused and rewrites nothing
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/srv/photos"
+    And the repository holds 3 snapshots another agent's plan "home" holds
+    When the owner previews adopting the other agent's "home" history into the plan "home"
+    And the owner adopts the other agent's "home" history into the plan "photos" with the preview's selection
+    Then the run is refused because the snapshots changed since the preview
+    And the engine was never asked to rewrite anything
+    And the log holds no operation of this adoption

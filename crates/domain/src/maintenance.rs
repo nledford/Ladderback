@@ -339,23 +339,42 @@ fn adoption_key(plan: &Plan, hostname: &str) -> (String, String, Vec<String>) {
 /// refused instead of removing what nobody reviewed (I6). It guards against
 /// change, not against an adversary, so a short, fixed hash is enough: the
 /// FNV-1a 64-bit hash of the snapshot IDs, sorted and joined by newlines,
-/// written as 16 lower-case hex digits.
+/// written as 16 lower-case hex digits. An adoption's token also covers the
+/// plan the history goes to: the text it hashes starts with the line
+/// `into:<plan>`, which no ID can be, so no forget's token is an adoption's
+/// and a preview of one destination can't start another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionToken(String);
 
 impl SelectionToken {
     /// The token of the set `ids` names, whatever the order they come in.
-    pub fn of(ids: &[SnapshotId]) -> Self {
+    pub fn of<'a>(ids: impl IntoIterator<Item = &'a SnapshotId>) -> Self {
+        Self::hashed(None, ids)
+    }
+
+    /// The token of an adoption of the set `ids` names into the plan `into`.
+    pub fn of_adoption<'a>(into: &PlanId, ids: impl IntoIterator<Item = &'a SnapshotId>) -> Self {
+        Self::hashed(Some(into), ids)
+    }
+
+    fn hashed<'a>(into: Option<&PlanId>, ids: impl IntoIterator<Item = &'a SnapshotId>) -> Self {
         const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
         const PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut sorted: Vec<&str> = ids.iter().map(SnapshotId::as_str).collect();
+        let mut sorted: Vec<&str> = ids.into_iter().map(SnapshotId::as_str).collect();
         sorted.sort_unstable();
         sorted.dedup();
-        let bytes = sorted
+        let destination = into.into_iter().flat_map(|plan| {
+            b"into:"
+                .iter()
+                .copied()
+                .chain(plan.as_str().bytes())
+                .chain(std::iter::once(b'\n'))
+        });
+        let listed = sorted
             .iter()
             .enumerate()
             .flat_map(|(n, id)| (n > 0).then_some(b'\n').into_iter().chain(id.bytes()));
-        let hash = bytes.fold(OFFSET, |hash, byte| {
+        let hash = destination.chain(listed).fold(OFFSET, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(PRIME)
         });
         Self(format!("{hash:016x}"))
@@ -825,6 +844,38 @@ mod tests {
         assert_eq!(token_text(&[1]), "68497038cf038672");
         assert_eq!(token_text(&[2, 1]), "f1ab8ae83457c94e");
         assert_eq!(token_text(&[1, 2, 3]), "312cd2115e3903a5");
+    }
+
+    #[test]
+    fn a_snapshot_named_twice_counts_once() {
+        assert_eq!(token_text(&[1, 1]), token_text(&[1]));
+        assert_eq!(token_text(&[2, 1, 2, 1]), token_text(&[1, 2]));
+    }
+
+    fn adoption_text(into: &str, ids: &[i64]) -> String {
+        let ids: Vec<SnapshotId> = ids.iter().copied().map(id).collect();
+        SelectionToken::of_adoption(&plan(into), &ids)
+            .as_str()
+            .to_owned()
+    }
+
+    #[test]
+    fn an_adoptions_token_covers_its_destination_and_its_snapshots() {
+        // FNV-1a 64 of `into:<plan>`, a newline, then the sorted IDs joined
+        // by newlines.
+        assert_eq!(adoption_text("home", &[1]), "6d271b21522bf869");
+        assert_eq!(adoption_text("home", &[2, 1]), "9ed6d13a3e9a15d3");
+        assert_eq!(adoption_text("photos", &[1]), "0d3078a0fe08835b");
+        assert_eq!(
+            adoption_text("home", &[1, 1]),
+            adoption_text("home", &[1]),
+            "a snapshot named twice counts once"
+        );
+        assert_ne!(
+            adoption_text("home", &[1]),
+            token_text(&[1]),
+            "no forget's selection is an adoption's"
+        );
     }
 
     #[test]
