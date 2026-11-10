@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { After, Given, Then, When } from "@cucumber/cucumber";
+import { expect } from "playwright/test";
 
+import { ScriptedDaemon } from "../support/scripted-daemon.mjs";
 import { fixtureRepo, startServer } from "../support/world.mjs";
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
@@ -21,6 +23,10 @@ const PASSWORD = "demo-password";
 // A real backup takes real time, and the steps that wait for one are patient:
 // enough for a big scratch source to finish, in a debug build.
 const ROW_PATIENCE_MS = 120_000;
+
+// A page's answer to a key press, or to an event a step sent it, takes a
+// moment at most: this long, not as long as a real backup.
+const UPDATE_PATIENCE_MS = 5_000;
 
 // The two sources a demo plan backs up: `small` runs long enough that its
 // Running row is there to be read (a second or two) and then ends; `big`
@@ -105,6 +111,39 @@ Given("a demo plan {string} with a scratch repository", async function (plan) {
 Given("a demo plan {string} with a big scratch repository", async function (plan) {
   await serveDemoPlan(this, plan, "big");
 });
+
+// The scripted daemon (support/scripted-daemon.mjs): a Given says what its
+// history holds, and its Whens say what its events stream tells the page and
+// when.
+function scripted(world) {
+  assert.ok(world.scriptedDaemon, "this scenario's daemon is not scripted: a Given must say so");
+  return world.scriptedDaemon;
+}
+
+Given("the daemon reports a queued backup of {string}", function (plan) {
+  this.scriptedDaemon = new ScriptedDaemon();
+  this.scriptedDaemon.addBackup(plan, "queued", { queuedAt: "2026-11-09T10:00:00Z" });
+});
+
+Given("the daemon reports two finished backups of {string}", function (plan) {
+  this.scriptedDaemon = new ScriptedDaemon();
+  for (const second of ["01", "02"]) {
+    this.scriptedDaemon.addBackup(plan, "succeeded", {
+      queuedAt: `2026-11-09T10:00:${second}Z`,
+      startedAt: `2026-11-09T10:00:${second}Z`,
+      finishedAt: `2026-11-09T10:01:${second}Z`,
+    });
+  }
+});
+
+When("the daemon reports that the backup of {string} has started", async function (plan) {
+  await scripted(this).starts(plan, "2026-11-09T10:00:05Z");
+});
+
+When("the daemon reports {int} steps of progress of the backup of {string}", async function (steps, plan) {
+  await scripted(this).progresses(plan, steps);
+});
+
 When("the daemon has stopped", async function () {
   const own = this.ownServer;
   assert.ok(own, "this scenario's daemon was never started");
@@ -151,12 +190,16 @@ Then("the table {string} has {int} rows", async function (name, count) {
 
 // The cells of the named column each carry the instant they show, so the
 // order is read from those, not from localized text.
-Then("the table {string} shows its {string} column newest first", async function (name, column) {
-  const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+async function instants(world, name, column) {
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
   const index = await header.evaluate((cell) => cell.cellIndex);
-  const values = await table(this, name)
+  return table(world, name)
     .locator("tbody tr")
     .evaluateAll((rows, at) => rows.map((row) => row.cells[at].title), index);
+}
+
+Then("the table {string} shows its {string} column newest first", async function (name, column) {
+  const values = await instants(this, name, column);
   assert.ok(values.length > 0, `the table ${name} has no rows to be newest first`);
   const sorted = [...values].sort((a, b) => b.localeCompare(a));
   assert.deepEqual(values, sorted, `the ${column} column of ${name} is not newest first`);
@@ -184,6 +227,28 @@ Then("the table {string} shows its {string} column in the time zone {string}", a
   }
 });
 
+// The table answers a press of its sort button by reordering the rows, so the
+// step waits for the order as it waits for any update.
+Then("the table {string} shows its {string} column oldest first", async function (name, column) {
+  const oldestFirst = (values) => [...values].sort((a, b) => a.localeCompare(b));
+  const end = Date.now() + UPDATE_PATIENCE_MS;
+  let values = await instants(this, name, column);
+  while (Date.now() < end && values.join() !== oldestFirst(values).join()) {
+    await sleep(100);
+    values = await instants(this, name, column);
+  }
+  assert.ok(values.length > 0, `the table ${name} has no rows to be oldest first`);
+  assert.deepEqual(values, oldestFirst(values), `the ${column} column of ${name} is not oldest first`);
+});
+
+// What the header says of the sort is what a screen reader tells (WCAG 1.3.1).
+Then(
+  "the table {string} announces its {string} column as sorted {word}",
+  async function (name, column, direction) {
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+    await expect(header).toHaveAttribute("aria-sort", direction);
+  },
+);
 Then("the page shows the paragraph {string}", async function (text) {
   await this.page.getByText(text, { exact: true }).first().waitFor({ state: "visible" });
 });

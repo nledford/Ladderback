@@ -411,6 +411,48 @@ fn row_view(
     }
 }
 
+/// What the operations page shows in the place of its table, or the table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shown {
+    /// The history is on its way.
+    Loading,
+    /// The daemon cannot be reached.
+    Unreachable,
+    /// The history is here and holds no operation.
+    Empty,
+    /// The history is here and holds some.
+    Table,
+}
+
+/// What the page shows while its connection is in `phase` and its state does
+/// or does not hold rows. Only a change of this rebuilds the table: an update
+/// to a row, or to the order, leaves the table and the controls in it as they
+/// are (WCAG 2.4.3).
+fn shown(phase: Phase, has_rows: bool) -> Shown {
+    todo!()
+}
+
+/// The ids of `rows` in the order `sort` shows them. History is the daemon's
+/// own order, newest first; a sort order compares the instant of the Started
+/// cell, which as RFC 3339 in UTC orders as its bytes do, and keeps the
+/// daemon's order between rows that tie.
+fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
+    todo!()
+}
+
+/// How far a row's run has come, as a whole percent: `None` until the run has
+/// reported any progress, so a row that has not begun has no bar.
+fn progress_percent(row: &OperationRow) -> Option<u8> {
+    todo!()
+}
+
+/// A status as its badge shows it: which pill, and its text. A status this
+/// build doesn't know is the empty pill with the status as it came, never a
+/// blank cell.
+fn badge_of(localizer: &Localizer, status: &str) -> (&'static str, String) {
+    todo!()
+}
+
 /// The order a row's life is told by: the instant its `Started` cell shows,
 /// which for a queued run is the instant it was queued.
 fn key(row: &OperationRow) -> String {
@@ -1189,11 +1231,17 @@ mod tests {
         }
     }
 
-    /// A summary as the store sends it, with the fields the key reads.
-    fn summary(started: Option<&str>, queued: &str) -> crate::backend::OperationRow {
+    /// The full operation ID of the run numbered `n`.
+    fn id_of(n: u32) -> String {
+        format!("018f0000-0000-7000-8000-{n:012}")
+    }
+
+    /// The run numbered `n` as the store sends it, with the fields the key
+    /// reads.
+    fn row(n: u32, started: Option<&str>, queued: &str) -> crate::backend::OperationRow {
         crate::backend::OperationRow {
             summary: api::OperationSummaryDto::new(
-                "018f0000-0000-7000-8000-000000000001".to_owned(),
+                id_of(n),
                 "demo-home".to_owned(),
                 "backup".to_owned(),
                 "succeeded".to_owned(),
@@ -1209,12 +1257,133 @@ mod tests {
         }
     }
 
+    /// A summary as the store sends it, with the fields the key reads.
+    fn summary(started: Option<&str>, queued: &str) -> crate::backend::OperationRow {
+        row(1, started, queued)
+    }
+
     #[test]
     fn the_row_order_key_is_when_the_row_started_or_was_queued() {
         let started = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:01Z");
         assert_eq!(key(&started), "2026-11-09T10:00:02Z");
         let queued = summary(None, "2026-11-09T10:00:01Z");
         assert_eq!(key(&queued), "2026-11-09T10:00:01Z");
+    }
+
+    #[test]
+    fn the_page_shows_what_its_connection_and_its_history_allow() {
+        assert_eq!(shown(Phase::Loading, false), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, false), Shown::Unreachable);
+        assert_eq!(shown(Phase::Ready, false), Shown::Empty);
+        assert_eq!(shown(Phase::Ready, true), Shown::Table);
+    }
+
+    #[test]
+    fn rows_held_from_before_do_not_show_a_table_while_the_connection_is_not_ready() {
+        assert_eq!(shown(Phase::Loading, true), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, true), Shown::Unreachable);
+    }
+
+    #[test]
+    fn the_history_is_shown_in_the_order_the_daemon_sent_it() {
+        let rows = [
+            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
+            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
+        ];
+        assert_eq!(
+            ordered(&rows, SortOrder::History),
+            [id_of(1), id_of(2), id_of(3)]
+        );
+    }
+
+    #[test]
+    fn newest_first_puts_the_latest_start_on_top() {
+        let rows = [
+            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
+            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
+        ];
+        assert_eq!(
+            ordered(&rows, SortOrder::NewestFirst),
+            [id_of(2), id_of(1), id_of(3)]
+        );
+    }
+
+    #[test]
+    fn oldest_first_puts_the_earliest_start_on_top() {
+        let rows = [
+            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
+            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
+        ];
+        assert_eq!(
+            ordered(&rows, SortOrder::OldestFirst),
+            [id_of(3), id_of(1), id_of(2)]
+        );
+    }
+
+    #[test]
+    fn a_run_that_has_not_begun_is_ordered_by_when_it_was_queued() {
+        let rows = [
+            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+            row(2, None, "2026-11-09T10:00:03Z"),
+        ];
+        assert_eq!(ordered(&rows, SortOrder::NewestFirst), [id_of(2), id_of(1)]);
+        assert_eq!(ordered(&rows, SortOrder::OldestFirst), [id_of(1), id_of(2)]);
+    }
+
+    #[test]
+    fn runs_that_started_together_keep_the_order_the_daemon_sent_them_in() {
+        let rows = [
+            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+            row(2, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
+        ];
+        for sort in [SortOrder::NewestFirst, SortOrder::OldestFirst] {
+            assert_eq!(ordered(&rows, sort), [id_of(1), id_of(2)], "{sort:?}");
+        }
+    }
+
+    #[test]
+    fn a_row_shows_progress_once_its_run_has_reported_some() {
+        let mut running = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z");
+        assert_eq!(
+            progress_percent(&running),
+            None,
+            "a run that has reported nothing has no bar"
+        );
+        running.progress = Some(crate::backend::Progress {
+            current: 3,
+            total: Some(4),
+        });
+        assert_eq!(progress_percent(&running), Some(75));
+        running.progress = Some(crate::backend::Progress {
+            current: 9,
+            total: None,
+        });
+        assert_eq!(
+            progress_percent(&running),
+            Some(0),
+            "a run of unknown size has a bar at nothing, not no bar"
+        );
+    }
+
+    #[test]
+    fn a_status_is_badged_by_its_pill_and_its_text_and_an_unknown_one_stands_as_it_came() {
+        let localizer = Localizer::new(&[]);
+        assert_eq!(
+            badge_of(&localizer, "running"),
+            ("loading", "Running".to_owned())
+        );
+        assert_eq!(
+            badge_of(&localizer, "succeeded-with-warnings"),
+            ("success", "Succeeded with warnings".to_owned())
+        );
+        assert_eq!(
+            badge_of(&localizer, "pausing"),
+            ("empty", "pausing".to_owned()),
+            "a status this build doesn't know is never a blank cell"
+        );
     }
 
     #[test]
