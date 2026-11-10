@@ -1365,3 +1365,23 @@ async fn only_so_many_different_keys_are_noted_as_left_out() {
         Some(line_of(&over, &format!("k{MAX_LEFT_OUT_KEYS:03} =")))
     );
 }
+
+#[tokio::test]
+async fn a_key_noted_in_many_entries_counts_once() {
+    let entries: String = (0..300)
+        .map(|n| {
+            format!(
+                "[[backup.snapshots]]\nname = \"p{n}\"\nsources = [\"/srv/{n}\"]\njson = true\n"
+            )
+        })
+        .collect();
+    let keys: String = (0..MAX_LEFT_OUT_KEYS - 1)
+        .map(|n| format!("k{n:03} = 1\n"))
+        .collect();
+    let text = format!(
+        "[repository]\nrepository = \"/srv/demo-repo\"\npassword-file = \"/srv/demo-password\"\n{keys}\n{entries}"
+    );
+    let profile = Scratch::new().read(&text).await.expect("a profile");
+    assert_eq!(profile.plans.len(), 300);
+    assert!(profile.notices.contains(&ignored("backup.snapshots.json")));
+}

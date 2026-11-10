@@ -15,7 +15,6 @@ use domain::secrets::CommandLine;
 use serde::Deserialize;
 use toml::de::{DeTable, Deserializer};
 
-use crate::MAX_ENTRIES;
 use crate::keys;
 use crate::locate::{
     Doc, Path, items_at, key_span, keys as keys_of, path_of, plain, position, scrub, table_at,
@@ -26,6 +25,7 @@ use crate::tables::{
     BackupTable, CommandTable, CommandValue, FileTable, ForgetTable, GlobalTable, HooksTable,
     RepositoryTable,
 };
+use crate::{MAX_ENTRIES, MAX_LEFT_OUT_KEYS, MAX_PROFILES};
 
 type Read<T> = Result<T, ProfileError>;
 
@@ -98,6 +98,20 @@ impl Reader<'_, '_> {
 
     fn unknown(&self, path: &Path) -> ProfileError {
         self.invalid(path, Spot::Key, ProfileProblem::UnknownKey, String::new())
+    }
+
+    /// Notes that `key`, written at `path`, is left out, once however often
+    /// it is met. A profile that leaves out more different keys than
+    /// [`MAX_LEFT_OUT_KEYS`] is refused at the first one over.
+    fn note(&self, path: &Path, left_out: &mut Vec<String>, key: String) -> Read<()> {
+        if left_out.contains(&key) {
+            return Ok(());
+        }
+        if left_out.len() >= MAX_LEFT_OUT_KEYS {
+            return Err(self.invalid(path, Spot::Key, ProfileProblem::TooManyKeys, String::new()));
+        }
+        left_out.push(key);
+        Ok(())
     }
 }
 
@@ -182,15 +196,9 @@ fn check_left_out_section(
         strict_keys(reader, path, keys::SNAPSHOT_FILTER)?;
     }
     if keys_of(table).next().is_some() {
-        note(left_out, name.to_owned());
+        reader.note(path, left_out, name.to_owned())?;
     }
     Ok(())
-}
-
-fn note(left_out: &mut Vec<String>, key: String) {
-    if !left_out.contains(&key) {
-        left_out.push(key);
-    }
 }
 
 /// Refuses the first key of the table at `path` that is not one of `known`.
@@ -220,9 +228,18 @@ fn check_hooks(reader: &Reader<'_, '_>, path: &Path) -> Read<()> {
 fn check_global(reader: &Reader<'_, '_>, path: &Path, left_out: &mut Vec<String>) -> Read<()> {
     strict_keys(reader, path, keys::GLOBAL)?;
     check_hooks(reader, &path.key("hooks"))?;
+    let names = path.key("use-profiles");
+    if items_at(reader.doc, &names).map_or(0, <[_]>::len) > MAX_PROFILES {
+        return Err(reader.invalid(
+            &names,
+            Spot::Key,
+            ProfileProblem::UsedTooMany,
+            String::new(),
+        ));
+    }
     for key in keys_at(reader, path) {
         if !keys::GLOBAL_MAPPED.contains(&key) {
-            note(left_out, format!("global.{}", plain(key)));
+            reader.note(&path.key(key), left_out, format!("global.{}", plain(key)))?;
         }
     }
     Ok(())
@@ -234,7 +251,11 @@ fn check_repository(reader: &Reader<'_, '_>, path: &Path, left_out: &mut Vec<Str
     check_hooks(reader, &path.key("hooks"))?;
     for key in keys_at(reader, path) {
         if !keys::REPOSITORY_MAPPED.contains(&key) {
-            note(left_out, format!("repository.{}", plain(key)));
+            reader.note(
+                &path.key(key),
+                left_out,
+                format!("repository.{}", plain(key)),
+            )?;
         }
     }
     Ok(())
@@ -296,7 +317,7 @@ fn check_backup_keys(
         }
         let own = [keys::NAME, keys::SOURCES, keys::SNAPSHOTS].contains(&key);
         if !own && !keys::backup_mapped(key) {
-            note(left_out, format!("{prefix}.{}", plain(key)));
+            reader.note(&path.key(key), left_out, format!("{prefix}.{}", plain(key)))?;
         }
     }
     Ok(())
@@ -306,7 +327,7 @@ fn check_forget(reader: &Reader<'_, '_>, path: &Path, left_out: &mut Vec<String>
     strict_keys(reader, path, &keys::forget_known())?;
     for key in keys_at(reader, path) {
         if !keys::forget_mapped(key) {
-            note(left_out, format!("forget.{}", plain(key)));
+            reader.note(&path.key(key), left_out, format!("forget.{}", plain(key)))?;
         }
     }
     Ok(())
