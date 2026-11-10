@@ -149,6 +149,35 @@ Feature: Accessibility of the app shell
     Then the table "Operations" shows its "Started" column newest first
     And the polite region comes to contain "Sorted by started, newest first."
 
+  # The daemon is the journey's own in the next two scenarios: its history and
+  # its events stream say what the steps tell them to, so each update of a row
+  # reaches the page when a step sends it, not when a real backup happens to
+  # report one. Where a reader has put focus must outlast every update (WCAG
+  # 2.4.3): the update is the one thing in the page that was not her doing.
+
+  Scenario: Focus stays on a backup's Cancel button while its row updates
+    Given the daemon reports a queued backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Queued"
+    And I press Tab until focus is on the button "Cancel demo-home"
+    And the daemon reports that the backup of "demo-home" has started
+    And the daemon reports 4 steps of progress of the backup of "demo-home"
+    Then the table "Operations" has a row "demo-home" that shows "Running"
+    And the progress bar "Backup progress" shows 100 percent
+    And focus stays on the button "Cancel demo-home"
+
+  Scenario: The operations table sorts oldest first on the second press of its sort button
+    Given the daemon reports two finished backups of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has 2 rows
+    And I press Tab until focus is on the button "Sort by started"
+    And I press Enter
+    Then the table "Operations" shows its "Started" column newest first
+    When I press Enter
+    Then the table "Operations" shows its "Started" column oldest first
+    And the table "Operations" announces its "Started" column as sorted ascending
+    And the polite region comes to contain "Sorted by started, oldest first."
+
   Scenario: The snapshots page announces the empty state of a repository without snapshots
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/snapshots"

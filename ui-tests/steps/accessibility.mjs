@@ -65,6 +65,26 @@ Then("focus is on the main heading", async function () {
   await keys.assertFocused(keys.byRole("heading", { level: 1 }), "the main heading");
 });
 
+/** Where focus is, as the end of a sentence. */
+function whereFocusIs(page) {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    return el === null || el === document.body
+      ? "on the page body"
+      : `on <${el.localName}> ${JSON.stringify((el.textContent ?? "").trim().slice(0, 40))}`;
+  });
+}
+
+// Focus an update did not take away (WCAG 2.4.3): the reader reached the
+// control before the update, and what the update changed was not hers to
+// notice. A control the update replaced is a new element, and has no focus.
+Then("focus stays on the {word} {string}", async function (role, name) {
+  const target = journey(this.page).byRole(role, { name: namePattern(name) });
+  assert.equal(await target.count(), 1, `the ${role} "${name}" is no longer on the page`);
+  const stays = await target.evaluate((el) => el === document.activeElement);
+  assert.ok(stays, `focus left the ${role} "${name}": it is ${await whereFocusIs(this.page)}`);
+});
+
 Then("focus is inside the dialog {string}", async function (name) {
   const keys = journey(this.page);
   const dialog = keys.byRole("dialog", { name });

@@ -172,6 +172,12 @@ impl OperationsState {
     fn row_mut(&mut self, operation: &str) -> Option<&mut OperationRow> {
         self.rows.iter_mut().find(|row| row.summary.id == operation)
     }
+
+    /// The row of `operation`, when the state holds it: how a row's view reads
+    /// what it shows, so that an update to another row does not reach it.
+    pub(crate) fn row(&self, operation: &str) -> Option<&OperationRow> {
+        self.rows.iter().find(|row| row.summary.id == operation)
+    }
 }
 
 /// Where a status stands in an operation's life: still queued, running, or
@@ -382,6 +388,21 @@ mod tests {
             state.apply(&event);
         }
         assert_eq!(state, before, "no half-invented row");
+    }
+
+    #[test]
+    fn a_row_is_found_by_its_operations_id() {
+        let state = OperationsState::from_history(
+            vec![succeeded_backup(SECOND), succeeded_backup(FIRST)],
+            None,
+        );
+        assert_eq!(state.row(&id(SECOND)), Some(&state.rows[0]));
+        assert_eq!(state.row(&id(FIRST)), Some(&state.rows[1]));
+        assert_eq!(
+            state.row(&id("3")),
+            None,
+            "a run the state does not hold has no row"
+        );
     }
 
     #[test]
