@@ -812,7 +812,10 @@ mod typed_dto_tests {
     fn a_warning_carries_its_code_and_its_arguments_by_name() {
         let warning = WarningDto::new(
             WarningCode::ProfileOptionLeftOut,
-            [("option", text("password")), ("variable", text("RUSTIC_PASSWORD"))],
+            [
+                ("option", text("password")),
+                ("variable", text("RUSTIC_PASSWORD")),
+            ],
         );
         assert_eq!(
             to_value(&warning).unwrap(),

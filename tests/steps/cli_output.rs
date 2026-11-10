@@ -138,11 +138,12 @@ fn document(agent: &Agent) -> Value {
 /// The value at `path` of a document. A segment names a key; in an array it
 /// is the position of an item.
 fn lookup<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.').try_fold(root, |found, segment| match found {
-        Value::Object(members) => members.get(segment),
-        Value::Array(items) => items.get(segment.parse::<usize>().ok()?),
-        _ => None,
-    })
+    path.split('.')
+        .try_fold(root, |found, segment| match found {
+            Value::Object(members) => members.get(segment),
+            Value::Array(items) => items.get(segment.parse::<usize>().ok()?),
+            _ => None,
+        })
 }
 
 #[then("standard output is one line holding one JSON document")]

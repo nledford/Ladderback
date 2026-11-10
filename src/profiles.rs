@@ -301,7 +301,10 @@ mod tests {
     fn an_import_is_reported_as_its_repository_its_plans_and_its_notices() {
         let imported = Imported {
             repository: RepositoryAlias::parse("nas").unwrap(),
-            plans: vec![PlanId::parse("docs").unwrap(), PlanId::parse("home").unwrap()],
+            plans: vec![
+                PlanId::parse("docs").unwrap(),
+                PlanId::parse("home").unwrap(),
+            ],
             notices: vec![
                 ProfileNotice::KeyIgnored {
                     key: "copy".to_owned(),
