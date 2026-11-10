@@ -19,7 +19,7 @@ use app::ports::Retention;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
-    RunningJob,
+    RunningJob, SnapshotSummary,
 };
 use app::secrets::ResolveRepository;
 use app::snapshots::ListSnapshots;
@@ -813,25 +813,32 @@ impl Catalog for ConfigCatalog {
         let snapshots = listed
             .iter()
             .filter_map(|snapshot| {
-                api::SnapshotDto::new(
-                    snapshot.id.as_str().to_owned(),
-                    snapshot.time.to_string(),
-                    snapshot.hostname.clone(),
-                    snapshot.label.clone(),
-                    snapshot.tags.clone(),
-                    snapshot.paths.clone(),
-                )
-                .map_err(|problem| {
-                    log::error!(
-                        "a snapshot of {} the page cannot show: {problem:?}",
-                        alias.as_str()
-                    );
-                })
-                .ok()
+                snapshot_dto(snapshot)
+                    .map_err(|problem| {
+                        log::error!(
+                            "a snapshot of {} the page cannot show: {problem:?}",
+                            alias.as_str()
+                        );
+                    })
+                    .ok()
             })
             .collect();
         Ok(api::SnapshotsDto { snapshots })
     }
+}
+
+/// A listed snapshot as the page is told of it, with what the engine cut
+/// from it said.
+fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::InvalidSnapshot> {
+    api::SnapshotDto::new(
+        snapshot.id.as_str().to_owned(),
+        snapshot.time.to_string(),
+        snapshot.hostname.clone(),
+        snapshot.label.clone(),
+        snapshot.tags.clone(),
+        snapshot.paths.clone(),
+    )
+    .map(|dto| dto.truncated(snapshot.paths_truncated, snapshot.tags_truncated))
 }
 
 impl CancelRegistry {
@@ -882,6 +889,30 @@ impl CancelRegistry {
 mod tests {
     use super::*;
     use app::ports::{HookContext, HookOutcome, HookStatus, JobControl};
+
+    fn listed(paths_truncated: bool, tags_truncated: bool) -> SnapshotSummary {
+        SnapshotSummary {
+            id: domain::SnapshotId::parse(&"ab".repeat(32)).expect("a snapshot ID"),
+            time: domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+            hostname: "demo-host".to_owned(),
+            label: "home".to_owned(),
+            tags: vec!["demo".to_owned()],
+            paths: vec!["/home/demo".to_owned()],
+            paths_truncated,
+            tags_truncated,
+        }
+    }
+
+    #[test]
+    fn a_listed_snapshot_tells_the_page_what_was_cut_from_it() {
+        let dto = snapshot_dto(&listed(true, false)).expect("a valid snapshot");
+        assert!(dto.paths_truncated && !dto.tags_truncated);
+        let dto = snapshot_dto(&listed(false, true)).expect("a valid snapshot");
+        assert!(!dto.paths_truncated && dto.tags_truncated);
+        let dto = snapshot_dto(&listed(false, false)).expect("a valid snapshot");
+        assert!(!dto.paths_truncated && !dto.tags_truncated);
+        assert_eq!(dto.label, "home");
+    }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
     /// ever been written to the first.

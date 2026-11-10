@@ -15,6 +15,7 @@ mod convert;
 mod events;
 mod fake;
 mod jobs;
+mod listing;
 mod logging;
 mod panic_hook;
 mod progress;

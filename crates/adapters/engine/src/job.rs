@@ -39,6 +39,24 @@ pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
 /// How much of one message to read: one byte past the cap, so a message of
 /// exactly [`MAX_MESSAGE_BYTES`] is told from one that is too long.
 pub(crate) const MAX_MESSAGE_READ: u64 = MAX_MESSAGE_BYTES as u64 + 1;
+
+/// The most snapshots a listing carries. A repository with more fails the
+/// listing instead of being listed in part, so a list is always whole; the
+/// daemon holds it in memory, and a bound is what keeps a hostile repository
+/// from sizing that allocation (§13.5).
+pub const MAX_LISTED_SNAPSHOTS: usize = 200_000;
+
+/// How much of a listing one `snapshots` event carries, serialized. A
+/// listing is sent as a series of them, so that none outgrows
+/// [`MAX_MESSAGE_BYTES`]. A snapshot is cut to a size that fits one event
+/// ([`MAX_LISTED_TEXT_BYTES`]), so a batch is never empty for its length.
+pub(crate) const LISTING_BATCH_BYTES: usize = 512 * 1024;
+
+/// The longest text of one listed snapshot (a path, a tag, the host or the
+/// label). At most 64 paths and 64 tags of it, and every character escaped
+/// to six bytes at worst, one snapshot is under 800 KiB: inside the
+/// message cap alone.
+pub(crate) const MAX_LISTED_TEXT_BYTES: usize = 1024;
 /// The one job a worker runs, read from its stdin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
@@ -249,6 +267,13 @@ pub enum WorkerEvent {
         level: Level,
         message: String,
     },
+    /// A batch of a repository's listing, newest first, sent before the
+    /// result that closes the listing. A listing is a series of these
+    /// instead of one message, which a large repository would outgrow the
+    /// cap with.
+    Snapshots {
+        snapshots: Vec<SnapshotResult>,
+    },
     Result(OpResult),
     Failed {
         code: ErrorCode,
@@ -295,9 +320,10 @@ pub enum OpResult {
     Rewrite(RewriteResult),
     Prune(PruneResult),
     Check(CheckResult),
-    /// A repository's snapshots, newest first.
+    /// A listing's end: how many snapshots the `snapshots` events before it
+    /// carried, so a daemon knows it has them all.
     Snapshots {
-        snapshots: Vec<SnapshotResult>,
+        count: u64,
     },
 }
 

@@ -12,7 +12,7 @@ use jiff::Span;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId, StringList};
 use rustic_core::{CheckResults, PruneOptions, PruneStats, RusticError};
 
-use crate::job::{BackupResult, CheckResult, PruneResult, SnapshotResult};
+use crate::job::{BackupResult, CheckResult, PruneResult};
 
 /// How a job ended badly.
 #[derive(Debug)]
@@ -65,27 +65,6 @@ pub(crate) fn snapshot_ref(snapshot: &SnapshotFile) -> Result<SnapshotRef, JobEr
 pub(crate) fn snapshot_id(id: &RusticSnapshotId) -> Result<SnapshotId, JobError> {
     SnapshotId::parse(id.to_hex().as_str())
         .map_err(|_| JobError::failed("rustic reported a snapshot ID that isn't 64 hex characters"))
-}
-
-/// One snapshot of a listing. The paths are capped at the published
-/// [`api::MAX_SNAPSHOT_PATHS`] (an input-derived size, §13.5): a snapshot
-/// with absurdly many roots reports the first 64, like the UI's DTO takes.
-pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult, JobError> {
-    Ok(SnapshotResult {
-        id: snapshot_id(&snapshot.id)?,
-        time: snapshot.time.timestamp(),
-        hostname: snapshot.hostname.clone(),
-        label: snapshot.label.clone(),
-        tags: snapshot.tags.iter().cloned().collect(),
-        paths: snapshot
-            .paths
-            .iter()
-            .take(api::MAX_SNAPSHOT_PATHS)
-            .cloned()
-            .collect(),
-        paths_truncated: false,
-        tags_truncated: false,
-    })
 }
 
 /// A finished backup: what rustic recorded in the snapshot it saved.

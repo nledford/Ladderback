@@ -28,8 +28,8 @@ use crate::cache_lock::CacheLock;
 use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
-    JobSpec, Level, MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec, RepositorySpec,
-    RewriteJobSpec, WorkerEvent, exit_code,
+    JobSpec, Level, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec,
+    RepositorySpec, RewriteJobSpec, WorkerEvent, exit_code,
 };
 
 /// How long a worker may keep running after it reported its result, for
@@ -310,6 +310,7 @@ impl Engine for WorkerEngine {
             redactor,
             exit_timeout: self.exit_timeout,
             first_line_by,
+            listing: Listing::default(),
         };
         Ok(RunningJob {
             events: stream::unfold(reading, Reading::next).boxed(),
@@ -604,6 +605,68 @@ struct Reading {
     /// `None` once a line has come, or for a timeout that can't be
     /// represented.
     first_line_by: Option<tokio::time::Instant>,
+    /// The listing the worker has sent so far, when the job is one.
+    listing: Listing,
+}
+
+/// A repository's listing as it arrives: the `snapshots` events of a worker
+/// until the result that closes it. The list is held up to
+/// [`MAX_LISTED_SNAPSHOTS`] and no further, and it is handed on only once
+/// the closing result's count agrees with it: a list that lost a batch is
+/// never taken for the whole.
+#[derive(Default)]
+struct Listing {
+    snapshots: Vec<SnapshotSummary>,
+}
+
+/// What a [`Listing`] made of one event of the worker's.
+enum Absorbed {
+    /// A batch, kept; nothing to tell the job's owner yet.
+    Kept,
+    /// The listing's end: the whole list.
+    Complete(Vec<SnapshotSummary>),
+    /// A listing that can't be taken, and why.
+    Refused(String),
+    /// Not part of a listing.
+    Passed(WorkerEvent),
+}
+
+impl Listing {
+    fn absorb(&mut self, event: WorkerEvent) -> Absorbed {
+        match event {
+            WorkerEvent::Snapshots { snapshots } => {
+                if self.snapshots.len().saturating_add(snapshots.len()) > MAX_LISTED_SNAPSHOTS {
+                    return Absorbed::Refused(format!(
+                        "worker listing longer than {MAX_LISTED_SNAPSHOTS} snapshots"
+                    ));
+                }
+                self.snapshots
+                    .extend(snapshots.into_iter().map(|s| SnapshotSummary {
+                        id: s.id,
+                        time: s.time,
+                        hostname: s.hostname,
+                        label: s.label,
+                        tags: s.tags,
+                        paths: s.paths,
+                        paths_truncated: s.paths_truncated,
+                        tags_truncated: s.tags_truncated,
+                    }));
+                Absorbed::Kept
+            }
+            WorkerEvent::Result(OpResult::Snapshots { count }) => {
+                let snapshots = std::mem::take(&mut self.snapshots);
+                if u64::try_from(snapshots.len()).is_ok_and(|held| held == count) {
+                    Absorbed::Complete(snapshots)
+                } else {
+                    Absorbed::Refused(format!(
+                        "worker listing ended at {count} snapshots after sending {}",
+                        snapshots.len()
+                    ))
+                }
+            }
+            other => Absorbed::Passed(other),
+        }
+    }
 }
 
 impl Reading {
@@ -651,6 +714,19 @@ impl Reading {
                         self,
                     ));
                 }
+            };
+            let event = match self.listing.absorb(event) {
+                Absorbed::Kept => continue,
+                Absorbed::Complete(snapshots) => {
+                    self.done = true;
+                    let _ = self.commands.send(Order::ResultReported);
+                    return Some((
+                        EngineEvent::Succeeded(EngineResult::Snapshots(snapshots)),
+                        self,
+                    ));
+                }
+                Absorbed::Refused(detail) => return Some((self.broken(detail), self)),
+                Absorbed::Passed(event) => event,
             };
             if let Some(event) = translate(event, &self.redactor) {
                 if matches!(event, EngineEvent::Succeeded(_) | EngineEvent::Failed(_)) {
@@ -991,21 +1067,11 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 errors: r.errors,
                 warnings: r.warnings,
             }),
-            OpResult::Snapshots { snapshots: list } => EngineResult::Snapshots(
-                list.into_iter()
-                    .map(|s| SnapshotSummary {
-                        id: s.id,
-                        time: s.time,
-                        hostname: s.hostname,
-                        label: s.label,
-                        tags: s.tags,
-                        paths: s.paths,
-                        paths_truncated: s.paths_truncated,
-                        tags_truncated: s.tags_truncated,
-                    })
-                    .collect(),
-            ),
+            // The listing's end, which `Listing` turns into the list before
+            // an event reaches here.
+            OpResult::Snapshots { .. } => return None,
         }),
+        WorkerEvent::Snapshots { .. } => return None,
         WorkerEvent::Failed { code, detail, .. } => {
             let detail = redactor.redact(&detail.unwrap_or_default());
             EngineEvent::Failed(match code {
@@ -2456,6 +2522,137 @@ mod tests {
             matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
             "the error should name the cap: {error:?}"
         );
+    }
+
+    fn listed(n: u128) -> crate::job::SnapshotResult {
+        crate::job::SnapshotResult {
+            id: domain::SnapshotId::parse(&format!("{n:064x}")).unwrap(),
+            time: domain::Timestamp::from_second(i64::try_from(n).unwrap()).unwrap(),
+            hostname: "demo-host".to_owned(),
+            label: format!("label {n}"),
+            tags: vec!["tag".to_owned()],
+            paths: vec!["/home/demo".to_owned()],
+            paths_truncated: n.is_multiple_of(2),
+            tags_truncated: n.is_multiple_of(3),
+        }
+    }
+
+    fn batch(from: u128, to: u128) -> WorkerEvent {
+        WorkerEvent::Snapshots {
+            snapshots: (from..to).map(listed).collect(),
+        }
+    }
+
+    /// The script of a worker that prints these events, one line each.
+    fn printing(events: &[WorkerEvent]) -> String {
+        let lines: String = events
+            .iter()
+            .map(|event| format!("echo '{}'; ", serde_json::to_string(event).unwrap()))
+            .collect();
+        format!("cat >/dev/null; {lines}")
+    }
+
+    #[tokio::test]
+    async fn a_worker_that_lists_in_batches_gives_the_job_one_whole_list() {
+        let events = events_from(&printing(&[
+            batch(0, 2),
+            batch(2, 3),
+            WorkerEvent::Result(OpResult::Snapshots { count: 3 }),
+        ]))
+        .await;
+        let [EngineEvent::Succeeded(EngineResult::Snapshots(all))] = events.as_slice() else {
+            panic!("one list, whole: {events:?}");
+        };
+        assert_eq!(all.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_worker_whose_listing_comes_up_short_fails_the_job() {
+        let events = events_from(&printing(&[
+            batch(0, 2),
+            WorkerEvent::Result(OpResult::Snapshots { count: 3 }),
+        ]))
+        .await;
+        let [EngineEvent::Failed(FailureReason::EngineFailed { detail })] = events.as_slice()
+        else {
+            panic!("the job fails: {events:?}");
+        };
+        assert!(detail.contains('3') && detail.contains('2'), "{detail}");
+    }
+
+    #[test]
+    fn a_listing_arrives_in_batches_and_is_handed_on_whole_at_its_end() {
+        let mut listing = Listing::default();
+        assert!(matches!(listing.absorb(batch(0, 2)), Absorbed::Kept));
+        assert!(matches!(listing.absorb(batch(2, 5)), Absorbed::Kept));
+        let Absorbed::Complete(all) =
+            listing.absorb(WorkerEvent::Result(OpResult::Snapshots { count: 5 }))
+        else {
+            panic!("the listing is complete");
+        };
+        let ids: Vec<String> = all.iter().map(|s| s.id.as_str().to_owned()).collect();
+        let expected: Vec<String> = (0..5).map(|n| listed(n).id.as_str().to_owned()).collect();
+        assert_eq!(ids, expected, "in the order sent");
+        // What was cut from a snapshot goes with it.
+        assert!(all[0].paths_truncated && all[0].tags_truncated);
+        assert!(!all[1].paths_truncated && !all[1].tags_truncated);
+        assert_eq!(all[3].label, "label 3");
+        assert_eq!(all[3].paths, ["/home/demo"]);
+        assert_eq!(all[3].tags, ["tag"]);
+        assert!(all[3].tags_truncated && !all[3].paths_truncated);
+    }
+
+    #[test]
+    fn an_empty_listing_is_complete_with_nothing_in_it() {
+        let mut listing = Listing::default();
+        let Absorbed::Complete(all) =
+            listing.absorb(WorkerEvent::Result(OpResult::Snapshots { count: 0 }))
+        else {
+            panic!("the listing is complete");
+        };
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn a_listing_that_lost_a_batch_is_refused_not_taken_for_the_whole() {
+        for count in [4, 6] {
+            let mut listing = Listing::default();
+            let _ = listing.absorb(batch(0, 5));
+            let Absorbed::Refused(detail) =
+                listing.absorb(WorkerEvent::Result(OpResult::Snapshots { count }))
+            else {
+                panic!("a listing that disagrees with its count is refused");
+            };
+            assert!(
+                detail.contains(&count.to_string()) && detail.contains('5'),
+                "{detail}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_listing_past_the_most_the_daemon_holds_is_refused() {
+        let mut listing = Listing::default();
+        let most = MAX_LISTED_SNAPSHOTS;
+        let fill = |from: usize, to: usize| WorkerEvent::Snapshots {
+            snapshots: (from..to).map(|_| listed(1)).collect(),
+        };
+        assert!(matches!(listing.absorb(fill(0, most - 1)), Absorbed::Kept));
+        assert!(matches!(listing.absorb(fill(0, 1)), Absorbed::Kept));
+        let Absorbed::Refused(detail) = listing.absorb(fill(0, 1)) else {
+            panic!("one past the most is refused");
+        };
+        assert!(detail.contains(&most.to_string()), "{detail}");
+    }
+
+    #[test]
+    fn what_is_not_a_listing_passes_through_untouched() {
+        let mut listing = Listing::default();
+        let event = WorkerEvent::Result(OpResult::Fake { steps_completed: 3 });
+        assert!(matches!(
+            listing.absorb(event.clone()),
+            Absorbed::Passed(passed) if passed == event
+        ));
     }
 
     fn access() -> app::ports::RepositoryAccess {
