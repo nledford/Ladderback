@@ -30,7 +30,8 @@ impl RecoverOperations {
     /// error means the log could not be changed and nothing was: the daemon
     /// refuses to start rather than serve with a repository held for good.
     pub async fn recover(&self) -> Result<u64, StoreError> {
-        let _ = (&self.store, FailureReason::DaemonStopped);
-        todo!("RecoverOperations::recover")
+        self.store
+            .fail_unfinished(&FailureReason::DaemonStopped)
+            .await
     }
 }

@@ -113,7 +113,16 @@ impl OperationStore for InMemoryOperationStore {
         Ok(HistoryPage { operations, next })
     }
 
-    async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
-        todo!("InMemoryOperationStore::fail_unfinished")
+    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
+        let mut ended = 0;
+        for detail in self.stored().values_mut() {
+            if !detail.record.status.is_finished() {
+                detail.record.status = OperationStatus::Failed {
+                    reason: reason.clone(),
+                };
+                ended += 1;
+            }
+        }
+        Ok(ended)
     }
 }
