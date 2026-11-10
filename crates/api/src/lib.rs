@@ -1154,11 +1154,45 @@ pub struct PlansDto {
     pub plans: Vec<PlanSummaryDto>,
 }
 
-/// The repositories list, by alias: what the snapshots page offers to show.
+/// The repositories list: what the Repositories page shows and the snapshots
+/// page offers to pick from, in the order of their aliases.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct RepositoriesDto {
-    pub repositories: Vec<String>,
+    pub repositories: Vec<RepositoryDto>,
+}
+
+/// One configured repository, as a list shows it: where it is, with any
+/// password in the location masked, and where its password comes from.
+/// Never the password itself (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryDto {
+    pub alias: String,
+    /// The location, with the password of a URL in it masked.
+    pub repository: String,
+    /// The hot half of a hot/cold repository, masked the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_hot: Option<String>,
+    pub password: PasswordSourceDto,
+}
+
+/// Where a configured repository's password comes from, without its value:
+/// all five sources the configuration takes, the command by its program
+/// only, since its arguments may hold the secret itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+pub enum PasswordSourceDto {
+    /// The configuration file holds the password.
+    Inline,
+    /// A file holds it.
+    File { path: String },
+    /// An entry of the OS keyring, as `service/name`.
+    Keyring { entry: String },
+    /// An environment variable of the daemon.
+    Env { name: String },
+    /// The output of a program.
+    Command { program: String },
 }
 
 /// Where a request says the repository's password is: the four sources the
@@ -1498,7 +1532,10 @@ mod operation_dto_tests {
 mod catalog_dto_tests {
     use serde_json::{from_str, to_string};
 
-    use super::{PlanSummaryDto, PlansDto, RepositoriesDto, SnapshotDto, SnapshotsDto};
+    use super::{
+        PasswordSourceDto, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto, SnapshotDto,
+        SnapshotsDto,
+    };
 
     #[test]
     fn the_catalog_lists_carry_their_own_field_names() {
@@ -1518,15 +1555,64 @@ mod catalog_dto_tests {
         );
 
         let repositories = RepositoriesDto {
-            repositories: vec!["demo".to_owned()],
+            repositories: vec![RepositoryDto {
+                alias: "demo".to_owned(),
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: PasswordSourceDto::Inline,
+            }],
         };
         assert_eq!(
             to_string(&repositories).unwrap(),
-            r#"{"repositories":["demo"]}"#
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"}}]}"#
         );
         assert_eq!(
             from_str::<RepositoriesDto>(&to_string(&repositories).unwrap()).unwrap(),
             repositories
+        );
+    }
+
+    #[test]
+    fn a_repository_row_names_where_its_password_comes_from_and_never_its_value() {
+        for (source, wire) in [
+            (PasswordSourceDto::Inline, r#"{"source":"inline"}"#),
+            (
+                PasswordSourceDto::File {
+                    path: "/run/pw".to_owned(),
+                },
+                r#"{"source":"file","path":"/run/pw"}"#,
+            ),
+            (
+                PasswordSourceDto::Keyring {
+                    entry: "ladderback/nas".to_owned(),
+                },
+                r#"{"source":"keyring","entry":"ladderback/nas"}"#,
+            ),
+            (
+                PasswordSourceDto::Env {
+                    name: "PW".to_owned(),
+                },
+                r#"{"source":"env","name":"PW"}"#,
+            ),
+            (
+                PasswordSourceDto::Command {
+                    program: "pass".to_owned(),
+                },
+                r#"{"source":"command","program":"pass"}"#,
+            ),
+        ] {
+            assert_eq!(to_string(&source).unwrap(), wire);
+            assert_eq!(from_str::<PasswordSourceDto>(wire).unwrap(), source);
+        }
+        let row = RepositoryDto {
+            alias: "nas".to_owned(),
+            repository: "rest:https://u:***@nas.example/repo".to_owned(),
+            repo_hot: Some("/mnt/hot".to_owned()),
+            password: PasswordSourceDto::Inline,
+        };
+        assert_eq!(
+            to_string(&row).unwrap(),
+            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"}}"#
         );
     }
 

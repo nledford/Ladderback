@@ -111,7 +111,7 @@ pub trait Catalog: Send + Sync {
     /// The configured plans, in the order they were written.
     async fn plans(&self) -> Result<api::PlansDto, CatalogError>;
 
-    /// The configured repositories' aliases, in the order of their aliases.
+    /// The configured repositories, in the order of their aliases.
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError>;
 
     /// One repository's snapshots, newest first.
@@ -589,7 +589,8 @@ async fn list_plans(State(state): State<AppState>) -> Response {
     }
 }
 
-/// The configured repositories' aliases: what the snapshots page can show.
+/// The configured repositories: what the Repositories page lists and the
+/// snapshots page can pick from.
 async fn list_repositories(State(state): State<AppState>) -> Response {
     match state.catalog.repositories().await {
         Ok(repositories) => (StatusCode::OK, axum::Json(repositories)).into_response(),
@@ -906,7 +907,12 @@ mod tests {
 
         async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
             Ok(api::RepositoriesDto {
-                repositories: vec!["demo".to_owned()],
+                repositories: vec![api::RepositoryDto {
+                    alias: "demo".to_owned(),
+                    repository: "/srv/demo/repo".to_owned(),
+                    repo_hot: None,
+                    password: api::PasswordSourceDto::Inline,
+                }],
             })
         }
 
@@ -1425,7 +1431,10 @@ mod tests {
 
         let repositories = get("/api/v1/repositories").await;
         assert_eq!(repositories.status(), StatusCode::OK);
-        assert_eq!(body(repositories).await, r#"{"repositories":["demo"]}"#);
+        assert_eq!(
+            body(repositories).await,
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"}}]}"#
+        );
     }
 
     #[tokio::test]

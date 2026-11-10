@@ -517,7 +517,9 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     let repositories_url = format!("{base}/api/v1/repositories");
     spawn_local(async move {
         match ws::read::<api::RepositoriesDto>(&repositories_url).await {
-            Some(read) => repositories.set(Some(read.repositories)),
+            Some(read) => repositories.set(Some(
+                read.repositories.into_iter().map(|row| row.alias).collect(),
+            )),
             None => unreachable.set(true),
         }
     });
