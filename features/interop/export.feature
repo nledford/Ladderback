@@ -293,6 +293,48 @@ Feature: Export a plan as a rustic profile
       And the export made no profile
       And the export never shows "CANARY-url-password"
 
+    Scenario: An rclone connection string with a secret in it is refused, naming the key and never the secret
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rclone::s3,provider=AWS,secret_access_key=CANARY-rclone-secret:bucket/repo"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the owner exports the plan "home"
+      Then the export is refused naming "repository"
+      And the export made no profile
+      And the export never shows "CANARY-rclone-secret"
+
+    Scenario: An option with a user or a password in an address is left out like a secret
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-file = "/srv/demo-password"
+        options = { region = "eu-demo-1", proxy = "demo:CANARY-proxy-password@proxy.demo:3128" }
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the owner exports the plan "home"
+      Then the export succeeds
+      And the exported profile has:
+        | key                       | value        |
+        | repository.options.region | "eu-demo-1"  |
+      And the exported profile doesn't hold "CANARY-proxy-password"
+      And the export notes that "RUSTIC_REPO_OPT_PROXY" is to be set instead
+
     Scenario: A tag with a comma is refused, naming the tag
       Given a config file holding:
         """

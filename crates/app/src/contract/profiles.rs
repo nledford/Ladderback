@@ -273,6 +273,9 @@ fn an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(
         ("region", "eu-demo-1"),
         ("token", "${DEMO_TOKEN}"),
         ("secret_access_key", "CANARY-option"),
+        // Credentials in an address that has no scheme, or only a user.
+        ("proxy", "demo:CANARY-proxy@proxy.demo:3128"),
+        ("other_proxy", "CANARY-token@proxy.demo:3128"),
     ] {
         export
             .repository
@@ -300,7 +303,10 @@ fn an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(
         })
         .collect();
     left_out.sort_unstable();
-    assert_eq!(left_out, ["secret_access_key", "token"]);
+    assert_eq!(
+        left_out,
+        ["other_proxy", "proxy", "secret_access_key", "token"]
+    );
 }
 
 fn a_plan_that_keeps_everything_is_written_with_a_notice(harness: &dyn ProfilesHarness) {
@@ -330,6 +336,16 @@ fn a_location_with_a_password_in_its_url_is_refused_and_never_written(
         (
             "/srv/demo-repo",
             Some("rest:https://demo:CANARY-url@hot.demo/"),
+            "repo-hot",
+        ),
+        (
+            "rclone::s3,secret_access_key=CANARY-url:bucket/repo",
+            None,
+            "repository",
+        ),
+        (
+            "/srv/demo-repo",
+            Some("rclone::drive,token=CANARY-url:repo"),
             "repo-hot",
         ),
     ] {

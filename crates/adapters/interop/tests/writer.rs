@@ -866,6 +866,113 @@ fn an_option_with_a_password_in_its_url_is_left_out_like_a_secret() {
 }
 
 #[test]
+fn an_option_with_credentials_in_an_address_is_left_out_whatever_the_address_looks_like() {
+    // A proxy is often written without its scheme, and a token can be the
+    // user name; neither has a `user:password@` after `://`.
+    for (name, value) in [
+        ("proxy", "demo:CANARY-pw@proxy.demo:3128"),
+        ("proxy", "CANARY-token@proxy.demo:3128"),
+        ("proxy", "http://CANARY-token@proxy.demo:3128"),
+        ("proxy", "http://demo:@proxy.demo:3128"),
+    ] {
+        let mut export = export();
+        export
+            .repository
+            .settings
+            .options
+            .insert(name.to_owned(), value.to_owned());
+        export
+            .repository
+            .settings
+            .options
+            .insert("region".to_owned(), "eu-demo-1".to_owned());
+        let written = render(&export).expect("the export is made");
+        assert!(
+            !written.text.contains("CANARY"),
+            "{value}: {}",
+            written.text
+        );
+        assert_has(
+            &written.text,
+            "repository.options.region",
+            string("eu-demo-1"),
+        );
+        assert!(
+            written.notices.contains(&ProfileNotice::OptionLeftOut {
+                option: name.to_owned(),
+                variable: "RUSTIC_REPO_OPT_PROXY".to_owned(),
+            }),
+            "{value}: {:?}",
+            written.notices
+        );
+    }
+}
+
+#[test]
+fn an_option_that_is_an_address_without_credentials_is_written() {
+    for value in ["https://s3.demo:9000/path", "proxy.demo:3128", "eu-demo-1"] {
+        let mut export = export();
+        export
+            .repository
+            .settings
+            .options
+            .insert("endpoint".to_owned(), value.to_owned());
+        assert_has(&text(&export), "repository.options.endpoint", string(value));
+    }
+}
+
+#[test]
+fn an_rclone_connection_string_with_a_secret_in_it_is_refused_naming_the_key_not_the_value() {
+    for (location, hot, key) in [
+        (
+            "rclone::s3,provider=AWS,secret_access_key=CANARY-rclone:bucket/repo",
+            None,
+            "repository",
+        ),
+        ("rclone::drive,token=CANARY-rclone:repo", None, "repository"),
+        (
+            "rclone::sftp,host=nas.demo,client_secret=CANARY-rclone",
+            None,
+            "repository",
+        ),
+        (
+            "/srv/demo-repo",
+            Some("rclone::s3,SECRET_ACCESS_KEY=CANARY-rclone:bucket"),
+            "repo-hot",
+        ),
+    ] {
+        let mut export = export();
+        export.repository.settings.repository = location.to_owned();
+        export.repository.settings.repo_hot = hot.map(str::to_owned);
+        let refusal = refused(&export);
+        assert_eq!(
+            refusal,
+            ExportRefusal::UrlPassword {
+                key: key.to_owned()
+            },
+            "{location} {hot:?}"
+        );
+        assert!(!format!("{refusal:?}{refusal}").contains("CANARY"));
+    }
+}
+
+#[test]
+fn an_rclone_address_with_no_secret_in_it_is_written() {
+    for location in [
+        "rclone:remote:path/to/repo",
+        "rclone::s3,provider=AWS,env_auth=true,access_key_id=demo-id:bucket/repo",
+        "rclone::s3,use_password=true:bucket",
+        // Not an rclone connection string: a path with a comma and a name.
+        "/srv/repo,token=demo",
+        "sftp:demo@nas.demo:/srv/repo,secret=demo",
+    ] {
+        let mut export = export();
+        export.repository.settings.repository = location.to_owned();
+        assert_has(&text(&export), "repository.repository", string(location));
+    }
+}
+
+#[test]
 fn a_tag_with_a_comma_is_refused_naming_the_tag() {
     let mut export = export();
     export.plan.tags = vec![
