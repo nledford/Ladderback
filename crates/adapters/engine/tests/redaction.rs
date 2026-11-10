@@ -7,7 +7,7 @@ mod support;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use app::ports::{Engine, EngineEvent, Job, RepositoryAccess};
 use domain::execution::FailureReason;
@@ -40,7 +40,8 @@ impl log::Log for CapturingLogger {
 fn capture_the_worker_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let _ = log::set_logger(&CapturingLogger);
+        log::set_logger(&CapturingLogger)
+            .expect("another logger was installed first, so the worker's log can't be captured");
         log::set_max_level(log::LevelFilter::Debug);
     });
 }
@@ -87,6 +88,10 @@ struct Said {
 impl Said {
     /// `canary` shows nowhere in it.
     fn assert_hides(&self, canary: &str) {
+        assert!(
+            !self.logged.is_empty(),
+            "the log captured nothing, so it was not checked"
+        );
         for form in forms(canary) {
             assert!(
                 !self.detail.contains(&form),
@@ -100,6 +105,24 @@ impl Said {
     }
 }
 
+/// A check of a log that captured nothing has looked at nothing, so it must
+/// fail, not pass: capture that is broken (another logger was installed
+/// first) would otherwise leave every check of the log green.
+#[test]
+fn a_check_of_a_log_that_captured_nothing_fails() {
+    let said = Said {
+        detail: "the connection to 127.0.0.1:9 was refused".to_owned(),
+        logged: Vec::new(),
+    };
+    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        said.assert_hides("CANARY");
+    }));
+    assert!(
+        checked.is_err(),
+        "a log with nothing in it passed the check"
+    );
+}
+
 /// Runs an Identify job that can only fail.
 async fn fails(access: RepositoryAccess) -> Said {
     capture_the_worker_log();
@@ -110,7 +133,17 @@ async fn fails(access: RepositoryAccess) -> Said {
     let Some(EngineEvent::Failed(FailureReason::EngineFailed { detail })) = events.last() else {
         panic!("the job did not fail as an engine failure: {events:?}");
     };
-    // What the worker's stderr holds is read beside the events.
+    // What the worker's stderr holds is read beside the events: wait for
+    // the first line, and a little more for the rest.
+    let first_line = Instant::now() + Duration::from_secs(10);
+    while WORKER_LOG
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_empty()
+        && Instant::now() < first_line
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
     let logged = WORKER_LOG
         .lock()

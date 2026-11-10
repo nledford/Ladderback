@@ -108,6 +108,12 @@ impl SecretsHarness for FakeSecretsHarness {
         path
     }
 
+    fn link(&self, name: &str, target: &str) -> String {
+        let path = format!("/fake/secrets/{name}");
+        self.secrets.link(&path, target);
+        path
+    }
+
     fn missing_file(&self) -> String {
         "/fake/secrets/nothing-here".to_owned()
     }

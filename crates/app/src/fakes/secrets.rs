@@ -3,8 +3,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use domain::secrets::{
-    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, decode, file_warning,
-    first_line,
+    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, command_failure,
+    command_secret, decode, file_warning,
 };
 
 use crate::ports::{Resolved, SecretResolver};
@@ -42,7 +42,24 @@ struct State {
     directories: BTreeSet<String>,
     keyring: BTreeMap<String, String>,
     commands: BTreeMap<(String, Vec<String>), Script>,
+    /// Link path to what it leads to.
+    links: BTreeMap<String, String>,
     reads: Vec<SecretRef>,
+}
+
+/// More links than a path is followed through: a cycle never ends.
+const MAX_LINKS_FOLLOWED: usize = 40;
+
+/// Where `path` leads when the links are followed, `None` for a cycle.
+fn follow(links: &BTreeMap<String, String>, path: &str) -> Option<String> {
+    let mut at = path;
+    for _ in 0..=MAX_LINKS_FOLLOWED {
+        match links.get(at) {
+            Some(target) => at = target,
+            None => return Some(at.to_owned()),
+        }
+    }
+    None
 }
 
 struct File {
@@ -68,6 +85,13 @@ impl FakeSecrets {
                 mode,
             },
         );
+    }
+
+    /// A link at `path` that leads to `target`, a file written with
+    /// [`FakeSecrets::write_file`]: reading `path` reads `target`, and where
+    /// `path` really is is where `target` is.
+    pub fn link(&self, path: &str, target: &str) {
+        self.lock().links.insert(path.to_owned(), target.to_owned());
     }
 
     /// A directory at `path`: reading it as a file fails.
@@ -133,7 +157,16 @@ impl SecretResolver for FakeSecrets {
             }
             SecretRef::File { path, read } => {
                 let source = SourceName::File { path: path.clone() };
-                if state.directories.contains(path) {
+                // Where the path really is, after the links.
+                let Some(real) = follow(&state.links, path) else {
+                    return Err(SecretError {
+                        source,
+                        problem: Problem::Unreachable {
+                            detail: "too many levels of symbolic links".to_owned(),
+                        },
+                    });
+                };
+                if state.directories.contains(&real) {
                     return Err(SecretError {
                         source,
                         problem: Problem::Unreachable {
@@ -143,15 +176,17 @@ impl SecretResolver for FakeSecrets {
                 }
                 let file = state
                     .files
-                    .get(path)
+                    .get(&real)
                     .ok_or_else(|| SecretError::missing(source.clone()))?;
                 let value = decode(&source, &file.contents, |text| read.extract(text))?;
                 let credentials = state.env.get("CREDENTIALS_DIRECTORY").map(String::as_str);
                 Ok(Resolved {
                     value,
-                    warnings: file_warning(path, file.mode, credentials)
-                        .into_iter()
-                        .collect(),
+                    warnings: file_warning(path, file.mode, credentials, |at| {
+                        follow(&state.links, at)
+                    })
+                    .into_iter()
+                    .collect(),
                 })
             }
             SecretRef::Command(command) => {
@@ -170,11 +205,15 @@ impl SecretResolver for FakeSecrets {
                     Some(Script::Hangs) => Err(fail(Problem::TimedOut {
                         seconds: FAKE_TIME_LIMIT_SECONDS,
                     })),
-                    Some(Script::Exits { status, stderr, .. }) if *status != 0 => {
-                        Err(fail(Problem::command_failed(Some(*status), stderr)))
+                    Some(Script::Exits {
+                        status,
+                        stdout,
+                        stderr,
+                    }) if *status != 0 => {
+                        Err(command_failure(&source, Some(*status), stdout, stderr))
                     }
                     Some(Script::Exits { stdout, .. }) => {
-                        let value = decode(&source, stdout, first_line)?;
+                        let value = command_secret(&source, stdout)?;
                         Ok(Resolved {
                             value,
                             warnings: Vec::new(),

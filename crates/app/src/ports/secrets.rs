@@ -13,7 +13,9 @@ use domain::secrets::{SecretError, SecretRef, SecretValue, SecretWarning};
 ///   there is `Missing`; one that can't be read, `Unreachable`; one that
 ///   isn't UTF-8, `NotUnicode`.
 /// - A command is started without a shell, with no input and in a process
-///   group of its own. The secret is the first line of its output. It fails as
+///   group of its own. The secret is the first line of its output; a command
+///   that printed nothing, or a first line of only white space, is `Missing`,
+///   not an empty secret. It fails as
 ///   `CommandFailed` with the exit status and a short, one-line `detail` from
 ///   its stderr, never from its output; as `Unreachable` when it can't be
 ///   started; and as `TimedOut` when it outlives the resolver's limit, after

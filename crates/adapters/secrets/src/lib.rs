@@ -40,6 +40,7 @@ pub struct SystemSecrets {
     environment: Option<BTreeMap<String, String>>,
     command_timeout: Duration,
     keyring: Arc<dyn KeyringStore>,
+    file_reader: FileReader,
 }
 
 impl SystemSecrets {
@@ -50,6 +51,7 @@ impl SystemSecrets {
             environment: None,
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
             keyring: keyring_store::os_store(),
+            file_reader: Arc::new(file::read),
         }
     }
 
@@ -80,7 +82,18 @@ impl SystemSecrets {
         self.keyring = store;
         self
     }
+
+    /// Reads files with `reader`, which a test makes slow.
+    #[cfg(test)]
+    pub(crate) fn with_file_reader(mut self, reader: FileReader) -> Self {
+        self.file_reader = reader;
+        self
+    }
 }
+
+/// Reads the file at a path, given how it is read and `$CREDENTIALS_DIRECTORY`.
+pub(crate) type FileReader =
+    Arc<dyn Fn(&str, FileRead, Option<&str>) -> Result<Resolved, SecretError> + Send + Sync>;
 
 impl Default for SystemSecrets {
     fn default() -> Self {
@@ -145,8 +158,9 @@ impl SystemSecrets {
         let credentials = self
             .var("CREDENTIALS_DIRECTORY")
             .and_then(|directory| directory.into_string().ok());
+        let reader = Arc::clone(&self.file_reader);
         let reading =
-            tokio::task::spawn_blocking(move || file::read(&path, read, credentials.as_deref()));
+            tokio::task::spawn_blocking(move || (reader)(&path, read, credentials.as_deref()));
         self.limited(&source, reading).await?
     }
 

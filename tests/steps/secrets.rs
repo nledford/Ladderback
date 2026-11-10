@@ -57,7 +57,8 @@ impl log::Log for CapturingLogger {
 fn capture_the_worker_log() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        let _ = log::set_logger(&CapturingLogger);
+        log::set_logger(&CapturingLogger)
+            .expect("another logger was installed first, so the worker's log can't be captured");
         log::set_max_level(log::LevelFilter::Debug);
     });
 }
@@ -263,6 +264,10 @@ fn nothing_shows(agent: &mut Agent, secret: String) {
         agent.secrets.resolved
     );
     let logged = WORKER_LOG.lock().unwrap_or_else(PoisonError::into_inner);
+    assert!(
+        !logged.is_empty(),
+        "the log captured nothing, so it was not checked"
+    );
     for line in logged.iter() {
         assert!(!line.contains(&secret), "{secret} is in the log: {line}");
     }
