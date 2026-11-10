@@ -411,16 +411,19 @@ impl Operations for PlanRunner {
             plan_id: plan.id.clone(),
             repository_alias: plan.repository.clone(),
         };
-        let engine = Arc::clone(&self.engine);
-        let store = Arc::clone(&self.store);
+        let use_case = RunOperation::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            Arc::clone(&self.store),
+        )
+        .with_hooks(Arc::clone(&self.hooks), setup);
+        // Recorded as queued before the route answers, so a cancel that
+        // arrives the instant it does finds the operation in the log.
+        let queued = use_case.queue(operation, Trigger::Manual, &job).await;
         let registry = Arc::clone(&self.registry);
-        let hooks = Arc::clone(&self.hooks);
         tokio::spawn(async move {
             // Nothing waits on the run: it reports through the event bus.
-            let finished = RunOperation::new(engine, Arc::new(SystemClock), store)
-                .with_hooks(hooks, setup)
-                .run(operation, Trigger::Manual, job, cancel)
-                .await;
+            let finished = use_case.run_queued(queued, job, cancel).await;
             registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",

@@ -529,6 +529,42 @@ async fn cancelling_before_the_engine_starts_cancels_the_queued_operation() {
 }
 
 #[tokio::test]
+async fn a_cancel_made_before_the_engine_is_up_wins_over_the_events_it_already_has() {
+    let clock = Arc::new(FakeClock::new(t(0)));
+    let engine = Arc::new(Live::new());
+    engine.send(started());
+    engine.send(EngineEvent::Succeeded(EngineResult::Fake {
+        steps_completed: 0,
+    }));
+    let store = log();
+    let use_case = RunOperation::new(engine.clone(), clock, store.clone());
+    let ended = use_case
+        .run(id(), Trigger::Manual, fake_job(None), future::ready(()))
+        .await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(engine.stops(), 1);
+    assert_logged_as_it_ended(&store, &ended).await;
+}
+
+#[tokio::test]
+async fn a_queued_operation_is_in_the_log_before_anything_runs() {
+    let clock = Arc::new(FakeClock::new(t(0)));
+    let engine = Arc::new(Live::new());
+    let store = log();
+    let use_case = RunOperation::new(engine.clone(), clock, store.clone());
+    let job = fake_job(None);
+    let queued = use_case.queue(id(), Trigger::Manual, &job).await;
+    assert_eq!(logged(&store).await.record.status, OperationStatus::Queued);
+    engine.send(started());
+    engine.send(EngineEvent::Succeeded(EngineResult::Fake {
+        steps_completed: 0,
+    }));
+    let ended = use_case.run_queued(queued, job, future::pending()).await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Succeeded);
+    assert_logged_as_it_ended(&store, &ended).await;
+}
+
+#[tokio::test]
 async fn an_operation_running_at_its_deadline_is_killed_and_fails() {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
