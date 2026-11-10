@@ -177,7 +177,8 @@ impl ProcessHookRunner {
             }
         };
         // From here on, whatever ends this call early (the timeout, the
-        // caller giving up) takes the group with it.
+        // caller giving up) kills the hook, and its group while the hook is
+        // unreaped.
         let mut running = Running::new(child, stop);
         // Held until the hook is reaped, though nothing reads them after the
         // timeout: a handler that writes to them when it gets SIGTERM must
@@ -210,7 +211,7 @@ impl ProcessHookRunner {
                 )
             }
             Err(_elapsed) => {
-                running.terminate_and_reap().await;
+                running.terminate_and_reap(&mut pipes).await;
                 (HookStatus::TimedOut, captured)
             }
         }
@@ -351,6 +352,30 @@ fn signal_group(group: Pid, signal: Signal) {
     let _ = killpg(group, signal);
 }
 
+/// Waits for the hook while reading what it writes and dropping it. A hook
+/// that is being stopped may say more on its way out than a pipe holds, and
+/// one that is blocked on a pipe nobody reads can't finish its handler.
+async fn wait_draining(child: &mut Child, pipes: &mut Pipes) -> std::io::Result<ExitStatus> {
+    let Pipes { stdout, stderr } = pipes;
+    let mut drain = pin!(async {
+        tokio::join!(discard(stdout), discard(stderr));
+    });
+    let mut drained = false;
+    let mut exit = pin!(child.wait());
+    loop {
+        tokio::select! {
+            status = &mut exit => return status,
+            () = &mut drain, if !drained => drained = true,
+        }
+    }
+}
+
+/// Reads `reader` to its end, or its first error, and keeps nothing.
+async fn discard(mut reader: impl AsyncRead + Unpin) {
+    let mut chunk = [0u8; READ_CHUNK];
+    while matches!(reader.read(&mut chunk).await, Ok(read) if read > 0) {}
+}
+
 /// The hook and its process group, which is killed when this is dropped
 /// while the hook is still unreaped: a future that is dropped mid-run must
 /// not leave a command behind, and `kill_on_drop` reaches only the command
@@ -361,12 +386,11 @@ fn signal_group(group: Pid, signal: Signal) {
 /// either, the id is free for an unrelated process, and a signal to it would
 /// reach that one. What is left of the group after the leader is gone can't
 /// be told from here, so the group is signalled only while the leader is
-/// not reaped, and each signal at most once.
+/// not reaped, the SIGTERM once and the SIGKILL at most once.
 struct Running<'a> {
     child: Child,
     group: Option<Pid>,
     stop: &'a Stop<'a>,
-    terminated: bool,
     killed: bool,
 }
 
@@ -381,45 +405,46 @@ impl<'a> Running<'a> {
             child,
             group,
             stop,
-            terminated: false,
             killed: false,
         }
     }
 
-    fn send(&mut self, signal: Signal) {
-        let sent = match signal {
-            Signal::SIGKILL => &mut self.killed,
-            _ => &mut self.terminated,
-        };
-        // Tokio gives no id once the child has been waited for.
-        if *sent || self.child.id().is_none() {
+    /// The group of the hook while the hook is unreaped: tokio gives no id
+    /// once the child has been waited for.
+    fn live_group(&self) -> Option<Pid> {
+        self.child.id().and(self.group)
+    }
+
+    fn kill(&mut self) {
+        if self.killed {
             return;
         }
-        if let Some(group) = self.group {
-            *sent = true;
-            (self.stop.signal)(group, signal);
+        if let Some(group) = self.live_group() {
+            self.killed = true;
+            (self.stop.signal)(group, Signal::SIGKILL);
         }
     }
 
     /// Signals the group and waits for the hook, for as long as the stop
     /// allows: a hook no signal reaches does not hold the caller up.
     async fn kill_and_reap(&mut self) {
-        self.send(Signal::SIGKILL);
+        self.kill();
         let _ = tokio::time::timeout(self.stop.reap_limit, self.child.wait()).await;
     }
 
     /// Stops a hook that outlived its timeout: SIGTERM to its process
     /// group, then SIGKILL once the grace has passed with the hook still
-    /// running. A hook that ended on the SIGTERM is reaped and nothing more
-    /// is sent: what it started and left running, if it ignored the SIGTERM,
-    /// is not signalled, as the group may have no live member by now. The
-    /// whole call takes at most the grace and the reap limit.
-    async fn terminate_and_reap(&mut self) {
-        self.send(Signal::SIGTERM);
-        if tokio::time::timeout(self.stop.grace, self.child.wait())
-            .await
-            .is_err()
-        {
+    /// running. Whatever the hook writes meanwhile is read and dropped. A
+    /// hook that ended on the SIGTERM is reaped and nothing more is sent:
+    /// what it started and left running, if it ignored the SIGTERM, is not
+    /// signalled, as the group may have no live member by now. The whole
+    /// call takes at most the grace and the reap limit.
+    async fn terminate_and_reap(&mut self, pipes: &mut Pipes) {
+        if let Some(group) = self.live_group() {
+            (self.stop.signal)(group, Signal::SIGTERM);
+        }
+        let ended = wait_draining(&mut self.child, pipes);
+        if tokio::time::timeout(self.stop.grace, ended).await.is_err() {
             self.kill_and_reap().await;
         }
     }
@@ -427,7 +452,7 @@ impl<'a> Running<'a> {
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.send(Signal::SIGKILL);
+        self.kill();
     }
 }
 
