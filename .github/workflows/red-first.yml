@@ -64,6 +64,20 @@ jobs:
       # `wasm-bindgen` that Cargo.lock pins; the wasm32 target comes with the
       # toolchain (rust-toolchain.toml). The binaries are a download of a few
       # seconds, so they are installed always.
+      #
+      # A Cargo.lock bump to a wasm-bindgen release that the pinned
+      # install-action doesn't list (manifests/wasm-bindgen.json at that SHA)
+      # doesn't fail the step: the action's `fallback` input defaults to
+      # cargo-binstall, so it warns and installs wasm-bindgen-cli at that
+      # version through cargo-binstall, from the release's prebuilt binary, or
+      # by building it when there is none (slower, still green). Only a
+      # version that doesn't exist, or a build that fails, fails the step.
+      # Read in the action's main.sh at v2.90.3 (`read_manifest`, and the
+      # fallback at its end), and run on macOS arm64, cargo-binstall already
+      # installed, with 0.2.130 taken out of the manifest: it fell back and
+      # installed in 5 s. On the Linux runner the same path installs
+      # cargo-binstall first (read, not run). When bumping the action, check
+      # that `fallback` still defaults to cargo-binstall.
       - id: wasm-bindgen
         run: echo "version=$(just _wasm-bindgen-version)" >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3

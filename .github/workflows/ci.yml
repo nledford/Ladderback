@@ -181,7 +181,9 @@ jobs:
   # check: add it to the ruleset once it has proved stable. The wasm32 target
   # comes with the toolchain (rust-toolchain.toml). The test runner must be the
   # version of `wasm-bindgen` that Cargo.lock pins, so `just` reads it from the
-  # lockfile and a second install step fetches that release's binaries.
+  # lockfile and a second install step fetches that release's binaries. A
+  # release that the pinned action doesn't list isn't an error: see the same
+  # step in red-first.yml.
   wasm:
     name: Wasm tests (Node)
     needs: changes
