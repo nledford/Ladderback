@@ -8,8 +8,7 @@ use std::collections::BTreeMap;
 
 use api::{
     ConnectRepositoryDto, ErrorCode, InitRepositoryDto, MsgArg, PasswordDto, PasswordSourceDto,
-    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, RepositoryWarningDto,
-    TestRepositoryDto,
+    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 
@@ -316,10 +315,7 @@ pub(crate) fn password_source(
 /// The notes a repository's row carries, one per warning, as the catalog
 /// writes them in the page's language (§8.4). A warning holds a code and the
 /// names of the settings it is about, never a secret (I4).
-pub(crate) fn repository_notes(
-    localizer: &Localizer,
-    warnings: &[RepositoryWarningDto],
-) -> Vec<String> {
+pub(crate) fn repository_notes(localizer: &Localizer, warnings: &[WarningDto]) -> Vec<String> {
     warnings
         .iter()
         .map(|warning| {
@@ -797,7 +793,7 @@ mod tests {
     #[test]
     fn a_repositorys_warnings_read_as_notes_in_the_catalogs_words_naming_the_setting() {
         let localizer = Localizer::new(&[]);
-        let warning = |field: &str| RepositoryWarningDto {
+        let warning = |field: &str| WarningDto {
             code: api::WarningCode::ConfigInlineSecret,
             args: [("field".to_owned(), text(field))].into(),
         };

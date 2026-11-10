@@ -13,6 +13,8 @@
     clippy::unreachable
 )]
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Why something failed. Closed: a code this version doesn't know, say from
@@ -184,6 +186,14 @@ pub enum ErrorCode {
     /// comma, which rustic reads as two tags. Nothing was written. The
     /// argument `tag` is the tag.
     ProfileExportTagComma,
+    /// A command of the command line has no folder to keep the configuration
+    /// in: the platform names no home folder and no configuration folder is
+    /// set. Nothing was done.
+    ConfigFolderUnknown,
+    /// A command of the command line could not start the async runtime it
+    /// works on, so it did nothing. The detail is the operating system's own
+    /// message.
+    RuntimeUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -621,6 +631,8 @@ impl ErrorCode {
             | Self::OriginNotAllowed
             | Self::JsonRequired
             | Self::InlineSecret
+            | Self::ConfigFolderUnknown
+            | Self::RuntimeUnavailable
             | Self::Unknown => &[],
         }
     }
@@ -701,6 +713,255 @@ impl WarningCode {
     }
 }
 
+/// A typed error, as a refusal carries it: over the HTTP API, and in the
+/// CLI's `--json` output (§8.4, §12.1). The code; the arguments its message
+/// takes, by name, for the reader to render; and, when the sender has words
+/// of its own to show, the `detail`, such as the engine's message as it came.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ErrorDto {
+    pub code: ErrorCode,
+    /// Left out when the code takes none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, MsgArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl ErrorDto {
+    /// An error of `code`, with its arguments named as [`ErrorCode::args`]
+    /// names them and the sender's own words, if it has some.
+    pub fn new(
+        code: ErrorCode,
+        args: impl IntoIterator<Item = (&'static str, MsgArg)>,
+        detail: Option<String>,
+    ) -> Self {
+        Self {
+            code,
+            args: named(args),
+            detail,
+        }
+    }
+}
+
+/// A typed warning: the code and the arguments its message takes, never the
+/// sentence (§8.4) and never a secret (I4). `import-profile --json` reports
+/// its notices as these, and the row of a configured repository carries its
+/// own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct WarningDto {
+    pub code: WarningCode,
+    /// Left out when the code takes none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, MsgArg>,
+}
+
+impl WarningDto {
+    /// A warning of `code`, with its arguments named as
+    /// [`WarningCode::args`] names them.
+    pub fn new(code: WarningCode, args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> Self {
+        Self {
+            code,
+            args: named(args),
+        }
+    }
+}
+
+/// A message's arguments, keyed by the names its code declares them under.
+fn named(args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> BTreeMap<String, MsgArg> {
+    args.into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+}
+
+/// What `ladderback import-profile --json` prints when the import saved the
+/// profile: the name the repository was saved under, the IDs of the plans
+/// added, and what the profile could not carry over or changed on the way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProfileImportDto {
+    pub repository: String,
+    pub plans: Vec<String>,
+    pub notices: Vec<WarningDto>,
+}
+
+/// What a command prints in `--json` mode when it refused: the typed error,
+/// under the key `error`, which no document of a command that did what it
+/// was asked has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FailureDto {
+    pub error: ErrorDto,
+}
+
+#[cfg(test)]
+mod typed_dto_tests {
+    use serde_json::{from_str, json, to_string, to_value};
+
+    use super::{
+        ErrorCode, ErrorDto, FailureDto, MsgArg, ProfileImportDto, WarningCode, WarningDto,
+    };
+
+    fn text(value: &str) -> MsgArg {
+        MsgArg::Text(value.to_owned())
+    }
+
+    #[test]
+    fn an_error_carries_its_code_its_arguments_by_name_and_its_detail() {
+        let error = ErrorDto::new(
+            ErrorCode::ProfileInvalid,
+            [("file", text("nas.toml")), ("line", text("7"))],
+            Some("unknown field".to_owned()),
+        );
+        assert_eq!(
+            to_value(&error).unwrap(),
+            json!({
+                "code": "profile-invalid",
+                "args": {
+                    "file": {"type": "text", "value": "nas.toml"},
+                    "line": {"type": "text", "value": "7"},
+                },
+                "detail": "unknown field",
+            })
+        );
+    }
+
+    #[test]
+    fn an_error_with_no_arguments_and_no_detail_is_its_code_alone() {
+        let error = ErrorDto::new(ErrorCode::InlineSecret, [], None);
+        assert_eq!(to_string(&error).unwrap(), r#"{"code":"inline-secret"}"#);
+    }
+
+    #[test]
+    fn a_warning_carries_its_code_and_its_arguments_by_name() {
+        let warning = WarningDto::new(
+            WarningCode::ProfileOptionLeftOut,
+            [
+                ("option", text("password")),
+                ("variable", text("RUSTIC_PASSWORD")),
+            ],
+        );
+        assert_eq!(
+            to_value(&warning).unwrap(),
+            json!({
+                "code": "profile-option-left-out",
+                "args": {
+                    "option": {"type": "text", "value": "password"},
+                    "variable": {"type": "text", "value": "RUSTIC_PASSWORD"},
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_warning_with_no_arguments_is_its_code_alone() {
+        let warning = WarningDto::new(WarningCode::ProfilePrune, []);
+        assert_eq!(to_string(&warning).unwrap(), r#"{"code":"profile-prune"}"#);
+    }
+
+    #[test]
+    fn an_import_is_its_repository_its_plans_and_its_notices() {
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: vec!["docs".to_owned(), "home".to_owned()],
+            notices: vec![WarningDto::new(
+                WarningCode::ProfileKeyIgnored,
+                [("key", text("copy"))],
+            )],
+        };
+        assert_eq!(
+            to_value(&import).unwrap(),
+            json!({
+                "repository": "nas",
+                "plans": ["docs", "home"],
+                "notices": [
+                    {
+                        "code": "profile-key-ignored",
+                        "args": {"key": {"type": "text", "value": "copy"}},
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn an_import_that_added_no_plan_and_noted_nothing_still_says_so() {
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: Vec::new(),
+            notices: Vec::new(),
+        };
+        assert_eq!(
+            to_string(&import).unwrap(),
+            r#"{"repository":"nas","plans":[],"notices":[]}"#
+        );
+    }
+
+    #[test]
+    fn a_failure_is_the_typed_error_under_the_one_key_error() {
+        let failure = FailureDto {
+            error: ErrorDto::new(ErrorCode::PlanIdTaken, [("plan", text("home"))], None),
+        };
+        assert_eq!(
+            to_string(&failure).unwrap(),
+            r#"{"error":{"code":"plan-id-taken","args":{"plan":{"type":"text","value":"home"}}}}"#
+        );
+    }
+
+    #[test]
+    fn every_document_reads_back_as_it_was_written() {
+        let error = ErrorDto::new(
+            ErrorCode::ProfileTooLarge,
+            [
+                ("file", text("nas.toml")),
+                ("limit", MsgArg::Bytes(1_048_576)),
+            ],
+            Some("a detail".to_owned()),
+        );
+        let warning = WarningDto::new(
+            WarningCode::ProfileTagDropped,
+            [("tag", text("ladderback-plan:home"))],
+        );
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: vec!["home".to_owned()],
+            notices: vec![warning.clone()],
+        };
+        let failure = FailureDto {
+            error: error.clone(),
+        };
+        assert_eq!(
+            from_str::<ErrorDto>(&to_string(&error).unwrap()).unwrap(),
+            error
+        );
+        assert_eq!(
+            from_str::<WarningDto>(&to_string(&warning).unwrap()).unwrap(),
+            warning
+        );
+        assert_eq!(
+            from_str::<ProfileImportDto>(&to_string(&import).unwrap()).unwrap(),
+            import
+        );
+        assert_eq!(
+            from_str::<FailureDto>(&to_string(&failure).unwrap()).unwrap(),
+            failure
+        );
+    }
+
+    #[test]
+    fn a_document_that_leaves_out_the_arguments_and_the_detail_reads_as_having_none() {
+        assert_eq!(
+            from_str::<ErrorDto>(r#"{"code":"inline-secret"}"#).unwrap(),
+            ErrorDto::new(ErrorCode::InlineSecret, [], None)
+        );
+        assert_eq!(
+            from_str::<WarningDto>(r#"{"code":"profile-prune"}"#).unwrap(),
+            WarningDto::new(WarningCode::ProfilePrune, [])
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,7 +1037,7 @@ mod tests {
             repository: "/srv/demo/repo".to_owned(),
             repo_hot: None,
             password: PasswordSourceDto::Inline,
-            warnings: vec![RepositoryWarningDto {
+            warnings: vec![WarningDto {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
             }],
@@ -924,6 +1185,8 @@ mod tests {
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,
+            ErrorCode::ConfigFolderUnknown,
+            ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,
         ] {
             assert!(code.args().is_empty(), "{code:?}");
@@ -1031,6 +1294,17 @@ mod tests {
             WarningCode::ProfileRetentionEmpty,
         ] {
             assert!(code.args().is_empty(), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn the_codes_of_a_command_that_cannot_start_are_named_on_the_wire() {
+        for (code, wire) in [
+            (ErrorCode::ConfigFolderUnknown, r#""config-folder-unknown""#),
+            (ErrorCode::RuntimeUnavailable, r#""runtime-unavailable""#),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
         }
     }
 }
@@ -1595,18 +1869,7 @@ pub struct RepositoryDto {
     /// repository, one per secret written inline. Left out when there is
     /// none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<RepositoryWarningDto>,
-}
-
-/// A warning about a configured repository, as its row carries it: the typed
-/// code and the arguments its message declares ([`WarningCode::args`]),
-/// never a sentence (§8.4) and never a secret (I4).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct RepositoryWarningDto {
-    pub code: WarningCode,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub args: std::collections::BTreeMap<String, MsgArg>,
+    pub warnings: Vec<WarningDto>,
 }
 
 /// Where a configured repository's password comes from, without its value:

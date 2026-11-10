@@ -6,39 +6,54 @@
 //!
 //! The daemon logs to stderr, at `info` unless `RUST_LOG` says otherwise.
 
-use env_logger::{Builder, Logger, Target};
+use env_logger::{Builder, Logger, Target, WriteStyle};
 use log::LevelFilter;
 
 /// What the daemon logs when `RUST_LOG` names no level. env_logger's own
 /// default is `error`, which would hide the warnings of a worker.
 const DEFAULT_LEVEL: LevelFilter = LevelFilter::Info;
 
-/// Makes the daemon log to stderr, once. Where a logger is set already, this
-/// one or another, that one stays, and nothing is changed or reported.
-pub(crate) fn install() {
+/// Makes the daemon log to stderr, once, in the style [`write_style`] gives
+/// for `plain`. Where a logger is set already, this one or another, that one
+/// stays, and nothing is changed or reported.
+pub(crate) fn install(plain: bool) {
     let rust_log = std::env::var("RUST_LOG").ok();
-    let logger = logger(rust_log.as_deref(), Target::Stderr);
+    let logger = logger(rust_log.as_deref(), Target::Stderr, write_style(plain));
     let level = logger.filter();
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
         log::set_max_level(level);
     }
 }
 
-/// The daemon's logger, writing to `target`, for the value of `RUST_LOG`, if
-/// that is set.
+/// The daemon's logger, writing to `target` in `style`, for the value of
+/// `RUST_LOG`, if that is set.
 ///
 /// It logs at [`DEFAULT_LEVEL`] unless `rust_log` names another level, and
 /// env_logger's directives (`debug`, `ladderback::worker=off`) go on top of
 /// that, so one for a target leaves the others at the default. An empty or
-/// blank `rust_log` says nothing, as none does. Colors are used only when the
-/// target is a terminal.
-pub(crate) fn logger(rust_log: Option<&str>, target: Target) -> Logger {
+/// blank `rust_log` says nothing, as none does.
+pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) -> Logger {
     let mut builder = Builder::new();
     builder.filter_level(DEFAULT_LEVEL);
     if let Some(rust_log) = rust_log {
         builder.parse_filters(rust_log);
     }
-    builder.target(target).format_timestamp_millis().build()
+    builder
+        .target(target)
+        .write_style(style)
+        .format_timestamp_millis()
+        .build()
+}
+
+/// How the daemon's log is styled: with no colour at all when plain output
+/// was asked for; otherwise with colour where the stream is a terminal and
+/// the environment (`NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`) allows it.
+pub(crate) fn write_style(plain: bool) -> WriteStyle {
+    if plain {
+        WriteStyle::Never
+    } else {
+        WriteStyle::Auto
+    }
 }
 
 #[cfg(test)]
@@ -46,10 +61,10 @@ mod tests {
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex, PoisonError};
 
-    use env_logger::{Logger, Target};
+    use env_logger::{Logger, Target, WriteStyle};
     use log::{Level, Log, Record};
 
-    use super::logger;
+    use super::{logger, write_style};
 
     const LEVELS: [Level; 5] = [
         Level::Error,
@@ -88,7 +103,14 @@ mod tests {
     /// writes to.
     fn piped(rust_log: Option<&str>) -> (Logger, Pipe) {
         let pipe = Pipe::default();
-        (logger(rust_log, Target::Pipe(Box::new(pipe.clone()))), pipe)
+        (
+            logger(
+                rust_log,
+                Target::Pipe(Box::new(pipe.clone())),
+                WriteStyle::Auto,
+            ),
+            pipe,
+        )
     }
 
     fn log_to(logger: &Logger, level: Level, target: &str, message: &str) {
@@ -204,5 +226,28 @@ mod tests {
         );
         assert!(text.ends_with('\n'), "{text:?}");
         assert!(!text.contains('\u{1b}'), "a pipe got colors: {text:?}");
+    }
+
+    #[test]
+    fn plain_output_turns_colour_off_and_the_rest_is_left_to_the_terminal() {
+        assert_eq!(write_style(true), WriteStyle::Never);
+        assert_eq!(write_style(false), WriteStyle::Auto);
+    }
+
+    /// What a logger of `style` writes for one warning, through a pipe.
+    fn written_in(style: WriteStyle) -> String {
+        let pipe = Pipe::default();
+        let logger = logger(None, Target::Pipe(Box::new(pipe.clone())), style);
+        log_to(&logger, Level::Warn, "ladderback", "disk is slow");
+        pipe.text()
+    }
+
+    #[test]
+    fn the_style_a_logger_is_given_decides_whether_its_records_are_coloured() {
+        let coloured = written_in(WriteStyle::Always);
+        assert!(coloured.contains('\u{1b}'), "{coloured:?}");
+        let plain = written_in(WriteStyle::Never);
+        assert!(!plain.contains('\u{1b}'), "{plain:?}");
+        assert!(plain.ends_with("disk is slow\n"), "{plain:?}");
     }
 }

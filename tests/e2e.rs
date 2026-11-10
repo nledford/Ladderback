@@ -43,6 +43,8 @@ mod secrets_steps;
 
 #[path = "steps/adopt.rs"]
 mod adopt_steps;
+#[path = "steps/cli_output.rs"]
+mod cli_output_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/interop.rs"]

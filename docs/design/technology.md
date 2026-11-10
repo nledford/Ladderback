@@ -86,7 +86,7 @@ ladderback/
 | Default notification text (ntfy, Gotify, Discord/Slack, email) | Yes, in the configured locale |
 | Ladderback's own CLI messages and errors | Yes, from the POSIX locale. `clap`'s generated help and usage errors stay English |
 | The static `index.html` shown before the wasm app loads | No: a minimal `lang="en"` loading text, replaced on startup |
-| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, MCP tool names, arguments and results, exported rustic profiles | **Never.** These are machine-facing or grep targets |
+| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, MCP tool names, arguments and results, the CLI's `--json` documents, exported rustic profiles | **Never.** These are machine-facing or grep targets |
 | Text from rustic itself (warning and error details) | Shown verbatim, in English, inside a localized frame (`backup-failed = Backup failed: { $detail }`), marked `lang="en"` in the UI |
 | User-written notification templates (§11) | Never; the user's own words |
 
@@ -95,7 +95,7 @@ ladderback/
 - `domain` and `app` return typed errors and outcomes (`Failed { reason: DeadlinePassed }`, `ClaimRejected { owner }`). No English string is produced inside the core, so the core needs no locale and its tests never assert on wording.
 - Adapters map them onto the published codes in `api`: closed enums `ErrorCode` and `WarningCode`, each with a `#[serde(other)] Unknown` variant.
 - Arguments are typed: `MsgArg = Count(u64) | Bytes(u64) | DurationMs(u64) | Timestamp { utc_ms, zone: Option<IanaZone> } | Text(String)`. Identifiers, ports, years and hostnames are `Text`, so they are never digit-grouped.
-- The REST API, the sync protocol, `WorkerEvent` (§4.1) and SQLite (§9) all carry `{ code, args, detail? }`, never rendered text. `detail` is rustic's own verbatim message.
+- The REST API, the sync protocol, `WorkerEvent` (§4.1), SQLite (§9) and the CLI's `--json` documents (§4.5) all carry `{ code, args, detail? }`, never rendered text. `detail` is rustic's own verbatim message.
 - Codes are rendered by matching the enum, never by using a wire string as a message ID. An `Unknown` code, say from a newer agent, renders as `error-unknown = An unexpected error occurred.` followed by its detail. It has no `$code` to show: `#[serde(other)]` discards the wire string.
 - **Redaction happens where codes are built:** `args` and `detail` pass through the `Redactor` before they are serialized, stored or synced (I4). `l10n` never sees a secret.
 

@@ -380,3 +380,14 @@ warning-profile-option-left-out = The option { $option } was left out of the pro
 # An export of a plan with no retention has no keep option, and rustic's forget refuses to run without one.
 # `keep-*`, `forget` and `rustic forget` are what a person types, typed as they are: keep them string literals.
 warning-profile-retention-empty = The plan keeps every snapshot, so the profile has no { "keep-*" } option, and rustic's { "forget" } refuses to run until one is set. { -brand-name } never forgets from this plan. Add a { "keep-*" } option to the profile before you run { "rustic forget" } on it.
+
+## Command-line codes: what a command says when it cannot start (technical design §4.5)
+
+# The command has no folder to keep the configuration in.
+# `LADDERBACK_CONFIG_DIR` is an environment variable, typed as it is: keep it a string literal.
+error-config-folder-unknown = { -brand-name } has no folder to keep its configuration in, so it did nothing. Set { "LADDERBACK_CONFIG_DIR" } to a folder, or run as a user who has a home folder.
+
+# The command could not start the runtime it works on.
+# $detail (text): the operating system's message. It is shown as it came.
+error-runtime-unavailable = { -brand-name } could not start the runtime it works on, so it did nothing. Check the limits on open files and threads for the user { -brand-name } runs as, then try again.
+    .with-detail = { -brand-name } could not start the runtime it works on, so it did nothing ({ $detail }). Check the limits on open files and threads for the user { -brand-name } runs as, then try again.

@@ -233,6 +233,8 @@ hooks.workspace = true
 log.workspace = true
 platform.workspace = true
 secrets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 store.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
 uuid = { workspace = true, features = ["v7"] }
@@ -253,7 +255,6 @@ secrets.workspace = true
 store.workspace = true
 tempfile.workspace = true
 toml.workspace = true
-serde_json.workspace = true
 tokio-tungstenite.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["time"] }

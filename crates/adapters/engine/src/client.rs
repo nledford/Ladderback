@@ -1176,6 +1176,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::InvalidCursor
                 | ErrorCode::InvalidBody
                 | ErrorCode::BodyTooLarge
+                | ErrorCode::ConfigFolderUnknown
+                | ErrorCode::RuntimeUnavailable
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

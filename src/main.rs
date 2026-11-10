@@ -7,19 +7,26 @@
     clippy::panic,
     clippy::unimplemented,
     clippy::todo,
-    clippy::unreachable
+    clippy::unreachable,
+    // A command prints through `output`: `print!` and `eprint!` panic when
+    // nobody reads what they print.
+    clippy::print_stdout,
+    clippy::print_stderr
 )]
 
+use std::ffi::OsString;
+use std::io;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use api::MsgArg;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 
 mod composition;
 mod logging;
+mod output;
 mod profiles;
 
 #[derive(Parser)]
@@ -29,6 +36,10 @@ mod profiles;
     about = "Self-hosted backup manager for rustic"
 )]
 struct Cli {
+    /// Print plain text: no colour, and nothing drawn over what is already
+    /// printed.
+    #[arg(long, global = true)]
+    plain: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -56,6 +67,11 @@ enum Command {
         /// file name, as a slug, when it is left out.
         #[arg(long = "repo-name", value_name = "NAME")]
         repo_name: Option<String>,
+        /// Print one JSON document on standard output, for a script to read,
+        /// instead of sentences: the repository and the plans that were
+        /// added, or the code of the refusal.
+        #[arg(long)]
+        json: bool,
     },
     /// Write a plan as a rustic profile on stdout.
     ExportProfile {
@@ -69,22 +85,56 @@ enum Command {
     Worker,
 }
 
+/// The command line, parsed, or the status to end with when `clap` has said
+/// its help, its version or a usage error. `clap` colours what it says while
+/// it parses, before it has a value for `--plain`, so the raw arguments are
+/// scanned for the flag first (see [`output::asked_for_plain`]).
+fn parse(args: Vec<OsString>) -> Result<Cli, ExitCode> {
+    let plain = output::asked_for_plain(&args);
+    let mut command = Cli::command().color(output::clap_colour(plain));
+    let mut matches = command
+        .try_get_matches_from_mut(args)
+        .map_err(|error| output::parser_status(&error))?;
+    Cli::from_arg_matches_mut(&mut matches)
+        .map_err(|error| output::parser_status(&error.format(&mut command)))
+}
+
 fn main() -> ExitCode {
-    match Cli::parse().command {
+    let Cli { plain, command } = match parse(std::env::args_os().collect()) {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+    match command {
         Command::Serve {
             listen,
             allowed_hosts,
-        } => serve(listen, allowed_hosts),
-        Command::ImportProfile { file, repo_name } => profiles::import_profile(file, repo_name),
+        } => serve(listen, allowed_hosts, plain),
+        Command::ImportProfile {
+            file,
+            repo_name,
+            json,
+        } => profiles::import_profile(file, repo_name, output::Report::asked(json)),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
         Command::Worker => engine::worker::main(),
     }
 }
 
-fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
-    logging::install();
+fn serve(listen: SocketAddr, allowed_hosts: Vec<String>, plain: bool) -> ExitCode {
+    logging::install(plain);
     log::info!("ladderback {} starting", env!("CARGO_PKG_VERSION"));
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    finish(&localizer, run_daemon(&localizer, listen, allowed_hosts))
+}
+
+/// Starts the daemon and runs it until it is told to stop, and says how it
+/// ended. What it says on stderr before it serves is written through `say`:
+/// a startup line that nobody reads stops it, as anything that prints does.
+/// Once it serves it only logs, and the logger drops what it cannot write.
+fn run_daemon(
+    localizer: &Localizer,
+    listen: SocketAddr,
+    allowed_hosts: Vec<String>,
+) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
     // is the parser's own for a value it rejects.
@@ -94,32 +144,32 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
             Ok(host) => hosts.push(host),
             Err(refusal) => {
                 say(
-                    &localizer,
+                    localizer,
                     msg::CLI_INVALID_ALLOWED_HOST,
                     &[("name", text(refusal.0))],
-                );
-                return ExitCode::from(2);
+                )?;
+                return Ok(ExitCode::from(2));
             }
         }
     }
     // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
     if let Err(refusal) = http_adapter::require_loopback(listen) {
         say(
-            &localizer,
+            localizer,
             msg::CLI_REFUSE_NON_LOOPBACK,
             &[("address", text(refusal.0))],
-        );
-        return ExitCode::FAILURE;
+        )?;
+        return Ok(ExitCode::FAILURE);
     }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
             say(
-                &localizer,
+                localizer,
                 msg::CLI_CANNOT_START_RUNTIME,
                 &[("detail", text(error))],
-            );
-            return ExitCode::FAILURE;
+            )?;
+            return Ok(ExitCode::FAILURE);
         }
     };
     runtime.block_on(async {
@@ -128,32 +178,32 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         let state = match composition::app_state().await {
             Ok(state) => state,
             Err(refused) => {
-                say(&localizer, refused.message, &refused.args);
-                return ExitCode::FAILURE;
+                say(localizer, refused.message, &refused.args)?;
+                return Ok(ExitCode::FAILURE);
             }
         };
         let listener = match tokio::net::TcpListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
                 say(
-                    &localizer,
+                    localizer,
                     msg::CLI_CANNOT_LISTEN,
                     &[("address", text(listen)), ("detail", text(error))],
-                );
-                return ExitCode::FAILURE;
+                )?;
+                return Ok(ExitCode::FAILURE);
             }
         };
         match listener.local_addr() {
             Ok(addr) => say(
-                &localizer,
+                localizer,
                 msg::CLI_LISTENING,
                 &[("url", text(format!("http://{addr}")))],
-            ),
+            )?,
             Err(error) => say(
-                &localizer,
+                localizer,
                 msg::CLI_LISTENING_UNKNOWN,
                 &[("detail", text(error))],
-            ),
+            )?,
         }
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
@@ -164,22 +214,38 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
             .with_graceful_shutdown(shutdown_signal())
             .await
         {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(()) => Ok(ExitCode::SUCCESS),
             Err(error) => {
-                say(
-                    &localizer,
-                    msg::CLI_SERVER_ERROR,
-                    &[("detail", text(error))],
-                );
-                ExitCode::FAILURE
+                say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])?;
+                Ok(ExitCode::FAILURE)
             }
         }
     })
 }
 
+/// The line `say` prints: one of Ladderback's own messages after the
+/// program's name.
+fn said(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String {
+    format!("ladderback: {}\n", localizer.message(id, args))
+}
+
 /// Prints one of Ladderback's own messages on stderr after the program's name.
-fn say(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) {
-    eprintln!("ladderback: {}", localizer.message(id, args));
+fn say(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> io::Result<()> {
+    output::to_stderr(&said(localizer, id, args))
+}
+
+/// The status a command ends with, given what writing its output came to
+/// (see [`output::status_after`]); a write that failed for another reason
+/// than a closed pipe is said as `cannot write the result`.
+fn finish(localizer: &Localizer, written: io::Result<ExitCode>) -> ExitCode {
+    output::status_after(written, |error| {
+        // If this cannot be said either, there is nothing left to say it on.
+        let _ = say(
+            localizer,
+            msg::CLI_CANNOT_WRITE_OUTPUT,
+            &[("detail", text(error))],
+        );
+    })
 }
 
 /// A value shown as the text it prints as.
@@ -200,5 +266,23 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
         () = terminate => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_the_program_says_is_its_name_and_a_sentence() {
+        let line = said(
+            &Localizer::new(&[]),
+            msg::CLI_CANNOT_WRITE_OUTPUT,
+            &[("detail", text("No space left on device"))],
+        );
+        assert_eq!(
+            line,
+            "ladderback: cannot write the result: No space left on device\n"
+        );
     }
 }
