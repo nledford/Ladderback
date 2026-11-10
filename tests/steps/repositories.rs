@@ -84,6 +84,14 @@ pub struct RepositoriesSetup {
     init: Option<Result<InitOutcome, RepositoryError>>,
     test: Option<Result<RepositoryId, RepositoryError>>,
     connect: Option<Result<RepositoryId, RepositoryError>>,
+    /// The client sends a password the repository doesn't have.
+    api_wrong_password: bool,
+    /// A file holding the right password, when the client names a file.
+    api_password_file: Option<PathBuf>,
+    /// Every body the daemon answered, to check that none holds a password.
+    api_answers: Vec<String>,
+    /// The last answer: its status and body.
+    api_last: Option<(u16, String)>,
     /// Every repository folder's contents, as a refusal found them.
     before: Vec<(String, Vec<u8>)>,
 }
@@ -357,4 +365,276 @@ async fn configured_with_settings(agent: &mut Agent, name: String) {
     let config = config(agent).await;
     let repository = config.repository(&alias).expect("the repository was saved");
     assert_eq!(repository.settings, settings(agent));
+}
+
+// The same behaviours over HTTP, for `features/repositories/api.feature`: the
+// real daemon, spoken to as the Repositories page speaks to it. The
+// repositories are still made and inspected with `rustic_core` itself.
+
+use super::operations_steps::{exchange, exchange_at};
+
+/// The settings a request carries: the scenario's location, its hot half when
+/// it has one, and the password the client has.
+fn api_settings(agent: &Agent) -> serde_json::Value {
+    let cold = agent
+        .repositories
+        .cold
+        .as_ref()
+        .expect("the scenario set a location");
+    let password = match &agent.repositories.api_password_file {
+        Some(path) => serde_json::json!({"source": "file", "path": text(path)}),
+        None if agent.repositories.api_wrong_password => {
+            serde_json::json!({"source": "inline", "value": api_secret(agent)})
+        }
+        None => serde_json::json!({"source": "inline", "value": PASSWORD}),
+    };
+    let mut settings = serde_json::json!({"repository": text(cold), "password": password});
+    if let Some(hot) = &agent.repositories.hot {
+        settings["repo-hot"] = serde_json::json!(text(hot));
+    }
+    settings
+}
+
+/// The password the client types: the repository's, or the wrong one.
+fn api_secret(agent: &Agent) -> &'static str {
+    if agent.repositories.api_wrong_password {
+        "not-the-password"
+    } else {
+        PASSWORD
+    }
+}
+
+/// Posts `body` to `path`, remembering the answer. A request that opens or
+/// creates a repository takes seconds, so the wait is on a blocking thread:
+/// see [`blocking`].
+async fn api_post(agent: &mut Agent, path: &str, body: &str) {
+    let addr = agent.events.addr();
+    let (path, body) = (path.to_owned(), body.to_owned());
+    let (status, answer) = blocking(move || exchange_at(addr, "POST", &path, &body)).await;
+    agent.repositories.api_answers.push(answer.clone());
+    agent.repositories.api_last = Some((status, answer));
+}
+
+/// The last answer's status and its body as JSON.
+fn api_answer(agent: &Agent) -> (u16, serde_json::Value) {
+    let (status, body) = agent
+        .repositories
+        .api_last
+        .as_ref()
+        .expect("the client has made a request");
+    // A route that isn't there answers with no body; its status says so.
+    let json = if body.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(body)
+            .unwrap_or_else(|error| panic!("the answer is JSON: {error}: {body}"))
+    };
+    (*status, json)
+}
+
+/// The daemon's list of repositories, remembered like any answer.
+fn api_list(agent: &mut Agent) -> Vec<serde_json::Value> {
+    let (status, body) = exchange(agent, "GET", "/api/v1/repositories", "");
+    assert_eq!(status, 200, "the list answers: {body}");
+    agent.repositories.api_answers.push(body.clone());
+    let list: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or_else(|error| panic!("the list is JSON: {error}"));
+    list["repositories"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the list has rows: {body}"))
+        .clone()
+}
+
+#[given("the client uses the wrong password")]
+fn api_uses_wrong_password(agent: &mut Agent) {
+    agent.repositories.api_wrong_password = true;
+}
+
+#[given("the client's password is in a file")]
+fn api_password_in_file(agent: &mut Agent) {
+    let path = agent.scratch().join("password.txt");
+    fs::write(&path, PASSWORD).expect("the password file");
+    agent.repositories.api_password_file = Some(path);
+}
+
+#[given(expr = "the client has connected it as {string}")]
+async fn api_has_connected(agent: &mut Agent, alias: String) {
+    api_connect(agent, &alias).await;
+    assert_eq!(api_answer(agent).0, 201, "the first connection succeeds");
+}
+
+async fn api_connect(agent: &mut Agent, alias: &str) {
+    let body = serde_json::json!({"alias": alias, "settings": api_settings(agent)});
+    api_post(agent, "/api/v1/repositories", &body.to_string()).await;
+}
+
+#[when("the client tests the repository")]
+async fn api_tests(agent: &mut Agent) {
+    let body = serde_json::json!({"settings": api_settings(agent)});
+    api_post(agent, "/api/v1/repositories/_test", &body.to_string()).await;
+}
+
+#[when(expr = "the client connects it as {string}")]
+async fn api_connects(agent: &mut Agent, alias: String) {
+    api_connect(agent, &alias).await;
+}
+
+#[when(expr = "the client connects it as {string} and as {string} at the same moment")]
+async fn api_connects_at_once(agent: &mut Agent, first: String, second: String) {
+    let addr = agent.events.addr();
+    let settings = api_settings(agent);
+    let requests = [first, second].into_iter().map(|alias| {
+        let body = serde_json::json!({"alias": alias, "settings": settings}).to_string();
+        blocking(move || exchange_at(addr, "POST", "/api/v1/repositories", &body))
+    });
+    for (status, body) in futures::future::join_all(requests).await {
+        assert_eq!(status, 201, "a connection made at the same moment: {body}");
+        agent.repositories.api_answers.push(body);
+    }
+}
+
+#[when("the client initialises the repository")]
+async fn api_initialises(agent: &mut Agent) {
+    api_initialise(agent, None).await;
+}
+
+#[when(expr = "the client initialises the repository as {string}")]
+async fn api_initialises_as(agent: &mut Agent, alias: String) {
+    api_initialise(agent, Some(alias)).await;
+}
+
+async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
+    agent.repositories.before = agent
+        .repositories
+        .cold
+        .as_ref()
+        .map(|cold| contents(cold))
+        .unwrap_or_default();
+    let mut body = serde_json::json!({"settings": api_settings(agent)});
+    if let Some(alias) = alias {
+        body["alias"] = serde_json::json!(alias);
+    }
+    api_post(agent, "/api/v1/repositories/_init", &body.to_string()).await;
+}
+
+#[when(regex = r#"^the client sends (.+) to "([^"]+)"$"#)]
+async fn api_sends(agent: &mut Agent, body: String, route: String) {
+    api_post(agent, &route, &body).await;
+}
+
+#[then(expr = "the answer has status {int} and the repository's ID")]
+async fn api_answers_with_id(agent: &mut Agent, status: u16) {
+    let (actual, json) = api_answer(agent);
+    assert_eq!(actual, status, "the answer: {json}");
+    assert_eq!(json["id"], serde_json::json!(rustic_id(agent).await));
+}
+
+#[then(expr = "the answer has status {int} and the repository's ID, not saved")]
+async fn api_answers_with_id_not_saved(agent: &mut Agent, status: u16) {
+    api_answers_with_id(agent, status).await;
+    assert_eq!(api_answer(agent).1["saved"], serde_json::json!(false));
+}
+
+#[then(expr = "the answer has status {int} and the repository's ID, saved")]
+async fn api_answers_with_id_saved(agent: &mut Agent, status: u16) {
+    api_answers_with_id(agent, status).await;
+    assert_eq!(api_answer(agent).1["saved"], serde_json::json!(true));
+}
+
+#[then(expr = "the refusal has status {int} and the typed code {string}")]
+fn api_refused(agent: &mut Agent, status: u16, code: String) {
+    let (actual, json) = api_answer(agent);
+    assert_eq!(actual, status, "the refusal: {json}");
+    assert_eq!(json["code"], serde_json::json!(code), "the refusal: {json}");
+}
+
+#[then("the refusal carries the engine's detail")]
+fn api_refusal_has_detail(agent: &mut Agent) {
+    let (_, json) = api_answer(agent);
+    assert!(
+        json["detail"]
+            .as_str()
+            .is_some_and(|detail| !detail.trim().is_empty()),
+        "the refusal has no detail: {json}"
+    );
+}
+
+#[then("no answer holds the password")]
+fn api_no_answer_holds_password(agent: &mut Agent) {
+    let secret = api_secret(agent);
+    for answer in &agent.repositories.api_answers {
+        assert!(
+            !answer.contains(secret),
+            "an answer holds the password: {answer}"
+        );
+    }
+}
+
+#[then("the daemon lists no repositories")]
+fn api_lists_none(agent: &mut Agent) {
+    assert!(api_list(agent).is_empty(), "the daemon lists a repository");
+}
+
+#[then(expr = "the daemon lists {int} repository")]
+#[then(expr = "the daemon lists {int} repositories")]
+fn api_lists_count(agent: &mut Agent, count: usize) {
+    assert_eq!(api_list(agent).len(), count);
+}
+
+/// The listed row of `alias`, which must be there.
+fn api_row(agent: &mut Agent, alias: &str) -> serde_json::Value {
+    let rows = api_list(agent);
+    rows.iter()
+        .find(|row| row["alias"].as_str() == Some(alias))
+        .cloned()
+        .unwrap_or_else(|| panic!("the list has no repository {alias}: {rows:?}"))
+}
+
+#[then(
+    expr = "the daemon lists the repository {string} at the location, its password stored inline"
+)]
+fn api_lists_inline(agent: &mut Agent, alias: String) {
+    let location = text(agent.repositories.cold.as_ref().expect("the location"));
+    let row = api_row(agent, &alias);
+    assert_eq!(row["repository"], serde_json::json!(location));
+    assert_eq!(row["password"], serde_json::json!({"source": "inline"}));
+}
+
+#[then(expr = "the daemon lists the repository {string} at the location, its password in the file")]
+fn api_lists_file(agent: &mut Agent, alias: String) {
+    let location = text(agent.repositories.cold.as_ref().expect("the location"));
+    let file = text(
+        agent
+            .repositories
+            .api_password_file
+            .as_ref()
+            .expect("the password file"),
+    );
+    let row = api_row(agent, &alias);
+    assert_eq!(row["repository"], serde_json::json!(location));
+    assert_eq!(
+        row["password"],
+        serde_json::json!({"source": "file", "path": file})
+    );
+}
+
+#[then(expr = "the daemon's config file doesn't hold {string}")]
+fn api_config_file_lacks(agent: &mut Agent, secret: String) {
+    let file = super::events_steps::Events::config_dir(agent).join("config.toml");
+    let text = fs::read_to_string(&file).expect("the daemon saved its config file");
+    assert!(!text.contains(&secret), "the config file holds {secret:?}");
+}
+
+#[then("the hot and the cold half each hold the repository's config")]
+fn api_both_halves_hold_config(agent: &mut Agent) {
+    for half in [
+        agent.repositories.cold.as_ref().expect("the location"),
+        agent.repositories.hot.as_ref().expect("the hot half"),
+    ] {
+        assert!(
+            half.join("config").is_file(),
+            "the {} half holds no config",
+            half.display()
+        );
+    }
 }

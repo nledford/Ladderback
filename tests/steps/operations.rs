@@ -125,8 +125,18 @@ async fn save_config_with_hooks(agent: &Agent, run_finally: Option<String>) {
 
 /// Sends `request` over a new connection and reads one response: status and
 /// body, nothing parsed further.
-fn exchange(agent: &Agent, method: &str, path: &str, body: &str) -> (u16, String) {
-    let addr = agent.events.addr();
+pub(crate) fn exchange(agent: &Agent, method: &str, path: &str, body: &str) -> (u16, String) {
+    exchange_at(agent.events.addr(), method, path, body)
+}
+
+/// [`exchange`] with the daemon's address instead of an agent that knows it,
+/// for a request sent from another thread.
+pub(crate) fn exchange_at(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> (u16, String) {
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://{addr}\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

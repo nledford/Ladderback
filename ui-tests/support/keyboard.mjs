@@ -13,6 +13,11 @@ export function journey(page) {
       }
     },
 
+    /** Types `text` into the focused element, key by key. */
+    async type(text) {
+      await page.keyboard.type(text);
+    },
+
     byRole(role, options) {
       return page.getByRole(role, options);
     },
