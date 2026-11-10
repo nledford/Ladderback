@@ -174,6 +174,17 @@ Feature: The command line's output
         | error.args.file | {"type":"text","value":"missing.toml"} |
       And standard error is empty
 
+    Scenario: An import with no place for the configuration is refused as a document, with its code
+      Given there is no home folder and no configuration folder is named
+      When the owner runs "import-profile nas.toml --json"
+      Then the command exits with status 1
+      And standard output is one line holding one JSON document
+      And the document has:
+        | key        | value                   |
+        | error.code | "config-folder-unknown" |
+      And the document has no key "repository"
+      And standard error is empty
+
     Scenario: Plain output leaves a document as it is
       Given a rustic profile "nas.toml" holding:
         """
