@@ -49,6 +49,8 @@ mod backend;
 // one is only covered by the browser journeys.
 mod page;
 mod routes;
+#[cfg(all(test, target_arch = "wasm32"))]
+mod time_zones;
 mod ws;
 
 // The toast's arrival and lifetime decisions are host-testable; the DOM
