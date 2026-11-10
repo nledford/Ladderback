@@ -700,3 +700,34 @@ async fn a_used_profile_that_is_a_folder_is_unreadable() {
         }
     );
 }
+
+#[tokio::test]
+async fn the_environment_and_prune_of_either_profile_count() {
+    // The environment (a notice) and prune (a warning and local
+    // maintenance), from the used profile, the own one, or both.
+    let scratch = Scratch::new();
+    let env = "[global.env]\nDEMO = \"x\"\n";
+    let prune = "[forget]\nprune = true\n";
+    for (own, used) in [(env, ""), ("", env), (env, env)] {
+        scratch.profile("base.toml", used);
+        let profile = scratch
+            .read(&uses(&["base"], &format!("{own}\n{REPOSITORY}\n{ENTRY}")))
+            .await
+            .expect("a profile");
+        assert!(
+            profile.notices.contains(&ProfileNotice::EnvIgnored),
+            "{own:?} {used:?}"
+        );
+    }
+    for (own, used) in [(prune, ""), ("", prune), (prune, prune)] {
+        scratch.profile("base.toml", used);
+        let profile = scratch
+            .read(&uses(&["base"], &format!("{own}\n{REPOSITORY}\n{ENTRY}")))
+            .await
+            .expect("a profile");
+        assert!(
+            profile.notices.contains(&ProfileNotice::Prune),
+            "{own:?} {used:?}"
+        );
+    }
+}
