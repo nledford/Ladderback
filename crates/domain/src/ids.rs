@@ -136,10 +136,18 @@ fn is_slug(value: &str) -> bool {
 /// The slug a free-form name becomes: the lowercase ASCII letters and digits
 /// of `text`, every other run of characters one hyphen, no hyphen at either
 /// end, at most 64 bytes. `None` when nothing is left.
-#[allow(clippy::todo, reason = "red test: interop import")]
 fn slugify(text: &str) -> Option<String> {
-    let _ = text;
-    todo!("slugify a free-form name")
+    let mut slug = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.truncate(64);
+    slug.truncate(slug.trim_end_matches('-').len());
+    (!slug.is_empty()).then_some(slug)
 }
 
 impl PlanId {
