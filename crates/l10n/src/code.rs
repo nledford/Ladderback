@@ -67,5 +67,6 @@ code_messages!(ERRORS, error_message, ErrorCode {
 code_messages!(WARNINGS, warning_message, WarningCode {
     SourceUnreadable => msg::WARNING_SOURCE_UNREADABLE,
     HookWarning => msg::WARNING_HOOK_WARNING,
+    MaintenancePartial => msg::WARNING_MAINTENANCE_PARTIAL,
     Unknown => msg::WARNING_UNKNOWN,
 });

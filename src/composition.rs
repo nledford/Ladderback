@@ -256,6 +256,7 @@ impl Publish {
                 code: match warning.kind {
                     WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
                     WarningKind::Hook => WarningCode::HookWarning,
+                    WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
                     WarningKind::Other => WarningCode::Unknown,
                 },
                 args: warning
@@ -733,6 +734,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
     match kind {
         WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
         WarningKind::Hook => WarningCode::HookWarning,
+        WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
         WarningKind::Other => WarningCode::Unknown,
     }
 }

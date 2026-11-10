@@ -118,6 +118,9 @@ pub enum ErrorCode {
 pub enum WarningCode {
     SourceUnreadable,
     HookWarning,
+    /// A forget or an adoption ended before its last engine job; the jobs
+    /// that finished stay done.
+    MaintenancePartial,
     #[serde(other)]
     Unknown,
 }
@@ -376,6 +379,23 @@ impl WarningCode {
                     optional: true,
                 },
             ],
+            Self::MaintenancePartial => &[
+                ArgSpec {
+                    name: "what",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "done",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "total",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
             Self::SourceUnreadable | Self::Unknown => &[],
         }
     }
@@ -394,6 +414,27 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WarningCode::SourceUnreadable).unwrap(),
             r#""source-unreadable""#
+        );
+    }
+
+    #[test]
+    fn a_partial_maintenance_run_has_its_own_code_and_declares_its_arguments() {
+        assert_eq!(
+            serde_json::to_string(&WarningCode::MaintenancePartial).unwrap(),
+            r#""maintenance-partial""#
+        );
+        let spec = |name, kind| ArgSpec {
+            name,
+            kind,
+            optional: false,
+        };
+        assert_eq!(
+            WarningCode::MaintenancePartial.args(),
+            &[
+                spec("what", ArgKind::Text),
+                spec("done", ArgKind::Count),
+                spec("total", ArgKind::Count),
+            ]
         );
     }
 

@@ -433,6 +433,7 @@ impl RunMaintenance {
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());
         let jobs = split(job);
+        let total: usize = jobs.iter().map(names).sum();
         let last = jobs.len().saturating_sub(1);
         // What the jobs finished so far reported, merged into one.
         let mut done: Option<EngineResult> = None;
@@ -440,7 +441,7 @@ impl RunMaintenance {
             // A cancel that came while the last job was finishing is seen
             // before another worker is started.
             if index > 0 && futures::poll!(cancel.as_mut()).is_ready() {
-                note_partial(&mut operation, done.as_ref());
+                note_partial(&mut operation, done.as_ref(), total);
                 let _ = operation.cancel(self.clock.now());
                 break;
             }
@@ -453,13 +454,19 @@ impl RunMaintenance {
                         }
                         EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
                     };
-                    note_partial(&mut operation, done.as_ref());
+                    note_partial(&mut operation, done.as_ref(), total);
                     let _ = operation.fail(reason, self.clock.now());
                     break;
                 }
             };
             match self
-                .play(&mut operation, running, cancel.as_mut(), done.as_ref())
+                .play(
+                    &mut operation,
+                    running,
+                    cancel.as_mut(),
+                    done.as_ref(),
+                    total,
+                )
                 .await
             {
                 Played::Reported(reported) => {
@@ -487,13 +494,15 @@ impl RunMaintenance {
     /// Plays one engine job's events into the operation until it reports a
     /// result (the operation is left running for the caller to settle) or
     /// the operation ends: failed, or cancelled. `done` is what the jobs
-    /// before this one finished.
+    /// before this one finished, and `total` how many snapshots the whole
+    /// run names.
     async fn play(
         &self,
         operation: &mut Operation,
         running: RunningJob,
         mut cancel: Pin<&mut (impl FusedFuture<Output = ()> + Send)>,
         done: Option<&EngineResult>,
+        total: usize,
     ) -> Played {
         let RunningJob {
             events,
@@ -504,7 +513,7 @@ impl RunMaintenance {
             select_biased! {
                 event = events.next() => {
                     let Some(event) = event else {
-                        note_partial(operation, done);
+                        note_partial(operation, done, total);
                         let _ = operation.fail(
                             FailureReason::EngineExited { exit_code: None },
                             self.clock.now(),
@@ -523,7 +532,7 @@ impl RunMaintenance {
                         }
                         EngineEvent::Succeeded(reported) => return Played::Reported(reported),
                         EngineEvent::Failed(reason) => {
-                            note_partial(operation, done);
+                            note_partial(operation, done, total);
                             let _ = operation.fail(reason, self.clock.now());
                             return Played::Ended;
                         }
@@ -531,7 +540,7 @@ impl RunMaintenance {
                 }
                 () = cancel => {
                     control.stop().await;
-                    note_partial(operation, done);
+                    note_partial(operation, done, total);
                     let _ = operation.cancel(self.clock.now());
                     return Played::Ended;
                 }
@@ -607,32 +616,32 @@ fn merge(done: Option<EngineResult>, next: EngineResult) -> EngineResult {
     }
 }
 
+/// How many snapshots a job names; none for a job that names none.
+fn names(job: &Job) -> usize {
+    match job {
+        Job::Forget(job) => job.ids.len(),
+        Job::Rewrite(job) => job.ids.len(),
+        _ => 0,
+    }
+}
+
 /// Warns that the run ends with some of its jobs already done, which stay
 /// done. Called before the operation ends, while it can still take a
-/// warning.
-fn note_partial(operation: &mut Operation, done: Option<&EngineResult>) {
-    let (during, detail) = match done {
-        Some(EngineResult::Forget(done)) => (
-            "forget",
-            format!(
-                "{} snapshots were removed before the run ended, and stay removed",
-                done.removed.len()
-            ),
-        ),
-        Some(EngineResult::Rewrite(done)) => (
-            "adopt",
-            format!(
-                "{} snapshots were rewritten before the run ended, and stay rewritten",
-                done.created.len()
-            ),
-        ),
+/// warning. The warning carries no English (§8.4): `during` is `forget` or
+/// `adopt` and `detail` is `<done>/<total>`, how many snapshots the finished
+/// jobs handled of how many the run names, which are the arguments of
+/// `WarningCode::MaintenancePartial`.
+fn note_partial(operation: &mut Operation, done: Option<&EngineResult>, total: usize) {
+    let (during, handled) = match done {
+        Some(EngineResult::Forget(done)) => ("forget", done.removed.len()),
+        Some(EngineResult::Rewrite(done)) => ("adopt", done.created.len()),
         _ => return,
     };
     let _ = operation.record_warning(Warning {
-        kind: WarningKind::Other,
+        kind: WarningKind::MaintenancePartial,
         item: None,
         during: during.to_owned(),
-        detail,
+        detail: format!("{handled}/{total}"),
     });
 }
 
@@ -873,37 +882,31 @@ mod tests {
     fn a_run_that_ends_after_some_jobs_says_how_many_snapshots_they_did() {
         let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
         let mut forgot = running();
-        note_partial(&mut forgot, Some(&removed(&repository, ids(3))));
+        note_partial(&mut forgot, Some(&removed(&repository, ids(3))), 12);
         let [warning] = forgot.warnings() else {
             panic!("one warning: {:?}", forgot.warnings());
         };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
         assert_eq!(warning.during, "forget");
-        assert!(
-            warning.detail.starts_with("3 snapshots were removed"),
-            "{}",
-            warning.detail
-        );
+        assert_eq!(warning.detail, "3/12");
         let mut adopted = running();
         let created = EngineResult::Rewrite(RewriteSummary {
             repository,
             created: ids(2),
         });
-        note_partial(&mut adopted, Some(&created));
+        note_partial(&mut adopted, Some(&created), 7);
         let [warning] = adopted.warnings() else {
             panic!("one warning: {:?}", adopted.warnings());
         };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
         assert_eq!(warning.during, "adopt");
-        assert!(
-            warning.detail.starts_with("2 snapshots were rewritten"),
-            "{}",
-            warning.detail
-        );
+        assert_eq!(warning.detail, "2/7");
     }
 
     #[test]
     fn a_run_that_ends_before_any_job_finished_has_nothing_to_say() {
         let mut operation = running();
-        note_partial(&mut operation, None);
+        note_partial(&mut operation, None, 12);
         assert!(operation.warnings().is_empty());
     }
 
