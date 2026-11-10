@@ -791,9 +791,21 @@ fn a_plan_with_any_retention_rule_gets_no_such_notice() {
 #[test]
 fn a_location_with_a_password_in_its_url_is_refused_naming_the_key_not_the_value() {
     for (location, hot, key) in [
-        ("rest:https://demo:CANARY-url@nas.demo:8000/repo", None, "repository"),
-        ("s3:https://demo:CANARY-url@s3.demo/bucket", None, "repository"),
-        ("/srv/demo-repo", Some("rest:https://demo:CANARY-url@hot.demo/"), "repo-hot"),
+        (
+            "rest:https://demo:CANARY-url@nas.demo:8000/repo",
+            None,
+            "repository",
+        ),
+        (
+            "s3:https://demo:CANARY-url@s3.demo/bucket",
+            None,
+            "repository",
+        ),
+        (
+            "/srv/demo-repo",
+            Some("rest:https://demo:CANARY-url@hot.demo/"),
+            "repo-hot",
+        ),
     ] {
         let mut export = export();
         export.repository.settings.repository = location.to_owned();
@@ -820,11 +832,7 @@ fn a_location_with_a_user_but_no_password_is_written() {
     ] {
         let mut export = export();
         export.repository.settings.repository = location.to_owned();
-        assert_has(
-            &text(&export),
-            "repository.repository",
-            string(location),
-        );
+        assert_has(&text(&export), "repository.repository", string(location));
     }
 }
 

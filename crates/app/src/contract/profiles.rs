@@ -322,7 +322,11 @@ fn a_location_with_a_password_in_its_url_is_refused_and_never_written(
     harness: &dyn ProfilesHarness,
 ) {
     for (location, hot, key) in [
-        ("rest:https://demo:CANARY-url@nas.demo/repo", None, "repository"),
+        (
+            "rest:https://demo:CANARY-url@nas.demo/repo",
+            None,
+            "repository",
+        ),
         (
             "/srv/demo-repo",
             Some("rest:https://demo:CANARY-url@hot.demo/"),

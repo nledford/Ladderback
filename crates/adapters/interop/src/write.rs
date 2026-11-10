@@ -26,12 +26,19 @@
 
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
 use domain::planning::{HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings};
-use domain::secrets::{KeyringEntry, Part, SecretRef, Template, is_secret_option};
+use domain::secrets::{KeyringEntry, Part, SecretRef, Template, is_secret_option, url_passwords};
 use std::collections::BTreeMap;
 
 /// The profile of `export`, and the options it left out.
 pub(crate) fn render(export: &PlanExport) -> Result<RenderedProfile, ExportRefusal> {
     let plan = &export.plan;
+    // rustic reads `a,b` as the two tags `a` and `b`, so the tag can't be
+    // written as it is.
+    if let Some(tag) = plan.tags.iter().find(|tag| tag.as_str().contains(',')) {
+        return Err(ExportRefusal::TagComma {
+            tag: tag.as_str().to_owned(),
+        });
+    }
     let mut out = Out::default();
     out.text.push_str(&format!(
         "# A rustic profile for the Ladderback plan {}, written by Ladderback.\n",
@@ -39,7 +46,10 @@ pub(crate) fn render(export: &PlanExport) -> Result<RenderedProfile, ExportRefus
     ));
     hooks(&mut out, "global.hooks", &export.agent_hooks);
 
-    let (repository, notices) = repository(&export.repository.settings)?;
+    let (repository, mut notices) = repository(&export.repository.settings)?;
+    if plan.retention.is_empty() {
+        notices.push(ProfileNotice::RetentionEmpty);
+    }
     out.section("repository");
     out.string("repository", &repository.location);
     if let Some(hot) = &repository.hot {
@@ -210,12 +220,22 @@ fn repository(
     ))
 }
 
-/// What a value of the repository says, when it says only text: a reference
-/// is one rustic can't resolve, so the key is refused.
+/// What a value of the repository says, when it says only text and no
+/// password: a reference is one rustic can't resolve, and a password in a
+/// URL would be written out, so the key is refused.
 fn plain(key: &str, value: &str) -> Result<String, ExportRefusal> {
-    text_of(value).ok_or_else(|| ExportRefusal::Reference {
+    let text = text_of(value).ok_or_else(|| ExportRefusal::Reference {
         key: key.to_owned(),
-    })
+    })?;
+    // The profile would hold the password as text, in the file and in what
+    // `rustic show-config` prints.
+    if url_passwords(&text).is_empty() {
+        Ok(text)
+    } else {
+        Err(ExportRefusal::UrlPassword {
+            key: key.to_owned(),
+        })
+    }
 }
 
 /// The text a config value stands for, or `None` when it refers to something
@@ -242,7 +262,7 @@ fn text_options(
     let mut kept = BTreeMap::new();
     for (name, value) in options {
         match text_of(value) {
-            Some(text) if !is_secret_option(name) => {
+            Some(text) if !is_secret_option(name) && url_passwords(&text).is_empty() => {
                 kept.insert(name.clone(), text);
             }
             _ => notices.push(ProfileNotice::OptionLeftOut {

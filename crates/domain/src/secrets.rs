@@ -248,7 +248,7 @@ fn partial_needles(secret: &str) -> Vec<String> {
 /// `/` in the password ends the authority early, so the last `@` of the
 /// whole string is tried too. Masking part of a path by mistake is the safe
 /// direction.
-fn url_passwords(repository: &str) -> Vec<SecretValue> {
+pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
     let Some((_, rest)) = repository.split_once("://") else {
         return Vec::new();
     };

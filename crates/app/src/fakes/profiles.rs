@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::RepositoryAlias;
-use domain::secrets::{Part, Template, is_secret_option};
+use domain::secrets::{Part, Template, is_secret_option, url_passwords};
 
 use crate::ports::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileReader,
@@ -54,8 +54,9 @@ impl ProfileReader for FakeProfileReader {
 
 /// Renders a fixed text with the scripted notices, or the scripted refusal,
 /// and records every export it was handed. Like the real writer it refuses a
-/// password written in the config and a location that is a reference, and it
-/// leaves out the options that are references or secrets.
+/// password written in the config, a location that is a reference or holds a
+/// password and a tag with a comma; it notes a plan that keeps everything,
+/// and leaves out the options that are references or secrets.
 #[derive(Default)]
 pub struct FakeProfileWriter {
     refusal: Mutex<Option<ExportRefusal>>,
@@ -92,7 +93,8 @@ impl ProfileWriter for FakeProfileWriter {
         }
         let settings = &export.repository.settings;
         // What no profile can hold, as the real writer sees it: a secret as
-        // text, and a location that is a reference.
+        // text, a location that is a reference or holds a password, and a tag
+        // rustic would split.
         if settings.password.inline().is_some() {
             return Err(ExportRefusal::InlineSecret);
         }
@@ -100,15 +102,34 @@ impl ProfileWriter for FakeProfileWriter {
             ("repository", Some(&settings.repository)),
             ("repo-hot", settings.repo_hot.as_ref()),
         ] {
-            if value.is_some_and(|value| !is_plain(value)) {
+            let Some(value) = value else { continue };
+            if !is_plain(value) {
                 return Err(ExportRefusal::Reference {
                     key: key.to_owned(),
                 });
             }
+            if !url_passwords(value).is_empty() {
+                return Err(ExportRefusal::UrlPassword {
+                    key: key.to_owned(),
+                });
+            }
+        }
+        if let Some(tag) = export
+            .plan
+            .tags
+            .iter()
+            .find(|tag| tag.as_str().contains(','))
+        {
+            return Err(ExportRefusal::TagComma {
+                tag: tag.as_str().to_owned(),
+            });
         }
         let mut notices = lock(&self.notices).clone();
+        if export.plan.retention.is_empty() {
+            notices.push(ProfileNotice::RetentionEmpty);
+        }
         for (name, value) in &settings.options {
-            if !is_plain(value) || is_secret_option(name) {
+            if !is_plain(value) || is_secret_option(name) || !url_passwords(value).is_empty() {
                 notices.push(ProfileNotice::OptionLeftOut {
                     option: name.clone(),
                     variable: format!("RUSTIC_REPO_OPT_{}", name.to_ascii_uppercase()),
