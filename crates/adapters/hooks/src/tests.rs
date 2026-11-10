@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use app::ports::{HookContext, HookPhase, HookStatus};
+use app::ports::{HookContext, HookPhase, HookRunner, HookStatus};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use nix::sys::signal::{Signal, kill, killpg};
@@ -388,6 +388,77 @@ async fn a_hook_that_ends_is_reaped_while_a_descendant_holds_its_output() {
         "the call waited for the timeout: {elapsed:?}"
     );
     assert_eq!(signals.sent(), []);
+}
+
+/// What the hook wrote before it exited is kept, though a descendant holds
+/// the pipes open and nothing ends them: the call reads what is in them and
+/// does not wait for an end that does not come.
+#[tokio::test]
+async fn what_a_hook_wrote_before_it_ended_is_kept_while_a_descendant_holds_its_output() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let entry = sh(
+        concat!(
+            "sleep 300 &\n",
+            r#"echo "pid $!" >> "$1""#,
+            "\necho out; echo err >&2\nexit 3"
+        ),
+        &log,
+    );
+    let outcome = runner.run(&entry, &context()).await;
+    let _reaper = Reaper(pid_in(&lines(&log)));
+    assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
+    assert_eq!(outcome.stdout.text, "out\n");
+    assert_eq!(outcome.stderr.text, "err\n");
+    assert!(!outcome.stdout.truncated && !outcome.stderr.truncated);
+}
+
+/// What a descendant says as the hook ends, or in the second after it, while
+/// the pipes are still read, is kept with the rest.
+#[tokio::test]
+async fn what_a_descendant_says_just_after_the_hook_ended_is_kept() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    // The descendant says its line once the hook is about to exit, so it is
+    // written to the pipes at the exit or just after it.
+    let entry = sh(
+        concat!(
+            "(until [ -e \"$1.exit\" ]; do :; done; echo late) &\n",
+            r#"echo "pid $!" >> "$1""#,
+            "\ntouch \"$1.exit\"\nexit 0"
+        ),
+        &log,
+    );
+    let outcome = runner.run(&entry, &context()).await;
+    let _reaper = Reaper(pid_in(&lines(&log)));
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert_eq!(outcome.stdout.text, "late\n");
+}
+
+/// The pipes are let go when the call returns, though a descendant holds
+/// their write ends: what it writes then fails, with SIGPIPE or, where it
+/// ignores that, with a write error, and nothing reads it.
+#[tokio::test]
+async fn a_descendant_cannot_write_to_a_hook_s_output_after_the_call_returned() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let entry = sh(
+        concat!(
+            "(trap '' PIPE; while [ ! -e \"$1.go\" ]; do sleep 1 & wait $!; done\n",
+            "echo late 2>/dev/null || echo failed >> \"$1\") &\n",
+            r#"echo "pid $!" >> "$1""#,
+            "\nexit 0"
+        ),
+        &log,
+    );
+    let outcome = runner.run(&entry, &context()).await;
+    let _reaper = Reaper(pid_in(&lines(&log)));
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    fs::write(scratch.path().join("log.go"), "").unwrap();
+    logged(&log, "failed").await;
 }
 
 /// The call returns once the killed hook is reaped, not when the SIGKILL is
