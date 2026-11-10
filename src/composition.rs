@@ -2959,6 +2959,61 @@ mod tests {
         assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
     }
 
+    /// The lines `log_ended` logs about a run that `n` names, which ended
+    /// after the log refused it the `refused` writes.
+    fn logged_when_a_run_ends(
+        n: u128,
+        refused: Vec<app::ports::StoreError>,
+    ) -> Vec<(log::Level, String)> {
+        captured_log::capture();
+        let id = OperationId::from_uuid(Uuid::from_u128(n));
+        log_ended(&Finished {
+            operation: running_backup(id),
+            result: None,
+            recording_errors: refused,
+        });
+        let id = id.as_uuid().hyphenated().to_string();
+        captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains(&id))
+            .collect()
+    }
+
+    /// A log that took every write of a run has nothing to be warned of.
+    #[test]
+    fn a_run_the_log_took_in_full_logs_no_warning() {
+        assert_eq!(logged_when_a_run_ends(0x7001, Vec::new()), []);
+    }
+
+    /// Each refused write is one warning, named by the code of its kind of
+    /// failure, and none of the failure's words reaches the log (I4).
+    #[test]
+    fn each_write_the_log_refused_is_one_warning_with_the_code_of_its_failure() {
+        let words = "canary: the disk of /srv/secret-folder is full";
+        let lines = logged_when_a_run_ends(
+            0x7002,
+            vec![
+                app::ports::StoreError::Unavailable {
+                    detail: words.to_owned(),
+                },
+                app::ports::StoreError::Corrupt {
+                    detail: words.to_owned(),
+                },
+            ],
+        );
+        let [(first_level, first), (second_level, second)] = lines.as_slice() else {
+            panic!("one line for each refused write: {lines:?}");
+        };
+        assert_eq!(*first_level, log::Level::Warn, "{first}");
+        assert_eq!(*second_level, log::Level::Warn, "{second}");
+        assert!(first.contains("store-unavailable"), "{first}");
+        assert!(second.contains("store-corrupt"), "{second}");
+        assert!(
+            lines.iter().all(|(_, line)| !line.contains("canary")),
+            "a line repeats what the log said: {lines:?}"
+        );
+    }
+
     /// An operation log whose starts take their time on both sides of the
     /// write, so that a handler dropped on either side is dropped with the
     /// start still going on or already stored.
