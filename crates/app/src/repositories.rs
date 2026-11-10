@@ -226,11 +226,16 @@ async fn run(
     }
 }
 
+/// How many events that are already waiting are read past the deadline in
+/// search of a result.
+const READY_EVENTS: usize = 64;
+
 /// Plays a job's events until its result. A result stands even when it
 /// arrives as the time runs out: a repository that was created is not made
 /// not created by a refusal. Any other event after the deadline is refused
 /// here, on the event itself, so a worker that never stops talking can't keep
-/// the timer from its turn.
+/// the timer from its turn; only the events already waiting behind it, up to
+/// [`READY_EVENTS`], are read first, for the result may be one of them.
 #[allow(clippy::result_large_err)]
 async fn drive(
     clock: &dyn Clock,
@@ -247,17 +252,38 @@ async fn drive(
     } = engine.run(op, job).await.map_err(RepositoryError::Engine)?;
     let mut events = events.fuse();
     while let Some(event) = events.next().await {
-        match event {
-            EngineEvent::Succeeded(EngineResult::Repository { id }) => return Ok(id),
-            EngineEvent::Failed(reason) => return Err(failed(reason)),
-            _ if deadline.has_passed(clock.now()) => return Err(RepositoryError::TimedOut),
-            _ => {}
+        if let Some(done) = result_of(event) {
+            return done;
+        }
+        if deadline.has_passed(clock.now()) {
+            for _ in 0..READY_EVENTS {
+                match events.next().now_or_never() {
+                    Some(Some(event)) => {
+                        if let Some(done) = result_of(event) {
+                            return done;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            return Err(RepositoryError::TimedOut);
         }
     }
     // The stream ended without a result: the engine stopped without reporting.
     Err(RepositoryError::Failed(FailureReason::EngineExited {
         exit_code: None,
     }))
+}
+
+/// What an event ends a job with, if it ends it: the repository's ID or the
+/// job's failure. Progress and warnings end nothing.
+#[allow(clippy::result_large_err)]
+fn result_of(event: EngineEvent) -> Option<Result<RepositoryId, RepositoryError>> {
+    match event {
+        EngineEvent::Succeeded(EngineResult::Repository { id }) => Some(Ok(id)),
+        EngineEvent::Failed(reason) => Some(Err(failed(reason))),
+        _ => None,
+    }
 }
 
 /// A failed job, as these use cases report it: the one typed refusal is a
