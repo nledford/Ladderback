@@ -28,9 +28,10 @@ use futures::select_biased;
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetJob, Job,
-    MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob, RepositoryAccess, Retention,
-    RetentionError, RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start, StoreError,
+    CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, EventBus,
+    ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob, RepositoryAccess,
+    Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start,
+    StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 use domain::execution::deadline::KeepDelete;
@@ -198,6 +199,13 @@ impl RunMaintenance {
             hostname,
             sources,
         }
+    }
+
+    /// Announces how each run ends on `events`, once the log has the end
+    /// (§4.4).
+    #[allow(clippy::todo, reason = "red test: the run announces its end next")]
+    pub fn with_events(self, _events: Arc<dyn EventBus>) -> Self {
+        todo!("announce the end of the run")
     }
 
     /// Resolves the repository, decides what the run does, and takes the

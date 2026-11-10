@@ -14,6 +14,7 @@
     clippy::unreachable
 )]
 
+pub mod announce;
 pub mod event_bus;
 pub mod execution;
 pub mod history;

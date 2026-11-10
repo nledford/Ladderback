@@ -12,8 +12,8 @@ use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, HookContext, HookOutcome, HookPhase,
-    HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome,
+    HookPhase, HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
 
 /// Runs one operation on the engine and records its lifecycle in the
@@ -106,6 +106,13 @@ impl RunOperation {
     pub fn with_hooks(mut self, runner: Arc<dyn HookRunner>, setup: HookSetup) -> Self {
         self.hooks = Some(HookPlan { runner, setup });
         self
+    }
+
+    /// Announces how each operation ends on `events`, once the log has the
+    /// end (§4.4).
+    #[allow(clippy::todo, reason = "red test: the run announces its end next")]
+    pub fn with_events(self, _events: Arc<dyn EventBus>) -> Self {
+        todo!("announce the end of the run")
     }
 
     /// Runs `job`, started by `trigger`. When `cancel` completes, the
