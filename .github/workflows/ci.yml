@@ -88,10 +88,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - if: needs.changes.outputs.docs-only != 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Every pull request is checked out: a docs-only one still runs the
+      # agent-guidance path check below, which `just lint` runs for the rest.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - if: needs.changes.outputs.docs-only == 'true'
+        run: scripts/check-doc-paths.sh
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - if: needs.changes.outputs.docs-only != 'true'
         run: rustup toolchain install
