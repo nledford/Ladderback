@@ -29,7 +29,9 @@ use tokio::sync::Notify;
 
 use super::Agent;
 use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
-use app::maintenance::{MaintenanceAssessment, MaintenanceError, MaintenanceKind, RunMaintenance};
+use app::maintenance::{
+    MaintenanceAssessment, MaintenanceError, MaintenanceKind, PreparedMaintenance, RunMaintenance,
+};
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
     JobControl, MAX_JOB_IDS, OperationStore, PruneSummary, RewriteSummary, RunningJob,
@@ -483,7 +485,7 @@ impl Engine for Scripted {
         };
         // Everything but the result flows at once; a forget's result waits
         // for the release, so a scenario can hold a run on purpose. A read
-        // (identify, listing) answers at once: `prepare` runs them before
+        // (identify, listing) answers at once: `assess` runs them before
         // anything holds the repository.
         let hold = change.is_some() && change == self.hold_at;
         let release = Arc::clone(&self.release);
@@ -520,6 +522,17 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 Arc::new(FakeSources),
             )),
     )
+}
+
+/// Assesses a maintenance run and starts it on this one future, which no
+/// scenario drops: the route keeps the two apart for a client that hangs up.
+pub async fn assess_and_start(
+    use_case: &RunMaintenance,
+    operation: OperationId,
+    kind: MaintenanceKind,
+) -> Result<PreparedMaintenance, MaintenanceError> {
+    let assessment = use_case.assess(operation, &alias(), kind).await?;
+    use_case.start(assessment).await
 }
 
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s)")]
@@ -633,15 +646,15 @@ async fn maintenance_running(agent: &mut Agent) {
 #[when("the owner forgets the repository")]
 async fn forget(agent: &mut Agent) {
     let use_case = use_case(agent);
-    // The scenario's clock jumps to a timer's deadline, so a prepare that
+    // The scenario's clock jumps to a timer's deadline, so an assess that
     // waits on a repository that never answers ends at once; one that does
     // not time out would hang, and is cut off here.
     let prepared = tokio::time::timeout(
         Duration::from_secs(5),
-        use_case.prepare(operation_id(0xcc), &alias(), MaintenanceKind::Forget),
+        assess_and_start(&use_case, operation_id(0xcc), MaintenanceKind::Forget),
     )
     .await
-    .expect("prepare returns instead of waiting for ever");
+    .expect("assess returns instead of waiting for ever");
     match prepared {
         Ok(prepared) => {
             // The prepared run carries the operation the route answered
@@ -673,8 +686,7 @@ async fn forget(agent: &mut Agent) {
 #[when("the owner forgets the repository and cancels it while the second job runs")]
 async fn forget_then_cancel(agent: &mut Agent) {
     let use_case = use_case(agent);
-    let prepared = use_case
-        .prepare(operation_id(0xcc), &alias(), MaintenanceKind::Forget)
+    let prepared = assess_and_start(&use_case, operation_id(0xcc), MaintenanceKind::Forget)
         .await
         .expect("the repository is free");
     let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
@@ -701,8 +713,7 @@ async fn forget_then_cancel(agent: &mut Agent) {
 #[when("the owner forgets the repository and a prune is asked while it runs")]
 async fn forget_then_prune(agent: &mut Agent) {
     let use_case = use_case(agent);
-    let prepared = use_case
-        .prepare(operation_id(0xdd), &alias(), MaintenanceKind::Forget)
+    let prepared = assess_and_start(&use_case, operation_id(0xdd), MaintenanceKind::Forget)
         .await
         .expect("the repository is free");
     let runner = Arc::clone(&use_case);
@@ -710,9 +721,7 @@ async fn forget_then_prune(agent: &mut Agent) {
         tokio::spawn(async move { runner.execute(prepared, futures::future::pending()).await });
     // The engine records the forget job before its result is held.
     wait_for_forget(agent).await;
-    let refused = use_case
-        .prepare(operation_id(0xee), &alias(), MaintenanceKind::Prune)
-        .await;
+    let refused = assess_and_start(&use_case, operation_id(0xee), MaintenanceKind::Prune).await;
     agent.forget.refused = refused.err();
     agent.forget.release.notify_waiters();
     agent.finished = Some(running.await.expect("the run ends"));
@@ -752,20 +761,17 @@ async fn check(agent: &mut Agent) {
 #[when("the owner checks the repository after cancelling it")]
 async fn check_after_cancel(agent: &mut Agent) {
     let use_case = use_case(agent);
-    let prepared = use_case
-        .prepare(operation_id(0xcc), &alias(), MaintenanceKind::Check)
+    let prepared = assess_and_start(&use_case, operation_id(0xcc), MaintenanceKind::Check)
         .await
         .expect("the repository is free");
     // The scripted engine's result is ready the moment the job starts.
     agent.finished = Some(use_case.execute(prepared, futures::future::ready(())).await);
 }
 
-/// Prepares and runs one maintenance operation, as the route does.
+/// Assesses, starts and runs one maintenance operation, as the route does.
 async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
     let use_case = use_case(agent);
-    let prepared = use_case
-        .prepare(operation_id(0xcc), &alias(), kind.clone())
-        .await;
+    let prepared = assess_and_start(&use_case, operation_id(0xcc), kind.clone()).await;
     match prepared {
         Ok(prepared) => {
             let runner = Arc::clone(&use_case);
@@ -915,9 +921,8 @@ fn prune_refused(agent: &mut Agent) {
 
 #[then("a prune of the repository can start")]
 async fn a_prune_can_start(agent: &mut Agent) {
-    let prepared = use_case(agent)
-        .prepare(operation_id(0xee), &alias(), MaintenanceKind::Prune)
-        .await;
+    let use_case = use_case(agent);
+    let prepared = assess_and_start(&use_case, operation_id(0xee), MaintenanceKind::Prune).await;
     assert!(
         prepared.is_ok(),
         "a repository nothing runs on takes a prune: {:?}",

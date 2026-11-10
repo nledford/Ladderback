@@ -16,7 +16,9 @@ use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
-use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
+use app::maintenance::{
+    Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, RunMaintenance,
+};
 use app::ports::Retention;
 use app::ports::SecretResolver as _;
 use app::ports::{
@@ -543,50 +545,46 @@ impl Operations for PlanRunner {
         .with_events(Arc::clone(&self.events));
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
-        let prepared = use_case.prepare(operation, &alias, kind).await;
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(app::maintenance::MaintenanceError::UnknownRepository) => {
-                return Err(http_adapter::MaintenanceStartError::UnknownRepository);
-            }
-            Err(app::maintenance::MaintenanceError::Busy { running }) => {
-                return Err(http_adapter::MaintenanceStartError::Busy {
-                    running: running.as_uuid().hyphenated().to_string(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::KeepsNothing { plan }) => {
-                return Err(http_adapter::MaintenanceStartError::KeepsNothing {
-                    plan: plan.as_str().to_owned(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::UnknownPlan { plan }) => {
-                return Err(http_adapter::MaintenanceStartError::UnknownPlan {
-                    plan: plan.as_str().to_owned(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::AdoptionNoMatch) => {
-                return Err(http_adapter::MaintenanceStartError::AdoptionNoMatch);
-            }
-            Err(app::maintenance::MaintenanceError::AdoptionAmbiguous { plans }) => {
-                return Err(http_adapter::MaintenanceStartError::AdoptionAmbiguous {
-                    plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
-                });
-            }
-            Err(_) => return Err(http_adapter::MaintenanceStartError::Unavailable),
-        };
-        // The slot is held; the run happens on a task of its own, and its
-        // cancel switch is parked before it starts (§4.2).
-        let cancel = self.registry.register(operation);
-        let cancel = async move {
-            let _ = cancel.await;
-        };
+        // The reads come first, on the request's own future: they store
+        // nothing and take no slot, so a client that hangs up meanwhile has
+        // left nothing behind.
+        let assessment = use_case
+            .assess(operation, &alias, kind)
+            .await
+            .map_err(maintenance_refusal)?;
+        // The start writes the log. A write dropped after SQLite committed
+        // it leaves a running row that holds the repository (I7) and that
+        // nothing in this process ends, so the start happens on a task of its
+        // own, which the client's hanging up can't drop, and the route waits
+        // for that task's answer.
+        let (started, wait_for_start) = futures::channel::oneshot::channel();
         let registry = Arc::clone(&self.registry);
         tokio::spawn(async move {
+            let prepared = match use_case.start(assessment).await {
+                Ok(prepared) => prepared,
+                Err(refused) => {
+                    let _ = started.send(Err(maintenance_refusal(refused)));
+                    return;
+                }
+            };
+            // The cancel switch is parked before the route answers, not
+            // lazily when the run first polls it, so a cancel that arrives
+            // the instant the route answers finds it (§4.2).
+            let cancel = registry.register(operation);
+            let cancel = async move {
+                let _ = cancel.await;
+            };
+            let _ = started.send(Ok(()));
             let finished = use_case.execute(prepared, cancel).await;
             registry.finish(&operation);
             log_ended(&finished);
         });
-        Ok(id_text)
+        // A task that ended without answering has not started anything the
+        // route could name.
+        match wait_for_start.await {
+            Ok(answer) => answer.map(|()| id_text),
+            Err(_) => Err(http_adapter::MaintenanceStartError::Unavailable),
+        }
     }
 
     async fn history(
@@ -705,6 +703,30 @@ fn log_ended(finished: &Finished) {
             "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
             refused.code()
         );
+    }
+}
+
+/// Why a maintenance run could not start, as the API answers it. A failure
+/// to read the configuration, the secrets, the repository or the operation
+/// log is `Unavailable`: none of them is the caller's to fix.
+fn maintenance_refusal(error: MaintenanceError) -> http_adapter::MaintenanceStartError {
+    use http_adapter::MaintenanceStartError as Answer;
+    match error {
+        MaintenanceError::UnknownRepository => Answer::UnknownRepository,
+        MaintenanceError::Busy { running } => Answer::Busy {
+            running: running.as_uuid().hyphenated().to_string(),
+        },
+        MaintenanceError::KeepsNothing { plan } => Answer::KeepsNothing {
+            plan: plan.as_str().to_owned(),
+        },
+        MaintenanceError::UnknownPlan { plan } => Answer::UnknownPlan {
+            plan: plan.as_str().to_owned(),
+        },
+        MaintenanceError::AdoptionNoMatch => Answer::AdoptionNoMatch,
+        MaintenanceError::AdoptionAmbiguous { plans } => Answer::AdoptionAmbiguous {
+            plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
+        },
+        _ => Answer::Unavailable,
     }
 }
 
