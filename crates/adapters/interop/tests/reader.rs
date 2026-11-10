@@ -1486,3 +1486,33 @@ async fn the_filter_an_export_makes_is_not_a_narrowing() {
         );
     }
 }
+
+// --- Substituting variables in the profiles a profile uses ----------------------
+
+#[tokio::test]
+async fn a_profile_that_has_rustic_substitute_variables_in_what_it_uses_is_refused() {
+    // The importer escapes the `${` a used profile holds so that it stays
+    // text; with the switch on, rustic would have read it as a variable.
+    let text = with("[global]\nprofile-substitute-env = true\n");
+    let (key, line) = unsupported(read_err(&text).await);
+    assert_eq!(key, "global.profile-substitute-env");
+    assert_eq!(line, Some(line_of(&text, "profile-substitute-env")));
+}
+
+#[tokio::test]
+async fn the_switch_turned_off_is_only_noted() {
+    let profile = read_ok(&with("[global]\nprofile-substitute-env = false\n")).await;
+    assert!(
+        profile
+            .notices
+            .contains(&ignored("global.profile-substitute-env"))
+    );
+}
+
+#[tokio::test]
+async fn a_switch_that_is_not_true_or_false_is_a_wrong_type() {
+    let (key, _, problem) =
+        invalid(read_err(&with("[global]\nprofile-substitute-env = \"yes\"\n")).await);
+    assert_eq!(key, "global.profile-substitute-env");
+    assert_eq!(problem, ProfileProblem::WrongType);
+}

@@ -713,6 +713,24 @@ Feature: Import a rustic profile
       Then the import is refused naming "missing.toml"
       And no config file was written
 
+    Scenario: A profile that has rustic substitute variables in the profiles it uses is refused
+      Given a rustic profile "nas.toml" holding:
+        """
+        [global]
+        profile-substitute-env = true
+
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "global.profile-substitute-env"
+      And no config file was written
+
   @e2e
   Rule: Secrets stay references, and rustic's variables fill only what the profile leaves out
 

@@ -645,3 +645,21 @@ async fn a_snapshot_filter_and_retention_that_come_from_two_profiles_are_refused
         other => panic!("unsupported, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn the_switch_in_a_used_profile_is_refused_naming_that_profile() {
+    let scratch = Scratch::new();
+    let base = scratch.profile("base.toml", "[global]\nprofile-substitute-env = true\n");
+    match scratch
+        .read(&uses(&["base"], &format!("{REPOSITORY}\n{ENTRY}")))
+        .await
+        .unwrap_err()
+    {
+        ProfileError::Unsupported { file, key, at } => {
+            assert_eq!(file, base.display().to_string());
+            assert_eq!(key, "global.profile-substitute-env");
+            assert_eq!(at.map(|at| at.line), Some(2));
+        }
+        other => panic!("unsupported, got {other:?}"),
+    }
+}
