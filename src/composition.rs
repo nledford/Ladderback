@@ -854,6 +854,16 @@ pub(crate) fn plan_unknown(plan: &str) -> Refusal {
     }
 }
 
+/// A name for a repository that is not an alias: the one a person asked for,
+/// or what could be made of a profile's file name.
+pub(crate) fn repository_alias_invalid() -> Refusal {
+    Refusal {
+        code: ErrorCode::RepositoryAliasInvalid,
+        args: Vec::new(),
+        detail: None,
+    }
+}
+
 /// What the reader said was wrong with a profile.
 fn profile_refusal(error: ProfileError) -> Refusal {
     match error {
@@ -2269,6 +2279,15 @@ mod tests {
         );
         assert_eq!(plan.code, ErrorCode::PlanIdTaken);
         assert!(said(&plan).contains("home"));
+    }
+
+    #[test]
+    fn a_name_that_is_not_an_alias_is_refused_by_its_code_alone() {
+        let refusal = repository_alias_invalid();
+        assert_eq!(refusal.code, ErrorCode::RepositoryAliasInvalid);
+        assert!(refusal.args.is_empty());
+        assert_eq!(refusal.detail, None);
+        assert!(said(&refusal).contains("lower-case letters"));
     }
 
     #[test]

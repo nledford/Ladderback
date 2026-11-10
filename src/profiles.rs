@@ -3,13 +3,16 @@
 //! ID and rustic's profile format, and reports what they did.
 //!
 //! The import's notices and refusals go to stderr as the catalog's messages
-//! for their codes; what the import did goes to stdout. A refusal exits with
-//! 1 and leaves the configuration as it was.
+//! for their codes; what the import did goes to stdout. With `--json` it
+//! prints one document on stdout instead, notices in it, made of codes and
+//! arguments and never of sentences (§8.4). A refusal exits with 1 and
+//! leaves the configuration as it was.
 //!
 //! The export prints the profile on stdout, and only when it was made.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -24,7 +27,9 @@ use platform::{SystemClock, agent_id, dirs};
 
 use crate::composition::{
     Notice, Refusal, export_refusal, import_refusal, plan_unknown, profile_notice,
+    repository_alias_invalid,
 };
+use crate::output::{Report, write_json};
 use crate::{say, text};
 
 /// Where stock rustic looks for the profiles a profile uses, when it is not
@@ -68,72 +73,96 @@ fn warn(localizer: &Localizer, notice: &Notice) {
 }
 
 /// What `import-profile --json` prints when the import saved the profile.
-fn import_document(_imported: Imported) -> api::ProfileImportDto {
-    todo!()
+fn import_document(imported: Imported) -> api::ProfileImportDto {
+    api::ProfileImportDto {
+        repository: imported.repository.as_str().to_owned(),
+        plans: imported
+            .plans
+            .iter()
+            .map(|plan| plan.as_str().to_owned())
+            .collect(),
+        notices: imported
+            .notices
+            .into_iter()
+            .map(|notice| {
+                let Notice { code, args } = profile_notice(notice);
+                api::WarningDto::new(code, args)
+            })
+            .collect(),
+    }
 }
 
 /// What `import-profile --json` prints when the import was refused.
-fn failure_document(_refusal: Refusal) -> api::FailureDto {
-    todo!()
+fn failure_document(refusal: Refusal) -> api::FailureDto {
+    api::FailureDto {
+        error: api::ErrorDto::new(refusal.code, refusal.args, refusal.detail),
+    }
+}
+
+/// What is wrong with the name an import would save its repository under.
+enum AliasProblem {
+    /// The name asked for with `--repo-name` is not an alias.
+    BadName(String),
+    /// None was asked for, and the profile's file name has nothing an alias
+    /// can be made of.
+    NoName,
 }
 
 /// The alias an import saves the repository under: the one asked for, or
-/// the profile's file name as a slug. `None` after saying what is wrong.
-fn repository_alias(
-    localizer: &Localizer,
-    file: &Path,
-    repo_name: Option<&str>,
-) -> Option<RepositoryAlias> {
+/// the profile's file name as a slug.
+fn repository_alias(file: &Path, repo_name: Option<&str>) -> Result<RepositoryAlias, AliasProblem> {
     if let Some(name) = repo_name {
-        return match RepositoryAlias::parse(name) {
-            Ok(alias) => Some(alias),
-            Err(_) => {
-                say(
-                    localizer,
-                    msg::CLI_PROFILE_BAD_REPOSITORY_NAME,
-                    &[("name", text(name))],
-                );
-                None
-            }
-        };
+        return RepositoryAlias::parse(name).map_err(|_| AliasProblem::BadName(name.to_owned()));
     }
-    let alias = file
-        .file_stem()
+    file.file_stem()
         .and_then(|stem| stem.to_str())
-        .and_then(RepositoryAlias::slugify);
-    if alias.is_none() {
-        say(
-            localizer,
-            msg::CLI_PROFILE_NO_REPOSITORY_NAME,
-            &[("file", text(file.display()))],
-        );
-    }
-    alias
+        .and_then(RepositoryAlias::slugify)
+        .ok_or(AliasProblem::NoName)
 }
 
-/// Imports the rustic profile in `file`. The repository is saved under
-/// `repo_name`, or under the profile's file name made into a slug.
-pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>) -> ExitCode {
-    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
-    let Some(config_dir) = dirs::config_dir() else {
-        say(&localizer, msg::CLI_NO_CONFIG_DIR, &[]);
-        return ExitCode::FAILURE;
-    };
-    let config_file = config_dir.join("config.toml");
-    let Some(alias) = repository_alias(&localizer, &file, repo_name.as_deref()) else {
-        return ExitCode::FAILURE;
-    };
-    let runtime = match tokio::runtime::Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            say(
-                &localizer,
+/// Why an import saved nothing.
+enum NotImported {
+    /// There is no folder to keep the configuration in.
+    NoConfigDir,
+    /// There is no name to save the repository under.
+    Alias(AliasProblem),
+    /// The async runtime did not start.
+    Runtime(io::Error),
+    /// The import was refused, and the configuration is as it was.
+    Refused(Refusal),
+}
+
+impl NotImported {
+    /// Says why on stderr, as the catalog says it. `file` is the profile.
+    fn say(&self, localizer: &Localizer, file: &Path) {
+        match self {
+            Self::NoConfigDir => say(localizer, msg::CLI_NO_CONFIG_DIR, &[]),
+            Self::Alias(AliasProblem::BadName(name)) => say(
+                localizer,
+                msg::CLI_PROFILE_BAD_REPOSITORY_NAME,
+                &[("name", text(name))],
+            ),
+            Self::Alias(AliasProblem::NoName) => say(
+                localizer,
+                msg::CLI_PROFILE_NO_REPOSITORY_NAME,
+                &[("file", text(file.display()))],
+            ),
+            Self::Runtime(error) => say(
+                localizer,
                 msg::CLI_CANNOT_START_RUNTIME,
                 &[("detail", text(error))],
-            );
-            return ExitCode::FAILURE;
+            ),
+            Self::Refused(refusal) => refuse(localizer, refusal),
         }
-    };
+    }
+}
+
+/// Does the import: what it added, or why it saved nothing.
+fn import(file: &Path, repo_name: Option<&str>) -> Result<Imported, NotImported> {
+    let config_dir = dirs::config_dir().ok_or(NotImported::NoConfigDir)?;
+    let config_file = config_dir.join("config.toml");
+    let alias = repository_alias(file, repo_name).map_err(NotImported::Alias)?;
+    let runtime = tokio::runtime::Runtime::new().map_err(NotImported::Runtime)?;
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
         config_file.clone(),
         Arc::new(SystemClock),
@@ -143,36 +172,88 @@ pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>) -> ExitCo
         rustic_variables(std::env::vars_os()),
     );
     let use_case = ImportProfile::new(Arc::new(reader), config);
-    match runtime.block_on(use_case.import(&file, alias)) {
-        Ok(imported) => {
-            for notice in imported.notices {
-                warn(&localizer, &profile_notice(notice));
-            }
-            println!(
-                "{}",
-                localizer.message(
-                    msg::CLI_PROFILE_IMPORTED,
-                    &[
-                        ("repository", text(imported.repository.as_str())),
-                        ("file", text(file.display())),
-                    ],
-                )
-            );
-            for plan in imported.plans {
-                println!(
-                    "{}",
-                    localizer.message(
-                        msg::CLI_PROFILE_ADDED_PLAN,
-                        &[("plan", text(plan.as_str()))],
-                    )
-                );
-            }
-            ExitCode::SUCCESS
+    runtime
+        .block_on(use_case.import(file, alias))
+        .map_err(|error| NotImported::Refused(import_refusal(error, &config_file)))
+}
+
+/// Says what the import did, in words: its notices on stderr, then what it
+/// added on stdout; or why it saved nothing, on stderr.
+fn tell_import(
+    localizer: &Localizer,
+    file: &Path,
+    outcome: Result<Imported, NotImported>,
+) -> ExitCode {
+    let imported = match outcome {
+        Ok(imported) => imported,
+        Err(not_imported) => {
+            not_imported.say(localizer, file);
+            return ExitCode::FAILURE;
         }
-        Err(error) => {
-            refuse(&localizer, &import_refusal(error, &config_file));
-            ExitCode::FAILURE
+    };
+    for notice in imported.notices {
+        warn(localizer, &profile_notice(notice));
+    }
+    println!(
+        "{}",
+        localizer.message(
+            msg::CLI_PROFILE_IMPORTED,
+            &[
+                ("repository", text(imported.repository.as_str())),
+                ("file", text(file.display())),
+            ],
+        )
+    );
+    for plan in imported.plans {
+        println!(
+            "{}",
+            localizer.message(
+                msg::CLI_PROFILE_ADDED_PLAN,
+                &[("plan", text(plan.as_str()))],
+            )
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+/// Prints what the import did, or why it saved nothing, as one JSON document
+/// on stdout, and nothing on stderr. Not yet a document: a failure that has
+/// no code, which is said in words on stderr.
+fn document_import(
+    localizer: &Localizer,
+    file: &Path,
+    outcome: Result<Imported, NotImported>,
+) -> ExitCode {
+    let (written, status) = match outcome {
+        Ok(imported) => (print_json(&import_document(imported)), ExitCode::SUCCESS),
+        Err(NotImported::Refused(refusal)) => {
+            (print_json(&failure_document(refusal)), ExitCode::FAILURE)
         }
+        Err(NotImported::Alias(_)) => (
+            print_json(&failure_document(repository_alias_invalid())),
+            ExitCode::FAILURE,
+        ),
+        Err(not_imported) => {
+            not_imported.say(localizer, file);
+            return ExitCode::FAILURE;
+        }
+    };
+    written.map_or(ExitCode::FAILURE, |()| status)
+}
+
+/// Prints `document` as the one line `--json` prints on stdout.
+fn print_json(document: &impl serde::Serialize) -> io::Result<()> {
+    write_json(&mut io::stdout().lock(), document)
+}
+
+/// Imports the rustic profile in `file`. The repository is saved under
+/// `repo_name`, or under the profile's file name made into a slug.
+pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>, report: Report) -> ExitCode {
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    let outcome = import(&file, repo_name.as_deref());
+    match report {
+        Report::Text => tell_import(&localizer, &file, outcome),
+        Report::Json => document_import(&localizer, &file, outcome),
     }
 }
 

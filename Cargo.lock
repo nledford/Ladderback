@@ -3219,6 +3219,7 @@ dependencies = [
  "rustic_backend",
  "rustic_core",
  "secrets",
+ "serde",
  "serde_json",
  "store",
  "tempfile",

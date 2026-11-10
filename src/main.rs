@@ -62,6 +62,11 @@ enum Command {
         /// file name, as a slug, when it is left out.
         #[arg(long = "repo-name", value_name = "NAME")]
         repo_name: Option<String>,
+        /// Print one JSON document on standard output, for a script to read,
+        /// instead of sentences: the repository and the plans that were
+        /// added, or the code of the refusal.
+        #[arg(long)]
+        json: bool,
     },
     /// Write a plan as a rustic profile on stdout.
     ExportProfile {
@@ -95,7 +100,11 @@ fn main() -> ExitCode {
             listen,
             allowed_hosts,
         } => serve(listen, allowed_hosts, plain),
-        Command::ImportProfile { file, repo_name } => profiles::import_profile(file, repo_name),
+        Command::ImportProfile {
+            file,
+            repo_name,
+            json,
+        } => profiles::import_profile(file, repo_name, output::Report::asked(json)),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
         Command::Worker => engine::worker::main(),
     }
