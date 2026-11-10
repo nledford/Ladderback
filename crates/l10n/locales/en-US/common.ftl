@@ -176,7 +176,7 @@ error-maintenance-selection-changed = The repository changed after you reviewed 
 
 # The repository did not answer a read in time, so there was nothing to show
 # or to review.
-error-repository-read-timed-out = The repository did not answer in time, so its snapshots could not be read. Check that it can be reached, then try again.
+error-repository-read-timed-out = The repository did not answer in time, so what was asked of it could not be read. Check that it can be reached, then try again.
 
 # The request asks for a maintenance kind this version does not run.
 # $kind (text): the kind as it was sent.

@@ -7,7 +7,7 @@ Feature: The Snapshots page asks the daemon for a repository's history and for a
   preview names what the run would do and changes nothing, takes no
   maintenance slot and leaves nothing in the operation log. A forget or an
   adoption that is confirmed names the selection its preview showed, and a
-  repository that has changed since is refused instead of acted on (I1, I6).
+  repository that has changed since is refused instead of acted on (I6).
 
   Background:
     Given Ladderback is serving on loopback with the plan "home"

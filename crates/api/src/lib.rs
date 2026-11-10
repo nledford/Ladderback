@@ -200,7 +200,7 @@ pub enum ErrorCode {
     RuntimeUnavailable,
     /// The snapshots a forget or an adoption would act on are no longer the
     /// ones its preview named: the repository changed after the review, so
-    /// nothing was done (I1).
+    /// nothing was done (I6).
     MaintenanceSelectionChanged,
     /// The repository did not answer a read in time, so its history, or a
     /// preview of a maintenance run, could not be shown.
