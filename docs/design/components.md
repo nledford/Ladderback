@@ -72,7 +72,7 @@ enum WorkerEvent {
 
 ### 4.2 Daemon (agent)
 
-- **axum 0.8** HTTP server. It serves the embedded UI, `/api/v1/*` (JSON) and `/api/v1/events` (WebSocket for live updates). It binds to `127.0.0.1:9898` by default. Request checks (§10.1) apply whether or not auth is enabled.
+- **axum 0.8** HTTP server. It serves the embedded UI, `/api/v1/*` (JSON) and `/api/v1/events` (WebSocket for live updates). It binds to `127.0.0.1:9898` by default. Request checks, body limits and the security response headers (§10.1) apply whether or not auth is enabled: a request is checked first, then its body is read up to the limit of its route class (128 KiB for `/api/v1`, none for the UI) before a route runs, and every response carries the headers.
 - **Scheduler** (§5). It turns plans into jobs and respects per-agent concurrency limits.
 - **Job runner.** It spawns workers, consumes events, writes the op log (queued, running, finished; a write the store refuses never changes how the operation ends, §9) and broadcasts to UI clients. If a hub is configured, it also writes events to the sync outbox.
 - **Store.** SQLite via `sqlx`, in WAL mode (§9).

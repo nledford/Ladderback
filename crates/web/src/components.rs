@@ -349,7 +349,9 @@ pub fn Progress(label: String, value: RwSignal<u8>) -> impl IntoView {
             aria-valuetext=move || format!("{}%", value.get())
         >
             <div class="progress-track">
-                <div class="progress-fill" style=move || format!("inline-size: {}%", value.get())></div>
+                // A style property, which the page's content security policy
+                // allows (§10.1), not a `style` attribute, which it refuses.
+                <div class="progress-fill" style:inline-size=move || format!("{}%", value.get())></div>
             </div>
         </div>
         <span aria-hidden="true">{move || format!("{}%", value.get())}</span>

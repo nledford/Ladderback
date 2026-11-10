@@ -14,6 +14,7 @@
 mod body_limit;
 mod repositories;
 mod request_checks;
+mod response_headers;
 
 use std::borrow::Cow;
 #[cfg(debug_assertions)]
@@ -310,7 +311,8 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// plans, the repositories, one repository's snapshots — and the routes that
 /// test, connect and initialise a repository. A request that fails `checks`
 /// never reaches a route, and neither does one whose body is over the limit
-/// of its class of route (§10.1).
+/// of its class of route (§10.1). Every response, a refusal included, carries
+/// the security headers.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -352,6 +354,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         })
         .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce))
+        .layer(from_fn(response_headers::add))
 }
 
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
@@ -746,14 +749,23 @@ fn file(path: &str, asset: Asset) -> Response {
     } else {
         "public, max-age=31536000, immutable"
     });
-    (
+    // The entry page starts the application with a script of its own, so its
+    // policy names that script by its hash (§10.1).
+    let policy = (path == INDEX).then(|| response_headers::page_policy(&asset.bytes));
+    let mut response = (
         [
             (header::CONTENT_TYPE, content_type),
             (header::CACHE_CONTROL, cache_control),
         ],
         Body::from(asset.bytes),
     )
-        .into_response()
+        .into_response();
+    if let Some(policy) = policy {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_SECURITY_POLICY, policy);
+    }
+    response
 }
 
 #[cfg(test)]

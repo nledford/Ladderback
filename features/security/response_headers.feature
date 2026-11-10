@@ -48,3 +48,10 @@ Feature: Security response headers
         | default-src 'self'                            |
         | script-src 'self' 'wasm-unsafe-eval'          |
         | frame-ancestors 'none'                        |
+
+  Rule: No response asks for HTTPS
+
+    Scenario: The web UI's response has no Strict-Transport-Security header
+      Given a "GET" request for "/"
+      When the request is sent
+      Then the response has no "Strict-Transport-Security" header

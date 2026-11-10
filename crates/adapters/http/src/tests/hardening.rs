@@ -150,3 +150,34 @@ async fn a_request_the_checks_refuse_gets_the_security_headers() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_secured(&response, "a refusal of the request checks");
 }
+
+#[tokio::test]
+async fn the_entry_page_names_its_own_inline_script_by_hash_and_nothing_else_does() {
+    let assets: Arc<dyn AssetSource> = Arc::new(Files(HashMap::from([
+        (
+            "index.html",
+            "<!doctype html><script type=\"module\">start()</script>",
+        ),
+        ("web-1a2b.js", "export default 1;"),
+    ])));
+    // The script's hash, as a browser computes it (the base64 of its SHA-256).
+    let hash = "'sha256-DIm7WJS6ZKDYe5qFLPy+h4JFI9Bol5QmYC57mt3Fb00='";
+    for path in ["/", "/machines/laptop"] {
+        let response = request(Arc::clone(&assets), Method::GET, path, "").await;
+        let policy = response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap();
+        assert!(
+            policy.contains(&format!("script-src 'self' 'wasm-unsafe-eval' {hash};")),
+            "{path}: {policy}"
+        );
+        assert!(!policy.contains("unsafe-inline"), "{path}: {policy}");
+    }
+    for path in ["/web-1a2b.js", "/api/v1/plans", "/missing.js"] {
+        let response = request(Arc::clone(&assets), Method::GET, path, "").await;
+        let policy = response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap();
+        assert!(!policy.contains("sha256-"), "{path}: {policy}");
+    }
+}
