@@ -32,7 +32,7 @@ Every secret-bearing field can come from any of these sources. That covers the r
 | OS keyring | `password-keyring = "ladderback/nas"` | Desktops. The UI can write the entry for you. Not available to system services before login or to a root worker reading a user's keyring |
 | File | `password-file = "/run/secrets/nas_password"` (rustic-compatible) | **Docker/Podman secrets**, systemd `LoadCredential=` (`$CREDENTIALS_DIRECTORY/…`), Kubernetes secrets |
 | Environment variable | `password-env = "NAS_PASSWORD"` | Containers, CI, systemd `Environment=`/`EnvironmentFile=` |
-| Inline | `password = "…"` | Accepted (e.g. on import) with a warning and an offer to move it to the keyring |
+| Inline | `password = "…"` | Accepted (e.g. on import) with a warning: the daemon logs `config-inline-secret` once per secret when it loads the config, and the Repositories page notes it on that repository's row. Both name the setting (`password`, `options.NAME`), never the value; it is not a refusal. An option counts when its name says it is a credential (`is_secret_option`) and its value has no `${…}` reference |
 
 **Substitution in repository fields.** Inspired by Backrest's `${VAR}` expansion, but stricter. `repository`, `repo-hot` and the **values** of `options`, `options-hot` and `options-cold` may reference `${VAR}` (an environment variable) or `${file:/abs/path}` (a file's contents). Substitution is limited to these fields: in hooks it would put secrets into process arguments (I4), and in `label`, `sources` or `tags` it would silently change snapshot identity. It never applies to option names, and never to an inline `password`, which is taken as written. For example:
 
