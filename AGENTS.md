@@ -123,6 +123,21 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 - Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`. `just test` lists the skips at its end, so CI shows them. `testkit` is a dev-dependency only.
 
+## Checks and evidence
+
+**Never make a check pass by weakening it.** A red check stands for unfinished work. None of these turns it green:
+
+- `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only an equivalent mutant (one no behaviour can tell apart) or code that never runs on the host is excluded, each with its reason in the attribute or the file, and the pull request names it;
+- `#[allow(clippy::…)]` without a `reason` that proves the case, or for code that can fail;
+- `testkit::skip!` on a test that fails here rather than one that can't run here;
+- raising a test's limit to fit slow code: the e2e runner's 8 s stall check (§13.2), a step's or a scenario's timeout;
+- re-recording a golden file so it matches new output without saying in the pull request why the output changed;
+- dropping a tag, a scenario or a test from the red `test:` commit, or `git commit --no-verify`.
+
+If you think a check is wrong, name it, say why, and stop for the maintainer.
+
+**Prove "done" with the recipe's output.** Before saying a change is done, fixed or green, run the recipe that proves it (`just verify`, or the narrower recipe for what changed) and quote its result. For CI, quote the run on the pull request's current head commit. A subagent's report, a handoff file or an earlier summary is a claim, not evidence: run the recipe again. A test in the skip list at the end of `just test` didn't pass; say it was skipped and why.
+
 ## Independent adversarial review
 
 After implementing a non-trivial change, get one independent adversarial review from a reviewer subagent that has a fresh context. Don't review your own work. If your tool has no subagents, use a new session that sees only the diff and the relevant design sections.
