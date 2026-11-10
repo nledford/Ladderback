@@ -100,6 +100,27 @@ a {
   font-weight: 600;
 }
 
+/* The pages' links, in the header of every page; the current page is bold,
+   which is more than its color (§4.5, A2). */
+.site-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin-block: 0.25rem 0;
+  margin-inline: 0;
+  padding: 0;
+}
+
+.site-nav a {
+  display: inline-block;
+  padding-block: 0.25rem;
+}
+
+.site-nav a[aria-current="page"] {
+  font-weight: 700;
+}
+
 main {
   max-inline-size: 60rem;
   margin-inline: auto;
@@ -188,4 +209,78 @@ main:focus {
   margin-block: 0.5rem;
   padding-block: 0.5rem;
   padding-inline: 0.75rem;
+}
+
+/* The repositories page: the form's fields stacked, the error beside its
+   field and the summary above them in the error's color (never color alone:
+   each has its own text and the summary a heading). */
+.field {
+  margin-block: 1rem;
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+}
+
+.field input {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 32rem;
+  min-block-size: 2rem;
+  margin-block: 0.25rem;
+  padding-block: 0.25rem;
+  padding-inline: 0.5rem;
+  font: inherit;
+}
+
+.field p {
+  margin-block: 0.25rem;
+}
+
+.form-error {
+  color: var(--badge-error-fg);
+  font-weight: 600;
+}
+
+.error-summary {
+  border: 2px solid var(--badge-error-fg);
+  padding-block: 0.5rem;
+  padding-inline: 1rem;
+  margin-block: 1rem;
+}
+
+.error-summary h2 {
+  margin-block: 0.25rem;
+  font-size: 1.125rem;
+}
+
+.error-summary ul {
+  margin-block: 0.5rem;
+  padding-inline-start: 1.25rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.actions button {
+  min-block-size: 2rem;
+  padding-inline: 0.75rem;
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: start;
+  vertical-align: top;
+  padding-block: 0.25rem;
+  padding-inline: 0.5rem;
+  border-block-end: 1px solid var(--muted);
 }

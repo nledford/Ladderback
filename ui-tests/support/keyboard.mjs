@@ -4,6 +4,19 @@
 
 import assert from "node:assert/strict";
 
+// A name the page built from fetched text carries bidi isolation marks
+// around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
+// journey's "Cancel demo-home". The marks are optional wherever they may
+// stand, and the anchors keep the match whole.
+export const ISOLATION = "[\\u2066-\\u2069]*";
+export const namePattern = (name) =>
+  new RegExp(
+    `^${[...name]
+      .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join(ISOLATION)}${ISOLATION}$`,
+  );
+
+
 export function journey(page) {
   return {
     async press(key) {
@@ -11,6 +24,11 @@ export function journey(page) {
       if (key === "Tab" || key === "Shift+Tab") {
         await assertFocusVisibleAndUnobscured(page, key);
       }
+    },
+
+    /** Types `text` into the focused element, key by key. */
+    async type(text) {
+      await page.keyboard.type(text);
     },
 
     byRole(role, options) {

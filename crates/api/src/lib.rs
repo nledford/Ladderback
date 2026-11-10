@@ -72,6 +72,10 @@ pub enum ErrorCode {
     /// The configuration already holds a repository under the alias. The
     /// argument `alias` names it.
     RepositoryAliasTaken,
+    /// A repository was to be saved under a name that is not an alias: a
+    /// name is up to 64 lower-case letters, digits and hyphens, starting
+    /// with a letter or a digit.
+    RepositoryAliasInvalid,
     /// A repository's settings hold a secret reference that couldn't be
     /// resolved. The argument `field` names where it is.
     SecretUnresolved,
@@ -302,6 +306,7 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::RepositoryAliasInvalid => &[],
             Self::SecretUnresolved => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
@@ -1149,11 +1154,154 @@ pub struct PlansDto {
     pub plans: Vec<PlanSummaryDto>,
 }
 
-/// The repositories list, by alias: what the snapshots page offers to show.
+/// The repositories list: what the Repositories page shows and the snapshots
+/// page offers to pick from, in the order of their aliases.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct RepositoriesDto {
-    pub repositories: Vec<String>,
+    pub repositories: Vec<RepositoryDto>,
+}
+
+/// One configured repository, as a list shows it: where it is, with any
+/// password in the location masked, and where its password comes from.
+/// Never the password itself (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryDto {
+    pub alias: String,
+    /// The location, with the password of a URL in it masked.
+    pub repository: String,
+    /// The hot half of a hot/cold repository, masked the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_hot: Option<String>,
+    pub password: PasswordSourceDto,
+}
+
+/// Where a configured repository's password comes from, without its value:
+/// all five sources the configuration takes, the command by its program
+/// only, since its arguments may hold the secret itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+pub enum PasswordSourceDto {
+    /// The configuration file holds the password.
+    Inline,
+    /// A file holds it.
+    File { path: String },
+    /// An entry of the OS keyring, as `service/name`.
+    Keyring { entry: String },
+    /// An environment variable of the daemon.
+    Env { name: String },
+    /// The output of a program.
+    Command { program: String },
+}
+
+/// Where a request says the repository's password is: the four sources the
+/// API takes. A `command` source is not one of them: it runs a program, and
+/// the first route that may run one is the one behind authentication
+/// (technical design §10.1). Its `Debug` form never shows a typed password.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum PasswordDto {
+    /// The password itself, as the person typed it.
+    Inline { value: String },
+    /// A file that holds it, by its absolute path.
+    File { path: String },
+    /// An entry of the OS keyring, as `service/name`.
+    Keyring { entry: String },
+    /// An environment variable of the daemon that holds it.
+    Env { name: String },
+}
+
+impl std::fmt::Debug for PasswordDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Inline { .. } => f.write_str("Inline { value: *** }"),
+            Self::File { path } => f.debug_struct("File").field("path", path).finish(),
+            Self::Keyring { entry } => f.debug_struct("Keyring").field("entry", entry).finish(),
+            Self::Env { name } => f.debug_struct("Env").field("name", name).finish(),
+        }
+    }
+}
+
+/// What a request says about one repository: where it is and how to open it.
+/// The field names are the configuration's own, so a repository written in
+/// the file and one typed into the page mean the same. Its `Debug` form shows
+/// no text a person could have put a secret in.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepositorySettingsDto {
+    pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_hot: Option<String>,
+    pub password: PasswordDto,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub options: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub options_hot: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub options_cold: std::collections::BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for RepositorySettingsDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A location can carry a password in a URL and an option can be a
+        // credential, so only what is not text a person typed is shown.
+        f.debug_struct("RepositorySettingsDto")
+            .field("repository", &"***")
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| "***"))
+            .field("password", &self.password)
+            .field("options", &self.options.keys().collect::<Vec<_>>())
+            .field("options_hot", &self.options_hot.keys().collect::<Vec<_>>())
+            .field(
+                "options_cold",
+                &self.options_cold.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+/// `POST /api/v1/repositories/_test`: open the repository these settings
+/// describe, and save nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TestRepositoryDto {
+    pub settings: RepositorySettingsDto,
+}
+
+/// `POST /api/v1/repositories`: test the repository, and save it under
+/// `alias` once the test passed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ConnectRepositoryDto {
+    pub alias: String,
+    pub settings: RepositorySettingsDto,
+}
+
+/// `POST /api/v1/repositories/_init`: create a repository where there is
+/// none, and save it under `alias` when one is given.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InitRepositoryDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    pub settings: RepositorySettingsDto,
+}
+
+/// What testing or connecting a repository answers: its ID, as rustic
+/// knows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryIdDto {
+    pub id: String,
+}
+
+/// What initialising a repository answers: its ID, and whether it was saved
+/// into the configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryInitDto {
+    pub id: String,
+    pub saved: bool,
 }
 
 /// One repository's snapshots, newest first.
@@ -1384,7 +1532,10 @@ mod operation_dto_tests {
 mod catalog_dto_tests {
     use serde_json::{from_str, to_string};
 
-    use super::{PlanSummaryDto, PlansDto, RepositoriesDto, SnapshotDto, SnapshotsDto};
+    use super::{
+        PasswordSourceDto, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto, SnapshotDto,
+        SnapshotsDto,
+    };
 
     #[test]
     fn the_catalog_lists_carry_their_own_field_names() {
@@ -1404,15 +1555,64 @@ mod catalog_dto_tests {
         );
 
         let repositories = RepositoriesDto {
-            repositories: vec!["demo".to_owned()],
+            repositories: vec![RepositoryDto {
+                alias: "demo".to_owned(),
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: PasswordSourceDto::Inline,
+            }],
         };
         assert_eq!(
             to_string(&repositories).unwrap(),
-            r#"{"repositories":["demo"]}"#
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"}}]}"#
         );
         assert_eq!(
             from_str::<RepositoriesDto>(&to_string(&repositories).unwrap()).unwrap(),
             repositories
+        );
+    }
+
+    #[test]
+    fn a_repository_row_names_where_its_password_comes_from_and_never_its_value() {
+        for (source, wire) in [
+            (PasswordSourceDto::Inline, r#"{"source":"inline"}"#),
+            (
+                PasswordSourceDto::File {
+                    path: "/run/pw".to_owned(),
+                },
+                r#"{"source":"file","path":"/run/pw"}"#,
+            ),
+            (
+                PasswordSourceDto::Keyring {
+                    entry: "ladderback/nas".to_owned(),
+                },
+                r#"{"source":"keyring","entry":"ladderback/nas"}"#,
+            ),
+            (
+                PasswordSourceDto::Env {
+                    name: "PW".to_owned(),
+                },
+                r#"{"source":"env","name":"PW"}"#,
+            ),
+            (
+                PasswordSourceDto::Command {
+                    program: "pass".to_owned(),
+                },
+                r#"{"source":"command","program":"pass"}"#,
+            ),
+        ] {
+            assert_eq!(to_string(&source).unwrap(), wire);
+            assert_eq!(from_str::<PasswordSourceDto>(wire).unwrap(), source);
+        }
+        let row = RepositoryDto {
+            alias: "nas".to_owned(),
+            repository: "rest:https://u:***@nas.example/repo".to_owned(),
+            repo_hot: Some("/mnt/hot".to_owned()),
+            password: PasswordSourceDto::Inline,
+        };
+        assert_eq!(
+            to_string(&row).unwrap(),
+            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"}}"#
         );
     }
 
@@ -1432,5 +1632,191 @@ mod catalog_dto_tests {
         };
         let wire = to_string(&list).unwrap();
         assert_eq!(from_str::<SnapshotsDto>(&wire).unwrap(), list);
+    }
+}
+
+#[cfg(test)]
+mod repository_request_tests {
+    use serde_json::{from_str, json, to_string};
+
+    use super::{
+        ConnectRepositoryDto, ErrorCode, InitRepositoryDto, PasswordDto, RepositorySettingsDto,
+        TestRepositoryDto,
+    };
+
+    fn settings() -> RepositorySettingsDto {
+        RepositorySettingsDto {
+            repository: "rest:https://user:hunter2@backup.example/repo".to_owned(),
+            repo_hot: Some("/mnt/hot".to_owned()),
+            password: PasswordDto::Inline {
+                value: "correct-horse".to_owned(),
+            },
+            options: [("api-key".to_owned(), "s3cret".to_owned())].into(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        }
+    }
+
+    #[test]
+    fn settings_carry_the_configurations_own_field_names() {
+        let wire = to_string(&settings()).unwrap();
+        assert_eq!(
+            from_str::<serde_json::Value>(&wire).unwrap(),
+            json!({
+                "repository": "rest:https://user:hunter2@backup.example/repo",
+                "repo-hot": "/mnt/hot",
+                "password": {"source": "inline", "value": "correct-horse"},
+                "options": {"api-key": "s3cret"},
+            })
+        );
+        assert_eq!(
+            from_str::<RepositorySettingsDto>(&wire).unwrap(),
+            settings()
+        );
+    }
+
+    #[test]
+    fn what_a_request_leaves_out_is_empty() {
+        let read: RepositorySettingsDto =
+            from_str(r#"{"repository":"/x","password":{"source":"env","name":"PW"}}"#).unwrap();
+        assert_eq!(read.repo_hot, None);
+        assert!(read.options.is_empty() && read.options_hot.is_empty());
+        assert!(read.options_cold.is_empty());
+        assert_eq!(read.password, PasswordDto::Env { name: "PW".into() });
+    }
+
+    #[test]
+    fn every_password_source_the_api_takes_reads_back() {
+        for (wire, expected) in [
+            (
+                r#"{"source":"inline","value":"p"}"#,
+                PasswordDto::Inline { value: "p".into() },
+            ),
+            (
+                r#"{"source":"file","path":"/run/pw"}"#,
+                PasswordDto::File {
+                    path: "/run/pw".into(),
+                },
+            ),
+            (
+                r#"{"source":"keyring","entry":"ladderback/nas"}"#,
+                PasswordDto::Keyring {
+                    entry: "ladderback/nas".into(),
+                },
+            ),
+            (
+                r#"{"source":"env","name":"PW"}"#,
+                PasswordDto::Env { name: "PW".into() },
+            ),
+        ] {
+            assert_eq!(from_str::<PasswordDto>(wire).unwrap(), expected, "{wire}");
+            assert_eq!(
+                from_str::<serde_json::Value>(&to_string(&expected).unwrap()).unwrap(),
+                from_str::<serde_json::Value>(wire).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_the_route_does_not_take_is_not_read() {
+        for wire in [
+            // The command source runs a program: not over this API.
+            r#"{"source":"command","command":"pass show x"}"#,
+            r#"{"source":"inline"}"#,
+            r#"{"source":"inline","value":"p","extra":1}"#,
+            r#"{"value":"p"}"#,
+            r#"{"source":"file","path":1}"#,
+        ] {
+            assert!(from_str::<PasswordDto>(wire).is_err(), "{wire}");
+        }
+        for wire in [
+            r#"{"repository":"/x","password":{"source":"env","name":"PW"},"repo_hot":"/y"}"#,
+            r#"{"repository":"/x"}"#,
+            r#"{"password":{"source":"env","name":"PW"}}"#,
+            r#"{"repository":"/x","password":{"source":"env","name":"PW"},"options":{"a":1}}"#,
+        ] {
+            assert!(from_str::<RepositorySettingsDto>(wire).is_err(), "{wire}");
+        }
+    }
+
+    #[test]
+    fn the_requests_name_their_parts() {
+        let body = json!({"settings": settings()});
+        assert_eq!(
+            from_str::<TestRepositoryDto>(&body.to_string())
+                .unwrap()
+                .settings,
+            settings()
+        );
+        assert!(from_str::<TestRepositoryDto>("{}").is_err());
+        assert!(from_str::<TestRepositoryDto>(r#"{"settings":null}"#).is_err());
+
+        let connect = json!({"alias": "demo", "settings": settings()});
+        let connect: ConnectRepositoryDto = from_str(&connect.to_string()).unwrap();
+        assert_eq!(connect.alias, "demo");
+        assert!(
+            from_str::<ConnectRepositoryDto>(&json!({"settings": settings()}).to_string()).is_err()
+        );
+
+        let init: InitRepositoryDto = from_str(&body.to_string()).unwrap();
+        assert_eq!(init.alias, None);
+        let init: InitRepositoryDto =
+            from_str(&json!({"alias": "fresh", "settings": settings()}).to_string()).unwrap();
+        assert_eq!(init.alias.as_deref(), Some("fresh"));
+        // Unknown fields are refused at every level of a request.
+        assert!(
+            from_str::<InitRepositoryDto>(&json!({"settings": settings(), "x": 1}).to_string())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn debug_shows_no_text_a_person_could_have_put_a_secret_in() {
+        let shown = format!(
+            "{:?} {:?}",
+            settings(),
+            ConnectRepositoryDto {
+                alias: "demo".into(),
+                settings: settings(),
+            }
+        );
+        for secret in [
+            "hunter2",
+            "correct-horse",
+            "s3cret",
+            "backup.example",
+            "/mnt/hot",
+        ] {
+            assert!(!shown.contains(secret), "{secret} in {shown}");
+        }
+        assert!(shown.contains("api-key"), "an option's name helps: {shown}");
+    }
+
+    #[test]
+    fn debug_names_where_a_password_comes_from_but_never_a_typed_one() {
+        let inline = format!(
+            "{:?}",
+            PasswordDto::Inline {
+                value: "hunter2".into()
+            }
+        );
+        assert!(!inline.contains("hunter2"), "{inline}");
+        assert!(inline.contains("Inline"), "the source helps: {inline}");
+        let file = format!(
+            "{:?}",
+            PasswordDto::File {
+                path: "/etc/demo/pw".into()
+            }
+        );
+        assert!(file.contains("/etc/demo/pw"), "a path is no secret: {file}");
+    }
+
+    #[test]
+    fn a_name_that_is_not_an_alias_is_a_code_with_no_arguments() {
+        assert_eq!(
+            to_string(&ErrorCode::RepositoryAliasInvalid).unwrap(),
+            r#""repository-alias-invalid""#
+        );
+        assert!(ErrorCode::RepositoryAliasInvalid.args().is_empty());
     }
 }

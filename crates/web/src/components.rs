@@ -14,6 +14,7 @@ use leptos::wasm_bindgen::JsCast;
 
 use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::{modal_gone, open_modal, say};
+use crate::repositories::Sentence;
 use crate::toast::{ToastTimers, arrival};
 
 thread_local! {
@@ -183,42 +184,145 @@ pub fn SortableTable(
 }
 
 /// A form field: a label, an input, a description and an error, both wired to
-/// the input with `aria-describedby`. The caller's check button decides when
-/// `error` is `Some`; the caller announces it politely (as the gallery's
-/// button does).
+/// the input with `aria-describedby`. `id` is the input's (an error summary's
+/// link points at it), and `value` holds what is typed, so the caller reads
+/// and clears it. The caller decides when `error` is `Some`; the caller
+/// announces it politely (as the gallery's button does) or moves focus to an
+/// [`ErrorSummary`]. `kind` is the input's `type`: `password` for a secret,
+/// which the browser then never shows.
 #[component]
 pub fn FormField(
+    id: &'static str,
     label: String,
     description: String,
     error: RwSignal<Option<String>>,
+    value: RwSignal<String>,
+    #[prop(default = "text")] kind: &'static str,
 ) -> impl IntoView {
-    let field_id = "form-field-input";
-    let described_by = format!("{field_id}-description");
-    let error_id = format!("{field_id}-error");
+    let described_by = format!("{id}-description");
+    let error_id = format!("{id}-error");
     // Clones for the reactive closures, which outlive this scope.
     let described_in_attr = described_by.clone();
     let error_in_error = error_id.clone();
     let error_in_attr = error_id.clone();
     view! {
-        <label for=field_id>{label.clone()}</label>
-        <input
-            id=field_id
-            type="text"
-            aria-describedby=move || {
-                if error.get().is_some() {
-                    format!("{described_in_attr} {error_in_attr}")
-                } else {
-                    described_in_attr.clone()
+        <div class="field">
+            <label for=id>{label}</label>
+            <input
+                id=id
+                type=kind
+                autocomplete="off"
+                prop:value=move || value.get()
+                on:input=move |event| value.set(event_target_value(&event))
+                aria-describedby=move || {
+                    if error.get().is_some() {
+                        format!("{described_in_attr} {error_in_attr}")
+                    } else {
+                        described_in_attr.clone()
+                    }
                 }
-            }
-            aria-invalid=move || error.get().is_some().then_some("true")
-        />
-        <p id=described_by.clone()>{description}</p>
-        {move || {
-            error
-                .get()
-                .map(|text| view! { <p id=error_in_error.clone() class="form-error">{text}</p> })
-        }}
+                aria-invalid=move || error.get().is_some().then_some("true")
+            />
+            <p id=described_by.clone()>{description}</p>
+            {move || {
+                error
+                    .get()
+                    .map(|text| view! { <p id=error_in_error.clone() class="form-error">{text}</p> })
+            }}
+        </div>
+    }
+}
+
+/// One problem of an [`ErrorSummary`]: what is wrong, and the field it is
+/// about when it is about one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SummaryItem {
+    pub(crate) field: Option<&'static str>,
+    pub(crate) sentence: Sentence,
+}
+
+/// The error summary of a form that failed to submit (§4.5): a heading that
+/// takes focus as it appears, so a screen reader reads it and a keyboard
+/// reader is at the top of the list, and one entry per problem that links to
+/// its field. The engine's own words in a sentence are marked as English
+/// (3.1.2). `advice` follows the list when there is any. It is not a live
+/// region: focus is what tells the reader.
+#[component]
+pub(crate) fn ErrorSummary(
+    heading: String,
+    items: Vec<SummaryItem>,
+    advice: Option<String>,
+) -> impl IntoView {
+    let heading_ref = NodeRef::<leptos::html::H2>::new();
+    Effect::new(move |_| {
+        if let Some(heading) = heading_ref.get() {
+            // A failed focus leaves focus where it was.
+            let _ = heading.focus();
+        }
+    });
+    view! {
+        <div class="error-summary">
+            <h2 tabindex="-1" node_ref=heading_ref>{heading}</h2>
+            <ul>
+                {items
+                    .into_iter()
+                    .map(|item| {
+                        let SummaryItem { field, sentence } = item;
+                        let shown = sentence_view(sentence);
+                        match field {
+                            // The router takes a click on any same-origin
+                            // link and would only scroll, so the link moves
+                            // focus itself and stops the click.
+                            Some(field) => {
+                                view! {
+                                    <li>
+                                        <a
+                                            href=format!("#{field}")
+                                            on:click=move |event| {
+                                                event.prevent_default();
+                                                focus_element(field);
+                                            }
+                                        >
+                                            {shown}
+                                        </a>
+                                    </li>
+                                }
+                                    .into_any()
+                            }
+                            None => view! { <li>{shown}</li> }.into_any(),
+                        }
+                    })
+                    .collect_view()}
+            </ul>
+            {advice.map(|advice| view! { <p>{advice}</p> })}
+        </div>
+    }
+}
+
+/// A sentence, with the engine's own words in it marked as English.
+fn sentence_view(sentence: Sentence) -> impl IntoView {
+    let Sentence { before, detail } = sentence;
+    let detail = detail.map(|(detail, after)| {
+        view! {
+            <span lang="en">{detail}</span>
+            {after}
+        }
+    });
+    view! {
+        {before}
+        {detail}
+    }
+}
+
+/// Moves focus to the element with `id`, when the page has one.
+fn focus_element(id: &str) {
+    if let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        // A failed focus leaves focus where it was.
+        let _ = element.focus();
     }
 }
 

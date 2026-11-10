@@ -19,7 +19,7 @@ use std::sync::Arc;
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
-use leptos_router::components::{Route, Router, Routes};
+use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::path;
 
@@ -48,6 +48,7 @@ mod backend;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod page;
+mod repositories;
 mod routes;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod time_zones;
@@ -58,7 +59,7 @@ mod ws;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod toast;
 
-use routes::{NotFound, Operations, Snapshots, Start};
+use routes::{NotFound, Operations, Repositories, Snapshots, Start};
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
@@ -99,8 +100,15 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let gallery = Arc::clone(&localizer);
     let operations = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
+    let repositories = Arc::clone(&localizer);
     let arrival = Arc::clone(&localizer);
     let main = NodeRef::<leptos::html::Main>::new();
+    let (nav_label, operations_link, snapshots_link, repositories_link) = (
+        text(&localizer, msg::UI_NAV_LABEL),
+        text(&localizer, msg::UI_NAV_OPERATIONS),
+        text(&localizer, msg::UI_NAV_SNAPSHOTS),
+        text(&localizer, msg::UI_NAV_REPOSITORIES),
+    );
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
         // there. The router takes any click on a same-origin link it was not
@@ -119,11 +127,18 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         >
             {text(&localizer, msg::UI_SKIP_LINK)}
         </a>
-        <header class="site-header">
-            <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
-        </header>
-        <main id="main" tabindex="-1" node_ref=main>
-            <Router>
+        <Router>
+            <header class="site-header">
+                <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
+                <nav class="site-nav" aria-label=nav_label>
+                    <ul>
+                        <li><A href="/operations">{operations_link}</A></li>
+                        <li><A href="/snapshots">{snapshots_link}</A></li>
+                        <li><A href="/repositories">{repositories_link}</A></li>
+                    </ul>
+                </nav>
+            </header>
+            <main id="main" tabindex="-1" node_ref=main>
                 <Arrival localizer=arrival />
                 <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
                     <Route
@@ -142,9 +157,13 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         path=path!("/snapshots")
                         view=move || view! { <Snapshots localizer=Arc::clone(&snapshots) /> }
                     />
+                    <Route
+                        path=path!("/repositories")
+                        view=move || view! { <Repositories localizer=Arc::clone(&repositories) /> }
+                    />
                 </Routes>
-            </Router>
-        </main>
+            </main>
+        </Router>
     }
 }
 

@@ -99,13 +99,17 @@ impl InitRepository {
     /// Initialises the repository the settings describe, and reports its ID.
     /// Saved only when `alias` is given, by the same rule
     /// [`ConnectRepository`] saves one: an alias the configuration already
-    /// holds is refused.
+    /// holds is refused, and before the job runs, so a refused request has
+    /// created no repository the person could not then find again.
     pub async fn init(
         &self,
         op: OperationId,
         settings: &RepositorySettings,
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
+        if let Some(alias) = &alias {
+            unused(&*self.config, alias).await?;
+        }
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.engine, op, Job::Init(access)).await?;
         let saved = match alias {
@@ -210,6 +214,20 @@ fn failed(reason: FailureReason) -> RepositoryError {
     }
 }
 
+/// The configuration as it stands, when it holds no repository under `alias`:
+/// otherwise the alias is refused.
+#[allow(clippy::result_large_err)]
+async fn unused(
+    config: &dyn ConfigStore,
+    alias: &RepositoryAlias,
+) -> Result<AgentConfig, RepositoryError> {
+    let loaded = config.load().await.map_err(RepositoryError::Config)?;
+    if loaded.repository(alias).is_some() {
+        return Err(RepositoryError::AliasTaken(alias.clone()));
+    }
+    Ok(loaded)
+}
+
 /// Saves `settings` under `alias`, refusing an alias the configuration
 /// already holds. What is saved is the settings as written: a secret stays
 #[allow(clippy::result_large_err)]
@@ -218,10 +236,7 @@ async fn save(
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
 ) -> Result<(), RepositoryError> {
-    let loaded = config.load().await.map_err(RepositoryError::Config)?;
-    if loaded.repository(alias).is_some() {
-        return Err(RepositoryError::AliasTaken(alias.clone()));
-    }
+    let loaded = unused(config, alias).await?;
     let mut repositories = loaded.repositories().clone();
     repositories.insert(
         alias.clone(),
@@ -477,6 +492,52 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn initialising_under_an_alias_already_taken_is_refused_before_the_job_runs() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        let use_case = InitRepository::new(
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+        use_case
+            .init(op(), &settings(), Some(alias()))
+            .await
+            .unwrap_or_else(|e| panic!("the first initialisation: {e:?}"));
+        let jobs_before = engine
+            .seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
+        let mut elsewhere = settings();
+        elsewhere.repository = "/home/demo/scratch/other".to_owned();
+        assert!(matches!(
+            use_case.init(op(), &elsewhere, Some(alias())).await,
+            Err(RepositoryError::AliasTaken(_))
+        ));
+        assert_eq!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len(),
+            jobs_before,
+            "the refused initialisation ran a job, and so created a repository"
+        );
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            saved.repository(&alias()).map(|r| &r.settings),
+            Some(&settings())
+        );
     }
 
     #[tokio::test]

@@ -33,6 +33,34 @@ fn test_state() -> AppState {
         events: Arc::new(app::fakes::InMemoryEventBus::new()),
         operations: Arc::new(NoOperations),
         catalog: Arc::new(EmptyCatalog),
+        repositories: Arc::new(NoRepositories),
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+struct NoRepositories;
+
+#[async_trait]
+impl crate::Repositories for NoRepositories {
+    async fn test(
+        &self,
+        _request: api::TestRepositoryDto,
+    ) -> Result<api::RepositoryIdDto, crate::RepositoriesError> {
+        Err(crate::RepositoriesError::InvalidBody)
+    }
+
+    async fn connect(
+        &self,
+        _request: api::ConnectRepositoryDto,
+    ) -> Result<api::RepositoryIdDto, crate::RepositoriesError> {
+        Err(crate::RepositoriesError::InvalidBody)
+    }
+
+    async fn init(
+        &self,
+        _request: api::InitRepositoryDto,
+    ) -> Result<api::RepositoryInitDto, crate::RepositoriesError> {
+        Err(crate::RepositoriesError::InvalidBody)
     }
 }
 

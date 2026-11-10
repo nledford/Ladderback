@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use crate::backend::{OperationsState, ended, events_url, reconnect_backoff};
+use crate::backend::{OperationsState, ended, events_url, reconnect_backoff, succeeded};
 use api::{ErrorCode, MsgArg, OperationsPageDto, UiEvent};
 use futures::StreamExt;
 use gloo_net::http::Request;
@@ -43,22 +43,25 @@ pub(crate) fn started_operation(answer: &str) -> Option<String> {
         .map(|started| started.operation)
 }
 
-/// A typed refusal, as the daemon writes it: the code, and the arguments its
-/// message takes. The page renders these through the catalog (§8.4), so no
-/// refusal is ever shown as a status code.
+/// A typed refusal, as the daemon writes it: the code, the arguments its
+/// message takes, and sometimes the engine's own words. The page renders these
+/// through the catalog (§8.4), so no refusal is ever shown as a status code.
 #[derive(Deserialize)]
 struct Refusal {
     code: ErrorCode,
     #[serde(default)]
     args: std::collections::BTreeMap<String, MsgArg>,
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 /// What a POST came back with: `Done` (with the raw answer, for whoever wants
-/// its body), a typed refusal to render, or `None` — the daemon never
-/// answered, which the page's phase says its own way.
+/// its body), a typed refusal to render (its code, arguments and the engine's
+/// words, if it gave any), or `None` — the daemon never answered, which the
+/// page's phase says its own way.
 pub(crate) enum Posted {
     Done(String),
-    Refused(ErrorCode, Vec<(String, MsgArg)>),
+    Refused(ErrorCode, Vec<(String, MsgArg)>, Option<String>),
 }
 
 /// The page's own origin, where the daemon that served the page listens.
@@ -86,13 +89,14 @@ pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
     let response = request.send().await.ok()?;
     let status = response.status();
     let text = response.text().await.ok()?;
-    if status == 200 || status == 202 {
+    if succeeded(status) {
         return Some(Posted::Done(text));
     }
     let refusal = serde_json::from_str::<Refusal>(&text).ok()?;
     Some(Posted::Refused(
         refusal.code,
         refusal.args.into_iter().collect::<Vec<_>>(),
+        refusal.detail,
     ))
 }
 

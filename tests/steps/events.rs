@@ -285,6 +285,15 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
     }
 }
 
+#[given("Ladderback is serving on loopback with no repositories")]
+async fn serving_with_no_repositories(agent: &mut Agent) {
+    // No config file and no config folder: the daemon's first run.
+    match start(agent).await {
+        Outcome::Listening(_) => {}
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
+    }
+}
+
 #[given("a live-updates connection from the UI's own origin")]
 async fn a_connection(agent: &mut Agent) {
     let page = connect(agent).await;

@@ -212,6 +212,13 @@ pub(crate) fn ended(status: &str) -> bool {
     rank(status) >= TERMINAL
 }
 
+/// Whether a POST's answer is a success: any 2xx. An operation is accepted
+/// with 202, a repository that was tested with 200 and one that was connected
+/// or created with 201; anything else is a refusal, with a typed body.
+pub(crate) fn succeeded(status: u16) -> bool {
+    (200..300).contains(&status)
+}
+
 #[cfg(test)]
 mod tests {
     // The decisions of §4.4, one test each; commit 1 wrote the red ones
@@ -220,7 +227,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{OperationsState, Progress, ended, events_url, reconnect_backoff};
+    use super::{OperationsState, Progress, ended, events_url, reconnect_backoff, succeeded};
     use api::{
         ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode,
     };
@@ -584,5 +591,15 @@ mod tests {
         state.merge(page(vec![succeeded_backup(SECOND)], None));
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].summary.id, id(SECOND));
+    }
+
+    #[test]
+    fn every_2xx_answer_is_a_success_and_nothing_else_is() {
+        for status in [200, 201, 202, 204, 299] {
+            assert!(succeeded(status), "{status}");
+        }
+        for status in [0, 100, 199, 300, 400, 409, 422, 500, 503] {
+            assert!(!succeeded(status), "{status}");
+        }
     }
 }

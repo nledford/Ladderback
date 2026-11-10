@@ -1119,6 +1119,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 ErrorCode::OperationFailed
                 | ErrorCode::EngineUnavailable
                 | ErrorCode::RepositoryAliasTaken
+                | ErrorCode::RepositoryAliasInvalid
                 | ErrorCode::SecretUnresolved
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
