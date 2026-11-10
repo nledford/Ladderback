@@ -12,7 +12,8 @@
     clippy::unreachable
 )]
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use app::ports::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileReader, ProfileWriter,
@@ -21,14 +22,39 @@ use app::ports::{
 use async_trait::async_trait;
 use domain::RepositoryAlias;
 
-/// Reads profiles from files, and the profiles they use from rustic's config
-/// folder, `/etc/rustic` and the working folder.
-#[derive(Clone, Debug, Default)]
-pub struct FileProfileReader;
+/// The most a profile may hold. A profile over it is refused unread, so a
+/// file that never ends can't fill the memory.
+pub const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
+
+/// How many profiles deep `use-profiles` is followed: a profile the profile
+/// being read uses is at depth 1.
+pub const MAX_USE_DEPTH: usize = 8;
+
+/// How many profiles are read for one import, the first one included. A
+/// profile used twice is read twice, as rustic merges it twice.
+pub const MAX_PROFILES: usize = 32;
+
+/// Reads profiles from files, and the profiles they use from the folders it
+/// is given, in order.
+///
+/// It never looks at the process: where rustic keeps its profiles, and the
+/// variables rustic reads (`RUSTIC_PASSWORD` and the like), are handed to it.
+pub struct FileProfileReader {
+    search: Vec<PathBuf>,
+    variables: BTreeMap<String, String>,
+}
 
 impl FileProfileReader {
-    pub fn new() -> Self {
-        Self
+    /// A reader that looks for a used profile in each of `search`, first to
+    /// last, and that reads the rustic variables among `variables`.
+    pub fn new(
+        search: Vec<PathBuf>,
+        variables: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        Self {
+            search,
+            variables: variables.into_iter().collect(),
+        }
     }
 }
 
@@ -40,7 +66,7 @@ impl ProfileReader for FileProfileReader {
         file: &Path,
         repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError> {
-        let _ = (file, repository);
+        let _ = (file, repository, &self.search, &self.variables);
         todo!("parse the profile and the profiles it uses, merge as rustic does, map to the domain")
     }
 }

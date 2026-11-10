@@ -78,7 +78,8 @@ pub enum ProfileNotice {
     OptionLeftOut { option: String, variable: String },
 }
 
-/// Why a profile couldn't be read. `file` is the path as the user gave it.
+/// Why a profile couldn't be read. `file` is the path as the user gave it, or
+/// the path of the profile it uses that is at fault.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProfileError {
     /// The file (or a profile it uses) couldn't be read.
@@ -92,12 +93,49 @@ pub enum ProfileError {
         file: String,
         key: Option<String>,
         at: Option<Position>,
+        problem: ProfileProblem,
         detail: String,
     },
     /// The profile says something Ladderback could only guess at, at `key`:
     /// a rule that keeps particular snapshots, a plan with no password
-    /// source, a source that is not absolute.
-    Unsupported { key: String },
+    /// source, a source that is not absolute. `at` is where it is written,
+    /// when something is.
+    Unsupported {
+        file: String,
+        key: String,
+        at: Option<Position>,
+    },
+}
+
+/// What is wrong with a profile that is not valid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileProblem {
+    /// The text is not TOML.
+    Syntax,
+    /// rustic has no such key, and refuses the profile for it.
+    UnknownKey,
+    /// The value is of another type than the key takes.
+    WrongType,
+    /// The value is one rustic's or Ladderback's types don't read: a host
+    /// name, a hook's command, a number of snapshots to keep.
+    BadValue,
+    /// rustic accepts the key but refuses it where it is: `name` or
+    /// `sources` in `[backup]`, `snapshots` in a snapshot entry.
+    NotHere,
+    /// A setting the profile needs, such as a snapshot entry's `sources` or
+    /// the repository, is not there.
+    Missing,
+    /// A name in `use-profiles` that is not a plain file name.
+    UsedName,
+    /// Profiles that use each other, or one that uses itself.
+    UsedCycle,
+    /// Profiles that use profiles that use profiles, deeper than the reader
+    /// follows.
+    UsedTooDeep,
+    /// More profiles used, all told, than the reader reads.
+    UsedTooMany,
+    /// More snapshot entries than the reader takes.
+    TooManyEntries,
 }
 
 impl std::fmt::Display for ProfileError {

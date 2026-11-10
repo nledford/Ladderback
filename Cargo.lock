@@ -2933,6 +2933,11 @@ dependencies = [
  "app",
  "async-trait",
  "domain",
+ "rustic_core",
+ "serde",
+ "tempfile",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

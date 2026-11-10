@@ -42,7 +42,7 @@ pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>) -> ExitCo
     let Ok(runtime) = tokio::runtime::Runtime::new() else {
         todo!("say the runtime could not start")
     };
-    let use_case = ImportProfile::new(Arc::new(FileProfileReader::new()), config);
+    let use_case = ImportProfile::new(Arc::new(FileProfileReader::new(Vec::new(), [])), config);
     let outcome = runtime.block_on(use_case.import(&file, alias));
     let _ = outcome;
     todo!("print the summary, the notices and the refusal through the catalog")

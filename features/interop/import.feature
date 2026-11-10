@@ -188,6 +188,7 @@ Feature: Import a rustic profile
         """
       And a rustic profile "nas.toml" holding:
         """
+        [global]
         use-profiles = ["base"]
 
         [repository]
@@ -217,6 +218,7 @@ Feature: Import a rustic profile
         """
       And a rustic profile "nas.toml" holding:
         """
+        [global]
         use-profiles = ["base"]
 
         [repository]
@@ -236,6 +238,7 @@ Feature: Import a rustic profile
     Scenario: A profile used by another that cannot be found is noted
       Given a rustic profile "nas.toml" holding:
         """
+        [global]
         use-profiles = ["ghost"]
 
         [repository]
@@ -253,6 +256,7 @@ Feature: Import a rustic profile
     Scenario: A used profile is a file name, never a path
       Given a rustic profile "nas.toml" holding:
         """
+        [global]
         use-profiles = ["../outside"]
 
         [repository]
@@ -270,10 +274,12 @@ Feature: Import a rustic profile
     Scenario: Profiles that use each other are refused
       Given a rustic profile "one.toml" holding:
         """
+        [global]
         use-profiles = ["two"]
         """
       And a rustic profile "two.toml" holding:
         """
+        [global]
         use-profiles = ["one"]
         """
       When the owner imports the profile "one.toml"
@@ -601,6 +607,7 @@ Feature: Import a rustic profile
     Scenario: Sections of other purposes are left out one notice each
       Given a rustic profile "nas.toml" holding:
         """
+        [global]
         log-level = "debug"
 
         [repository]

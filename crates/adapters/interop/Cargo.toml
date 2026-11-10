@@ -11,6 +11,14 @@ publish.workspace = true
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+toml.workspace = true
+
+[dev-dependencies]
+rustic_core.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

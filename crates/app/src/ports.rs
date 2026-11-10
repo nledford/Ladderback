@@ -29,8 +29,8 @@ pub use operation_store::{
     OperationStore, PageSize, Start, StoreError, maintained_repository,
 };
 pub use profiles::{
-    ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileReader,
-    ProfileWriter, RenderedProfile,
+    ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
+    ProfileReader, ProfileWriter, RenderedProfile,
 };
 pub use retention::{Retention, RetentionError};
 pub use secrets::{Resolved, SecretResolver};
