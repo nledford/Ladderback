@@ -78,7 +78,33 @@ The daemon runs unattended and owns the operation queue, so a panic silently sto
 - Mutex poisoning is `lock().unwrap_or_else(PoisonError::into_inner)` or an error; a thread join is a `Result`.
 - Input-derived numbers are hostile: bytes from outside the process (worker output, `JobSpec`, HTTP requests, `config.toml`, imported profiles, sync messages) never size an allocation unbounded and never index unchecked. Use `get()`, not `[i]` or `[a..b]`; checked or saturating arithmetic; caps on line and message lengths (§4.1); slice strings only at char boundaries.
 
-## Adding an error or warning code
+## Where code goes
+
+Decide by what the code knows about. The full layout is §8.3; the rule behind it is §3.2.
+
+| The code knows about… | It goes in |
+|---|---|
+| Rules only: no I/O, no async, no clock | `crates/domain` |
+| Use cases, and the ports they call | `crates/app` (port traits in `crates/app/src/ports/`) |
+| Time or randomness | Nowhere directly in `domain` or `app`: the `Clock` and `Random` ports (§3.2). Clippy bans `jiff::Timestamp::now` and `SystemTime::now` there |
+| `rustic_core` types | `crates/adapters/engine` only |
+| Rustic profile TOML | the `interop` adapter only (§8.3; not built yet) |
+| A secret source: command, keyring, file, environment | `crates/adapters/secrets` only |
+| SQL and SQLite | `crates/adapters/store` |
+| `config.toml` | `crates/adapters/config` |
+| Running hooks | `crates/adapters/hooks` |
+| HTTP, axum, request checks | `crates/adapters/http` |
+| The operating system | `crates/adapters/platform` |
+| The wire contract: request and response types, error and warning codes | `crates/api` |
+| User-facing text | `crates/l10n` and its Fluent catalogs |
+| The browser and the DOM | `crates/web` |
+| Wiring adapters together | `src/main.rs` only |
+
+## Changes that touch several places
+
+Each list is one change: leave out a step and something breaks later, often far from the edit.
+
+### An error or warning code
 
 A code isn't done until a person can read it in their own language (§8.4). Three steps, in the same change:
 
@@ -87,6 +113,28 @@ A code isn't done until a person can read it in their own language (§8.4). Thre
 3. Write the message in `crates/l10n/locales/en-US/common.ftl`, named `error-<code>` or `warning-<code>` after the code's name on the wire (`InvalidJobSpec` is `error-invalid-job-spec`). It reads the variables `args()` lists and no others, with a translator comment above it when it reads any, and may have a `.with-detail` attribute that shows `{ $detail }`, the sender's own text. Voice follows PRODUCT.md: say what happened and what to do next.
 
 `just test` fails for a code with no message, a message with no code, a message that reads a variable its code doesn't declare, and a catalog message that no product code names.
+
+### A port
+
+1. The trait in `crates/app/src/ports/`, in the ubiquitous language, returning typed errors.
+2. The in-memory fake in `crates/app/src/fakes/`, behind the `fakes` feature.
+3. The contract suite in `crates/app/src/contract/`, run against the fake from `crates/app/tests/contracts.rs` and against the real adapter from that adapter's tests (`crates/adapters/store/tests/contract.rs` is one).
+4. The real adapter in its own crate under `crates/adapters/`, depending on no other adapter, and its wiring in `src/main.rs`.
+
+### A gated crate
+
+Add it to `mutants_packages` in the Justfile and to the list in §13.1, in the change that creates the crate.
+
+### A package's first `wasm_bindgen_test`
+
+Add the package to the `--package` list of the Justfile's `test-wasm` recipe. `just red-first` finds the package by itself; `just test-wasm` doesn't yet (#60).
+
+### A shared UI component
+
+1. The component in `crates/web/src/components.rs`, from native elements first (§4.5).
+2. A `wasm-bindgen-test` for its structure, and its entry in the gallery (`crates/web/src/gallery.rs`).
+3. A contract scenario in `features/ui/components.feature`, with steps in `ui-tests/steps/components.mjs` that find it by role and name, by keyboard alone.
+4. axe-core clean on every state it shows (`features/ui/accessibility.feature`).
 
 ## How to work: BDD, DDD and TDD
 
@@ -110,8 +158,8 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
   - `domain` has no I/O, no async, and no ambient time or randomness.
   - `app` depends only on `domain`; time and randomness come from the `Clock` and `Random` ports.
   - Adapters never depend on each other. Only `src/main.rs` wires them together.
-- Foreign models stay behind their anti-corruption layers: `rustic_core` types only in `adapters/engine`, rustic profile TOML only in `adapters/interop`.
-- Secret sources (command, keyring, file, environment) are read only in `adapters/secrets`, behind the `SecretResolver` port; `adapters/engine` hands workers a scrubbed environment (§10.2, §4.1).
+- Foreign models stay behind their anti-corruption layers: `rustic_core` types only in `crates/adapters/engine`, rustic profile TOML only in the `interop` adapter (§8.3).
+- Secret sources (command, keyring, file, environment) are read only in `crates/adapters/secrets`, behind the `SecretResolver` port; `crates/adapters/engine` hands workers a scrubbed environment (§10.2, §4.1).
 - The core returns typed errors and codes, never user-facing sentences. Text is produced through `l10n` (§8.4).
 
 **Test first (TDD).**
