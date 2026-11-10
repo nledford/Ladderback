@@ -360,6 +360,10 @@ async fn refusal(
             StoreError::Unavailable { detail } | StoreError::Corrupt { detail },
         ) => unavailable(ErrorCode::OperationFailed, Vec::new(), Some(detail)),
         MaintenanceError::SelectionChanged => MaintenanceRefusal::SelectionChanged,
+        // The core names no sentence for it: the catalog's plainest words.
+        MaintenanceError::InvalidRetention { .. } => {
+            unavailable(ErrorCode::OperationFailed, Vec::new(), None)
+        }
     }
 }
 
@@ -860,6 +864,10 @@ mod tests {
             (
                 MaintenanceError::SelectionChanged,
                 MaintenanceRefusal::SelectionChanged,
+            ),
+            (
+                MaintenanceError::InvalidRetention { plan: plan("home") },
+                unavailable_with(ErrorCode::OperationFailed, Vec::new(), None),
             ),
         ];
         let config = InMemoryConfigStore::new();

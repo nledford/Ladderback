@@ -1067,11 +1067,13 @@ fn refused_listing(agent: &mut Agent) {
 #[then("the forget is refused because the policy is not one the engine accepts")]
 fn refused_policy(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    let MaintenanceError::Failed(domain::execution::FailureReason::EngineFailed { detail }) = error
-    else {
-        panic!("a failed policy evaluation, not {error:?}")
-    };
-    assert_eq!(detail, "the retention policy is not one the engine accepts");
+    assert_eq!(
+        error,
+        MaintenanceError::InvalidRetention {
+            plan: PlanId::parse("home").expect("a plan ID")
+        },
+        "a typed reason, not a sentence"
+    );
 }
 
 #[then("the engine was asked to prune the repository")]

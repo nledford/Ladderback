@@ -145,6 +145,12 @@ pub enum MaintenanceError {
     /// would act on now is not that: the repository changed in between.
     /// Nothing was removed or rewritten; preview again.
     SelectionChanged,
+    /// A plan's retention policy is not one the engine accepts, so what it
+    /// would remove can't be told: the run is refused before anything is
+    /// removed, and the plan is named.
+    InvalidRetention {
+        plan: PlanId,
+    },
 }
 
 /// A maintenance run with every decision made and its I7 slot held: the
@@ -702,7 +708,7 @@ impl RunMaintenance {
                 self.clock.as_ref(),
                 self.retention
                     .removes(access, &plan.policy, &group.snapshots)
-                    .map(|answer| answer.map_err(retention_failed)),
+                    .map(|answer| answer.map_err(|error| retention_failed(error, &plan.plan))),
             )
             .await?;
             removals.push((plan.plan.clone(), ids));
@@ -1190,12 +1196,10 @@ fn sources_failed(error: SourcesError) -> MaintenanceError {
     MaintenanceError::Engine { detail }
 }
 
-fn retention_failed(error: RetentionError) -> MaintenanceError {
+fn retention_failed(error: RetentionError, plan: &PlanId) -> MaintenanceError {
     match error {
         RetentionError::Engine { detail } => MaintenanceError::Engine { detail },
-        RetentionError::InvalidPolicy => MaintenanceError::Failed(FailureReason::EngineFailed {
-            detail: "the retention policy is not one the engine accepts".to_owned(),
-        }),
+        RetentionError::InvalidPolicy => MaintenanceError::InvalidRetention { plan: plan.clone() },
     }
 }
 
