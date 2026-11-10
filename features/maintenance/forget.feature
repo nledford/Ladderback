@@ -71,6 +71,12 @@ Feature: Forget keeps each plan's history within its policy
     Then the operation ends as succeeded
     And the engine was asked to check the repository
 
+  Scenario: A cancel made before the engine is up beats the result it already has
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner checks the repository after cancelling it
+    Then the operation ends as cancelled
+
   Scenario: A refused forget leaves nothing in the log
     Given a plan "home" keeping nothing
     And the repository holds 3 snapshots of the plan "home"

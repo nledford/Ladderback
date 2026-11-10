@@ -732,6 +732,17 @@ async fn check(agent: &mut Agent) {
     run_maintenance(agent, MaintenanceKind::Check).await;
 }
 
+#[when("the owner checks the repository after cancelling it")]
+async fn check_after_cancel(agent: &mut Agent) {
+    let use_case = use_case(agent);
+    let prepared = use_case
+        .prepare(operation_id(0xcc), &alias(), MaintenanceKind::Check)
+        .await
+        .expect("the repository is free");
+    // The scripted engine's result is ready the moment the job starts.
+    agent.finished = Some(use_case.execute(prepared, futures::future::ready(())).await);
+}
+
 /// Prepares and runs one maintenance operation, as the route does.
 async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
     let use_case = use_case(agent);
