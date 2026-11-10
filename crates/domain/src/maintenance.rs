@@ -10,7 +10,7 @@
 //! decided here: retention is evaluated with rustic's own rules, through the
 //! `Retention` port in `app` (§3.2).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::execution::plan_tags;
 use crate::planning::{Plan, RetentionPolicy};
@@ -297,20 +297,31 @@ impl AdoptSelection {
         }
     }
 
-    /// The plans that would adopt `group`: every plan whose host, label and
-    /// sources equal the group's, in `plans`' order. None when no plan
-    /// would, one when it is clear which does, several when which one takes
-    /// the history is the person's decision (the same key `unmanaged`
-    /// matches by, so a group listed with one claimant is one an adoption
-    /// into that plan finds).
-    pub fn claimants(group: &UnmanagedGroup, hostname: &str, plans: &[Plan]) -> Vec<PlanId> {
-        plans
+    /// The plans that would adopt each of `groups`: every plan whose host,
+    /// label and sources equal the group's, in `plans`' order, one list per
+    /// group in the groups' order. None when no plan would, one when it is
+    /// clear which does, several when which one takes the history is the
+    /// person's decision (the same key `unmanaged` matches by, so a group
+    /// listed with one claimant is one an adoption into that plan finds).
+    pub fn claimants(
+        groups: &[UnmanagedGroup],
+        hostname: &str,
+        plans: &[Plan],
+    ) -> Vec<Vec<PlanId>> {
+        let keys: Vec<_> = plans
             .iter()
-            .filter(|plan| {
-                let (host, label, paths) = adoption_key(plan, hostname);
-                host == group.hostname && label == group.label && paths == group.paths
+            .map(|plan| (&plan.id, adoption_key(plan, hostname)))
+            .collect();
+        groups
+            .iter()
+            .map(|group| {
+                keys.iter()
+                    .filter(|(_, (host, label, paths))| {
+                        *host == group.hostname && *label == group.label && *paths == group.paths
+                    })
+                    .map(|(id, _)| (*id).clone())
+                    .collect()
             })
-            .map(|plan| plan.id.clone())
             .collect()
     }
 }
@@ -441,7 +452,7 @@ impl ForgetPreview {
             .managed
             .iter()
             .map(|group| {
-                let named: HashSet<&SnapshotId> = removals
+                let named: BTreeSet<&SnapshotId> = removals
                     .iter()
                     .filter(|(plan, _)| *plan == group.plan)
                     .flat_map(|(_, ids)| ids)
@@ -482,20 +493,19 @@ impl ForgetPreview {
     /// The IDs a forget removes: each plan's, in the plans' order, newest
     /// first within a plan.
     pub fn removal(&self) -> Vec<SnapshotId> {
-        self.plans
-            .iter()
-            .flat_map(|plan| plan.remove.iter().map(|snapshot| snapshot.id.clone()))
-            .collect()
+        self.removed().cloned().collect()
     }
 
     /// The fingerprint of what the forget removes.
     pub fn selection(&self) -> SelectionToken {
-        SelectionToken::of(&self.removal())
+        SelectionToken::of(self.removed())
     }
 
-    /// Whether the forget removes nothing.
-    pub fn is_empty(&self) -> bool {
-        self.plans.iter().all(|plan| plan.remove.is_empty())
+    /// The IDs a forget removes, as `removal` lists them, without copying.
+    fn removed(&self) -> impl Iterator<Item = &SnapshotId> {
+        self.plans
+            .iter()
+            .flat_map(|plan| plan.remove.iter().map(|snapshot| &snapshot.id))
     }
 }
 
@@ -545,6 +555,13 @@ mod tests {
 
     fn untagged(number: i64) -> Snapshot {
         snapshot(number, &[])
+    }
+
+    fn untagged_of(number: i64, folder: &str) -> Snapshot {
+        Snapshot {
+            paths: vec![folder.to_owned()],
+            ..untagged(number)
+        }
     }
 
     fn home_policy() -> RetentionPolicy {
@@ -702,6 +719,11 @@ mod tests {
             ForgetSelection::partition(&[], &agent(), &plans(&[("home", home_policy())]));
         assert_eq!(partition.len(), 0);
         assert!(partition.is_empty());
+    }
+
+    /// The plans that claim `group`, as `claimants` tells it of one group.
+    fn claimants_of(group: &UnmanagedGroup, hostname: &str, plans: &[Plan]) -> Vec<PlanId> {
+        AdoptSelection::claimants(std::slice::from_ref(group), hostname, plans).remove(0)
     }
 
     /// A plan whose host, label and sources match the untagged snapshots'
@@ -1023,12 +1045,11 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_removing_nothing_is_empty() {
+    fn a_preview_removing_nothing_removes_nothing() {
         let nothing = ForgetPreview::new(&busy_repository(), removals(&[("home", &[])]));
-        assert!(nothing.is_empty());
         assert!(nothing.removal().is_empty());
         let something = ForgetPreview::new(&busy_repository(), removals(&[("photos", &[5])]));
-        assert!(!something.is_empty());
+        assert_eq!(something.removal(), [id(5)]);
     }
 
     #[test]
@@ -1057,7 +1078,7 @@ mod tests {
             full_plan("photos", "/srv/photos"),
         ];
         assert_eq!(
-            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            claimants_of(&group, "demo-host", &candidates),
             [plan("home")]
         );
     }
@@ -1072,7 +1093,7 @@ mod tests {
             full_plan("home", "/home/demo"),
         ];
         assert_eq!(
-            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            claimants_of(&group, "demo-host", &candidates),
             [plan("mirror"), plan("home")]
         );
     }
@@ -1087,7 +1108,7 @@ mod tests {
         labelled.label = Some("weekly".to_owned());
         let candidates = vec![full_plan("photos", "/srv/photos"), other_host, labelled];
         assert_eq!(
-            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            claimants_of(&group, "demo-host", &candidates),
             Vec::<PlanId>::new()
         );
     }
@@ -1100,13 +1121,45 @@ mod tests {
         home.host = None;
         let candidates = vec![home];
         assert_eq!(
-            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            claimants_of(&group, "demo-host", &candidates),
             [plan("home")]
         );
         assert_eq!(
-            AdoptSelection::claimants(&group, "another-host", &candidates),
+            claimants_of(&group, "another-host", &candidates),
             Vec::<PlanId>::new(),
             "the agent's hostname is the one it is asked with"
         );
+    }
+
+    #[test]
+    fn each_group_is_claimed_by_the_plans_that_match_it_alone() {
+        let partition = ForgetSelection::partition(
+            &[untagged(1), untagged_of(2, "/srv/photos")],
+            &agent(),
+            &plans(&[]),
+        );
+        let candidates = vec![
+            full_plan("photos", "/srv/photos"),
+            full_plan("home", "/home/demo"),
+            full_plan("mirror", "/home/demo"),
+        ];
+        let claimed: Vec<(String, Vec<PlanId>)> = partition
+            .unmanaged
+            .iter()
+            .zip(AdoptSelection::claimants(
+                &partition.unmanaged,
+                "demo-host",
+                &candidates,
+            ))
+            .map(|(group, plans)| (group.paths.join(","), plans))
+            .collect();
+        assert_eq!(
+            claimed,
+            [
+                ("/home/demo".to_owned(), vec![plan("home"), plan("mirror")]),
+                ("/srv/photos".to_owned(), vec![plan("photos")]),
+            ]
+        );
+        assert!(AdoptSelection::claimants(&[], "demo-host", &candidates).is_empty());
     }
 }

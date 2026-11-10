@@ -402,7 +402,7 @@ impl RunMaintenance {
         let (partition, job) = match kind {
             MaintenanceKind::Forget => {
                 let (partition, forget) = self.forget_of(op, &config, alias, &access).await?;
-                held_to(held, forget.selection())?;
+                held_to(held, || forget.selection())?;
                 (
                     Some(partition),
                     Job::Forget(ForgetJob {
@@ -419,7 +419,7 @@ impl RunMaintenance {
                     into: adoption.into.clone(),
                     snapshots,
                 };
-                held_to(held, adopt.selection())?;
+                held_to(held, || adopt.selection())?;
                 let ids = adopt
                     .snapshots
                     .iter()
@@ -583,10 +583,8 @@ impl RunMaintenance {
         alias: &RepositoryAlias,
     ) -> Result<RepositoryGroups, MaintenanceError> {
         let (config, access) = self.open(alias).await?;
-        let listed = list(self.engine.as_ref(), self.clock.as_ref(), op, access).await?;
-        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
         let managed = plans_of(&config, alias);
-        let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
+        let partition = self.partitioned(op, access, &managed).await?;
         let plans = repository_plans(&config, alias);
         // Only an unmanaged group is matched by a plan's sources, so only
         // then does the engine's own spelling of them need asking. A plan
@@ -606,6 +604,7 @@ impl RunMaintenance {
         // it names both tags, so a group missing one can't be adopted.
         let every_plan: Vec<PlanId> = plans.iter().map(|plan| plan.id.clone()).collect();
         let mut owned = partition.managed;
+        let claimants = AdoptSelection::claimants(&partition.unmanaged, &hostname, &normalized);
         Ok(RepositoryGroups {
             plans: managed
                 .iter()
@@ -633,10 +632,8 @@ impl RunMaintenance {
             unmanaged: partition
                 .unmanaged
                 .into_iter()
-                .map(|group| {
-                    let adopt_into = AdoptSelection::claimants(&group, &hostname, &normalized);
-                    UnmanagedHistory { group, adopt_into }
-                })
+                .zip(claimants)
+                .map(|(group, adopt_into)| UnmanagedHistory { group, adopt_into })
                 .collect(),
         })
     }
@@ -663,6 +660,24 @@ impl RunMaintenance {
         Ok((config, access))
     }
 
+    /// The repository's snapshots partitioned by who owns them, from one
+    /// listing. The listing and the copies the partition is made from are
+    /// dropped before this returns, so the long reads that follow (a plan's
+    /// retention) don't hold them.
+    async fn partitioned(
+        &self,
+        op: OperationId,
+        access: RepositoryAccess,
+        plans: &[ManagedPlan],
+    ) -> Result<Partition, MaintenanceError> {
+        let snapshots: Vec<Snapshot> = list(self.engine.as_ref(), self.clock.as_ref(), op, access)
+            .await?
+            .iter()
+            .map(selected)
+            .collect();
+        Ok(ForgetSelection::partition(&snapshots, &self.agent, plans))
+    }
+
     /// What a forget would do to the repository, from one listing of it. A
     /// preview and a run are both made from this value, so what a person
     /// reviews is what a run removes (I6).
@@ -673,16 +688,8 @@ impl RunMaintenance {
         alias: &RepositoryAlias,
         access: &RepositoryAccess,
     ) -> Result<(Partition, ForgetPreview), MaintenanceError> {
-        let listed = list(
-            self.engine.as_ref(),
-            self.clock.as_ref(),
-            op,
-            access.clone(),
-        )
-        .await?;
-        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
         let plans = plans_of(config, alias);
-        let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
+        let partition = self.partitioned(op, access.clone(), &plans).await?;
         let mut removals = Vec::new();
         for plan in &plans {
             let Some(group) = partition
@@ -734,16 +741,8 @@ impl RunMaintenance {
                 plan: adoption.into.clone(),
             });
         }
-        let listed = list(
-            self.engine.as_ref(),
-            self.clock.as_ref(),
-            op,
-            access.clone(),
-        )
-        .await?;
-        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
         let managed = plans_of(config, alias);
-        let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
+        let partition = self.partitioned(op, access.clone(), &managed).await?;
         let group = match &adoption.from {
             AdoptionSource::Orphaned { agent, plan } => {
                 AdoptSelection::orphaned(&partition, agent, plan)
@@ -991,20 +990,26 @@ enum Played {
 /// all fit, and one naming none stays that one); any other job stays whole.
 fn split(job: Job) -> Vec<Job> {
     match job {
-        Job::Forget(job) => chunks(&job.ids)
+        Job::Forget(ForgetJob { repository, ids }) => parts(ids)
+            .into_iter()
             .map(|ids| {
                 Job::Forget(ForgetJob {
-                    repository: job.repository.clone(),
-                    ids: ids.to_vec(),
+                    repository: repository.clone(),
+                    ids,
                 })
             })
             .collect(),
-        Job::Rewrite(job) => chunks(&job.ids)
+        Job::Rewrite(RewriteJob {
+            repository,
+            ids,
+            tags,
+        }) => parts(ids)
+            .into_iter()
             .map(|ids| {
                 Job::Rewrite(RewriteJob {
-                    repository: job.repository.clone(),
-                    ids: ids.to_vec(),
-                    tags: job.tags.clone(),
+                    repository: repository.clone(),
+                    ids,
+                    tags: tags.clone(),
                 })
             })
             .collect(),
@@ -1012,13 +1017,18 @@ fn split(job: Job) -> Vec<Job> {
     }
 }
 
-/// `ids` in consecutive parts of at most [`MAX_JOB_IDS`]; no ids make one
-/// empty part, so a job is never lost.
-fn chunks(ids: &[SnapshotId]) -> impl Iterator<Item = &[SnapshotId]> {
-    (0..ids.len().max(1)).step_by(MAX_JOB_IDS).map(|start| {
-        ids.get(start..ids.len().min(start + MAX_JOB_IDS))
-            .unwrap_or_default()
+/// `ids` in consecutive parts of at most [`MAX_JOB_IDS`], each ID moved once;
+/// no ids make one empty part, so a job is never lost.
+fn parts(ids: Vec<SnapshotId>) -> Vec<Vec<SnapshotId>> {
+    if ids.is_empty() {
+        return vec![ids];
+    }
+    let mut rest = ids.into_iter();
+    std::iter::from_fn(|| {
+        let part: Vec<SnapshotId> = rest.by_ref().take(MAX_JOB_IDS).collect();
+        (!part.is_empty()).then_some(part)
     })
+    .collect()
 }
 
 /// The result of the jobs so far with the next one's added: the snapshots
@@ -1091,10 +1101,15 @@ fn repository_plans(config: &AgentConfig, alias: &RepositoryAlias) -> Vec<Plan> 
 }
 
 /// Refuses a run that is held to a selection other than the one it would
-/// now act on: the repository changed after the person reviewed it.
-fn held_to(held: Option<&SelectionToken>, now: SelectionToken) -> Result<(), MaintenanceError> {
+/// now act on: the repository changed after the person reviewed it. `now`
+/// is only worked out when the run is held to one: it reads every snapshot
+/// of the selection.
+fn held_to(
+    held: Option<&SelectionToken>,
+    now: impl FnOnce() -> SelectionToken,
+) -> Result<(), MaintenanceError> {
     match held {
-        Some(held) if *held != now => Err(MaintenanceError::SelectionChanged),
+        Some(held) if *held != now() => Err(MaintenanceError::SelectionChanged),
         _ => Ok(()),
     }
 }
