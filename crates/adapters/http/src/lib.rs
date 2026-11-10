@@ -357,6 +357,11 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .layer(from_fn(response_headers::add))
 }
 
+/// The most one message from an events client may hold. The UI sends pings,
+/// which a control frame keeps to 125 bytes, and the library's default of
+/// 64 MiB would let a client make the daemon buffer that much.
+const EVENTS_CLIENT_MAX_MESSAGE: usize = 1024;
+
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
 /// [`UiEvent`]s. It sends nothing until an event arrives — the first state
 /// comes over REST — and the client is dropped when a send fails. The
@@ -364,7 +369,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
 /// never reaches here.
 async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let stream = state.events.subscribe().await;
-    upgrade.on_upgrade(move |socket| forward(socket, stream))
+    upgrade
+        .max_message_size(EVENTS_CLIENT_MAX_MESSAGE)
+        .max_frame_size(EVENTS_CLIENT_MAX_MESSAGE)
+        .on_upgrade(move |socket| forward(socket, stream))
 }
 
 /// Reads the bus and writes each event to the client, until the client goes

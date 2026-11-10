@@ -137,7 +137,7 @@ error-invalid-body = { -brand-name } could not read the request's body. Send the
 
 # A request's body was larger than the most its route takes, so nothing ran.
 # $limit (bytes): the most the route takes, as a size such as 128 KiB.
-error-body-too-large = { -brand-name } did not read this request, because its body is larger than { $limit }. Send less in one request, then try again.
+error-body-too-large = { -brand-name } did not read this request, because its body is larger than { $limit }. Shorten the body or leave it out, then try again.
 
 # The request names an operation the log has none of.
 # $operation (text): the operation's ID.
