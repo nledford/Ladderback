@@ -145,6 +145,17 @@ pub(crate) fn items_at<'a, 'i>(doc: &'a Doc<'i>, path: &Path) -> Option<&'a [Nod
     }
 }
 
+/// The items of the array at `path`, when all of them are text.
+pub(crate) fn texts_at<'a>(doc: &'a Doc<'_>, path: &Path) -> Option<Vec<&'a str>> {
+    items_at(doc, path)?
+        .iter()
+        .map(|item| match item.get_ref() {
+            DeValue::String(text) => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The names of the keys of `table`, in file order, each with its place.
 pub(crate) fn keys<'a>(table: &'a DeTable<'_>) -> impl Iterator<Item = (&'a str, Range<usize>)> {
     table

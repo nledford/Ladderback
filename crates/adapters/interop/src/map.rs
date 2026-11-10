@@ -53,6 +53,17 @@ pub(crate) fn map(
             .map(|key| ProfileNotice::KeyIgnored { key: key.clone() }),
     );
     check_items(&part, file)?;
+    // rustic's forget reaches only the snapshots the filter selects, so the
+    // retention would delete more here than it does there.
+    if let Some(filter) = &part.snapshot_filter
+        && !part.forget.retention.is_empty()
+    {
+        return Err(ProfileError::Unsupported {
+            file: filter.file.clone(),
+            key: filter.key.clone(),
+            at: filter.at,
+        });
+    }
     let repository = repository(&part, variables, file, &mut notices)?;
     if part.global.env {
         notices.push(ProfileNotice::EnvIgnored);

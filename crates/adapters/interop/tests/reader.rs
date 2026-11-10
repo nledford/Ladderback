@@ -1446,3 +1446,43 @@ async fn an_empty_snapshot_filter_beside_retention_is_not_a_filter() {
     let profile = read_ok(&with("[forget]\nkeep-last = 3\n\n[snapshot-filter]\n")).await;
     assert_eq!(ids(&profile), ["home"]);
 }
+
+#[tokio::test]
+async fn the_filter_an_export_makes_is_not_a_narrowing() {
+    // Selecting the snapshots of one plan of one agent is what the plan's
+    // forget does anyway, so an exported profile is read back.
+    let own = "[forget]\nkeep-last = 3\n\n[snapshot-filter]\nfilter-tags = [\"ladderback-plan:home,ladderback-agent:00000000-0000-0000-0000-000000000001\"]\n";
+    let profile = read_ok(&with(own)).await;
+    assert_eq!(
+        plan(&profile, "home").retention.keep_last.map(|n| n.get()),
+        Some(3)
+    );
+    assert!(profile.notices.contains(&ignored("snapshot-filter")));
+
+    for filter in [
+        // Two entries are OR-ed, not both required.
+        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a\", \"x\"]",
+        // Another tag makes it narrower.
+        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a,x\"]",
+        "filter-tags = [\"ladderback-plan:home\"]",
+        "filter-tags = [\"ladderback-agent:a,ladderback-plan:home\"]",
+        "filter-tags = [\"ladderback-plan:home,x\"]",
+        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a\"]\nfilter-hosts = [\"demo\"]",
+        "filter-tags = []",
+        "filter-tags = [1]",
+    ] {
+        let text = with(&format!(
+            "[forget]\nkeep-last = 3\n\n[snapshot-filter]\n{filter}\n"
+        ));
+        // A narrower filter is refused; so is a filter-tags that is not
+        // a list of texts (a wrong type).
+        let error = read_err(&text).await;
+        assert!(
+            matches!(
+                error,
+                ProfileError::Unsupported { .. } | ProfileError::Invalid { .. }
+            ),
+            "{filter}: {error:?}"
+        );
+    }
+}

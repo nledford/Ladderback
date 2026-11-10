@@ -5,7 +5,8 @@
 //! `use-profiles` are appended, the profile's own first; `options` are
 //! merged key by key, the profile's own key winning; and the snapshot entries
 //! are put together, sorted by name and then sources, and a repeat of one is
-//! dropped, the first kept.
+//! dropped, the first kept. The first key of `[snapshot-filter]` is the
+//! profile's own, else the used one's.
 
 use std::collections::BTreeMap;
 
@@ -21,11 +22,20 @@ pub(crate) struct Part {
     pub backup: Settings,
     pub entries: Vec<Entry>,
     pub forget: Forget,
+    /// The first key of `[snapshot-filter]`, if the table has any.
+    pub snapshot_filter: Option<Located>,
     /// The paths of the keys that were left out, in the order they were met.
     pub left_out: Vec<String>,
     /// The names in `use-profiles`, each with where it is written. Not merged:
     /// each is resolved where it is.
     pub uses: Vec<Use>,
+}
+
+/// A key of a file: which file, the key as a path, and where it is written.
+pub(crate) struct Located {
+    pub file: String,
+    pub key: String,
+    pub at: Option<Position>,
 }
 
 /// A name in `use-profiles`.
@@ -97,6 +107,7 @@ impl Part {
         self.repository.merge(used.repository);
         self.backup.merge(used.backup);
         self.forget.merge(used.forget);
+        take_if_none(&mut self.snapshot_filter, used.snapshot_filter);
         self.entries.extend(used.entries);
         sort_and_dedup(&mut self.entries);
         for key in used.left_out {

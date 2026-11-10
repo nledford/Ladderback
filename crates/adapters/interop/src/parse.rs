@@ -7,6 +7,7 @@
 use std::ops::Range;
 
 use app::ports::{Position, ProfileError, ProfileProblem};
+use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::planning::{
     GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
     RetentionPolicy, Source,
@@ -18,9 +19,11 @@ use toml::de::{DeTable, Deserializer};
 use crate::keys;
 use crate::locate::{
     Doc, Path, items_at, key_span, keys as keys_of, path_of, plain, position, scrub, table_at,
-    value_span,
+    texts_at, value_span,
 };
-use crate::part::{Entry, Forget, Global, Part, Repository, Settings, Use, sort_and_dedup};
+use crate::part::{
+    Entry, Forget, Global, Located, Part, Repository, Settings, Use, sort_and_dedup,
+};
 use crate::tables::{
     BackupTable, CommandTable, CommandValue, FileTable, ForgetTable, GlobalTable, HooksTable,
     RepositoryTable,
@@ -358,15 +361,50 @@ fn build(reader: &Reader<'_, '_>, table: FileTable, left_out: Vec<String>) -> Re
         table.forget.unwrap_or_default(),
     )?;
     sort_and_dedup(&mut entries);
+    let filter = root.key("snapshot-filter");
+    let snapshot_filter = keys_at(reader, &filter)
+        .next()
+        .filter(|_| !is_own_filter(reader, &filter))
+        .map(|key| {
+            let here = filter.key(key);
+            Located {
+                file: reader.file.to_owned(),
+                key: here.text().unwrap_or_default(),
+                at: reader.at(&here, Spot::Key),
+            }
+        });
     Ok(Part {
         global,
         repository,
         backup,
         entries,
         forget,
+        snapshot_filter,
         left_out,
         uses,
     })
+}
+
+/// Whether the `[snapshot-filter]` at `path` is the one an export makes: one
+/// `filter-tags` entry with the two tags of a plan and its agent, which
+/// selects what Ladderback's forget reaches anyway, the plan's own
+/// snapshots. Anything else narrows what rustic's forget reaches.
+fn is_own_filter(reader: &Reader<'_, '_>, path: &Path) -> bool {
+    if keys_at(reader, path).count() != 1 {
+        return false;
+    }
+    let Some(tags) = texts_at(reader.doc, &path.key("filter-tags")) else {
+        return false;
+    };
+    let [entry] = tags.as_slice() else {
+        return false;
+    };
+    let mut tags = entry.split(',');
+    matches!(
+        (tags.next(), tags.next(), tags.next()),
+        (Some(plan), Some(agent), None)
+            if plan.starts_with(PLAN_TAG_PREFIX) && agent.starts_with(AGENT_TAG_PREFIX)
+    )
 }
 
 fn global(reader: &Reader<'_, '_>, path: &Path, table: GlobalTable) -> Read<(Global, Vec<Use>)> {
