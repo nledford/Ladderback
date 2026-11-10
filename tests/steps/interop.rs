@@ -2,7 +2,9 @@
 //! `ladderback import-profile` and `export-profile` run on real files in the
 //! scenario's scratch folder, and what they wrote is read back as TOML. The
 //! golden scenario also runs the stock `rustic` CLI on the exported profile
-//! and compares its forget with Ladderback's own.
+//! and compares its forget with Ladderback's own. The scenarios of
+//! `features/cli/output.feature` run commands the same way, through [`run`]
+//! (see `cli_output.rs`).
 //!
 //! The scratch folder holds `work/` (the folder the command runs in, where
 //! profiles are written and where rustic looks for the profiles one uses
@@ -26,9 +28,10 @@ use super::forget_steps::snapshots_of;
 /// What the scenario set up, and what the last command did.
 #[derive(Default)]
 pub struct InteropE2e {
-    /// Rustic's environment variables, which the commands run with.
-    env: Vec<(String, String)>,
-    ran: Option<Ran>,
+    /// The environment variables the commands run with: rustic's, and the
+    /// ones a scenario sets to choose colour or language.
+    pub(super) env: Vec<(String, String)>,
+    pub(super) ran: Option<Ran>,
     /// The profile the last export wrote on stdout.
     exported: Option<String>,
     /// The golden scenario: rustic is not installed, so the scenario stops
@@ -41,12 +44,12 @@ pub struct InteropE2e {
 }
 
 /// What one run of `ladderback` printed, and how it ended.
-struct Ran {
-    success: bool,
+pub(super) struct Ran {
+    pub(super) success: bool,
     /// `1` is a refusal the command reports; a panic ends with `101`.
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
+    pub(super) code: Option<i32>,
+    pub(super) stdout: String,
+    pub(super) stderr: String,
 }
 
 /// `{scratch}` in a step's text stands for the scenario's scratch folder, and
@@ -95,9 +98,9 @@ fn file_text(agent: &Agent, step: &Step) -> String {
 }
 
 /// Runs `ladderback` with `args` in the working folder, with an environment
-/// of its own: the scratch folders, English, and rustic's variables the
-/// scenario set. Nothing of the developer's environment reaches it.
-async fn run(agent: &mut Agent, args: &[&str]) {
+/// of its own: the scratch folders, English, and the variables the scenario
+/// set. Nothing of the developer's environment reaches it.
+pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     fs::create_dir_all(work_dir(agent)).expect("the working folder");
     fs::create_dir_all(home_dir(agent)).expect("the home folder");
     let mut command = Command::new(super::LADDERBACK);
@@ -121,12 +124,12 @@ async fn run(agent: &mut Agent, args: &[&str]) {
     });
 }
 
-fn ran(agent: &Agent) -> &Ran {
+pub(super) fn ran(agent: &Agent) -> &Ran {
     agent.interop.ran.as_ref().expect("a command ran")
 }
 
 /// Whatever the last command said.
-fn said(agent: &Agent) -> String {
+pub(super) fn said(agent: &Agent) -> String {
     let ran = ran(agent);
     format!("{}\n{}", ran.stdout, ran.stderr)
 }

@@ -13,6 +13,8 @@
     clippy::unreachable
 )]
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Why something failed. Closed: a code this version doesn't know, say from
@@ -698,6 +700,136 @@ impl WarningCode {
             | Self::ProfileRetentionEmpty
             | Self::Unknown => &[],
         }
+    }
+}
+
+/// A typed error, as a refusal carries it: over the HTTP API, and in the
+/// CLI's `--json` output (§8.4, §12.1). The code; the arguments its message
+/// takes, by name, for the reader to render; and, when the sender has words
+/// of its own to show, the `detail`, such as the engine's message as it came.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ErrorDto {
+    pub code: ErrorCode,
+    /// Left out when the code takes none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, MsgArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl ErrorDto {
+    /// An error of `code`, with its arguments named as [`ErrorCode::args`]
+    /// names them and the sender's own words, if it has some.
+    pub fn new(
+        _code: ErrorCode,
+        _args: impl IntoIterator<Item = (&'static str, MsgArg)>,
+        _detail: Option<String>,
+    ) -> Self {
+        todo!()
+    }
+}
+
+/// A typed warning, in a document that reports what a command did: the code
+/// and the arguments its message takes, never the sentence (§8.4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct WarningDto {
+    pub code: WarningCode,
+    /// Left out when the code takes none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, MsgArg>,
+}
+
+impl WarningDto {
+    /// A warning of `code`, with its arguments named as
+    /// [`WarningCode::args`] names them.
+    pub fn new(
+        _code: WarningCode,
+        _args: impl IntoIterator<Item = (&'static str, MsgArg)>,
+    ) -> Self {
+        todo!()
+    }
+}
+
+/// What `ladderback import-profile --json` prints when the import saved the
+/// profile: the name the repository was saved under, the IDs of the plans
+/// added, and what the profile could not carry over or changed on the way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProfileImportDto {
+    pub repository: String,
+    pub plans: Vec<String>,
+    pub notices: Vec<WarningDto>,
+}
+
+/// What a command prints in `--json` mode when it refused: the typed error,
+/// under the key `error`, which no document of a command that did what it
+/// was asked has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FailureDto {
+    pub error: ErrorDto,
+}
+
+#[cfg(test)]
+mod typed_dto_tests {
+    use serde_json::{json, to_string, to_value};
+
+    use super::{ErrorCode, ErrorDto, MsgArg, WarningCode, WarningDto};
+
+    fn text(value: &str) -> MsgArg {
+        MsgArg::Text(value.to_owned())
+    }
+
+    #[test]
+    fn an_error_carries_its_code_its_arguments_by_name_and_its_detail() {
+        let error = ErrorDto::new(
+            ErrorCode::ProfileInvalid,
+            [("file", text("nas.toml")), ("line", text("7"))],
+            Some("unknown field".to_owned()),
+        );
+        assert_eq!(
+            to_value(&error).unwrap(),
+            json!({
+                "code": "profile-invalid",
+                "args": {
+                    "file": {"type": "text", "value": "nas.toml"},
+                    "line": {"type": "text", "value": "7"},
+                },
+                "detail": "unknown field",
+            })
+        );
+    }
+
+    #[test]
+    fn an_error_with_no_arguments_and_no_detail_is_its_code_alone() {
+        let error = ErrorDto::new(ErrorCode::InlineSecret, [], None);
+        assert_eq!(to_string(&error).unwrap(), r#"{"code":"inline-secret"}"#);
+    }
+
+    #[test]
+    fn a_warning_carries_its_code_and_its_arguments_by_name() {
+        let warning = WarningDto::new(
+            WarningCode::ProfileOptionLeftOut,
+            [("option", text("password")), ("variable", text("RUSTIC_PASSWORD"))],
+        );
+        assert_eq!(
+            to_value(&warning).unwrap(),
+            json!({
+                "code": "profile-option-left-out",
+                "args": {
+                    "option": {"type": "text", "value": "password"},
+                    "variable": {"type": "text", "value": "RUSTIC_PASSWORD"},
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_warning_with_no_arguments_is_its_code_alone() {
+        let warning = WarningDto::new(WarningCode::ProfilePrune, []);
+        assert_eq!(to_string(&warning).unwrap(), r#"{"code":"profile-prune"}"#);
     }
 }
 

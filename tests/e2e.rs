@@ -47,6 +47,8 @@ mod adopt_steps;
 mod forget_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/cli_output.rs"]
+mod cli_output_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/snapshots.rs"]

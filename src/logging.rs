@@ -6,7 +6,7 @@
 //!
 //! The daemon logs to stderr, at `info` unless `RUST_LOG` says otherwise.
 
-use env_logger::{Builder, Logger, Target};
+use env_logger::{Builder, Logger, Target, WriteStyle};
 use log::LevelFilter;
 
 /// What the daemon logs when `RUST_LOG` names no level. env_logger's own
@@ -41,15 +41,22 @@ pub(crate) fn logger(rust_log: Option<&str>, target: Target) -> Logger {
     builder.target(target).format_timestamp_millis().build()
 }
 
+/// How the daemon's log is styled: with no colour at all when plain output
+/// was asked for; otherwise with colour where the stream is a terminal and
+/// the environment (`NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`) allows it.
+pub(crate) fn write_style(_plain: bool) -> WriteStyle {
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex, PoisonError};
 
-    use env_logger::{Logger, Target};
+    use env_logger::{Logger, Target, WriteStyle};
     use log::{Level, Log, Record};
 
-    use super::logger;
+    use super::{logger, write_style};
 
     const LEVELS: [Level; 5] = [
         Level::Error,
@@ -204,5 +211,11 @@ mod tests {
         );
         assert!(text.ends_with('\n'), "{text:?}");
         assert!(!text.contains('\u{1b}'), "a pipe got colors: {text:?}");
+    }
+
+    #[test]
+    fn plain_output_turns_colour_off_and_the_rest_is_left_to_the_terminal() {
+        assert_eq!(write_style(true), WriteStyle::Never);
+        assert_eq!(write_style(false), WriteStyle::Auto);
     }
 }

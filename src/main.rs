@@ -20,6 +20,7 @@ use l10n::{Localizer, MessageId, PosixEnv, msg};
 
 mod composition;
 mod logging;
+mod output;
 mod profiles;
 
 #[derive(Parser)]

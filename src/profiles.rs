@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use app::interop::{ExportProfile, ImportProfile};
+use app::interop::{ExportProfile, ImportProfile, Imported};
 use app::ports::ConfigStore;
 use config_adapter::FileConfigStore;
 use domain::{PlanId, RepositoryAlias};
@@ -65,6 +65,16 @@ fn warn(localizer: &Localizer, notice: &Notice) {
         "ladderback: {}",
         localizer.warning(notice.code, &notice.args, None)
     );
+}
+
+/// What `import-profile --json` prints when the import saved the profile.
+fn import_document(_imported: Imported) -> api::ProfileImportDto {
+    todo!()
+}
+
+/// What `import-profile --json` prints when the import was refused.
+fn failure_document(_refusal: Refusal) -> api::FailureDto {
+    todo!()
 }
 
 /// The alias an import saves the repository under: the one asked for, or
@@ -228,6 +238,9 @@ pub(crate) fn export_profile(plan: String) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use app::interop::ImportError;
+    use app::ports::ProfileNotice;
+
     use super::*;
 
     fn os(name: &str) -> OsString {
@@ -281,6 +294,73 @@ mod tests {
         assert_eq!(
             found.keys().map(String::as_str).collect::<Vec<_>>(),
             ["RUSTIC_REPOSITORY"]
+        );
+    }
+
+    #[test]
+    fn an_import_is_reported_as_its_repository_its_plans_and_its_notices() {
+        let imported = Imported {
+            repository: RepositoryAlias::parse("nas").unwrap(),
+            plans: vec![PlanId::parse("docs").unwrap(), PlanId::parse("home").unwrap()],
+            notices: vec![
+                ProfileNotice::KeyIgnored {
+                    key: "copy".to_owned(),
+                },
+                ProfileNotice::Prune,
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(import_document(imported)).unwrap(),
+            serde_json::json!({
+                "repository": "nas",
+                "plans": ["docs", "home"],
+                "notices": [
+                    {
+                        "code": "profile-key-ignored",
+                        "args": {"key": {"type": "text", "value": "copy"}},
+                    },
+                    {"code": "profile-prune"},
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_reported_as_the_typed_error_under_error() {
+        let refusal = import_refusal(
+            ImportError::PlanTaken(PlanId::parse("home").unwrap()),
+            Path::new("/config/config.toml"),
+        );
+        assert_eq!(
+            serde_json::to_value(failure_document(refusal)).unwrap(),
+            serde_json::json!({
+                "error": {
+                    "code": "plan-id-taken",
+                    "args": {"plan": {"type": "text", "value": "home"}},
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_refusal_that_has_words_of_its_own_carries_them_as_the_detail() {
+        let refusal = Refusal {
+            code: api::ErrorCode::ProfileInvalid,
+            args: vec![("file", text("nas.toml")), ("line", text(7))],
+            detail: Some("unknown field".to_owned()),
+        };
+        assert_eq!(
+            serde_json::to_value(failure_document(refusal)).unwrap(),
+            serde_json::json!({
+                "error": {
+                    "code": "profile-invalid",
+                    "args": {
+                        "file": {"type": "text", "value": "nas.toml"},
+                        "line": {"type": "text", "value": "7"},
+                    },
+                    "detail": "unknown field",
+                },
+            })
         );
     }
 }
