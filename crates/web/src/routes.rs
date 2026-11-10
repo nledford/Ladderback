@@ -150,7 +150,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // row follows by itself, and the table and the controls in it stay where
     // they are. History is the daemon's own order; a sort order is the sort
     // button's, and follows it as the reader presses it.
-    let showing = Memo::new(move |_| shown(phase.get(), ops.with(|state| !state.rows.is_empty())));
+    let showing = Memo::new(move |_| {
+        let phase = phase.get();
+        ops.with(|state| shown(phase, &state.rows))
+    });
     let order = Memo::new(move |_| ops.with(|state| ordered(&state.rows, sort.get())));
     let table_localizer = Arc::clone(&localizer);
     // The zone the browser reads its clock in, asked once: every instant the
@@ -465,16 +468,16 @@ enum Shown {
     Table,
 }
 
-/// What the page shows while its connection is in `phase` and its state does
-/// or does not hold rows. Only a change of this rebuilds the table: an update
-/// to a row, or to the order of the rows, leaves the table and the controls in
-/// it as they are (WCAG 2.4.3).
-fn shown(phase: Phase, has_rows: bool) -> Shown {
+/// What the page shows while its connection is in `phase` and its state holds
+/// `rows`. Only a change of this rebuilds the table: an update to a row, or to
+/// the order of the rows, leaves the table and the controls in it as they are
+/// (WCAG 2.4.3).
+fn shown(phase: Phase, rows: &[OperationRow]) -> Shown {
     match phase {
         Phase::Loading => Shown::Loading,
         Phase::Unreachable => Shown::Unreachable,
-        Phase::Ready if has_rows => Shown::Table,
-        Phase::Ready => Shown::Empty,
+        Phase::Ready if rows.is_empty() => Shown::Empty,
+        Phase::Ready => Shown::Table,
     }
 }
 
@@ -1328,16 +1331,18 @@ mod tests {
 
     #[test]
     fn the_page_shows_what_its_connection_and_its_history_allow() {
-        assert_eq!(shown(Phase::Loading, false), Shown::Loading);
-        assert_eq!(shown(Phase::Unreachable, false), Shown::Unreachable);
-        assert_eq!(shown(Phase::Ready, false), Shown::Empty);
-        assert_eq!(shown(Phase::Ready, true), Shown::Table);
+        let held = [summary(None, "2026-11-09T10:00:00Z")];
+        assert_eq!(shown(Phase::Loading, &[]), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, &[]), Shown::Unreachable);
+        assert_eq!(shown(Phase::Ready, &[]), Shown::Empty);
+        assert_eq!(shown(Phase::Ready, &held), Shown::Table);
     }
 
     #[test]
     fn rows_held_from_before_do_not_show_a_table_while_the_connection_is_not_ready() {
-        assert_eq!(shown(Phase::Loading, true), Shown::Loading);
-        assert_eq!(shown(Phase::Unreachable, true), Shown::Unreachable);
+        let held = [summary(None, "2026-11-09T10:00:00Z")];
+        assert_eq!(shown(Phase::Loading, &held), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, &held), Shown::Unreachable);
     }
 
     #[test]
