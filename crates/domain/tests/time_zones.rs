@@ -1,9 +1,8 @@
-//! Time zones need no database on the machine (technical design §3.2): the
+//! A host needs no time-zone database of its own (technical design §3.2): the
 //! build carries a copy of the IANA time-zone database, so a zone resolves on a
-//! host with no `tzdata` (a slim or distroless container image) and in the
-//! browser, which has none. `jiff` reads the system copy first, so these tests
-//! ask for the bundled one by name: that way a machine that has `tzdata` can't
-//! hide a build that left the bundle out.
+//! host with no `tzdata` (a `scratch` or Alpine container image). `jiff` reads
+//! the system copy first, so these tests ask for the bundled one by name: that
+//! way a machine that has `tzdata` can't hide a build that left the bundle out.
 
 use jiff::Timestamp;
 use jiff::tz::{Offset, TimeZoneDatabase};
