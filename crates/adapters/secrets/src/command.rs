@@ -7,8 +7,8 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use domain::secrets::{
-    CommandLine, MAX_SECRET_BYTES, Problem, Redactor, SecretError, SecretValue, SourceName, decode,
-    first_line,
+    CommandLine, MAX_SECRET_BYTES, Problem, Redactor, SecretError, SecretValue, SourceName,
+    command_secret, first_line,
 };
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -92,7 +92,7 @@ pub(crate) async fn run(
     group.release();
 
     if status.success() {
-        decode(&source, &out, first_line)
+        command_secret(&source, &out)
     } else {
         // A helper that rejects a value may quote it on stderr: what it
         // printed, and its first line, which is what it would have given as

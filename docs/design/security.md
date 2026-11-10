@@ -49,13 +49,15 @@ Grammar and limits (`domain::secrets::Template`):
 | `${VAR}`, `password-env` | the value as it is, with no trimming | not set: `Missing`. Set to empty: the empty secret |
 | `${file:/abs/path}` | the whole contents minus one trailing `\n` (and a `\r` before it) | `Missing` |
 | `password-file` | the first line: up to the first `\n`, minus a `\r` before it (as rustic does) | `Missing` |
-| `password-command` | the first line of the command's output | — |
+| `password-command` | the first line of the command's output | the first line is empty or only white space: `Missing` |
 | `password-keyring` | the entry's secret | no such entry: `Missing` |
 | Inline `password` | as written | — |
 
 Options accept only `${VAR}` and `${file:/abs/path}`; commands and the keyring are forms of the repository password. A missing variable or file is never an empty string (unlike Backrest). What a source gives, the whole file, output or value and not only the line taken from it, is limited to 64 KiB (`TooLarge`) and must be UTF-8 (`NotUnicode`). A source that exists but can't be read is `Unreachable`. A file or keyring read that outlives the resolver's limit (a keyring that waits for an unlock, a mount that has hung) fails as `TimedOut`, like a command; the blocked read can't be cancelled and ends when the system lets it go.
 
 **Commands.** The command line is split into words POSIX-style and started **without a shell**, so `|`, `;` and `$(…)` in it mean nothing. The port contract (`app::ports::SecretResolver`) is that a command gets no input, runs in a process group of its own, and is limited in time: one that outlives the resolver's limit fails as `TimedOut` and nothing it started is left running. A command that exits unsuccessfully fails as `CommandFailed` with its exit status (none when a signal ended it) and the first non-empty line of its **stderr**, cut to 512 bytes, with the value it printed on stdout masked (whole, trimmed and line by line), since a helper that rejects a value may quote it. Its stdout itself is never part of an error. One that can't be started is `Unreachable`.
+
+**A command that gives nothing.** A command that exits successfully with no output, or whose first line is empty or only white space, gives no secret: it fails as `Missing`, naming the program, never as the empty secret that a repository would then fail to open with, far from its cause. A variable, a file or a keyring entry that is set to nothing stays the empty secret, since someone set it so.
 
 **Errors.** An error names the source and the problem, as codes (§8.4): the variable's name, the file's path, the program (without its arguments), or the keyring entry. It never holds a value or a command's arguments; the one text a command controls is the `CommandFailed` detail, which has the value the command printed on stdout masked (see above). In a resolved repository the error also names the field it was found in (`repository`, `repo-hot`, `password`, or an option by its name); when several fields fail, the first is reported, in the order password, `repository`, `repo-hot`, `options`, `options-hot`, `options-cold`.
 

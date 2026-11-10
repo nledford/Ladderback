@@ -3,8 +3,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use domain::secrets::{
-    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, decode, file_warning,
-    first_line,
+    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, command_secret, decode,
+    file_warning,
 };
 
 use crate::ports::{Resolved, SecretResolver};
@@ -183,7 +183,7 @@ impl SecretResolver for FakeSecrets {
                         Err(fail(Problem::command_failed(Some(*status), stderr)))
                     }
                     Some(Script::Exits { stdout, .. }) => {
-                        let value = decode(&source, stdout, first_line)?;
+                        let value = command_secret(&source, stdout)?;
                         Ok(Resolved {
                             value,
                             warnings: Vec::new(),

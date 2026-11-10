@@ -37,7 +37,8 @@ impl SecretError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Problem {
     /// There is nothing there: the variable isn't set, the file doesn't
-    /// exist, the keyring has no such entry. Never read as an empty secret.
+    /// exist, the keyring has no such entry, the command printed nothing.
+    /// Never read as an empty secret.
     Missing,
     /// The source exists but couldn't be reached: a file that can't be read,
     /// a program that can't be started, a keyring that can't be opened. The
@@ -120,9 +121,16 @@ pub fn decode(
 
 /// The secret that a command gave as its `stdout`: the first line of it. A
 /// command that printed nothing, or only white space, gave no secret: that
-/// is `Missing`, never an empty secret.
+/// is `Missing`, never an empty secret, which a repository would fail to
+/// open with, far from its cause. (A variable, a file or a keyring entry
+/// that is set to nothing was set so on purpose, and stays the empty
+/// secret.)
 pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue, SecretError> {
-    decode(source, stdout, first_line)
+    let secret = decode(source, stdout, first_line)?;
+    if secret.expose().trim().is_empty() {
+        return Err(SecretError::missing(source.clone()));
+    }
+    Ok(secret)
 }
 
 /// The error of a command that ran and failed: its exit `status` and what it
@@ -566,6 +574,45 @@ mod tests {
                 status: Some(2),
                 detail: "bad value ***".to_owned(),
             }
+        );
+    }
+
+    #[test]
+    fn a_command_gives_the_first_line_of_what_it_printed_as_it_is() {
+        let source = command("pass");
+        for (stdout, secret) in [
+            ("hunter2\nsecond line\n", "hunter2"),
+            ("hunter2\r\n", "hunter2"),
+            ("hunter2", "hunter2"),
+            ("  hunter2 \n", "  hunter2 "),
+            ("\u{a0}x\n", "\u{a0}x"),
+        ] {
+            let given = command_secret(&source, stdout.as_bytes()).unwrap();
+            assert_eq!(given.expose(), secret, "{stdout:?}");
+        }
+    }
+
+    /// What a command printed is held to the limits of every source before
+    /// it is asked whether there is a secret in it.
+    #[test]
+    fn what_a_command_printed_is_too_large_or_not_text_before_it_is_missing() {
+        let source = command("pass");
+        let blank = " ".repeat(MAX_SECRET_BYTES + 1);
+        assert_eq!(
+            command_secret(&source, blank.as_bytes()),
+            Err(SecretError {
+                source: source.clone(),
+                problem: Problem::TooLarge {
+                    limit: MAX_SECRET_BYTES
+                },
+            })
+        );
+        assert_eq!(
+            command_secret(&source, &[0xff, b'\n']),
+            Err(SecretError {
+                source,
+                problem: Problem::NotUnicode,
+            })
         );
     }
 }
