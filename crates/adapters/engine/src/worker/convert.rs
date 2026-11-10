@@ -83,6 +83,8 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
             .take(api::MAX_SNAPSHOT_PATHS)
             .cloned()
             .collect(),
+        paths_truncated: false,
+        tags_truncated: false,
     })
 }
 

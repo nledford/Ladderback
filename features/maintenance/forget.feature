@@ -134,3 +134,20 @@ Feature: Forget keeps each plan's history within its policy
     And the repository has 2 snapshots
     And the remaining snapshot of the plan is the newest of its 3
     And the snapshot made without Ladderback is still there
+
+  Scenario: A forget of more snapshots than one engine job can name runs as several jobs
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 12000 snapshots of the plan "home"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the newest snapshot of the plan "home"
+    And no forget job names more snapshots than an engine job takes
+    And the log shows the forget removed 11999 snapshots
+
+  Scenario: A repository that never answers refuses the forget instead of holding the request
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository never answers
+    When the owner forgets the repository
+    Then the forget is refused because the repository did not answer in time
+    And the log holds no operation of this forget

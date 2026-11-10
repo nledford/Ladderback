@@ -47,6 +47,11 @@ pub fn default_keep_delete() -> KeepDelete {
         .expect("six days is never shorter than rustic's own minimum")
 }
 
+/// How long `prepare` waits for each of its reads (the repository's ID, its
+/// snapshot list) before it gives up. A repository that never answers would
+/// otherwise hold the caller's request open for ever.
+pub const READ_TIMEOUT: SignedDuration = SignedDuration::from_mins(10);
+
 /// Which maintenance operation to run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MaintenanceKind {
@@ -97,6 +102,10 @@ pub enum MaintenanceError {
     },
     /// The listing or the identify failed.
     Failed(FailureReason),
+    /// A read of the repository (its ID, its snapshot list) was not answered
+    /// within [`READ_TIMEOUT`]. Nothing was stored and the engine was
+    /// stopped.
+    TimedOut,
     /// A plan's policy is set and would keep nothing: the run is refused
     /// before anything is removed, and the plan is named.
     KeepsNothing {

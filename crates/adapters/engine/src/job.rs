@@ -310,6 +310,12 @@ pub struct SnapshotResult {
     pub label: String,
     pub tags: Vec<String>,
     pub paths: Vec<String>,
+    /// The snapshot has more paths than `paths` holds, or one was cut short.
+    #[serde(default)]
+    pub paths_truncated: bool,
+    /// The snapshot has more tags than `tags` holds, or one was cut short.
+    #[serde(default)]
+    pub tags_truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

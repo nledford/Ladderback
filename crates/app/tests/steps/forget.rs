@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -31,7 +32,8 @@ use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
 use app::maintenance::{MaintenanceError, MaintenanceKind, RunMaintenance};
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, OperationStore, PruneSummary, RewriteSummary, RunningJob, SnapshotSummary, Start,
+    JobControl, MAX_JOB_IDS, OperationStore, PruneSummary, RewriteSummary, RunningJob,
+    SnapshotSummary, Start,
 };
 
 /// The alias every forget scenario's repository goes under.
@@ -68,6 +70,9 @@ pub enum ReadFailure {
     Unreachable,
     /// The listing answers a failure event.
     Listing,
+    /// The repository never answers: the identify starts and says nothing
+    /// more.
+    Silent,
 }
 
 /// What the forget scenarios set up and what the runs answered.
@@ -121,6 +126,7 @@ impl ForgetWorld {
             fail: self.fail,
             jobs: Arc::clone(&self.jobs),
             release: Arc::clone(&self.release),
+            held: AtomicBool::new(false),
             repository_id: self.repository_id.clone(),
         })
     }
@@ -238,6 +244,8 @@ impl ForgetWorld {
                 label: String::new(),
                 tags,
                 paths: vec![folder.to_owned()],
+                paths_truncated: false,
+                tags_truncated: false,
             });
         }
         self.snapshots
@@ -346,6 +354,9 @@ struct Scripted {
     fail: ReadFailure,
     jobs: Arc<Mutex<Vec<Job>>>,
     release: Arc<Notify>,
+    /// Whether a forget or rewrite was held already: only the first is, so
+    /// a run split into several jobs is released once.
+    held: AtomicBool,
     repository_id: RepositoryId,
 }
 
@@ -364,10 +375,28 @@ impl Engine for Scripted {
                 detail: "the engine is down".to_owned(),
             });
         }
+        // Like the real engine, which cannot send a spec past its message
+        // cap: a job naming more snapshots than that refuses to start.
+        let named = match &job {
+            Job::Forget(job) => job.ids.len(),
+            Job::Rewrite(job) => job.ids.len(),
+            _ => 0,
+        };
+        if named > MAX_JOB_IDS {
+            return Err(EngineError::Unavailable {
+                detail: format!("a job names {named} snapshots, over the {MAX_JOB_IDS} it takes"),
+            });
+        }
         self.jobs
             .lock()
             .expect("the job list answers")
             .push(job.clone());
+        if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_)) {
+            return Ok(RunningJob {
+                events: stream::pending().boxed(),
+                control: Box::new(Nothing),
+            });
+        }
         let started = EngineEvent::Started {
             index_read_at: at(0),
         };
@@ -412,7 +441,8 @@ impl Engine for Scripted {
         // for the release, so a scenario can hold a run on purpose. A read
         // (identify, listing) answers at once: `prepare` runs them before
         // anything holds the repository.
-        let hold = matches!(job, Job::Forget(_) | Job::Rewrite(_));
+        let hold = matches!(job, Job::Forget(_) | Job::Rewrite(_))
+            && !self.held.swap(true, Ordering::SeqCst);
         let release = Arc::clone(&self.release);
         let stream = stream::iter(vec![started]).chain(stream::iter(events).then(move |event| {
             let release = Arc::clone(&release);
@@ -495,6 +525,11 @@ async fn engine_unreachable(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Unreachable);
 }
 
+#[given("the repository never answers")]
+async fn repository_silent(agent: &mut Agent) {
+    agent.forget.fail_read(ReadFailure::Silent);
+}
+
 #[given("the repository's listing fails")]
 async fn listing_fails(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Listing);
@@ -541,9 +576,15 @@ async fn maintenance_running(agent: &mut Agent) {
 #[when("the owner forgets the repository")]
 async fn forget(agent: &mut Agent) {
     let use_case = use_case(agent);
-    let prepared = use_case
-        .prepare(operation_id(0xcc), &alias(), MaintenanceKind::Forget)
-        .await;
+    // The scenario's clock jumps to a timer's deadline, so a prepare that
+    // waits on a repository that never answers ends at once; one that does
+    // not time out would hang, and is cut off here.
+    let prepared = tokio::time::timeout(
+        Duration::from_secs(5),
+        use_case.prepare(operation_id(0xcc), &alias(), MaintenanceKind::Forget),
+    )
+    .await
+    .expect("prepare returns instead of waiting for ever");
     match prepared {
         Ok(prepared) => {
             // The prepared run carries the operation the route answered
@@ -784,6 +825,12 @@ fn refused_engine(agent: &mut Agent) {
     );
 }
 
+#[then("the forget is refused because the repository did not answer in time")]
+fn refused_silent(agent: &mut Agent) {
+    let error = agent.forget.refused.take().expect("the forget was refused");
+    assert_eq!(error, MaintenanceError::TimedOut);
+}
+
 #[then("the forget is refused because the listing failed")]
 fn refused_listing(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
@@ -835,6 +882,23 @@ async fn log_shows_the_forget(agent: &mut Agent, removed: usize) {
         panic!("the log carries the forget's summary: {:?}", detail.record);
     };
     assert_eq!(summary.removed.len(), removed, "{summary:?}");
+}
+
+#[then("no forget job names more snapshots than an engine job takes")]
+fn forget_jobs_are_small_enough(agent: &mut Agent) {
+    let jobs = agent.forget.jobs.lock().expect("the job list answers");
+    let sizes: Vec<usize> = jobs
+        .iter()
+        .filter_map(|job| match job {
+            Job::Forget(job) => Some(job.ids.len()),
+            _ => None,
+        })
+        .collect();
+    assert!(!sizes.is_empty(), "the engine was never asked to forget");
+    assert!(
+        sizes.iter().all(|&size| size <= MAX_JOB_IDS),
+        "forget jobs of {sizes:?} snapshots"
+    );
 }
 
 #[then("the log holds no operation of this forget")]

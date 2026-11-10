@@ -999,6 +999,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                         label: s.label,
                         tags: s.tags,
                         paths: s.paths,
+                        paths_truncated: s.paths_truncated,
+                        tags_truncated: s.tags_truncated,
                     })
                     .collect(),
             ),
