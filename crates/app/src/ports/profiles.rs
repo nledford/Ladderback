@@ -139,6 +139,10 @@ pub enum ProfileProblem {
     UsedTooMany,
     /// More snapshot entries than the reader takes.
     TooManyEntries,
+    /// The plans the profile makes would hold more items (sources, globs,
+    /// tags, hooks) than the reader takes, the settings of `[backup]` being
+    /// copied into each.
+    TooManyItems,
 }
 
 impl std::fmt::Display for ProfileError {

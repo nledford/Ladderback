@@ -11,7 +11,7 @@ use common::{
 };
 use domain::planning::{GroupBy, KeepCount, KeepWithin, Maintenance, OnFailure};
 use domain::secrets::{FileRead, Part, Reference, SecretRef, SecretValue, Template};
-use interop::MAX_ENTRIES;
+use interop::{MAX_ENTRIES, MAX_ITEMS};
 
 /// The key, the line and the problem of a refusal for an invalid profile.
 fn invalid(error: ProfileError) -> (String, Option<usize>, ProfileProblem) {
@@ -1232,4 +1232,101 @@ async fn only_so_many_snapshot_entries_are_taken() {
     let (key, _, problem) = invalid(error);
     assert_eq!(key, "backup.snapshots");
     assert_eq!(problem, ProfileProblem::TooManyEntries);
+}
+
+/// A profile of `entries` snapshot entries, each with one source, after
+/// `backup`, the text of its `[backup]` section.
+fn crowd(entries: usize, backup: &str) -> String {
+    let entries: String = (0..entries)
+        .map(|n| format!("[[backup.snapshots]]\nname = \"p{n}\"\nsources = [\"/srv/{n}\"]\n"))
+        .collect();
+    format!("{REPOSITORY}\n{backup}\n{entries}")
+}
+
+/// `count` text items as a TOML array.
+fn array(count: usize, item: &str) -> String {
+    format!("[{}]", vec![format!("{item:?}"); count].join(", "))
+}
+
+#[tokio::test]
+async fn the_items_the_plans_hold_in_all_are_bounded() {
+    // Every plan holds the one source of its entry and the 99 globs of
+    // `[backup]`: exactly the cap.
+    let scratch = Scratch::new();
+    let globs = |count| format!("[backup]\nglobs = {}\n", array(count, "*.a"));
+    let profile = scratch
+        .read(&crowd(MAX_ENTRIES, &globs(99)))
+        .await
+        .expect("a profile");
+    assert_eq!(profile.plans.len(), MAX_ENTRIES);
+    assert_eq!(MAX_ITEMS, MAX_ENTRIES * 100);
+
+    let error = scratch
+        .read(&crowd(MAX_ENTRIES, &globs(100)))
+        .await
+        .unwrap_err();
+    let (key, _, problem) = invalid(error);
+    assert_eq!(key, "backup");
+    assert_eq!(problem, ProfileProblem::TooManyItems);
+}
+
+/// The lists a plan takes from `[backup]` or from an entry, as the table
+/// each is in (`""` is the section or entry itself) and the text that sets
+/// `count` items of it.
+fn lists(count: usize) -> Vec<(&'static str, String)> {
+    let many = array(count, "x");
+    let commands = array(count, "true");
+    let mut lists: Vec<(&'static str, String)> = [
+        "tags",
+        "globs",
+        "iglobs",
+        "glob-files",
+        "iglob-files",
+        "custom-ignorefiles",
+        "exclude-if-present",
+        "exclude-if-xattr",
+    ]
+    .into_iter()
+    .map(|key| ("", format!("{key} = {many}\n")))
+    .collect();
+    for key in ["run-before", "run-after", "run-failed", "run-finally"] {
+        lists.push((".hooks", format!("{key} = {commands}\n")));
+    }
+    lists
+}
+
+#[tokio::test]
+async fn every_list_a_plan_gets_from_the_backup_section_counts() {
+    let scratch = Scratch::new();
+    for (table, list) in lists(100) {
+        let text = crowd(MAX_ENTRIES, &format!("[backup{table}]\n{list}"));
+        let (key, _, problem) = invalid(scratch.read(&text).await.unwrap_err());
+        assert_eq!(problem, ProfileProblem::TooManyItems, "{list}");
+        assert_eq!(key, "backup", "{list}");
+    }
+}
+
+#[tokio::test]
+async fn every_list_of_an_entry_counts() {
+    let scratch = Scratch::new();
+    let entry = "[[backup.snapshots]]\nname = \"home\"\nsources = [\"/srv/home\"]\n";
+    for (table, list) in lists(MAX_ITEMS + 1) {
+        let header = if table.is_empty() {
+            String::new()
+        } else {
+            format!("\n[backup.snapshots{table}]\n")
+        };
+        let text = format!("{REPOSITORY}\n{entry}{header}{list}");
+        let (key, _, problem) = invalid(scratch.read(&text).await.unwrap_err());
+        assert_eq!(problem, ProfileProblem::TooManyItems, "{list:.30}");
+        assert_eq!(key, "backup", "{list:.30}");
+    }
+    let sources: Vec<String> = (0..=MAX_ITEMS).map(|n| format!("\"/{n}\"")).collect();
+    let text = format!(
+        "{REPOSITORY}\n[[backup.snapshots]]\nname = \"home\"\nsources = [{}]\n",
+        sources.join(",")
+    );
+    let (key, _, problem) = invalid(scratch.read(&text).await.unwrap_err());
+    assert_eq!(problem, ProfileProblem::TooManyItems);
+    assert_eq!(key, "backup");
 }
