@@ -111,6 +111,10 @@ jobs:
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,cargo-nextest
+      # The rustic CLI the profile golden tests compare against (§6.2): the
+      # official release, checked against the SHA-256 the script pins.
+      - if: needs.changes.outputs.docs-only != 'true'
+        run: scripts/install-rustic.sh
       - if: needs.changes.outputs.docs-only != 'true'
         run: npm ci
         working-directory: ui-tests

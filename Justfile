@@ -25,6 +25,7 @@ setup:
     rustup target add wasm32-unknown-unknown
     cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
+    scripts/install-rustic.sh
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium
 
