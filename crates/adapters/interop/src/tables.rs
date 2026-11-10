@@ -1,5 +1,6 @@
 //! The tables of a profile as serde reads them: only the keys the import
-//! carries over, every one of them optional. A key rustic doesn't know is
+//! carries over and the few it must see to refuse, every one of them
+//! optional. A key rustic doesn't know is
 //! refused before these are read (`parse`), and a key the import leaves out is
 //! not read at all, so they are not here.
 
@@ -25,6 +26,7 @@ pub(crate) struct FileTable {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct GlobalTable {
+    pub profile_substitute_env: Option<bool>,
     pub use_profiles: Option<Vec<String>>,
     pub group_by: Option<String>,
     pub hooks: Option<HooksTable>,

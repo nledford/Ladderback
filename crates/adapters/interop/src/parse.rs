@@ -408,6 +408,12 @@ fn is_own_filter(reader: &Reader<'_, '_>, path: &Path) -> bool {
 }
 
 fn global(reader: &Reader<'_, '_>, path: &Path, table: GlobalTable) -> Read<(Global, Vec<Use>)> {
+    // The text of a used profile is escaped so that it stays text. With this
+    // on, rustic reads its `${VAR}` as a variable, so the plans would not be
+    // what rustic ran.
+    if table.profile_substitute_env == Some(true) {
+        return Err(reader.unsupported(&path.key("profile-substitute-env"), Spot::Key));
+    }
     let group_by = group_by(reader, &path.key("group-by"), table.group_by)?;
     let hooks = hooks(reader, &path.key("hooks"), table.hooks.unwrap_or_default())?;
     let names_path = path.key("use-profiles");
