@@ -329,16 +329,20 @@ fn focus_element(id: &str) {
 /// A status badge: a short labeled state on a colored pill, one of
 /// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose
 /// text token on its background token is pair-checked by
-/// `scripts/check-contrast.mjs`.
+/// `scripts/check-contrast.mjs`. The state and the label may be signals: the
+/// pill follows them in place, as a live row's does.
 #[component]
-pub fn StatusBadge(state: &'static str, label: String) -> impl IntoView {
-    view! { <span class=format!("badge badge-{state}")>{label}</span> }
+pub fn StatusBadge(
+    #[prop(into)] state: Signal<&'static str>,
+    #[prop(into)] label: Signal<String>,
+) -> impl IntoView {
+    view! { <span class=move || format!("badge badge-{}", state.get())>{move || label.get()}</span> }
 }
 /// A progress bar (`role="progressbar"` with `aria-valuenow`, `aria-valuemin`,
 /// `aria-valuemax` and `aria-valuetext`). Its value changes are never
 /// announced: nothing here calls the announcer.
 #[component]
-pub fn Progress(label: String, value: RwSignal<u8>) -> impl IntoView {
+pub fn Progress(label: String, #[prop(into)] value: Signal<u8>) -> impl IntoView {
     view! {
         <div
             role="progressbar"

@@ -173,9 +173,10 @@ impl OperationsState {
         self.rows.iter_mut().find(|row| row.summary.id == operation)
     }
 
-    /// The row of `operation`, when the state holds it.
+    /// The row of `operation`, when the state holds it: how a row's view reads
+    /// what it shows, so that an update to another row does not reach it.
     pub(crate) fn row(&self, operation: &str) -> Option<&OperationRow> {
-        todo!()
+        self.rows.iter().find(|row| row.summary.id == operation)
     }
 }
 

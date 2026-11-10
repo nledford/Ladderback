@@ -11,7 +11,6 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use serde::Serialize;
-use std::cmp::Reverse;
 use std::str::FromStr;
 
 use crate::announcer::Politeness;
@@ -76,6 +75,11 @@ struct Empty {}
 /// stream (§4.4). Its decisions are `backend::OperationsState`; its glue is
 /// `ws::watch`. The heading follows the connection: a daemon that cannot be
 /// reached says so, in place of the page's own heading.
+///
+/// The table is built once and its rows follow the state in place: an update
+/// to a row changes the text, the bar or the button it is about, and nothing
+/// else, so a control a reader has focused is never replaced while its row
+/// updates (WCAG 2.4.3).
 #[component]
 pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_OPERATIONS_HEADING);
@@ -140,18 +144,14 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             }
         });
     });
-    // The rows as the current sort shows them. History is the daemon's own
-    // order, newest first; a sort order compares the Started cell's instant,
-    // RFC 3339 UTC, which orders as its bytes do.
-    let sorted = Memo::new(move |_| {
-        let mut rows = ops.get().rows;
-        match sort.get_untracked() {
-            SortOrder::History => {}
-            SortOrder::NewestFirst => rows.sort_by_key(|row| Reverse(key(row))),
-            SortOrder::OldestFirst => rows.sort_by_key(key),
-        }
-        rows
-    });
+    // What the page shows, and the ids of the rows in the order it shows them.
+    // Each is a memo, so an update that leaves it as it was rebuilds nothing:
+    // a progress report or a status change is an update to a row, which the
+    // row follows by itself, and the table and the controls in it stay where
+    // they are. History is the daemon's own order; a sort order is the sort
+    // button's, and follows it as the reader presses it.
+    let showing = Memo::new(move |_| shown(phase.get(), ops.with(|state| !state.rows.is_empty())));
+    let order = Memo::new(move |_| ops.with(|state| ordered(&state.rows, sort.get())));
     let table_localizer = Arc::clone(&localizer);
     // The zone the browser reads its clock in, asked once: every instant the
     // page shows is written in it (§8.4).
@@ -229,22 +229,19 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         }}
         {move || {
             // Per render: the sort button's and rows' closures own what they
-            // say and show.
+            // say and show. A render is a change of what the page shows, never
+            // an update to a row.
             let newest = sorted_newest.clone();
             let oldest = sorted_oldest.clone();
             let rows_localizer = table_localizer.clone();
             let rows_errors = cancel_localizer.clone();
             let rows_base = cancel_base.clone();
             let rows_zone = viewer.clone();
-            match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
-            Phase::Unreachable => {
-                view! { <p>{unreachable_body.clone()}</p> }.into_any()
-            }
-            Phase::Ready => {
-                if sorted.get().is_empty() {
-                    view! { <p>{empty.clone()}</p> }.into_any()
-                } else {
+            match showing.get() {
+                Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
+                Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
+                Shown::Table => {
                     view! {
                         <table>
                             <caption class="text-muted">{caption.clone()}</caption>
@@ -254,7 +251,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                     <th scope="col">{status_column.clone()}</th>
                                     <th
                                         scope="col"
-                                        aria-sort=move || match sort.get_untracked() {
+                                        aria-sort=move || match sort.get() {
                                             SortOrder::OldestFirst => "ascending",
                                             _ => "descending",
                                         }
@@ -290,15 +287,15 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             </thead>
                             <tbody>
                                 <For
-                                    each=move || sorted.get()
-                                    key=|row| row.summary.id.clone()
-                                    children=move |row| {
+                                    each=move || order.get()
+                                    key=|id| id.clone()
+                                    children=move |id| {
                                         row_view(
                                             rows_localizer.clone(),
                                             rows_base.clone(),
                                             cancel_ops,
                                             rows_errors.clone(),
-                                            row,
+                                            id,
                                             error,
                                             rows_zone.clone(),
                                         )
@@ -310,7 +307,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                     .into_any()
                 }
             }
-        }
         }}
     }
 }
@@ -319,93 +315,138 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// backup's progress), the instant it started — the raw instant in the cell's
 /// `title`, so an order can be read without the locale's text — and what can
 /// be done with it: a running or queued backup can be cancelled.
+///
+/// A row is built once, when its operation first shows, and follows the state
+/// from then on. Each fact it shows is a memo of its own, and each cell binds
+/// to the facts it shows, so an update reaches only the cells it is about: a
+/// progress report moves the bar, a start changes the status and the Started
+/// cell, and none of them replaces the Cancel button (WCAG 2.4.3). The button
+/// goes only when the run ends, and then it is no longer a control.
 fn row_view(
     localizer: Arc<Localizer>,
     base: String,
     ops: RwSignal<OperationsState>,
     error_localizer: Arc<Localizer>,
-    row: OperationRow,
+    id: String,
     error: RwSignal<Option<String>>,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
-    let (state, label) = match status_display(&row.summary.status) {
-        Some((state, label_id)) => (state, text(&localizer, label_id)),
-        // A status this build doesn't know: the empty pill with the status
-        // as it came, never a blank cell.
-        None => ("empty", row.summary.status.clone()),
-    };
-    let raw = row
-        .summary
-        .started_at
-        .clone()
-        .unwrap_or_else(|| row.summary.queued_at.clone());
-    let shown = instant(&localizer, &raw, zone.as_ref());
-    let plan = row.summary.plan.clone();
+    // The plan an operation belongs to does not change.
+    let plan = ops
+        .with_untracked(|state| state.row(&id).map(|row| row.summary.plan.clone()))
+        .unwrap_or_default();
+    // A row that has left the state, in the moment before its view is dropped,
+    // reads as empty: never a panic, never a stale fact.
+    let status = Memo::new({
+        let id = id.clone();
+        move |_| {
+            ops.with(|state| {
+                state
+                    .row(&id)
+                    .map(|row| row.summary.status.clone())
+                    .unwrap_or_default()
+            })
+        }
+    });
+    let started = Memo::new({
+        let id = id.clone();
+        move |_| {
+            ops.with(|state| {
+                state
+                    .row(&id)
+                    .map(|row| key(row).to_owned())
+                    .unwrap_or_default()
+            })
+        }
+    });
+    let percent = Memo::new({
+        let id = id.clone();
+        move |_| ops.with(|state| state.row(&id).and_then(progress_percent))
+    });
+    let badge = Memo::new({
+        let localizer = Arc::clone(&localizer);
+        move |_| status.with(|status| badge_of(&localizer, status))
+    });
+    let can_cancel = Memo::new(move |_| status.with(|status| cancellable(status)));
+    let has_progress = Memo::new(move |_| percent.get().is_some());
     let cancel_label = text_with(
         &localizer,
         msg::UI_CANCEL_PLAN,
         &[("plan", MsgArg::Text(plan.clone()))],
     );
+    let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
-    let cancellable = cancellable(&row.summary.status);
-    let progress = row.progress.map(|progress| {
-        (
-            text(&localizer, msg::UI_BACKUP_PROGRESS),
-            RwSignal::new(percent(progress.current, progress.total)),
-        )
-    });
-    let url = format!("{base}/api/v1/operations/{}/cancel", row.summary.id);
-    let operation = row.summary.id.clone();
-    let base = base.clone();
+    let url = format!("{base}/api/v1/operations/{id}/cancel");
+    let operation = id;
     view! {
         <tr>
             <td>{plan}</td>
             <td>
-                <StatusBadge state=state label=label />
-                {progress
-                    .map(|(progress_label, value)| {
-                        view! { <Progress label=progress_label value=value /> }
-                    })}
-            </td>
-            <td title=raw.clone()>{shown}</td>
-            <td>
-                {cancellable.then(|| {
-                    let url = url.clone();
-                    let base = base.clone();
-                    view! {
-                        <button
-                            type="button"
-                            on:click=move |_| {
-                                let error_localizer = Arc::clone(&error_localizer);
-                                let base = base.clone();
-                                let still_waiting = still_waiting.clone();
-                                let operation = operation.clone();
-                                let url = url.clone();
-                                let ops = ops;
-                                spawn_local(async move {
-                                    match ws::post(&url, &Empty {}).await {
-                                        Some(Posted::Done(_)) => {
-                                            if !ws::settle(&base, ops, &operation).await {
-                                                say(Politeness::Polite, &still_waiting);
-                                            }
-                                        }
-                                        Some(Posted::Refused(code, args, detail)) => {
-                                            error.set(Some(refusal(
-                                                &error_localizer,
-                                                code,
-                                                &args,
-                                                detail.as_deref(),
-                                            )));
-                                        }
-                                        None => {}
-                                    }
-                                });
+                <StatusBadge
+                    state=Signal::derive(move || badge.with(|badge| badge.0))
+                    label=Signal::derive(move || badge.with(|badge| badge.1.clone()))
+                />
+                {move || {
+                    has_progress
+                        .get()
+                        .then(|| {
+                            view! {
+                                <Progress
+                                    label=progress_label.clone()
+                                    value=Signal::derive(move || percent.get().unwrap_or_default())
+                                />
                             }
-                        >
-                            {cancel_label.clone()}
-                        </button>
-                    }
-                })}
+                        })
+                }}
+            </td>
+            <td title=move || started.get()>
+                {move || instant(&localizer, &started.get(), zone.as_ref())}
+            </td>
+            <td>
+                {move || {
+                    can_cancel
+                        .get()
+                        .then(|| {
+                            let url = url.clone();
+                            let base = base.clone();
+                            let operation = operation.clone();
+                            let still_waiting = still_waiting.clone();
+                            let error_localizer = Arc::clone(&error_localizer);
+                            view! {
+                                <button
+                                    type="button"
+                                    on:click=move |_| {
+                                        let error_localizer = Arc::clone(&error_localizer);
+                                        let base = base.clone();
+                                        let still_waiting = still_waiting.clone();
+                                        let operation = operation.clone();
+                                        let url = url.clone();
+                                        let ops = ops;
+                                        spawn_local(async move {
+                                            match ws::post(&url, &Empty {}).await {
+                                                Some(Posted::Done(_)) => {
+                                                    if !ws::settle(&base, ops, &operation).await {
+                                                        say(Politeness::Polite, &still_waiting);
+                                                    }
+                                                }
+                                                Some(Posted::Refused(code, args, detail)) => {
+                                                    error.set(Some(refusal(
+                                                        &error_localizer,
+                                                        code,
+                                                        &args,
+                                                        detail.as_deref(),
+                                                    )));
+                                                }
+                                                None => {}
+                                            }
+                                        });
+                                    }
+                                >
+                                    {cancel_label.clone()}
+                                </button>
+                            }
+                        })
+                }}
             </td>
         </tr>
     }
@@ -426,10 +467,15 @@ enum Shown {
 
 /// What the page shows while its connection is in `phase` and its state does
 /// or does not hold rows. Only a change of this rebuilds the table: an update
-/// to a row, or to the order, leaves the table and the controls in it as they
-/// are (WCAG 2.4.3).
+/// to a row, or to the order of the rows, leaves the table and the controls in
+/// it as they are (WCAG 2.4.3).
 fn shown(phase: Phase, has_rows: bool) -> Shown {
-    todo!()
+    match phase {
+        Phase::Loading => Shown::Loading,
+        Phase::Unreachable => Shown::Unreachable,
+        Phase::Ready if has_rows => Shown::Table,
+        Phase::Ready => Shown::Empty,
+    }
 }
 
 /// The ids of `rows` in the order `sort` shows them. History is the daemon's
@@ -437,29 +483,39 @@ fn shown(phase: Phase, has_rows: bool) -> Shown {
 /// cell, which as RFC 3339 in UTC orders as its bytes do, and keeps the
 /// daemon's order between rows that tie.
 fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
-    todo!()
+    let mut rows: Vec<&OperationRow> = rows.iter().collect();
+    match sort {
+        SortOrder::History => {}
+        SortOrder::NewestFirst => rows.sort_by(|a, b| key(b).cmp(key(a))),
+        SortOrder::OldestFirst => rows.sort_by(|a, b| key(a).cmp(key(b))),
+    }
+    rows.into_iter().map(|row| row.summary.id.clone()).collect()
 }
 
 /// How far a row's run has come, as a whole percent: `None` until the run has
 /// reported any progress, so a row that has not begun has no bar.
 fn progress_percent(row: &OperationRow) -> Option<u8> {
-    todo!()
+    row.progress
+        .map(|progress| percent(progress.current, progress.total))
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this
 /// build doesn't know is the empty pill with the status as it came, never a
 /// blank cell.
 fn badge_of(localizer: &Localizer, status: &str) -> (&'static str, String) {
-    todo!()
+    match status_display(status) {
+        Some((state, label)) => (state, text(localizer, label)),
+        None => ("empty", status.to_owned()),
+    }
 }
 
 /// The order a row's life is told by: the instant its `Started` cell shows,
 /// which for a queued run is the instant it was queued.
-fn key(row: &OperationRow) -> String {
+fn key(row: &OperationRow) -> &str {
     row.summary
         .started_at
-        .clone()
-        .unwrap_or_else(|| row.summary.queued_at.clone())
+        .as_deref()
+        .unwrap_or(&row.summary.queued_at)
 }
 
 /// A status as the badge and the label show it: which pill, and which
