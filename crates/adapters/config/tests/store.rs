@@ -632,6 +632,33 @@ async fn a_save_through_a_symlinked_config_keeps_the_link_and_writes_its_target(
 }
 
 #[tokio::test]
+async fn the_history_of_a_symlinked_config_stays_in_the_config_folder() {
+    let linked = Linked::to("dotfiles/config.toml");
+    let scratch = &linked.scratch;
+    std::fs::write(&linked.target, OLD_FILE).expect("the target");
+    linked.link_to(&linked.target);
+
+    scratch
+        .store()
+        .save(&with_concurrency(2))
+        .await
+        .expect("saved");
+
+    let kept = scratch.history();
+    assert_eq!(kept.len(), 1, "the version the save replaced");
+    assert_eq!(kept[0].1, OLD_FILE.as_bytes());
+    assert!(
+        !linked
+            .target
+            .parent()
+            .expect("a folder")
+            .join("history")
+            .exists(),
+        "a dotfiles repository doesn't get a folder of old copies of a file that may hold a password"
+    );
+}
+
+#[tokio::test]
 async fn a_relative_link_through_a_chain_of_links_is_followed_to_the_end() {
     let linked = Linked::to("dotfiles/real.toml");
     let scratch = &linked.scratch;
@@ -676,3 +703,26 @@ async fn a_save_through_a_link_to_nothing_makes_the_target_and_keeps_the_link() 
     assert!(scratch.history().is_empty(), "nothing was there to keep");
 }
 
+#[tokio::test]
+async fn a_save_through_a_link_that_loops_changes_nothing() {
+    let scratch = Scratch::new();
+    let other = scratch.dir.path().join("other.toml");
+    std::os::unix::fs::symlink(&other, &scratch.path).expect("a symlink");
+    std::os::unix::fs::symlink(&scratch.path, &other).expect("a symlink");
+
+    let saved = scratch.store().save(&with_concurrency(2)).await;
+
+    assert!(
+        matches!(&saved, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name()),
+        "{saved:?}"
+    );
+    assert!(scratch.history().is_empty());
+    for link in [&scratch.path, &other] {
+        assert!(
+            std::fs::symlink_metadata(link)
+                .expect("the link")
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
