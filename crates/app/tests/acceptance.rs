@@ -117,6 +117,11 @@ impl Agent {
     }
 }
 
+#[when("the agent runs the operation after the user has cancelled it")]
+async fn run_after_cancel(agent: &mut Agent) {
+    agent.run_operation_until(futures::future::ready(())).await;
+}
+
 /// The shared clock jumps straight to each sleeper's deadline, so the engine
 /// would never let a cancel in; this scenario moves time by hand instead.
 #[when(expr = "the agent runs the operation and the user cancels it after {int} minute(s)")]

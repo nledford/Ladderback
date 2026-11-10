@@ -44,6 +44,15 @@ struct HookPlan {
     setup: HookSetup,
 }
 
+/// An operation that is recorded as queued and waits to be run, with the job
+/// it runs: what [`RunOperation::queue`] hands to [`RunOperation::run_queued`].
+/// Dropping it unrun leaves the operation queued in the log for good.
+#[must_use = "a queued operation that is never run stays queued in the log"]
+pub struct Queued {
+    run: Run,
+    job: Job,
+}
+
 /// How a run ended: the operation as it finished, what the engine reported
 /// when it succeeded, and what went wrong writing the operation log.
 #[derive(Debug)]
@@ -97,15 +106,33 @@ impl RunOperation {
         job: Job,
         cancel: impl Future<Output = ()> + Send,
     ) -> Finished {
+        let queued = self.queue(id, trigger, job).await;
+        self.run_queued(queued, cancel).await
+    }
+
+    /// Queues the operation for `job` and records it, before the engine is
+    /// asked for anything: an operation that never gets going is in the
+    /// history too, and a caller that answers its client first can answer
+    /// with an operation the log already knows. [`Self::run_queued`] runs it.
+    pub async fn queue(&self, id: OperationId, trigger: Trigger, job: Job) -> Queued {
         let mut run = Run {
             operation: Operation::queue(id, job.kind(), trigger, job.target(), self.clock.now()),
             result: None,
             recording_errors: Vec::new(),
             stopped_by_hook: false,
         };
-        // Queued before the engine is asked for anything, so an operation
-        // that never gets going is in the history too.
         self.record(&mut run).await;
+        Queued { run, job }
+    }
+
+    /// Runs the job of an operation [`Self::queue`] recorded, as
+    /// [`Self::run`] does.
+    pub async fn run_queued(
+        &self,
+        queued: Queued,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        let Queued { mut run, job } = queued;
         self.run_before_hooks(&mut run).await;
         if !run.stopped_by_hook {
             self.drive(&mut run, job, cancel).await;
@@ -139,6 +166,14 @@ impl RunOperation {
             }
         };
         let mut cancel = pin!(cancel.fuse());
+        // A cancel made before the engine was up is honoured at once, not
+        // raced against the events the engine already has ready: the client
+        // was told it was accepted.
+        if (&mut cancel).now_or_never().is_some() {
+            control.stop().await;
+            self.cancel(run);
+            return;
+        }
         // Ended streams stay ended; `select_biased!` needs that guarantee.
         let mut events = events.fuse();
         let mut deadline: Option<Deadline> = None;

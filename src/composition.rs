@@ -411,16 +411,23 @@ impl Operations for PlanRunner {
             plan_id: plan.id.clone(),
             repository_alias: plan.repository.clone(),
         };
-        let engine = Arc::clone(&self.engine);
-        let store = Arc::clone(&self.store);
+        let use_case = RunOperation::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            Arc::clone(&self.store),
+        )
+        .with_hooks(Arc::clone(&self.hooks), setup);
+        // Recorded as queued before the route answers, so a cancel that
+        // arrives the instant it does finds the operation in the log. The
+        // task does the recording and the run, so a handler that is dropped
+        // meanwhile (the client went away) strands neither.
+        let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
-        let hooks = Arc::clone(&self.hooks);
         tokio::spawn(async move {
+            let queued = use_case.queue(operation, Trigger::Manual, job).await;
+            let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus.
-            let finished = RunOperation::new(engine, Arc::new(SystemClock), store)
-                .with_hooks(hooks, setup)
-                .run(operation, Trigger::Manual, job, cancel)
-                .await;
+            let finished = use_case.run_queued(queued, cancel).await;
             registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",
@@ -428,6 +435,8 @@ impl Operations for PlanRunner {
                 finished.operation.status()
             );
         });
+        // A task that ended without recording has nothing to wait for.
+        let _ = wait_for_log.await;
         Ok(id_text)
     }
     async fn start_maintenance(
@@ -1000,12 +1009,15 @@ mod tests {
         async fn stop(&mut self) {}
     }
 
-    /// A cancel that arrives the instant the route answers finds the
-    /// operation, not an "already ended" refusal (§4.2): the cancel switch
-    /// is parked before the run starts, while the run is still in its
-    /// before-hooks.
-    #[tokio::test]
-    async fn a_cancel_in_the_start_window_stops_the_operation() {
+    /// A runner over scratch folders with one plan, "home", whose agent-level
+    /// before-hook is the gate; its engine parks. Also what the gate says and
+    /// opens, and the scratch folder, which must outlive the runner.
+    async fn runner_at_a_gate() -> (
+        PlanRunner,
+        tokio::sync::watch::Receiver<u32>,
+        tokio::sync::watch::Sender<bool>,
+        tempfile::TempDir,
+    ) {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config_dir, data_dir) = own_folders(scratch.path());
         let source = scratch.path().join("source");
@@ -1047,7 +1059,7 @@ mod tests {
             )],
         )
         .expect("a valid configuration");
-        let (hooks, mut entered, open_gate) = GateHooks::new();
+        let (hooks, entered, open_gate) = GateHooks::new();
         let config_store = Arc::new(FileConfigStore::new(
             config_dir.join("config.toml"),
             Arc::new(SystemClock),
@@ -1069,6 +1081,16 @@ mod tests {
             registry: Arc::new(CancelRegistry::new()),
             hooks: Arc::new(hooks),
         };
+        (runner, entered, open_gate, scratch)
+    }
+
+    /// A cancel that arrives the instant the route answers finds the
+    /// operation, not an "already ended" refusal (§4.2): the cancel switch
+    /// is parked before the run starts, while the run is still in its
+    /// before-hooks.
+    #[tokio::test]
+    async fn a_cancel_in_the_start_window_stops_the_operation() {
+        let (runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
         let id = runner
             .start_backup("home".into())
             .await
@@ -1081,5 +1103,132 @@ mod tests {
         let cancel = runner.cancel(id).await;
         open_gate.send(true).expect("the gate opens");
         cancel.expect("a cancel in the start window is accepted");
+    }
+
+    /// A client that cancels the instant it has the answer to its start is
+    /// not told the operation is unknown or not running: the operation is
+    /// recorded and its cancel switch parked before the route answers, and
+    /// the run it cancels ends cancelled.
+    #[tokio::test]
+    async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_cancelled() {
+        let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
+        open_gate.send(true).expect("the gate opens");
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    /// The status the operation ends with, once it has.
+    async fn ended(runner: &PlanRunner, operation: OperationId) -> OperationStatus {
+        let ended = async {
+            loop {
+                let detail = GetOperation::new(Arc::clone(&runner.store))
+                    .get(operation)
+                    .await
+                    .expect("the log reads");
+                if let Some(detail) = detail
+                    && detail.record.status.is_finished()
+                {
+                    return detail.record.status;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(30), ended)
+            .await
+            .expect("the cancelled operation ends")
+    }
+
+    /// An operation log whose writes wait until the test opens it.
+    struct GatedSaves {
+        inner: Arc<dyn OperationStore>,
+        open: tokio::sync::watch::Receiver<bool>,
+    }
+
+    #[async_trait]
+    impl OperationStore for GatedSaves {
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            let mut open = self.open.clone();
+            while !*open.borrow_and_update() {
+                open.changed().await.expect("the gate stays open");
+            }
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            self.inner.try_start(operation).await
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// A client that gives up on its start while the log is still being
+    /// written (the connection drops, and the handler with it) leaves a run
+    /// that goes on: nothing is left queued and never run, or registered and
+    /// never cancellable.
+    #[tokio::test]
+    async fn a_start_whose_client_gave_up_still_runs_and_still_cancels() {
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let (open_log, log_is_open) = tokio::sync::watch::channel(false);
+        runner.store = Arc::new(GatedSaves {
+            inner: Arc::clone(&runner.store),
+            open: log_is_open,
+        });
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            runner.start_backup("home".into()),
+        )
+        .await;
+        assert!(answered.is_err(), "the start waits for the log");
+        open_log.send(true).expect("the log opens");
+        let operation = *runner
+            .registry
+            .running()
+            .keys()
+            .next()
+            .expect("the start parked a cancel switch");
+        let id = operation.as_uuid().hyphenated().to_string();
+        let accepted = async {
+            loop {
+                match runner.cancel(id.clone()).await {
+                    Err(http_adapter::CancelError::Unknown) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    other => return other,
+                }
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), accepted)
+            .await
+            .expect("the operation ends up in the log")
+            .expect("the operation that was started is cancellable");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
     }
 }
