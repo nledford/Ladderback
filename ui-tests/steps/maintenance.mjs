@@ -25,6 +25,10 @@ const RUN_PATIENCE_MS = 120_000;
 // row. Short, so a page that never shows them fails a journey quickly.
 const PAGE_PATIENCE_MS = 10_000;
 const ROWS_PATIENCE_MS = 30_000;
+// A line of the page that a run's wait brings: a run behind answers that come
+// seconds late is on the page seconds after it was started. Under the
+// timeout of a step, so that a line that never comes fails by saying so.
+const LINE_PATIENCE_MS = 20_000;
 
 // More Tab presses than the Snapshots page has stops, with its groups.
 const MAX_TABS = 40;
@@ -147,6 +151,23 @@ Given("the repository holds data no snapshot uses", async function () {
   );
 });
 
+// The daemon asks the engine for the repository's folder, which is gone, and
+// says so with the engine's own words.
+Given("the repository has been removed", async function () {
+  assert.ok(this.ownServer, "this scenario's daemon was never started");
+  await rm(path.join(this.ownServer.scratch, "repo"), { recursive: true, force: true });
+});
+
+// The demo plan is the config's last table: cut it off, and the repository is
+// one no plan backs up to.
+Given("the config names no plan", async function () {
+  const file = configPath(this);
+  const config = await readFile(file, "utf8");
+  const at = config.indexOf("[[plans]]");
+  assert.ok(at >= 0, "the config names no plan to cut off");
+  await writeFile(file, config.slice(0, at));
+});
+
 /** Presses Tab until the button the locator finds, once, has focus. The
  *  page reads the history it lists from the daemon, so a button made from it
  *  is not there when the presses would begin: they begin when it is. */
@@ -159,6 +180,20 @@ async function tabUntilFocused(world, target, description) {
     await keys.press("Tab");
   }
   assert.ok(await focused(), `focus did not reach ${description} within ${MAX_TABS} Tab presses`);
+}
+
+/** Reads the repository's history afresh, as a person does: back to the
+ *  repository's button, and Enter on it. */
+async function readAgain(world) {
+  const keys = journey(world.page);
+  const picker = keys.byRole("button", { name: namePattern(`Snapshots of ${ALIAS}`) });
+  const focused = async () =>
+    (await picker.count()) === 1 && (await picker.evaluate((el) => el === document.activeElement));
+  for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
+    await keys.press("Shift+Tab");
+  }
+  assert.ok(await focused(), `focus did not reach the repository's button within ${MAX_TABS} Shift+Tab presses`);
+  await keys.press("Enter");
 }
 
 // An adoption button names the agent too, which a journey cannot know.
@@ -254,8 +289,8 @@ Then("the page shows no section heading {string}", async function (name) {
 
 // The plan's table is named after the plan; what the page fills in carries
 // bidi isolation marks, which the name pattern allows for.
-Then("the plan {string} shows {int} snapshot rows", async function (plan, count) {
-  const rows = this.page
+async function waitForRows(world, plan, count) {
+  const rows = world.page
     .getByRole("table", { name: namePattern(`Snapshots of plan ${plan}`) })
     .locator("tbody tr");
   const end = Date.now() + ROWS_PATIENCE_MS;
@@ -266,6 +301,40 @@ Then("the plan {string} shows {int} snapshot rows", async function (plan, count)
     await sleep(250);
   }
   assert.equal(found, count, `the snapshot rows of plan ${plan}`);
+}
+
+// What the page drew is not what the repository holds: once the table shows
+// the count, the history is read again, and the count must hold.
+Then("the plan {string} shows {int} snapshot rows", async function (plan, count) {
+  await waitForRows(this, plan, count);
+  await readAgain(this);
+  await waitForRows(this, plan, count);
+});
+
+// The live regions repeat what the page says, so a line of the page is looked
+// for in its main content.
+Then("the main content shows the line {string}", async function (text) {
+  await this.page
+    .getByRole("main")
+    .getByText(text, { exact: true })
+    .first()
+    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+});
+
+Then("the main content shows no line {string}", async function (text) {
+  await this.page
+    .getByRole("main")
+    .getByText(text, { exact: true })
+    .first()
+    .waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+});
+
+// What the engine says is English whatever the language of the page, and the
+// page marks it so (§4.5).
+Then("the alert marks the engine's words as English", async function () {
+  const words = this.page.getByRole("alert").locator('[lang="en"]');
+  await words.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  assert.notEqual((await words.first().innerText()).trim(), "", "the engine's words in the alert");
 });
 
 // A refusal of the preview is told where a reader is looking, as an alert.

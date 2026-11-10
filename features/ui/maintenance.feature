@@ -223,3 +223,89 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then the dialog "Forget snapshots of demo" is closed
     And the polite region comes to contain "A forget is running."
+
+  # What the engine says is English whatever the language of the page, and the
+  # page marks it so.
+  Scenario: The engine's words in a refusal are marked as English
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the repository has been removed
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows an alert containing "The operation failed"
+    And the alert marks the engine's words as English
+    And the page has no accessibility violations
+
+  Scenario: The end of the last run is not shown once another review is asked for
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the main content shows the line "Forget finished."
+    When I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And the main content shows no line "Forget finished."
+
+  # The answers arrive four seconds late in the next two scenarios, so the run
+  # is on the page for long enough to act on it.
+  Scenario: Picking the repository again reads its history afresh and leaves the run on the page
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And the daemon's answers to the UI are delayed by 4 seconds
+    When I open the address "/snapshots"
+    Then the page shows the button "Snapshots of demo"
+    When I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the main content shows the line "A forget is running."
+    When I press Shift+Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the paragraph "Loading…"
+    And the main content shows the line "A forget is running."
+    And the main content shows the line "Forget finished."
+
+  Scenario: Focus stays on the page when the control it was on goes with the run
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And the daemon's answers to the UI are delayed by 4 seconds
+    When I open the address "/snapshots"
+    Then the page shows the button "Snapshots of demo"
+    When I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" is closed
+    When I press Tab until focus is on the button "Cancel the run"
+    Then the main content shows the line "Forget finished."
+    And focus is on the heading "Maintenance of demo"
+
+  Scenario: A repository no plan backs up to says it holds nothing, and a forget says why it has nothing to do
+    Given a demo plan "home" with a tiny scratch repository
+    And the config names no plan
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the main content shows the line "No snapshots yet."
+    When I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And the dialog "Forget snapshots of demo" says "No plan of this agent backs up to this repository"
+    And the dialog "Forget snapshots of demo" offers only the button "Close"

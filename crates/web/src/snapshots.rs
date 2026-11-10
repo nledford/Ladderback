@@ -19,11 +19,12 @@ use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 
-use crate::components::{Confirmation, ReviewDialog, Working, recover_focus};
+use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
 use crate::live::say;
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
+use crate::repositories::Sentence;
 use crate::routes::{Empty, PageHeading, instant, refusal, short_id, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
@@ -108,14 +109,17 @@ impl Page {
         format!("{}{route}", self.base.get_value())
     }
 
-    /// What a refusal says.
-    fn refused_text(self, refused: &Refusal) -> String {
-        refusal(
+    /// What a refusal says, in two parts when the engine's own words are in
+    /// it: those are English whatever the language of the page, and are
+    /// marked so.
+    fn refused_sentence(self, refused: &Refusal) -> Sentence {
+        let text = refusal(
             &self.localizer.get_value(),
             refused.code,
             &refused.args,
             refused.detail.as_deref(),
-        )
+        );
+        Sentence::new(&text, refused.detail.as_deref())
     }
 
     /// Notes whether a request got an answer at all: any answer, a refusal
@@ -479,7 +483,7 @@ fn Repository(
                 refused
                     .get()
                     .map(|refused| {
-                        view! { <p role="alert">{page.refused_text(&refused)}</p> }
+                        view! { <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p> }
                     })
             }}
             {move || {
