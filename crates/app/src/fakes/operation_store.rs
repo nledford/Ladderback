@@ -22,8 +22,8 @@ impl InMemoryOperationStore {
         Self::default()
     }
 
-    // The map is only ever changed by whole inserts, so a panic elsewhere
-    // can't leave it half-written.
+    // Each change is an insert or a plain assignment that cannot panic partway,
+    // so a panic elsewhere can't leave the map half-written.
     fn stored(&self) -> MutexGuard<'_, BTreeMap<OperationId, OperationDetail>> {
         self.stored.lock().unwrap_or_else(PoisonError::into_inner)
     }
