@@ -480,6 +480,27 @@ Feature: Import a rustic profile
         | keep-tags = ["precious"] | keep-tags |
         | keep-ids = ["abcd1234"]  | keep-ids  |
 
+    Scenario: A snapshot filter beside retention is refused, because rustic's forget reaches fewer snapshots than Ladderback's
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [forget]
+        keep-last = 3
+
+        [snapshot-filter]
+        filter-hosts = ["demo-laptop"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "snapshot-filter.filter-hosts"
+      And no config file was written
+
     Scenario: Prune is not copied; the repository asks for local maintenance with a warning
       Given a rustic profile "nas.toml" holding:
         """

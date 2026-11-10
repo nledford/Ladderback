@@ -1385,3 +1385,64 @@ async fn a_key_noted_in_many_entries_counts_once() {
     assert_eq!(profile.plans.len(), 300);
     assert!(profile.notices.contains(&ignored("backup.snapshots.json")));
 }
+
+// --- A snapshot filter beside retention ---------------------------------------
+
+/// A profile with `extra` after the repository, and the entry `home`.
+fn with(extra: &str) -> String {
+    format!("{REPOSITORY}\n{extra}\n{ENTRY}")
+}
+
+#[tokio::test]
+async fn a_snapshot_filter_beside_retention_is_refused_at_the_first_key_of_the_filter() {
+    // rustic's forget is narrower than the plan's: it reaches only the
+    // snapshots the filter selects, which the retention would then be
+    // applied to in Ladderback without it.
+    let text = with(
+        "[forget]\nkeep-last = 3\n\n[snapshot-filter]\nfilter-hosts = [\"demo\"]\nfilter-tags = [\"x\"]\n",
+    );
+    let (key, line) = unsupported(read_err(&text).await);
+    assert_eq!(key, "snapshot-filter.filter-hosts");
+    assert_eq!(line, Some(line_of(&text, "filter-hosts")));
+}
+
+#[tokio::test]
+async fn any_kind_of_retention_with_a_snapshot_filter_is_refused() {
+    for rule in [
+        "keep-daily = 7",
+        "keep-last = 0",
+        "keep-within = \"1y\"",
+        "keep-within-yearly = \"2y\"",
+    ] {
+        let text = with(&format!(
+            "[forget]\n{rule}\n\n[snapshot-filter]\nfilter-tags = [\"x\"]\n"
+        ));
+        let (key, _) = unsupported(read_err(&text).await);
+        assert_eq!(key, "snapshot-filter.filter-tags", "{rule}");
+    }
+}
+
+#[tokio::test]
+async fn a_snapshot_filter_without_retention_is_only_noted() {
+    for forget in [
+        "",
+        "[forget]\nprune = true\n",
+        "[forget]\nkeep-none = true\n",
+        "[forget]\ngroup-by = \"host\"\n",
+    ] {
+        let text = with(&format!(
+            "{forget}\n[snapshot-filter]\nfilter-tags = [\"x\"]\n"
+        ));
+        let profile = read_ok(&text).await;
+        assert!(
+            profile.notices.contains(&ignored("snapshot-filter")),
+            "{forget}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_empty_snapshot_filter_beside_retention_is_not_a_filter() {
+    let profile = read_ok(&with("[forget]\nkeep-last = 3\n\n[snapshot-filter]\n")).await;
+    assert_eq!(ids(&profile), ["home"]);
+}

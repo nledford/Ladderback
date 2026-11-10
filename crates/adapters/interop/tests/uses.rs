@@ -595,3 +595,53 @@ async fn a_list_of_more_profiles_than_are_read_is_refused_whether_they_exist_or_
     assert_eq!(key, "global.use-profiles");
     assert_eq!(line, Some(line_of(&over, "use-profiles")));
 }
+
+#[tokio::test]
+async fn a_snapshot_filter_and_retention_that_come_from_two_profiles_are_refused_too() {
+    let scratch = Scratch::new();
+    let text = uses(&["base"], &format!("{REPOSITORY}\n{ENTRY}"));
+
+    // The filter is the used profile's: the refusal is at its line.
+    let base = scratch.profile(
+        "base.toml",
+        "[snapshot-filter]\nfilter-hosts = [\"demo\"]\n",
+    );
+    let own = format!("{text}\n[forget]\nkeep-last = 3\n");
+    match scratch.read(&own).await.unwrap_err() {
+        ProfileError::Unsupported { file, key, at } => {
+            assert_eq!(file, base.display().to_string());
+            assert_eq!(key, "snapshot-filter.filter-hosts");
+            assert_eq!(at.map(|at| at.line), Some(2));
+        }
+        other => panic!("unsupported, got {other:?}"),
+    }
+
+    // The retention is the used profile's, the filter the profile's own.
+    scratch.profile("base.toml", "[forget]\nkeep-last = 3\n");
+    let own = format!("{text}\n[snapshot-filter]\nfilter-tags = [\"x\"]\n");
+    let file = scratch.work.join("nas.toml").display().to_string();
+    match scratch.read(&own).await.unwrap_err() {
+        ProfileError::Unsupported {
+            file: found, key, ..
+        } => {
+            assert_eq!(found, file);
+            assert_eq!(key, "snapshot-filter.filter-tags");
+        }
+        other => panic!("unsupported, got {other:?}"),
+    }
+
+    // Both profiles have a filter: the profile's own is the one named.
+    scratch.profile(
+        "base.toml",
+        "[forget]\nkeep-last = 3\n\n[snapshot-filter]\nfilter-hosts = [\"demo\"]\n",
+    );
+    match scratch.read(&own).await.unwrap_err() {
+        ProfileError::Unsupported {
+            file: found, key, ..
+        } => {
+            assert_eq!(found, file);
+            assert_eq!(key, "snapshot-filter.filter-tags");
+        }
+        other => panic!("unsupported, got {other:?}"),
+    }
+}
