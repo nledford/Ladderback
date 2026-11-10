@@ -1613,3 +1613,60 @@ async fn a_profile_that_is_a_pipe_is_unreadable_and_is_not_opened() {
         }
     );
 }
+
+#[tokio::test]
+async fn only_a_variable_a_reference_can_name_and_that_has_a_value_is_an_option() {
+    let scratch = Scratch::new();
+    let profile = scratch
+        .read_with(
+            &[
+                ("RUSTIC_REPO_OPT_", "no name"),
+                ("RUSTIC_REPO_OPT_A-B", "a dash"),
+                ("RUSTIC_REPO_OPT_Ä", "not ASCII"),
+                ("RUSTIC_REPO_OPT_NO_VALUE", ""),
+                ("RUSTIC_REPO_OPT_REGION", "eu"),
+                ("RUSTIC_REPO_OPTHOT_", "no name"),
+                ("RUSTIC_REPO_OPTCOLD_B_C", "x"),
+            ],
+            &profile_text(""),
+        )
+        .await
+        .expect("a profile");
+    let settings = &profile.repository.settings;
+    assert_eq!(
+        settings.options.keys().collect::<Vec<_>>(),
+        ["region"],
+        "{:?}",
+        settings.options
+    );
+    assert!(settings.options_hot.is_empty());
+    assert_eq!(settings.options_cold.keys().collect::<Vec<_>>(), ["b-c"]);
+}
+
+#[tokio::test]
+async fn a_value_of_the_wrong_type_in_a_list_is_refused_at_the_item() {
+    for (text, key, line) in [
+        (
+            with("[backup]\nglobs = [\"a\", 1]\n"),
+            "backup.globs[1]",
+            Some("globs"),
+        ),
+        (
+            with("[backup]\nglobs = [2, \"a\"]\n"),
+            "backup.globs[0]",
+            Some("globs"),
+        ),
+        (
+            format!(
+                "{REPOSITORY}\n[[backup.snapshots]]\nname = \"home\"\nsources = [\"/srv/a\", 3]\n"
+            ),
+            "backup.snapshots[0].sources[1]",
+            Some("sources"),
+        ),
+    ] {
+        let (found, at, problem) = invalid(read_err(&text).await);
+        assert_eq!(found, key);
+        assert_eq!(problem, ProfileProblem::WrongType, "{key}");
+        assert_eq!(at, line.map(|needle| line_of(&text, needle)), "{key}");
+    }
+}

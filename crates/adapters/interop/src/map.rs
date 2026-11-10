@@ -229,13 +229,10 @@ fn reference(name: &str) -> String {
     format!("${{{name}}}")
 }
 
-/// Whether `name` is a name a `${…}` can hold.
+/// Whether `name`, a variable of the process that starts with `RUSTIC_`, is
+/// one a `${…}` can hold: letters, digits and `_`.
 fn is_variable_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The password, from the first of the sources rustic asks, in its order:
