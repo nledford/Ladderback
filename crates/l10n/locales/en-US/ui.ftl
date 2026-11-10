@@ -386,8 +386,8 @@ ui-repositories-hot-hint = The fast half of a repository kept in two places. Lea
 # The label of the password field.
 ui-repositories-password-label = Password
 
-# The hint under the password field. It says where the typed password goes.
-ui-repositories-password-hint = { -brand-name } keeps it in its configuration file and never shows it again.
+# The hint under the password field. It says where the typed password goes: the configuration file, and the history of it that { -brand-name } keeps.
+ui-repositories-password-hint = { -brand-name } keeps it in its configuration file, and in the copies it keeps of that file's earlier versions. It never shows it again.
 
 # The button that opens the repository and saves nothing.
 ui-repositories-test = Test the repository

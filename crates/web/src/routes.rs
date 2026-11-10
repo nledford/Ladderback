@@ -812,10 +812,16 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 Action::Connect => ws::post(&url, &form.connect_request()).await,
                 Action::Create => ws::post(&url, &form.create_request()).await,
             };
+            // The reader may have followed a link while the engine worked: the
+            // page's signals went with it, reading one would panic, and there
+            // is nobody left to tell.
+            let Some(phase_now) = phase.try_get_untracked() else {
+                return;
+            };
             busy.set(false);
             // An answer, of any kind, is a daemon that is there: a page that
             // could not read the list takes it up again.
-            if posted.is_some() && phase.get_untracked() == Phase::Unreachable {
+            if posted.is_some() && phase_now == Phase::Unreachable {
                 load.run(());
             }
             match posted {

@@ -66,8 +66,9 @@ impl Action {
     }
 }
 
-/// What a person has typed.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// What a person has typed. It has no `Debug`, so nothing can print the
+/// password it holds (I4).
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct Form {
     pub(crate) name: String,
     pub(crate) location: String,
@@ -282,27 +283,47 @@ impl Sentence {
         }
     }
 
-    /// `text` with `detail` marked, when `detail` is in it; a text that
-    /// holds none of it (the catalog cut a long one short) is one plain run.
+    /// `text` with `detail` marked, when `detail` is in it. The catalog puts
+    /// bidi isolation marks around a placeable, and the words are found
+    /// between them; a text without marks has them where they stand last,
+    /// which is where a message puts the sender's words. A text that holds
+    /// none of them (the catalog cut a long one short) is one plain run.
     pub(crate) fn new(text: &str, detail: Option<&str>) -> Self {
-        let marked = detail
-            .filter(|detail| !detail.is_empty())
-            .and_then(|detail| text.find(detail).map(|at| (detail, at)));
-        match marked {
-            Some((detail, at)) => Self {
-                before: text.get(..at).unwrap_or_default().to_owned(),
-                detail: Some((
-                    detail.to_owned(),
-                    text.get(at + detail.len()..).unwrap_or_default().to_owned(),
-                )),
+        let Some(detail) = detail.filter(|detail| !detail.is_empty()) else {
+            return Self::plain_run(text);
+        };
+        let isolated = format!("{FIRST_ISOLATE}{detail}{POP_ISOLATE}");
+        let (start, end) = match text.find(&isolated) {
+            Some(at) => (
+                at + FIRST_ISOLATE.len_utf8(),
+                at + isolated.len() - POP_ISOLATE.len_utf8(),
+            ),
+            None => match text.rfind(detail) {
+                Some(at) => (at, at + detail.len()),
+                None => return Self::plain_run(text),
             },
-            None => Self {
-                before: text.to_owned(),
-                detail: None,
+        };
+        match (text.get(..start), text.get(end..)) {
+            (Some(before), Some(after)) => Self {
+                before: before.to_owned(),
+                detail: Some((detail.to_owned(), after.to_owned())),
             },
+            _ => Self::plain_run(text),
+        }
+    }
+
+    fn plain_run(text: &str) -> Self {
+        Self {
+            before: text.to_owned(),
+            detail: None,
         }
     }
 }
+
+/// The marks the catalog's placeables are wrapped in, which keep a text that
+/// runs the other way from reordering the sentence around it (§4.5).
+const FIRST_ISOLATE: char = '\u{2068}';
+const POP_ISOLATE: char = '\u{2069}';
 
 #[cfg(test)]
 mod tests {
@@ -623,6 +644,30 @@ mod tests {
             Sentence {
                 before: "The operation failed: ".to_owned(),
                 detail: Some(("wrong password".to_owned(), ".".to_owned())),
+            }
+        );
+    }
+
+    #[test]
+    fn the_engines_words_are_found_between_the_marks_the_catalog_put_around_them() {
+        // A word as short as `a` is in the catalog's own text too.
+        let text = "The operation failed: \u{2068}a\u{2069}";
+        assert_eq!(
+            Sentence::new(text, Some("a")),
+            Sentence {
+                before: "The operation failed: \u{2068}".to_owned(),
+                detail: Some(("a".to_owned(), "\u{2069}".to_owned())),
+            }
+        );
+    }
+
+    #[test]
+    fn without_marks_the_engines_words_are_where_they_stand_last() {
+        assert_eq!(
+            Sentence::new("The operation failed: a", Some("a")),
+            Sentence {
+                before: "The operation failed: ".to_owned(),
+                detail: Some(("a".to_owned(), String::new())),
             }
         );
     }
