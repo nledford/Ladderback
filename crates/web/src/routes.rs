@@ -20,7 +20,7 @@ use crate::components::{ErrorSummary, FormField, Progress, StatusBadge, SummaryI
 use crate::live::say;
 use crate::repositories::{
     Action, Field, Form, Outcome, Sentence, advises_retry, error_of, field_of, password_source,
-    problems_of, rereads_list,
+    problems_of, repository_notes, rereads_list,
 };
 use crate::ws::{self, Phase, Posted};
 use crate::{page, text};
@@ -970,6 +970,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
 fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
     let (id, args) = password_source(&row.password);
     let password = text_with(localizer, id, &args);
+    let notes = repository_notes(localizer, &row.warnings);
     let hot = row.repo_hot.map(|location| {
         text_with(
             localizer,
@@ -984,7 +985,10 @@ fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
                 <div>{row.repository}</div>
                 {hot.map(|hot| view! { <div>{hot}</div> })}
             </td>
-            <td>{password}</td>
+            <td>
+                <div>{password}</div>
+                {notes.into_iter().map(|note| view! { <div class="text-muted">{note}</div> }).collect_view()}
+            </td>
         </tr>
     }
 }

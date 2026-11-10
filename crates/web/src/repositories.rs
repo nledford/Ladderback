@@ -309,10 +309,20 @@ pub(crate) fn password_source(
 /// writes them in the page's language (§8.4). A warning holds a code and the
 /// names of the settings it is about, never a secret (I4).
 pub(crate) fn repository_notes(
-    _localizer: &Localizer,
-    _warnings: &[RepositoryWarningDto],
+    localizer: &Localizer,
+    warnings: &[RepositoryWarningDto],
 ) -> Vec<String> {
-    Vec::new()
+    warnings
+        .iter()
+        .map(|warning| {
+            let args: Vec<(&str, MsgArg)> = warning
+                .args
+                .iter()
+                .map(|(name, arg)| (name.as_str(), arg.clone()))
+                .collect();
+            localizer.warning(warning.code, &args, None).into_text()
+        })
+        .collect()
 }
 
 /// A refusal's sentence, in two parts when the engine's own words are in it:
@@ -772,6 +782,14 @@ mod tests {
             "{notes:?}"
         );
         assert!(notes[1].contains("options.secret_access_key"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_repository_with_no_warnings_has_no_notes() {
+        assert_eq!(
+            repository_notes(&Localizer::new(&[]), &[]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
