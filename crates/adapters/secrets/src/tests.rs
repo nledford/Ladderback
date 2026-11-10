@@ -338,6 +338,31 @@ async fn a_helper_that_leaves_a_daemon_holding_its_output_still_gives_its_secret
     assert!(is_running(pid));
 }
 
+/// The limit is the command's. One that has exited in time is not timed out
+/// because a daemon of its holds the output open past the limit, and its
+/// group is not signalled: its leader is reaped, and the id may be another
+/// process's.
+#[tokio::test]
+async fn a_command_that_exited_in_time_is_not_timed_out_by_a_daemon_of_its() {
+    let directory = TempDir::new().unwrap();
+    let pidfile = directory.path().join("pid");
+    let signalled = Mutex::new(0_u32);
+    let signal = |_: Pid| *signalled.lock().unwrap() += 1;
+    let stop = Stop {
+        reap_limit: Duration::from_secs(5),
+        kill: &signal,
+    };
+    let script = sh(
+        r#"sleep 60 & echo $! > "$1"; echo hunter2"#,
+        [pidfile.display().to_string()],
+    );
+    let result = run_with(&script, Duration::from_millis(300), &stop).await;
+    let pid = recorded_pid(&pidfile).await;
+    let _reaper = Reaper(pid);
+    assert_eq!(result, Ok(SecretValue::new("hunter2")));
+    assert_eq!(*signalled.lock().unwrap(), 0);
+}
+
 #[tokio::test]
 async fn dropping_the_resolve_future_kills_the_command_s_group() {
     let directory = TempDir::new().unwrap();

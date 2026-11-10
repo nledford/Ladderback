@@ -89,7 +89,7 @@ pub struct RepositorySecrets<'a> {
 /// encodes a userinfo, a path, a query, a special URL's query or a fragment;
 /// without the tab and newlines it takes out; with `\` read as `/`; and
 /// lower-cased, as a host is; and in pieces, where a parser splits it at
-/// `@`, `#`, `?` or `/`; see `url_needles`), with [`REDACTED`]; and what
+/// `@`, `#`, `?`, `/` or `:`; see `url_needles`), with [`REDACTED`]; and what
 /// else of it shows in text on its own (see `partial_needles`). Secrets that
 /// overlap or touch are replaced as one span.
 #[derive(Clone, Default)]
@@ -397,15 +397,18 @@ const MIN_PIECE_BYTES: usize = 8;
 const MAX_PIECES_PER_SECRET: usize = 64;
 
 /// The characters at which a URL parser takes a secret apart: it ends the
-/// userinfo (`@`), the host and the path (`?`, `/`) and the query (`#`).
-const SPLITTING: [char; 4] = ['@', '#', '?', '/'];
+/// userinfo (`@`), the host and the path (`?`, `/`) and the query (`#`), and
+/// splits a user name from a password (`:`).
+const SPLITTING: [char; 5] = ['@', '#', '?', '/', ':'];
 
 /// Every way a URL parser can write `value`. A parser takes tab and
 /// newlines out of a URL and reads `\` as `/` (in a special URL's path), so
 /// those two rewrites of the value are encoded too; then each is written as
 /// fully encoded (either hex case) and as each part of a URL encodes it,
 /// with upper-case hex like the url crate. A host is lower-cased, so every
-/// needle is lower-cased too.
+/// needle is lower-cased too. A secret of any size has at most about 130
+/// needles of its own size or up to three times it, and 64 pieces of up to
+/// 18 each; a secret of ordinary characters has about a dozen.
 ///
 /// A secret that holds a character a parser splits a URL at is printed in
 /// pieces, each as its part of the URL writes it, and a library that takes
@@ -421,10 +424,13 @@ fn url_needles(value: &str) -> Vec<String> {
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
     let slashed = stripped.replace('\\', "/");
-    let bases: Vec<&str> = [value, stripped.as_str(), slashed.as_str()]
+    let mut bases: Vec<&str> = [value, stripped.as_str(), slashed.as_str()]
         .into_iter()
         .filter(|base| !base.is_empty())
         .collect();
+    // A rewrite that changed nothing is the same text (and each rewrite is
+    // the same as the last, or different from all before it).
+    bases.dedup();
     let mut needles = Vec::new();
     for base in &bases {
         written_each_way(base, &mut needles);
@@ -452,8 +458,12 @@ fn url_needles(value: &str) -> Vec<String> {
     for piece in pieces {
         written_each_way(piece, &mut needles);
     }
+    needles.sort_unstable();
+    needles.dedup();
     let lower: Vec<String> = needles.iter().map(|n| n.to_ascii_lowercase()).collect();
     needles.extend(lower);
+    needles.sort_unstable();
+    needles.dedup();
     needles
 }
 
@@ -743,9 +753,9 @@ mod tests {
     const MARKERS: [&str; 3] = ["Canary-Alpha", "Bravo-Delta", "Echo-ZzEnd"];
 
     /// Secrets made of the markers and the characters a parser splits a URL
-    /// at (`@`, `#`, `?`, `/`), in every order of two.
+    /// at (`@`, `#`, `?`, `/`, `:`), in every order of two.
     fn splitting_secrets() -> Vec<String> {
-        let delimiters = ["@", "#", "?", "/"];
+        let delimiters = ["@", "#", "?", "/", ":"];
         let [first, second, third] = MARKERS;
         let mut secrets = Vec::new();
         for one in delimiters {

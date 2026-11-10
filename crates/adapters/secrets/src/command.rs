@@ -88,24 +88,28 @@ pub(crate) async fn run_with(
 
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let outcome = timeout(
+    let outcome = collect(
+        &mut running.child,
+        stdout,
+        stderr,
         limit,
-        collect(&mut running.child, stdout, stderr, &mut out, &mut err),
+        &mut out,
+        &mut err,
     )
     .await;
     let status = match outcome {
-        Ok(Ok(Outcome::Exited(status))) => status,
-        Ok(Ok(Outcome::TooLarge)) => {
+        Ok(Outcome::Exited(status)) => status,
+        Ok(Outcome::TooLarge) => {
             running.kill_and_reap().await;
             return Err(fail(Problem::TooLarge {
                 limit: MAX_SECRET_BYTES,
             }));
         }
-        Ok(Err(error)) => {
+        Err(error) => {
             running.kill_and_reap().await;
             return Err(unreachable(error.to_string()));
         }
-        Err(_elapsed) => {
+        Ok(Outcome::TimedOut) => {
             running.kill_and_reap().await;
             return Err(fail(Problem::TimedOut {
                 seconds: whole_seconds_up(limit),
@@ -192,6 +196,8 @@ enum Outcome {
     Exited(ExitStatus),
     /// Stdout went past the limit.
     TooLarge,
+    /// The command was still running at its limit.
+    TimedOut,
 }
 
 enum End {
@@ -199,13 +205,16 @@ enum End {
     Full,
 }
 
-/// Reads stdout and stderr while the command runs, then gives the pipes
-/// [`PIPE_GRACE`] to end. What was read is in `out` and `err` even when this
-/// is cancelled.
+/// Reads stdout and stderr while the command runs, under `limit`, then gives
+/// the pipes [`PIPE_GRACE`] to end. The limit is the command's: once it has
+/// exited and been reaped, what is left is a pipe a daemon may hold open,
+/// which the grace bounds, so a command that ended in time is never timed
+/// out, and the group is signalled only while its leader is not reaped.
 async fn collect(
     child: &mut Child,
     stdout: ChildStdout,
     stderr: ChildStderr,
+    limit: Duration,
     out: &mut Vec<u8>,
     err: &mut Vec<u8>,
 ) -> io::Result<Outcome> {
@@ -214,16 +223,24 @@ async fn collect(
     let mut err_read = pin!(read_capped(stderr, err, STDERR_KEPT, false));
     let mut out_done = false;
     let mut err_done = false;
-    let status = loop {
-        tokio::select! {
-            result = &mut out_read, if !out_done => match result? {
-                End::Full => return Ok(Outcome::TooLarge),
-                End::Eof => out_done = true,
-            },
-            // A stderr that can't be read is a stderr with nothing more in it.
-            _ = &mut err_read, if !err_done => err_done = true,
-            status = child.wait() => break status?,
+    let running = async {
+        loop {
+            tokio::select! {
+                result = &mut out_read, if !out_done => match result? {
+                    End::Full => return Ok(None),
+                    End::Eof => out_done = true,
+                },
+                // A stderr that can't be read is a stderr with nothing more in it.
+                _ = &mut err_read, if !err_done => err_done = true,
+                status = child.wait() => return status.map(Some),
+            }
         }
+    };
+    let status = match timeout(limit, running).await {
+        Err(_elapsed) => return Ok(Outcome::TimedOut),
+        Ok(Err(error)) => return Err(error),
+        Ok(Ok(None)) => return Ok(Outcome::TooLarge),
+        Ok(Ok(Some(status))) => status,
     };
 
     let drained = async {

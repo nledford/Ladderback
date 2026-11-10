@@ -7,7 +7,7 @@ mod support;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use app::ports::{Engine, EngineEvent, Job, RepositoryAccess};
 use domain::execution::FailureReason;
@@ -133,7 +133,17 @@ async fn fails(access: RepositoryAccess) -> Said {
     let Some(EngineEvent::Failed(FailureReason::EngineFailed { detail })) = events.last() else {
         panic!("the job did not fail as an engine failure: {events:?}");
     };
-    // What the worker's stderr holds is read beside the events.
+    // What the worker's stderr holds is read beside the events: wait for
+    // the first line, and a little more for the rest.
+    let first_line = Instant::now() + Duration::from_secs(10);
+    while WORKER_LOG
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_empty()
+        && Instant::now() < first_line
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
     let logged = WORKER_LOG
         .lock()
