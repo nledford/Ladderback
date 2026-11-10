@@ -118,7 +118,7 @@ Decisions the models make where this document was silent:
 
 **Built (C2).** The `config` adapter (`crates/adapters/config`, package `config-adapter`, as a registry crate `config` exists): `FileConfigStore` over the file with the contract suite of `ConfigStore`, the strict tables and the parity tests of the four `rustic_core` structs they map onto (and a test that the lists of mapped keys are the keys the tables take), the schema migrations on a `toml::Table` with golden files (`tests/golden/v1.toml`), the atomic write, the history and the size cap. `[hub]` is an unknown key until M4a.
 
-**Not yet.** The adapter is not wired into `main.rs`, so "the daemon refuses to start on a newer schema" holds for the adapter, not yet for the daemon. The repositories' `[prune]` and `[check]` tables are not read (§7.3, item 7), and there are no `timezone`, `every`, overlap or metered keys (M2). The warning for an inline secret and seeding the daemon-wide redactor from the config (security.md §10.2) wait for their consumer. A golden file exists for version 1 only; the first `schema = 2` brings the second.
+**Not yet.** The adapter is not wired into `main.rs`, so "the daemon refuses to start on a newer schema" holds for the adapter, not yet for the daemon. The repositories' `[prune]` and `[check]` tables are not read (§7.3, item 7), and there are no `timezone`, `every`, overlap or metered keys (M2). Seeding the daemon-wide redactor from the config (security.md §10.2) waits for its consumer. The warning for an inline secret is built: the daemon logs it when it loads the config at start, and the repository list carries it (§16, decision 37). A golden file exists for version 1 only; the first `schema = 2` brings the second.
 
 ### 6.2 Importing rustic profiles
 
