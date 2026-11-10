@@ -77,6 +77,22 @@ pub async fn within<T>(seconds: u64, what: &str, work: impl Future<Output = T>) 
     }
 }
 
+/// Polls `call` `polls` times, a moment apart so the connection threads can
+/// answer in between, then drops it: the call is cut short at one of its
+/// await points, as a run cuts the write that would hold up a cancel or its
+/// deadline (§9). `Some` when the call ended within `polls` polls.
+pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option<T> {
+    let mut call = std::pin::pin!(call);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    for _ in 0..polls {
+        if let std::task::Poll::Ready(done) = call.as_mut().poll(&mut cx) {
+            return Some(done);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    None
+}
+
 pub fn id(n: u128) -> OperationId {
     OperationId::from_uuid(Uuid::from_u128(n))
 }
