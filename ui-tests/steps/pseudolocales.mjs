@@ -59,8 +59,8 @@ Then("the page title is transformed", async function () {
 
 Then("the skip link is at the {word} edge of the page", async function (edge) {
   assert.ok(["left", "right"].includes(edge), `unknown edge "${edge}"`);
-  const link = journey(this.page).byRole("link");
-  assert.equal(await link.count(), 1, "the start page has exactly one link, the skip link");
+  // The skip link is the first link of the page, ahead of the navigation.
+  const link = journey(this.page).byRole("link").first();
   const box = await link.boundingBox();
   assert.ok(box, "the skip link is not shown");
   const gaps = { left: box.x, right: this.page.viewportSize().width - (box.x + box.width) };

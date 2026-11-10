@@ -58,6 +58,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // The demos' state: a form-field error, the progress bar's percent and
     // the toast text.
     let form_error = RwSignal::<Option<String>>::new(None);
+    let form_value = RwSignal::new(String::new());
     let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
     let progress = RwSignal::new(40u8);
     let toast = RwSignal::<Option<String>>::new(None);
@@ -169,6 +170,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_FORM_HEADING)}</h2>
             <FormField
+                id="form-field-input"
+                value=form_value
                 label=t(msg::UI_GALLERY_REPOSITORY_NAME)
                 description=t(msg::UI_GALLERY_REPOSITORY_HINT)
                 error=form_error

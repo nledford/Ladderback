@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 
-import { journey } from "../support/keyboard.mjs";
+import { journey, namePattern } from "../support/keyboard.mjs";
 import { fixtureRepo, startServer } from "../support/world.mjs";
 
 // A test, a connection or a creation takes the engine a moment, in a debug
@@ -102,7 +102,7 @@ Then("the page has {int} text boxes", async function (count) {
 // Focus moves once the answer is in, a moment after the element exists.
 async function focusComesTo(world, role, name, description) {
   const keys = journey(world.page);
-  const target = keys.byRole(role, { name, exact: true });
+  const target = keys.byRole(role, { name: namePattern(name) });
   const deadline = Date.now() + ANSWER_PATIENCE_MS;
   for (;;) {
     try {

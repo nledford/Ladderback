@@ -32,6 +32,9 @@ Feature: Accessibility of the app shell
     And I press Tab
     And I press Tab
     And I press Tab
+    And I press Tab
+    And I press Tab
+    And I press Tab
     And I press Enter
     Then focus is on the main heading
     And every visible text is transformed

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use api::{ErrorCode, MsgArg, PlanSummaryDto, PlansDto};
+use api::{ErrorCode, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto};
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -16,8 +16,11 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
-use crate::components::{Progress, StatusBadge};
+use crate::components::{ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
 use crate::live::say;
+use crate::repositories::{
+    Action, Field, Form, Outcome, Sentence, advises_retry, field_of, password_source,
+};
 use crate::ws::{self, Phase, Posted};
 use crate::{page, text};
 
@@ -197,11 +200,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                         say(Politeness::Polite, &still_waiting);
                                                     }
                                                 }
-                                                Some(Posted::Refused(code, args)) => {
+                                                Some(Posted::Refused(code, args, detail)) => {
                                                     error.set(Some(refusal(
                                                         &error_localizer,
                                                         code,
                                                         &args,
+                                                        detail.as_deref(),
                                                     )));
                                                 }
                                                 // No answer at all: the page's
@@ -378,11 +382,12 @@ fn row_view(
                                                 say(Politeness::Polite, &still_waiting);
                                             }
                                         }
-                                        Some(Posted::Refused(code, args)) => {
+                                        Some(Posted::Refused(code, args, detail)) => {
                                             error.set(Some(refusal(
                                                 &error_localizer,
                                                 code,
                                                 &args,
+                                                detail.as_deref(),
                                             )));
                                         }
                                         None => {}
@@ -481,12 +486,17 @@ fn instant(localizer: &Localizer, raw: &str) -> String {
 
 /// A refusal the daemon answered with, as the catalog writes it (§8.4): a
 /// typed code with its arguments, never a bare status number.
-fn refusal(localizer: &Localizer, code: ErrorCode, args: &[(String, MsgArg)]) -> String {
+fn refusal(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(String, MsgArg)],
+    detail: Option<&str>,
+) -> String {
     let args = args
         .iter()
         .map(|(name, arg)| (name.as_str(), arg.clone()))
         .collect::<Vec<_>>();
-    localizer.error(code, &args, None).into_text()
+    localizer.error(code, &args, detail).into_text()
 }
 
 /// The snapshots page, the route `/snapshots`: one repository's snapshots,
@@ -616,6 +626,368 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// What a person has typed into the Repositories form, one signal per field.
+#[derive(Clone, Copy)]
+struct Inputs {
+    name: RwSignal<String>,
+    location: RwSignal<String>,
+    hot_storage: RwSignal<String>,
+    password: RwSignal<String>,
+}
+
+impl Inputs {
+    fn new() -> Self {
+        Self {
+            name: RwSignal::new(String::new()),
+            location: RwSignal::new(String::new()),
+            hot_storage: RwSignal::new(String::new()),
+            password: RwSignal::new(String::new()),
+        }
+    }
+
+    fn of(self, field: Field) -> RwSignal<String> {
+        match field {
+            Field::Name => self.name,
+            Field::Location => self.location,
+            Field::HotStorage => self.hot_storage,
+            Field::Password => self.password,
+        }
+    }
+
+    fn read(self) -> Form {
+        Form {
+            name: self.name.get_untracked(),
+            location: self.location.get_untracked(),
+            hot_storage: self.hot_storage.get_untracked(),
+            password: self.password.get_untracked(),
+        }
+    }
+
+    fn clear(self) {
+        for field in FIELDS {
+            self.of(field).set(String::new());
+        }
+    }
+}
+
+/// The form's fields in the order the page shows them.
+const FIELDS: [Field; 4] = [
+    Field::Name,
+    Field::Location,
+    Field::HotStorage,
+    Field::Password,
+];
+
+/// What is wrong with the form: the error each field shows, and the summary
+/// that lists them all. Both are set together, so a field and the summary
+/// never disagree.
+#[derive(Clone, Copy)]
+struct Problems {
+    summary: RwSignal<Vec<SummaryItem>>,
+    advice: RwSignal<Option<String>>,
+    name: RwSignal<Option<String>>,
+    location: RwSignal<Option<String>>,
+    hot_storage: RwSignal<Option<String>>,
+    password: RwSignal<Option<String>>,
+}
+
+impl Problems {
+    fn new() -> Self {
+        Self {
+            summary: RwSignal::new(Vec::new()),
+            advice: RwSignal::new(None),
+            name: RwSignal::new(None),
+            location: RwSignal::new(None),
+            hot_storage: RwSignal::new(None),
+            password: RwSignal::new(None),
+        }
+    }
+
+    fn of(self, field: Field) -> RwSignal<Option<String>> {
+        match field {
+            Field::Name => self.name,
+            Field::Location => self.location,
+            Field::HotStorage => self.hot_storage,
+            Field::Password => self.password,
+        }
+    }
+
+    /// Shows `items`, and `advice` after them: each field about which an item
+    /// is shows it, and every other field is clear. No items is a clear form.
+    fn show(self, items: Vec<SummaryItem>, advice: Option<String>) {
+        for field in FIELDS {
+            let error = items
+                .iter()
+                .find(|item| item.field == Some(field.id()))
+                .map(|item| item.sentence.plain());
+            self.of(field).set(error);
+        }
+        self.advice.set(advice);
+        self.summary.set(items);
+    }
+}
+
+/// The repositories page, the route `/repositories`: the repositories
+/// Ladderback backs up to, and the form that tests one, connects one that
+/// exists and creates one that doesn't (§4.4). Its decisions are
+/// `repositories.rs`; this is the glue. A failed submit moves focus to the
+/// error summary, and a typed password stays in its field until the
+/// repository is saved, never shown again (I4, A5).
+#[component]
+pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
+    let heading = text(&localizer, msg::UI_REPOSITORIES_HEADING);
+    let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
+    let body = text(&localizer, msg::UI_REPOSITORIES_BODY);
+    let loading = text(&localizer, msg::UI_LOADING);
+    let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
+    let caption = text(&localizer, msg::UI_REPOSITORIES_CAPTION);
+    let (name_column, location_column, password_column) = (
+        text(&localizer, msg::UI_COLUMN_NAME),
+        text(&localizer, msg::UI_COLUMN_LOCATION),
+        text(&localizer, msg::UI_COLUMN_PASSWORD),
+    );
+    let empty = text(&localizer, msg::UI_NO_REPOSITORIES);
+    let form_heading = text(&localizer, msg::UI_REPOSITORIES_FORM_HEADING);
+    let working = text(&localizer, msg::UI_REPOSITORIES_WORKING);
+    let (test_label, connect_label, create_label) = (
+        text(&localizer, msg::UI_REPOSITORIES_TEST),
+        text(&localizer, msg::UI_REPOSITORIES_CONNECT),
+        text(&localizer, msg::UI_REPOSITORIES_CREATE),
+    );
+    let base = StoredValue::new(ws::origin());
+    let phase = RwSignal::new(Phase::Loading);
+    // The configured repositories; `None` until the first read answers.
+    let rows = RwSignal::<Option<Vec<RepositoryDto>>>::new(None);
+    let load = Callback::new(move |()| {
+        let url = format!("{}/api/v1/repositories", base.get_value());
+        spawn_local(async move {
+            match ws::read::<RepositoriesDto>(&url).await {
+                Some(read) => {
+                    rows.set(Some(read.repositories));
+                    phase.set(Phase::Ready);
+                }
+                None => phase.set(Phase::Unreachable),
+            }
+        });
+    });
+    load.run(());
+
+    let inputs = Inputs::new();
+    let problems = Problems::new();
+    // What the last answer said, and whether a request is still on its way.
+    let result = RwSignal::<Option<String>>::new(None);
+    let busy = RwSignal::new(false);
+    let submit_localizer = Arc::clone(&localizer);
+    let submit = Callback::new(move |action: Action| {
+        if busy.get_untracked() {
+            return;
+        }
+        let form = inputs.read();
+        result.set(None);
+        let missing = form.missing(action);
+        if !missing.is_empty() {
+            let items = missing
+                .into_iter()
+                .filter_map(|field| {
+                    let required = field.required()?;
+                    Some(SummaryItem {
+                        field: Some(field.id()),
+                        sentence: Sentence::new(&text(&submit_localizer, required), None),
+                    })
+                })
+                .collect();
+            problems.show(items, None);
+            return;
+        }
+        busy.set(true);
+        say(
+            Politeness::Polite,
+            &text(&submit_localizer, msg::UI_REPOSITORIES_WORKING),
+        );
+        let localizer = Arc::clone(&submit_localizer);
+        let url = format!("{}{}", base.get_value(), action.path());
+        spawn_local(async move {
+            let posted = match action {
+                Action::Test => ws::post(&url, &form.test_request()).await,
+                Action::Connect => ws::post(&url, &form.connect_request()).await,
+                Action::Create => ws::post(&url, &form.create_request()).await,
+            };
+            busy.set(false);
+            // An answer, of any kind, is a daemon that is there: a page that
+            // could not read the list takes it up again.
+            if posted.is_some() && phase.get_untracked() == Phase::Unreachable {
+                load.run(());
+            }
+            match posted {
+                Some(Posted::Done(answer)) => match Outcome::of(action, &answer) {
+                    Some(outcome) => {
+                        let alias = form.alias();
+                        let (id, args) = outcome.shown(alias);
+                        result.set(Some(text_with(&localizer, id, &args)));
+                        let (id, args) = outcome.announced(alias);
+                        say(Politeness::Polite, &text_with(&localizer, id, &args));
+                        problems.show(Vec::new(), None);
+                        if outcome.saved() {
+                            inputs.clear();
+                            load.run(());
+                        }
+                    }
+                    // An answer that is not the one the route gives is a
+                    // daemon the page cannot talk to.
+                    None => phase.set(Phase::Unreachable),
+                },
+                Some(Posted::Refused(code, args, detail)) => {
+                    let shown = refusal(&localizer, code, &args, detail.as_deref());
+                    problems.show(
+                        vec![SummaryItem {
+                            field: field_of(code, &args).map(Field::id),
+                            sentence: Sentence::new(&shown, detail.as_deref()),
+                        }],
+                        advises_retry(code)
+                            .then(|| text(&localizer, msg::UI_REPOSITORIES_TRY_AGAIN)),
+                    );
+                }
+                // No answer at all: the page's phase says that its own way.
+                None => phase.set(Phase::Unreachable),
+            }
+        });
+    });
+
+    let list_localizer = Arc::clone(&localizer);
+    let summary_localizer = Arc::clone(&localizer);
+    let field_text = |id| text(&localizer, id);
+    view! {
+        <PageHeading>
+            {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+        </PageHeading>
+        <p>{body}</p>
+        {move || match phase.get() {
+            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
+            Phase::Ready => match rows.get() {
+                Some(rows) if !rows.is_empty() => {
+                    let localizer = Arc::clone(&list_localizer);
+                    view! {
+                        <table>
+                            <caption class="text-muted">{caption.clone()}</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">{name_column.clone()}</th>
+                                    <th scope="col">{location_column.clone()}</th>
+                                    <th scope="col">{password_column.clone()}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows
+                                    .into_iter()
+                                    .map(|row| repository_row(&localizer, row))
+                                    .collect_view()}
+                            </tbody>
+                        </table>
+                    }
+                        .into_any()
+                }
+                _ => view! { <p>{empty.clone()}</p> }.into_any(),
+            },
+        }}
+        <section aria-labelledby="repositories-form-heading">
+            <h2 id="repositories-form-heading">{form_heading}</h2>
+            {move || {
+                let items = problems.summary.get();
+                (!items.is_empty())
+                    .then(|| {
+                        let count = u64::try_from(items.len()).unwrap_or(u64::MAX);
+                        let heading = text_with(
+                            &summary_localizer,
+                            msg::UI_REPOSITORIES_PROBLEMS,
+                            &[("count", MsgArg::Count(count))],
+                        );
+                        view! {
+                            <ErrorSummary
+                                heading=heading
+                                items=items
+                                advice=problems.advice.get_untracked()
+                            />
+                        }
+                    })
+            }}
+            <form
+                novalidate
+                on:submit=move |event| {
+                    event.prevent_default();
+                    submit.run(Action::Test);
+                }
+            >
+                <FormField
+                    id=Field::Name.id()
+                    label=field_text(msg::UI_REPOSITORIES_NAME_LABEL)
+                    description=field_text(msg::UI_REPOSITORIES_NAME_HINT)
+                    error=problems.name
+                    value=inputs.name
+                />
+                <FormField
+                    id=Field::Location.id()
+                    label=field_text(msg::UI_REPOSITORIES_LOCATION_LABEL)
+                    description=field_text(msg::UI_REPOSITORIES_LOCATION_HINT)
+                    error=problems.location
+                    value=inputs.location
+                />
+                <FormField
+                    id=Field::HotStorage.id()
+                    label=field_text(msg::UI_REPOSITORIES_HOT_LABEL)
+                    description=field_text(msg::UI_REPOSITORIES_HOT_HINT)
+                    error=problems.hot_storage
+                    value=inputs.hot_storage
+                />
+                <FormField
+                    id=Field::Password.id()
+                    label=field_text(msg::UI_REPOSITORIES_PASSWORD_LABEL)
+                    description=field_text(msg::UI_REPOSITORIES_PASSWORD_HINT)
+                    error=problems.password
+                    value=inputs.password
+                    kind="password"
+                />
+                <p class="actions">
+                    <button type="submit">{test_label}</button>
+                    <button type="button" on:click=move |_| submit.run(Action::Connect)>
+                        {connect_label}
+                    </button>
+                    <button type="button" on:click=move |_| submit.run(Action::Create)>
+                        {create_label}
+                    </button>
+                </p>
+            </form>
+            {move || busy.get().then(|| view! { <p>{working.clone()}</p> })}
+            {move || result.get().map(|text| view! { <p>{text}</p> })}
+        </section>
+    }
+}
+
+/// One row of the repositories table: the name as the row's header, where the
+/// repository is (the hot half on a line of its own), and where its password
+/// comes from. Never the password itself (I4).
+fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
+    let (id, args) = password_source(&row.password);
+    let password = text_with(localizer, id, &args);
+    let hot = row.repo_hot.map(|location| {
+        text_with(
+            localizer,
+            msg::UI_REPOSITORY_HOT,
+            &[("location", MsgArg::Text(location))],
+        )
+    });
+    view! {
+        <tr>
+            <th scope="row">{row.alias}</th>
+            <td>
+                <div>{row.repository}</div>
+                {hot.map(|hot| view! { <div>{hot}</div> })}
+            </td>
+            <td>{password}</td>
+        </tr>
+    }
+}
+
 /// A snapshot's short ID: its first eight hex digits, as rustic's own lists
 /// show one. A shorter ID is shown whole.
 fn short_id(id: &str) -> String {
@@ -650,6 +1022,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_GALLERY_TITLE
     } else if path == "/operations" {
         msg::UI_OPERATIONS_TITLE
+    } else if path == "/repositories" {
+        msg::UI_REPOSITORIES_TITLE
     } else if path == "/snapshots" {
         msg::UI_SNAPSHOTS_TITLE
     } else {
@@ -798,12 +1172,30 @@ mod tests {
             &Localizer::new(&[]),
             ErrorCode::PlanUnknown,
             &[("plan".to_owned(), MsgArg::Text("demo-home".to_owned()))],
+            None,
         );
         assert!(!shown.is_empty(), "a refusal is never a bare absence");
         assert!(
             shown.contains("demo-home"),
             "the argument is part of the message: {shown}"
         );
+    }
+
+    #[test]
+    fn a_refusal_carries_the_engines_words_when_the_daemon_sent_them() {
+        let localizer = Localizer::new(&[]);
+        let with = refusal(
+            &localizer,
+            ErrorCode::OperationFailed,
+            &[],
+            Some("wrong password"),
+        );
+        assert!(
+            with.starts_with("The operation failed: ") && with.contains("wrong password"),
+            "{with}"
+        );
+        let without = refusal(&localizer, ErrorCode::OperationFailed, &[], None);
+        assert_eq!(without, "The operation failed.");
     }
 
     #[test]
@@ -883,5 +1275,3 @@ mod tests {
         );
     }
 }
-    } else if path == "/repositories" {
-        msg::UI_REPOSITORIES_TITLE

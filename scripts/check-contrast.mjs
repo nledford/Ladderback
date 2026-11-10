@@ -19,6 +19,11 @@ const PAIRS = [
   { name: "empty badge", fg: "--badge-empty-fg", bg: "--badge-empty-bg", min: 4.5 },
   { name: "error badge", fg: "--badge-error-fg", bg: "--badge-error-bg", min: 4.5 },
   { name: "success badge", fg: "--badge-success-fg", bg: "--badge-success-bg", min: 4.5 },
+  { name: "link on surface", fg: "--accent", bg: "--surface", min: 4.5 },
+  { name: "text on page", fg: "--fg", bg: "--bg", min: 4.5 },
+  { name: "link on page", fg: "--accent", bg: "--bg", min: 4.5 },
+  { name: "form error on page", fg: "--badge-error-fg", bg: "--bg", min: 4.5 },
+  { name: "table rule on page", fg: "--muted", bg: "--bg", min: 3 },
 ];
 
 const SCHEMES = [

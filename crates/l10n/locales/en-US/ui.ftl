@@ -14,7 +14,7 @@ ui-start-title = { -brand-name }
 ui-start-heading = Welcome to { -brand-name }
 
 # The start page's text, until there is something to set up.
-ui-start-body = Nothing is set up yet. Repositories, plans and backups arrive in later releases.
+ui-start-body = Nothing is scheduled yet. Plans and their schedules arrive in later releases.
 
 # The title of the page shown for an address nothing serves: the browser's tab
 # and history show it.

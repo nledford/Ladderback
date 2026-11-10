@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 
-import { journey } from "../support/keyboard.mjs";
+import { journey, namePattern } from "../support/keyboard.mjs";
 
-// More Tab presses than any page of the gallery has stops.
-const MAX_TABS = 15;
+// More Tab presses than any page has stops: the gallery's, the longest, and
+// the skip link and the navigation's three links before it.
+const MAX_TABS = 20;
 
 // A polite message waits up to two seconds for company, and its text is set a
 // moment after the region is cleared (§4.5); five seconds is generous.
@@ -19,6 +20,8 @@ const REGIONS = {
   assertive: "alert",
 };
 
+const ISOLATION_MARKS = /[\u2066-\u2069]/g;
+
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 When("I open the component gallery", async function () {
@@ -28,18 +31,6 @@ When("I open the component gallery", async function () {
 When("I open the address {string}", async function (address) {
   await this.open(address);
 });
-
-// A name the page built from fetched text carries bidi isolation marks
-// around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
-// journey's "Cancel demo-home". The marks are optional wherever they may
-// stand, and the anchors keep the match whole.
-const ISOLATION = "[\\u2066-\\u2069]*";
-const namePattern = (name) =>
-  new RegExp(
-    `^${[...name]
-      .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join(ISOLATION)}${ISOLATION}$`,
-  );
 
 When("I press Tab until focus is on the {word} {string}", async function (role, name) {
   const keys = journey(this.page);
@@ -107,10 +98,12 @@ Then("the {word} region reads {string}", async function (politeness, expected) {
 Then("the {word} region comes to contain {string}", async function (politeness, expected) {
   const found = await region(this, politeness);
   const deadline = Date.now() + REGION_PATIENCE_MS;
-  let actual = await textOf(found);
+  // What a reader hears has no bidi isolation marks (§4.5).
+  const heard = async () => (await textOf(found)).replace(ISOLATION_MARKS, "");
+  let actual = await heard();
   while (!actual.includes(expected) && Date.now() < deadline) {
     await sleep(100);
-    actual = await textOf(found);
+    actual = await heard();
   }
   assert.ok(
     actual.includes(expected),
