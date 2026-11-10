@@ -19,6 +19,11 @@ impl InlineSecret {
     /// `options.NAME`, `options-hot.NAME` or `options-cold.NAME`. Never the
     /// secret itself (I4).
     pub fn field(&self) -> String {
-        String::new()
+        match self {
+            Self::Password => "password".to_owned(),
+            Self::Option(name) => format!("options.{name}"),
+            Self::OptionHot(name) => format!("options-hot.{name}"),
+            Self::OptionCold(name) => format!("options-cold.{name}"),
+        }
     }
 }

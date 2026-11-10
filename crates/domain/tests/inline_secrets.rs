@@ -99,3 +99,42 @@ fn a_secret_is_named_as_the_configuration_names_its_setting() {
         "options-cold.token"
     );
 }
+
+#[test]
+fn a_password_read_from_a_source_is_not() {
+    let sources = [
+        env(),
+        SecretRef::File {
+            path: "/run/secrets/demo".to_owned(),
+            read: FileRead::FirstLine,
+        },
+        SecretRef::Keyring(KeyringEntry::parse("ladderback/demo").unwrap()),
+    ];
+    for source in sources {
+        assert_eq!(settings(source.clone()).inline_secrets(), [], "{source:?}");
+    }
+}
+
+#[test]
+fn a_secret_that_is_empty_is_nothing_to_move() {
+    let mut empty = settings(inline(""));
+    empty.options = options(&[("token", "")]);
+    assert_eq!(empty.inline_secrets(), []);
+}
+
+#[test]
+fn an_option_that_does_not_name_a_credential_is_not_one_whatever_it_holds() {
+    let mut demo = settings(env());
+    demo.options = options(&[("region", "eu-demo-1"), ("access_key_id", "AKIADEMO")]);
+    assert_eq!(demo.inline_secrets(), []);
+}
+
+#[test]
+fn a_credential_option_that_holds_a_reference_is_not_written_inline() {
+    let mut demo = settings(env());
+    demo.options = options(&[
+        ("secret_access_key", "${DEMO_SECRET}"),
+        ("token", "${file:/run/secrets/token}"),
+    ]);
+    assert_eq!(demo.inline_secrets(), []);
+}

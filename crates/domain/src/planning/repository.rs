@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
-use crate::secrets::{InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue};
+use crate::secrets::{
+    InlineSecret, Part, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, Template,
+    is_secret_option,
+};
 
 /// A repository as the configuration describes it: its fields may hold
 /// `${VAR}` and `${file:/path}` references, which are resolved when a job
@@ -30,8 +33,34 @@ impl RepositorySettings {
     /// In the order password, `options`, `options-hot`, `options-cold`, each
     /// by name. A secret that is empty is nothing to move.
     pub fn inline_secrets(&self) -> Vec<InlineSecret> {
-        Vec::new()
+        let mut found = Vec::new();
+        if matches!(&self.password, SecretRef::Inline(value) if !value.expose().is_empty()) {
+            found.push(InlineSecret::Password);
+        }
+        let mut credentials = |set: &BTreeMap<String, String>,
+                               secret: fn(String) -> InlineSecret| {
+            for (name, value) in set {
+                if is_secret_option(name) && !value.is_empty() && !has_reference(value) {
+                    found.push(secret(name.clone()));
+                }
+            }
+        };
+        credentials(&self.options, InlineSecret::Option);
+        credentials(&self.options_hot, InlineSecret::OptionHot);
+        credentials(&self.options_cold, InlineSecret::OptionCold);
+        found
     }
+}
+
+/// Whether `text` is a valid template with a `${…}` reference in it. A text
+/// that only holds a `${` is no reference: it is written as it stands.
+fn has_reference(text: &str) -> bool {
+    Template::parse(text).is_ok_and(|template| {
+        template
+            .parts()
+            .iter()
+            .any(|part| matches!(part, Part::Reference(_)))
+    })
 }
 
 /// An option written in the config can be a secret as it stands, so what the
