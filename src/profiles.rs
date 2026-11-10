@@ -218,7 +218,8 @@ fn tell_import(
 
 /// Prints what the import did, or why it saved nothing, as one JSON document
 /// on stdout, and nothing on stderr. Not yet a document: a failure that has
-/// no code, which is said in words on stderr.
+/// no code, which is said in words on stderr, as is a document that cannot be
+/// written, which has nowhere to go.
 fn document_import(
     localizer: &Localizer,
     file: &Path,
@@ -238,7 +239,17 @@ fn document_import(
             return ExitCode::FAILURE;
         }
     };
-    written.map_or(ExitCode::FAILURE, |()| status)
+    match written {
+        Ok(()) => status,
+        Err(error) => {
+            say(
+                localizer,
+                msg::CLI_CANNOT_WRITE_OUTPUT,
+                &[("detail", text(error))],
+            );
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Prints `document` as the one line `--json` prints on stdout.

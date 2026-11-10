@@ -97,3 +97,7 @@ cli-profile-no-repository-name = cannot make a repository name of the file name 
 # $path (text): the data folder.
 # $detail (text): the operating system's own message. It is shown as it came.
 cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }
+
+# A command could not write its result to standard output, because whatever reads it has gone.
+# $detail (text): the operating system's message. It is shown as it came.
+cli-cannot-write-output = cannot write the result: { $detail }
