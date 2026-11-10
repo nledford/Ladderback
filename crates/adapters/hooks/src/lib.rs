@@ -11,7 +11,7 @@
 //! A hook that ends by itself is reaped when it ends, whatever still holds
 //! its stdout or stderr open: a process it started (a daemon, a background
 //! job) keeps a pipe's write end for as long as it runs. What is in the pipes
-//! at the exit, and what the pipes still carry for [`PIPE_GRACE`] after it, is
+//! at the exit, and what the pipes still carry for `PIPE_GRACE` after it, is
 //! read and kept, and then the read ends are dropped: a process that writes
 //! to them later gets SIGPIPE (or EPIPE, where it ignores that), as the
 //! hook's output is over. A hook that starts something long-lived redirects
@@ -196,9 +196,10 @@ impl ProcessHookRunner {
         // caller giving up) kills the hook, and its group while the hook is
         // unreaped.
         let mut running = Running::new(child, stop);
-        // Held until the hook is reaped, though nothing reads them after the
-        // timeout: a handler that writes to them when it gets SIGTERM must
-        // find them open, or the SIGPIPE ends it before it is done.
+        // Held until the hook is reaped: a handler that writes to them when
+        // it gets SIGTERM must find them open, or the SIGPIPE ends it before
+        // it is done, and while it is being stopped they are read and
+        // dropped, so it is not blocked on a pipe nobody reads either.
         let Some(mut pipes) = Pipes::take(&mut running.child) else {
             running.kill_and_reap().await;
             return (
@@ -263,8 +264,11 @@ impl Captured {
     ///
     /// The hook is waited for, not its pipes: once it has ended, they are
     /// read on for [`PIPE_GRACE`] and then left, though a process it started
-    /// may hold them open. `None` is a hook still running at `limit`; the
-    /// pipes are then still the caller's to read.
+    /// may hold them open. The limit is the hook's own: the grace after its
+    /// exit does not count against it, so a hook that ended in time is never
+    /// timed out. A pipe that can't be read after the exit has nothing more
+    /// in it. `None` is a hook still running at `limit`; the pipes are then
+    /// still the caller's to read.
     async fn read(
         &mut self,
         child: &mut Child,
