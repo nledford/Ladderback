@@ -130,6 +130,15 @@ pub enum ErrorCode {
     /// The configuration, or the profile itself, already has a plan with this
     /// ID, so nothing was imported. The argument `plan` names it.
     PlanIdTaken,
+    /// A plan can't be exported as a profile because its repository's
+    /// password is written in the configuration: a profile would have to
+    /// repeat it as text. Nothing was written.
+    InlineSecret,
+    /// A plan can't be exported as a profile because the value at `key` of
+    /// the repository is a reference rustic can't resolve, and there is no
+    /// variable to set instead. Nothing was written. The argument `key` is the
+    /// setting.
+    ProfileExportReference,
     #[serde(other)]
     Unknown,
 }
@@ -451,6 +460,11 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProfileExportReference => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::InvalidBody
             | Self::InvalidJobSpec
             | Self::OperationFailed
@@ -461,6 +475,7 @@ impl ErrorCode {
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
+            | Self::InlineSecret
             | Self::Unknown => &[],
         }
     }
@@ -760,6 +775,11 @@ mod tests {
             optional,
         };
         assert_eq!(ErrorCode::ProfileUnreadable.args(), &[text("file", false)]);
+        assert_eq!(
+            ErrorCode::ProfileExportReference.args(),
+            &[text("key", false)]
+        );
+        assert!(ErrorCode::InlineSecret.args().is_empty());
         assert_eq!(
             ErrorCode::ProfileInvalid.args(),
             &[text("file", false), text("key", true), text("line", true)]

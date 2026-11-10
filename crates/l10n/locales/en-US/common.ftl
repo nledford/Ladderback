@@ -263,6 +263,14 @@ error-profile-unsupported = The profile { $file } says something { -brand-name }
 # $plan (text): the plan's ID, such as home.
 error-plan-id-taken = { -brand-name } already has a plan with the ID { $plan }, or the profile makes two of them, so nothing was imported. Give the profile's snapshot entries different names, or remove the plan from the configuration.
 
+# The plan can't be exported, because the repository's password is written in the configuration.
+# `password` is a setting of the configuration, typed as it is: keep it a string literal.
+error-inline-secret = { -brand-name } did not export the plan, because the repository's { "password" } is written in its configuration, and a profile would have to repeat it as text. Move the password to a keyring, a file, a command or an environment variable, then export again.
+
+# The plan can't be exported, because a setting of the repository is a reference rustic can't resolve.
+# $key (text): the setting, as its path in the profile, such as repository.
+error-profile-export-reference = { -brand-name } did not export the plan, because the repository's { $key } refers to something at run time, which a profile cannot say for that setting. Write the value itself in the configuration, then export again.
+
 # The import left out a setting of the profile.
 # $key (text): the setting, as its path in the profile, such as copy or backup.group-by.
 warning-profile-key-ignored = { -brand-name } left out { $key } of the profile, because it has no place for it. Check that nothing depends on it.

@@ -67,6 +67,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProfileInvalid => msg::ERROR_PROFILE_INVALID,
     ProfileUnsupported => msg::ERROR_PROFILE_UNSUPPORTED,
     PlanIdTaken => msg::ERROR_PLAN_ID_TAKEN,
+    InlineSecret => msg::ERROR_INLINE_SECRET,
+    ProfileExportReference => msg::ERROR_PROFILE_EXPORT_REFERENCE,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

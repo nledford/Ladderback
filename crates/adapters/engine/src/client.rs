@@ -1156,6 +1156,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ProfileInvalid
                 | ErrorCode::ProfileUnsupported
                 | ErrorCode::PlanIdTaken
+                | ErrorCode::InlineSecret
+                | ErrorCode::ProfileExportReference
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor

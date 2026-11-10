@@ -87,3 +87,8 @@ cli-profile-bad-repository-name = { $name } is not a repository name: use lowerc
 # `--repo-name` is an option, typed as it is: keep it a string literal.
 # $file (text): the profile's path, as it was given.
 cli-profile-no-repository-name = cannot make a repository name of the file name of { $file }: give one with { "--repo-name" }
+
+# An export needs the agent's ID, which is kept in the data folder, and could not read it.
+# $path (text): the data folder.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }
