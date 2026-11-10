@@ -4,9 +4,11 @@
 //! its start is read once, with no waiting: recovery has finished before it
 //! says it listens.
 
+use api::MsgArg;
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::{OperationId, RepositoryId, Timestamp, Uuid};
+use l10n::{Localizer, msg};
 use store::SqliteStore;
 
 use app::ports::{OperationStore, Start};
@@ -127,17 +129,22 @@ async fn a_prune_is_accepted(agent: &mut Agent) {
 
 #[then("the second Ladderback is refused, naming the data folder and the process that holds it")]
 fn the_second_is_refused(agent: &mut Agent) {
-    let holder = agent.events.pid().to_string();
+    let holder = agent.events.pid();
     let data = Events::data_dir(agent);
     let (status, log) = events_steps::refusal(agent);
     assert!(!status.success(), "a refusal is a failure: {status}");
-    // The folder as the daemon was told it, or as the system resolves it.
-    let named = std::iter::once(data.clone())
-        .chain(std::fs::canonicalize(&data))
-        .any(|folder| log.contains(folder.to_string_lossy().as_ref()));
-    assert!(named, "the refusal names the data folder {data:?}:\n{log}");
+    // The refusal as the daemon's catalog words it for this folder and this
+    // holder: bare digits could as well be a time in the log's own lines.
+    let said = Localizer::new(&[]).message(
+        msg::CLI_DATA_DIR_IN_USE,
+        &[
+            ("path", MsgArg::Text(data.display().to_string())),
+            ("pid", MsgArg::Text(holder.to_string())),
+        ],
+    );
     assert!(
-        log.contains(&holder),
-        "the refusal names the holder's process ID {holder}:\n{log}"
+        log.contains(said.text()),
+        "the refusal says {:?}:\n{log}",
+        said.text()
     );
 }
