@@ -97,7 +97,12 @@ icu_locale_core = { version = "2.4.0", default-features = false, features = ["al
 icu_provider = { version = "2.4.0", default-features = false, features = ["sync"] }
 icu_time = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 intl-memoizer = "0.5.3"
-jiff = { version = "0.2.40", features = ["serde"] }
+# `tzdb-bundle-always` carries a copy of the IANA time-zone database in every
+# build, for a host with no system database (a container image without
+# `tzdata`). `jiff` reads the system's copy first and uses the bundled one only
+# when it finds none; on wasm it bundles by default, and this keeps that from
+# depending on the default (technical design §3.2, §16 decision 29).
+jiff = { version = "0.2.40", features = ["serde", "tzdb-bundle-always"] }
 # The browser's `Intl`, which `l10n`'s `browser-intl` feature writes the web UI's
 # numbers and instants with (technical design §8.4).
 js-sys = "0.3.107"
