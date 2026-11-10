@@ -115,6 +115,42 @@ pub enum ErrorCode {
     /// More than one plan matches the group an adoption named. The argument
     /// `plans` names them all.
     AdoptionAmbiguous,
+    /// A rustic profile couldn't be read: the file isn't there, or isn't
+    /// readable. The argument `file` is the path as it was given, or the path
+    /// of the profile it uses that is at fault.
+    ProfileUnreadable,
+    /// A rustic profile is larger than any profile needs, so it wasn't read.
+    /// The argument `file` names it.
+    ProfileTooLarge,
+    /// A file isn't a profile rustic accepts. The argument `file` names it;
+    /// `key` is the setting at fault and `line` where it is written, each
+    /// left out when none is known. The detail says what is wrong.
+    ProfileInvalid,
+    /// A profile says something Ladderback can't honour, so nothing was
+    /// imported. The argument `key` is the setting, `file` the profile and
+    /// `line` where it is written, left out when none is known.
+    ProfileUnsupported,
+    /// The configuration, or the profile itself, already has a plan with this
+    /// ID, so nothing was imported. The argument `plan` names it.
+    PlanIdTaken,
+    /// A plan can't be exported as a profile because its repository's
+    /// password is written in the configuration: a profile would have to
+    /// repeat it as text. Nothing was written.
+    InlineSecret,
+    /// A plan can't be exported as a profile because the value at `key` of
+    /// the repository is a reference rustic can't resolve, and there is no
+    /// variable to set instead. Nothing was written. The argument `key` is the
+    /// setting.
+    ProfileExportReference,
+    /// A plan can't be exported as a profile because the repository's
+    /// location holds a password in its URL, which a profile would have to
+    /// repeat as text. Nothing was written. The argument `key` is the
+    /// setting (`repository` or `repo-hot`), never its value.
+    ProfileExportUrlPassword,
+    /// A plan can't be exported as a profile because one of its tags holds a
+    /// comma, which rustic reads as two tags. Nothing was written. The
+    /// argument `tag` is the tag.
+    ProfileExportTagComma,
     #[serde(other)]
     Unknown,
 }
@@ -124,6 +160,33 @@ pub enum ErrorCode {
 #[serde(rename_all = "kebab-case")]
 pub enum WarningCode {
     SourceUnreadable,
+    /// An import left out a setting of the profile that Ladderback has no
+    /// place for. The argument `key` is its path in the profile.
+    ProfileKeyIgnored,
+    /// The profile prunes after its forget, and the repository now prunes
+    /// from one place.
+    ProfilePrune,
+    /// The profile's `[global.env]` was left out.
+    ProfileEnvIgnored,
+    /// Hooks set for every snapshot entry of the profile now run once per
+    /// plan.
+    ProfileHooksPerPlan,
+    /// A profile named by `use-profiles` wasn't found. The argument `name` is
+    /// the name as the profile wrote it.
+    ProfileUsedMissing,
+    /// A secret written in the profile was kept as text in the configuration.
+    /// The argument `field` names it.
+    InlineSecret,
+    /// A tag of Ladderback's own, found on a snapshot entry, was dropped. The
+    /// argument `tag` is the tag.
+    ProfileTagDropped,
+    /// An export left an option out, because it is a reference. The argument
+    /// `option` names it and `variable` is the environment variable that
+    /// sets it.
+    ProfileOptionLeftOut,
+    /// An export wrote a plan that keeps everything, which rustic's forget
+    /// refuses to run on until a `keep-*` option is set.
+    ProfileRetentionEmpty,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -361,6 +424,77 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProfileUnreadable => &[ArgSpec {
+                name: "file",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileTooLarge => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ],
+            Self::ProfileInvalid => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "key",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+                ArgSpec {
+                    name: "line",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
+            Self::ProfileUnsupported => &[
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "key",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "line",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
+            Self::PlanIdTaken => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileExportReference => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileExportUrlPassword => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileExportTagComma => &[ArgSpec {
+                name: "tag",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::InvalidBody
             | Self::InvalidJobSpec
             | Self::OperationFailed
@@ -371,6 +505,7 @@ impl ErrorCode {
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
+            | Self::InlineSecret
             | Self::Unknown => &[],
         }
     }
@@ -409,7 +544,44 @@ impl WarningCode {
                     optional: false,
                 },
             ],
-            Self::SourceUnreadable | Self::Unknown => &[],
+            Self::ProfileKeyIgnored => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileUsedMissing => &[ArgSpec {
+                name: "name",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::InlineSecret => &[ArgSpec {
+                name: "field",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileTagDropped => &[ArgSpec {
+                name: "tag",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileOptionLeftOut => &[
+                ArgSpec {
+                    name: "option",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "variable",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::SourceUnreadable
+            | Self::ProfilePrune
+            | Self::ProfileEnvIgnored
+            | Self::ProfileHooksPerPlan
+            | Self::ProfileRetentionEmpty
+            | Self::Unknown => &[],
         }
     }
 }
@@ -640,6 +812,50 @@ mod tests {
                 text("supported", false),
             ]
         );
+    }
+
+    #[test]
+    fn profile_codes_declare_the_arguments_their_producers_send() {
+        let text = |name, optional| ArgSpec {
+            name,
+            kind: ArgKind::Text,
+            optional,
+        };
+        assert_eq!(ErrorCode::ProfileUnreadable.args(), &[text("file", false)]);
+        assert_eq!(
+            ErrorCode::ProfileExportReference.args(),
+            &[text("key", false)]
+        );
+        assert_eq!(
+            ErrorCode::ProfileExportUrlPassword.args(),
+            &[text("key", false)]
+        );
+        assert_eq!(
+            ErrorCode::ProfileExportTagComma.args(),
+            &[text("tag", false)]
+        );
+        assert!(ErrorCode::InlineSecret.args().is_empty());
+        assert_eq!(
+            ErrorCode::ProfileInvalid.args(),
+            &[text("file", false), text("key", true), text("line", true)]
+        );
+        assert_eq!(
+            ErrorCode::ProfileUnsupported.args(),
+            &[text("file", false), text("key", false), text("line", true)]
+        );
+        assert_eq!(ErrorCode::PlanIdTaken.args(), &[text("plan", false)]);
+        assert_eq!(
+            WarningCode::ProfileOptionLeftOut.args(),
+            &[text("option", false), text("variable", false)]
+        );
+        for code in [
+            WarningCode::ProfilePrune,
+            WarningCode::ProfileEnvIgnored,
+            WarningCode::ProfileHooksPerPlan,
+            WarningCode::ProfileRetentionEmpty,
+        ] {
+            assert!(code.args().is_empty(), "{code:?}");
+        }
     }
 }
 

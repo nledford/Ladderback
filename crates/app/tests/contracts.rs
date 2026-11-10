@@ -1,5 +1,6 @@
 //! The in-memory fakes pass the same contract suites as the real adapters.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -338,4 +339,105 @@ impl contract::event_bus::EventBusHarness for InMemoryEventBusHarness {
 #[tokio::test]
 async fn the_in_memory_event_bus_meets_the_event_bus_contract() {
     contract::event_bus::run(&InMemoryEventBusHarness).await;
+}
+
+/// The fake reader gives the profile a harness method scripted, at the path
+/// the method returns, and the fake writer renders in memory.
+struct FakeProfilesHarness {
+    reader: Arc<app::fakes::FakeProfileReader>,
+    writer: Arc<app::fakes::FakeProfileWriter>,
+}
+
+impl FakeProfilesHarness {
+    fn new() -> Self {
+        Self {
+            reader: Arc::new(app::fakes::FakeProfileReader::new(Err(
+                app::ports::ProfileError::Unreadable {
+                    file: "nothing scripted".to_owned(),
+                },
+            ))),
+            writer: Arc::new(app::fakes::FakeProfileWriter::new()),
+        }
+    }
+
+    /// Scripts a profile of the plan `home` into `repository`, at `location`.
+    fn script_profile(&self, repository: &domain::RepositoryAlias, location: &str) -> PathBuf {
+        use domain::planning::{
+            GroupBy, Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source,
+        };
+        use domain::secrets::{FileRead, SecretRef};
+        let plan = Plan::new(
+            domain::PlanId::parse("home").expect("a plan ID"),
+            repository.clone(),
+            vec![Source::parse("/home/demo").expect("a source")],
+        );
+        let settings = RepositorySettings {
+            repository: location.to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: "/srv/demo-password".to_owned(),
+                read: FileRead::FirstLine,
+            },
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        self.reader.script(Ok(app::ports::ImportedProfile {
+            repository: RepositoryConfig {
+                settings,
+                maintenance: Maintenance::None,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
+            },
+            plans: vec![plan],
+            hooks: Hooks::default(),
+            notices: Vec::new(),
+        }));
+        PathBuf::from("/demo/nas.toml")
+    }
+}
+
+impl contract::profiles::ProfilesHarness for FakeProfilesHarness {
+    fn reader(&self) -> Arc<dyn app::ports::ProfileReader> {
+        self.reader.clone()
+    }
+
+    fn writer(&self) -> Arc<dyn app::ports::ProfileWriter> {
+        self.writer.clone()
+    }
+
+    fn good_profile(&self, repository: &domain::RepositoryAlias) -> PathBuf {
+        self.script_profile(repository, "/srv/demo-repo")
+    }
+
+    fn reference_profile(&self, repository: &domain::RepositoryAlias) -> PathBuf {
+        // What the real reader hands back for the text `${file:…}`: escaped.
+        self.script_profile(repository, "s3:$${file:/srv/demo-endpoint}")
+    }
+
+    fn broken_profile(&self) -> PathBuf {
+        let file = PathBuf::from("/demo/broken.toml");
+        self.reader.script(Err(app::ports::ProfileError::Invalid {
+            file: file.display().to_string(),
+            key: None,
+            at: None,
+            problem: app::ports::ProfileProblem::Syntax,
+            detail: String::new(),
+        }));
+        file
+    }
+
+    fn missing_profile(&self) -> PathBuf {
+        let file = PathBuf::from("/demo/missing.toml");
+        self.reader
+            .script(Err(app::ports::ProfileError::Unreadable {
+                file: file.display().to_string(),
+            }));
+        file
+    }
+}
+
+#[tokio::test]
+async fn the_fake_profile_reader_and_writer_meet_the_profiles_contract() {
+    contract::profiles::run(&FakeProfilesHarness::new()).await;
 }

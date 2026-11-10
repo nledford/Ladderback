@@ -14,12 +14,13 @@ use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::history::{GetOperation, ListOperations};
+use app::interop::{ExportError, ImportError};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
 use app::ports::Retention;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
-    RunningJob, SnapshotSummary,
+    EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
+    ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
 use app::secrets::{Field, ResolveRepository};
@@ -751,6 +752,231 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
         WarningKind::Other => WarningCode::Unknown,
     }
+}
+
+/// An import that saved nothing, as the code, arguments and detail the
+/// catalog renders (§8.4).
+pub(crate) struct Refusal {
+    pub(crate) code: ErrorCode,
+    pub(crate) args: Vec<(&'static str, MsgArg)>,
+    pub(crate) detail: Option<String>,
+}
+
+/// Something an import did that the person should know, as the code and
+/// arguments the catalog renders.
+pub(crate) struct Notice {
+    pub(crate) code: WarningCode,
+    pub(crate) args: Vec<(&'static str, MsgArg)>,
+}
+
+/// The `line` argument of a message about a place in a file, left out when
+/// no place is known.
+fn line_arg(at: Option<app::ports::Position>) -> Option<(&'static str, MsgArg)> {
+    at.map(|at| ("line", text(at.line)))
+}
+
+/// What came of a refused import. `config_file` is the configuration's own
+/// path, which a refusal about the merged configuration (rather than about a
+/// file the store read) names.
+pub(crate) fn import_refusal(error: ImportError, config_file: &std::path::Path) -> Refusal {
+    match error {
+        ImportError::Profile(error) => profile_refusal(error),
+        ImportError::AliasTaken(alias) => Refusal {
+            code: ErrorCode::RepositoryAliasTaken,
+            args: vec![("alias", text(alias.as_str()))],
+            detail: None,
+        },
+        ImportError::PlanTaken(plan) => Refusal {
+            code: ErrorCode::PlanIdTaken,
+            args: vec![("plan", text(plan.as_str()))],
+            detail: None,
+        },
+        ImportError::Config(error) => profile_config_refusal(error, config_file),
+    }
+}
+
+/// What came of a refused export: the code, arguments and detail the catalog
+/// renders. `config_file` is as for [`import_refusal`].
+pub(crate) fn export_refusal(error: ExportError, config_file: &std::path::Path) -> Refusal {
+    match error {
+        ExportError::PlanUnknown(plan) => plan_unknown(plan.as_str()),
+        ExportError::Render(ExportRefusal::InlineSecret) => Refusal {
+            code: ErrorCode::InlineSecret,
+            args: Vec::new(),
+            detail: None,
+        },
+        ExportError::Render(ExportRefusal::Reference { key }) => Refusal {
+            code: ErrorCode::ProfileExportReference,
+            args: vec![("key", text(key))],
+            detail: None,
+        },
+        ExportError::Render(ExportRefusal::UrlPassword { key }) => Refusal {
+            code: ErrorCode::ProfileExportUrlPassword,
+            args: vec![("key", text(key))],
+            detail: None,
+        },
+        ExportError::Render(ExportRefusal::TagComma { tag }) => Refusal {
+            code: ErrorCode::ProfileExportTagComma,
+            args: vec![("tag", text(tag))],
+            detail: None,
+        },
+        ExportError::Config(error) => profile_config_refusal(error, config_file),
+    }
+}
+
+/// A plan the configuration does not have, or a name no plan can have.
+pub(crate) fn plan_unknown(plan: &str) -> Refusal {
+    Refusal {
+        code: ErrorCode::PlanUnknown,
+        args: vec![("plan", text(plan))],
+        detail: None,
+    }
+}
+
+/// What the reader said was wrong with a profile.
+fn profile_refusal(error: ProfileError) -> Refusal {
+    match error {
+        ProfileError::Unreadable { file } => Refusal {
+            code: ErrorCode::ProfileUnreadable,
+            args: vec![("file", text(file))],
+            detail: None,
+        },
+        ProfileError::TooLarge { file, limit } => Refusal {
+            code: ErrorCode::ProfileTooLarge,
+            args: vec![("file", text(file)), ("limit", MsgArg::Bytes(limit))],
+            detail: None,
+        },
+        ProfileError::Invalid {
+            file,
+            key,
+            at,
+            problem,
+            detail,
+        } => {
+            let mut args = vec![("file", text(file))];
+            args.extend(key.map(|key| ("key", text(key))));
+            args.extend(line_arg(at));
+            Refusal {
+                code: ErrorCode::ProfileInvalid,
+                args,
+                detail: Some(problem_detail(&format!("{problem:?}"), &detail)),
+            }
+        }
+        ProfileError::Unsupported { file, key, at } => {
+            let mut args = vec![("file", text(file)), ("key", text(key))];
+            args.extend(line_arg(at));
+            Refusal {
+                code: ErrorCode::ProfileUnsupported,
+                args,
+                detail: None,
+            }
+        }
+    }
+}
+
+/// What the store said was wrong with the configuration an import would have
+/// written: the answer a person gets for the file they know.
+fn profile_config_refusal(error: ConfigError, config_file: &std::path::Path) -> Refusal {
+    fn refusal(
+        code: ErrorCode,
+        args: Vec<(&'static str, MsgArg)>,
+        detail: Option<String>,
+    ) -> Refusal {
+        Refusal { code, args, detail }
+    }
+    match error {
+        ConfigError::Unavailable { file, detail } => refusal(
+            ErrorCode::ConfigUnavailable,
+            vec![("file", text(file))],
+            Some(detail),
+        ),
+        ConfigError::TooLarge { file, limit } => refusal(
+            ErrorCode::ConfigTooLarge,
+            vec![("file", text(file)), ("limit", MsgArg::Bytes(limit))],
+            None,
+        ),
+        ConfigError::SchemaMissing { file } => refusal(
+            ErrorCode::ConfigSchemaMissing,
+            vec![("file", text(file))],
+            None,
+        ),
+        ConfigError::SchemaNewer {
+            file,
+            found,
+            supported,
+        } => refusal(
+            ErrorCode::ConfigSchemaNewer,
+            vec![
+                ("file", text(file)),
+                ("found", text(found)),
+                ("supported", text(supported)),
+            ],
+            None,
+        ),
+        ConfigError::Invalid {
+            file,
+            key,
+            at,
+            problem,
+            detail,
+        } => {
+            // The use case's own check of the merged configuration names no
+            // file: it is the configuration the import would have written.
+            let file = if file.is_empty() {
+                config_file.display().to_string()
+            } else {
+                file
+            };
+            let mut args = vec![("file", text(file))];
+            args.extend(line_arg(at));
+            let what = problem_detail(&format!("{problem:?}"), &detail);
+            refusal(
+                ErrorCode::ConfigInvalid,
+                args,
+                Some(match key {
+                    Some(key) => format!("{key}: {what}"),
+                    None => what,
+                }),
+            )
+        }
+    }
+}
+
+/// What is wrong, as the problem's name and the parser's words when it had
+/// any.
+fn problem_detail(problem: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        problem.to_owned()
+    } else {
+        format!("{problem}: {detail}")
+    }
+}
+
+/// A notice of an import or export, as the warning the catalog renders.
+pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
+    let (code, args) = match notice {
+        ProfileNotice::KeyIgnored { key } => {
+            (WarningCode::ProfileKeyIgnored, vec![("key", text(key))])
+        }
+        ProfileNotice::Prune => (WarningCode::ProfilePrune, Vec::new()),
+        ProfileNotice::EnvIgnored => (WarningCode::ProfileEnvIgnored, Vec::new()),
+        ProfileNotice::HooksPerPlan => (WarningCode::ProfileHooksPerPlan, Vec::new()),
+        ProfileNotice::UsedProfileMissing { name } => {
+            (WarningCode::ProfileUsedMissing, vec![("name", text(name))])
+        }
+        ProfileNotice::InlineSecret { field } => {
+            (WarningCode::InlineSecret, vec![("field", text(field))])
+        }
+        ProfileNotice::TagDropped { tag } => {
+            (WarningCode::ProfileTagDropped, vec![("tag", text(tag))])
+        }
+        ProfileNotice::OptionLeftOut { option, variable } => (
+            WarningCode::ProfileOptionLeftOut,
+            vec![("option", text(option)), ("variable", text(variable))],
+        ),
+        ProfileNotice::RetentionEmpty => (WarningCode::ProfileRetentionEmpty, Vec::new()),
+    };
+    Notice { code, args }
 }
 
 /// The running operations' cancel switches (§4.2): what the API cancels
@@ -1591,6 +1817,244 @@ mod tests {
             .expect("the operation ends up in the log")
             .expect("the operation that was started is cancellable");
         assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    fn english() -> l10n::Localizer {
+        l10n::Localizer::new(&[])
+    }
+
+    fn said(refusal: &Refusal) -> String {
+        let shown = english().error(refusal.code, &refusal.args, refusal.detail.as_deref());
+        assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+        shown.into_text()
+    }
+
+    fn invalid(key: Option<&str>, at: Option<(usize, usize)>) -> ImportError {
+        ImportError::Profile(ProfileError::Invalid {
+            file: "nas.toml".to_owned(),
+            key: key.map(str::to_owned),
+            at: at.map(|(line, column)| app::ports::Position { line, column }),
+            problem: app::ports::ProfileProblem::UnknownKey,
+            detail: String::new(),
+        })
+    }
+
+    #[test]
+    fn an_invalid_profile_names_its_file_its_key_and_its_line() {
+        let refusal = import_refusal(
+            invalid(Some("forget.keep-lots"), Some((7, 3))),
+            std::path::Path::new("/cfg/config.toml"),
+        );
+        assert_eq!(refusal.code, ErrorCode::ProfileInvalid);
+        let said = said(&refusal);
+        for part in ["nas.toml", "forget.keep-lots", "line 7", "UnknownKey"] {
+            assert!(said.contains(part), "{part}: {said}");
+        }
+    }
+
+    #[test]
+    fn an_invalid_profile_with_no_place_does_not_say_none() {
+        let refusal = import_refusal(invalid(None, None), std::path::Path::new("/cfg/c.toml"));
+        assert!(refusal.args.iter().all(|(name, _)| *name == "file"));
+        let said = said(&refusal);
+        assert!(said.contains("nas.toml"), "{said}");
+        assert!(!said.contains("none") && !said.contains("line"), "{said}");
+    }
+
+    #[test]
+    fn an_unsupported_setting_names_the_key_and_the_line_when_known() {
+        let unsupported = |at| {
+            ImportError::Profile(ProfileError::Unsupported {
+                file: "nas.toml".to_owned(),
+                key: "forget.keep-tags".to_owned(),
+                at,
+            })
+        };
+        let path = std::path::Path::new("/cfg/c.toml");
+        let placed = said(&import_refusal(
+            unsupported(Some(app::ports::Position {
+                line: 12,
+                column: 1,
+            })),
+            path,
+        ));
+        assert!(placed.contains("forget.keep-tags") && placed.contains("line 12"));
+        let unplaced = said(&import_refusal(unsupported(None), path));
+        assert!(unplaced.contains("forget.keep-tags") && !unplaced.contains("line"));
+    }
+
+    #[test]
+    fn a_profile_that_cannot_be_read_names_the_file_and_the_limit() {
+        let path = std::path::Path::new("/cfg/c.toml");
+        let unreadable = import_refusal(
+            ImportError::Profile(ProfileError::Unreadable {
+                file: "missing.toml".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(unreadable.code, ErrorCode::ProfileUnreadable);
+        assert!(said(&unreadable).contains("missing.toml"));
+        let large = import_refusal(
+            ImportError::Profile(ProfileError::TooLarge {
+                file: "big.toml".to_owned(),
+                limit: 1 << 20,
+            }),
+            path,
+        );
+        assert_eq!(large.code, ErrorCode::ProfileTooLarge);
+        let said = said(&large);
+        assert!(
+            said.contains("big.toml") && said.contains("1 MiB"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn an_export_that_cannot_be_made_says_which_plan_or_which_setting() {
+        let path = std::path::Path::new("/cfg/c.toml");
+        let unknown = export_refusal(
+            ExportError::PlanUnknown(PlanId::parse("ghost").expect("a slug")),
+            path,
+        );
+        assert_eq!(unknown.code, ErrorCode::PlanUnknown);
+        assert!(said(&unknown).contains("ghost"));
+        let inline = export_refusal(ExportError::Render(ExportRefusal::InlineSecret), path);
+        assert_eq!(inline.code, ErrorCode::InlineSecret);
+        assert!(said(&inline).contains("password"));
+        let reference = export_refusal(
+            ExportError::Render(ExportRefusal::Reference {
+                key: "repository".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(reference.code, ErrorCode::ProfileExportReference);
+        assert!(said(&reference).contains("repository"));
+        let url = export_refusal(
+            ExportError::Render(ExportRefusal::UrlPassword {
+                key: "repo-hot".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(url.code, ErrorCode::ProfileExportUrlPassword);
+        assert!(said(&url).contains("repo-hot"));
+        let tag = export_refusal(
+            ExportError::Render(ExportRefusal::TagComma {
+                tag: "a,b".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(tag.code, ErrorCode::ProfileExportTagComma);
+        assert!(said(&tag).contains("a,b"));
+        let config = export_refusal(
+            ExportError::Config(ConfigError::SchemaMissing {
+                file: "/cfg/c.toml".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(config.code, ErrorCode::ConfigSchemaMissing);
+    }
+
+    #[test]
+    fn a_clash_names_the_alias_or_the_plan() {
+        let path = std::path::Path::new("/cfg/c.toml");
+        let alias = import_refusal(
+            ImportError::AliasTaken(RepositoryAlias::parse("nas").expect("a slug")),
+            path,
+        );
+        assert_eq!(alias.code, ErrorCode::RepositoryAliasTaken);
+        assert!(said(&alias).contains("nas"));
+        let plan = import_refusal(
+            ImportError::PlanTaken(PlanId::parse("home").expect("a slug")),
+            path,
+        );
+        assert_eq!(plan.code, ErrorCode::PlanIdTaken);
+        assert!(said(&plan).contains("home"));
+    }
+
+    #[test]
+    fn a_merged_configuration_that_is_not_valid_names_the_configuration_file() {
+        let refusal = import_refusal(
+            ImportError::Config(ConfigError::Invalid {
+                file: String::new(),
+                key: None,
+                at: None,
+                problem: app::ports::Problem::Violation(domain::planning::Violation::NoSources {
+                    index: 0,
+                    plan: PlanId::parse("home").expect("a slug"),
+                }),
+                detail: String::new(),
+            }),
+            std::path::Path::new("/cfg/config.toml"),
+        );
+        assert_eq!(refusal.code, ErrorCode::ConfigInvalid);
+        let said = said(&refusal);
+        assert!(said.contains("/cfg/config.toml"), "{said}");
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_read_is_the_configuration_codes() {
+        let path = std::path::Path::new("/cfg/config.toml");
+        let unavailable = import_refusal(
+            ImportError::Config(ConfigError::Unavailable {
+                file: "/cfg/config.toml".to_owned(),
+                detail: "permission denied".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(unavailable.code, ErrorCode::ConfigUnavailable);
+        assert!(said(&unavailable).contains("permission denied"));
+        let newer = import_refusal(
+            ImportError::Config(ConfigError::SchemaNewer {
+                file: "/cfg/config.toml".to_owned(),
+                found: 9,
+                supported: 1,
+            }),
+            path,
+        );
+        assert_eq!(newer.code, ErrorCode::ConfigSchemaNewer);
+        assert!(said(&newer).contains('9'));
+    }
+
+    #[test]
+    fn every_notice_is_a_warning_that_renders_what_it_names() {
+        let notices = [
+            (ProfileNotice::KeyIgnored { key: "copy".into() }, "copy"),
+            (ProfileNotice::Prune, "Pruning will run from one place"),
+            (ProfileNotice::EnvIgnored, "global.env"),
+            (ProfileNotice::HooksPerPlan, "once per plan"),
+            (
+                ProfileNotice::UsedProfileMissing {
+                    name: "ghost".into(),
+                },
+                "ghost",
+            ),
+            (
+                ProfileNotice::InlineSecret {
+                    field: "repository.password".into(),
+                },
+                "repository.password",
+            ),
+            (
+                ProfileNotice::TagDropped {
+                    tag: "ladderback-plan:x".into(),
+                },
+                "ladderback-plan:x",
+            ),
+            (
+                ProfileNotice::OptionLeftOut {
+                    option: "secret-key".into(),
+                    variable: "OPENDAL_SECRET_KEY".into(),
+                },
+                "OPENDAL_SECRET_KEY",
+            ),
+            (ProfileNotice::RetentionEmpty, "keep-*"),
+        ];
+        for (notice, expected) in notices {
+            let notice = profile_notice(notice);
+            let shown = english().warning(notice.code, &notice.args, None);
+            assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+            assert!(shown.text().contains(expected), "{expected}: {shown}");
+        }
     }
 }
 

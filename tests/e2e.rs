@@ -45,6 +45,8 @@ mod secrets_steps;
 mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/interop.rs"]
+mod interop_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/snapshots.rs"]
@@ -75,6 +77,7 @@ struct Agent {
     repositories: repositories_steps::RepositoriesSetup,
     snapshots: snapshots_steps::SnapshotsSetup,
     forget: forget_steps::ForgetE2e,
+    interop: interop_steps::InteropE2e,
     adopt: adopt_steps::AdoptE2e,
 }
 
@@ -117,6 +120,7 @@ impl Agent {
             repositories: repositories_steps::RepositoriesSetup::default(),
             snapshots: snapshots_steps::SnapshotsSetup::default(),
             forget: forget_steps::ForgetE2e::default(),
+            interop: interop_steps::InteropE2e::default(),
             adopt: adopt_steps::AdoptE2e::default(),
         }
     }

@@ -248,7 +248,7 @@ fn partial_needles(secret: &str) -> Vec<String> {
 /// `/` in the password ends the authority early, so the last `@` of the
 /// whole string is tried too. Masking part of a path by mistake is the safe
 /// direction.
-fn url_passwords(repository: &str) -> Vec<SecretValue> {
+pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
     let Some((_, rest)) = repository.split_once("://") else {
         return Vec::new();
     };
@@ -258,6 +258,19 @@ fn url_passwords(repository: &str) -> Vec<SecretValue> {
             .filter_map(|userinfo| userinfo.split_once(':'))
             .map(|(_, password)| password),
     )
+}
+
+/// Whether a repository string is an rclone connection string that carries a
+/// secret: `rclone::s3,provider=AWS,secret_access_key=…:bucket` holds the
+/// settings of its backend as `key=value` pieces between commas and colons,
+/// and a piece whose key names a credential ([`is_secret_option`]) is one.
+/// Any other string is not, whatever it holds.
+pub fn rclone_secret(location: &str) -> bool {
+    location.strip_prefix("rclone:").is_some_and(|rest| {
+        rest.split([',', ':'])
+            .filter_map(|piece| piece.split_once('='))
+            .any(|(key, _)| is_secret_option(key))
+    })
 }
 
 /// What the userinfo of a URL holds that must not show, wherever the URL is
@@ -1072,6 +1085,36 @@ mod tests {
             "rest:https://nas/b/x:y@z",
         ] {
             assert_eq!(passwords(repository), Vec::<String>::new(), "{repository}");
+        }
+    }
+
+    #[test]
+    fn an_rclone_connection_string_holds_a_secret_when_a_piece_names_one() {
+        for location in [
+            "rclone::s3,provider=AWS,secret_access_key=abc:bucket/repo",
+            "rclone::drive,token=abc:repo",
+            "rclone::sftp,host=nas.demo,CLIENT_SECRET=abc",
+            "rclone:remote,password=abc:path",
+            "rclone:::s3,x=1:sas-token=abc",
+        ] {
+            assert!(rclone_secret(location), "{location}");
+        }
+    }
+
+    #[test]
+    fn an_address_that_is_not_an_rclone_connection_string_or_names_no_secret_holds_none() {
+        for location in [
+            "rclone:remote:path",
+            "rclone::s3,provider=AWS,access_key_id=demo:bucket",
+            "rclone::s3,use_password=true:bucket",
+            "rclone:",
+            "rclone",
+            "/srv/repo,token=demo",
+            "local:rclone::s3,token=demo",
+            "sftp:demo@nas:/srv/repo,secret=demo",
+            "Rclone::s3,token=demo",
+        ] {
+            assert!(!rclone_secret(location), "{location}");
         }
     }
 

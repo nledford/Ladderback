@@ -74,3 +74,26 @@ cli-config-schema-newer = the configuration { $file } is in schema version { $fo
 # $where (text): the setting at fault and where in the file it is, when the reader could tell; otherwise "an earlier rule".
 # $detail (text): what is wrong, as the reader reported it.
 cli-config-invalid = the configuration { $file } is not valid at { $where }: { $detail }
+
+# An import saved the repository of a profile.
+# $repository (text): the name the repository was saved under.
+# $file (text): the profile's path, as it was given.
+cli-profile-imported = imported the repository { $repository } from { $file }
+
+# An import saved one plan of a profile.
+# $plan (text): the plan's ID.
+cli-profile-added-plan = added the plan { $plan }
+
+# The name given for the imported repository is not a name the configuration takes.
+# $name (text): the name, as it was given.
+cli-profile-bad-repository-name = { $name } is not a repository name: use lowercase letters, digits and dashes
+
+# The profile's file name has nothing in it to make a repository name of.
+# `--repo-name` is an option, typed as it is: keep it a string literal.
+# $file (text): the profile's path, as it was given.
+cli-profile-no-repository-name = cannot make a repository name of the file name of { $file }: give one with { "--repo-name" }
+
+# An export needs the agent's ID, which is kept in the data folder, and could not read it.
+# $path (text): the data folder.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }

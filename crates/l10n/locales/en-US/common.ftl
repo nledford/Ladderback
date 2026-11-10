@@ -222,3 +222,100 @@ error-repository-alias-invalid = { -brand-name } cannot use that name for a repo
 # A repository's settings hold a secret reference that could not be resolved.
 # $field (text): where in the settings the reference is.
 error-secret-unresolved = { -brand-name } could not read the secret in the repository's { $field }. Check where the secret is kept.
+
+## Profile codes: importing and exporting a rustic profile (technical design §6.2)
+
+# The profile, or a profile it uses, could not be read.
+# $file (text): the path of the profile as it was given, or of the profile it uses that could not be read.
+error-profile-unreadable = { -brand-name } could not read the profile { $file }, so nothing was imported. Check that the file is there and that the user { -brand-name } runs as may read it, and that the profiles it uses are there too.
+
+# The profile is larger than any profile needs.
+# $file (text): the path of the profile.
+# $limit (bytes): the largest size { -brand-name } reads, as a size such as 1 MiB.
+error-profile-too-large = { -brand-name } did not read the profile { $file }, because it is larger than { $limit }. A profile is far smaller, so check that the file is the right one. Nothing was imported.
+
+# The file is not a profile that rustic accepts.
+# $file (text): the path of the profile.
+# $key (text): the setting at fault, as its path in the profile. The sender leaves it out when none is known, and the program then supplies the text none.
+# $line (text): the line of the file where the problem was found. The sender leaves it out when none is known, and the program then supplies the text none.
+# $detail (text): what is wrong, as the reader reported it. It is shown as it came, in English.
+error-profile-invalid = { -brand-name } did not accept the profile { $file }{ $key ->
+    [none] {""}
+   *[other] , at the setting { $key }
+  }{ $line ->
+    [none] {""}
+   *[other] , line { $line }
+  }, so nothing was imported. Correct the profile, then try again.
+    .with-detail = { -brand-name } did not accept the profile { $file }{ $key ->
+        [none] {""}
+       *[other] , at the setting { $key }
+      }{ $line ->
+        [none] {""}
+       *[other] , line { $line }
+      }, so nothing was imported ({ $detail }). Correct the profile, then try again.
+
+# The profile says something that { -brand-name } cannot carry over.
+# $file (text): the path of the profile.
+# $key (text): the setting, as its path in the profile.
+# $line (text): the line of the file where it is written. The sender leaves it out when none is known, and the program then supplies the text none.
+error-profile-unsupported = The profile { $file } says something { -brand-name } cannot carry over, at { $key }{ $line ->
+    [none] {""}
+   *[other] {" "}(line { $line })
+  }, so nothing was imported. Change that setting in the profile, then import it again.
+
+# The configuration already has a plan with this ID, or the profile makes two plans with one ID.
+# $plan (text): the plan's ID, such as home.
+error-plan-id-taken = { -brand-name } already has a plan with the ID { $plan }, or the profile makes two of them, so nothing was imported. Give the profile's snapshot entries different names, or remove the plan from the configuration.
+
+# The plan can't be exported, because the repository's password is written in the configuration.
+# `password` is a setting of the configuration, typed as it is: keep it a string literal.
+error-inline-secret = { -brand-name } did not export the plan, because the repository's { "password" } is written in its configuration, and a profile would have to repeat it as text. Move the password to a keyring, a file, a command or an environment variable, then export again.
+
+# The plan can't be exported, because a setting of the repository is a reference rustic can't resolve.
+# $key (text): the setting, as its path in the profile, such as repository.
+error-profile-export-reference = { -brand-name } did not export the plan, because the repository's { $key } refers to something at run time, which a profile cannot say for that setting. Write the value itself in the configuration, then export again.
+
+# The plan can't be exported, because the address of the repository holds a password or another secret.
+# $key (text): the setting that holds it, repository or repo-hot.
+error-profile-export-url-password = { -brand-name } did not export the plan, because the { $key } of the repository holds a password or another secret in its address, and a profile would have to repeat it as text. Move the credentials out of the address into the repository's options, which an export leaves out and names the environment variable for, then export again.
+
+# The plan can't be exported, because one of its tags holds a comma.
+# $tag (text): the tag.
+# The comma is typed as it is: keep it a string literal.
+error-profile-export-tag-comma = { -brand-name } did not export the plan, because its tag { $tag } holds a comma ({ "," }), which rustic reads as two tags. Rename the tag without the comma, then export again.
+
+# The import left out a setting of the profile.
+# $key (text): the setting, as its path in the profile, such as copy or backup.group-by.
+warning-profile-key-ignored = { -brand-name } left out { $key } of the profile, because it has no place for it. Check that nothing depends on it.
+
+# The profile prunes after its forget, and the repository now prunes from one place.
+# `maintenance` and `local` are a setting and its value in the configuration, typed as they are: keep them string literals.
+warning-profile-prune = Pruning will run from one place (the hub or this agent), not after every forget as the profile asked. The repository's { "maintenance" } setting is now { "local" }: change it if that is not what you want.
+
+# The profile's environment table was left out.
+# `[global.env]`, `password-env` and `${VAR}` are typed as they are: keep them string literals.
+warning-profile-env-ignored = { -brand-name } left out the { "[global.env]" } of the profile, because it does not set the environment of a job. Reference a variable with { "password-env" } or { "${VAR}" } instead, or set it in the environment { -brand-name } runs in.
+
+# The hooks the profile set for all its snapshot entries now run once per plan.
+warning-profile-hooks-per-plan = The hooks the profile set for all its snapshot entries now run once per plan, around each plan's backup, rather than once around everything.
+
+# A profile named by the profile's use-profiles was not found.
+# $name (text): the name as the profile wrote it.
+warning-profile-used-missing = The profile uses a profile called { $name }, which was not found, so { -brand-name } went on without it. Check the name, or add the file to rustic's profile folder, then import again.
+
+# A secret written in the profile was kept as text in the configuration.
+# $field (text): where the secret is, as its setting.
+warning-inline-secret = The profile holds a secret in { $field }, which { -brand-name } kept as text in its configuration. Move it to a keyring, a file or an environment variable, and refer to that instead.
+
+# One of the program's own tags was found on a snapshot entry and dropped.
+# $tag (text): the tag.
+warning-profile-tag-dropped = { -brand-name } dropped the tag { $tag } from a plan, because tags that start like that are its own. It adds them itself.
+
+# An export left an option out of the profile because it is a reference.
+# $option (text): the option's name.
+# $variable (text): the environment variable to set instead.
+warning-profile-option-left-out = The option { $option } was left out of the profile, because it is a reference that rustic cannot resolve. Set the environment variable { $variable } instead.
+
+# An export of a plan with no retention has no keep option, and rustic's forget refuses to run without one.
+# `keep-*`, `forget` and `rustic forget` are what a person types, typed as they are: keep them string literals.
+warning-profile-retention-empty = The plan keeps every snapshot, so the profile has no { "keep-*" } option, and rustic's { "forget" } refuses to run until one is set. { -brand-name } never forgets from this plan. Add a { "keep-*" } option to the profile before you run { "rustic forget" } on it.

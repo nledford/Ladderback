@@ -41,7 +41,10 @@ fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
 }
 
 /// Backs the scenario's folder up with plain rustic, carrying `tags`.
-async fn back_up_with_tags(agent: &Agent, tags: &[String]) -> rustic_core::repofile::SnapshotFile {
+pub(crate) async fn back_up_with_tags(
+    agent: &Agent,
+    tags: &[String],
+) -> rustic_core::repofile::SnapshotFile {
     let source = agent.backup.source.clone().expect("a plan source");
     let tags = tags.to_vec();
     with_repository(agent, move |repository| {
