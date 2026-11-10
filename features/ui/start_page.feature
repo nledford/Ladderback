@@ -62,3 +62,13 @@ Feature: Start page
     Then the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
+
+  Scenario: The page runs under the daemon's content security policy
+    When I open the web UI
+    Then the page has a content security policy
+    And the browser blocked nothing the page asked for
+
+  Scenario: The browser refuses a script the page doesn't carry
+    When I open the web UI
+    And a script the page doesn't carry is added to it
+    Then the script didn't run and the browser said it blocked it

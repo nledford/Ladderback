@@ -96,6 +96,9 @@ pub enum ErrorCode {
     InvalidCursor,
     /// A request's body is not the JSON the route takes.
     InvalidBody,
+    /// A request's body is larger than the most its route class takes
+    /// (§10.1), so the route never ran. The argument `limit` is that most.
+    BodyTooLarge,
     /// Another maintenance operation already runs on the repository (I7):
     /// nothing ran. The argument `operation` names the one that holds it.
     MaintenanceBusy,
@@ -253,6 +256,11 @@ impl ErrorCode {
             Self::ConfigUnavailable | Self::ConfigSchemaMissing => &[ArgSpec {
                 name: "file",
                 kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::BodyTooLarge => &[ArgSpec {
+                name: "limit",
+                kind: ArgKind::Bytes,
                 optional: false,
             }],
             Self::ConfigTooLarge => &[
@@ -579,6 +587,22 @@ mod tests {
         for code in [WarningCode::SourceUnreadable, WarningCode::Unknown] {
             assert!(code.args().is_empty(), "{code:?}");
         }
+    }
+
+    #[test]
+    fn a_body_too_large_declares_the_limit_it_names() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::BodyTooLarge).unwrap(),
+            r#""body-too-large""#
+        );
+        assert_eq!(
+            ErrorCode::BodyTooLarge.args(),
+            &[ArgSpec {
+                name: "limit",
+                kind: ArgKind::Bytes,
+                optional: false,
+            }]
+        );
     }
 
     #[test]

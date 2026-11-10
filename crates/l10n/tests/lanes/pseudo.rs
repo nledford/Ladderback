@@ -164,8 +164,20 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             &["Content-Type: application/json"],
         ),
         (msg::CLI_REFUSE_NON_LOOPBACK, &["127.0.0.1", "::1"]),
+        (
+            msg::CLI_INVALID_ALLOWED_HOST,
+            &[
+                "--allowed-host",
+                "nas.example.com",
+                "192.168.1.5",
+                "[fd00::1]",
+            ],
+        ),
     ];
-    let args = [("address", text("192.168.1.5:9898"))];
+    let args = [
+        ("address", text("192.168.1.5:9898")),
+        ("name", text("nas.example.com:9898")),
+    ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);
         for (id, literals) in TYPED {

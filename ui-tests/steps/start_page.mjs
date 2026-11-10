@@ -125,3 +125,34 @@ Then("no text is clipped", async function () {
   });
   assert.equal(clipped.length, 0, `text is clipped or off screen:\n${clipped.join("\n")}`);
 });
+
+Then("the page has a content security policy", async function () {
+  const response = await this.page.request.get(this.page.url());
+  const policy = response.headers()["content-security-policy"];
+  assert.ok(policy, "the page came with no Content-Security-Policy header");
+  assert.match(policy, /frame-ancestors 'none'/);
+  assert.doesNotMatch(policy, /unsafe-inline/);
+});
+
+Then("the browser blocked nothing the page asked for", async function () {
+  assert.deepEqual(this.policyBlocks, []);
+});
+
+When("a script the page doesn't carry is added to it", async function () {
+  this.expectsPolicyBlocks = true;
+  this.injectedScriptRan = await this.page.evaluate(() => {
+    const script = document.createElement("script");
+    script.textContent = "window.injectedScriptRan = true";
+    document.head.append(script);
+    return window.injectedScriptRan === true;
+  });
+});
+
+Then("the script didn't run and the browser said it blocked it", async function () {
+  assert.equal(this.injectedScriptRan, false, "an inline script the page doesn't carry ran");
+  const deadline = Date.now() + 5_000;
+  while (this.policyBlocks.length === 0 && Date.now() < deadline) {
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  assert.ok(this.policyBlocks.length > 0, "the browser reported nothing blocked");
+});

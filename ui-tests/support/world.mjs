@@ -133,6 +133,10 @@ class BrowserWorld extends World {
   baseUrl = null;
   /** What the page's scripts threw, so a step can say it threw nothing. */
   scriptErrors = [];
+  /** What the browser reports it refused under the page's content security
+   *  policy. A journey that finds one fails, unless it set out to cause it. */
+  policyBlocks = [];
+  expectsPolicyBlocks = false;
   context;
   page;
 
@@ -146,11 +150,21 @@ class BrowserWorld extends World {
     }
     this.page = await this.context.newPage();
     this.page.on("pageerror", (error) => this.scriptErrors.push(error.message));
+    this.page.on("console", (message) => {
+      if (/Content Security Policy/i.test(message.text())) this.policyBlocks.push(message.text());
+    });
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
     await this.page.getByRole("heading", { level: 1 }).waitFor();
+    // As a constructed sheet, not a <style> element: the page's content
+    // security policy refuses an inline one, and a reader's own styles are not
+    // the page's to refuse.
     for (const content of this.readerStyles) {
-      await this.page.addStyleTag({ content });
+      await this.page.evaluate((css) => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(css);
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      }, content);
     }
   }
 }
@@ -162,10 +176,17 @@ Before(function () {
   this.readerStyles = [];
   this.slowNetwork = false;
   this.scriptErrors = [];
+  this.policyBlocks = [];
+  this.expectsPolicyBlocks = false;
   this.ownServer = null;
   this.baseUrl = null;
 });
 
 After(async function () {
   await this.context?.close();
+  // The daemon's content security policy (§10.1) must let the UI do all it
+  // does: any journey that has the browser refuse something fails.
+  if (!this.expectsPolicyBlocks && this.policyBlocks.length > 0) {
+    throw new Error(`the browser blocked the page under its content security policy:\n${this.policyBlocks.join("\n")}`);
+  }
 });

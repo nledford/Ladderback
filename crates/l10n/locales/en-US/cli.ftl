@@ -28,6 +28,11 @@ cli-server-error = server error: { $detail }
 # `127.0.0.1` and `::1` are addresses, typed as they are: keep them string literals.
 cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" })
 
+# `--allowed-host` was given a name that no Host header could ever match, which would lock the web UI out.
+# $name (text): the value as it was typed. It is shown as it is.
+# `--allowed-host`, `nas.example.com`, `192.168.1.5` and `[fd00::1]` are typed as they are: keep them string literals.
+cli-invalid-allowed-host = “{ $name }” is not a host name or an address without a port, so { "--allowed-host" } cannot take it. Give a name such as { "nas.example.com" }, or an address such as { "192.168.1.5" } or { "[fd00::1]" }.
+
 # The daemon could not say where its own program file is, so it cannot start
 # workers.
 # $detail (text): the operating system's message. It is shown as it came.

@@ -11,8 +11,10 @@
     clippy::unreachable
 )]
 
+mod body_limit;
 mod repositories;
 mod request_checks;
+mod response_headers;
 
 use std::borrow::Cow;
 #[cfg(debug_assertions)]
@@ -25,7 +27,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 #[cfg(not(debug_assertions))]
 use rust_embed::RustEmbed;
@@ -308,7 +310,9 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// history, one operation, cancel — the catalog routes the pages read: the
 /// plans, the repositories, one repository's snapshots — and the routes that
 /// test, connect and initialise a repository. A request that fails `checks`
-/// never reaches a route.
+/// never reaches a route, and neither does one whose body is over the limit
+/// of its class of route (§10.1). Every response, a refusal included, carries
+/// the security headers.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -348,8 +352,15 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             let assets = Arc::clone(&assets);
             async move { serve(assets.as_ref(), &method, &uri) }
         })
+        .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce))
+        .layer(from_fn(response_headers::add))
 }
+
+/// The most one message from an events client may hold. The UI sends pings,
+/// which a control frame keeps to 125 bytes, and the library's default of
+/// 64 MiB would let a client make the daemon buffer that much.
+const EVENTS_CLIENT_MAX_MESSAGE: usize = 1024;
 
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
 /// [`UiEvent`]s. It sends nothing until an event arrives — the first state
@@ -358,7 +369,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
 /// never reaches here.
 async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let stream = state.events.subscribe().await;
-    upgrade.on_upgrade(move |socket| forward(socket, stream))
+    upgrade
+        .max_message_size(EVENTS_CLIENT_MAX_MESSAGE)
+        .max_frame_size(EVENTS_CLIENT_MAX_MESSAGE)
+        .on_upgrade(move |socket| forward(socket, stream))
 }
 
 /// Reads the bus and writes each event to the client, until the client goes
@@ -743,18 +757,29 @@ fn file(path: &str, asset: Asset) -> Response {
     } else {
         "public, max-age=31536000, immutable"
     });
-    (
+    // The entry page starts the application with a script of its own, so its
+    // policy names that script by its hash (§10.1).
+    let policy = (path == INDEX).then(|| response_headers::page_policy(&asset.bytes));
+    let mut response = (
         [
             (header::CONTENT_TYPE, content_type),
             (header::CACHE_CONTROL, cache_control),
         ],
         Body::from(asset.bytes),
     )
-        .into_response()
+        .into_response();
+    if let Some(policy) = policy {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_SECURITY_POLICY, policy);
+    }
+    response
 }
 
 #[cfg(test)]
 mod tests {
+    mod hardening;
+
     use std::collections::HashMap;
 
     use axum::http::Request;
@@ -1704,7 +1729,6 @@ mod tests {
             "repository": "/ok",
             "password": {"source": "command", "command": "pass show x"},
         });
-        let oversize = "a".repeat(3 * 1024 * 1024);
         for route in [TEST, CONNECT, INIT] {
             let wrap = |settings: &serde_json::Value| {
                 serde_json::json!({"alias": "demo", "settings": settings}).to_string()
@@ -1724,11 +1748,6 @@ mod tests {
                     "an unknown field at the top",
                     serde_json::json!({"alias": "demo", "settings": valid, "x": 1}).to_string(),
                 ),
-                (
-                    "a body over the limit",
-                    serde_json::json!({"alias": "demo", "settings": settings_json(&oversize)})
-                        .to_string(),
-                ),
             ] {
                 let (response, calls) = post_counted(route, body).await;
                 let (status, answer) = json_of(response).await;
@@ -1746,6 +1765,20 @@ mod tests {
             post_counted(CONNECT, serde_json::json!({"settings": valid}).to_string()).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn a_body_over_the_limit_is_refused_before_the_daemon_sees_it() {
+        let oversize = "a".repeat(3 * 1024 * 1024);
+        for route in [TEST, CONNECT, INIT] {
+            let request =
+                serde_json::json!({"alias": "demo", "settings": settings_json(&oversize)});
+            let (response, calls) = post_counted(route, request.to_string()).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{route}");
+            assert_eq!(answer["code"], "body-too-large", "{route}");
+            assert_eq!(calls, 0, "{route} reached the daemon");
+        }
     }
 
     #[tokio::test]
