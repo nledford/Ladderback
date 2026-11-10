@@ -620,13 +620,16 @@ async fn list_snapshots(
     }
 }
 
-/// The body of a refusal: the code, and the arguments its message takes, for
-/// the UI to render (§8.4).
+/// The body of a refusal: the code, the arguments its message takes, for the
+/// UI to render (§8.4), and, when the sender has words of its own to show,
+/// the `detail`: the engine's text, as it came.
 #[derive(Serialize)]
 struct TypedRefusal {
     code: api::ErrorCode,
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     args: std::collections::BTreeMap<&'static str, api::MsgArg>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 /// A typed refusal (§10.1) with `status`.
@@ -641,11 +644,23 @@ fn refused_with(
     code: api::ErrorCode,
     args: Vec<(&'static str, api::MsgArg)>,
 ) -> Response {
+    refused_detailed(status, code, args, None)
+}
+
+/// A typed refusal that also carries the sender's own words, when it has
+/// some: the engine's message, which the UI shows as it came.
+fn refused_detailed(
+    status: StatusCode,
+    code: api::ErrorCode,
+    args: Vec<(&'static str, api::MsgArg)>,
+    detail: Option<String>,
+) -> Response {
     (
         status,
         axum::Json(TypedRefusal {
             code,
             args: args.into_iter().collect(),
+            detail,
         }),
     )
         .into_response()

@@ -4,11 +4,13 @@
 //! typed refusal whose arguments are names, never values.
 
 use async_trait::async_trait;
+use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::response::Response;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
-use crate::AppState;
+use crate::{AppState, refused_detailed as refused};
 
 /// What the repository routes ask of the daemon: the three things the
 /// Repositories page does, each from a request as it came, before anything
@@ -68,24 +70,95 @@ pub enum RepositoriesError {
 
 /// Tests the repository the body describes.
 pub(crate) async fn test_repository(
-    State(_state): State<AppState>,
-    _body: Result<axum::Json<api::TestRepositoryDto>, JsonRejection>,
+    State(state): State<AppState>,
+    body: Result<Json<api::TestRepositoryDto>, JsonRejection>,
 ) -> Response {
-    todo!("the red commit: tests first")
+    let Ok(Json(request)) = body else {
+        return refusal(&RepositoriesError::InvalidBody);
+    };
+    match state.repositories.test(request).await {
+        Ok(id) => (StatusCode::OK, Json(id)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Connects the repository the body describes under its alias.
 pub(crate) async fn connect_repository(
-    State(_state): State<AppState>,
-    _body: Result<axum::Json<api::ConnectRepositoryDto>, JsonRejection>,
+    State(state): State<AppState>,
+    body: Result<Json<api::ConnectRepositoryDto>, JsonRejection>,
 ) -> Response {
-    todo!("the red commit: tests first")
+    let Ok(Json(request)) = body else {
+        return refusal(&RepositoriesError::InvalidBody);
+    };
+    match state.repositories.connect(request).await {
+        Ok(id) => (StatusCode::CREATED, Json(id)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Initialises the repository the body describes.
 pub(crate) async fn init_repository(
-    State(_state): State<AppState>,
-    _body: Result<axum::Json<api::InitRepositoryDto>, JsonRejection>,
+    State(state): State<AppState>,
+    body: Result<Json<api::InitRepositoryDto>, JsonRejection>,
 ) -> Response {
-    todo!("the red commit: tests first")
+    let Ok(Json(request)) = body else {
+        return refusal(&RepositoriesError::InvalidBody);
+    };
+    match state.repositories.init(request).await {
+        Ok(initialised) => (StatusCode::CREATED, Json(initialised)).into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
+/// The typed refusal of `error`, with the status of its kind: a body that
+/// can't be read is 400; a name the configuration can't take, or a job the
+/// engine ran and failed, 422; something that is already there, 409; and the
+/// daemon not being able to do it now, 503.
+fn refusal(error: &RepositoriesError) -> Response {
+    use api::{ErrorCode, MsgArg};
+    let text = |name, value: &String| vec![(name, MsgArg::Text(value.clone()))];
+    match error {
+        RepositoriesError::InvalidBody => refused(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidBody,
+            Vec::new(),
+            None,
+        ),
+        RepositoriesError::AliasInvalid => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::RepositoryAliasInvalid,
+            Vec::new(),
+            None,
+        ),
+        RepositoriesError::AliasTaken { alias } => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryAliasTaken,
+            text("alias", alias),
+            None,
+        ),
+        RepositoriesError::Exists { location } => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryExists,
+            text("location", location),
+            None,
+        ),
+        RepositoriesError::SecretUnresolved { field } => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::SecretUnresolved,
+            text("field", field),
+            None,
+        ),
+        RepositoriesError::OperationFailed { detail } => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::OperationFailed,
+            Vec::new(),
+            Some(detail.clone()),
+        ),
+        RepositoriesError::Unavailable { code, args, detail } => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            *code,
+            args.clone(),
+            detail.clone(),
+        ),
+    }
 }
