@@ -161,8 +161,6 @@ pub enum CancelError {
 pub enum MaintenanceStartError {
     /// No repository by that alias is configured.
     UnknownRepository,
-    /// The request asks for a maintenance kind this version doesn't run.
-    UnknownKind,
     /// Another maintenance operation holds the repository (I7). Names the
     /// one that does.
     Busy { running: String },
@@ -424,12 +422,24 @@ async fn run_maintenance(
 ) -> Response {
     let request = match body {
         Ok(axum::Json(RunMaintenanceBody { kind, into, from })) => {
+            // An adoption names its plan and group; no other kind takes
+            // either, so one that carries them is a body this route doesn't
+            // take rather than a request to ignore part of.
             match (kind.as_str(), into, from) {
-                ("forget", _, _) => MaintenanceRequest::Forget,
-                ("prune", _, _) => MaintenanceRequest::Prune,
-                ("check", _, _) => MaintenanceRequest::Check,
+                ("forget", None, None) => MaintenanceRequest::Forget,
+                ("prune", None, None) => MaintenanceRequest::Prune,
+                ("check", None, None) => MaintenanceRequest::Check,
                 ("adopt", Some(into), Some(from)) => MaintenanceRequest::Adopt { into, from },
-                _ => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
+                ("forget" | "prune" | "check" | "adopt", _, _) => {
+                    return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
+                }
+                _ => {
+                    return refused_with(
+                        StatusCode::NOT_FOUND,
+                        api::ErrorCode::MaintenanceKindUnknown,
+                        vec![("kind", api::MsgArg::Text(kind))],
+                    );
+                }
             }
         }
         Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
@@ -448,11 +458,6 @@ async fn run_maintenance(
             StatusCode::NOT_FOUND,
             api::ErrorCode::RepositoryUnknown,
             vec![("alias", api::MsgArg::Text(alias))],
-        ),
-        Err(MaintenanceStartError::UnknownKind) => refused_with(
-            StatusCode::NOT_FOUND,
-            api::ErrorCode::MaintenanceKindUnknown,
-            vec![("kind", api::MsgArg::Text("adopt".to_owned()))],
         ),
         Err(MaintenanceStartError::UnknownPlan { plan }) => refused_with(
             StatusCode::NOT_FOUND,
@@ -802,7 +807,7 @@ mod tests {
                     plans: vec!["home".to_owned(), "mirror".to_owned()],
                 }),
                 ("unreachable", _) => Err(MaintenanceStartError::Unavailable),
-                _ => Err(MaintenanceStartError::UnknownKind),
+                _ => Err(MaintenanceStartError::UnknownRepository),
             }
         }
 
@@ -1059,13 +1064,27 @@ mod tests {
 
     #[tokio::test]
     async fn a_maintenance_kind_this_version_does_not_run_is_refused() {
-        // The route names the kinds it runs, so a kind it doesn't is a body
-        // it doesn't take.
         let response = request(
             ui(),
             Method::POST,
             "/api/v1/repositories/demo/maintenance",
             r#"{"kind":"rewrite"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"maintenance-kind-unknown","args":{"kind":{"type":"text","value":"rewrite"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forget_that_names_a_plan_to_adopt_into_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"forget","into":"home"}"#,
         )
         .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

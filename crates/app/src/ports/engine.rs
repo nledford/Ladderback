@@ -388,15 +388,17 @@ pub struct CheckSummary {
     pub warnings: u64,
 }
 
-/// What a forget run removed. What survived and why is the selection's own
-/// story, told before the run; this is what the run did.
+/// What an adoption's rewrite left in the repository.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewriteSummary {
     pub repository: RepositoryId,
-    /// The rewritten snapshots' new IDs.
+    /// The copy of each snapshot the job named, in the order it named them:
+    /// new, or one an earlier rewrite cut short had already saved.
     pub created: Vec<SnapshotId>,
 }
 
+/// What a forget run removed. What survived and why is the selection's own
+/// story, told before the run; this is what the run did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForgetSummary {
     pub repository: RepositoryId,

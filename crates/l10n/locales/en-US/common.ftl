@@ -165,7 +165,7 @@ error-adoption-ambiguous = Plans { $plans } all match that history, and which on
 
 # The request asks for a maintenance kind this version does not run.
 # $kind (text): the kind as it was sent.
-error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, prune or check.
+error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, adopt, prune or check.
 
 # A history request's cursor is not an operation's ID.
 # $cursor (text): the cursor as it was sent.

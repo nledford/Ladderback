@@ -263,14 +263,22 @@ impl RunMaintenance {
                 )
             }
             MaintenanceKind::Adopt(adoption) => {
-                let listed = list(self.engine.as_ref(), op, access.clone()).await?;
-                let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
+                // Only a plan of this repository can take history: a plan of
+                // another repository, or none at all, would leave the
+                // rewritten snapshots orphaned again.
                 let plans: Vec<Plan> = config
                     .plans()
                     .iter()
                     .filter(|plan| plan.repository == *alias)
                     .cloned()
                     .collect();
+                if !plans.iter().any(|plan| plan.id == adoption.into) {
+                    return Err(MaintenanceError::UnknownPlan {
+                        plan: adoption.into.clone(),
+                    });
+                }
+                let listed = list(self.engine.as_ref(), op, access.clone()).await?;
+                let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
                 let managed = plans_of(&config, alias);
                 let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
                 let ids: Vec<SnapshotId> = match &adoption.from {
@@ -281,11 +289,8 @@ impl RunMaintenance {
                         group.snapshots.iter().map(|s| s.id.clone()).collect()
                     }
                     AdoptionSource::Unmanaged => {
-                        if !plans.iter().any(|plan| plan.id == adoption.into) {
-                            return Err(MaintenanceError::UnknownPlan {
-                                plan: adoption.into.clone(),
-                            });
-                        }
+                        // The destination plan is among `plans`, checked
+                        // above.
                         let hostname = config
                             .agent()
                             .hostname
@@ -306,9 +311,8 @@ impl RunMaintenance {
                             }))
                             .await
                             .map_err(sources_failed)?;
-                        // The destination plan is among `plans`, checked
-                        // above, and every plan of `plans` is among the
-                        // normalized ones.
+                        // Every plan of `plans` is among the normalized
+                        // ones, so the destination is too.
                         let into = normalized
                             .iter()
                             .find(|plan| plan.id == adoption.into)

@@ -267,9 +267,9 @@ impl AdoptSelection {
     /// The unmanaged group whose host, label and paths equal `into`'s host,
     /// label and sources (`into`'s host is `host`'s when the plan doesn't
     /// name one, and its label an empty one), and every other plan that
-    /// would claim the same group. The paths are compared as written, in
-    /// order: what a listing reports of a plan's own backups is the plan's
-    /// sources, sanitized.
+    /// would claim the same group. The paths are compared exactly, in order,
+    /// so the caller hands in plans whose sources are already normalized the
+    /// way the engine records a snapshot's paths (decision 26).
     pub fn unmanaged<'a>(
         partition: &'a Partition,
         hostname: &str,
