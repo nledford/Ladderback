@@ -26,7 +26,10 @@
 
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
 use domain::planning::{HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings};
-use domain::secrets::{KeyringEntry, Part, SecretRef, Template, is_secret_option, url_passwords};
+use domain::secrets::{
+    KeyringEntry, Part, SecretRef, Template, is_secret_option, rclone_secret, url_credentials,
+    url_passwords,
+};
 use std::collections::BTreeMap;
 
 /// The profile of `export`, and the options it left out.
@@ -222,14 +225,17 @@ fn repository(
 
 /// What a value of the repository says, when it says only text and no
 /// password: a reference is one rustic can't resolve, and a password in a
-/// URL would be written out, so the key is refused.
+/// URL or a secret in an rclone connection string would be written out, so
+/// the key is refused. A user name without a password is written: it is
+/// part of the address, and where it is a token the config holds it as text
+/// already.
 fn plain(key: &str, value: &str) -> Result<String, ExportRefusal> {
     let text = text_of(value).ok_or_else(|| ExportRefusal::Reference {
         key: key.to_owned(),
     })?;
     // The profile would hold the password as text, in the file and in what
     // `rustic show-config` prints.
-    if url_passwords(&text).is_empty() {
+    if url_passwords(&text).is_empty() && !rclone_secret(&text) {
         Ok(text)
     } else {
         Err(ExportRefusal::UrlPassword {
@@ -253,7 +259,9 @@ fn text_of(value: &str) -> Option<String> {
 }
 
 /// The options of `table` that are text and not secrets. The others are
-/// noted as left out with the variable to set instead.
+/// noted as left out with the variable to set instead. An option whose
+/// value is an address with a user or a password in it (`demo:pw@host`,
+/// with or without its scheme) is a secret, as a token may be the user.
 fn text_options(
     table: &OptionTable,
     options: &BTreeMap<String, String>,
@@ -262,7 +270,7 @@ fn text_options(
     let mut kept = BTreeMap::new();
     for (name, value) in options {
         match text_of(value) {
-            Some(text) if !is_secret_option(name) && url_passwords(&text).is_empty() => {
+            Some(text) if !is_secret_option(name) && url_credentials(&text).is_empty() => {
                 kept.insert(name.clone(), text);
             }
             _ => notices.push(ProfileNotice::OptionLeftOut {

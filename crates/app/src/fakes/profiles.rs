@@ -8,7 +8,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::RepositoryAlias;
-use domain::secrets::{Part, Template, is_secret_option, url_passwords};
+use domain::secrets::{
+    Part, Template, is_secret_option, rclone_secret, url_credentials, url_passwords,
+};
 
 use crate::ports::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileReader,
@@ -108,7 +110,7 @@ impl ProfileWriter for FakeProfileWriter {
                     key: key.to_owned(),
                 });
             }
-            if !url_passwords(value).is_empty() {
+            if !url_passwords(value).is_empty() || rclone_secret(value) {
                 return Err(ExportRefusal::UrlPassword {
                     key: key.to_owned(),
                 });
@@ -129,7 +131,7 @@ impl ProfileWriter for FakeProfileWriter {
             notices.push(ProfileNotice::RetentionEmpty);
         }
         for (name, value) in &settings.options {
-            if !is_plain(value) || is_secret_option(name) || !url_passwords(value).is_empty() {
+            if !is_plain(value) || is_secret_option(name) || !url_credentials(value).is_empty() {
                 notices.push(ProfileNotice::OptionLeftOut {
                     option: name.clone(),
                     variable: format!("RUSTIC_REPO_OPT_{}", name.to_ascii_uppercase()),
