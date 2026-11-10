@@ -89,7 +89,7 @@ Decide by what the code knows about. The full layout is §8.3; the rule behind i
 | Use cases, and the ports they call | `crates/app` (port traits in `crates/app/src/ports/`) |
 | Time or randomness | Nowhere directly in `domain` or `app`: the `Clock` port, and the `Random` port §3.2 designs (not built yet). Clippy bans the ambient calls there (§3.2, "Banned calls") |
 | `rustic_core` types | `crates/adapters/engine` only |
-| Rustic profile TOML | the `interop` adapter only (§8.3; not built yet) |
+| Rustic profile TOML | `crates/adapters/interop` only |
 | A secret source: command, keyring, file, environment | `crates/adapters/secrets` only |
 | SQL and SQLite | `crates/adapters/store` |
 | `config.toml` | `crates/adapters/config` |
@@ -159,7 +159,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
   - `domain` has no I/O, no async, and no ambient time or randomness.
   - `app` depends only on `domain`; time and randomness come from the `Clock` and `Random` ports.
   - Adapters never depend on each other. Only `src/main.rs` wires them together.
-- Foreign models stay behind their anti-corruption layers: `rustic_core` types only in `crates/adapters/engine`, rustic profile TOML only in the `interop` adapter (§8.3).
+- Foreign models stay behind their anti-corruption layers: `rustic_core` types only in `crates/adapters/engine`, rustic profile TOML only in `crates/adapters/interop`.
 - Secret sources (command, keyring, file, environment) are read only in `crates/adapters/secrets`, behind the `SecretResolver` port; `crates/adapters/engine` hands workers a scrubbed environment (§10.2, §4.1).
 - The core returns typed errors and codes, never user-facing sentences. Text is produced through `l10n` (§8.4).
 
