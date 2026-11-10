@@ -22,3 +22,10 @@ final-status-level = "flaky"
 [profile.ci.junit]
 # Written to <target dir>/nextest/ci/junit.xml; CI uploads it as an artifact.
 path = "junit.xml"
+
+# The isolation guard builds and runs the daemon-starting test binaries one
+# after another (the e2e runner alone takes about 40 s), so it gets a longer
+# period than the 60 s a unit test is held to.
+[[profile.default.overrides]]
+filter = "binary(isolation)"
+slow-timeout = { period = "120s", terminate-after = 3 }
