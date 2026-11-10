@@ -271,9 +271,9 @@ error-inline-secret = { -brand-name } did not export the plan, because the repos
 # $key (text): the setting, as its path in the profile, such as repository.
 error-profile-export-reference = { -brand-name } did not export the plan, because the repository's { $key } refers to something at run time, which a profile cannot say for that setting. Write the value itself in the configuration, then export again.
 
-# The plan can't be exported, because the URL of the repository holds a password.
+# The plan can't be exported, because the address of the repository holds a password or another secret.
 # $key (text): the setting that holds it, repository or repo-hot.
-error-profile-export-url-password = { -brand-name } did not export the plan, because the { $key } of the repository holds a password in its address, and a profile would have to repeat it as text. Move the credentials out of the address into the repository's options, which an export leaves out and names the environment variable for, then export again.
+error-profile-export-url-password = { -brand-name } did not export the plan, because the { $key } of the repository holds a password or another secret in its address, and a profile would have to repeat it as text. Move the credentials out of the address into the repository's options, which an export leaves out and names the environment variable for, then export again.
 
 # The plan can't be exported, because one of its tags holds a comma.
 # $tag (text): the tag.
