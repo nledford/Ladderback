@@ -28,8 +28,11 @@
 # page, and only this stays in it: sending the history read, the previews, the
 # starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
 # say it, open or close the review, read the history again, wait for the run,
-# move focus); and drawing the elements. The maintenance journeys of
-# `features/ui/maintenance.feature` check it in Chromium. Everything the page
+# move focus); and drawing the elements, which includes leaving out what has
+# nothing to say (an unmanaged group's paths when it has none, and the
+# sentence that no plan could adopt it when it has no plan to offer). The
+# maintenance journeys of `features/ui/maintenance.feature` check it in
+# Chromium. Everything the page
 # decides is decided on the host and mutated there: the request and the review
 # of a preview, the rows, the adoptions, what shows of the history, what the
 # page holds while a request is out or a run goes on and what it does next,
