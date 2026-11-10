@@ -53,7 +53,8 @@ fn folder_of(path: &Path) -> &Path {
 }
 
 /// How many links in a row [`resolve`] follows before it gives up: the limit
-/// the operating systems have, rounded up.
+/// the operating systems have, rounded up. A longer chain, or a loop, is an
+/// error.
 const MAX_LINKS: usize = 40;
 
 /// The file at the end of the symlinks at `path`, which needn't exist: a link
@@ -61,7 +62,8 @@ const MAX_LINKS: usize = 40;
 /// a link is itself. A relative link is relative to the folder of the link.
 fn resolve(path: &Path) -> io::Result<PathBuf> {
     let mut current = path.to_path_buf();
-    for _ in 0..MAX_LINKS {
+    // One look at each of the links and one at the file the last of them leads to.
+    for _ in 0..=MAX_LINKS {
         match fs::symlink_metadata(&current) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 let target = fs::read_link(&current)?;
@@ -149,30 +151,47 @@ fn keep_with(
         .last()
         .map_or(Some(1), |(last, _)| last.checked_add(1))
         .ok_or_else(|| io::Error::other("the history has run out of version numbers"))?;
+    let version = folder.join(format!("{number:06}-{}.toml", stamp(at)));
     let mut kept = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(folder.join(format!("{number:06}-{}.toml", stamp(at))))?;
+        .open(&version)?;
     kept.write_all(old)?;
     kept.sync_all()?;
     // The file is whole, but its entry in the folder isn't safe until the
     // folder is flushed, and neither is the folder's own, if it is new: a
     // version reported as kept must survive a power loss, because the file is
     // about to be replaced.
-    flush_folder(&folder)?;
-    flush_folder(folder_of(path))?;
+    if let Err(error) = flush_folder(&folder).and_then(|()| flush_folder(folder_of(path))) {
+        // Not kept: the file isn't replaced, and the retry mustn't find a copy
+        // of the same bytes it has to number after and count among the ten.
+        let _ = fs::remove_file(&version);
+        return Err(error);
+    }
     // Forgetting is housekeeping: a version that can't be removed now is
     // removed by a later save, and must not fail this one.
     let _ = forget_old(&folder);
     Ok(())
 }
 
+/// Whether `text` is what [`stamp`] writes: `20261108T132021.123Z`.
+fn is_stamp(text: &str) -> bool {
+    const SHAPE: &[u8] = b"ddddddddTdddddd.dddZ";
+    text.len() == SHAPE.len()
+        && text.bytes().zip(SHAPE).all(|(byte, shape)| match shape {
+            b'd' => byte.is_ascii_digit(),
+            literal => byte == *literal,
+        })
+}
+
 /// The number a kept version's name starts with: `000042` in
-/// `000042-20261108T132021.123Z.toml`. Names of other shapes aren't versions.
+/// `000042-20261108T132021.123Z.toml`. A name of another shape, such as a
+/// note someone left in the folder, isn't a version: it is not counted, and
+/// never forgotten.
 fn number_of(name: &str) -> Option<u64> {
-    let (number, _) = name.strip_suffix(".toml")?.split_once('-')?;
-    if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+    let (number, stamp) = name.strip_suffix(".toml")?.split_once('-')?;
+    if !is_stamp(stamp) || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
     number.parse().ok()
