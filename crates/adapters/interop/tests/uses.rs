@@ -575,3 +575,23 @@ async fn what_a_used_profile_leaves_out_is_noted_and_its_text_stays_text() {
     assert!(profile.notices.contains(&ignored("global.dry-run")));
     assert_eq!(profile.repository.settings.repository, "$${HOME}/repo");
 }
+
+#[tokio::test]
+async fn a_list_of_more_profiles_than_are_read_is_refused_whether_they_exist_or_not() {
+    let scratch = Scratch::new();
+    let names = |count: usize| -> Vec<String> { (0..count).map(|n| format!("none{n}")).collect() };
+    let text = |count: usize| {
+        let names = names(count);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        uses(&names, &format!("{REPOSITORY}\n{ENTRY}"))
+    };
+
+    let profile = scratch.read(&text(MAX_PROFILES)).await.expect("a profile");
+    assert_eq!(profile.notices.len(), MAX_PROFILES);
+
+    let over = text(MAX_PROFILES + 1);
+    let (_, key, line, problem) = invalid(scratch.read(&over).await.unwrap_err());
+    assert_eq!(problem, ProfileProblem::UsedTooMany);
+    assert_eq!(key, "global.use-profiles");
+    assert_eq!(line, Some(line_of(&over, "use-profiles")));
+}

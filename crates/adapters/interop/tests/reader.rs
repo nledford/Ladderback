@@ -11,7 +11,7 @@ use common::{
 };
 use domain::planning::{GroupBy, KeepCount, KeepWithin, Maintenance, OnFailure};
 use domain::secrets::{FileRead, Part, Reference, SecretRef, SecretValue, Template};
-use interop::{MAX_ENTRIES, MAX_ITEMS};
+use interop::{MAX_ENTRIES, MAX_ITEMS, MAX_LEFT_OUT_KEYS};
 
 /// The key, the line and the problem of a refusal for an invalid profile.
 fn invalid(error: ProfileError) -> (String, Option<usize>, ProfileProblem) {
@@ -1329,4 +1329,39 @@ async fn every_list_of_an_entry_counts() {
     let (key, _, problem) = invalid(scratch.read(&text).await.unwrap_err());
     assert_eq!(problem, ProfileProblem::TooManyItems);
     assert_eq!(key, "backup");
+}
+
+#[tokio::test]
+async fn only_so_many_different_keys_are_noted_as_left_out() {
+    let keys = |count: usize| -> String {
+        (0..count)
+            .map(|n| format!("k{n:03} = 1\n"))
+            .collect::<String>()
+    };
+    let text = |count: usize| {
+        format!(
+            "[repository]\nrepository = \"/srv/demo-repo\"\npassword-file = \"/srv/demo-password\"\n{}\n{ENTRY}",
+            keys(count)
+        )
+    };
+    let scratch = Scratch::new();
+    let profile = scratch
+        .read(&text(MAX_LEFT_OUT_KEYS))
+        .await
+        .expect("a profile");
+    let noted = profile
+        .notices
+        .iter()
+        .filter(|notice| matches!(notice, ProfileNotice::KeyIgnored { .. }))
+        .count();
+    assert_eq!(noted, MAX_LEFT_OUT_KEYS);
+
+    let over = text(MAX_LEFT_OUT_KEYS + 1);
+    let (key, line, problem) = invalid(scratch.read(&over).await.unwrap_err());
+    assert_eq!(problem, ProfileProblem::TooManyKeys);
+    assert_eq!(key, format!("repository.k{MAX_LEFT_OUT_KEYS:03}"));
+    assert_eq!(
+        line,
+        Some(line_of(&over, &format!("k{MAX_LEFT_OUT_KEYS:03} =")))
+    );
 }

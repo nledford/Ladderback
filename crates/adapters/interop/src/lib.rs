@@ -47,6 +47,11 @@ pub const MAX_PROFILES: usize = 32;
 /// How many snapshot entries, hence plans, one import takes.
 pub const MAX_ENTRIES: usize = 1000;
 
+/// How many different keys of one profile the import says it left out. A
+/// `[repository]` may hold any key, so a profile of a megabyte could name
+/// tens of thousands.
+pub const MAX_LEFT_OUT_KEYS: usize = 200;
+
 /// How many items (a source, a glob, a tag, a hook, ...) the plans of one
 /// import hold in all. The settings of `[backup]` are copied into every plan,
 /// so a profile of a megabyte could otherwise ask for gigabytes.

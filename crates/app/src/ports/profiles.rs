@@ -143,6 +143,8 @@ pub enum ProfileProblem {
     /// tags, hooks) than the reader takes, the settings of `[backup]` being
     /// copied into each.
     TooManyItems,
+    /// More different keys left out than the reader keeps a note of.
+    TooManyKeys,
 }
 
 impl std::fmt::Display for ProfileError {
