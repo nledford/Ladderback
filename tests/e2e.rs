@@ -1,6 +1,7 @@
 //! Runs the `@e2e` scenarios in `features/` against the real `ladderback`
 //! binary: operations run in real `ladderback worker` processes (§13.2).
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -240,7 +241,8 @@ async fn main() {
     let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
     let name = cli.re_filter.take();
     let tags = cli.tags_filter.take();
-    Agent::cucumber()
+    let worst_stall = Cell::new(Duration::ZERO);
+    let run = Agent::cucumber()
         .with_cli(cli)
         .fail_on_skipped()
         .filter_run_and_exit(features, move |feature, rule, scenario| {
@@ -270,8 +272,37 @@ async fn main() {
                 return false;
             }
             true
-        })
-        .await;
+        });
+    // The runner polls every scenario from this one task: watching it from
+    // the same task measures how long a step left it unpolled.
+    let watch = watch_for_stalls(&worst_stall);
+    futures::pin_mut!(run, watch);
+    futures::future::select(run, watch).await;
+    assert!(
+        worst_stall.get() <= MAX_STALL,
+        "a step kept the runner's thread for {:?}, longer than the {MAX_STALL:?} allowed: \
+         every other scenario waited that long, and the operation log gives up on a \
+         connection after 10 s. A step that blocks (rustic_core, a blocking socket, a long \
+         file walk) runs through `blocking(…)`.",
+        worst_stall.get()
+    );
+}
+
+/// How long a step may keep the runner's thread before the run fails. The
+/// operation log gives up on a connection after 10 s; this is well inside
+/// that, and well beyond what steps that don't block take.
+const MAX_STALL: Duration = Duration::from_secs(2);
+
+/// Records in `worst` the longest a timer was late being polled, forever.
+/// Joined with the runner in one task, a late poll is a step that blocked the
+/// thread every scenario shares.
+async fn watch_for_stalls(worst: &Cell<Duration>) {
+    const TICK: Duration = Duration::from_millis(50);
+    loop {
+        let before = std::time::Instant::now();
+        tokio::time::sleep(TICK).await;
+        worst.set(worst.get().max(before.elapsed().saturating_sub(TICK)));
+    }
 }
 
 /// Whether this machine can listen on IPv6: containers often can't, and a
