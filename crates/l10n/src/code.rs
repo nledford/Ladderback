@@ -84,6 +84,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProfileExportTagComma => msg::ERROR_PROFILE_EXPORT_TAG_COMMA,
     ConfigFolderUnknown => msg::ERROR_CONFIG_FOLDER_UNKNOWN,
     RuntimeUnavailable => msg::ERROR_RUNTIME_UNAVAILABLE,
+    MaintenanceSelectionChanged => msg::ERROR_MAINTENANCE_SELECTION_CHANGED,
+    RepositoryReadTimedOut => msg::ERROR_REPOSITORY_READ_TIMED_OUT,
     Unknown => msg::ERROR_UNKNOWN,
 });
 

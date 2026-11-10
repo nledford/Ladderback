@@ -198,6 +198,13 @@ pub enum ErrorCode {
     /// works on, so it did nothing. The detail is the operating system's own
     /// message.
     RuntimeUnavailable,
+    /// The snapshots a forget or an adoption would act on are no longer the
+    /// ones its preview named: the repository changed after the review, so
+    /// nothing was done (I1).
+    MaintenanceSelectionChanged,
+    /// The repository did not answer a read in time, so its history, or a
+    /// preview of a maintenance run, could not be shown.
+    RepositoryReadTimedOut,
     #[serde(other)]
     Unknown,
 }
@@ -547,6 +554,7 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::AdoptionNoMatch => &[],
+            Self::MaintenanceSelectionChanged | Self::RepositoryReadTimedOut => &[],
             Self::AdoptionAmbiguous => &[ArgSpec {
                 name: "plans",
                 kind: ArgKind::Text,
@@ -2721,5 +2729,220 @@ mod repository_request_tests {
             r#""repository-alias-invalid""#
         );
         assert!(ErrorCode::RepositoryAliasInvalid.args().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod maintenance_dto_tests {
+    use serde_json::{from_str, json, to_string, to_value};
+
+    use super::{
+        AdoptionFromDto, ErrorCode, ForgetPlanDto, LeftAloneDto, MaintenancePreviewDto,
+        MaintenanceRequestDto, OrphanedGroupDto, PlanGroupDto, SnapshotDto, SnapshotGroupsDto,
+        TallyDto, UnmanagedGroupDto,
+    };
+
+    fn snapshot() -> SnapshotDto {
+        SnapshotDto {
+            id: "ab".repeat(32),
+            time: "2026-11-09T10:15:00Z".to_owned(),
+            hostname: "demo-host".to_owned(),
+            label: "home".to_owned(),
+            tags: vec!["ladderback-plan:demo-home".to_owned()],
+            paths: vec!["/home/demo".to_owned()],
+            paths_truncated: false,
+            tags_truncated: false,
+        }
+    }
+
+    fn previews() -> [MaintenancePreviewDto; 4] {
+        [
+            MaintenancePreviewDto::Forget {
+                plans: vec![ForgetPlanDto {
+                    plan: "demo-home".to_owned(),
+                    total: 3,
+                    remove: 2,
+                    listed: vec![snapshot()],
+                }],
+                left_alone: LeftAloneDto {
+                    orphaned: TallyDto {
+                        groups: 1,
+                        snapshots: 4,
+                    },
+                    unmanaged: TallyDto::default(),
+                },
+                selection: "68497038cf038672".to_owned(),
+            },
+            MaintenancePreviewDto::Adopt {
+                into: "demo-home".to_owned(),
+                count: 1,
+                listed: vec![snapshot()],
+                selection: "68497038cf038672".to_owned(),
+            },
+            MaintenancePreviewDto::Prune {
+                packs_marked: 2,
+                packs_deleted: 1,
+                packs_recovered: 0,
+                bytes_deleted: 4096,
+                keep_delete_hours: 144,
+            },
+            MaintenancePreviewDto::Check { read_data: false },
+        ]
+    }
+
+    #[test]
+    fn each_preview_names_its_kind_on_the_wire_and_reads_back() {
+        for (preview, kind) in previews()
+            .into_iter()
+            .zip(["forget", "adopt", "prune", "check"])
+        {
+            let wire = to_value(&preview).unwrap();
+            assert_eq!(wire["kind"], kind);
+            assert_eq!(
+                from_str::<MaintenancePreviewDto>(&wire.to_string()).unwrap(),
+                preview
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_carries_kebab_case_field_names() {
+        let [forget, adopt, prune, check] = previews();
+        let forget = to_value(&forget).unwrap();
+        assert_eq!(
+            forget["left-alone"],
+            json!({
+                "orphaned": {"groups": 1, "snapshots": 4},
+                "unmanaged": {"groups": 0, "snapshots": 0},
+            })
+        );
+        assert_eq!(forget["plans"][0]["remove"], 2);
+        assert_eq!(forget["selection"], "68497038cf038672");
+        let adopt = to_value(&adopt).unwrap();
+        assert_eq!(adopt["into"], "demo-home");
+        assert_eq!(adopt["count"], 1);
+        assert_eq!(
+            to_value(&prune).unwrap(),
+            json!({
+                "kind": "prune",
+                "packs-marked": 2,
+                "packs-deleted": 1,
+                "packs-recovered": 0,
+                "bytes-deleted": 4096,
+                "keep-delete-hours": 144,
+            })
+        );
+        assert_eq!(
+            to_value(&check).unwrap(),
+            json!({"kind": "check", "read-data": false})
+        );
+    }
+
+    #[test]
+    fn a_request_names_only_what_it_holds() {
+        let bare = MaintenanceRequestDto {
+            kind: "forget".to_owned(),
+            into: None,
+            from: None,
+            selection: None,
+        };
+        assert_eq!(to_string(&bare).unwrap(), r#"{"kind":"forget"}"#);
+        assert_eq!(
+            from_str::<MaintenanceRequestDto>(r#"{"kind":"forget"}"#).unwrap(),
+            bare
+        );
+    }
+
+    #[test]
+    fn an_adoption_request_names_its_destination_source_and_selection() {
+        for (from, wire) in [
+            (
+                AdoptionFromDto::Orphaned {
+                    agent: "agent-1".to_owned(),
+                    plan: "old-home".to_owned(),
+                },
+                json!({"from": "orphaned", "agent": "agent-1", "plan": "old-home"}),
+            ),
+            (AdoptionFromDto::Unmanaged, json!({"from": "unmanaged"})),
+        ] {
+            let request = MaintenanceRequestDto {
+                kind: "adopt".to_owned(),
+                into: Some("demo-home".to_owned()),
+                from: Some(from),
+                selection: Some("68497038cf038672".to_owned()),
+            };
+            assert_eq!(
+                to_value(&request).unwrap(),
+                json!({
+                    "kind": "adopt",
+                    "into": "demo-home",
+                    "from": wire,
+                    "selection": "68497038cf038672",
+                })
+            );
+            assert_eq!(
+                from_str::<MaintenanceRequestDto>(&to_string(&request).unwrap()).unwrap(),
+                request
+            );
+        }
+    }
+
+    #[test]
+    fn a_source_that_is_no_kind_of_group_is_not_read() {
+        assert!(from_str::<AdoptionFromDto>(r#"{"from":"somewhere"}"#).is_err());
+        assert!(from_str::<AdoptionFromDto>(r#"{"agent":"a","plan":"p"}"#).is_err());
+    }
+
+    #[test]
+    fn the_groups_carry_their_own_field_names_and_read_back() {
+        let groups = SnapshotGroupsDto {
+            plans: vec![PlanGroupDto {
+                plan: "demo-home".to_owned(),
+                count: 1,
+                snapshots: vec![snapshot()],
+            }],
+            orphaned: vec![OrphanedGroupDto {
+                agent: Some("agent-1".to_owned()),
+                plan: None,
+                count: 1,
+                snapshots: vec![snapshot()],
+                adopt_into: vec!["demo-home".to_owned()],
+            }],
+            unmanaged: vec![UnmanagedGroupDto {
+                hostname: "demo-host".to_owned(),
+                label: String::new(),
+                paths: vec!["/home/demo".to_owned()],
+                count: 1,
+                snapshots: vec![snapshot()],
+                adopt_into: vec![],
+            }],
+        };
+        let wire = to_value(&groups).unwrap();
+        assert_eq!(wire["orphaned"][0]["adopt-into"], json!(["demo-home"]));
+        assert!(wire["orphaned"][0]["plan"].is_null());
+        assert_eq!(wire["unmanaged"][0]["adopt-into"], json!([]));
+        assert_eq!(wire["plans"][0]["count"], 1);
+        assert_eq!(
+            from_str::<SnapshotGroupsDto>(&wire.to_string()).unwrap(),
+            groups
+        );
+    }
+
+    #[test]
+    fn the_codes_of_a_changed_selection_and_a_slow_read_take_no_arguments() {
+        for (code, wire) in [
+            (
+                ErrorCode::MaintenanceSelectionChanged,
+                r#""maintenance-selection-changed""#,
+            ),
+            (
+                ErrorCode::RepositoryReadTimedOut,
+                r#""repository-read-timed-out""#,
+            ),
+        ] {
+            assert_eq!(to_string(&code).unwrap(), wire);
+            assert_eq!(from_str::<ErrorCode>(wire).unwrap(), code);
+            assert!(code.args().is_empty());
+        }
     }
 }

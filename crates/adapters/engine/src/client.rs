@@ -1172,6 +1172,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ProfileExportReference
                 | ErrorCode::ProfileExportUrlPassword
                 | ErrorCode::ProfileExportTagComma
+                | ErrorCode::MaintenanceSelectionChanged
+                | ErrorCode::RepositoryReadTimedOut
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor
