@@ -11,7 +11,7 @@ use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
 };
-use domain::secrets::{CommandLine, FileRead, SecretRef, SecretValue, is_secret_option};
+use domain::secrets::{CommandLine, FileRead, SecretRef, SecretValue, Template, is_secret_option};
 use domain::{PlanId, RepositoryAlias};
 
 use crate::MAX_ITEMS;
@@ -143,7 +143,7 @@ fn repository(
 ) -> Result<RepositoryConfig, ProfileError> {
     let own = &part.repository;
     let location = match (&own.repository, variable(variables, REPOSITORY)) {
-        (Some(location), _) => escape::text(location),
+        (Some(location), _) => fits(escape::text(location), "repository.repository", file)?,
         (None, Some(_)) => reference(REPOSITORY),
         (None, None) => {
             return Err(ProfileError::Invalid {
@@ -155,26 +155,33 @@ fn repository(
             });
         }
     };
+    let repo_hot = own
+        .repo_hot
+        .as_deref()
+        .map(|hot| fits(escape::text(hot), "repository.repo-hot", file))
+        .transpose()?;
     let password = password(own, variables, file, notices)?;
     let settings = RepositorySettings {
         repository: location,
-        repo_hot: own.repo_hot.as_deref().map(escape::text),
+        repo_hot,
         password,
-        options: options(&own.options, "options", variables, OPTIONS, notices),
+        options: options(&own.options, "options", variables, OPTIONS, file, notices)?,
         options_hot: options(
             &own.options_hot,
             "options-hot",
             variables,
             OPTIONS_HOT,
+            file,
             notices,
-        ),
+        )?,
         options_cold: options(
             &own.options_cold,
             "options-cold",
             variables,
             OPTIONS_COLD,
+            file,
             notices,
-        ),
+        )?,
     };
     Ok(RepositoryConfig {
         settings,
@@ -190,6 +197,22 @@ fn repository(
             .unwrap_or_default(),
         hooks: own.hooks.clone(),
     })
+}
+
+/// `value`, an escaped value of the profile at `key`, if the config will
+/// read it back: it is a template, which is no longer than a secret may be,
+/// and escaping made it up to half as long again.
+fn fits(value: String, key: &str, file: &str) -> Result<String, ProfileError> {
+    match Template::parse(&value) {
+        Ok(_) => Ok(value),
+        Err(_) => Err(ProfileError::Invalid {
+            file: file.to_owned(),
+            key: Some(key.to_owned()),
+            at: None,
+            problem: ProfileProblem::BadValue,
+            detail: String::new(),
+        }),
+    }
 }
 
 /// A variable of rustic's environment, unless it is empty.
@@ -302,28 +325,28 @@ fn options(
     table: &str,
     variables: &BTreeMap<String, String>,
     prefix: &str,
+    file: &str,
     notices: &mut Vec<ProfileNotice>,
-) -> BTreeMap<String, String> {
+) -> Result<BTreeMap<String, String>, ProfileError> {
     let mut options = BTreeMap::new();
     for (name, value) in own {
+        let key = format!("repository.{table}.{}", plain(name));
         if is_secret_option(name) {
-            notices.push(ProfileNotice::InlineSecret {
-                field: format!("repository.{table}.{}", plain(name)),
-            });
+            notices.push(ProfileNotice::InlineSecret { field: key.clone() });
         }
-        options.insert(name.clone(), escape::text(value));
+        options.insert(name.clone(), fits(escape::text(value), &key, file)?);
     }
-    for variable in variables.keys() {
+    for (variable, value) in variables {
         let Some(rest) = variable.strip_prefix(prefix) else {
             continue;
         };
         let name = rest.to_ascii_lowercase().replace('_', "-");
-        if name.is_empty() || !is_variable_name(variable) || variables[variable].is_empty() {
+        if name.is_empty() || !is_variable_name(variable) || value.is_empty() {
             continue;
         }
         options.entry(name).or_insert_with(|| reference(variable));
     }
-    options
+    Ok(options)
 }
 
 // --- The plans --------------------------------------------------------------
