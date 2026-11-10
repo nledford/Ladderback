@@ -8,9 +8,11 @@ Feature: The command line's output
   a script to parse. The exit status is the same with and without it: 0 when
   the command did what it was asked, 1 when it refused, 2 when the command
   line was not understood, which the parser says before any command runs and
-  leaves standard output empty. The one failure `--json` cannot report as a
-  document is a document that cannot be written, because the reader of the
-  pipe has gone: that is said in words on standard error, with status 1.
+  leaves standard output empty. Under `--json` every failure is a document.
+  And when the reader of a pipe has gone before the command is done, as in
+  `ladderback import-profile nas.toml | head -1`, the command stops, quietly,
+  with 141, which is 128 and the number of SIGPIPE: the status a shell shows
+  for a program that a closed pipe killed. It never panics.
 
   `import-profile` reports what it added, so it has `--json`. `export-profile`
   writes the profile itself on standard output, and `serve` is the daemon,
@@ -234,23 +236,6 @@ Feature: The command line's output
         | en-XA    |
         | ar-XB    |
 
-    Scenario: A document that cannot be written is said in words on standard error, and the status is 1
-      Given a rustic profile "nas.toml" holding:
-        """
-        [repository]
-        repository = "{scratch}/repo"
-        password-file = "{scratch}/password"
-
-        [[backup.snapshots]]
-        name = "home"
-        sources = ["/home/demo"]
-        """
-      And standard output is closed
-      When the owner runs "import-profile nas.toml --json"
-      Then the command exits with status 1
-      And standard error has 1 line
-      And standard error says "cannot write the result"
-
   Rule: --plain is text with no colour and nothing to redraw, a fact to a line
 
     Scenario: An import says its facts one to a line, with no colour, though colour is forced
@@ -416,3 +401,108 @@ Feature: The command line's output
         | command line                                   | words                                          |
         | import-profile nas.toml --repo-name Not_A_Name | Not_A_Name is not a repository name            |
         | import-profile ./---.toml                      | cannot make a repository name of the file name |
+
+  Rule: A command whose output nobody reads any more stops quietly, with the status 141
+
+    A pipe has no reader when the program at its other end has ended, as
+    `head` does once it has its line. The command stops printing and says
+    nothing, and ends with 141, which is 128 and the number of SIGPIPE, as a
+    shell shows a program that a closed pipe killed. A panic would end with
+    101 and a message.
+
+    Scenario Outline: A command that prints on standard output
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.cloud]
+        repository = "/srv/demo-cloud"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "cloud"
+        sources = ["/home/demo"]
+
+        [plans.retention]
+        keep-last = 3
+        """
+      And a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "docs"
+        sources = ["/home/demo/docs"]
+        """
+      And nobody reads standard output
+      When the owner runs "<command line>"
+      Then the command exits with status 141
+      And standard error is empty
+
+      Examples:
+        | command line                   |
+        | import-profile nas.toml        |
+        | import-profile nas.toml --json |
+        | export-profile --plan home     |
+        | --help                         |
+        | --version                      |
+
+    Scenario Outline: A command that says something on standard error
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [copy]
+        targets = ["/srv/copy"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      And nobody reads standard error
+      When the owner runs "<command line>"
+      Then the command exits with status 141
+
+      Examples:
+        | command line                |
+        | import-profile nas.toml     |
+        | import-profile missing.toml |
+        | --bogus                     |
+
+    Scenario: The daemon, whose standard error is its log, stops when nobody reads it
+      Given nobody reads standard error
+      When the daemon is started with "--listen 127.0.0.1:0"
+      Then the command exits with status 141
+
+  Rule: A standard output that is not open at all is an empty sink, and the command goes on
+
+    A program that a shell starts with `>&-` has no descriptor for standard
+    output. The runtime gives it an empty one in place of it, so what the
+    command prints is lost, and it neither stops nor panics: it ends as it
+    would have.
+
+    Scenario Outline: A command that prints on a standard output that is not open
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "docs"
+        sources = ["/home/demo/docs"]
+        """
+      And standard output is not open
+      When the owner runs "<command line>"
+      Then the command exits with status 0
+      And standard error is empty
+
+      Examples:
+        | command line                   |
+        | import-profile nas.toml        |
+        | import-profile nas.toml --json |

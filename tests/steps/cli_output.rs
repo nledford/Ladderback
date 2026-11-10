@@ -15,7 +15,7 @@ use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use serde_json::Value;
 
-use super::interop_steps::{Ran, ran, run, said};
+use super::interop_steps::{Ran, pipe_without_reader, ran, run, said};
 use super::{Agent, LADDERBACK, blocking};
 
 /// How long a freshly started daemon may take to listen or give up.
@@ -32,9 +32,19 @@ fn colour_is_forced(agent: &mut Agent) {
         .push(("CLICOLOR_FORCE".to_owned(), "1".to_owned()));
 }
 
-#[given("standard output is closed")]
-fn stdout_is_closed(agent: &mut Agent) {
-    agent.interop.stdout_closed = true;
+#[given("nobody reads standard output")]
+fn nobody_reads_stdout(agent: &mut Agent) {
+    agent.interop.stdout_unread = true;
+}
+
+#[given("nobody reads standard error")]
+fn nobody_reads_stderr(agent: &mut Agent) {
+    agent.interop.stderr_unread = true;
+}
+
+#[given("standard output is not open")]
+fn stdout_is_not_open(agent: &mut Agent) {
+    agent.interop.stdout_not_open = true;
 }
 
 #[given("NO_COLOR is set")]
@@ -70,6 +80,12 @@ async fn runs(agent: &mut Agent, command_line: String) {
 async fn daemon_started(agent: &mut Agent, options: String) {
     let scratch = agent.scratch().to_owned();
     let env = agent.interop.env.clone();
+    // A daemon whose log has no reader ends by itself.
+    if agent.interop.stderr_unread {
+        let ran = blocking(move || serve_without_a_reader(&scratch, &options, &env)).await;
+        agent.interop.ran = Some(ran);
+        return;
+    }
     let log = blocking(move || serve_until_listening(&scratch, &options, &env)).await;
     // A daemon prints nothing on standard output, and is stopped, not ended.
     agent.interop.ran = Some(Ran {
@@ -80,12 +96,9 @@ async fn daemon_started(agent: &mut Agent, options: String) {
     });
 }
 
-/// Starts `ladderback serve` with `options`, waits until it listens, stops
-/// it, and returns what it logged. Runs on a blocking thread: see
-/// [`blocking`].
-fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]) -> String {
-    let log_path = scratch.join("serve-output.log");
-    let log = File::create(&log_path).expect("a log file for the daemon");
+/// `ladderback serve` with `options`, on folders of its own and with the
+/// environment a scenario chose, and nothing of the developer's.
+fn daemon_command(scratch: &Path, options: &str, env: &[(String, String)]) -> Command {
     let mut command = Command::new(LADDERBACK);
     command
         .env_clear()
@@ -96,11 +109,21 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
     for (name, value) in env {
         command.env(name, value);
     }
-    let mut child = command
+    command
         .arg("serve")
         .args(options.split_whitespace())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::null());
+    command
+}
+
+/// Starts `ladderback serve` with `options`, waits until it listens, stops
+/// it, and returns what it logged. Runs on a blocking thread: see
+/// [`blocking`].
+fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]) -> String {
+    let log_path = scratch.join("serve-output.log");
+    let log = File::create(&log_path).expect("a log file for the daemon");
+    let mut child = daemon_command(scratch, options, env)
         .stderr(log)
         .spawn()
         .expect("ladderback starts");
@@ -124,6 +147,35 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
             let _ = child.kill();
             let _ = child.wait();
             panic!("ladderback neither listened nor exited within {START_TIMEOUT:?}: {text}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Starts `ladderback serve` with `options` and a standard error that nothing
+/// can be written to, and waits for it to end by itself. Runs on a blocking
+/// thread: see [`blocking`].
+fn serve_without_a_reader(scratch: &Path, options: &str, env: &[(String, String)]) -> Ran {
+    let mut child = daemon_command(scratch, options, env)
+        .stderr(pipe_without_reader())
+        .spawn()
+        .expect("ladderback starts");
+    let began = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("the daemon's status") {
+            return Ran {
+                success: status.success(),
+                code: status.code(),
+                stdout: String::new(),
+                stderr: String::new(),
+            };
+        }
+        if began.elapsed() >= START_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "ladderback was still running {START_TIMEOUT:?} after nothing could read its log"
+            );
         }
         std::thread::sleep(Duration::from_millis(20));
     }

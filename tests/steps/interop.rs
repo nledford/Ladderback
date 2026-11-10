@@ -31,9 +31,14 @@ pub struct InteropE2e {
     /// The environment variables the commands run with: rustic's, and the
     /// ones a scenario sets to choose colour or language.
     pub(super) env: Vec<(String, String)>,
-    /// Whether the commands run with a standard output that cannot be
-    /// written to: a pipe whose reader has gone.
-    pub(super) stdout_closed: bool,
+    /// Whether the commands run with a standard output nobody reads: a pipe
+    /// whose reader has gone, so that a write to it fails.
+    pub(super) stdout_unread: bool,
+    /// The same for standard error.
+    pub(super) stderr_unread: bool,
+    /// Whether the commands run with no descriptor for standard output at
+    /// all, as a shell starts one with `>&-`.
+    pub(super) stdout_not_open: bool,
     pub(super) ran: Option<Ran>,
     /// The profile the last export wrote on stdout.
     exported: Option<String>,
@@ -100,13 +105,29 @@ fn file_text(agent: &Agent, step: &Step) -> String {
     format!("{}\n", expand(agent, text.trim_start_matches('\n')))
 }
 
+/// The write end of a pipe whose reader has gone: a stream nothing can be
+/// written to, as the standard output of a command in a pipeline whose next
+/// command has ended.
+pub(super) fn pipe_without_reader() -> std::io::PipeWriter {
+    let (reader, writer) = std::io::pipe().expect("a pipe");
+    drop(reader);
+    writer
+}
+
 /// Runs `ladderback` with `args` in the working folder, with an environment
 /// of its own: the scratch folders, English, and the variables the scenario
 /// set. Nothing of the developer's environment reaches it.
 pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     fs::create_dir_all(work_dir(agent)).expect("the working folder");
     fs::create_dir_all(home_dir(agent)).expect("the home folder");
-    let mut command = Command::new(super::LADDERBACK);
+    // Only a shell can start a program with a descriptor closed.
+    let mut command = if agent.interop.stdout_not_open {
+        let mut shell = Command::new("/bin/sh");
+        shell.args(["-c", r#"exec "$0" "$@" >&-"#, super::LADDERBACK]);
+        shell
+    } else {
+        Command::new(super::LADDERBACK)
+    };
     command
         .args(args)
         .current_dir(work_dir(agent))
@@ -118,12 +139,12 @@ pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     for (name, value) in &agent.interop.env {
         command.env(name, value);
     }
-    if agent.interop.stdout_closed {
-        // A write to this pipe fails, as it does in a pipeline whose next
-        // command has ended; `output` leaves the stdout it is given as it is.
-        let (reader, writer) = std::io::pipe().expect("a pipe");
-        drop(reader);
-        command.stdout(writer);
+    // `output` leaves a stream it is given as it is.
+    if agent.interop.stdout_unread {
+        command.stdout(pipe_without_reader());
+    }
+    if agent.interop.stderr_unread {
+        command.stderr(pipe_without_reader());
     }
     let output = blocking(move || command.output().expect("ladderback runs")).await;
     agent.interop.ran = Some(Ran {
