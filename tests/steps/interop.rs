@@ -31,6 +31,9 @@ pub struct InteropE2e {
     /// The environment variables the commands run with: rustic's, and the
     /// ones a scenario sets to choose colour or language.
     pub(super) env: Vec<(String, String)>,
+    /// Whether the commands run with a standard output that cannot be
+    /// written to: a pipe whose reader has gone.
+    pub(super) stdout_closed: bool,
     pub(super) ran: Option<Ran>,
     /// The profile the last export wrote on stdout.
     exported: Option<String>,
@@ -114,6 +117,13 @@ pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
         .env("LANGUAGE", "en-US");
     for (name, value) in &agent.interop.env {
         command.env(name, value);
+    }
+    if agent.interop.stdout_closed {
+        // A write to this pipe fails, as it does in a pipeline whose next
+        // command has ended; `output` leaves the stdout it is given as it is.
+        let (reader, writer) = std::io::pipe().expect("a pipe");
+        drop(reader);
+        command.stdout(writer);
     }
     let output = blocking(move || command.output().expect("ladderback runs")).await;
     agent.interop.ran = Some(Ran {

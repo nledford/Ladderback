@@ -32,6 +32,11 @@ fn colour_is_forced(agent: &mut Agent) {
         .push(("CLICOLOR_FORCE".to_owned(), "1".to_owned()));
 }
 
+#[given("standard output is closed")]
+fn stdout_is_closed(agent: &mut Agent) {
+    agent.interop.stdout_closed = true;
+}
+
 #[given("NO_COLOR is set")]
 fn no_colour_is_set(agent: &mut Agent) {
     agent

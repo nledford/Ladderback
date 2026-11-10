@@ -8,7 +8,9 @@ Feature: The command line's output
   a script to parse. The exit status is the same with and without it: 0 when
   the command did what it was asked, 1 when it refused, 2 when the command
   line was not understood, which the parser says before any command runs and
-  leaves standard output empty.
+  leaves standard output empty. The one failure `--json` cannot report as a
+  document is a document that cannot be written, because the reader of the
+  pipe has gone: that is said in words on standard error, with status 1.
 
   `import-profile` reports what it added, so it has `--json`. `export-profile`
   writes the profile itself on standard output, and `serve` is the daemon,
@@ -220,6 +222,23 @@ Feature: The command line's output
         | en-US    |
         | en-XA    |
         | ar-XB    |
+
+    Scenario: A document that cannot be written is said in words on standard error, and the status is 1
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      And standard output is closed
+      When the owner runs "import-profile nas.toml --json"
+      Then the command exits with status 1
+      And standard error has 1 line
+      And standard error says "cannot write the result"
 
   Rule: --plain is text with no colour and nothing to redraw, a fact to a line
 
