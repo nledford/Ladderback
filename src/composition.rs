@@ -116,12 +116,11 @@ async fn app_state_at(
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
     });
-    let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService {
-        engine: Arc::clone(&engine),
-        resolve: resolve.as_ref().clone(),
-        config: Arc::clone(&config),
-        writes: tokio::sync::Mutex::new(()),
-    });
+    let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
+        Arc::clone(&engine),
+        resolve.as_ref().clone(),
+        Arc::clone(&config),
+    ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
     Ok(AppState {
         events: bus,
@@ -866,6 +865,21 @@ struct RepositoryService {
     writes: tokio::sync::Mutex<()>,
 }
 
+impl RepositoryService {
+    fn new(
+        engine: Arc<dyn Engine>,
+        resolve: ResolveRepository,
+        config: Arc<dyn ConfigStore>,
+    ) -> Self {
+        Self {
+            engine,
+            resolve,
+            config,
+            writes: tokio::sync::Mutex::new(()),
+        }
+    }
+}
+
 #[async_trait]
 impl Repositories for RepositoryService {
     async fn test(
@@ -889,6 +903,12 @@ impl Repositories for RepositoryService {
     ) -> Result<api::RepositoryInitDto, RepositoriesError> {
         todo!("the red commit: tests first")
     }
+}
+
+/// A location of `settings`, as it may be shown: with the password a URL
+/// holds masked.
+fn redacted_location(_settings: &domain::planning::RepositorySettings, _text: &str) -> String {
+    todo!("the red commit: tests first")
 }
 
 impl CancelRegistry {
@@ -1311,5 +1331,719 @@ mod tests {
             .expect("the operation ends up in the log")
             .expect("the operation that was started is cancellable");
         assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+}
+
+#[cfg(test)]
+mod repository_service_tests {
+    use std::sync::{Mutex, PoisonError};
+
+    use api::{ErrorCode, MsgArg, PasswordDto, RepositorySettingsDto};
+    use app::fakes::{FakeSecrets, InMemoryConfigStore};
+    use app::ports::JobControl;
+    use domain::RepositoryId;
+
+    use super::*;
+
+    /// An engine that answers every job with the scripted outcome, and keeps
+    /// the jobs it was given.
+    struct Scripted {
+        outcome: Mutex<Result<RepositoryId, FailureReason>>,
+        refuses: Mutex<Option<EngineError>>,
+        seen: Mutex<Vec<Job>>,
+    }
+
+    struct Stop;
+
+    #[async_trait]
+    impl JobControl for Stop {
+        async fn stop(&mut self) {}
+    }
+
+    #[async_trait]
+    impl Engine for Scripted {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            if let Some(error) = self
+                .refuses
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+            {
+                return Err(error);
+            }
+            let event = match self
+                .outcome
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+            {
+                Ok(id) => EngineEvent::Succeeded(EngineResult::Repository { id }),
+                Err(reason) => EngineEvent::Failed(reason),
+            };
+            Ok(RunningJob {
+                events: futures::stream::iter([event]).boxed(),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    /// A configuration store that lets the other task run between a read
+    /// and the write that follows it, as a slow disk does.
+    struct Yielding(InMemoryConfigStore);
+
+    #[async_trait]
+    impl ConfigStore for Yielding {
+        async fn load(&self) -> Result<domain::planning::AgentConfig, ConfigError> {
+            let loaded = self.0.load().await;
+            tokio::task::yield_now().await;
+            loaded
+        }
+
+        async fn save(&self, config: &domain::planning::AgentConfig) -> Result<(), ConfigError> {
+            self.0.save(config).await
+        }
+    }
+
+    /// A configuration store that can't be read.
+    struct Broken(ConfigError);
+
+    #[async_trait]
+    impl ConfigStore for Broken {
+        async fn load(&self) -> Result<domain::planning::AgentConfig, ConfigError> {
+            Err(self.0.clone())
+        }
+
+        async fn save(&self, _config: &domain::planning::AgentConfig) -> Result<(), ConfigError> {
+            Err(self.0.clone())
+        }
+    }
+
+    fn repository_id() -> RepositoryId {
+        RepositoryId::parse(&"a".repeat(64)).expect("a repository ID")
+    }
+
+    fn engine() -> Arc<Scripted> {
+        Arc::new(Scripted {
+            outcome: Mutex::new(Ok(repository_id())),
+            refuses: Mutex::new(None),
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn service(engine: &Arc<Scripted>, config: Arc<dyn ConfigStore>) -> RepositoryService {
+        RepositoryService::new(
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config,
+        )
+    }
+
+    fn jobs(engine: &Scripted) -> usize {
+        engine
+            .seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    fn settings_dto() -> RepositorySettingsDto {
+        RepositorySettingsDto {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: PasswordDto::Inline {
+                value: "demo-password".to_owned(),
+            },
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        }
+    }
+
+    fn alias(name: &str) -> RepositoryAlias {
+        RepositoryAlias::parse(name).expect("an alias")
+    }
+
+    fn connect(alias: &str, settings: RepositorySettingsDto) -> api::ConnectRepositoryDto {
+        api::ConnectRepositoryDto {
+            alias: alias.to_owned(),
+            settings,
+        }
+    }
+
+    fn init(alias: Option<&str>, settings: RepositorySettingsDto) -> api::InitRepositoryDto {
+        api::InitRepositoryDto {
+            alias: alias.map(str::to_owned),
+            settings,
+        }
+    }
+
+    async fn saved(config: &dyn ConfigStore) -> domain::planning::AgentConfig {
+        config.load().await.expect("the configuration loads")
+    }
+
+    #[tokio::test]
+    async fn a_test_reports_the_id_and_saves_nothing() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let answer = service(&engine, config.clone())
+            .test(api::TestRepositoryDto {
+                settings: settings_dto(),
+            })
+            .await;
+        assert_eq!(answer, Ok(api::RepositoryIdDto { id: "a".repeat(64) }));
+        assert!(matches!(
+            engine.seen.lock().unwrap_or_else(PoisonError::into_inner)[0],
+            Job::Identify(_)
+        ));
+        assert!(saved(&*config).await.repositories().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_connection_saves_the_settings_as_written() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let mut settings = settings_dto();
+        settings.repo_hot = Some("/srv/hot".to_owned());
+        settings.password = PasswordDto::File {
+            path: "/run/secrets/pw".to_owned(),
+        };
+        settings.options = [("a".to_owned(), "1".to_owned())].into();
+        settings.options_hot = [("b".to_owned(), "2".to_owned())].into();
+        settings.options_cold = [("c".to_owned(), "3".to_owned())].into();
+        let answer = service(&engine, config.clone())
+            .connect(connect("demo", settings))
+            .await;
+        assert_eq!(answer.map(|id| id.id), Ok("a".repeat(64)));
+        let config = saved(&*config).await;
+        let repository = config.repository(&alias("demo")).expect("saved");
+        let settings = &repository.settings;
+        assert_eq!(settings.repository, "/srv/demo/repo");
+        assert_eq!(settings.repo_hot.as_deref(), Some("/srv/hot"));
+        // A reference stays a reference: the file is read when a job needs it.
+        assert_eq!(
+            settings.password,
+            domain::secrets::SecretRef::File {
+                path: "/run/secrets/pw".to_owned(),
+                read: domain::secrets::FileRead::FirstLine,
+            }
+        );
+        assert_eq!(settings.options.get("a").map(String::as_str), Some("1"));
+        assert_eq!(settings.options_hot.get("b").map(String::as_str), Some("2"));
+        assert_eq!(
+            settings.options_cold.get("c").map(String::as_str),
+            Some("3")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_other_password_sources_become_their_references() {
+        use domain::secrets::{KeyringEntry, SecretRef, SecretValue};
+        for (dto, expected) in [
+            (
+                PasswordDto::Inline {
+                    value: "typed".into(),
+                },
+                SecretRef::Inline(SecretValue::new("typed")),
+            ),
+            (
+                PasswordDto::Keyring {
+                    entry: "ladderback/nas".into(),
+                },
+                SecretRef::Keyring(KeyringEntry::parse("ladderback/nas").expect("an entry")),
+            ),
+            (
+                PasswordDto::Env {
+                    name: "DEMO_PASSWORD".into(),
+                },
+                SecretRef::Env("DEMO_PASSWORD".into()),
+            ),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let mut settings = settings_dto();
+            settings.password = dto.clone();
+            // Only a connection saves the reference, and testing it first
+            // resolves it: the fake knows this variable and this entry.
+            let secrets = FakeSecrets::new();
+            secrets.set_env("DEMO_PASSWORD", "demo-password");
+            secrets.set_keyring_entry(
+                &KeyringEntry::parse("ladderback/nas").expect("an entry"),
+                "demo-password",
+            );
+            let service = RepositoryService::new(
+                engine.clone(),
+                ResolveRepository::new(Arc::new(secrets)),
+                config.clone(),
+            );
+            service
+                .connect(connect("demo", settings))
+                .await
+                .unwrap_or_else(|e| panic!("{dto:?}: {e:?}"));
+            let config = saved(&*config).await;
+            let kept = &config.repository(&alias("demo")).expect("saved").settings;
+            assert_eq!(kept.password, expected, "{dto:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_value_the_settings_cannot_take_is_an_invalid_body_and_nothing_runs() {
+        for password in [
+            PasswordDto::File {
+                path: "password.txt".into(),
+            },
+            PasswordDto::File {
+                path: String::new(),
+            },
+            PasswordDto::Keyring {
+                entry: "no-slash".into(),
+            },
+            PasswordDto::Keyring {
+                entry: "/name".into(),
+            },
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            let mut settings = settings_dto();
+            settings.password = password.clone();
+            assert_eq!(
+                service
+                    .test(api::TestRepositoryDto {
+                        settings: settings.clone()
+                    })
+                    .await,
+                Err(RepositoriesError::InvalidBody),
+                "{password:?}"
+            );
+            assert_eq!(
+                service.connect(connect("demo", settings.clone())).await,
+                Err(RepositoriesError::InvalidBody),
+                "{password:?}"
+            );
+            assert_eq!(
+                service.init(init(None, settings)).await,
+                Err(RepositoriesError::InvalidBody),
+                "{password:?}"
+            );
+            assert_eq!(jobs(&engine), 0, "{password:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_that_is_not_an_alias_is_refused_before_anything_runs() {
+        let long = "a".repeat(65);
+        for name in [
+            "Not A Name",
+            "",
+            "-lead",
+            "under_score",
+            "demo/x",
+            long.as_str(),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            assert_eq!(
+                service.connect(connect(name, settings_dto())).await,
+                Err(RepositoriesError::AliasInvalid),
+                "{name:?}"
+            );
+            // An initialisation that would be saved is refused before it
+            // creates a repository it couldn't then keep.
+            assert_eq!(
+                service.init(init(Some(name), settings_dto())).await,
+                Err(RepositoriesError::AliasInvalid),
+                "{name:?}"
+            );
+            assert_eq!(jobs(&engine), 0, "{name:?} ran a job");
+            assert!(saved(&*config).await.repositories().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn an_alias_already_used_is_refused_and_the_first_repository_stays() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the first connection");
+        let mut other = settings_dto();
+        other.repository = "/srv/other".to_owned();
+        assert_eq!(
+            service.connect(connect("demo", other)).await,
+            Err(RepositoriesError::AliasTaken {
+                alias: "demo".to_owned()
+            })
+        );
+        let config = saved(&*config).await;
+        assert_eq!(config.repositories().len(), 1);
+        assert_eq!(
+            config
+                .repository(&alias("demo"))
+                .expect("kept")
+                .settings
+                .repository,
+            "/srv/demo/repo"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_initialisation_is_saved_only_when_it_names_an_alias() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        let answer = service.init(init(None, settings_dto())).await;
+        assert_eq!(
+            answer,
+            Ok(api::RepositoryInitDto {
+                id: "a".repeat(64),
+                saved: false
+            })
+        );
+        assert!(matches!(
+            engine.seen.lock().unwrap_or_else(PoisonError::into_inner)[0],
+            Job::Init(_)
+        ));
+        assert!(saved(&*config).await.repositories().is_empty());
+
+        let answer = service.init(init(Some("fresh"), settings_dto())).await;
+        assert_eq!(
+            answer,
+            Ok(api::RepositoryInitDto {
+                id: "a".repeat(64),
+                saved: true
+            })
+        );
+        assert!(saved(&*config).await.repository(&alias("fresh")).is_some());
+    }
+
+    #[tokio::test]
+    async fn two_connections_made_at_the_same_moment_are_both_kept() {
+        let engine = engine();
+        let config = Arc::new(Yielding(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        let (first, second) = tokio::join!(
+            service.connect(connect("first", settings_dto())),
+            service.connect(connect("second", settings_dto())),
+        );
+        first.expect("the first connection");
+        second.expect("the second connection");
+        let config = saved(&*config).await;
+        assert!(config.repository(&alias("first")).is_some());
+        assert!(config.repository(&alias("second")).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_failed_job_is_refused_by_the_kind_of_its_failure() {
+        use FailureReason as F;
+        let text = |value: &str| MsgArg::Text(value.to_owned());
+        let unavailable = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<&str>| {
+            Err(RepositoriesError::Unavailable {
+                code,
+                args,
+                detail: detail.map(str::to_owned),
+            })
+        };
+        for (reason, expected) in [
+            (
+                F::EngineFailed {
+                    detail: "wrong password".into(),
+                },
+                Err(RepositoriesError::OperationFailed {
+                    detail: "wrong password".into(),
+                }),
+            ),
+            (
+                F::EngineUnavailable {
+                    detail: "no worker".into(),
+                },
+                unavailable(ErrorCode::EngineUnavailable, vec![], Some("no worker")),
+            ),
+            (
+                F::JobRejected {
+                    detail: "refused".into(),
+                },
+                unavailable(ErrorCode::EngineUnavailable, vec![], Some("refused")),
+            ),
+            (
+                F::EngineExited { exit_code: Some(3) },
+                unavailable(
+                    ErrorCode::EngineExited,
+                    vec![("exit_code", text("3"))],
+                    None,
+                ),
+            ),
+            (
+                F::EngineExited { exit_code: None },
+                unavailable(ErrorCode::EngineExited, vec![], None),
+            ),
+            (
+                F::DeadlinePassed,
+                unavailable(ErrorCode::DeadlinePassed, vec![], None),
+            ),
+            (
+                F::EngineStartTimedOut,
+                unavailable(ErrorCode::EngineStartTimedOut, vec![], None),
+            ),
+            (
+                F::EngineExitTimedOut,
+                unavailable(ErrorCode::EngineExitTimedOut, vec![], None),
+            ),
+            (
+                F::RepositoryExists,
+                Err(RepositoriesError::Exists {
+                    location: "/srv/demo/repo".into(),
+                }),
+            ),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            *engine
+                .outcome
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Err(reason.clone());
+            let service = service(&engine, config.clone());
+            let tested = service
+                .test(api::TestRepositoryDto {
+                    settings: settings_dto(),
+                })
+                .await;
+            assert_eq!(
+                tested.map(|_| ()),
+                expected.clone().map(|_: ()| ()),
+                "{reason:?}"
+            );
+            assert_eq!(
+                service
+                    .connect(connect("demo", settings_dto()))
+                    .await
+                    .map(|_| ()),
+                expected.map(|_: ()| ()),
+                "{reason:?}"
+            );
+            assert!(
+                saved(&*config).await.repositories().is_empty(),
+                "{reason:?} saved something"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_engine_not_starting_is_unavailable() {
+        for (error, expected) in [
+            (
+                EngineError::Unavailable {
+                    detail: "no such program".into(),
+                },
+                RepositoriesError::Unavailable {
+                    code: ErrorCode::EngineUnavailable,
+                    args: vec![],
+                    detail: Some("no such program".into()),
+                },
+            ),
+            (
+                EngineError::StartTimedOut,
+                RepositoriesError::Unavailable {
+                    code: ErrorCode::EngineStartTimedOut,
+                    args: vec![],
+                    detail: None,
+                },
+            ),
+        ] {
+            let engine = engine();
+            *engine
+                .refuses
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(error);
+            let answer = service(&engine, Arc::new(InMemoryConfigStore::new()))
+                .test(api::TestRepositoryDto {
+                    settings: settings_dto(),
+                })
+                .await;
+            assert_eq!(answer, Err(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_existing_repository_is_refused_with_its_location_redacted() {
+        let engine = engine();
+        *engine
+            .outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Err(FailureReason::RepositoryExists);
+        let mut settings = settings_dto();
+        settings.repository = "rest:https://backup:hunter2@nas.example/repo".to_owned();
+        let Err(RepositoriesError::Exists { location }) =
+            service(&engine, Arc::new(InMemoryConfigStore::new()))
+                .init(init(None, settings))
+                .await
+        else {
+            panic!("an existing repository is refused as one");
+        };
+        assert!(!location.contains("hunter2"), "{location}");
+        assert!(location.contains("nas.example/repo"), "{location}");
+    }
+
+    #[tokio::test]
+    async fn a_secret_that_cannot_be_read_names_where_it_is() {
+        for (mut settings, field) in [
+            (settings_dto(), "password"),
+            (settings_dto(), "repository"),
+            (settings_dto(), "repo-hot"),
+            (settings_dto(), "options.token"),
+        ] {
+            match field {
+                "password" => {
+                    settings.password = PasswordDto::Env {
+                        name: "NOT_SET_ANYWHERE".into(),
+                    }
+                }
+                "repository" => settings.repository = "${NOT_SET_ANYWHERE}/repo".into(),
+                "repo-hot" => settings.repo_hot = Some("${NOT_SET_ANYWHERE}/hot".into()),
+                _ => {
+                    settings.options =
+                        [("token".to_owned(), "${NOT_SET_ANYWHERE}".to_owned())].into()
+                }
+            }
+            let engine = engine();
+            let answer = service(&engine, Arc::new(InMemoryConfigStore::new()))
+                .test(api::TestRepositoryDto { settings })
+                .await;
+            assert_eq!(
+                answer,
+                Err(RepositoriesError::SecretUnresolved {
+                    field: field.to_owned()
+                })
+            );
+            assert_eq!(jobs(&engine), 0, "{field}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_configuration_that_cannot_be_used_is_unavailable_with_its_code() {
+        let text = |value: &str| MsgArg::Text(value.to_owned());
+        for (error, code, args, detail) in [
+            (
+                ConfigError::Unavailable {
+                    file: "/c/config.toml".into(),
+                    detail: "permission denied".into(),
+                },
+                ErrorCode::ConfigUnavailable,
+                vec![("file", text("/c/config.toml"))],
+                Some("permission denied"),
+            ),
+            (
+                ConfigError::TooLarge {
+                    file: "/c/config.toml".into(),
+                    limit: 1024,
+                },
+                ErrorCode::ConfigTooLarge,
+                vec![
+                    ("file", text("/c/config.toml")),
+                    ("limit", MsgArg::Bytes(1024)),
+                ],
+                None,
+            ),
+            (
+                ConfigError::SchemaMissing {
+                    file: "/c/config.toml".into(),
+                },
+                ErrorCode::ConfigSchemaMissing,
+                vec![("file", text("/c/config.toml"))],
+                None,
+            ),
+            (
+                ConfigError::SchemaNewer {
+                    file: "/c/config.toml".into(),
+                    found: 9,
+                    supported: 1,
+                },
+                ErrorCode::ConfigSchemaNewer,
+                vec![
+                    ("file", text("/c/config.toml")),
+                    ("found", text("9")),
+                    ("supported", text("1")),
+                ],
+                None,
+            ),
+            (
+                ConfigError::Invalid {
+                    file: "/c/config.toml".into(),
+                    key: Some("plans[0].id".into()),
+                    at: Some(app::ports::Position { line: 7, column: 3 }),
+                    problem: app::ports::Problem::Syntax,
+                    detail: "expected a table".into(),
+                },
+                ErrorCode::ConfigInvalid,
+                vec![("file", text("/c/config.toml")), ("line", text("7"))],
+                Some("plans[0].id: expected a table"),
+            ),
+            (
+                ConfigError::Invalid {
+                    file: "/c/config.toml".into(),
+                    key: None,
+                    at: None,
+                    problem: app::ports::Problem::Syntax,
+                    detail: String::new(),
+                },
+                ErrorCode::ConfigInvalid,
+                vec![("file", text("/c/config.toml"))],
+                None,
+            ),
+        ] {
+            let engine = engine();
+            let service = service(&engine, Arc::new(Broken(error.clone())));
+            let expected = Err(RepositoriesError::Unavailable {
+                code,
+                args,
+                detail: detail.map(str::to_owned),
+            });
+            assert_eq!(
+                service
+                    .connect(connect("demo", settings_dto()))
+                    .await
+                    .map(|_| ()),
+                expected.clone().map(|_: ()| ()),
+                "{error:?}"
+            );
+            assert_eq!(
+                service
+                    .init(init(Some("demo"), settings_dto()))
+                    .await
+                    .map(|_| ()),
+                expected.map(|_: ()| ()),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_location_is_shown_without_the_password_in_it() {
+        let mut settings = domain::planning::RepositorySettings {
+            repository: "rest:https://backup:hunter2@nas.example/repo".to_owned(),
+            repo_hot: Some("rest:https://backup:hunter3@hot.example/repo".to_owned()),
+            password: domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
+                "typed",
+            )),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let shown = redacted_location(&settings, &settings.repository);
+        assert!(
+            !shown.contains("hunter2") && shown.contains("nas.example"),
+            "{shown}"
+        );
+        let hot = settings.repo_hot.clone().expect("a hot half");
+        let shown = redacted_location(&settings, &hot);
+        assert!(
+            !shown.contains("hunter3") && shown.contains("hot.example"),
+            "{shown}"
+        );
+        // The typed password is not a needle: a location that happens to
+        // hold the same text is still a location.
+        settings.repository = "/srv/typed/repo".to_owned();
+        assert_eq!(
+            redacted_location(&settings, &settings.repository),
+            "/srv/typed/repo"
+        );
     }
 }
