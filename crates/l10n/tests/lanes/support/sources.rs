@@ -205,6 +205,18 @@ fn collect_idents(stream: TokenStream, names: &mut BTreeSet<String>) {
     }
 }
 
+/// `files` without the ones only test code declares: the files `#[cfg(test)]
+/// mod name;` points at, and the files those declare in turn. `read` gives a
+/// file's text, or `None` if there is no such file. An error if a test module
+/// has no file, or one can't be read as Rust.
+#[allow(dead_code, reason = "the fix makes `product_sources` use it")]
+pub fn exclude_test_modules(
+    _files: Vec<PathBuf>,
+    _read: impl Fn(&Path) -> Option<String>,
+) -> Result<Vec<PathBuf>, String> {
+    todo!("exclude_test_modules")
+}
+
 /// The workspace's product sources: `src/` and every crate's `src/`, minus
 /// tests, benches, examples and build output.
 pub fn product_sources(root: &Path) -> Vec<PathBuf> {
