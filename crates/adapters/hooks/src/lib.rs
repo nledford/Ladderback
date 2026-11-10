@@ -7,6 +7,16 @@
 //! (`secrets::command`) uses, and with the same guarantees: the group is
 //! signalled only while the hook is unreaped, each signal at most once; the
 //! pipes stay open until the hook is reaped; and the whole wait is bounded.
+//!
+//! A hook that ends by itself is reaped when it ends, whatever still holds
+//! its stdout or stderr open: a process it started (a daemon, a background
+//! job) keeps a pipe's write end for as long as it runs. What is in the pipes
+//! at the exit, and what the pipes still carry for [`PIPE_GRACE`] after it, is
+//! read and kept, and then the read ends are dropped: a process that writes
+//! to them later gets SIGPIPE (or EPIPE, where it ignores that), as the
+//! hook's output is over. A hook that starts something long-lived redirects
+//! its output. Nothing is signalled, as the hook was reaped.
+//!
 //! The two adapters each hold their own copy: adapters never depend on each
 //! other, and the one place both could share it, `app`, has no process code.
 
@@ -43,6 +53,12 @@ const KILL_GRACE: Duration = Duration::from_secs(5);
 /// How long a hook that was killed is waited for: one in uninterruptible
 /// sleep (a hung mount) may never be reaped.
 const REAP_LIMIT: Duration = Duration::from_secs(5);
+
+/// How long the pipes of a hook that has ended are read on, for what it left
+/// in them and what a process it started still writes, before they are
+/// dropped. A process that holds one open for good (a daemon) is not waited
+/// for.
+const PIPE_GRACE: Duration = Duration::from_secs(1);
 
 /// How much is read from a pipe at a time.
 const READ_CHUNK: usize = 8 * 1024;
@@ -193,15 +209,14 @@ impl ProcessHookRunner {
             );
         };
         let mut captured = Captured::default();
-        let outcome = {
-            let reading = pin!(captured.read(&mut running.child, &mut pipes));
-            tokio::time::timeout(self.timeout, reading).await
-        };
+        let outcome = captured
+            .read(&mut running.child, &mut pipes, self.timeout)
+            .await;
         match outcome {
             // The hook ran to its end and was reaped: what it left running
             // is its business, and the group is not signalled any more.
-            Ok(Ok(status)) => (exit_status(status), captured),
-            Ok(Err(error)) => {
+            Ok(Some(status)) => (exit_status(status), captured),
+            Err(error) => {
                 running.kill_and_reap().await;
                 (
                     HookStatus::NotStarted {
@@ -210,7 +225,7 @@ impl ProcessHookRunner {
                     captured,
                 )
             }
-            Err(_elapsed) => {
+            Ok(None) => {
                 running.terminate_and_reap(&mut pipes).await;
                 (HookStatus::TimedOut, captured)
             }
@@ -240,22 +255,76 @@ struct Captured {
 }
 
 impl Captured {
-    /// Reads both streams to the end of the hook, keeping at most
-    /// [`MAX_HOOK_OUTPUT_BYTES`] of each: the rest is read on and dropped,
-    /// so a hook that talks past the cap is never blocked on it. Both
-    /// streams are read together, so a hook that fills one pipe while
+    /// Reads both streams while the hook runs, for at most `limit`, keeping
+    /// at most [`MAX_HOOK_OUTPUT_BYTES`] of each: the rest is read on and
+    /// dropped, so a hook that talks past the cap is never blocked on it.
+    /// Both streams are read together, so a hook that fills one pipe while
     /// writing the other cannot block itself.
-    async fn read(&mut self, child: &mut Child, pipes: &mut Pipes) -> std::io::Result<ExitStatus> {
+    ///
+    /// The hook is waited for, not its pipes: once it has ended, they are
+    /// read on for [`PIPE_GRACE`] and then left, though a process it started
+    /// may hold them open. `None` is a hook still running at `limit`; the
+    /// pipes are then still the caller's to read.
+    async fn read(
+        &mut self,
+        child: &mut Child,
+        pipes: &mut Pipes,
+        limit: Duration,
+    ) -> std::io::Result<Option<ExitStatus>> {
         let Pipes { stdout, stderr } = pipes;
-        let (out, err) = (pin!(stdout), pin!(stderr));
         let (kept_out, kept_err) = (&mut self.stdout, &mut self.stderr);
         let (cut_out, cut_err) = (&mut self.stdout_truncated, &mut self.stderr_truncated);
-        let read_out = read_capped(out, kept_out, MAX_HOOK_OUTPUT_BYTES, cut_out);
-        let read_err = read_capped(err, kept_err, MAX_HOOK_OUTPUT_BYTES, cut_err);
-        let (out, err) = tokio::join!(read_out, read_err);
-        out?;
-        err?;
-        child.wait().await
+        let mut read_out = pin!(read_capped(
+            stdout,
+            kept_out,
+            MAX_HOOK_OUTPUT_BYTES,
+            cut_out
+        ));
+        let mut read_err = pin!(read_capped(
+            stderr,
+            kept_err,
+            MAX_HOOK_OUTPUT_BYTES,
+            cut_err
+        ));
+        let mut out_done = false;
+        let mut err_done = false;
+        let running = async {
+            loop {
+                tokio::select! {
+                    result = &mut read_out, if !out_done => {
+                        result?;
+                        out_done = true;
+                    }
+                    result = &mut read_err, if !err_done => {
+                        result?;
+                        err_done = true;
+                    }
+                    status = child.wait() => return status,
+                }
+            }
+        };
+        let Ok(status) = tokio::time::timeout(limit, running).await else {
+            return Ok(None);
+        };
+        let status = status?;
+        // What is left in the pipes, and what their other writers still say:
+        // a pipe that can't be read any more has nothing more in it.
+        let drained = async {
+            tokio::join!(
+                async {
+                    if !out_done {
+                        let _ = (&mut read_out).await;
+                    }
+                },
+                async {
+                    if !err_done {
+                        let _ = (&mut read_err).await;
+                    }
+                },
+            );
+        };
+        let _ = tokio::time::timeout(PIPE_GRACE, drained).await;
+        Ok(Some(status))
     }
 
     /// The kept, redacted text of one stream. A stream that was cut first
