@@ -65,6 +65,14 @@ Feature: Repositories over HTTP
     Then the refusal has status 422 and the typed code "operation-failed"
     And the daemon lists no repositories
 
+  Scenario: A password file that is not there is refused with a code of its own
+    Given an initialised repository
+    And the client's password is in a file that is not there
+    When the client connects it as "demo"
+    Then the refusal has status 422 and the typed code "secret-missing"
+    And the refusal names the setting "password" and the file the password is read from
+    And the daemon lists no repositories
+
   Scenario: Two repositories connected at the same moment are both kept
     Given an initialised repository
     When the client connects it as "first" and as "second" at the same moment

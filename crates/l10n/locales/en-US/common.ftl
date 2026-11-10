@@ -222,9 +222,62 @@ error-repository-alias-taken = { -brand-name } already has a repository called {
 # A repository was to be saved under a name that is not an alias.
 error-repository-alias-invalid = { -brand-name } cannot use that name for a repository. Use up to 64 lower-case letters, digits and hyphens, and start with a letter or a digit.
 
-# A repository's settings hold a secret reference that could not be resolved.
-# $field (text): where in the settings the reference is.
-error-secret-unresolved = { -brand-name } could not read the secret in the repository's { $field }. Check where the secret is kept.
+# A repository's secret has nothing in its source.
+# $field (text): where in the settings the secret is, as the configuration names it.
+# $source (text): the variable, file, keyring entry or program that should give it.
+error-secret-missing = { -brand-name } found no secret in { $source }, which the repository's { $field } refers to. Check that it is there and not empty.
+
+# A repository's secret has a source that could not be reached.
+# $field (text): where in the settings the secret is.
+# $source (text): the variable, file, keyring entry or program that should give it.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+error-secret-unreadable = { -brand-name } could not read { $source }, which the repository's { $field } refers to. Check that it is there and that the user { -brand-name } runs as may read it.
+    .with-detail = { -brand-name } could not read { $source }, which the repository's { $field } refers to ({ $detail }). Check that it is there and that the user { -brand-name } runs as may read it.
+
+# A repository's secret is not text.
+# $field (text): where in the settings the secret is.
+# $source (text): where it is read from.
+error-secret-not-text = { $source }, which the repository's { $field } refers to, does not hold text. A secret has to be text.
+
+# A repository's secret is longer than a secret may be.
+# $field (text): where in the settings the secret is.
+# $source (text): where it is read from.
+# $limit (bytes): the most a secret may hold.
+error-secret-too-large = { $source }, which the repository's { $field } refers to, holds more than { $limit }, which is more than a secret can be.
+
+# The command that gives a repository's secret ran and failed.
+# $field (text): where in the settings the secret is.
+# $source (text): the program that was run.
+# $detail (text): the first line the command wrote to stderr, with secrets masked.
+error-secret-command-failed = The command { $source }, which gives the repository's { $field }, failed. Run it yourself to see why.
+    .with-detail = The command { $source }, which gives the repository's { $field }, failed ({ $detail }). Run it yourself to see why.
+
+# The command that gives a repository's secret ran for too long.
+# $field (text): where in the settings the secret is.
+# $source (text): the program that was run.
+# $seconds (count): the seconds it was given.
+error-secret-command-timed-out = { $seconds ->
+    [one] The command { $source }, which gives the repository's { $field }, did not finish in { $seconds } second, so { -brand-name } stopped it.
+   *[other] The command { $source }, which gives the repository's { $field }, did not finish in { $seconds } seconds, so { -brand-name } stopped it.
+  }
+
+# A setting that a program is started with refers to a secret.
+# $field (text): where in the settings it is.
+error-secret-in-process-arguments = The repository's { $field } is handed to a program as an argument, so it cannot refer to a secret: every user of the computer could read it there. Write the value out, or put the secret where the program reads it on its own.
+
+# A setting with its references in is longer than a secret may be.
+# $field (text): where in the settings it is.
+# $limit (bytes): the most it may hold.
+error-secret-expansion-too-long = The repository's { $field } is longer than { $limit } once the secrets it refers to are put in. Shorten it.
+
+# A setting is not a valid template.
+# $field (text): where in the settings it is.
+# $at (text): the place in it where the fault starts, counted in bytes from 0. The sender leaves it out when it has no place, and the program then supplies the text none.
+# `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
+error-template-invalid = { $at ->
+    [none] The repository's { $field } has a reference that is not valid. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
+   *[other] The repository's { $field } has a reference that is not valid at byte { $at }. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
+  }
 
 ## Profile codes: importing and exporting a rustic profile (technical design §6.2)
 

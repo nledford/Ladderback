@@ -463,6 +463,12 @@ fn api_password_in_file(agent: &mut Agent) {
     agent.repositories.api_password_file = Some(path);
 }
 
+#[given("the client's password is in a file that is not there")]
+fn api_password_in_a_missing_file(agent: &mut Agent) {
+    let path = agent.scratch().join("no-such-password.txt");
+    agent.repositories.api_password_file = Some(path);
+}
+
 #[given("the client's repository is at another, empty location")]
 fn api_other_empty_location(agent: &mut Agent) {
     let other = agent.scratch().join("other-repo");
@@ -559,6 +565,21 @@ fn api_refused(agent: &mut Agent, status: u16, code: String) {
     let (actual, json) = api_answer(agent);
     assert_eq!(actual, status, "the refusal: {json}");
     assert_eq!(json["code"], serde_json::json!(code), "the refusal: {json}");
+}
+
+#[then(expr = "the refusal names the setting {string} and the file the password is read from")]
+fn api_refusal_names_setting_and_file(agent: &mut Agent, setting: String) {
+    let (_, json) = api_answer(agent);
+    let file = agent
+        .repositories
+        .api_password_file
+        .as_ref()
+        .and_then(|path| path.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    let text = |value: String| serde_json::json!({"type": "text", "value": value});
+    assert_eq!(json["args"]["field"], text(setting), "the refusal: {json}");
+    assert_eq!(json["args"]["source"], text(file), "the refusal: {json}");
 }
 
 #[then("the refusal carries the engine's detail")]

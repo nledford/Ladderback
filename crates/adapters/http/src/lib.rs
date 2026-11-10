@@ -33,7 +33,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
-pub use repositories::{Repositories, RepositoriesError};
+pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
 };
@@ -128,13 +128,15 @@ pub enum CatalogError {
 }
 
 /// Why a snapshot listing couldn't be answered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SnapshotsError {
     /// The configuration has no repository by that name.
     Unknown,
+    /// The repository's secrets cannot be resolved, or a setting with a
+    /// reference is not valid: the refusal says which.
+    SecretRefused(SecretRefusal),
     /// The repository is there but its snapshots cannot be read just now,
-    /// for example because its secrets cannot be resolved or the engine
-    /// cannot be started.
+    /// for example because the engine cannot be started.
     Unavailable,
 }
 
@@ -628,6 +630,7 @@ async fn list_snapshots(
             api::ErrorCode::RepositoryUnknown,
             vec![("alias", api::MsgArg::Text(alias))],
         ),
+        Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(SnapshotsError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::EngineUnavailable,
@@ -1505,9 +1508,14 @@ mod tests {
                 "/exists" => Err(RepositoriesError::Exists {
                     location: "/exists".to_owned(),
                 }),
-                "/secret" => Err(RepositoriesError::SecretUnresolved {
-                    field: "password".to_owned(),
-                }),
+                "/secret" => Err(RepositoriesError::SecretRefused(SecretRefusal {
+                    code: api::ErrorCode::SecretMissing,
+                    args: vec![
+                        ("field", api::MsgArg::Text("password".to_owned())),
+                        ("source", api::MsgArg::Text("PW".to_owned())),
+                    ],
+                    detail: None,
+                })),
                 "/failed" => Err(RepositoriesError::OperationFailed {
                     detail: "wrong password or no repository at the location".to_owned(),
                 }),
@@ -1673,7 +1681,7 @@ mod tests {
             (
                 "/secret",
                 422,
-                json!({"code": "secret-unresolved", "args": {"field": text("password")}}),
+                json!({"code": "secret-missing", "args": {"field": text("password"), "source": text("PW")}}),
             ),
             (
                 "/failed",
