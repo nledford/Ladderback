@@ -89,9 +89,10 @@ pub(crate) async fn run_with(
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
     let mut running = Running::new(child, stop);
-    // Held until the command is reaped, though nothing reads them after the
-    // limit: a handler that writes to them when it gets SIGTERM must find
-    // them open, or the SIGPIPE ends it before it is done.
+    // Held until the command is reaped: a handler that writes to them when
+    // it gets SIGTERM must find them open, or the SIGPIPE ends it before it
+    // is done, and while it is being stopped they are read and dropped, so
+    // it is not blocked on a pipe nobody reads either.
     let (Some(mut stdout), Some(mut stderr)) =
         (running.child.stdout.take(), running.child.stderr.take())
     else {
@@ -122,7 +123,7 @@ pub(crate) async fn run_with(
             return Err(unreachable(error.to_string()));
         }
         Ok(Outcome::TimedOut) => {
-            running.terminate_and_reap().await;
+            running.terminate_and_reap(&mut stdout, &mut stderr).await;
             return Err(fail(Problem::TimedOut {
                 seconds: whole_seconds_up(limit),
             }));
@@ -202,14 +203,16 @@ impl<'a> Running<'a> {
     }
 
     /// SIGTERM to the group, and SIGKILL once the grace has passed with the
-    /// command still running. A command that ended on the SIGTERM is reaped
+    /// command still running. Whatever the command writes meanwhile is read
+    /// and dropped. A command that ended on the SIGTERM is reaped
     /// and nothing more is sent: what it started and left running, if it
     /// ignored the SIGTERM, is not signalled, as the group may have no live
     /// member by now. The whole call takes at most the grace and the reap
     /// limit.
-    async fn terminate_and_reap(&mut self) {
+    async fn terminate_and_reap(&mut self, stdout: &mut ChildStdout, stderr: &mut ChildStderr) {
         self.send(Signal::SIGTERM);
-        if timeout(self.stop.grace, self.child.wait()).await.is_err() {
+        let ended = wait_draining(&mut self.child, stdout, stderr);
+        if timeout(self.stop.grace, ended).await.is_err() {
             self.kill_and_reap().await;
         }
     }
@@ -224,6 +227,34 @@ impl Drop for Running<'_> {
 /// Signals the whole process group: nothing left in it is not an error.
 fn signal_group(group: Pid, signal: Signal) {
     let _ = killpg(group, signal);
+}
+
+/// Waits for the command while reading what it writes and dropping it. A
+/// command that is being stopped may say more on its way out than a pipe
+/// holds, and one that is blocked on a pipe nobody reads can't finish its
+/// handler.
+async fn wait_draining(
+    child: &mut Child,
+    stdout: &mut ChildStdout,
+    stderr: &mut ChildStderr,
+) -> io::Result<ExitStatus> {
+    let mut drain = pin!(async {
+        tokio::join!(discard(stdout), discard(stderr));
+    });
+    let mut drained = false;
+    let mut exit = pin!(child.wait());
+    loop {
+        tokio::select! {
+            status = &mut exit => return status,
+            () = &mut drain, if !drained => drained = true,
+        }
+    }
+}
+
+/// Reads `reader` to its end, or its first error, and keeps nothing.
+async fn discard(mut reader: impl AsyncRead + Unpin) {
+    let mut chunk = [0_u8; READ_CHUNK];
+    while matches!(reader.read(&mut chunk).await, Ok(read) if read > 0) {}
 }
 
 enum Outcome {
