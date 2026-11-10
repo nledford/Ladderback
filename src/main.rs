@@ -43,11 +43,7 @@ enum Command {
         /// A host name or address, without a port, that the web UI answers to
         /// besides loopback addresses, such as the name a reverse proxy
         /// forwards with the browser's Host (repeatable).
-        #[arg(
-            long = "allowed-host",
-            value_name = "NAME",
-            value_parser = http_adapter::validate_host_name
-        )]
+        #[arg(long = "allowed-host", value_name = "NAME")]
         allowed_hosts: Vec<String>,
     },
     /// Run one operation, read from stdin, and report events on stdout.
@@ -70,6 +66,23 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
     logging::install();
     log::info!("ladderback {} starting", env!("CARGO_PKG_VERSION"));
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    // Checked here, not by the argument parser, so that the refusal is said
+    // in the catalog's words and the person's language (§8.4). Exit status 2
+    // is the parser's own for a value it rejects.
+    let mut hosts = Vec::with_capacity(allowed_hosts.len());
+    for name in allowed_hosts {
+        match http_adapter::validate_host_name(&name) {
+            Ok(host) => hosts.push(host),
+            Err(refusal) => {
+                say(
+                    &localizer,
+                    msg::CLI_INVALID_ALLOWED_HOST,
+                    &[("name", text(refusal.0))],
+                );
+                return ExitCode::from(2);
+            }
+        }
+    }
     // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
     if let Err(refusal) = http_adapter::require_loopback(listen) {
         say(
@@ -125,7 +138,7 @@ fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
         }
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
-            http_adapter::RequestChecks::new(allowed_hosts),
+            http_adapter::RequestChecks::new(hosts),
             state,
         );
         match axum::serve(listener, app)

@@ -208,21 +208,10 @@ pub fn require_loopback(addr: SocketAddr) -> Result<(), NonLoopbackBind> {
     }
 }
 
-/// The daemon was asked to listen beyond loopback with sign-in off.
+/// The daemon was asked to listen beyond loopback with sign-in off. It has no
+/// words of its own: the caller says it from the catalog (§8.4).
 #[derive(Debug, PartialEq, Eq)]
 pub struct NonLoopbackBind(pub SocketAddr);
-
-impl std::fmt::Display for NonLoopbackBind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "refusing to listen on {}: sign-in is off, so Ladderback only listens on loopback addresses (127.0.0.1, ::1)",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for NonLoopbackBind {}
 
 /// Checks a host name for `--allowed-host`: a name or an address without a
 /// port, such as `nas.example.com`, `192.168.1.5` or `[fd00::1]`. A value the
@@ -234,21 +223,10 @@ pub fn validate_host_name(name: &str) -> Result<String, InvalidHostName> {
     }
 }
 
-/// A configured host name that isn't a name or an address without a port.
+/// A configured host name that isn't a name or an address without a port. It
+/// has no words of its own: the caller says it from the catalog (§8.4).
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidHostName(pub String);
-
-impl std::fmt::Display for InvalidHostName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "`{}` isn't a host name or address without a port, such as nas.example.com",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for InvalidHostName {}
 
 #[cfg(test)]
 mod tests;
