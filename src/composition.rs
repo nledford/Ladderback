@@ -13,7 +13,7 @@ use std::sync::Arc;
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
 use app::event_bus::BroadcastEventBus;
-use app::execution::RunOperation;
+use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
@@ -498,11 +498,7 @@ impl Operations for PlanRunner {
             // Nothing waits on the run: it reports through the event bus.
             let finished = use_case.run_queued(queued, cancel).await;
             registry.finish(&operation);
-            log::info!(
-                "operation {} ended: {:?}",
-                finished.operation.id().as_uuid().hyphenated(),
-                finished.operation.status()
-            );
+            log_ended(&finished);
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
@@ -588,11 +584,7 @@ impl Operations for PlanRunner {
         tokio::spawn(async move {
             let finished = use_case.execute(prepared, cancel).await;
             registry.finish(&operation);
-            log::info!(
-                "operation {} ended: {:?}",
-                finished.operation.id().as_uuid().hyphenated(),
-                finished.operation.status()
-            );
+            log_ended(&finished);
         });
         Ok(id_text)
     }
@@ -694,6 +686,25 @@ impl Operations for PlanRunner {
         } else {
             Err(http_adapter::CancelError::NotRunning)
         }
+    }
+}
+
+/// Says in the log that an operation ended, and each write the operation log
+/// refused it (§9): a run goes on without a log that refuses its writes, so
+/// these lines are the only sign that the log has stopped taking them. A
+/// refused write is named by the code of its failure and never by the
+/// failure's own words, which nobody has checked for a value (I4).
+fn log_ended(finished: &Finished) {
+    let operation = finished.operation.id().as_uuid().hyphenated();
+    log::info!(
+        "operation {operation} ended: {:?}",
+        finished.operation.status()
+    );
+    for refused in &finished.recording_errors {
+        log::warn!(
+            "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
+            refused.code()
+        );
     }
 }
 
