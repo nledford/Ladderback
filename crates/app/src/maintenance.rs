@@ -195,9 +195,12 @@ impl MaintenancePreview {
     /// The selection a start must carry for the run to act on what this
     /// preview showed: a forget's and an adoption's; none for a prune or a
     /// check, which select nothing.
-    #[allow(clippy::todo, reason = "red test: previews are decided next")]
     pub fn selection(&self) -> Option<SelectionToken> {
-        todo!("the selection of a preview")
+        match self {
+            Self::Forget(forget) => Some(forget.selection()),
+            Self::Adopt(adopt) => Some(adopt.selection()),
+            Self::Prune(_) | Self::Check(_) => None,
+        }
     }
 }
 
@@ -211,9 +214,13 @@ pub struct AdoptPreview {
 
 impl AdoptPreview {
     /// The fingerprint of what the adoption rewrites.
-    #[allow(clippy::todo, reason = "red test: previews are decided next")]
     pub fn selection(&self) -> SelectionToken {
-        todo!("the selection of an adoption")
+        let ids: Vec<SnapshotId> = self
+            .snapshots
+            .iter()
+            .map(|snapshot| snapshot.id.clone())
+            .collect();
+        SelectionToken::of(&ids)
     }
 }
 
@@ -278,7 +285,6 @@ pub struct RepositoryGroups {
 }
 
 /// Runs maintenance manually on the local owner.
-#[allow(dead_code, reason = "red test: the run fills them next")]
 pub struct RunMaintenance {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
@@ -333,6 +339,10 @@ impl RunMaintenance {
         self
     }
 
+    /// Whether a manual check reads every pack's data. It doesn't: a check a
+    /// person starts reads the repository's structure only.
+    const CHECK_READS_DATA: bool = false;
+
     /// Decides what the run does, from reads alone: the configuration, the
     /// repository's ID and, for a forget or an adoption, its snapshots. Nothing
     /// is stored, no I7 slot is taken and no engine job is left running, so a
@@ -347,20 +357,32 @@ impl RunMaintenance {
         alias: &RepositoryAlias,
         kind: MaintenanceKind,
     ) -> Result<MaintenanceAssessment, MaintenanceError> {
-        let config = self
-            .config
-            .load()
-            .await
-            .map_err(|_| MaintenanceError::Unavailable)?;
-        let repository = config
-            .repository(alias)
-            .ok_or(MaintenanceError::UnknownRepository)?;
-        let mut access = self
-            .resolve
-            .resolve(&repository.settings)
-            .await
-            .map_err(MaintenanceError::Resolve)?
-            .access;
+        self.assess_with(op, alias, kind, None).await
+    }
+
+    /// [`assess`](Self::assess) for a run a person reviewed: refused with
+    /// [`MaintenanceError::SelectionChanged`], before the slot is taken, when
+    /// what the run would act on is not what `selection` names. Nothing is
+    /// removed or rewritten then. A prune and a check select nothing, so a
+    /// selection holds them to nothing.
+    pub async fn assess_previewed(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        kind: MaintenanceKind,
+        selection: &SelectionToken,
+    ) -> Result<MaintenanceAssessment, MaintenanceError> {
+        self.assess_with(op, alias, kind, Some(selection)).await
+    }
+
+    async fn assess_with(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        kind: MaintenanceKind,
+        held: Option<&SelectionToken>,
+    ) -> Result<MaintenanceAssessment, MaintenanceError> {
+        let (config, mut access) = self.open(alias).await?;
         // The repository's ID names it in the log, which is what I7 holds
         // it by. A read reports it; nothing else runs before the slot is
         // taken.
@@ -375,126 +397,31 @@ impl RunMaintenance {
 
         let (partition, job) = match kind {
             MaintenanceKind::Forget => {
-                let listed = list(
-                    self.engine.as_ref(),
-                    self.clock.as_ref(),
-                    op,
-                    access.clone(),
-                )
-                .await?;
-                let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
-                let plans = plans_of(&config, alias);
-                let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
-                let mut ids = Vec::new();
-                for plan in &plans {
-                    let Some(group) = partition
-                        .managed
-                        .iter()
-                        .find(|group| group.plan == plan.plan)
-                    else {
-                        // A plan with no snapshots has nothing a policy
-                        // could remove, so its policy refuses nothing.
-                        continue;
-                    };
-                    // Checked per group, before anything is selected: a
-                    // policy that would keep nothing removes the plan's
-                    // whole history, which is the user's decision to make
-                    // explicitly, not a rule's.
-                    if plan.policy.keeps_nothing() {
-                        return Err(MaintenanceError::KeepsNothing {
-                            plan: plan.plan.clone(),
-                        });
-                    }
-                    ids.extend(
-                        self.retention
-                            .removes(&access, &plan.policy, &group.snapshots)
-                            .await
-                            .map_err(retention_failed)?,
-                    );
-                }
+                let (partition, forget) = self.forget_of(op, &config, alias, &access).await?;
+                held_to(held, forget.selection())?;
                 (
                     Some(partition),
                     Job::Forget(ForgetJob {
                         repository: access,
-                        ids,
+                        ids: forget.removal(),
                     }),
                 )
             }
             MaintenanceKind::Adopt(adoption) => {
-                // Only a plan of this repository can take history: a plan of
-                // another repository, or none at all, would leave the
-                // rewritten snapshots orphaned again.
-                let plans: Vec<Plan> = config
-                    .plans()
-                    .iter()
-                    .filter(|plan| plan.repository == *alias)
-                    .cloned()
-                    .collect();
-                if !plans.iter().any(|plan| plan.id == adoption.into) {
-                    return Err(MaintenanceError::UnknownPlan {
-                        plan: adoption.into.clone(),
-                    });
-                }
-                let listed = list(
-                    self.engine.as_ref(),
-                    self.clock.as_ref(),
-                    op,
-                    access.clone(),
-                )
-                .await?;
-                let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
-                let managed = plans_of(&config, alias);
-                let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
-                let ids: Vec<SnapshotId> = match &adoption.from {
-                    AdoptionSource::Orphaned { agent, plan } => {
-                        let Some(group) = AdoptSelection::orphaned(&partition, agent, plan) else {
-                            return Err(MaintenanceError::AdoptionNoMatch);
-                        };
-                        group.snapshots.iter().map(|s| s.id.clone()).collect()
-                    }
-                    AdoptionSource::Unmanaged => {
-                        // The destination plan is among `plans`, checked
-                        // above.
-                        let hostname = config
-                            .agent()
-                            .hostname
-                            .as_ref()
-                            .map(|host| host.as_str().to_owned())
-                            .unwrap_or_else(|| self.hostname.clone());
-                        // Every candidate plan's sources as the engine
-                        // records them, so the match compares like with
-                        // like: rustic resolves symlinks when it records a
-                        // snapshot's paths.
-                        let normalized: Vec<Plan> =
-                            futures::future::try_join_all(plans.iter().map(|plan| async {
-                                self.sources.normalized(&plan.sources).await.map(|sources| {
-                                    let mut normalized = plan.clone();
-                                    normalized.sources = sources;
-                                    normalized
-                                })
-                            }))
-                            .await
-                            .map_err(sources_failed)?;
-                        // Every plan of `plans` is among the normalized
-                        // ones, so the destination is too.
-                        let into = normalized
-                            .iter()
-                            .find(|plan| plan.id == adoption.into)
-                            .ok_or(MaintenanceError::UnknownPlan {
-                                plan: adoption.into.clone(),
-                            })?;
-                        let group =
-                            AdoptSelection::unmanaged(&partition, &hostname, into, &normalized)
-                                .map_err(|refusal| match refusal {
-                                    AdoptionRefusal::NoMatch => MaintenanceError::AdoptionNoMatch,
-                                    AdoptionRefusal::Ambiguous { plans } => {
-                                        MaintenanceError::AdoptionAmbiguous { plans }
-                                    }
-                                })?;
-                        group.snapshots.iter().map(|s| s.id.clone()).collect()
-                    }
+                let (partition, snapshots) = self
+                    .adoption_of(op, &config, alias, &access, &adoption)
+                    .await?;
+                let adopt = AdoptPreview {
+                    into: adoption.into.clone(),
+                    snapshots,
                 };
-                let tags = PlanTags::new(adoption.into.clone(), self.agent);
+                held_to(held, adopt.selection())?;
+                let ids = adopt
+                    .snapshots
+                    .iter()
+                    .map(|snapshot| snapshot.id.clone())
+                    .collect();
+                let tags = PlanTags::new(adoption.into, self.agent);
                 (
                     Some(partition),
                     Job::Rewrite(RewriteJob {
@@ -515,7 +442,7 @@ impl RunMaintenance {
                 None,
                 Job::Check(CheckJob {
                     repository: access,
-                    read_data: false,
+                    read_data: Self::CHECK_READS_DATA,
                 }),
             ),
         };
@@ -578,42 +505,284 @@ impl RunMaintenance {
     /// I7 slot and writes nothing to the operation log. A forget and an
     /// adoption return the snapshots they would act on and a selection a
     /// later [`assess_previewed`](Self::assess_previewed) can be held to.
-    #[allow(clippy::todo, reason = "red test: previews are decided next")]
+    /// The decision is the one [`assess`](Self::assess) makes, so what a
+    /// person reviews is what a run acts on.
     pub async fn preview(
         &self,
-        _op: OperationId,
-        _alias: &RepositoryAlias,
-        _kind: &MaintenanceKind,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        kind: &MaintenanceKind,
     ) -> Result<MaintenancePreview, MaintenanceError> {
-        todo!("a maintenance preview")
+        match kind {
+            MaintenanceKind::Check => {
+                // A check needs nothing of the repository to say what it
+                // does, only that the repository is configured.
+                let config = self
+                    .config
+                    .load()
+                    .await
+                    .map_err(|_| MaintenanceError::Unavailable)?;
+                config
+                    .repository(alias)
+                    .ok_or(MaintenanceError::UnknownRepository)?;
+                Ok(MaintenancePreview::Check(CheckPreview {
+                    read_data: Self::CHECK_READS_DATA,
+                }))
+            }
+            MaintenanceKind::Forget => {
+                let (config, access) = self.open(alias).await?;
+                let (_, forget) = self.forget_of(op, &config, alias, &access).await?;
+                Ok(MaintenancePreview::Forget(forget))
+            }
+            MaintenanceKind::Adopt(adoption) => {
+                let (config, access) = self.open(alias).await?;
+                let (_, snapshots) = self
+                    .adoption_of(op, &config, alias, &access, adoption)
+                    .await?;
+                Ok(MaintenancePreview::Adopt(AdoptPreview {
+                    into: adoption.into.clone(),
+                    snapshots,
+                }))
+            }
+            MaintenanceKind::Prune => {
+                let (_, access) = self.open(alias).await?;
+                let keep_delete = default_keep_delete();
+                let job = Job::PrunePlan(PruneJob {
+                    repository: access,
+                    keep_delete,
+                });
+                let EngineResult::PrunePlan(plan) =
+                    run_read(self.engine.as_ref(), self.clock.as_ref(), op, job).await?
+                else {
+                    return Err(MaintenanceError::Failed(FailureReason::EngineExited {
+                        exit_code: None,
+                    }));
+                };
+                Ok(MaintenancePreview::Prune(PrunePreview {
+                    packs_marked: plan.packs_marked,
+                    packs_deleted: plan.packs_deleted,
+                    packs_recovered: plan.packs_recovered,
+                    bytes_deleted: plan.bytes_deleted,
+                    keep_delete,
+                }))
+            }
+        }
     }
 
     /// The repository's snapshots grouped by who owns them (§7.3), as a
     /// read: every plan of this agent on the repository, the history no plan
     /// of this agent owns, and for each group of it the plans that could
     /// take it.
-    #[allow(clippy::todo, reason = "red test: groups are decided next")]
     pub async fn groups(
         &self,
-        _op: OperationId,
-        _alias: &RepositoryAlias,
+        op: OperationId,
+        alias: &RepositoryAlias,
     ) -> Result<RepositoryGroups, MaintenanceError> {
-        todo!("a repository's groups")
+        let (config, access) = self.open(alias).await?;
+        let listed = list(self.engine.as_ref(), self.clock.as_ref(), op, access).await?;
+        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
+        let managed = plans_of(&config, alias);
+        let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
+        let plans = repository_plans(&config, alias);
+        // Only an unmanaged group is matched by a plan's sources, so only
+        // then does the engine's own spelling of them need asking.
+        let normalized = if partition.unmanaged.is_empty() {
+            Vec::new()
+        } else {
+            self.normalized(&plans).await?
+        };
+        let hostname = self.host_of(&config);
+        // Which plan takes orphaned history is the person's choice, so every
+        // plan of the repository is offered.
+        let every_plan: Vec<PlanId> = plans.iter().map(|plan| plan.id.clone()).collect();
+        let mut owned = partition.managed;
+        Ok(RepositoryGroups {
+            plans: managed
+                .iter()
+                .map(|plan| PlanHistory {
+                    plan: plan.plan.clone(),
+                    snapshots: owned
+                        .iter()
+                        .position(|group| group.plan == plan.plan)
+                        .map(|at| owned.swap_remove(at).snapshots)
+                        .unwrap_or_default(),
+                })
+                .collect(),
+            orphaned: partition
+                .orphaned
+                .into_iter()
+                .map(|group| OrphanedHistory {
+                    group,
+                    adopt_into: every_plan.clone(),
+                })
+                .collect(),
+            unmanaged: partition
+                .unmanaged
+                .into_iter()
+                .map(|group| {
+                    let adopt_into = AdoptSelection::claimants(&group, &hostname, &normalized);
+                    UnmanagedHistory { group, adopt_into }
+                })
+                .collect(),
+        })
     }
 
-    /// [`assess`](Self::assess) for a run a person reviewed: refused with
-    /// [`MaintenanceError::SelectionChanged`], before the slot is taken, when
-    /// what the run would act on is not what `selection` names. Nothing is
-    /// removed or rewritten then.
-    #[allow(clippy::todo, reason = "red test: the held selection is decided next")]
-    pub async fn assess_previewed(
+    /// The configuration, and the access to the repository `alias` names.
+    async fn open(
         &self,
-        _op: OperationId,
-        _alias: &RepositoryAlias,
-        _kind: MaintenanceKind,
-        _selection: &SelectionToken,
-    ) -> Result<MaintenanceAssessment, MaintenanceError> {
-        todo!("a run held to its preview's selection")
+        alias: &RepositoryAlias,
+    ) -> Result<(AgentConfig, RepositoryAccess), MaintenanceError> {
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|_| MaintenanceError::Unavailable)?;
+        let repository = config
+            .repository(alias)
+            .ok_or(MaintenanceError::UnknownRepository)?;
+        let access = self
+            .resolve
+            .resolve(&repository.settings)
+            .await
+            .map_err(MaintenanceError::Resolve)?
+            .access;
+        Ok((config, access))
+    }
+
+    /// What a forget would do to the repository, from one listing of it. A
+    /// preview and a run are both made from this value, so what a person
+    /// reviews is what a run removes (I6).
+    async fn forget_of(
+        &self,
+        op: OperationId,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+        access: &RepositoryAccess,
+    ) -> Result<(Partition, ForgetPreview), MaintenanceError> {
+        let listed = list(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            access.clone(),
+        )
+        .await?;
+        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
+        let plans = plans_of(config, alias);
+        let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
+        let mut removals = Vec::new();
+        for plan in &plans {
+            let Some(group) = partition
+                .managed
+                .iter()
+                .find(|group| group.plan == plan.plan)
+            else {
+                // A plan with no snapshots has nothing a policy could
+                // remove, so its policy refuses nothing.
+                continue;
+            };
+            // Checked per group, before anything is selected: a policy that
+            // would keep nothing removes the plan's whole history, which is
+            // the user's decision to make explicitly, not a rule's.
+            if plan.policy.keeps_nothing() {
+                return Err(MaintenanceError::KeepsNothing {
+                    plan: plan.plan.clone(),
+                });
+            }
+            let ids = self
+                .retention
+                .removes(access, &plan.policy, &group.snapshots)
+                .await
+                .map_err(retention_failed)?;
+            removals.push((plan.plan.clone(), ids));
+        }
+        let forget = ForgetPreview::new(&partition, removals);
+        Ok((partition, forget))
+    }
+
+    /// The snapshots an adoption would rewrite, newest first, from one
+    /// listing of the repository.
+    async fn adoption_of(
+        &self,
+        op: OperationId,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+        access: &RepositoryAccess,
+        adoption: &Adoption,
+    ) -> Result<(Partition, Vec<Snapshot>), MaintenanceError> {
+        // Only a plan of this repository can take history: a plan of another
+        // repository, or none at all, would leave the rewritten snapshots
+        // orphaned again.
+        let plans = repository_plans(config, alias);
+        if !plans.iter().any(|plan| plan.id == adoption.into) {
+            return Err(MaintenanceError::UnknownPlan {
+                plan: adoption.into.clone(),
+            });
+        }
+        let listed = list(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            access.clone(),
+        )
+        .await?;
+        let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
+        let managed = plans_of(config, alias);
+        let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
+        let group = match &adoption.from {
+            AdoptionSource::Orphaned { agent, plan } => {
+                AdoptSelection::orphaned(&partition, agent, plan)
+                    .ok_or(MaintenanceError::AdoptionNoMatch)?
+                    .snapshots
+                    .clone()
+            }
+            AdoptionSource::Unmanaged => {
+                let normalized = self.normalized(&plans).await?;
+                // Every plan of `plans` is among the normalized ones, so the
+                // destination is too.
+                let into = normalized
+                    .iter()
+                    .find(|plan| plan.id == adoption.into)
+                    .ok_or(MaintenanceError::UnknownPlan {
+                        plan: adoption.into.clone(),
+                    })?;
+                AdoptSelection::unmanaged(&partition, &self.host_of(config), into, &normalized)
+                    .map_err(|refusal| match refusal {
+                        AdoptionRefusal::NoMatch => MaintenanceError::AdoptionNoMatch,
+                        AdoptionRefusal::Ambiguous { plans } => {
+                            MaintenanceError::AdoptionAmbiguous { plans }
+                        }
+                    })?
+                    .snapshots
+                    .clone()
+            }
+        };
+        Ok((partition, group))
+    }
+
+    /// `plans` with their sources as the engine records them, so matching an
+    /// unmanaged group compares like with like: rustic resolves symlinks when
+    /// it records a snapshot's paths.
+    async fn normalized(&self, plans: &[Plan]) -> Result<Vec<Plan>, MaintenanceError> {
+        futures::future::try_join_all(plans.iter().map(|plan| async {
+            self.sources.normalized(&plan.sources).await.map(|sources| {
+                let mut normalized = plan.clone();
+                normalized.sources = sources;
+                normalized
+            })
+        }))
+        .await
+        .map_err(sources_failed)
+    }
+
+    /// The host name a plan that names none matches an unmanaged group by:
+    /// the configuration's, else this agent's own.
+    fn host_of(&self, config: &AgentConfig) -> String {
+        config
+            .agent()
+            .hostname
+            .as_ref()
+            .map(|host| host.as_str().to_owned())
+            .unwrap_or_else(|| self.hostname.clone())
     }
 
     /// Runs the prepared job to its end, playing the engine's events into
@@ -881,6 +1050,25 @@ fn plans_of(config: &AgentConfig, alias: &RepositoryAlias) -> Vec<ManagedPlan> {
             policy: plan.retention.clone(),
         })
         .collect()
+}
+
+/// The plans of `config` that back up the repository `alias`.
+fn repository_plans(config: &AgentConfig, alias: &RepositoryAlias) -> Vec<Plan> {
+    config
+        .plans()
+        .iter()
+        .filter(|plan| plan.repository == *alias)
+        .cloned()
+        .collect()
+}
+
+/// Refuses a run that is held to a selection other than the one it would
+/// now act on: the repository changed after the person reviewed it.
+fn held_to(held: Option<&SelectionToken>, now: SelectionToken) -> Result<(), MaintenanceError> {
+    match held {
+        Some(held) if *held != now => Err(MaintenanceError::SelectionChanged),
+        _ => Ok(()),
+    }
 }
 
 /// One snapshot of a listing, as the selection reads it.
