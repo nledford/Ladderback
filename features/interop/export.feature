@@ -249,6 +249,70 @@ Feature: Export a plan as a rustic profile
       And the export made no profile
 
   @e2e
+  Rule: What rustic would refuse, split or print is said or refused
+
+    Scenario: A plan that keeps everything is exported, with a notice that rustic's forget will refuse the profile
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the owner exports the plan "home"
+      Then the export succeeds
+      And the export warns that rustic's forget needs a keep option
+      And the exported profile has:
+        | key                         | value                                             |
+        | forget.group-by             | ""                                                |
+        | snapshot-filter.filter-tags | ["ladderback-plan:home,ladderback-agent:{agent}"] |
+      And the exported profile doesn't set "forget.keep-last"
+
+    Scenario: A repository address with a password in it is refused, naming the key and never the password
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rest:https://demo:CANARY-url-password@nas.demo:8000/repo"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the owner exports the plan "home"
+      Then the export is refused naming "repository"
+      And the export made no profile
+      And the export never shows "CANARY-url-password"
+
+    Scenario: A tag with a comma is refused, naming the tag
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        tags = ["weekly,laptop"]
+        """
+      When the owner exports the plan "home"
+      Then the export is refused naming "weekly,laptop"
+      And the export made no profile
+
+  @e2e
   Rule: What is exported can be imported again
 
     Scenario: An exported plan comes back as the same plan, without Ladderback's own tags

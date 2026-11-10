@@ -11,7 +11,7 @@ use common::{Scratch, nas};
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
     HookEntry, Hooks, Hostname, KeepCount, KeepWithin, OnFailure, Plan, RepositoryConfig,
-    RepositorySettings, Source,
+    RepositorySettings, RetentionPolicy, Source,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
@@ -533,6 +533,7 @@ fn a_location_that_is_a_reference_is_refused_naming_the_key() {
 #[test]
 fn an_option_that_is_a_reference_is_left_out_with_the_variable_to_set_instead() {
     let mut export = export();
+    export.plan.retention.keep_last = Some(KeepCount::new(3).expect("a count"));
     let settings = &mut export.repository.settings;
     settings
         .options
@@ -593,6 +594,7 @@ fn an_option_that_is_a_reference_is_left_out_with_the_variable_to_set_instead() 
 #[test]
 fn a_secret_option_written_in_the_config_is_left_out_like_a_reference() {
     let mut export = export();
+    export.plan.retention.keep_last = Some(KeepCount::new(3).expect("a count"));
     export
         .repository
         .settings
@@ -749,6 +751,125 @@ fn a_password_in_the_config_is_refused_and_never_shown() {
     let refusal = refused(&export);
     assert_eq!(refusal, ExportRefusal::InlineSecret);
     assert!(!format!("{refusal:?}{refusal}").contains("CANARY"));
+}
+
+// --- What rustic would refuse, split or print ---------------------------------
+
+#[test]
+fn a_plan_that_keeps_everything_is_written_with_a_notice_that_forget_will_refuse() {
+    let written = render(&export()).expect("the export is made");
+    assert_eq!(written.notices, [ProfileNotice::RetentionEmpty]);
+    // The profile is kept: its forget holds the grouping and nothing else.
+    let parsed = parsed(&written.text);
+    let forget = at(&parsed, "forget")
+        .and_then(toml::Value::as_table)
+        .expect("a forget table");
+    assert_eq!(forget.keys().collect::<Vec<_>>(), ["group-by"]);
+}
+
+#[test]
+fn a_plan_with_any_retention_rule_gets_no_such_notice() {
+    // rustic's forget is happy with any keep-* key, a count of zero too.
+    let count = |n| Some(KeepCount::new(n).expect("a count"));
+    let within = Some(KeepWithin::parse("1y").expect("a span"));
+    let mut policies = [
+        RetentionPolicy::default(),
+        RetentionPolicy::default(),
+        RetentionPolicy::default(),
+    ];
+    policies[0].keep_last = count(0);
+    policies[1].keep_yearly = count(-1);
+    policies[2].keep_within_yearly = within;
+    for policy in policies {
+        let mut export = export();
+        export.plan.retention = policy;
+        let written = render(&export).expect("the export is made");
+        assert_eq!(written.notices, [], "{:?}", export.plan.retention);
+    }
+}
+
+#[test]
+fn a_location_with_a_password_in_its_url_is_refused_naming_the_key_not_the_value() {
+    for (location, hot, key) in [
+        ("rest:https://demo:CANARY-url@nas.demo:8000/repo", None, "repository"),
+        ("s3:https://demo:CANARY-url@s3.demo/bucket", None, "repository"),
+        ("/srv/demo-repo", Some("rest:https://demo:CANARY-url@hot.demo/"), "repo-hot"),
+    ] {
+        let mut export = export();
+        export.repository.settings.repository = location.to_owned();
+        export.repository.settings.repo_hot = hot.map(str::to_owned);
+        let refusal = refused(&export);
+        assert_eq!(
+            refusal,
+            ExportRefusal::UrlPassword {
+                key: key.to_owned()
+            },
+            "{location} {hot:?}"
+        );
+        assert!(!format!("{refusal:?}{refusal}").contains("CANARY"));
+    }
+}
+
+#[test]
+fn a_location_with_a_user_but_no_password_is_written() {
+    for location in [
+        "sftp:demo@nas.demo:/srv/repo",
+        "rest:https://demo@nas.demo:8000/repo",
+        "rest:https://nas.demo:8000/repo",
+        "/srv/demo:repo",
+    ] {
+        let mut export = export();
+        export.repository.settings.repository = location.to_owned();
+        assert_has(
+            &text(&export),
+            "repository.repository",
+            string(location),
+        );
+    }
+}
+
+#[test]
+fn an_option_with_a_password_in_its_url_is_left_out_like_a_secret() {
+    let mut export = export();
+    export.repository.settings.options.insert(
+        "endpoint".to_owned(),
+        "https://demo:CANARY-url@s3.demo".to_owned(),
+    );
+    export
+        .repository
+        .settings
+        .options
+        .insert("region".to_owned(), "eu-demo-1".to_owned());
+    let written = render(&export).expect("the export is made");
+    assert!(!written.text.contains("CANARY"), "{}", written.text);
+    assert_has(
+        &written.text,
+        "repository.options.region",
+        string("eu-demo-1"),
+    );
+    assert!(
+        written.notices.contains(&ProfileNotice::OptionLeftOut {
+            option: "endpoint".to_owned(),
+            variable: "RUSTIC_REPO_OPT_ENDPOINT".to_owned(),
+        }),
+        "{:?}",
+        written.notices
+    );
+}
+
+#[test]
+fn a_tag_with_a_comma_is_refused_naming_the_tag() {
+    let mut export = export();
+    export.plan.tags = vec![
+        UserTag::new("laptop").expect("a tag"),
+        UserTag::new("a,b").expect("a tag"),
+    ];
+    assert_eq!(
+        refused(&export),
+        ExportRefusal::TagComma {
+            tag: "a,b".to_owned()
+        }
+    );
 }
 
 // --- What reads it back ---------------------------------------------------------------

@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use domain::execution::plan_tags::PlanTags;
+use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
-    GroupBy, Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source,
+    GroupBy, Hooks, KeepCount, Maintenance, Plan, RepositoryConfig, RepositorySettings,
+    RetentionPolicy, Source,
 };
 use domain::secrets::{FileRead, Part, SecretRef, SecretValue, Template};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
@@ -55,6 +56,9 @@ pub async fn run(harness: &dyn ProfilesHarness) {
     a_password_in_the_config_is_refused_and_never_written(harness);
     a_location_that_is_a_reference_is_refused(harness);
     an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(harness);
+    a_plan_that_keeps_everything_is_written_with_a_notice(harness);
+    a_location_with_a_password_in_its_url_is_refused_and_never_written(harness);
+    a_tag_with_a_comma_is_refused(harness);
 }
 
 fn alias(text: &str) -> Option<RepositoryAlias> {
@@ -167,11 +171,12 @@ async fn a_file_that_is_not_there_is_unreadable(harness: &dyn ProfilesHarness) {
 /// whose password is in a file, for an agent with no hostname and no hooks.
 fn export(location: &str) -> Option<PlanExport> {
     let plan_id = PlanId::parse("home").ok()?;
-    let plan = Plan::new(
+    let mut plan = Plan::new(
         plan_id.clone(),
         alias("demo")?,
         vec![Source::parse("/home/demo").ok()?],
     );
+    plan.retention.keep_last = KeepCount::new(3).ok();
     Some(PlanExport {
         plan,
         repository: RepositoryConfig {
@@ -296,4 +301,65 @@ fn an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(
         .collect();
     left_out.sort_unstable();
     assert_eq!(left_out, ["secret_access_key", "token"]);
+}
+
+fn a_plan_that_keeps_everything_is_written_with_a_notice(harness: &dyn ProfilesHarness) {
+    let Some(mut export) = export("/srv/demo-repo") else {
+        return;
+    };
+    export.plan.retention = RetentionPolicy::default();
+    let written = harness.writer().render(&export);
+    assert!(written.is_ok(), "the export is made: {written:?}");
+    let Ok(profile) = written else { return };
+    assert!(
+        profile.notices.contains(&ProfileNotice::RetentionEmpty),
+        "rustic's forget will refuse the profile, and the export says so: {:?}",
+        profile.notices
+    );
+}
+
+fn a_location_with_a_password_in_its_url_is_refused_and_never_written(
+    harness: &dyn ProfilesHarness,
+) {
+    for (location, hot, key) in [
+        ("rest:https://demo:CANARY-url@nas.demo/repo", None, "repository"),
+        (
+            "/srv/demo-repo",
+            Some("rest:https://demo:CANARY-url@hot.demo/"),
+            "repo-hot",
+        ),
+    ] {
+        let Some(mut export) = export(location) else {
+            return;
+        };
+        export.repository.settings.repo_hot = hot.map(str::to_owned);
+        let written = harness.writer().render(&export);
+        assert_eq!(
+            written.as_ref().err(),
+            Some(&ExportRefusal::UrlPassword {
+                key: key.to_owned()
+            }),
+            "{key}: {written:?}"
+        );
+        let shown = format!("{written:?}");
+        assert!(!shown.contains("CANARY"), "{shown}");
+    }
+}
+
+fn a_tag_with_a_comma_is_refused(harness: &dyn ProfilesHarness) {
+    let Some(mut export) = export("/srv/demo-repo") else {
+        return;
+    };
+    let Ok(tag) = UserTag::new("a,b") else {
+        return;
+    };
+    export.plan.tags = vec![tag];
+    let written = harness.writer().render(&export);
+    assert_eq!(
+        written.as_ref().err(),
+        Some(&ExportRefusal::TagComma {
+            tag: "a,b".to_owned()
+        }),
+        "{written:?}"
+    );
 }

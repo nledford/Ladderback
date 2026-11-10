@@ -506,6 +506,11 @@ fn export_notes_variable(agent: &mut Agent, variable: String) {
     assert_stderr_names(agent, &variable);
 }
 
+#[then("the export warns that rustic's forget needs a keep option")]
+fn export_warns_keep_option(agent: &mut Agent) {
+    assert_stderr_names(agent, "keep-*");
+}
+
 #[then(expr = "rustic would have removed {int} snapshots")]
 fn rustic_would_remove(agent: &mut Agent, count: usize) {
     if agent.interop.rustic_missing {
