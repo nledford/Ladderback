@@ -232,6 +232,36 @@ mod tests {
     }
 
     #[test]
+    fn a_link_is_followed_to_its_end_and_a_missing_file_is_where_it_would_be() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let folder = scratch.path();
+        let plain = folder.join("plain.toml");
+        assert_eq!(resolve(&plain).expect("resolved"), plain, "nothing there");
+        fs::write(&plain, "").expect("a file");
+        assert_eq!(resolve(&plain).expect("resolved"), plain, "not a link");
+
+        std::os::unix::fs::symlink("plain.toml", folder.join("one.toml")).expect("a link");
+        std::os::unix::fs::symlink(folder.join("one.toml"), folder.join("two.toml"))
+            .expect("a link");
+        assert_eq!(
+            resolve(&folder.join("two.toml")).expect("resolved"),
+            plain,
+            "a relative link, then an absolute one"
+        );
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_looked_at_is_an_error_not_a_missing_file() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let file = scratch.path().join("file");
+        fs::write(&file, "").expect("a file");
+
+        let resolved = resolve(&file.join("config.toml"));
+
+        assert!(resolved.is_err(), "{resolved:?}");
+    }
+
+    #[test]
     fn a_name_is_a_version_when_it_starts_with_a_number_and_ends_in_toml() {
         let number = |name| number_of(name);
         assert_eq!(number("000042-20261108T132021.123Z.toml"), Some(42));
