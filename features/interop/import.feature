@@ -621,7 +621,7 @@ Feature: Import a rustic profile
         address = "localhost:8000"
 
         [snapshot-filter]
-        filter-host = ["demo-laptop"]
+        filter-hosts = ["demo-laptop"]
 
         [global.env]
         DEMO_VARIABLE = "demo"
