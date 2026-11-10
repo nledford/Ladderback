@@ -1000,12 +1000,15 @@ mod tests {
         async fn stop(&mut self) {}
     }
 
-    /// A cancel that arrives the instant the route answers finds the
-    /// operation, not an "already ended" refusal (§4.2): the cancel switch
-    /// is parked before the run starts, while the run is still in its
-    /// before-hooks.
-    #[tokio::test]
-    async fn a_cancel_in_the_start_window_stops_the_operation() {
+    /// A runner over scratch folders with one plan, "home", whose agent-level
+    /// before-hook is the gate; its engine parks. Also what the gate says and
+    /// opens, and the scratch folder, which must outlive the runner.
+    async fn runner_at_a_gate() -> (
+        PlanRunner,
+        tokio::sync::watch::Receiver<u32>,
+        tokio::sync::watch::Sender<bool>,
+        tempfile::TempDir,
+    ) {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config_dir, data_dir) = own_folders(scratch.path());
         let source = scratch.path().join("source");
@@ -1047,7 +1050,7 @@ mod tests {
             )],
         )
         .expect("a valid configuration");
-        let (hooks, mut entered, open_gate) = GateHooks::new();
+        let (hooks, entered, open_gate) = GateHooks::new();
         let config_store = Arc::new(FileConfigStore::new(
             config_dir.join("config.toml"),
             Arc::new(SystemClock),
@@ -1069,6 +1072,16 @@ mod tests {
             registry: Arc::new(CancelRegistry::new()),
             hooks: Arc::new(hooks),
         };
+        (runner, entered, open_gate, scratch)
+    }
+
+    /// A cancel that arrives the instant the route answers finds the
+    /// operation, not an "already ended" refusal (§4.2): the cancel switch
+    /// is parked before the run starts, while the run is still in its
+    /// before-hooks.
+    #[tokio::test]
+    async fn a_cancel_in_the_start_window_stops_the_operation() {
+        let (runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
         let id = runner
             .start_backup("home".into())
             .await
@@ -1081,5 +1094,42 @@ mod tests {
         let cancel = runner.cancel(id).await;
         open_gate.send(true).expect("the gate opens");
         cancel.expect("a cancel in the start window is accepted");
+    }
+
+    /// A client that cancels the instant it has the answer to its start is
+    /// not told the operation is unknown or not running: the operation is
+    /// recorded and its cancel switch parked before the route answers, and
+    /// the run it cancels ends cancelled.
+    #[tokio::test]
+    async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_cancelled() {
+        let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
+        open_gate.send(true).expect("the gate opens");
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        let ended = async {
+            loop {
+                let detail = GetOperation::new(Arc::clone(&runner.store))
+                    .get(operation)
+                    .await
+                    .expect("the log reads");
+                if let Some(detail) = detail
+                    && detail.record.status.is_finished()
+                {
+                    return detail.record.status;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        let status = tokio::time::timeout(std::time::Duration::from_secs(30), ended)
+            .await
+            .expect("the cancelled operation ends");
+        assert_eq!(status, OperationStatus::Cancelled);
     }
 }

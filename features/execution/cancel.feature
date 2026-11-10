@@ -9,6 +9,12 @@ Feature: Cancelling an operation
     And the operation took 3 minutes
     And the history shows the operation as it ended
 
+  Scenario: A cancel made before the engine is asked for anything ends the operation as cancelled
+    Given the engine will complete the operation in 10 steps of 1 minute each
+    When the agent runs the operation after the user has cancelled it
+    Then the operation ends as cancelled
+    And the history shows the operation as it ended
+
   @e2e
   Scenario: Cancelling a backup stops its worker and writes no snapshot
     Given a new repository
