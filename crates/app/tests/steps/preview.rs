@@ -99,6 +99,11 @@ fn only_the_plan_tag(agent: &mut Agent, count: u64, plan: String) {
     agent.forget.snapshots_tagged(count, &tags, "/home/demo");
 }
 
+#[given(expr = "the repository holds {int} snapshots no plan owns of the folder {string}")]
+async fn untagged_of_the_folder(agent: &mut Agent, count: u64, folder: String) {
+    agent.forget.snapshots_of_folder(count, None, &folder).await;
+}
+
 #[when("the owner previews forgetting the repository")]
 async fn preview_forget(agent: &mut Agent) {
     preview(agent, MaintenanceKind::Forget).await;

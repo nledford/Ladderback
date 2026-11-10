@@ -116,6 +116,9 @@ pub struct ForgetWorld {
     /// The folder whose normalization the sources port refuses, when a
     /// scenario says: a drive that is not mounted.
     unreadable_folder: Option<String>,
+    /// A folder the sources port records under another spelling, as rustic
+    /// does with a link: `(as written, as recorded)`.
+    recorded_folder: Option<(String, String)>,
     /// How many times the sources port was asked to normalize a plan's
     /// sources.
     source_reads: Arc<AtomicUsize>,
@@ -138,6 +141,7 @@ impl Default for ForgetWorld {
             fail_at: None,
             assessed: None,
             unreadable_folder: None,
+            recorded_folder: None,
             source_reads: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -222,6 +226,11 @@ impl ForgetWorld {
     /// Makes the sources port refuse every plan that backs up `folder`.
     pub fn refuse_sources_of(&mut self, folder: &str) {
         self.unreadable_folder = Some(folder.to_owned());
+    }
+
+    /// Makes the sources port record `written` as `recorded`.
+    pub fn record_folder_as(&mut self, written: &str, recorded: &str) {
+        self.recorded_folder = Some((written.to_owned(), recorded.to_owned()));
     }
 
     /// How many plans' sources were asked of the sources port.
@@ -564,6 +573,7 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 "demo-host".to_owned(),
                 Arc::new(ScriptedSources {
                     unreadable_folder: agent.forget.unreadable_folder.clone(),
+                    recorded_folder: agent.forget.recorded_folder.clone(),
                     reads: Arc::clone(&agent.forget.source_reads),
                 }),
             )),
@@ -601,6 +611,7 @@ impl Retention for NeverAnswers {
 /// plan that backs up the unreadable folder: its sources can't be read.
 struct ScriptedSources {
     unreadable_folder: Option<String>,
+    recorded_folder: Option<(String, String)>,
     reads: Arc<AtomicUsize>,
 }
 
@@ -614,7 +625,15 @@ impl NormalizeSources for ScriptedSources {
                     detail: "no such folder".to_owned(),
                 })
             }
-            _ => Ok(sources.to_vec()),
+            _ => Ok(sources
+                .iter()
+                .map(|source| match &self.recorded_folder {
+                    Some((written, recorded)) if source.as_str() == written => {
+                        Source::parse(recorded).unwrap_or_else(|_| source.clone())
+                    }
+                    _ => source.clone(),
+                })
+                .collect()),
         }
     }
 }
@@ -672,6 +691,11 @@ async fn engine_unreachable(agent: &mut Agent) {
 #[given("the repository never answers")]
 async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
+}
+
+#[given(expr = "the folder {string} is recorded by the engine as {string}")]
+async fn folder_recorded_as(agent: &mut Agent, written: String, recorded: String) {
+    agent.forget.record_folder_as(&written, &recorded);
 }
 
 #[given(expr = "the sources of the folder {string} cannot be read")]

@@ -345,3 +345,10 @@ Feature: A maintenance preview tells what a run would do before it does anything
     When the owner lists the repository's groups
     Then the groups list an unmanaged group of 2 snapshots that can be adopted into "home"
     And the sources of 2 plans were read from the disk
+
+  Scenario: The groups match unmanaged history to a plan by its sources as the engine records them
+    Given a plan "photos" keeping the last 1 snapshot of the folder "/srv/pictures"
+    And the folder "/srv/pictures" is recorded by the engine as "/srv/photos"
+    And the repository holds 2 snapshots no plan owns of the folder "/srv/photos"
+    When the owner lists the repository's groups
+    Then the groups list an unmanaged group of 2 snapshots that can be adopted into "photos"
