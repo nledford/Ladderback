@@ -7,8 +7,8 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use domain::secrets::{
-    CommandLine, MAX_SECRET_BYTES, Problem, Redactor, SecretError, SecretValue, SourceName,
-    command_secret, first_line,
+    CommandLine, MAX_SECRET_BYTES, Problem, SecretError, SecretValue, SourceName, command_failure,
+    command_secret,
 };
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -94,17 +94,7 @@ pub(crate) async fn run(
     if status.success() {
         command_secret(&source, &out)
     } else {
-        // A helper that rejects a value may quote it on stderr: what it
-        // printed, and its first line, which is what it would have given as
-        // its secret, are masked there.
-        let output = String::from_utf8_lossy(&out);
-        let printed = SecretValue::new(output.as_ref());
-        let first = SecretValue::new(first_line(&output));
-        let said = Redactor::new([&printed, &first]).redact(&String::from_utf8_lossy(&err));
-        Err(fail(Problem::command_failed(
-            status.code(),
-            said.as_bytes(),
-        )))
+        Err(command_failure(&source, status.code(), &out, &err))
     }
 }
 

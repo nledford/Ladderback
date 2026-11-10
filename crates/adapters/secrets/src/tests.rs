@@ -740,8 +740,8 @@ async fn a_keyring_secret_is_text_and_within_the_limit() {
 /// Whether the OS keyring may be used: only when it is asked for, because it
 /// is the session's own store (an unlocked keychain, a Secret Service) and
 /// keeps what a test puts in it.
-fn os_keyring_enabled(_setting: Option<&std::ffi::OsStr>) -> bool {
-    todo!()
+fn os_keyring_enabled(setting: Option<&std::ffi::OsStr>) -> bool {
+    setting.is_some_and(|value| value == "1")
 }
 
 #[test]

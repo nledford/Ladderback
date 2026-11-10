@@ -5,7 +5,7 @@
 use std::path::{Component, Path};
 
 use super::source::{SourceName, first_line};
-use super::{MAX_SECRET_BYTES, SecretValue};
+use super::{MAX_SECRET_BYTES, Redactor, SecretValue};
 
 /// A secret that couldn't be read. It names the source, so a job's failure
 /// can say which reference is at fault, and never holds a value.
@@ -138,12 +138,20 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
-    _stdout: &[u8],
+    stdout: &[u8],
     stderr: &[u8],
 ) -> SecretError {
+    // A helper that rejects a value may quote it on stderr: what it printed
+    // (less the line ending its last line ends with, which isn't what it
+    // quotes), and its first line, which is what it would have given as its
+    // secret, are masked there.
+    let output = String::from_utf8_lossy(stdout);
+    let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
+    let first = SecretValue::new(first_line(&output));
+    let said = Redactor::new([&printed, &first]).redact(&String::from_utf8_lossy(stderr));
     SecretError {
         source: source.clone(),
-        problem: Problem::command_failed(status, stderr),
+        problem: Problem::command_failed(status, said.as_bytes()),
     }
 }
 

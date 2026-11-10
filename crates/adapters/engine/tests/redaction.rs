@@ -40,7 +40,8 @@ impl log::Log for CapturingLogger {
 fn capture_the_worker_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let _ = log::set_logger(&CapturingLogger);
+        log::set_logger(&CapturingLogger)
+            .expect("another logger was installed first, so the worker's log can't be captured");
         log::set_max_level(log::LevelFilter::Debug);
     });
 }
@@ -87,6 +88,10 @@ struct Said {
 impl Said {
     /// `canary` shows nowhere in it.
     fn assert_hides(&self, canary: &str) {
+        assert!(
+            !self.logged.is_empty(),
+            "the log captured nothing, so it was not checked"
+        );
         for form in forms(canary) {
             assert!(
                 !self.detail.contains(&form),
