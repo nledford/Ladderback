@@ -88,9 +88,10 @@ pub struct RepositorySecrets<'a> {
 /// (percent-encoded in full with either hex case, or as the url crate
 /// encodes a userinfo, a path, a query, a special URL's query or a fragment;
 /// without the tab and newlines it takes out; with `\` read as `/`; and
-/// lower-cased, as a host is), with [`REDACTED`]; and what else of it shows
-/// in text on its own (see `partial_needles`). Secrets that overlap or touch
-/// are replaced as one span.
+/// lower-cased, as a host is; and in pieces, where a parser splits it at
+/// `@`, `#`, `?` or `/`; see `url_needles`), with [`REDACTED`]; and what
+/// else of it shows in text on its own (see `partial_needles`). Secrets that
+/// overlap or touch are replaced as one span.
 #[derive(Clone, Default)]
 pub struct Redactor {
     /// Longest first, so a secret containing another is replaced whole.
@@ -386,41 +387,163 @@ fn percent_encode(value: &str, keep: impl Fn(u8) -> bool, hex: Hex) -> String {
     })
 }
 
+/// A piece of a secret that a URL parser takes apart is a needle of its own
+/// when it has at least this many bytes: a shorter one would mask half of
+/// all the text there is, as with [`MIN_LINE_BYTES`].
+const MIN_PIECE_BYTES: usize = 8;
+
+/// How many pieces of one secret are needles of their own, so a large secret
+/// can't make every redaction slow.
+const MAX_PIECES_PER_SECRET: usize = 64;
+
+/// The characters at which a URL parser takes a secret apart: it ends the
+/// userinfo (`@`), the host and the path (`?`, `/`) and the query (`#`).
+const SPLITTING: [char; 4] = ['@', '#', '?', '/'];
+
 /// Every way a URL parser can write `value`. A parser takes tab and
 /// newlines out of a URL and reads `\` as `/` (in a special URL's path), so
 /// those two rewrites of the value are encoded too; then each is written as
 /// fully encoded (either hex case) and as each part of a URL encodes it,
 /// with upper-case hex like the url crate. A host is lower-cased, so every
-/// needle is lower-cased too. A secret of any size has at most about 50
-/// needles, each at most three times its size.
+/// needle is lower-cased too.
+///
+/// A secret that holds a character a parser splits a URL at is printed in
+/// pieces, each as its part of the URL writes it, and a library that takes
+/// a URL apart may print them one by one. So each piece of at least
+/// [`MIN_PIECE_BYTES`] is a needle in all those forms, and the secret is
+/// also written as the parser prints it when it starts in a host, a path or
+/// a query and moves on at each delimiter (a mixed form: `canary/Alpha`).
+/// Not covered: a host that isn't ASCII (punycode needs an IDNA library),
+/// percent-decoding in a host, and dot segments in a path.
 fn url_needles(value: &str) -> Vec<String> {
     let stripped: String = value
         .chars()
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
     let slashed = stripped.replace('\\', "/");
+    let bases: Vec<&str> = [value, stripped.as_str(), slashed.as_str()]
+        .into_iter()
+        .filter(|base| !base.is_empty())
+        .collect();
     let mut needles = Vec::new();
-    for base in [value, stripped.as_str(), slashed.as_str()] {
-        if base.is_empty() {
-            continue;
+    for base in &bases {
+        written_each_way(base, &mut needles);
+        for start in [Stage::Host, Stage::Path, Stage::Query] {
+            for special in [false, true] {
+                for caret in [false, true] {
+                    needles.push(written_across_parts(base, start, special, caret));
+                }
+            }
         }
-        needles.push(base.to_owned());
-        needles.push(percent_encode(base, is_unreserved, Hex::Upper));
-        needles.push(percent_encode(base, is_unreserved, Hex::Lower));
-        for set in [
-            USERINFO_SET,
-            FRAGMENT_SET,
-            QUERY_SET,
-            SPECIAL_QUERY_SET,
-            PATH_SET,
-            PATH_WITH_CARET_SET,
-        ] {
-            needles.push(percent_encode(base, all_but(set), Hex::Upper));
+    }
+    let mut pieces: Vec<&str> = Vec::new();
+    for piece in bases
+        .iter()
+        .flat_map(|base| base.split(SPLITTING))
+        .filter(|piece| piece.len() >= MIN_PIECE_BYTES)
+    {
+        if pieces.len() == MAX_PIECES_PER_SECRET {
+            break;
         }
+        if !pieces.contains(&piece) {
+            pieces.push(piece);
+        }
+    }
+    for piece in pieces {
+        written_each_way(piece, &mut needles);
     }
     let lower: Vec<String> = needles.iter().map(|n| n.to_ascii_lowercase()).collect();
     needles.extend(lower);
     needles
+}
+
+/// `text` as it is, fully encoded with either hex case, and as each part of
+/// a URL encodes it on its own.
+fn written_each_way(text: &str, needles: &mut Vec<String>) {
+    needles.push(text.to_owned());
+    needles.push(percent_encode(text, is_unreserved, Hex::Upper));
+    needles.push(percent_encode(text, is_unreserved, Hex::Lower));
+    for set in [
+        USERINFO_SET,
+        FRAGMENT_SET,
+        QUERY_SET,
+        SPECIAL_QUERY_SET,
+        PATH_SET,
+        PATH_WITH_CARET_SET,
+    ] {
+        needles.push(percent_encode(text, all_but(set), Hex::Upper));
+    }
+}
+
+/// The part of a URL a parser is in while it writes a secret.
+#[derive(Clone, Copy)]
+enum Stage {
+    Host,
+    Path,
+    Query,
+    Fragment,
+}
+
+/// `value` as a parser prints it when it starts in `start` and moves on at
+/// each delimiter: a `/` ends a host, a `?` a host or a path, a `#` all but
+/// a fragment. Each stretch is written the way its part of the URL writes
+/// it; a delimiter stays as it is. A `special` URL (`http`, `https`, …) has
+/// the path `/` when it has none, and a query that encodes `'` too.
+fn written_across_parts(value: &str, start: Stage, special: bool, caret: bool) -> String {
+    let mut written = String::with_capacity(value.len());
+    let mut stage = start;
+    let mut stretch = String::new();
+    for c in value.chars() {
+        let next = match (stage, c) {
+            (Stage::Host, '/') => Some(Stage::Path),
+            (Stage::Host | Stage::Path, '?') => Some(Stage::Query),
+            (Stage::Host | Stage::Path | Stage::Query, '#') => Some(Stage::Fragment),
+            _ => None,
+        };
+        if let Some(next) = next {
+            write_stretch(&mut written, stage, &stretch, special, caret);
+            if special && matches!(stage, Stage::Host) && c != '/' {
+                written.push('/');
+            }
+            written.push(c);
+            stretch.clear();
+            stage = next;
+        } else {
+            stretch.push(c);
+        }
+    }
+    write_stretch(&mut written, stage, &stretch, special, caret);
+    written
+}
+
+/// Appends `stretch` as the `stage` of a URL writes it.
+fn write_stretch(out: &mut String, stage: Stage, stretch: &str, special: bool, caret: bool) {
+    let encoded = |set| percent_encode(stretch, all_but(set), Hex::Upper);
+    match stage {
+        // The last `@` of an authority ends the userinfo, whose first `:`
+        // ends the user name; a host is lower-cased.
+        Stage::Host => match stretch.rsplit_once('@') {
+            Some((userinfo, host)) => {
+                let (user, password) = userinfo.split_once(':').unzip();
+                let encode = |text: &str| percent_encode(text, all_but(USERINFO_SET), Hex::Upper);
+                out.push_str(&encode(user.unwrap_or(userinfo)));
+                if let Some(password) = password {
+                    out.push(':');
+                    out.push_str(&encode(password));
+                }
+                out.push('@');
+                out.push_str(&host.to_ascii_lowercase());
+            }
+            None => out.push_str(&stretch.to_ascii_lowercase()),
+        },
+        Stage::Path => out.push_str(&encoded(if caret { PATH_WITH_CARET_SET } else { PATH_SET })),
+        Stage::Query => out.push_str(&encoded(if special {
+            SPECIAL_QUERY_SET
+        } else {
+            QUERY_SET
+        })),
+        Stage::Fragment => out.push_str(&encoded(FRAGMENT_SET)),
+    }
 }
 
 #[cfg(test)]
@@ -701,6 +824,131 @@ mod tests {
             }
         }
         assert!(checked >= 70, "only {checked} cases ran");
+    }
+
+    /// Pieces too short to be needles of their own (a secret may be made of
+    /// them) still show nowhere in the URL that is printed whole, where the
+    /// parser writes each in its part's way.
+    #[test]
+    fn a_secret_of_short_pieces_shows_nowhere_in_the_url_it_prints() {
+        let markers = ["Qx1", "Zy2", "Wv3"];
+        let delimiters = ["@", "#", "?", "/", ":"];
+        let mut checked = 0;
+        for one in delimiters {
+            for two in delimiters {
+                let [first, second, third] = markers;
+                for secret in [
+                    format!("{first}{one}{second}"),
+                    format!("{first}{one}{second}{two}{third}"),
+                ] {
+                    let redactor = redactor(&[&secret]);
+                    for place in PLACES {
+                        let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                            continue;
+                        };
+                        checked += 1;
+                        let printed = url.as_str();
+                        let redacted = redactor.redact(printed).to_lowercase();
+                        assert!(
+                            !redacted.contains("qx1") && !redacted.contains("zy2"),
+                            "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked >= 100, "only {checked} cases ran");
+    }
+
+    /// A piece of 8 bytes is a needle of its own; one of 7 is not, or it
+    /// would mask ordinary text.
+    #[test]
+    fn a_piece_of_a_split_secret_is_masked_alone_from_8_bytes_on() {
+        let redactor = redactor(&["Abcdefgh/ijklmno@Pqrstuvw"]);
+        assert_eq!(redactor.redact("x Abcdefgh y"), "x *** y");
+        assert_eq!(redactor.redact("x Pqrstuvw y"), "x *** y");
+        assert_eq!(redactor.redact("x ijklmno y"), "x ijklmno y");
+        // ... and as a host writes it.
+        assert_eq!(redactor.redact("x abcdefgh y"), "x *** y");
+    }
+
+    /// The pieces of a secret that are needles of their own are limited, the
+    /// first ones kept.
+    #[test]
+    fn only_the_first_64_pieces_of_a_secret_are_needles_of_their_own() {
+        let piece = |n: usize| format!("piece{n:03}x");
+        let secret: Vec<String> = (0..65).map(piece).collect();
+        let redactor = redactor(&[&secret.join("/")]);
+        assert_eq!(redactor.redact(&piece(0)), "***");
+        assert_eq!(redactor.redact(&piece(63)), "***");
+        assert_eq!(redactor.redact(&piece(64)), piece(64));
+    }
+
+    /// A piece that is the same in every rewrite of a secret takes one place
+    /// of the 64, not one for each rewrite, so the pieces that only a rewrite
+    /// has (a `\` is read as `/`) still find a place.
+    #[test]
+    fn a_piece_that_every_rewrite_has_takes_one_place_of_the_64() {
+        let secret: Vec<String> = (0..40)
+            .map(|n| format!("a{n:02}-head\\z{n:02}-tail"))
+            .collect();
+        let redactor = redactor(&[&secret.join("/")]);
+        assert_eq!(redactor.redact("z00-tail"), "***");
+        assert_eq!(redactor.redact("z11-tail"), "***");
+    }
+
+    /// The secret as it is written when it starts in a part of the URL and
+    /// is carried over into the next at each delimiter.
+    #[test]
+    fn a_secret_is_written_part_by_part_as_the_parts_of_a_url_write_it() {
+        use Stage::{Host, Path, Query};
+        let write =
+            |value, start, special, caret| written_across_parts(value, start, special, caret);
+        // A host is lower-cased, the rest of it is not.
+        assert_eq!(write("Ab/Cd?Ef#Gh", Host, false, false), "ab/Cd?Ef#Gh");
+        // A special URL has the path `/` when it has none.
+        assert_eq!(write("Ab?Cd", Host, true, false), "ab/?Cd");
+        assert_eq!(write("Ab#Cd", Host, true, false), "ab/#Cd");
+        assert_eq!(write("Ab/Cd", Host, true, false), "ab/Cd");
+        assert_eq!(write("Ab?Cd", Host, false, false), "ab?Cd");
+        assert_eq!(write("Ab#Cd", Host, false, false), "ab#Cd");
+        // A path escapes its own set, and a `^` as the newer standard does.
+        assert_eq!(
+            write("a b{c}`d^e", Path, false, false),
+            "a%20b%7Bc%7D%60d^e"
+        );
+        assert_eq!(
+            write("a b{c}`d^e", Path, false, true),
+            "a%20b%7Bc%7D%60d%5Ee"
+        );
+        // The query escapes its own, and `'` in a special URL's.
+        assert_eq!(
+            write("a'b\"c<d>e f", Query, false, false),
+            "a'b%22c%3Cd%3Ee%20f"
+        );
+        assert_eq!(
+            write("a'b\"c<d>e f", Query, true, false),
+            "a%27b%22c%3Cd%3Ee%20f"
+        );
+        // `?` ends a path but not a query; `#` ends them both, and not a
+        // fragment, which escapes only its own.
+        assert_eq!(
+            write("a?b/c d#e?f#g`h'i", Path, true, false),
+            "a?b/c%20d#e?f#g%60h'i"
+        );
+        assert_eq!(write("a?b#c", Query, true, false), "a?b#c");
+        assert_eq!(write("a b#c d", Query, false, false), "a%20b#c%20d");
+        // The userinfo of a host: split at its last `@`, its user name from
+        // its password at the first `:`, each escaped as a userinfo is.
+        assert_eq!(
+            write("Us:Pa:ss@Ho/St", Host, false, false),
+            "Us:Pa%3Ass@ho/St"
+        );
+        assert_eq!(write("A@b/c@D", Host, false, false), "A@b/c@D");
+        assert_eq!(write("A/b@C@D", Host, false, false), "a/b@C@D");
+        assert_eq!(write("Us@Ho", Host, false, false), "Us@ho");
+        assert_eq!(write("U@s@Ho", Host, false, false), "U%40s@ho");
+        assert_eq!(write("U s:P w@Ho", Host, false, false), "U%20s:P%20w@ho");
     }
 
     #[test]
