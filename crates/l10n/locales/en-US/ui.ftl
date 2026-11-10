@@ -176,6 +176,43 @@ ui-gallery-save-settings = Save the demo settings
 # The toast shown after the demo settings are saved.
 ui-gallery-settings-saved = Settings saved.
 
+# The heading of the gallery's review dialog demo.
+ui-gallery-review-heading = Review dialog
+
+# The button that opens the review demo that has something to confirm.
+ui-gallery-open-review = Open a demo review
+
+# The button that opens the review demo that has nothing to do.
+ui-gallery-open-empty-review = Open an empty demo review
+
+# The accessible name and heading of the review demo that has something to confirm.
+ui-gallery-demo-review = Demo review to confirm
+
+# What the review demo that has something to confirm says it is about.
+ui-gallery-demo-review-body = Nothing changes until you confirm this demo review.
+
+# The button inside that review demo that confirms it.
+ui-gallery-confirm-demo-review = Confirm the demo review
+
+# Announced politely when the demo review is confirmed.
+ui-gallery-demo-review-confirmed = Demo review confirmed.
+
+# The accessible name and heading of the review demo that has nothing to do.
+ui-gallery-demo-empty-review = Demo review with nothing to do
+
+# What the review demo that has nothing to do says.
+ui-gallery-demo-empty-review-body = There is nothing to change.
+
+## The review dialog (§4.5): what a run would do, shown in a dialog before it
+## runs. The gallery's demos and the snapshots page both use its buttons.
+
+# The button of a review dialog that has something to confirm, which closes it
+# without running anything.
+ui-review-cancel = Cancel
+
+# The only button of a review dialog that has nothing to run.
+ui-review-close = Close
+
 ## The operations page: the backup history, live (§4.4).
 
 # The operations page's title, as the browser's tab and history show it.

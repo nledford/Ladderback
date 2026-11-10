@@ -125,6 +125,100 @@ fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardE
     }
 }
 
+/// What a review's confirm button says, and what pressing it does.
+#[derive(Clone)]
+pub struct Confirmation {
+    pub label: String,
+    pub action: Callback<()>,
+}
+
+/// A review dialog (§4.5): what a run would do, shown before it runs, with the
+/// person's word asked for. It is a native `<dialog>` opened with `showModal`,
+/// as [`ModalDialog`] is, but opened by whoever owns the run: the page sets
+/// `open` once it knows what the run would do, and the dialog clears it
+/// however it closes (Escape, the dismiss button, or the owner clearing it
+/// first). It opens with focus on its first button, the dismiss one, so a
+/// stray Enter backs out and never confirms. Closing returns focus to the
+/// control with the id `returns_to`, the one that asked for the review.
+///
+/// A review with something to confirm has a [`Confirmation`]: the dismiss
+/// button and then the confirm one, whose action leaves the dialog open until
+/// the owner closes it. A review with nothing to do has none, and offers only
+/// the dismiss button. `described_by` is the id of the element in `children`
+/// that says what the review is about, which a screen reader reads as the
+/// dialog's description. While the dialog is open, polite messages wait
+/// ([`crate::live::modal_opened`]).
+#[component]
+pub fn ReviewDialog(
+    open: RwSignal<bool>,
+    title: String,
+    dismiss_label: String,
+    confirm: Option<Confirmation>,
+    returns_to: String,
+    described_by: String,
+    children: Children,
+) -> impl IntoView {
+    let dialog = NodeRef::<leptos::html::Dialog>::new();
+    let dismiss = NodeRef::<leptos::html::Button>::new();
+    // Whether the announcer counts the dialog as an open modal, so leaving the
+    // page while it is open ends the count however the dialog went away.
+    let counted = RwSignal::new(false);
+    on_cleanup(move || modal_gone(counted));
+    let title_id = format!("{returns_to}-title");
+    Effect::new(move |_| {
+        let wanted = open.get();
+        let Some(dialog) = dialog.get() else {
+            return;
+        };
+        if wanted {
+            open_modal(&dialog, counted);
+            // The browser puts focus on the first control it finds; the
+            // dismiss button is the one a review means to start on.
+            if let Some(dismiss) = dismiss.get_untracked() {
+                let _ = dismiss.focus();
+            }
+        } else if dialog.open() {
+            dialog.close();
+        }
+    });
+    let body = children();
+    let confirm = confirm.map(|Confirmation { label, action }| {
+        view! {
+            <button type="button" on:click=move |_| action.run(())>
+                {label}
+            </button>
+        }
+    });
+    view! {
+        <dialog
+            node_ref=dialog
+            aria-labelledby=title_id.clone()
+            aria-describedby=described_by
+            on:close=move |_| {
+                modal_gone(counted);
+                open.try_set(false);
+                focus_element(&returns_to);
+            }
+            on:keydown=move |ev: web_sys::KeyboardEvent| trap_focus(&dialog, &ev)
+        >
+            <h3 id=title_id.clone()>{title}</h3>
+            {body}
+            <p class="actions">
+                <button
+                    type="button"
+                    node_ref=dismiss
+                    on:click=move |_| if let Some(dialog) = dialog.get() {
+                        dialog.close();
+                    }
+                >
+                    {dismiss_label}
+                </button>
+                {confirm}
+            </p>
+        </dialog>
+    }
+}
+
 /// A data table: a caption, `scope`d headers, and a column sortable through a
 /// button in its header, with each sort announced politely.
 #[component]
