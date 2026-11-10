@@ -95,11 +95,12 @@ test-e2e *args:
 # The runner is `wasm-bindgen-test-runner` from wasm-bindgen-cli, whose version
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is
 # Cargo's runner for wasm32 in this recipe only, so no other command changes.
-# The packages are the ones with wasm-bindgen tests (`scripts/red-first.mjs`
-# finds them by their `wasm-bindgen-test` dependency): add a package here when
-# it gets its first. Selecting both unifies their features, and `--all-features`
-# turns on those that only matter on wasm32 (`l10n`'s `browser-intl`). Zero
-# tests is a pass.
+# The packages are the ones with wasm-bindgen tests: those with a
+# `wasm-bindgen-test` dependency, which `scripts/wasm-test-packages.mjs` finds
+# from `cargo metadata`, the same way `scripts/red-first.mjs` does, so a
+# package's first wasm test is picked up by both with no edit here. Selecting
+# several unifies their features, and `--all-features` turns on those that only
+# matter on wasm32 (`l10n`'s `browser-intl`). Zero tests is a pass.
 [doc("Run the wasm-bindgen tests under Node (the browser lanes).")]
 [group('test')]
 [positional-arguments]
@@ -112,6 +113,18 @@ test-wasm *args:
         echo "error: wasm-bindgen-test-runner is ${have:-not installed}, Cargo.lock has wasm-bindgen $want; run: cargo binstall --no-confirm --version $want wasm-bindgen-cli" >&2
         exit 1
     fi
+    # The packages with a `wasm-bindgen-test` dependency, found as red-first
+    # finds them (one script for both), so a package's first wasm test needs
+    # no edit here.
+    names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.mjs)
+    if [[ -z $names ]]; then
+        echo "no package depends on wasm-bindgen-test: no wasm tests to run"
+        exit 0
+    fi
+    packages=()
+    for name in $names; do
+        packages+=(--package "$name")
+    done
     export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
     # Node reads this as the viewer's zone: not UTC, so a host that read no zone
     # as the viewer's would fail the tests that expect UTC.
@@ -119,7 +132,7 @@ test-wasm *args:
     # With CARGO_TERM_QUIET set, cargo passes `--quiet` on to the test binary,
     # and wasm-bindgen-test-runner refuses it.
     unset CARGO_TERM_QUIET
-    cargo test --package l10n --package web --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
+    cargo test "${packages[@]}" --lib --bins --tests --all-features --target wasm32-unknown-unknown --no-fail-fast "$@"
 
 
 # The color tokens in style.css must meet WCAG 2.2 AA in every pair the UI

@@ -26,6 +26,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
+import { parseMetadata, wasmTestPackages } from "./wasm-test-packages.mjs";
 
 const WASM_TARGET = "wasm32-unknown-unknown";
 const WASM_RUNNER = "wasm-bindgen-test-runner";
@@ -183,7 +184,8 @@ function addsWasmTests(mergeBase, first) {
 
 /**
  * Builds the wasm-bindgen test binaries of the packages that depend on
- * `wasm-bindgen-test` and lists their tests, as `rustTests` does. A package
+ * `wasm-bindgen-test` (`scripts/wasm-test-packages.mjs`, which `just test-wasm`
+ * asks too) and lists their tests, as `rustTests` does. A package
  * gets everything the Justfile's `test-wasm` gives it: all its features, and
  * the runner as Cargo's for the target (set per call, no `.cargo/config.toml`).
  */
@@ -195,11 +197,7 @@ function wasmTests(dir) {
   if (metadata.status !== 0) {
     return { ok: false, output: metadata.output };
   }
-  // Cargo's own notes (or a wrapper's) can share the stream; the JSON is the line that opens with a brace.
-  const json = metadata.output.split("\n").find((line) => line.startsWith("{"));
-  const packages = JSON.parse(json)
-    .packages.filter((pkg) => pkg.dependencies.some((dependency) => dependency.name === "wasm-bindgen-test"))
-    .flatMap((pkg) => ["--package", pkg.name]);
+  const packages = wasmTestPackages(parseMetadata(metadata.output)).flatMap((name) => ["--package", name]);
   if (packages.length === 0) {
     return { ok: true, tests: new Map() };
   }

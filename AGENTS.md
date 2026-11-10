@@ -20,7 +20,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
 | `just test-contrast` | The token contrast gate (WCAG 2.2 AA on the pairs `scripts/check-contrast.mjs` names, light and dark). CI runs it in the `Check` job; `just verify` runs it too |
-| `just test-wasm [args]` | The `wasm-bindgen` tests under Node, for the packages its `--package` list names |
+| `just test-wasm [args]` | The `wasm-bindgen` tests under Node, for every package with a `wasm-bindgen-test` dependency (the set `just red-first` uses too) |
 | `just test-ui [args]` | Builds the web UI with the component gallery (`just web-test`) and the binary, installs the UI test dependencies if they are missing or stale, then runs the `@ui` scenarios. CI caches trunk's downloaded tools (`~/.cache/trunk`) so a GitHub-releases outage can't fail the job |
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists; further `args` go to `cargo mutants` (e.g. `--jobs 3`) |
 | `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests, host and `wasm_bindgen_test`, and scenarios fail at run time (§13.1) |
@@ -128,7 +128,7 @@ Add it to `mutants_packages` in the Justfile and to the list in §13.1, in the c
 
 ### A package's first `wasm_bindgen_test`
 
-Add the package to the `--package` list of the Justfile's `test-wasm` recipe. `just red-first` finds the package by itself; `just test-wasm` doesn't yet (#60).
+Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.workspace = true`). `just test-wasm` and `just red-first` both find the package by that dependency, from `cargo metadata` (`scripts/wasm-test-packages.mjs`), so there is no list to edit.
 
 ### A shared UI component
 
