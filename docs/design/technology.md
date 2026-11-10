@@ -53,7 +53,11 @@ ladderback/
 │     ├─ sync/                # /sync/v1 server (hub) and client (agent)
 │     ├─ store/               # sqlx SQLite: operations, catalog, outbox, ownership, registry
 │     ├─ config/              # versioned file formats, parser, migrations on load, version history
-│     ├─ interop/             # rustic profile import/export (anti-corruption layer)
+│     ├─ interop/             # rustic profile import/export (anti-corruption layer; the only code that knows the format, §6.2):
+│     │                       # read = `locate` (spanned TOML), `keys` + `tables` + `parse` (strict key lists, parity tests
+│     │                       # against the pinned `rustic_core`), `part` (rustic's merge), `resolve` (`use-profiles`, caps),
+│     │                       # `map` (to domain types, notices), `escape` (`${` → `$${`); write = `write` (hand-written TOML);
+│     │                       # ports and use cases: `app::ports::profiles`, `app::interop`; contract suite `contract::profiles`
 │     ├─ secrets/             # command, keyring, file, env sources; `${…}` substitution (redaction: domain `Redactor`)
 │     ├─ notify/              # webhook, ntfy, Gotify, Discord/Slack, SMTP, healthchecks
 │     ├─ mcp/                 # `ladderback mcp`: JSON-RPC 2.0 over stdio; in-process and /api/v1 backends (§4.6)
