@@ -2857,6 +2857,41 @@ mod tests {
         }
     }
 
+    /// An engine that answers the identify a maintenance run begins with and
+    /// parks the job itself, as a real check does while it works.
+    struct IdentifiesThenParks;
+
+    #[async_trait]
+    impl Engine for IdentifiesThenParks {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            match job {
+                Job::Identify(_) => Completes.run(op, job).await,
+                _ => ParkedEngine.run(op, job).await,
+            }
+        }
+    }
+
+    /// A client that cancels the instant it has the answer to a maintenance
+    /// start is not told the operation is unknown or not running: the run
+    /// starts on a task of its own, and that task parks the run's cancel
+    /// switch before the route answers (§4.2). The run it cancels ends
+    /// cancelled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_cancelled() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(IdentifiesThenParks);
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
     /// The lines the daemon logged about `operation` once its run had said
     /// what the log refused it: one for each of the `refused` writes, so the
     /// wait ends when there are that many. A run that never says gives up
@@ -3204,9 +3239,12 @@ mod tests {
     /// leave the repository held by a row nothing ends (I7): once SQLite has
     /// committed the start, only the run itself ends it, and a handler that
     /// was dropped before it learned of the commit has no one left to run it
-    /// (#135).
+    /// (#135). The sweep holds itself to what it is about: the start that
+    /// nothing cuts is answered with its run, and some cut came after the log
+    /// had stored the start.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_maintenance_start_cut_short_at_any_await_point_leaves_the_repository_free() {
+        let mut cut_after_the_write = 0;
         for polls in 0..MOST_POLLS {
             let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
             runner.engine = Arc::new(Completes);
@@ -3216,13 +3254,29 @@ mod tests {
             let start =
                 runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
             let what = format!("after a start cut after {polls} polls");
-            if cut_after(start, polls).await.is_some() {
+            if let Some(answer) = cut_after(start, polls).await {
+                assert!(
+                    answer.is_ok(),
+                    "the start that nothing cut was refused: {answer:?}"
+                );
                 assert!(
                     polls >= FEWEST_AWAIT_POINTS,
                     "the start ended in {polls} polls: nothing was cut"
                 );
+                assert!(
+                    cut_after_the_write > 0,
+                    "no cut came after the log had stored the start: the sweep never reached the point it is about"
+                );
                 assert_the_repository_takes_another_check(&runner, &what).await;
                 return;
+            }
+            let stored = runner
+                .store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if !stored.operations.is_empty() {
+                cut_after_the_write += 1;
             }
             assert_the_repository_takes_another_check(&runner, &what).await;
         }
