@@ -262,10 +262,67 @@ mod tests {
     }
 
     #[test]
+    fn forty_links_in_a_row_are_followed_and_forty_one_are_not() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let folder = scratch.path();
+        let plain = folder.join("plain.toml");
+        let chain = |links: usize| {
+            for n in 0..links {
+                let next = if n + 1 == links {
+                    "plain.toml".to_owned()
+                } else {
+                    format!("link-{}.toml", n + 1)
+                };
+                let _ = fs::remove_file(folder.join(format!("link-{n}.toml")));
+                std::os::unix::fs::symlink(next, folder.join(format!("link-{n}.toml")))
+                    .expect("a link");
+            }
+            resolve(&folder.join("link-0.toml"))
+        };
+
+        assert_eq!(chain(MAX_LINKS).expect("resolved"), plain);
+        let too_many = chain(MAX_LINKS + 1);
+        assert!(too_many.is_err(), "{too_many:?}");
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_flushed_is_not_left_in_the_history() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        let kept = keep_with(&path, b"old", at, |_| Err(io::Error::other("no")));
+
+        assert!(kept.is_err(), "{kept:?}");
+        assert!(
+            names_in(&history_folder(&path)).is_empty(),
+            "a failed keep isn't retried into duplicates"
+        );
+    }
+
+    #[test]
+    fn a_config_folder_that_cannot_be_flushed_fails_the_keep_too() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        let kept = keep_with(&path, b"old", at, |folder| {
+            if folder == history_folder(&path) {
+                Ok(())
+            } else {
+                Err(io::Error::other("no"))
+            }
+        });
+
+        assert!(kept.is_err(), "{kept:?}");
+        assert!(names_in(&history_folder(&path)).is_empty());
+    }
+
+    #[test]
     fn a_name_is_a_version_when_it_starts_with_a_number_and_ends_in_toml() {
         let number = |name| number_of(name);
         assert_eq!(number("000042-20261108T132021.123Z.toml"), Some(42));
-        assert_eq!(number("7-x.toml"), Some(7));
+        assert_eq!(number("7-20261108T132021.123Z.toml"), Some(7));
         assert_eq!(number("000042-20261108T132021.123Z.txt"), None);
         assert_eq!(
             number("20261108T132021.123Z-00.toml"),
@@ -273,9 +330,37 @@ mod tests {
             "no number first"
         );
         assert_eq!(number("42.toml"), None, "no stamp");
-        assert_eq!(number("-x.toml"), None, "an empty number");
-        assert_eq!(number("+7-x.toml"), None, "a sign isn't a digit");
-        assert_eq!(number("99999999999999999999999-x.toml"), None, "too big");
+        assert_eq!(
+            number("-20261108T132021.123Z.toml"),
+            None,
+            "an empty number"
+        );
+        assert_eq!(
+            number("+7-20261108T132021.123Z.toml"),
+            None,
+            "a sign isn't a digit"
+        );
+        assert_eq!(
+            number("99999999999999999999999-20261108T132021.123Z.toml"),
+            None,
+            "too big"
+        );
+        assert_eq!(
+            number("20261108-notes.toml"),
+            None,
+            "a date, not a number and a stamp"
+        );
+        assert_eq!(number("000042-x.toml"), None, "no stamp after the number");
+        assert_eq!(
+            number("000042-20261108T132021.123.toml"),
+            None,
+            "a stamp without its Z"
+        );
+        assert_eq!(
+            number("000042-2026-11-08T13:20:21Z.toml"),
+            None,
+            "another kind of stamp"
+        );
     }
 
     #[test]
@@ -284,7 +369,12 @@ mod tests {
         let path = scratch.path().join("config.toml");
         let folder = history_folder(&path);
         fs::create_dir(&folder).expect("the history");
-        for name in ["000041-20990101T000000.000Z.toml", "notes.toml", "x-1.toml"] {
+        for name in [
+            "000041-20990101T000000.000Z.toml",
+            "notes.toml",
+            "x-1.toml",
+            "20261108-notes.toml",
+        ] {
             fs::write(folder.join(name), "").expect("a file");
         }
         let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
@@ -296,10 +386,13 @@ mod tests {
             "{:?}",
             names_in(&folder)
         );
-        assert!(
-            folder.join("notes.toml").exists() && folder.join("x-1.toml").exists(),
-            "files that aren't versions are left alone"
-        );
+        for other in ["notes.toml", "x-1.toml", "20261108-notes.toml"] {
+            assert!(
+                folder.join(other).exists(),
+                "{other} isn't a version and is left alone: {:?}",
+                names_in(&folder)
+            );
+        }
     }
 
     #[test]
@@ -308,7 +401,7 @@ mod tests {
         let path = scratch.path().join("config.toml");
         let folder = history_folder(&path);
         fs::create_dir(&folder).expect("the history");
-        let last = format!("{}-x.toml", u64::MAX);
+        let last = format!("{}-20261108T132021.123Z.toml", u64::MAX);
         fs::write(folder.join(&last), "").expect("a file");
         let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
 
