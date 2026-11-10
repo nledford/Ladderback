@@ -21,7 +21,7 @@ use domain::planning::{
     AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Plan, RepositoryConfig,
     RepositorySettings, Source,
 };
-use domain::secrets::{SecretRef, SecretValue};
+use domain::secrets::{FileRead, SecretRef};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
 
 use super::Agent;
@@ -93,7 +93,11 @@ fn demo_repository() -> RepositoryConfig {
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),
             repo_hot: None,
-            password: SecretRef::Inline(SecretValue::new("demo-password")),
+            // A profile can't hold a password written in the config.
+            password: SecretRef::File {
+                path: "/srv/demo-password".to_owned(),
+                read: FileRead::FirstLine,
+            },
             options: BTreeMap::new(),
             options_hot: BTreeMap::new(),
             options_cold: BTreeMap::new(),
