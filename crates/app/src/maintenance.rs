@@ -1195,6 +1195,18 @@ mod record_tests {
             .await;
         assert!(errors.is_empty(), "{errors:?}");
     }
+
+    /// The double stays stalled for the one write of the log that no use case
+    /// in this module issues: ending what a stopped daemon left unfinished.
+    #[tokio::test]
+    async fn a_stalled_log_never_answers_a_recovery_either() {
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            Stalled.fail_unfinished(&domain::execution::FailureReason::DaemonStopped),
+        )
+        .await;
+        assert!(answered.is_err(), "a stalled log answers nothing");
+    }
 }
 
 #[cfg(all(test, feature = "fakes"))]
