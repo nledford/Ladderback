@@ -333,7 +333,7 @@ fn row_view(
         .started_at
         .clone()
         .unwrap_or_else(|| row.summary.queued_at.clone());
-    let shown = instant(&localizer, &raw);
+    let shown = instant(&localizer, &raw, None);
     let plan = row.summary.plan.clone();
     let cancel_label = text_with(
         &localizer,
@@ -468,7 +468,7 @@ fn text_with(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> S
 
 /// An RFC 3339 instant as the page's locale writes it (§8.4). One that
 /// doesn't parse is shown as it came: never a blank cell, never a guess.
-fn instant(localizer: &Localizer, raw: &str) -> String {
+pub(crate) fn instant(localizer: &Localizer, raw: &str, zone: Option<&api::IanaZone>) -> String {
     match jiff::Timestamp::from_str(raw) {
         Ok(timestamp) => text_with(
             localizer,
@@ -477,7 +477,7 @@ fn instant(localizer: &Localizer, raw: &str) -> String {
                 "when",
                 MsgArg::Timestamp {
                     utc_ms: timestamp.as_millisecond(),
-                    zone: None,
+                    zone: zone.cloned(),
                 },
             )],
         ),
@@ -608,7 +608,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                                 key=|snapshot| snapshot.id.clone()
                                 children=move |snapshot| {
                                     let raw = snapshot.time.clone();
-                                    let shown = instant(&rows_localizer, &raw);
+                                    let shown = instant(&rows_localizer, &raw, None);
                                     view! {
                                         <tr>
                                             <td>{short_id(&snapshot.id)}</td>
@@ -1232,12 +1232,12 @@ mod tests {
     fn an_instant_is_written_in_the_pages_locale_and_one_that_does_not_parse_stands_as_it_came() {
         let localizer = Localizer::new(&[]);
         assert_ne!(
-            instant(&localizer, "2026-11-09T10:00:02Z"),
+            instant(&localizer, "2026-11-09T10:00:02Z", None),
             "2026-11-09T10:00:02Z",
             "a parsed instant is the locale's own writing, not the wire's"
         );
         assert_eq!(
-            instant(&localizer, "not-an-instant"),
+            instant(&localizer, "not-an-instant", None),
             "not-an-instant",
             "never a blank cell, never a guess"
         );

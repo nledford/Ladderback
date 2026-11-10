@@ -266,3 +266,20 @@ fn isolation_wraps_a_written_number_and_a_written_instant_once() {
         "um \u{2068}08.11.2026, 14:30\u{2069}"
     );
 }
+
+#[wasm_bindgen_test]
+fn the_viewers_zone_is_the_zone_the_browser_reads_its_own_clock_in() {
+    // `just test-wasm` pins `TZ` to a zone that is not UTC, so a viewer's zone
+    // and the formatter's default are two different readings of one instant.
+    assert_eq!(
+        l10n::viewer_zone(),
+        Some(IanaZone::new("America/New_York").unwrap())
+    );
+    let localizer = speaking("en-US");
+    let viewer = l10n::viewer_zone();
+    assert_ne!(
+        instant(&localizer, WINTER, viewer.as_ref().map(IanaZone::as_str)),
+        instant(&localizer, WINTER, None),
+        "the viewer's zone and the default are told apart"
+    );
+}

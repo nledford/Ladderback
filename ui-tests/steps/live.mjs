@@ -162,6 +162,28 @@ Then("the table {string} shows its {string} column newest first", async function
   assert.deepEqual(values, sorted, `the ${column} column of ${name} is not newest first`);
 });
 
+Given("the browser is in the time zone {string}", function (zone) {
+  this.contextOptions.timezoneId = zone;
+});
+
+// Each cell carries the instant it shows in its `title`, in UTC. What it shows
+// is that instant read in the browser's own zone, as the browser's `Intl`
+// writes it: the default of the formatter is UTC, so a page that didn't pass
+// the zone would show the title's own hours.
+Then("the table {string} shows its {string} column in the time zone {string}", async function (name, column, zone) {
+  const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+  const index = await header.evaluate((cell) => cell.cellIndex);
+  const cells = await table(this, name)
+    .locator("tbody tr")
+    .evaluateAll((rows, at) => rows.map((row) => [row.cells[at].title, row.cells[at].textContent]), index);
+  assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
+  const fold = (text) => text.replace(/[\u202f\u00a0]/g, " ");
+  const written = new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "medium", timeZone: zone });
+  for (const [raw, shown] of cells) {
+    assert.equal(fold(shown), fold(written.format(new Date(raw))), `the ${column} cell of ${raw} is not in ${zone}`);
+  }
+});
+
 Then("the page shows the paragraph {string}", async function (text) {
   await this.page.getByText(text, { exact: true }).first().waitFor({ state: "visible" });
 });

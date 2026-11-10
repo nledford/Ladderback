@@ -54,6 +54,11 @@ mod localizer;
 pub mod msg;
 mod pseudo;
 
+/// The zone the viewer's browser reads its own clock in.
+pub fn viewer_zone() -> Option<api::IanaZone> {
+    todo!()
+}
+
 pub use id::MessageId;
 pub use locale::{BrowserLanguages, Direction, PosixEnv};
 pub use localizer::{Formatted, Localizer};
