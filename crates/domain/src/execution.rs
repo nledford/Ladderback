@@ -100,7 +100,7 @@ impl FailureReason {
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
-            Self::DaemonStopped => todo!("FailureReason::DaemonStopped.code"),
+            Self::DaemonStopped => "daemon-stopped",
         }
     }
 }
