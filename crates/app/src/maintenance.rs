@@ -598,7 +598,8 @@ impl RunMaintenance {
         };
         let hostname = self.host_of(&config);
         // Which plan takes orphaned history is the person's choice, so every
-        // plan of the repository is offered.
+        // plan of the repository is offered, to a group an adoption can name:
+        // it names both tags, so a group missing one can't be adopted.
         let every_plan: Vec<PlanId> = plans.iter().map(|plan| plan.id.clone()).collect();
         let mut owned = partition.managed;
         Ok(RepositoryGroups {
@@ -617,8 +618,12 @@ impl RunMaintenance {
                 .orphaned
                 .into_iter()
                 .map(|group| OrphanedHistory {
+                    adopt_into: if group.agent.is_some() && group.plan.is_some() {
+                        every_plan.clone()
+                    } else {
+                        Vec::new()
+                    },
                     group,
-                    adopt_into: every_plan.clone(),
                 })
                 .collect(),
             unmanaged: partition

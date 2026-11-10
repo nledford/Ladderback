@@ -80,6 +80,25 @@ async fn gains_foreign(agent: &mut Agent, count: u64, plan: String) {
         .await;
 }
 
+#[given(expr = "the repository holds {int} snapshots only another agent's tag marks")]
+fn only_the_agent_tag(agent: &mut Agent, count: u64) {
+    let tags = [format!(
+        "{}{}",
+        domain::execution::plan_tags::AGENT_TAG_PREFIX,
+        other_agent().as_uuid().hyphenated()
+    )];
+    agent.forget.snapshots_tagged(count, &tags, "/home/demo");
+}
+
+#[given(expr = "the repository holds {int} snapshots only the plan tag {string} marks")]
+fn only_the_plan_tag(agent: &mut Agent, count: u64, plan: String) {
+    let tags = [format!(
+        "{}{plan}",
+        domain::execution::plan_tags::PLAN_TAG_PREFIX
+    )];
+    agent.forget.snapshots_tagged(count, &tags, "/home/demo");
+}
+
 #[when("the owner previews forgetting the repository")]
 async fn preview_forget(agent: &mut Agent) {
     preview(agent, MaintenanceKind::Forget).await;
@@ -597,6 +616,15 @@ fn groups_unmanaged_group(agent: &mut Agent, count: usize, into: String) {
     };
     assert_eq!(unmanaged.group.snapshots.len(), count, "{unmanaged:?}");
     assert_eq!(names(&unmanaged.adopt_into), into, "{unmanaged:?}");
+}
+
+#[then(expr = "the groups list an orphaned group of {int} snapshots that no plan could adopt")]
+fn groups_unadoptable_orphaned_group(agent: &mut Agent, count: usize) {
+    let [orphaned] = groups(agent).orphaned.as_slice() else {
+        panic!("one orphaned group: {:?}", groups(agent));
+    };
+    assert_eq!(orphaned.group.snapshots.len(), count, "{orphaned:?}");
+    assert!(orphaned.adopt_into.is_empty(), "{orphaned:?}");
 }
 
 #[then(expr = "the groups list an unmanaged group of {int} snapshots that no plan would adopt")]

@@ -306,3 +306,15 @@ Feature: A maintenance preview tells what a run would do before it does anything
     And the repository holds 2 snapshots no plan owns that match the plan "home"
     When the owner previews adopting the unmanaged history into the plan "photos"
     Then the preview is refused because the engine cannot be reached
+
+  Scenario: The groups offer no plan for orphaned history that only an agent tag marks
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 2 snapshots only another agent's tag marks
+    When the owner lists the repository's groups
+    Then the groups list an orphaned group of 2 snapshots that no plan could adopt
+
+  Scenario: The groups offer no plan for orphaned history that only a plan tag marks
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 2 snapshots only the plan tag "home" marks
+    When the owner lists the repository's groups
+    Then the groups list an orphaned group of 2 snapshots that no plan could adopt

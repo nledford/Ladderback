@@ -261,21 +261,27 @@ impl ForgetWorld {
         plan: Option<(String, AgentId)>,
         folder: &str,
     ) {
+        let tags = match &plan {
+            Some((plan, agent)) => vec![
+                format!("{PLAN_TAG_PREFIX}{plan}"),
+                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            ],
+            None => Vec::new(),
+        };
+        self.snapshots_tagged(count, &tags, folder);
+    }
+
+    /// Adds `count` snapshots of `folder` carrying exactly `tags`. The first
+    /// added is the newest.
+    pub fn snapshots_tagged(&mut self, count: u64, tags: &[String], folder: &str) {
         for _ in 0..count {
             self.made += 1;
-            let tags = match &plan {
-                Some((plan, agent)) => vec![
-                    format!("{PLAN_TAG_PREFIX}{plan}"),
-                    format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
-                ],
-                None => Vec::new(),
-            };
             self.snapshots.push(SnapshotSummary {
                 id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
                 time: at(-i64::try_from(self.made * 3_600).expect("an hour")),
                 hostname: "demo-host".to_owned(),
                 label: String::new(),
-                tags,
+                tags: tags.to_vec(),
                 paths: vec![folder.to_owned()],
                 paths_truncated: false,
                 tags_truncated: false,
