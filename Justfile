@@ -39,12 +39,14 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
-# Lint: clippy on the host crates and on the web UI (wasm32), then the journey lint.
+# Lint: clippy on the host crates and on the web UI (wasm32), the journey lint,
+# then the check that every path AGENTS.md and CLAUDE.md name exists.
 [group('quality')]
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     cd ui-tests && npm run --silent lint
+    scripts/check-doc-paths.sh
 
 # Check the dependency rule: banned crates in domain and app, domain on wasm32.
 [group('quality')]
