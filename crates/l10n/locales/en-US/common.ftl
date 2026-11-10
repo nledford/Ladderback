@@ -275,7 +275,7 @@ error-secret-expansion-too-long = The repository's { $field } is longer than { $
 # $at (text): the place in it where the fault starts, counted in bytes from 0. The sender leaves it out when it has no place, and the program then supplies the text none.
 # `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
 error-template-invalid = { $at ->
-    [none] The repository's { $field } has a reference that is not valid. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
+    [none] The repository's { $field } is too long or has too many references. Shorten it, or refer to fewer secrets. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
    *[other] The repository's { $field } has a reference that is not valid at byte { $at }. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
   }
 

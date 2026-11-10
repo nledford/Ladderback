@@ -1344,7 +1344,7 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
                 Problem::Unreachable { detail } => refusal(
                     ErrorCode::SecretUnreadable,
                     named,
-                    Some(redactor.redact(detail)),
+                    Some(masked_detail(&redactor, detail)),
                 ),
                 Problem::NotUnicode => refusal(ErrorCode::SecretNotText, named, None),
                 Problem::TooLarge { limit } => refusal(
@@ -1355,13 +1355,20 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
                 Problem::CommandFailed { detail, .. } => refusal(
                     ErrorCode::SecretCommandFailed,
                     named,
-                    Some(redactor.redact(detail)),
+                    Some(masked_detail(&redactor, detail)),
                 ),
-                Problem::TimedOut { seconds } => refusal(
-                    ErrorCode::SecretCommandTimedOut,
-                    vec![field(), source, ("seconds", MsgArg::Count(*seconds))],
-                    None,
-                ),
+                // Only a command is run for a time; a file or a keyring that
+                // doesn't answer is a source that can't be read.
+                Problem::TimedOut { seconds } => match secret.source {
+                    SourceName::Command { .. } => refusal(
+                        ErrorCode::SecretCommandTimedOut,
+                        vec![field(), source, ("seconds", MsgArg::Count(*seconds))],
+                        None,
+                    ),
+                    SourceName::Keyring { .. }
+                    | SourceName::File { .. }
+                    | SourceName::Env { .. } => refusal(ErrorCode::SecretUnreadable, named, None),
+                },
             }
         }
         Cause::ReferenceInProcessArguments => {
@@ -1380,6 +1387,25 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
             refusal(ErrorCode::TemplateInvalid, args, None)
         }
     }
+}
+
+/// What a command or a platform said, with the secrets of the repository
+/// masked. A line that was cut at its cap (it ends in `…`) first loses as
+/// many bytes of its end as the longest secret has, less one: a secret that
+/// straddles the cut can't leave its first characters behind, for the mask
+/// only finds what is whole.
+fn masked_detail(redactor: &Redactor, detail: &str) -> String {
+    let Some(cut) = detail.strip_suffix('…') else {
+        return redactor.redact(detail);
+    };
+    let kept = cut
+        .len()
+        .saturating_sub(redactor.longest_match().saturating_sub(1));
+    let end = (0..=kept)
+        .rev()
+        .find(|&at| cut.is_char_boundary(at))
+        .unwrap_or_default();
+    format!("{}…", redactor.redact(cut.get(..end).unwrap_or_default()))
 }
 
 /// Where in a setting a template goes wrong, when the fault has a place.
@@ -1406,6 +1432,20 @@ fn source_text(source: &SourceName) -> String {
     }
 }
 
+/// How long a secret is read again for a redactor: a source that does not
+/// answer in this time adds nothing, and a failure doesn't wait for it.
+const REREAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A secret read again, for a redactor: `None` when it can't be read, since
+/// what can't be read can't show in what a failure says.
+async fn read_again(resolver: &SystemSecrets, secret: &SecretRef) -> Option<SecretValue> {
+    tokio::time::timeout(REREAD_LIMIT, resolver.resolve(secret))
+        .await
+        .ok()?
+        .ok()
+        .map(|found| found.value)
+}
+
 /// A redactor for what a failure of `settings` says: its inline password and
 /// credential options, and what the references of its settings, and a
 /// password read from the environment or a file, resolve to. A failed
@@ -1419,25 +1459,29 @@ async fn failure_redactor(settings: &RepositorySettings) -> Redactor {
     if matches!(
         settings.password,
         SecretRef::Env(_) | SecretRef::File { .. }
-    ) && let Ok(found) = resolver.resolve(&settings.password).await
+    ) && let Some(value) = read_again(&resolver, &settings.password).await
     {
-        resolved.push(found.value);
+        resolved.push(value);
     }
     let texts = std::iter::once(&settings.repository)
         .chain(&settings.repo_hot)
         .chain(settings.options.values())
         .chain(settings.options_hot.values())
         .chain(settings.options_cold.values());
+    // Each distinct reference once, as the resolution reads it.
+    let mut references = std::collections::BTreeSet::new();
     for text in texts {
-        let Ok(template) = Template::parse(text) else {
-            continue;
-        };
-        for part in template.parts() {
-            if let Part::Reference(reference) = part
-                && let Ok(found) = resolver.resolve(&reference.secret_ref()).await
-            {
-                resolved.push(found.value);
+        if let Ok(template) = Template::parse(text) {
+            for part in template.parts() {
+                if let Part::Reference(reference) = part {
+                    references.insert(reference.clone());
+                }
             }
+        }
+    }
+    for reference in references {
+        if let Some(value) = read_again(&resolver, &reference.secret_ref()).await {
+            resolved.push(value);
         }
     }
     let none = SecretValue::new("");
