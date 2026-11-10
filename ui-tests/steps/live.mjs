@@ -13,6 +13,7 @@ import path from "node:path";
 import { After, Given, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 
+import { namePattern } from "../support/keyboard.mjs";
 import { ScriptedDaemon } from "../support/scripted-daemon.mjs";
 import { fixtureRepo, startServer } from "../support/world.mjs";
 
@@ -53,9 +54,10 @@ async function until(read, ms, what) {
   assert.fail(`${what} (last saw ${last === null ? "nothing" : JSON.stringify(last)})`);
 }
 
-/** The table a page shows, by its caption. */
+/** The table a page shows, by its whole caption. A value in the caption is
+ *  wrapped in bidi isolation marks, which a reader never hears (§4.5). */
 function table(world, name) {
-  return world.page.getByRole("table", { name });
+  return world.page.getByRole("table", { name: namePattern(name) });
 }
 
 /** Writes a demo plan's config and repository into a scratch folder, starts
