@@ -384,6 +384,22 @@ fn disk_error() -> StoreError {
     }
 }
 
+/// The words of a failure are the platform's own, or a stored row's, and
+/// nobody has checked them for a value (I4): a line of the daemon's log that
+/// says a write was refused names the kind of failure by its code instead.
+#[test]
+fn each_kind_of_store_error_has_a_code_of_its_own_that_holds_none_of_its_words() {
+    let words = "canary: the disk of /srv/secret-folder is full";
+    let unavailable = StoreError::Unavailable {
+        detail: words.to_owned(),
+    };
+    let corrupt = StoreError::Corrupt {
+        detail: words.to_owned(),
+    };
+    assert_eq!(unavailable.code(), "store-unavailable");
+    assert_eq!(corrupt.code(), "store-corrupt");
+}
+
 /// Runs a job on an engine that plays `events`, writing to `store`.
 async fn scripted(events: Vec<EngineEvent>, store: Arc<dyn OperationStore>) -> Finished {
     RunOperation::new(

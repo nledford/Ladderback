@@ -158,6 +158,16 @@ impl PreparedMaintenance {
     }
 }
 
+/// A maintenance run with every decision made and nothing held: no row in
+/// the log, no engine started. [`RunMaintenance::start`] takes its
+/// repository's I7 slot.
+#[allow(dead_code, reason = "red test: assess fills them next")]
+pub struct MaintenanceAssessment {
+    operation: OperationId,
+    job: Job,
+    partition: Option<Partition>,
+}
+
 /// Runs maintenance manually on the local owner.
 #[allow(dead_code, reason = "red test: the run fills them next")]
 pub struct RunMaintenance {
@@ -212,6 +222,30 @@ impl RunMaintenance {
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
         self
+    }
+
+    /// Decides what the run does, from reads: the repository's ID and, for a
+    /// forget or an adoption, its snapshots. Nothing is stored and no I7 slot
+    /// is taken, so a caller that is dropped here, because the client that
+    /// asked went away, has left nothing behind.
+    pub async fn assess(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        kind: MaintenanceKind,
+    ) -> Result<MaintenanceAssessment, MaintenanceError> {
+        let _ = (op, alias, kind);
+        todo!("RunMaintenance::assess")
+    }
+
+    /// Takes the assessed run's repository slot (I7), recording the operation
+    /// as running in the one step that decides it.
+    pub async fn start(
+        &self,
+        assessment: MaintenanceAssessment,
+    ) -> Result<PreparedMaintenance, MaintenanceError> {
+        let _ = assessment;
+        todo!("RunMaintenance::start")
     }
 
     /// Resolves the repository, decides what the run does, and takes the

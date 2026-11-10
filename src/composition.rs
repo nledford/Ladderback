@@ -1753,6 +1753,46 @@ impl CancelRegistry {
     }
 }
 
+/// What the daemon logs at warning level and above, for the tests that look
+/// at the log. `log` takes one logger for a process, so the tests of every
+/// module that reads the log share this one, and each reads only the lines
+/// about what it started.
+#[cfg(test)]
+mod captured_log {
+    use std::sync::{Mutex, PoisonError};
+
+    struct Captured;
+
+    static LOGGED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+
+    impl log::Log for Captured {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            LOGGED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((record.level(), record.args().to_string()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// Starts capturing, before the code that logs runs.
+    pub(super) fn capture() {
+        let _ = log::set_logger(&Captured);
+        log::set_max_level(log::LevelFilter::Warn);
+    }
+
+    /// Every line logged so far, with its level.
+    pub(super) fn lines() -> Vec<(log::Level, String)> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2446,6 +2486,12 @@ mod tests {
         }
     }
 
+    /// The demo repository's ID: what [`Completes`] reports for a read of it,
+    /// and what the tests that look at its slot in the log name.
+    fn demo_repository() -> domain::RepositoryId {
+        domain::RepositoryId::parse(&"ab".repeat(32)).expect("a repository ID")
+    }
+
     /// An engine whose jobs start and succeed at once, each with what its
     /// kind reports: the ID of the repository a read opens, the outcome of
     /// a check.
@@ -2454,8 +2500,7 @@ mod tests {
     #[async_trait]
     impl Engine for Completes {
         async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-            let repository =
-                domain::RepositoryId::parse(&"ab".repeat(32)).expect("a repository ID");
+            let repository = demo_repository();
             let result = match &job {
                 Job::Identify(_) => EngineResult::Repository { id: repository },
                 Job::Check(_) => EngineResult::Check(app::ports::CheckSummary {
@@ -2722,6 +2767,305 @@ mod tests {
                 "the page's news of {end:?}"
             );
         }
+    }
+
+    /// An operation log that refuses every save, in the words a database
+    /// uses for what it refuses, and counts them. Starts and reads go to the
+    /// log behind it.
+    struct RefusingSaves {
+        inner: Arc<dyn OperationStore>,
+        refused: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    /// What a refused save says for itself: none of it may reach the daemon's
+    /// log.
+    const REFUSAL: &str = "canary: the disk of /srv/secret-folder is full";
+
+    #[async_trait]
+    impl OperationStore for RefusingSaves {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            _operation: &domain::execution::Operation,
+            _result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.refused
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(app::ports::StoreError::Unavailable {
+                detail: REFUSAL.to_owned(),
+            })
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            self.inner.try_start(operation).await
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// The lines the daemon logged about `operation` once its run had said
+    /// what the log refused it: one for each of the `refused` writes, so the
+    /// wait ends when there are that many. A run that never says gives up
+    /// after a few seconds, and the lines as they stand tell what is missing.
+    async fn logged_about_the_run(
+        operation: &str,
+        refused: &std::sync::atomic::AtomicUsize,
+    ) -> Vec<(log::Level, String)> {
+        let about = || {
+            captured_log::lines()
+                .into_iter()
+                .filter(|(_, line)| line.contains(operation))
+                .collect::<Vec<_>>()
+        };
+        let said = async {
+            loop {
+                let lines = about();
+                let refused = refused.load(std::sync::atomic::Ordering::SeqCst);
+                if refused > 0 && lines.len() >= refused {
+                    return lines;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), said)
+            .await
+            .unwrap_or_else(|_| about())
+    }
+
+    /// Each refused write is said once, at warning level, with the code of
+    /// the failure and none of its words (I4).
+    fn assert_each_refusal_is_said(lines: &[(log::Level, String)], refused: usize) {
+        assert!(
+            refused > 0,
+            "the log refused nothing, so the test shows nothing"
+        );
+        assert_eq!(
+            lines.len(),
+            refused,
+            "one line for each refused write: {lines:?}"
+        );
+        for (level, line) in lines {
+            assert_eq!(*level, log::Level::Warn, "{line}");
+            assert!(line.contains("store-unavailable"), "{line}");
+        }
+        let everything = captured_log::lines();
+        assert!(
+            everything.iter().all(|(_, line)| !line.contains("canary")),
+            "a line repeats what the log said: {everything:?}"
+        );
+    }
+
+    /// A backup goes on without a log that refuses its writes, and the
+    /// daemon says so in its own log: a log that has stopped taking writes
+    /// is otherwise invisible to the person running it (#135).
+    #[tokio::test]
+    async fn a_write_the_log_refuses_during_a_backup_is_logged_once_with_its_code_and_never_its_words()
+     {
+        captured_log::capture();
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        runner.store = Arc::new(RefusingSaves {
+            inner: Arc::clone(&runner.store),
+            refused: Arc::clone(&refused),
+        });
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("a backup starts without a log that takes its writes");
+        // The engine parks the run, as a real one is parked while it works,
+        // so a cancel is what ends it.
+        let operation = operation_of(&id).expect("an operation ID");
+        assert!(
+            runner.registry.cancel(&operation),
+            "the run has a switch to fire"
+        );
+        let lines = logged_about_the_run(&id, &refused).await;
+        assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// The same for a maintenance run, whose last write is the one the log
+    /// refuses here: its start was taken, so the run goes on to the end.
+    #[tokio::test]
+    async fn a_write_the_log_refuses_during_maintenance_is_logged_once_with_its_code_and_never_its_words()
+     {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(Completes);
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        runner.store = Arc::new(RefusingSaves {
+            inner: Arc::clone(&runner.store),
+            refused: Arc::clone(&refused),
+        });
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("a check starts");
+        let lines = logged_about_the_run(&id, &refused).await;
+        assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// An operation log whose starts take their time on both sides of the
+    /// write, so that a handler dropped on either side is dropped with the
+    /// start still going on or already stored.
+    struct SlowStarts {
+        inner: Arc<dyn OperationStore>,
+    }
+
+    /// How long [`SlowStarts`] waits before and after a start: two polls of
+    /// the sweep's 20 ms each.
+    const SLOW: std::time::Duration = std::time::Duration::from_millis(40);
+
+    #[async_trait]
+    impl OperationStore for SlowStarts {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            tokio::time::sleep(SLOW).await;
+            let decided = self.inner.try_start(operation).await;
+            tokio::time::sleep(SLOW).await;
+            decided
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// More polls than a start needs: a sweep that reaches it fails, rather
+    /// than runs for ever.
+    const MOST_POLLS: usize = 200;
+
+    /// A start that ends after fewer polls than this was not cut at the
+    /// points the sweep is about: its reads, and the two sides of the write
+    /// that records it.
+    const FEWEST_AWAIT_POINTS: usize = 5;
+
+    /// Polls `call` `polls` times, a moment apart so that the tasks and
+    /// connection threads it waits for can answer in between, then drops it:
+    /// the call is cut short at one of its await points, as a client that
+    /// hangs up cuts the handler that serves it. `Some` when the call ended
+    /// within `polls` polls. (The operation log's own cancellation tests use
+    /// the same sweep.)
+    async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option<T> {
+        let mut call = std::pin::pin!(call);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..polls {
+            if let std::task::Poll::Ready(done) = call.as_mut().poll(&mut cx) {
+                return Some(done);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        None
+    }
+
+    /// Within a few seconds the repository takes another maintenance
+    /// operation: whatever ran on it has ended, or was never recorded.
+    async fn assert_the_repository_takes_another_check(runner: &PlanRunner, what: &str) {
+        let now = domain::Timestamp::from_second(1_800_000_100).expect("a timestamp");
+        let mut check = domain::execution::Operation::queue(
+            OperationId::from_uuid(Uuid::now_v7()),
+            OperationKind::Check,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: Some(demo_repository()),
+            },
+            now,
+        );
+        check.start(now).expect("a queued operation starts");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match runner.store.try_start(&check).await {
+                Ok(app::ports::Start::Started) => return,
+                Ok(app::ports::Start::Refused { running }) => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "{what}: the repository is still held by {}, which nothing ends",
+                        running.as_uuid().hyphenated()
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("{what}: the log refused the check's start: {error}"),
+            }
+        }
+    }
+
+    /// A client that hangs up in the middle of its request drops the handler
+    /// wherever it is waiting. A maintenance start dropped there must not
+    /// leave the repository held by a row nothing ends (I7): once SQLite has
+    /// committed the start, only the run itself ends it, and a handler that
+    /// was dropped before it learned of the commit has no one left to run it
+    /// (#135).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_maintenance_start_cut_short_at_any_await_point_leaves_the_repository_free() {
+        for polls in 0..MOST_POLLS {
+            let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+            runner.engine = Arc::new(Completes);
+            runner.store = Arc::new(SlowStarts {
+                inner: Arc::clone(&runner.store),
+            });
+            let start =
+                runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+            let what = format!("after a start cut after {polls} polls");
+            if cut_after(start, polls).await.is_some() {
+                assert!(
+                    polls >= FEWEST_AWAIT_POINTS,
+                    "the start ended in {polls} polls: nothing was cut"
+                );
+                assert_the_repository_takes_another_check(&runner, &what).await;
+                return;
+            }
+            assert_the_repository_takes_another_check(&runner, &what).await;
+        }
+        panic!("a start took more than {MOST_POLLS} polls");
     }
 
     fn english() -> l10n::Localizer {
@@ -2995,6 +3339,7 @@ mod tests {
 
 #[cfg(test)]
 mod repository_service_tests {
+    use super::captured_log::{self, capture};
     use std::sync::{Mutex, PoisonError};
 
     use api::{ErrorCode, MsgArg, PasswordDto, RepositorySettingsDto};
@@ -3960,39 +4305,12 @@ mod repository_service_tests {
         assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
     }
 
-    /// Captures what the daemon logs at warning level, for the tests that
-    /// look at the log.
-    struct Captured;
-
-    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-    impl log::Log for Captured {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-            true
-        }
-        fn log(&self, record: &log::Record<'_>) {
-            LOGGED
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(record.args().to_string());
-        }
-        fn flush(&self) {}
-    }
-
-    /// Starts capturing, before the code that logs runs.
-    fn capture() {
-        let _ = log::set_logger(&Captured);
-        log::set_max_level(log::LevelFilter::Warn);
-    }
-
     /// The lines logged so far about the snapshots of `alias`.
     fn logged_about(alias: &str) -> Vec<String> {
-        LOGGED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
+        captured_log::lines()
+            .into_iter()
+            .map(|(_, line)| line)
             .filter(|line| line.contains(&format!("snapshots of {alias} ")))
-            .cloned()
             .collect()
     }
 

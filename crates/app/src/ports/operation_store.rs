@@ -136,6 +136,15 @@ impl std::fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
+impl StoreError {
+    /// A short code for the kind of failure, for a line of the daemon's log:
+    /// it says what went wrong without the failure's own words, which nobody
+    /// has checked for a value (I4).
+    pub fn code(&self) -> &'static str {
+        todo!("StoreError::code")
+    }
+}
+
 /// How many operations a page of history holds: always between 1 and
 /// [`MAX_PAGE_SIZE`], whatever a caller asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

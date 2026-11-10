@@ -29,7 +29,7 @@ use tokio::sync::Notify;
 
 use super::Agent;
 use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
-use app::maintenance::{MaintenanceError, MaintenanceKind, RunMaintenance};
+use app::maintenance::{MaintenanceAssessment, MaintenanceError, MaintenanceKind, RunMaintenance};
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
     JobControl, MAX_JOB_IDS, OperationStore, PruneSummary, RewriteSummary, RunningJob,
@@ -103,6 +103,8 @@ pub struct ForgetWorld {
     hold_at: Option<usize>,
     /// Which forget or rewrite job the engine fails, when a scenario says.
     fail_at: Option<usize>,
+    /// The run a scenario assessed and has not started.
+    assessed: Option<MaintenanceAssessment>,
 }
 
 impl Default for ForgetWorld {
@@ -120,6 +122,7 @@ impl Default for ForgetWorld {
             repository_id: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
             hold_at: Some(0),
             fail_at: None,
+            assessed: None,
         }
     }
 }
@@ -715,6 +718,16 @@ async fn forget_then_prune(agent: &mut Agent) {
     agent.finished = Some(running.await.expect("the run ends"));
 }
 
+#[when("the owner assesses a forget of the repository")]
+async fn assess_a_forget(agent: &mut Agent) {
+    let use_case = use_case(agent);
+    let assessment = use_case
+        .assess(operation_id(0xcc), &alias(), MaintenanceKind::Forget)
+        .await
+        .expect("the forget is assessed");
+    agent.forget.assessed = Some(assessment);
+}
+
 /// Waits until the scripted engine was given a forget job.
 async fn wait_for_forget(agent: &Agent) {
     for _ in 0..400 {
@@ -898,6 +911,29 @@ fn refused_busy(agent: &mut Agent) {
 fn prune_refused(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the prune was refused");
     assert!(matches!(error, MaintenanceError::Busy { .. }), "{error:?}");
+}
+
+#[then("a prune of the repository can start")]
+async fn a_prune_can_start(agent: &mut Agent) {
+    let prepared = use_case(agent)
+        .prepare(operation_id(0xee), &alias(), MaintenanceKind::Prune)
+        .await;
+    assert!(
+        prepared.is_ok(),
+        "a repository nothing runs on takes a prune: {:?}",
+        prepared.err()
+    );
+}
+
+#[then("the assessed forget is refused when it starts")]
+async fn assessed_forget_refused(agent: &mut Agent) {
+    let assessment = agent.forget.assessed.take().expect("a forget was assessed");
+    let refused = use_case(agent).start(assessment).await;
+    assert!(
+        matches!(refused, Err(MaintenanceError::Busy { .. })),
+        "the prune holds the repository: {:?}",
+        refused.err()
+    );
 }
 
 #[then("the engine was never asked to remove anything")]
