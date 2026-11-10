@@ -122,6 +122,7 @@ Several agents may work on the repository at once (§13.5). Each one:
 - uses its own ports, never `just serve`'s 9898, and its own scratch folder;
 - never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
+- numbers a new §16 decision only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
 ## Conventions
 
