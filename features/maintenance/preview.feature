@@ -6,7 +6,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
   history the run leaves alone (I6), and gives a selection: a run started
   with that selection is refused, before anything is removed or rewritten,
   when the snapshots it would act on are not the ones the preview showed
-  (I1). The groups say who owns each snapshot of a repository and which
+  (I6). The groups say who owns each snapshot of a repository and which
   plans could take the history no plan owns.
 
   Scenario: A forget preview names what the plan's retention would remove
@@ -328,3 +328,20 @@ Feature: A maintenance preview tells what a run would do before it does anything
     Then the run is refused because the snapshots changed since the preview
     And the engine was never asked to rewrite anything
     And the log holds no operation of this adoption
+
+  Scenario: The groups of a repository with no unmanaged history read no plan's sources
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/srv/photos"
+    And the repository holds 2 snapshots of the plan "home"
+    And the repository holds 3 snapshots another agent's plan "home" holds
+    When the owner lists the repository's groups
+    Then the groups list no unmanaged history
+    And the sources of 0 plans were read from the disk
+
+  Scenario: The groups of a repository with unmanaged history read each plan's sources once
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/srv/photos"
+    And the repository holds 2 snapshots no plan owns that match the plan "home"
+    When the owner lists the repository's groups
+    Then the groups list an unmanaged group of 2 snapshots that can be adopted into "home"
+    And the sources of 2 plans were read from the disk

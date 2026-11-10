@@ -591,6 +591,15 @@ fn groups_no_orphaned(agent: &mut Agent) {
     assert!(groups(agent).orphaned.is_empty(), "{:?}", groups(agent));
 }
 
+#[then(expr = "the sources of {int} plan(s) were read from the disk")]
+fn sources_read(agent: &mut Agent, count: usize) {
+    assert_eq!(
+        agent.forget.source_reads(),
+        count,
+        "only an unmanaged group is matched by a plan's sources"
+    );
+}
+
 #[then("the groups list no unmanaged history")]
 fn groups_no_unmanaged(agent: &mut Agent) {
     assert!(groups(agent).unmanaged.is_empty(), "{:?}", groups(agent));

@@ -224,6 +224,11 @@ impl ForgetWorld {
         self.unreadable_folder = Some(folder.to_owned());
     }
 
+    /// How many plans' sources were asked of the sources port.
+    pub fn source_reads(&self) -> usize {
+        self.source_reads.load(Ordering::SeqCst)
+    }
+
     /// Adds a plan as drafted, with whatever policy it carries.
     pub async fn plan_raw(&mut self, plan: Plan) {
         self.plans.push(plan);
