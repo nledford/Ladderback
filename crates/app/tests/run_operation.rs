@@ -1174,3 +1174,108 @@ async fn a_log_that_never_answers_does_not_hold_the_run() {
         "the queued, running and final writes"
     );
 }
+
+/// An operation log whose writes take `delay` on the clock to answer.
+struct Slow {
+    clock: Arc<FakeClock>,
+    delay: SignedDuration,
+    inner: InMemoryOperationStore,
+}
+
+#[async_trait]
+impl OperationStore for Slow {
+    async fn save(
+        &self,
+        operation: &Operation,
+        result: Option<&EngineResult>,
+    ) -> Result<(), StoreError> {
+        use app::ports::Clock;
+        self.clock.sleep_until(self.clock.now() + self.delay).await;
+        self.inner.save(operation, result).await
+    }
+
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        self.inner.try_start(operation).await
+    }
+
+    async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
+        self.inner.get(id).await
+    }
+
+    async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+        self.inner.list(query).await
+    }
+}
+
+#[tokio::test]
+async fn a_write_that_answers_just_inside_the_bound_is_kept() {
+    let clock = Arc::new(FakeClock::new(t(0)));
+    let engine = Arc::new(Live::new());
+    let store = Arc::new(Slow {
+        clock: clock.clone(),
+        delay: SAVE_BOUND - SignedDuration::from_secs(1),
+        inner: InMemoryOperationStore::new(),
+    });
+    let use_case = RunOperation::new(engine.clone(), clock.clone(), store.clone());
+    engine.send(started());
+    engine.send(succeeded());
+    let running = tokio::spawn(async move {
+        use_case
+            .run(id(), Trigger::Manual, fake_job(None), future::pending())
+            .await
+    });
+    // One second at a time, so a bound shorter than the write fires first.
+    for _ in 0..200 {
+        settle().await;
+        if running.is_finished() {
+            break;
+        }
+        clock.advance(SignedDuration::from_secs(1));
+    }
+    let ended = finished(running).await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Succeeded);
+    assert!(
+        ended.recording_errors.is_empty(),
+        "{:?}",
+        ended.recording_errors
+    );
+    let kept = store
+        .inner
+        .get(id())
+        .await
+        .unwrap()
+        .expect("the operation is logged");
+    assert_eq!(kept.record.status, OperationStatus::Succeeded);
+}
+
+#[tokio::test]
+async fn a_stalled_write_does_not_hold_the_deadline() {
+    let clock = Arc::new(FakeClock::new(t(0)));
+    let engine = Arc::new(Live::new());
+    let use_case = RunOperation::new(engine.clone(), clock.clone(), Arc::new(Stalled::after(1)));
+    let budget = SignedDuration::from_secs(5);
+    let running = tokio::spawn(async move {
+        use_case
+            .run(
+                id(),
+                Trigger::Manual,
+                fake_job(Some(budget)),
+                future::pending(),
+            )
+            .await
+    });
+    engine.send(started());
+    settle().await;
+    // The deadline passes while the write that says the operation is running
+    // is still stalled, and well before the bound on it.
+    clock.advance(budget);
+    give_up_on_the_log(&clock, &running).await;
+    let ended = finished(running).await;
+    assert_eq!(
+        ended.operation.status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::DeadlinePassed
+        }
+    );
+    assert_eq!(ended.operation.finished_at(), Some(t(5)));
+}

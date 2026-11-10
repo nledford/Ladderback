@@ -26,6 +26,7 @@ use futures::future::{FusedFuture, FutureExt};
 use futures::select_biased;
 
 use crate::execution::Finished;
+use crate::log_write::save_within_bound;
 use crate::ports::{
     CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetJob, Job,
     MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob, RepositoryAccess, Retention,
@@ -565,7 +566,8 @@ impl RunMaintenance {
         result: &Option<EngineResult>,
         recording_errors: &mut Vec<StoreError>,
     ) {
-        if let Err(error) = self.store.save(operation, result.as_ref()).await {
+        let saved = save_within_bound(&*self.clock, &*self.store, operation, result.as_ref()).await;
+        if let Err(error) = saved {
             recording_errors.push(error);
         }
     }
@@ -1087,6 +1089,104 @@ mod read_timeout_tests {
             .expect("the read ends when the timeout does")
             .expect("the read task ran");
         assert_eq!(outcome.unwrap_err(), MaintenanceError::TimedOut);
+    }
+}
+
+#[cfg(all(test, feature = "fakes"))]
+mod record_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use domain::execution::{OperationKind, Target, Trigger};
+    use domain::{AgentId, OperationId, Timestamp, Uuid};
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::{HistoryPage, HistoryQuery, OperationDetail, Start};
+
+    /// An operation log whose writes never answer: a stalled disk.
+    struct Stalled;
+
+    #[async_trait]
+    impl OperationStore for Stalled {
+        async fn save(
+            &self,
+            _operation: &Operation,
+            _result: Option<&EngineResult>,
+        ) -> Result<(), StoreError> {
+            futures::future::pending().await
+        }
+
+        async fn try_start(&self, _operation: &Operation) -> Result<Start, StoreError> {
+            futures::future::pending().await
+        }
+
+        async fn get(&self, _id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
+            Ok(None)
+        }
+
+        async fn list(&self, _query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+            futures::future::pending().await
+        }
+    }
+
+    fn use_case(store: Arc<dyn OperationStore>) -> RunMaintenance {
+        RunMaintenance::new(
+            Arc::new(crate::fakes::SimulatedEngine::new(Arc::new(
+                FakeClock::auto_advancing(Timestamp::UNIX_EPOCH),
+            ))),
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            store,
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(InMemoryConfigStore::new()),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    fn operation() -> Operation {
+        Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            OperationKind::Check,
+            Trigger::Manual,
+            Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_write_the_log_never_answers_is_given_up_on_and_noted() {
+        let mut errors = Vec::new();
+        let use_case = use_case(Arc::new(Stalled));
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            use_case.record(&operation(), &None, &mut errors),
+        )
+        .await
+        .expect("the write is given up on");
+        assert!(
+            matches!(errors.as_slice(), [StoreError::Unavailable { .. }]),
+            "{errors:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_write_the_log_answers_is_not_noted() {
+        let mut errors = Vec::new();
+        use_case(Arc::new(InMemoryOperationStore::new()))
+            .record(&operation(), &None, &mut errors)
+            .await;
+        assert!(errors.is_empty(), "{errors:?}");
     }
 }
 
