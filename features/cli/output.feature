@@ -238,7 +238,11 @@ Feature: The command line's output
 
   Rule: --plain is text with no colour and nothing to redraw, a fact to a line
 
-    Scenario: An import says its facts one to a line, with no colour, though colour is forced
+    Scenario: An import under --plain says its facts one to a line
+      Nothing an import prints is coloured, so no control exists for --plain
+      to remove here. The colour check fails once any of its lines is coloured
+      without honouring the setting.
+
       Given colour is forced on
       And a rustic profile "nas.toml" holding:
         """
@@ -339,7 +343,11 @@ Feature: The command line's output
       When the daemon is started with "--listen 127.0.0.1:0"
       Then the output is plain text
 
-    Scenario: An import has no colour under NO_COLOR, though colour is forced
+    Scenario: An import prints no control under NO_COLOR, though colour is forced
+      Nothing an import prints is coloured, so no control exists for NO_COLOR
+      to remove here. It fails once any of its lines is coloured without
+      honouring the setting.
+
       Given colour is forced on
       And NO_COLOR is set
       And a rustic profile "nas.toml" holding:
