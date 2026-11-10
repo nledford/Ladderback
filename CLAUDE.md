@@ -1,11 +1,5 @@
 # CLAUDE.md
 
-This project's agent instructions live in [AGENTS.md](AGENTS.md). Read it before starting work, and again whenever a task touches what it covers:
+@AGENTS.md
 
-- the design documents to read first;
-- the non-negotiable invariants;
-- behaviour-, domain- and test-first development (BDD, DDD, TDD);
-- independent adversarial review;
-- accessibility, localization, commit and pull request conventions.
-
-AGENTS.md wins over anything in this file. Keep project guidance there, not here.
+The import above loads AGENTS.md, this project's only agent guidance, into every Claude Code session. A tool that doesn't expand `@` imports must read [AGENTS.md](AGENTS.md) before starting work. Keep project guidance there, not here.
