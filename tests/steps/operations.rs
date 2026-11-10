@@ -182,7 +182,7 @@ pub(crate) fn exchange_at(
 }
 
 /// One history page, as JSON.
-async fn history_page(agent: &Agent, query: &str) -> serde_json::Value {
+pub(crate) async fn history_page(agent: &Agent, query: &str) -> serde_json::Value {
     let (status, body) = exchange(agent, "GET", &format!("/api/v1/operations?{query}"), "");
     assert_eq!(status, 200, "the history page answers: {body}");
     serde_json::from_str(&body).unwrap_or_else(|error| panic!("the page is JSON: {error}: {body}"))
@@ -207,7 +207,7 @@ fn page_ids(page: &serde_json::Value) -> Vec<String> {
 /// or fails when it ends any other way or never arrives. A state on the way
 /// — `queued` before the engine starts — is not an ending: the page keeps
 /// waiting.
-async fn shows_status(agent: &Agent, id: &str, status: &str) {
+pub(crate) async fn shows_status(agent: &Agent, id: &str, status: &str) {
     let started = Instant::now();
     loop {
         let page = history_page(agent, "limit=50").await;
@@ -240,7 +240,7 @@ async fn shows_status(agent: &Agent, id: &str, status: &str) {
 }
 
 /// Starts a backup of `plan`, returning the operation's ID.
-fn start_backup(agent: &mut Agent, plan: &str) -> String {
+pub(crate) fn start_backup(agent: &mut Agent, plan: &str) -> String {
     let body = format!("{{\"plan\":{plan:?}}}");
     let (status, response) = exchange(agent, "POST", "/api/v1/operations", &body);
     assert!(
@@ -306,11 +306,17 @@ fn refusal_code(body: &str) -> Option<String> {
 impl Ops {
     /// The operation the scenario means by "the operation": the newest it
     /// started.
-    fn the_operation(&self) -> String {
+    pub(crate) fn the_operation(&self) -> String {
         self.started
             .last()
             .cloned()
             .expect("the scenario started an operation")
+    }
+
+    /// Makes `id`, an operation the scenario did not start through the
+    /// daemon, the one the scenario means by "the operation".
+    pub(crate) fn note_started(&mut self, id: String) {
+        self.started.push(id);
     }
 }
 

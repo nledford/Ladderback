@@ -172,16 +172,18 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
-    runtime.block_on(async {
-        // Before the listener: a daemon that cannot serve must not print
-        // that it is listening.
-        let state = match composition::app_state().await {
-            Ok(state) => state,
-            Err(refused) => {
-                say(localizer, refused.message, &refused.args)?;
-                return Ok(ExitCode::FAILURE);
-            }
-        };
+    // Before the listener: a daemon that cannot serve must not print that it
+    // is listening. By the time it is handed back it has locked the data
+    // folder and ended what an earlier run left unfinished, so no request is
+    // served before the log says what really happened (§4.2, §9).
+    let composition::Daemon { state, lock } = match runtime.block_on(composition::daemon()) {
+        Ok(daemon) => daemon,
+        Err(refused) => {
+            say(localizer, refused.message, &refused.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let code: io::Result<ExitCode> = runtime.block_on(async {
         let listener = match tokio::net::TcpListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -220,7 +222,13 @@ fn run_daemon(
                 Ok(ExitCode::FAILURE)
             }
         }
-    })
+    });
+    // The lock is let go last: until the runtime is gone, a job it was running
+    // may still hold the operation log, and another daemon must not recover
+    // that log from under it (§9).
+    drop(runtime);
+    drop(lock);
+    code
 }
 
 /// The line `say` prints: one of Ladderback's own messages after the

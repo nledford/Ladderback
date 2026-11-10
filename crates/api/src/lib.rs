@@ -45,6 +45,10 @@ pub enum ErrorCode {
     /// The engine stopped reporting, but its process stayed alive and was
     /// killed.
     EngineExitTimedOut,
+    /// The daemon stopped while the operation was queued or running (a crash,
+    /// a kill, a power cut), so the operation never reached its end and what
+    /// it did is unknown. The next start ended it as failed.
+    DaemonStopped,
     /// The request's `Host` header names neither a loopback address nor a
     /// configured host name (a DNS-rebinding defense, §10.1).
     HostNotAllowed,
@@ -627,6 +631,7 @@ impl ErrorCode {
             | Self::EngineStartTimedOut
             | Self::EngineExitTimedOut
             | Self::RepositoryTimedOut
+            | Self::DaemonStopped
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
@@ -1182,6 +1187,7 @@ mod tests {
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
             ErrorCode::RepositoryTimedOut,
+            ErrorCode::DaemonStopped,
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,
@@ -1194,6 +1200,14 @@ mod tests {
         for code in [WarningCode::SourceUnreadable, WarningCode::Unknown] {
             assert!(code.args().is_empty(), "{code:?}");
         }
+    }
+
+    #[test]
+    fn a_stopped_daemons_code_is_spelled_daemon_stopped() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::DaemonStopped).unwrap(),
+            r#""daemon-stopped""#
+        );
     }
 
     #[test]

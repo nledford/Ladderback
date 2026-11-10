@@ -58,6 +58,16 @@ pub(crate) const GET_OPERATION: &str = select_operations!(" WHERE id = ?");
 pub(crate) const GET_WARNINGS: &str =
     "SELECT item, during, code, detail FROM op_warnings WHERE op_id = ? ORDER BY rowid LIMIT ?";
 
+/// Ends every queued or running operation as failed (startup recovery), and
+/// nothing else about it: not its times, warnings or target. Parameters:
+/// `status`, `error_code`, `error_args`, `error_detail`, then the two statuses
+/// it ends, queued and running. A running maintenance row stops being one, so
+/// the one-maintenance index stops holding its repository.
+pub(crate) const FAIL_UNFINISHED: &str = concat!(
+    "UPDATE operations SET status = ?, error_code = ?, error_args = ?, error_detail = ? ",
+    "WHERE status IN (?, ?)"
+);
+
 // History, newest first, in four statements: with or without a plan, and with
 // or without a cursor. The cursor is a term of its own, not an `IS NULL OR`
 // alternative, so a later page starts at its place in the index rather than

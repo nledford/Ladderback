@@ -39,6 +39,10 @@ pub struct Events {
     stalled: Option<Page>,
     /// The outcome of asking a daemon to serve that was expected to refuse.
     asked_to_serve: Option<Outcome>,
+    /// A second daemon that started on the folders the first one holds, kept
+    /// so the scenario's end stops it.
+    #[allow(dead_code)]
+    second: Option<Daemon>,
 }
 
 /// A running daemon, stopped when the scenario ends.
@@ -72,6 +76,23 @@ impl Events {
     /// The scratch folder of the daemon these scenarios start.
     fn root(agent: &Agent) -> PathBuf {
         agent.scratch().join("events")
+    }
+
+    /// The data folder of that daemon.
+    pub(crate) fn data_dir(agent: &Agent) -> PathBuf {
+        testkit::daemon::data_dir(&Self::root(agent))
+    }
+
+    /// The process ID of the daemon that is serving.
+    pub(crate) fn pid(&self) -> u32 {
+        self.daemon().child.id()
+    }
+
+    /// Kills the daemon with SIGKILL and waits for the process to be gone:
+    /// a crash, as far as the folders it leaves behind can tell.
+    pub(crate) fn kill(&mut self) {
+        let daemon = self.daemon.take().expect("Ladderback is serving");
+        drop(daemon);
     }
 
     /// The config folder of that daemon.
@@ -126,6 +147,36 @@ async fn start(agent: &mut Agent) -> Outcome {
         agent.events.daemon = daemon;
     }
     outcome
+}
+
+/// Starts the daemon again on the folders a stopped one left, for the
+/// scenarios that restart it, and waits until it listens.
+pub(crate) async fn restart(agent: &mut Agent) {
+    match start(agent).await {
+        Outcome::Listening(_) => {}
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
+    }
+}
+
+/// Starts a second daemon on the folders the first one serves from, and
+/// keeps what came of it for [`refusal`].
+pub(crate) async fn start_second(agent: &mut Agent) {
+    let root = Events::root(agent);
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root)).await;
+    agent.events.second = daemon;
+    agent.events.asked_to_serve = Some(outcome);
+}
+
+/// How the second daemon ended: its exit status and its log. Fails the step
+/// when it listened instead.
+pub(crate) fn refusal(agent: &mut Agent) -> (ExitStatus, String) {
+    match agent.events.asked_to_serve.take() {
+        Some(Outcome::Listening(addr)) => {
+            panic!("the second daemon listened on {addr} instead of refusing")
+        }
+        Some(Outcome::Exited(status, log)) => (status, log),
+        None => panic!("a second Ladderback was started first"),
+    }
 }
 
 /// Starts the daemon and reads its log until it says where it listens or

@@ -32,6 +32,8 @@ mod secrets_steps;
 mod hooks_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/recovery.rs"]
+mod recovery_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 
@@ -50,6 +52,7 @@ struct Agent {
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
     interop: interop_steps::InteropWorld,
+    recovery: recovery_steps::RecoveryWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -85,6 +88,7 @@ impl Agent {
             repositories: Default::default(),
             forget: Default::default(),
             interop: Default::default(),
+            recovery: Default::default(),
         }
     }
 

@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use domain::execution::{Operation, OperationKind, OperationStatus, Target, Trigger, Warning};
+use domain::execution::{
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
+};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 
 use crate::ports::EngineResult;
@@ -46,6 +48,10 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 ///   of it, and the calls after it work as they would have: nothing the
 ///   dropped call began holds them up. The contract suite has no runtime to
 ///   cut a call with, so the SQLite store's `cancellation` tests check this.
+/// - [`fail_unfinished`](Self::fail_unfinished) ends every queued or running
+///   operation as failed, for startup recovery: all of them or none, nothing
+///   ever as succeeded, finished operations untouched, and a running
+///   maintenance operation stops holding its repository (I7).
 #[async_trait]
 pub trait OperationStore: Send + Sync {
     /// Stores `operation`, and `result` when the engine reported one.
@@ -76,6 +82,25 @@ pub trait OperationStore: Send + Sync {
     /// One page of history, newest first. The page ends at `query.limit`
     /// operations; [`HistoryPage::next`] says whether older ones remain.
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError>;
+
+    /// Ends every operation the log shows as queued or running as
+    /// [`Failed`](OperationStatus::Failed) with `reason`, and returns how
+    /// many it ended. Startup recovery calls it before anything runs, when
+    /// whatever still looks unfinished was left by a process that stopped: a
+    /// crash, a kill or a power cut.
+    ///
+    /// It ends them where they stand: a started operation keeps its start
+    /// time, warnings and target, and none gets a finish time, because when
+    /// it ended is unknown. It never ends one as succeeded, and leaves every
+    /// finished operation as it was. A running maintenance operation that
+    /// held its repository (I7) stops holding it. All of it happens or none
+    /// of it does, and a second call finds nothing left to end.
+    ///
+    /// Unlike every other use of this port, its caller doesn't carry on after
+    /// an error: a daemon that can't end the unfinished operations refuses to
+    /// start, since a stale running maintenance operation would hold its
+    /// repository for good.
+    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError>;
 }
 
 /// What [`OperationStore::try_start`] decided.

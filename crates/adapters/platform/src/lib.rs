@@ -12,6 +12,7 @@
 )]
 
 pub mod agent_id;
+pub mod data_dir_lock;
 pub mod dirs;
 
 use app::ports::Clock;

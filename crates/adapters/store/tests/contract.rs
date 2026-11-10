@@ -18,3 +18,16 @@ async fn sqlite_store_meets_the_operation_store_contract() {
     .await;
     store.close().await;
 }
+
+#[tokio::test]
+async fn sqlite_store_recovers_its_unfinished_operations() {
+    let scratch = Scratch::new();
+    let store = scratch.open().await;
+    within(
+        120,
+        "the recovery contract suite",
+        contract::operation_store::run_recovery(&store),
+    )
+    .await;
+    store.close().await;
+}

@@ -1,3 +1,4 @@
+mod recovery;
 mod serialization;
 
 use domain::execution::{
@@ -39,6 +40,17 @@ pub async fn run(store: &dyn OperationStore) {
     a_page_continues_after_any_cursor(store, &fx).await;
     history_can_be_limited_to_one_plan(store, &fx).await;
     serialization::run(store, &fx).await;
+}
+
+/// The cases for ending what a stopped daemon left behind: every queued or
+/// running operation ends failed with `DaemonStopped` and a running
+/// maintenance operation stops holding its repository.
+///
+/// Unlike [`run`], which leaves unfinished operations in the log, this needs
+/// its own FRESH, empty store: the cases count exactly the operations they
+/// end.
+pub async fn run_recovery(store: &dyn OperationStore) {
+    recovery::run(store).await;
 }
 
 /// IDs the suite can't build without a fallible parse.
@@ -350,6 +362,7 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
         FailureReason::DeadlinePassed,
         FailureReason::EngineStartTimedOut,
         FailureReason::EngineExitTimedOut,
+        FailureReason::DaemonStopped,
     ];
 
     let mut ops = vec![

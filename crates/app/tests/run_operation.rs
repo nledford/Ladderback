@@ -237,6 +237,13 @@ impl Journal {
 
 #[async_trait]
 impl OperationStore for Journal {
+    async fn fail_unfinished(
+        &self,
+        reason: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        self.inner.fail_unfinished(reason).await
+    }
+
     async fn save(
         &self,
         operation: &Operation,
@@ -286,6 +293,13 @@ impl Flaky {
 
 #[async_trait]
 impl OperationStore for Flaky {
+    async fn fail_unfinished(
+        &self,
+        reason: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        self.inner.fail_unfinished(reason).await
+    }
+
     async fn save(
         &self,
         operation: &Operation,
@@ -333,6 +347,13 @@ impl Stalled {
 
 #[async_trait]
 impl OperationStore for Stalled {
+    async fn fail_unfinished(
+        &self,
+        reason: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        self.inner.fail_unfinished(reason).await
+    }
+
     async fn save(
         &self,
         operation: &Operation,
@@ -1184,6 +1205,13 @@ struct Slow {
 
 #[async_trait]
 impl OperationStore for Slow {
+    async fn fail_unfinished(
+        &self,
+        reason: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        self.inner.fail_unfinished(reason).await
+    }
+
     async fn save(
         &self,
         operation: &Operation,

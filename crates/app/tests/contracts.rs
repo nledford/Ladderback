@@ -56,6 +56,11 @@ async fn in_memory_operation_store_meets_the_operation_store_contract() {
 }
 
 #[tokio::test]
+async fn in_memory_operation_store_recovers_its_unfinished_operations() {
+    contract::operation_store::run_recovery(&InMemoryOperationStore::new()).await;
+}
+
+#[tokio::test]
 async fn simulated_engine_steps_take_time_on_its_clock() {
     let clock = Arc::new(FakeClock::auto_advancing(epoch()));
     let engine = SimulatedEngine::new(clock.clone());

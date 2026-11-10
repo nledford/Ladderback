@@ -77,6 +77,12 @@ pub enum FailureReason {
     /// before the engine started (I4, §6.1). `exit_code` is the hook's exit
     /// status, or `None` when it timed out or could not be started.
     HookFailed { exit_code: Option<i32> },
+    /// The daemon stopped while the operation was queued or running, so the
+    /// operation never reached its end: a crash, a kill, a power cut or a
+    /// restart left it unfinished in the log, and the next start ended it as
+    /// failed (§9). What it did before it stopped is unknown, so it is never
+    /// recorded as succeeded.
+    DaemonStopped,
 }
 
 impl FailureReason {
@@ -94,6 +100,7 @@ impl FailureReason {
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
+            Self::DaemonStopped => "daemon-stopped",
         }
     }
 }
@@ -887,6 +894,11 @@ mod tests {
             "hook-failed"
         );
         assert_eq!(FailureReason::RepositoryExists.code(), "repository-exists");
+    }
+
+    #[test]
+    fn a_daemon_that_stopped_codes_as_daemon_stopped() {
+        assert_eq!(FailureReason::DaemonStopped.code(), "daemon-stopped");
     }
 
     #[test]

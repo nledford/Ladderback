@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::OperationId;
-use domain::execution::{Operation, OperationStatus};
+use domain::execution::{FailureReason, Operation, OperationStatus};
 
 use crate::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
@@ -22,8 +22,8 @@ impl InMemoryOperationStore {
         Self::default()
     }
 
-    // The map is only ever changed by whole inserts, so a panic elsewhere
-    // can't leave it half-written.
+    // Each change is an insert or a plain assignment that cannot panic partway,
+    // so a panic elsewhere can't leave the map half-written.
     fn stored(&self) -> MutexGuard<'_, BTreeMap<OperationId, OperationDetail>> {
         self.stored.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -111,5 +111,18 @@ impl OperationStore for InMemoryOperationStore {
             .filter(|_| more_remain)
             .map(|last| last.id);
         Ok(HistoryPage { operations, next })
+    }
+
+    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
+        let mut ended = 0;
+        for detail in self.stored().values_mut() {
+            if !detail.record.status.is_finished() {
+                detail.record.status = OperationStatus::Failed {
+                    reason: reason.clone(),
+                };
+                ended += 1;
+            }
+        }
+        Ok(ended)
     }
 }

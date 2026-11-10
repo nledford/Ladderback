@@ -21,6 +21,7 @@ pub mod interop;
 pub mod log_write;
 pub mod maintenance;
 pub mod ports;
+pub mod recovery;
 pub mod repositories;
 pub mod secrets;
 pub mod snapshots;
