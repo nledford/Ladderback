@@ -18,8 +18,10 @@ use domain::secrets::{SecretError, SecretRef, SecretValue, SecretWarning};
 ///   not an empty secret. It fails as
 ///   `CommandFailed` with the exit status and a short, one-line `detail` from
 ///   its stderr, never from its output; as `Unreachable` when it can't be
-///   started; and as `TimedOut` when it outlives the resolver's limit, after
-///   which nothing it started is left running.
+///   started; and as `TimedOut` when it outlives the resolver's limit. Its
+///   process group then gets SIGTERM and, 5 s later, SIGKILL if the command
+///   is still running; a process the command started that ignored the
+///   SIGTERM can outlive a command that ended on it (security.md §10.2).
 /// - A keyring entry that isn't there is `Missing`; a keyring that can't be
 ///   reached is `Unreachable`.
 /// - Whatever a source gives is limited to `MAX_SECRET_BYTES`, the whole of

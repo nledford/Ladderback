@@ -16,6 +16,7 @@ use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
     SecretValue, SecretWarning, SourceName,
 };
+use nix::sys::signal::Signal;
 use nix::unistd::Pid;
 use tempfile::TempDir;
 
@@ -242,7 +243,7 @@ async fn the_system_resolver_meets_the_secrets_contract() {
 // --------------------------------------------------------------- commands
 
 #[tokio::test]
-async fn a_timed_out_command_leaves_nothing_of_its_group_running() {
+async fn a_timed_out_command_takes_a_helper_of_its_group_with_it() {
     let directory = TempDir::new().unwrap();
     let pidfile = directory.path().join("pid");
     let script = sh(
@@ -347,10 +348,11 @@ async fn a_command_that_exited_in_time_is_not_timed_out_by_a_daemon_of_its() {
     let directory = TempDir::new().unwrap();
     let pidfile = directory.path().join("pid");
     let signalled = Mutex::new(0_u32);
-    let signal = |_: Pid| *signalled.lock().unwrap() += 1;
+    let signal = |_: Pid, _: Signal| *signalled.lock().unwrap() += 1;
     let stop = Stop {
+        grace: Duration::from_secs(5),
         reap_limit: Duration::from_secs(5),
-        kill: &signal,
+        signal: &signal,
     };
     let script = sh(
         r#"sleep 60 & echo $! > "$1"; echo hunter2"#,
@@ -868,10 +870,11 @@ async fn a_file_that_cannot_be_read_in_time_is_timed_out() {
 /// the call, and what the call waits for after it is bounded too.
 #[tokio::test]
 async fn a_command_that_will_not_die_does_not_hold_the_resolver_up() {
-    let lost = |_: Pid| {};
+    let lost = |_: Pid, _: Signal| {};
     let stop = Stop {
+        grace: Duration::from_millis(300),
         reap_limit: Duration::from_millis(300),
-        kill: &lost,
+        signal: &lost,
     };
     let started = Instant::now();
     let sleeping = sh("exec sleep 60", Vec::<String>::new());
@@ -893,24 +896,293 @@ async fn a_command_that_will_not_die_does_not_hold_the_resolver_up() {
     );
 }
 
-/// A process group is named by the process id of its leader, and that id is
-/// free for another process once the leader has been reaped.
-#[tokio::test]
-async fn the_group_is_signalled_once_and_only_while_its_leader_is_unreaped() {
-    use nix::sys::signal::{Signal, kill, killpg};
-    let leader_there = Mutex::new(Vec::new());
-    let signal = |group: Pid| {
+/// What a command that traps TERM did before and while it was stopped.
+struct Trapped {
+    result: Result<SecretValue, SecretError>,
+    /// What the script wrote to its log, line by line.
+    lines: Vec<String>,
+    /// From the call to its return.
+    elapsed: Duration,
+    /// The signals the stop sent to the group, in order, each with whether
+    /// the leader was there (not reaped) when it went.
+    sent: Vec<(Signal, bool)>,
+}
+
+impl Trapped {
+    fn wrote(&self, line: &str) -> bool {
+        self.lines.iter().any(|written| written == line)
+    }
+}
+
+/// A stop's signals, sent for real and remembered, each with whether the
+/// leader of the group was there (not reaped) when it went.
+#[derive(Default)]
+struct Signals(Mutex<Vec<(Signal, bool)>>);
+
+impl Signals {
+    fn send(&self, group: Pid, signal: Signal) {
+        use nix::sys::signal::{kill, killpg};
         // Signal 0 only asks whether the process is there, reaped or not.
-        leader_there.lock().unwrap().push(kill(group, None).is_ok());
-        let _ = killpg(group, Signal::SIGKILL);
-    };
+        let there = kill(group, None).is_ok();
+        self.0.lock().unwrap().push((signal, there));
+        let _ = killpg(group, signal);
+    }
+
+    fn sent(&self) -> Vec<(Signal, bool)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// Runs `script` (`$1` is its log) until `limit` and stops it with the real
+/// signals and a SIGKILL `grace` after the SIGTERM. A command that is still
+/// starting when the limit fires is ended by the TERM before it has trapped
+/// anything, which reads as a clean stop with nothing written: only a run
+/// whose script said `ready` once its trap was in place proves anything, so
+/// the others are tried again.
+async fn run_trapping(script: &str, limit: Duration, grace: Duration) -> Trapped {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let command = sh(script, [log.display().to_string()]);
+    let mut written = Vec::new();
+    for _ in 0..3 {
+        fs::write(&log, "").unwrap();
+        let signals = Signals::default();
+        let stop = Stop {
+            grace,
+            reap_limit: Duration::from_secs(5),
+            signal: &|group, signal| signals.send(group, signal),
+        };
+        let started = Instant::now();
+        let result = run_with(&command, limit, &stop).await;
+        let elapsed = started.elapsed();
+        written = fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        if written.iter().any(|line| line == "ready") {
+            return Trapped {
+                result,
+                lines: written,
+                elapsed,
+                sent: signals.sent(),
+            };
+        }
+    }
+    panic!("the command never reached its trap: {written:?}");
+}
+
+fn timed_out() -> Result<SecretValue, SecretError> {
+    Err(SecretError {
+        source: program("sh"),
+        problem: Problem::TimedOut { seconds: 1 },
+    })
+}
+
+/// The polite signal comes first: a command that handles it ends cleanly, as
+/// a helper that holds a lock or a session does, and a limit does not take
+/// that from it. Nothing is sent after it, and the call does not wait out a
+/// grace the command did not need.
+///
+/// A group is named by the process id of its leader, and that id is free for
+/// another process once the leader has been reaped: the signal went while the
+/// leader was there, and no other went after it.
+#[tokio::test]
+async fn a_timed_out_command_gets_sigterm_before_anything_else() {
+    let limit = Duration::from_secs(1);
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'echo term >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        limit,
+        Duration::from_secs(20),
+    )
+    .await;
+    assert_eq!(trapped.result, timed_out());
+    assert!(
+        trapped.wrote("term"),
+        "SIGTERM did not reach the command: {:?}",
+        trapped.lines
+    );
+    assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
+    assert!(
+        trapped.elapsed < limit + Duration::from_secs(10),
+        "the call waited {:?}",
+        trapped.elapsed
+    );
+}
+
+/// What a command says on its way out, it can say: a handler that writes to
+/// stdout or stderr (a helper that logs that it is closing its session) must
+/// find the pipes open, or the SIGPIPE ends it before it is done.
+#[tokio::test]
+async fn a_command_can_still_write_to_its_output_when_it_gets_sigterm() {
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'echo closing; echo closing >&2; echo done >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
+    )
+    .await;
+    assert_eq!(trapped.result, timed_out());
+    assert!(
+        trapped.wrote("done"),
+        "the handler was cut short: {:?}",
+        trapped.lines
+    );
+}
+
+/// A command that ignores SIGTERM is killed once its grace is over: not
+/// before, so the polite signal had its time, and not much later, so the
+/// call is bounded. Each signal went once, while the leader was there.
+#[tokio::test]
+async fn a_command_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
+    let limit = Duration::from_secs(1);
+    let grace = Duration::from_secs(1);
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'echo term >> "$1"' TERM"#,
+            "\n",
+            r#"echo "pid $$" >> "$1""#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        limit,
+        grace,
+    )
+    .await;
+    assert_eq!(trapped.result, timed_out());
+    assert!(
+        trapped.wrote("term"),
+        "SIGTERM did not reach the command: {:?}",
+        trapped.lines
+    );
+    assert_eq!(
+        trapped.sent,
+        [(Signal::SIGTERM, true), (Signal::SIGKILL, true)]
+    );
+    assert!(
+        trapped.elapsed >= limit + grace,
+        "the grace was not given: {:?}",
+        trapped.elapsed
+    );
+    // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
+    assert!(
+        trapped.elapsed < limit + grace + Duration::from_secs(15),
+        "the call waited {:?}",
+        trapped.elapsed
+    );
+    let pid = trapped
+        .lines
+        .iter()
+        .find_map(|line| line.strip_prefix("pid ")?.parse().ok())
+        .expect("the script wrote its pid");
+    let _reaper = Reaper(pid);
+    // Reaped, not only killed: gone from the process table, so the call has
+    // waited for it (a zombie still answers signal 0).
+    assert!(
+        nix::sys::signal::kill(Pid::from_raw(pid), None).is_err(),
+        "{pid} was not reaped when the call returned"
+    );
+    assert!(is_gone_soon(pid).await, "{pid} is still running");
+}
+
+/// Waits until the log at `log` has the line `line`.
+async fn logged(log: &Path, line: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if fs::read_to_string(log).is_ok_and(|text| text.lines().any(|written| written == line)) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {line:?} in {}",
+            log.display()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A call that is given up on while the command has its grace is not a reason
+/// to leave the command running: the drop sends the SIGKILL. The call is
+/// dropped once the command has said that it got the SIGTERM; one that ended
+/// before it had trapped anything proves nothing and is tried again.
+#[tokio::test]
+async fn dropping_the_call_during_the_grace_kills_the_command() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let command = sh(
+        concat!(
+            r#"trap 'echo term >> "$1"' TERM"#,
+            "\n",
+            r#"echo "pid $$" >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        [log.display().to_string()],
+    );
+    for attempt in 0..3 {
+        fs::write(&log, "").unwrap();
+        let signals = Signals::default();
+        let stop = Stop {
+            grace: Duration::from_secs(60),
+            reap_limit: Duration::from_secs(5),
+            signal: &|group, signal| signals.send(group, signal),
+        };
+        {
+            let running = run_with(&command, Duration::from_secs(1), &stop);
+            tokio::pin!(running);
+            tokio::select! {
+                result = &mut running => {
+                    assert!(attempt < 2, "the command never reached its trap: {result:?}");
+                    continue;
+                }
+                () = logged(&log, "term") => {}
+            }
+            // `running` is dropped here, in the middle of the grace.
+        }
+        let pid = fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("pid ")?.parse().ok())
+            .expect("the script wrote its pid");
+        let _reaper = Reaper(pid);
+        assert_eq!(
+            signals.sent(),
+            [(Signal::SIGTERM, true), (Signal::SIGKILL, true)]
+        );
+        assert!(is_gone_soon(pid).await, "{pid} is still running");
+        return;
+    }
+}
+
+/// A command that prints without end is killed at once, with no grace, even
+/// when it would ignore a SIGTERM: it is not asked to stop what it is doing
+/// wrong.
+#[tokio::test]
+async fn a_command_that_prints_without_end_gets_no_grace() {
+    let signals = Signals::default();
     let stop = Stop {
+        grace: Duration::from_secs(60),
         reap_limit: Duration::from_secs(5),
-        kill: &signal,
+        signal: &|group, signal| signals.send(group, signal),
     };
+    let started = Instant::now();
+    // `yes` takes the ignored SIGTERM of the shell that executes it.
     let result = run_with(
-        &sh("sleep 60", Vec::<String>::new()),
-        Duration::from_millis(300),
+        &sh("trap '' TERM; exec yes", Vec::<String>::new()),
+        Duration::from_secs(60),
         &stop,
     )
     .await;
@@ -918,40 +1190,83 @@ async fn the_group_is_signalled_once_and_only_while_its_leader_is_unreaped() {
         result,
         Err(SecretError {
             source: program("sh"),
-            problem: Problem::TimedOut { seconds: 1 },
+            problem: Problem::TooLarge {
+                limit: MAX_SECRET_BYTES
+            },
         })
     );
-    assert_eq!(*leader_there.lock().unwrap(), [true]);
+    assert_eq!(signals.sent(), [(Signal::SIGKILL, true)]);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "took {:?}",
+        started.elapsed()
+    );
 }
 
-/// A command that ignores the polite signal and outlives its limit is gone
-/// when the call returns, and the call did not wait for it in vain.
+/// What the grace can't do: a command that ends on the SIGTERM is reaped, and
+/// the group is not signalled after that, as its id may be another process's
+/// by then. A descendant that ignores the SIGTERM too is left running.
 #[tokio::test]
-async fn a_command_that_ignores_termination_is_killed_at_its_limit() {
-    let scratch = TempDir::new().unwrap();
-    let pidfile = scratch.path().join("pid");
-    let script = format!("trap '' TERM; echo $$ > {}; sleep 60", pidfile.display());
-    let result = run_with(
-        &sh(&script, Vec::<String>::new()),
-        Duration::from_millis(300),
-        &Stop {
-            reap_limit: Duration::from_secs(5),
-            kill: &|group| {
-                let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
-            },
-        },
+async fn a_descendant_that_ignores_sigterm_outlives_a_command_that_ended_on_it() {
+    let trapped = run_trapping(
+        concat!(
+            "trap '' TERM\n",
+            "sleep 300 &\n",
+            r#"echo "descendant $!" >> "$1""#,
+            "\n",
+            r#"trap 'echo term >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
     )
     .await;
-    assert_eq!(
-        result,
-        Err(SecretError {
-            source: program("sh"),
-            problem: Problem::TimedOut { seconds: 1 },
-        })
+    let descendant = trapped
+        .lines
+        .iter()
+        .find_map(|line| line.strip_prefix("descendant ")?.parse().ok())
+        .expect("the script wrote its descendant's pid");
+    let _reaper = Reaper(descendant);
+    assert_eq!(trapped.result, timed_out());
+    assert!(trapped.wrote("term"), "{:?}", trapped.lines);
+    assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
+    assert!(is_running(descendant), "{descendant} was killed");
+}
+
+/// The call returns once the killed command is reaped, not when the SIGKILL
+/// is sent: here the SIGKILL takes a while to arrive, as it does for a
+/// command that is busy in the kernel, and the call waits for it. (The
+/// SIGTERM is not delivered at all, so the command is still there when the
+/// grace is over.)
+#[tokio::test]
+async fn the_call_waits_for_a_killed_command_to_be_reaped() {
+    let delay = Duration::from_millis(400);
+    let (limit, grace) = (Duration::from_millis(300), Duration::from_millis(300));
+    let late = |group: Pid, signal: Signal| {
+        if signal == Signal::SIGKILL {
+            std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let _ = nix::sys::signal::killpg(group, Signal::SIGKILL);
+            });
+        }
+    };
+    let stop = Stop {
+        grace,
+        reap_limit: Duration::from_secs(5),
+        signal: &late,
+    };
+    let started = Instant::now();
+    let result = run_with(&sh("sleep 60", Vec::<String>::new()), limit, &stop).await;
+    let elapsed = started.elapsed();
+    assert_eq!(result, timed_out());
+    assert!(
+        elapsed >= limit + grace + delay,
+        "the call did not wait for the command: {elapsed:?}"
     );
-    let pid = recorded_pid(&pidfile).await;
-    let _reaper = Reaper(pid);
-    assert!(is_gone_soon(pid).await, "{pid} is still running");
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 /// A command that ended by itself is reaped: nothing is signalled, as the
@@ -959,10 +1274,11 @@ async fn a_command_that_ignores_termination_is_killed_at_its_limit() {
 #[tokio::test]
 async fn a_command_that_ends_by_itself_is_never_signalled() {
     let signalled = Mutex::new(0_u32);
-    let signal = |_: Pid| *signalled.lock().unwrap() += 1;
+    let signal = |_: Pid, _: Signal| *signalled.lock().unwrap() += 1;
     let stop = Stop {
+        grace: Duration::from_secs(5),
         reap_limit: Duration::from_secs(5),
-        kill: &signal,
+        signal: &signal,
     };
     let result = run_with(
         &sh("echo hunter2", Vec::<String>::new()),

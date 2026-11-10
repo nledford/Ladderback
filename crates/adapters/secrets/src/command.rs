@@ -30,19 +30,27 @@ const READ_CHUNK: usize = 8 * 1024;
 /// sleep (a hung mount) may never be reaped.
 const REAP_LIMIT: Duration = Duration::from_secs(5);
 
-/// What stops a command that outlives its limit; tests replace both parts.
+/// How long a command that outlived its limit has to end after SIGTERM before
+/// it is killed.
+const KILL_GRACE: Duration = Duration::from_secs(5);
+
+/// What stops a command that outlives its limit; tests replace the parts.
 pub(crate) struct Stop<'a> {
-    /// How long a command that was signalled is waited for.
+    /// How long a command that got SIGTERM is given to end before SIGKILL.
+    pub(crate) grace: Duration,
+    /// How long a command that got SIGKILL is waited for.
     pub(crate) reap_limit: Duration,
-    /// Signals the process group with this id.
-    pub(crate) kill: &'a (dyn Fn(Pid) + Send + Sync),
+    /// Sends a signal to the process group with this id.
+    pub(crate) signal: &'a (dyn Fn(Pid, Signal) + Send + Sync),
 }
 
 impl Stop<'static> {
-    /// SIGKILL to the group, and five seconds for the command to be reaped.
-    const SIGKILL: Self = Self {
+    /// The real stop: SIGTERM to the group, SIGKILL after [`KILL_GRACE`], and
+    /// [`REAP_LIMIT`] for the command to be reaped.
+    const REAL: Self = Self {
+        grace: KILL_GRACE,
         reap_limit: REAP_LIMIT,
-        kill: &kill_group,
+        signal: &signal_group,
     };
 }
 
@@ -51,7 +59,7 @@ pub(crate) async fn run(
     command: &CommandLine,
     limit: Duration,
 ) -> Result<SecretValue, SecretError> {
-    run_with(command, limit, &Stop::SIGKILL).await
+    run_with(command, limit, &Stop::REAL).await
 }
 
 pub(crate) async fn run_with(
@@ -81,7 +89,11 @@ pub(crate) async fn run_with(
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
     let mut running = Running::new(child, stop);
-    let (Some(stdout), Some(stderr)) = (running.child.stdout.take(), running.child.stderr.take())
+    // Held until the command is reaped, though nothing reads them after the
+    // limit: a handler that writes to them when it gets SIGTERM must find
+    // them open, or the SIGPIPE ends it before it is done.
+    let (Some(mut stdout), Some(mut stderr)) =
+        (running.child.stdout.take(), running.child.stderr.take())
     else {
         return Err(unreachable("the command's output is not piped".to_owned()));
     };
@@ -90,8 +102,8 @@ pub(crate) async fn run_with(
     let mut err = Vec::new();
     let outcome = collect(
         &mut running.child,
-        stdout,
-        stderr,
+        &mut stdout,
+        &mut stderr,
         limit,
         &mut out,
         &mut err,
@@ -110,7 +122,7 @@ pub(crate) async fn run_with(
             return Err(unreachable(error.to_string()));
         }
         Ok(Outcome::TimedOut) => {
-            running.kill_and_reap().await;
+            running.terminate_and_reap().await;
             return Err(fail(Problem::TimedOut {
                 seconds: whole_seconds_up(limit),
             }));
@@ -138,14 +150,18 @@ pub(crate) fn whole_seconds_up(limit: Duration) -> u64 {
 /// not leave a command behind, and `kill_on_drop` reaches only the command
 /// itself.
 ///
-/// A group is named by the process id of its leader, and that id is free for
-/// an unrelated process once the leader has been reaped, so the group is
-/// signalled only while the leader is not, and at most once.
+/// A group is named by the process id of its leader, and a leader that has
+/// been reaped no longer holds that id: once the group has no live member
+/// either, the id is free for an unrelated process, and a signal to it would
+/// reach that one. What is left of the group after the leader is gone can't
+/// be told from here, so the group is signalled only while the leader is
+/// not reaped, and each signal at most once.
 struct Running<'a> {
     child: Child,
     group: Option<Pid>,
     stop: &'a Stop<'a>,
-    signalled: bool,
+    terminated: bool,
+    killed: bool,
 }
 
 impl<'a> Running<'a> {
@@ -158,38 +174,56 @@ impl<'a> Running<'a> {
             child,
             group,
             stop,
-            signalled: false,
+            terminated: false,
+            killed: false,
         }
     }
 
-    fn kill(&mut self) {
+    fn send(&mut self, signal: Signal) {
+        let sent = match signal {
+            Signal::SIGKILL => &mut self.killed,
+            _ => &mut self.terminated,
+        };
         // Tokio gives no id once the child has been waited for.
-        if self.signalled || self.child.id().is_none() {
+        if *sent || self.child.id().is_none() {
             return;
         }
         if let Some(group) = self.group {
-            self.signalled = true;
-            (self.stop.kill)(group);
+            *sent = true;
+            (self.stop.signal)(group, signal);
         }
     }
 
     /// Signals the group and waits for the command, for as long as the stop
     /// allows: a command no signal reaches does not hold the caller up.
     async fn kill_and_reap(&mut self) {
-        self.kill();
+        self.send(Signal::SIGKILL);
         let _ = timeout(self.stop.reap_limit, self.child.wait()).await;
+    }
+
+    /// SIGTERM to the group, and SIGKILL once the grace has passed with the
+    /// command still running. A command that ended on the SIGTERM is reaped
+    /// and nothing more is sent: what it started and left running, if it
+    /// ignored the SIGTERM, is not signalled, as the group may have no live
+    /// member by now. The whole call takes at most the grace and the reap
+    /// limit.
+    async fn terminate_and_reap(&mut self) {
+        self.send(Signal::SIGTERM);
+        if timeout(self.stop.grace, self.child.wait()).await.is_err() {
+            self.kill_and_reap().await;
+        }
     }
 }
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.kill();
+        self.send(Signal::SIGKILL);
     }
 }
 
-/// Kills the whole process group: nothing left in it is not an error.
-fn kill_group(group: Pid) {
-    let _ = killpg(group, Signal::SIGKILL);
+/// Signals the whole process group: nothing left in it is not an error.
+fn signal_group(group: Pid, signal: Signal) {
+    let _ = killpg(group, signal);
 }
 
 enum Outcome {
@@ -212,8 +246,8 @@ enum End {
 /// out, and the group is signalled only while its leader is not reaped.
 async fn collect(
     child: &mut Child,
-    stdout: ChildStdout,
-    stderr: ChildStderr,
+    stdout: &mut ChildStdout,
+    stderr: &mut ChildStderr,
     limit: Duration,
     out: &mut Vec<u8>,
     err: &mut Vec<u8>,
