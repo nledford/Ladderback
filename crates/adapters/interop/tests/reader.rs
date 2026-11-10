@@ -1546,3 +1546,51 @@ async fn a_dropped_tag_is_noted_without_control_characters_and_cut_short() {
     );
     assert!(dropped.iter().all(|tag| !tag.chars().any(char::is_control)));
 }
+
+// --- A value that grows when it is escaped ----------------------------------------
+
+/// `pairs` times `${`, then `extra`: escaped, every pair is three bytes.
+fn dollars(pairs: usize, extra: &str) -> String {
+    format!("{}{extra}", "${".repeat(pairs))
+}
+
+#[tokio::test]
+async fn a_value_that_is_too_long_once_escaped_is_refused_where_it_is_written() {
+    // The config reads these values as templates, which end at 64 KiB:
+    // 21 845 pairs escape to 65 535 bytes, and one more byte is the cap.
+    let at_the_cap = dollars(21_845, "x");
+    let over = dollars(21_845, "xx");
+    assert_eq!(at_the_cap.len() + 21_845, 64 * 1024);
+
+    let scratch = Scratch::new();
+    for (field, key) in [
+        ("repository", "repository.repository"),
+        ("repo-hot", "repository.repo-hot"),
+        ("options", "repository.options.region"),
+        ("options-hot", "repository.options-hot.region"),
+        ("options-cold", "repository.options-cold.region"),
+    ] {
+        let text = |value: &str| {
+            let location = if field == "repository" {
+                format!("repository = {value:?}")
+            } else {
+                "repository = \"/srv/demo-repo\"".to_owned()
+            };
+            let more = match field {
+                "repository" => String::new(),
+                "repo-hot" => format!("repo-hot = {value:?}"),
+                options => format!("{options} = {{ region = {value:?} }}"),
+            };
+            format!(
+                "[repository]\n{location}\n{more}\npassword-file = \"/srv/demo-password\"\n\n{ENTRY}"
+            )
+        };
+        scratch
+            .read(&text(&at_the_cap))
+            .await
+            .unwrap_or_else(|error| panic!("{field} at the cap: {error:?}"));
+        let (found, _, problem) = invalid(scratch.read(&text(&over)).await.unwrap_err());
+        assert_eq!(found, key, "{field}");
+        assert_eq!(problem, ProfileProblem::BadValue, "{field}");
+    }
+}
