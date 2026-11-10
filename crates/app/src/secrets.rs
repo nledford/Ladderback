@@ -8,7 +8,7 @@ use std::sync::Arc;
 use domain::planning::RepositorySettings;
 use domain::secrets::{
     MAX_SECRET_BYTES, Part, Reference, SecretError, SecretRef, SecretValue, SecretWarning,
-    Template, TemplateError,
+    Template, TemplateError, has_reference,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
@@ -141,17 +141,6 @@ const COMMAND_OPTIONS: [&str; 3] = [
     "post-create-command",
     "post-delete-command",
 ];
-
-/// Whether `text` is a valid template with a reference in it. A malformed
-/// one is reported by the field's expansion, in its turn.
-fn has_reference(text: &str) -> bool {
-    Template::parse(text).is_ok_and(|template| {
-        template
-            .parts()
-            .iter()
-            .any(|part| matches!(part, Part::Reference(_)))
-    })
-}
 
 /// A resolved secret in a process's arguments shows in `ps` and in
 /// `/proc/<pid>/cmdline` (I4), so a reference in a field that becomes one is

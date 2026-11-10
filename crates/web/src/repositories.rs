@@ -8,9 +8,10 @@ use std::collections::BTreeMap;
 
 use api::{
     ConnectRepositoryDto, ErrorCode, InitRepositoryDto, MsgArg, PasswordDto, PasswordSourceDto,
-    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto,
+    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, RepositoryWarningDto,
+    TestRepositoryDto,
 };
-use l10n::{MessageId, msg};
+use l10n::{Localizer, MessageId, msg};
 
 use crate::components::SummaryItem;
 use crate::ws::Phase;
@@ -302,6 +303,26 @@ pub(crate) fn password_source(
             (msg::UI_PASSWORD_COMMAND, vec![("program", text(program))])
         }
     }
+}
+
+/// The notes a repository's row carries, one per warning, as the catalog
+/// writes them in the page's language (§8.4). A warning holds a code and the
+/// names of the settings it is about, never a secret (I4).
+pub(crate) fn repository_notes(
+    localizer: &Localizer,
+    warnings: &[RepositoryWarningDto],
+) -> Vec<String> {
+    warnings
+        .iter()
+        .map(|warning| {
+            let args: Vec<(&str, MsgArg)> = warning
+                .args
+                .iter()
+                .map(|(name, arg)| (name.as_str(), arg.clone()))
+                .collect();
+            localizer.warning(warning.code, &args, None).into_text()
+        })
+        .collect()
 }
 
 /// A refusal's sentence, in two parts when the engine's own words are in it:
@@ -742,6 +763,33 @@ mod tests {
         for (source, id, args) in cases {
             assert_eq!(password_source(&source), (id, args), "{source:?}");
         }
+    }
+
+    #[test]
+    fn a_repositorys_warnings_read_as_notes_in_the_catalogs_words_naming_the_setting() {
+        let localizer = Localizer::new(&[]);
+        let warning = |field: &str| RepositoryWarningDto {
+            code: api::WarningCode::ConfigInlineSecret,
+            args: [("field".to_owned(), text(field))].into(),
+        };
+        let notes = repository_notes(
+            &localizer,
+            &[warning("password"), warning("options.secret_access_key")],
+        );
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].contains("The password of this repository is written as text"),
+            "{notes:?}"
+        );
+        assert!(notes[1].contains("options.secret_access_key"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_repository_with_no_warnings_has_no_notes() {
+        assert_eq!(
+            repository_notes(&Localizer::new(&[]), &[]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

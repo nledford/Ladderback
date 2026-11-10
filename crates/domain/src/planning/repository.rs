@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
-use crate::secrets::{REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue};
+use crate::secrets::{
+    InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
+    is_secret_option,
+};
 
 /// A repository as the configuration describes it: its fields may hold
 /// `${VAR}` and `${file:/path}` references, which are resolved when a job
@@ -21,6 +24,32 @@ pub struct RepositorySettings {
     pub options: BTreeMap<String, String>,
     pub options_hot: BTreeMap<String, String>,
     pub options_cold: BTreeMap<String, String>,
+}
+
+impl RepositorySettings {
+    /// Every secret these settings hold as text: the password when it is
+    /// inline, and each option whose name says it is a credential
+    /// ([`is_secret_option`]) and whose value has no `${…}` reference in it.
+    /// In the order password, `options`, `options-hot`, `options-cold`, each
+    /// by name. A secret that is empty is nothing to move.
+    pub fn inline_secrets(&self) -> Vec<InlineSecret> {
+        let mut found = Vec::new();
+        if matches!(&self.password, SecretRef::Inline(value) if !value.expose().is_empty()) {
+            found.push(InlineSecret::Password);
+        }
+        let mut credentials = |set: &BTreeMap<String, String>,
+                               secret: fn(String) -> InlineSecret| {
+            for (name, value) in set {
+                if is_secret_option(name) && !value.is_empty() && !has_reference(value) {
+                    found.push(secret(name.clone()));
+                }
+            }
+        };
+        credentials(&self.options, InlineSecret::Option);
+        credentials(&self.options_hot, InlineSecret::OptionHot);
+        credentials(&self.options_cold, InlineSecret::OptionCold);
+        found
+    }
 }
 
 /// An option written in the config can be a secret as it stands, so what the

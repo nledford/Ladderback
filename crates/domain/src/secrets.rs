@@ -4,19 +4,21 @@
 use std::collections::BTreeMap;
 
 mod command;
+mod inline;
 mod options;
 mod outcome;
 mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
+pub use inline::InlineSecret;
 pub use options::is_secret_option;
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
     file_warning,
 };
 pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};
-pub use template::{Part, Reference, Template, TemplateError};
+pub use template::{Part, Reference, Template, TemplateError, has_reference};
 
 /// The most bytes a secret may have, and a field that may hold references:
 /// what is read from a file or from a command's output, what a reference

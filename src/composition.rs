@@ -70,6 +70,23 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
     MsgArg::Text(value.to_string())
 }
 
+/// Says in the log, once at load, each secret the configuration holds as
+/// text (§10.2): the repository and the setting, in the catalog's words,
+/// never the secret (I4).
+fn log_inline_secrets(config: &domain::planning::AgentConfig) {
+    let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+    for (alias, repository) in config.repositories() {
+        for secret in repository.settings.inline_secrets() {
+            let message = localizer.warning(
+                WarningCode::ConfigInlineSecret,
+                &[("field", MsgArg::Text(secret.field()))],
+                None,
+            );
+            log::warn!("repository {}: {message}", alias.as_str());
+        }
+    }
+}
+
 /// What the daemon's router runs against (§4.2), or why it cannot.
 pub(crate) async fn app_state() -> Result<AppState, Refused> {
     app_state_at(dirs::config_dir(), dirs::data_dir()).await
@@ -87,7 +104,8 @@ async fn app_state_at(
         config_dir.join("config.toml"),
         Arc::new(SystemClock),
     ));
-    config.load().await.map_err(config_refused)?;
+    let loaded = config.load().await.map_err(config_refused)?;
+    log_inline_secrets(&loaded);
     // The data dir must be there before the store opens in it.
     let data_dir = data_dir.ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
     std::fs::create_dir_all(&data_dir)
@@ -1389,6 +1407,14 @@ fn repository_row(alias: &RepositoryAlias, settings: &RepositorySettings) -> api
                 program: command.program().to_owned(),
             },
         },
+        warnings: settings
+            .inline_secrets()
+            .iter()
+            .map(|secret| api::RepositoryWarningDto {
+                code: WarningCode::ConfigInlineSecret,
+                args: [("field".to_owned(), MsgArg::Text(secret.field()))].into(),
+            })
+            .collect(),
     }
 }
 
@@ -1479,6 +1505,58 @@ mod tests {
         let dto = snapshot_dto(&listed(false, false)).expect("a valid snapshot");
         assert!(!dto.paths_truncated && !dto.tags_truncated);
         assert_eq!(dto.label, "home");
+    }
+
+    fn demo_settings(password: SecretRef) -> RepositorySettings {
+        RepositorySettings {
+            repository: "s3:s3.example.net/demo".to_owned(),
+            repo_hot: None,
+            password,
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        }
+    }
+
+    fn field_warning(field: &str) -> api::RepositoryWarningDto {
+        api::RepositoryWarningDto {
+            code: WarningCode::ConfigInlineSecret,
+            args: [("field".to_owned(), MsgArg::Text(field.to_owned()))].into(),
+        }
+    }
+
+    #[test]
+    fn a_listed_repository_with_secrets_in_the_config_carries_a_warning_for_each_without_the_value()
+    {
+        let (password, key) = ("not-a-real-password", "not-a-real-key");
+        let mut settings = demo_settings(SecretRef::Inline(SecretValue::new(password)));
+        settings
+            .options_cold
+            .insert("secret_access_key".to_owned(), key.to_owned());
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let row = repository_row(&alias, &settings);
+        assert_eq!(
+            row.warnings,
+            [
+                field_warning("password"),
+                field_warning("options-cold.secret_access_key")
+            ]
+        );
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        assert!(
+            !wire.contains(password) && !wire.contains(key),
+            "the row repeats a secret: {wire}"
+        );
+    }
+
+    #[test]
+    fn a_listed_repository_whose_secrets_are_read_from_elsewhere_has_no_warning() {
+        let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        settings
+            .options
+            .insert("secret_access_key".to_owned(), "${DEMO_KEY}".to_owned());
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        assert_eq!(repository_row(&alias, &settings).warnings, []);
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has

@@ -24,7 +24,17 @@ impl Daemon {
     /// Starts the daemon on a port of the system's choosing, with `RUST_LOG`
     /// set to `rust_log` or, for `None`, not set at all.
     fn start(rust_log: Option<&str>) -> Self {
+        Self::start_with(rust_log, None)
+    }
+
+    /// [`Daemon::start`] with `config` written as the daemon's `config.toml`.
+    fn start_with(rust_log: Option<&str>, config: Option<&str>) -> Self {
         let scratch = tempfile::tempdir().expect("a scratch folder for the daemon");
+        if let Some(config) = config {
+            let folder = testkit::daemon::config_dir(scratch.path());
+            std::fs::create_dir_all(&folder).expect("the daemon's config folder");
+            std::fs::write(folder.join("config.toml"), config).expect("the daemon's config");
+        }
         let mut command = Command::new(LADDERBACK);
         // Folders of its own: the daemons of these tests run side by side,
         // and none may open the platform's, the developer's real ones.
@@ -159,5 +169,39 @@ fn rust_log_info_shows_the_startup_line_and_rust_log_warn_hides_it() {
     assert!(
         !quiet.iter().any(|line| is_startup_line(line)),
         "RUST_LOG=warn let the INFO line through: {quiet:#?}"
+    );
+}
+
+/// A config with one repository, whose password is `password`.
+fn config_with(password: &str) -> String {
+    format!("schema = 1\n\n[repositories.demo]\nrepository = \"/srv/demo/repo\"\n{password}\n")
+}
+
+#[test]
+fn the_daemon_warns_at_load_of_a_password_written_in_its_config_and_never_repeats_it() {
+    // Not a real secret.
+    let secret = "not-a-real-password";
+    let config = config_with(&format!("password = \"{secret}\""));
+    let lines = Daemon::start_with(None, Some(&config)).lines_until_it_listens();
+    let warned: Vec<_> = lines.iter().filter(|line| line.contains("WARN")).collect();
+    assert!(
+        warned
+            .iter()
+            .any(|line| line.contains("demo") && line.contains("password")),
+        "no WARN line names the repository and its password: {lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains(secret)),
+        "a line repeats the secret: {lines:#?}"
+    );
+}
+
+#[test]
+fn the_daemon_does_not_warn_of_a_password_it_reads_from_elsewhere() {
+    let config = config_with("password-env = \"DEMO_PASSWORD\"");
+    let lines = Daemon::start_with(None, Some(&config)).lines_until_it_listens();
+    assert!(
+        !lines.iter().any(|line| line.contains("WARN")),
+        "a WARN line for a password that is no secret in the config: {lines:#?}"
     );
 }

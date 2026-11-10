@@ -39,6 +39,12 @@ Feature: Repositories over HTTP
     And the daemon lists the repository "demo" at the location, its password stored inline
     And no answer holds the password
 
+  Scenario: A password stored in the config is listed with a warning that names the setting, not the value
+    Given an initialised repository
+    When the client connects it as "demo"
+    Then the daemon lists the repository "demo" with a warning that its password is written in the config
+    And no answer holds the password
+
   Scenario: Connecting over HTTP with an alias already used is refused
     Given an initialised repository
     And the client has connected it as "demo"
@@ -70,6 +76,7 @@ Feature: Repositories over HTTP
     When the client connects it as "demo"
     Then the daemon's config file doesn't hold "demo-password"
     And the daemon lists the repository "demo" at the location, its password in the file
+    And the daemon lists the repository "demo" with no warnings
 
   Scenario: Initialising a new local repository gives it an ID and saves nothing
     Given an empty repository location

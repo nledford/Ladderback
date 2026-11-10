@@ -32,7 +32,7 @@ Every secret-bearing field can come from any of these sources. That covers the r
 | OS keyring | `password-keyring = "ladderback/nas"` | Desktops. The UI can write the entry for you. Not available to system services before login or to a root worker reading a user's keyring |
 | File | `password-file = "/run/secrets/nas_password"` (rustic-compatible) | **Docker/Podman secrets**, systemd `LoadCredential=` (`$CREDENTIALS_DIRECTORY/…`), Kubernetes secrets |
 | Environment variable | `password-env = "NAS_PASSWORD"` | Containers, CI, systemd `Environment=`/`EnvironmentFile=` |
-| Inline | `password = "…"` | Accepted (e.g. on import) with a warning and an offer to move it to the keyring |
+| Inline | `password = "…"` | Accepted (e.g. on import) with a warning: the daemon logs `config-inline-secret` once per secret when it starts and loads the config (a repository saved while it runs is noted on its row at once and logged at the next start), and the Repositories page notes it on that repository's row. Both name the setting (`password`, `options.NAME`), never the value; it is not a refusal. An option counts when its name says it is a credential (`is_secret_option`) and its value has no `${…}` reference |
 
 **Substitution in repository fields.** Inspired by Backrest's `${VAR}` expansion, but stricter. `repository`, `repo-hot` and the **values** of `options`, `options-hot` and `options-cold` may reference `${VAR}` (an environment variable) or `${file:/abs/path}` (a file's contents). Substitution is limited to these fields: in hooks it would put secrets into process arguments (I4), and in `label`, `sources` or `tags` it would silently change snapshot identity. It never applies to option names, and never to an inline `password`, which is taken as written. For example:
 
@@ -95,7 +95,7 @@ Hook and notification templates never receive secrets (Backrest leaks them this 
 
 Connecting a repository saves the settings **as written**: a `password-keyring`, `password-file` or `${…}` reference stays a reference in `config.toml`, never the value it resolved to; the resolved value lives only inside the job it was resolved for. The `@e2e` scenario covers this with a file reference — no test writes a real OS-keyring entry — and a keyring reference round-trips the same way through the config store.
 
-**Not yet in place.** Mapping `SecretError` and `TemplateError` to operation failure reasons, API error codes and their localized messages belongs to the job-runner, operation-log and `l10n` work. The warning for an inline secret, and seeding a daemon-wide redactor with every secret at config load, belong to the config work.
+**Not yet in place.** Mapping `SecretError` and `TemplateError` to operation failure reasons, API error codes and their localized messages belongs to the job-runner, operation-log and `l10n` work. Seeding a daemon-wide redactor with every secret at config load belongs to the config work. The warning for an inline secret is built (`config-inline-secret`, §16 decision 37).
 
 ### 10.3 Agent ↔ hub
 

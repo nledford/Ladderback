@@ -310,6 +310,11 @@ warning-profile-used-missing = The profile uses a profile called { $name }, whic
 # $field (text): where the secret is, as its setting.
 warning-inline-secret = The profile holds a secret in { $field }, which { -brand-name } kept as text in its configuration. Move it to a keyring, a file or an environment variable, and refer to that instead.
 
+# A repository's secret is written as text in the configuration file.
+# $field (text): where it is, as the configuration names it, such as password or options.secret_access_key. Keep it as it is.
+# `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
+warning-config-inline-secret = The { $field } of this repository is written as text in the configuration file. Keep the secret outside the file and refer to it: a password can come from a keyring, a file, a command or an environment variable, and an option from a { "${VAR}" } or { "${file:/path}" } reference.
+
 # One of the program's own tags was found on a snapshot entry and dropped.
 # $tag (text): the tag.
 warning-profile-tag-dropped = { -brand-name } dropped the tag { $tag } from a plan, because tags that start like that are its own. It adds them itself.

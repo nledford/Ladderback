@@ -180,6 +180,12 @@ pub enum WarningCode {
     /// A secret written in the profile was kept as text in the configuration.
     /// The argument `field` names it.
     InlineSecret,
+    /// A repository's configuration holds a secret as text: its password, or
+    /// an option whose name says it is a credential. Said when the
+    /// configuration loads and on the repository's row of the list. The
+    /// argument `field` names where it is, as the configuration names it.
+    /// Never the secret itself (I4).
+    ConfigInlineSecret,
     /// A tag of Ladderback's own, found on a snapshot entry, was dropped. The
     /// argument `tag` is the tag.
     ProfileTagDropped,
@@ -560,7 +566,7 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::InlineSecret => &[ArgSpec {
+            Self::InlineSecret | Self::ConfigInlineSecret => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
                 optional: false,
@@ -658,6 +664,33 @@ mod tests {
             let json = serde_json::to_string(&arg).unwrap();
             assert_eq!(serde_json::from_str::<MsgArg>(&json).unwrap(), arg);
         }
+    }
+
+    #[test]
+    fn a_repository_row_carries_its_warnings_as_a_code_and_arguments_and_leaves_none_out() {
+        let row = RepositoryDto {
+            alias: "demo".to_owned(),
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: PasswordSourceDto::Inline,
+            warnings: vec![RepositoryWarningDto {
+                code: WarningCode::ConfigInlineSecret,
+                args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
+            }],
+        };
+        let json = serde_json::to_string(&row).unwrap();
+        assert_eq!(
+            json,
+            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<RepositoryDto>(&json).unwrap(), row);
+        let bare = r#"{"alias":"demo","repository":"/x","password":{"source":"inline"}}"#;
+        assert!(
+            serde_json::from_str::<RepositoryDto>(bare)
+                .unwrap()
+                .warnings
+                .is_empty()
+        );
     }
 
     #[test]
@@ -854,6 +887,10 @@ mod tests {
         assert_eq!(
             WarningCode::ProfileOptionLeftOut.args(),
             &[text("option", false), text("variable", false)]
+        );
+        assert_eq!(
+            WarningCode::ConfigInlineSecret.args(),
+            &[text("field", false)]
         );
         for code in [
             WarningCode::ProfilePrune,
@@ -1422,6 +1459,22 @@ pub struct RepositoryDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_hot: Option<String>,
     pub password: PasswordSourceDto,
+    /// What the configuration holds that the user should know about this
+    /// repository, one per secret written inline. Left out when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<RepositoryWarningDto>,
+}
+
+/// A warning about a configured repository, as its row carries it: the typed
+/// code and the arguments its message declares ([`WarningCode::args`]),
+/// never a sentence (§8.4) and never a secret (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryWarningDto {
+    pub code: WarningCode,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, MsgArg>,
 }
 
 /// Where a configured repository's password comes from, without its value:
@@ -1807,6 +1860,7 @@ mod catalog_dto_tests {
                 repository: "/srv/demo/repo".to_owned(),
                 repo_hot: None,
                 password: PasswordSourceDto::Inline,
+                warnings: Vec::new(),
             }],
         };
         assert_eq!(
@@ -1856,6 +1910,7 @@ mod catalog_dto_tests {
             repository: "rest:https://u:***@nas.example/repo".to_owned(),
             repo_hot: Some("/mnt/hot".to_owned()),
             password: PasswordSourceDto::Inline,
+            warnings: Vec::new(),
         };
         assert_eq!(
             to_string(&row).unwrap(),
