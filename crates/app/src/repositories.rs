@@ -422,14 +422,12 @@ mod tests {
         }
     }
 
-    #[allow(clippy::panic)]
-    fn start() -> Timestamp {
-        Timestamp::from_second(1_800_000_000).unwrap_or_else(|e| panic!("a timestamp: {e:?}"))
-    }
+    /// Where every test's clock starts.
+    const START: Timestamp = Timestamp::constant(1_800_000_000, 0);
 
     /// A clock that jumps to the deadline of whoever sleeps on it.
     fn clock() -> Arc<dyn Clock> {
-        Arc::new(FakeClock::auto_advancing(start()))
+        Arc::new(FakeClock::auto_advancing(START))
     }
 
     /// A control that notes when its worker is dropped, which kills it.
@@ -486,7 +484,7 @@ mod tests {
 
     fn started() -> EngineEvent {
         EngineEvent::Started {
-            index_read_at: start(),
+            index_read_at: START,
         }
     }
 
@@ -497,6 +495,10 @@ mod tests {
     /// Runs `work` against a manual clock, moving time by `steps` once the
     /// work waits on it. Gives, after each step, whether the work had ended
     /// and what `watch` said, and then what the work ended with.
+    #[allow(
+        clippy::panic,
+        reason = "a helper outside a test body is production code to clippy"
+    )]
     async fn timed<T>(
         clock: &FakeClock,
         watch: &AtomicBool,
@@ -512,7 +514,9 @@ mod tests {
         let driver = async {
             let mut seen = Vec::new();
             for step in steps {
-                while clock.sleepers() == 0 && !finished.load(Ordering::SeqCst) {
+                // Time moves once the work waits on it, never before: a
+                // deadline that isn't registered yet would be skipped.
+                while clock.sleepers() == 0 {
                     tokio::task::yield_now().await;
                 }
                 clock.advance(*step);
@@ -526,11 +530,18 @@ mod tests {
             }
             seen
         };
-        let (done, seen) = tokio::join!(work, driver);
+        let (done, seen) =
+            tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(work, driver) })
+                .await
+                .unwrap_or_else(|_| panic!("the work never waited on the clock, or never ended"));
         (seen, done)
     }
 
-    #[allow(clippy::panic, clippy::result_large_err)]
+    #[allow(
+        clippy::panic,
+        clippy::result_large_err,
+        reason = "a helper outside a test body is production code to clippy; the error is the use cases' own"
+    )]
     async fn within(
         work: impl std::future::Future<Output = Result<RepositoryId, RepositoryError>>,
     ) -> Result<RepositoryId, RepositoryError> {
@@ -541,7 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_repository_that_never_answers_is_refused_the_moment_its_time_is_up() {
-        let clock = Arc::new(FakeClock::new(start()));
+        let clock = Arc::new(FakeClock::new(START));
         let engine = Playing::new(Vec::new(), || {});
         let use_case = TestRepository::new(
             clock.clone(),
@@ -594,7 +605,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_worker_that_keeps_talking_cannot_hold_off_the_deadline() {
-        let clock = Arc::new(FakeClock::new(start()));
+        let clock = Arc::new(FakeClock::new(START));
         let engine = Arc::new(Chatty {
             clock: clock.clone(),
             killed: Arc::new(AtomicBool::new(false)),
@@ -615,7 +626,7 @@ mod tests {
     async fn a_result_waiting_behind_a_message_after_the_deadline_stands() {
         // Time ran out while the daemon was not looking: the worker's last
         // two messages are both waiting, and the second is the answer.
-        let clock = Arc::new(FakeClock::new(start()));
+        let clock = Arc::new(FakeClock::new(START));
         let ticking = clock.clone();
         let engine = Playing::new(vec![started(), found()], move || {
             ticking.advance(REPOSITORY_JOB_BUDGET + SignedDuration::from_secs(1));
@@ -631,7 +642,7 @@ mod tests {
     #[tokio::test]
     async fn a_result_that_arrives_as_time_runs_out_stands() {
         // The repository was created: refusing now would say it was not.
-        let clock = Arc::new(FakeClock::new(start()));
+        let clock = Arc::new(FakeClock::new(START));
         let ticking = clock.clone();
         let engine = Playing::new(vec![found()], move || {
             ticking.advance(REPOSITORY_JOB_BUDGET + SignedDuration::from_secs(1));
