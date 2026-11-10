@@ -397,12 +397,14 @@ async fn the_call_waits_for_a_killed_hook_to_be_reaped() {
 /// A pipe holds 64 KiB or so. A hook that says more than that on its way out
 /// is not left blocked on a pipe nobody reads until the SIGKILL: the output
 /// of a hook that is being stopped is read on and dropped, so its handler
-/// gets to the end.
+/// gets to the end. The handler writes with the shell's own `printf`, 300
+/// writes of 1000 bytes: what `head` or `yes` do with a full pipe differs
+/// between coreutils, and the test must not depend on it.
 #[tokio::test]
 async fn a_hook_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
     let trapped = run_trapping(
         concat!(
-            r#"trap 'head -c 300000 /dev/zero; echo done >> "$1"; exit 0' TERM"#,
+            r#"trap 'n=0; while [ $n -lt 300 ]; do printf "%1000s" ""; n=$((n+1)); done; echo done >> "$1"; exit 0' TERM"#,
             "\n",
             r#"echo ready >> "$1""#,
             "\n",
