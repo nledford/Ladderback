@@ -1053,6 +1053,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::InlineSecret
                 | WarningCode::ProfileTagDropped
                 | WarningCode::ProfileOptionLeftOut
+                | WarningCode::ProfileRetentionEmpty
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact(&item)),
@@ -1158,6 +1159,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::PlanIdTaken
                 | ErrorCode::InlineSecret
                 | ErrorCode::ProfileExportReference
+                | ErrorCode::ProfileExportUrlPassword
+                | ErrorCode::ProfileExportTagComma
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor

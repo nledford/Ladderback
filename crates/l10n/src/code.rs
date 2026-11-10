@@ -69,6 +69,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     PlanIdTaken => msg::ERROR_PLAN_ID_TAKEN,
     InlineSecret => msg::ERROR_INLINE_SECRET,
     ProfileExportReference => msg::ERROR_PROFILE_EXPORT_REFERENCE,
+    ProfileExportUrlPassword => msg::ERROR_PROFILE_EXPORT_URL_PASSWORD,
+    ProfileExportTagComma => msg::ERROR_PROFILE_EXPORT_TAG_COMMA,
     Unknown => msg::ERROR_UNKNOWN,
 });
 
@@ -84,5 +86,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     InlineSecret => msg::WARNING_INLINE_SECRET,
     ProfileTagDropped => msg::WARNING_PROFILE_TAG_DROPPED,
     ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
+    ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
     Unknown => msg::WARNING_UNKNOWN,
 });

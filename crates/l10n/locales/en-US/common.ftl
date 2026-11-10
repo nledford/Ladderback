@@ -271,6 +271,15 @@ error-inline-secret = { -brand-name } did not export the plan, because the repos
 # $key (text): the setting, as its path in the profile, such as repository.
 error-profile-export-reference = { -brand-name } did not export the plan, because the repository's { $key } refers to something at run time, which a profile cannot say for that setting. Write the value itself in the configuration, then export again.
 
+# The plan can't be exported, because the URL of the repository holds a password.
+# $key (text): the setting that holds it, repository or repo-hot.
+error-profile-export-url-password = { -brand-name } did not export the plan, because the { $key } of the repository holds a password in its address, and a profile would have to repeat it as text. Move the credentials out of the address into the repository's options, which an export leaves out and names the environment variable for, then export again.
+
+# The plan can't be exported, because one of its tags holds a comma.
+# $tag (text): the tag.
+# The comma is typed as it is: keep it a string literal.
+error-profile-export-tag-comma = { -brand-name } did not export the plan, because its tag { $tag } holds a comma ({ "," }), which rustic reads as two tags. Rename the tag without the comma, then export again.
+
 # The import left out a setting of the profile.
 # $key (text): the setting, as its path in the profile, such as copy or backup.group-by.
 warning-profile-key-ignored = { -brand-name } left out { $key } of the profile, because it has no place for it. Check that nothing depends on it.
@@ -302,3 +311,7 @@ warning-profile-tag-dropped = { -brand-name } dropped the tag { $tag } from a pl
 # $option (text): the option's name.
 # $variable (text): the environment variable to set instead.
 warning-profile-option-left-out = The option { $option } was left out of the profile, because it is a reference that rustic cannot resolve. Set the environment variable { $variable } instead.
+
+# An export of a plan with no retention has no keep option, and rustic's forget refuses to run without one.
+# `keep-*`, `forget` and `rustic forget` are what a person types, typed as they are: keep them string literals.
+warning-profile-retention-empty = The plan keeps every snapshot, so the profile has no { "keep-*" } option, and rustic's { "forget" } refuses to run until one is set. { -brand-name } never forgets from this plan. Add a { "keep-*" } option to the profile before you run { "rustic forget" } on it.

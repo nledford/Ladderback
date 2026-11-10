@@ -139,6 +139,15 @@ pub enum ErrorCode {
     /// variable to set instead. Nothing was written. The argument `key` is the
     /// setting.
     ProfileExportReference,
+    /// A plan can't be exported as a profile because the repository's
+    /// location holds a password in its URL, which a profile would have to
+    /// repeat as text. Nothing was written. The argument `key` is the
+    /// setting (`repository` or `repo-hot`), never its value.
+    ProfileExportUrlPassword,
+    /// A plan can't be exported as a profile because one of its tags holds a
+    /// comma, which rustic reads as two tags. Nothing was written. The
+    /// argument `tag` is the tag.
+    ProfileExportTagComma,
     #[serde(other)]
     Unknown,
 }
@@ -172,6 +181,9 @@ pub enum WarningCode {
     /// `option` names it and `variable` is the environment variable that
     /// sets it.
     ProfileOptionLeftOut,
+    /// An export wrote a plan that keeps everything, which rustic's forget
+    /// refuses to run on until a `keep-*` option is set.
+    ProfileRetentionEmpty,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -465,6 +477,16 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProfileExportUrlPassword => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileExportTagComma => &[ArgSpec {
+                name: "tag",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::InvalidBody
             | Self::InvalidJobSpec
             | Self::OperationFailed
@@ -550,6 +572,7 @@ impl WarningCode {
             | Self::ProfilePrune
             | Self::ProfileEnvIgnored
             | Self::ProfileHooksPerPlan
+            | Self::ProfileRetentionEmpty
             | Self::Unknown => &[],
         }
     }
@@ -779,6 +802,14 @@ mod tests {
             ErrorCode::ProfileExportReference.args(),
             &[text("key", false)]
         );
+        assert_eq!(
+            ErrorCode::ProfileExportUrlPassword.args(),
+            &[text("key", false)]
+        );
+        assert_eq!(
+            ErrorCode::ProfileExportTagComma.args(),
+            &[text("tag", false)]
+        );
         assert!(ErrorCode::InlineSecret.args().is_empty());
         assert_eq!(
             ErrorCode::ProfileInvalid.args(),
@@ -797,6 +828,7 @@ mod tests {
             WarningCode::ProfilePrune,
             WarningCode::ProfileEnvIgnored,
             WarningCode::ProfileHooksPerPlan,
+            WarningCode::ProfileRetentionEmpty,
         ] {
             assert!(code.args().is_empty(), "{code:?}");
         }

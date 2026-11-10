@@ -76,6 +76,9 @@ pub enum ProfileNotice {
     /// An export left an option out because it is a reference; `variable` is
     /// the environment variable to set instead.
     OptionLeftOut { option: String, variable: String },
+    /// An export wrote a plan that keeps everything: the profile has no
+    /// `keep-*` option, and rustic's `forget` refuses to run on one.
+    RetentionEmpty,
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or
@@ -177,6 +180,11 @@ pub enum ExportRefusal {
     /// The value at `key` is a reference rustic can't resolve, and there is
     /// no variable to set instead.
     Reference { key: String },
+    /// The location at `key` (`repository` or `repo-hot`) holds a password
+    /// in its URL, which a profile would have to repeat as text.
+    UrlPassword { key: String },
+    /// A tag holds a comma, which rustic reads as two tags.
+    TagComma { tag: String },
 }
 
 impl std::fmt::Display for ExportRefusal {

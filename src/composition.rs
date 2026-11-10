@@ -810,6 +810,16 @@ pub(crate) fn export_refusal(error: ExportError, config_file: &std::path::Path) 
             args: vec![("key", text(key))],
             detail: None,
         },
+        ExportError::Render(ExportRefusal::UrlPassword { key }) => Refusal {
+            code: ErrorCode::ProfileExportUrlPassword,
+            args: vec![("key", text(key))],
+            detail: None,
+        },
+        ExportError::Render(ExportRefusal::TagComma { tag }) => Refusal {
+            code: ErrorCode::ProfileExportTagComma,
+            args: vec![("tag", text(tag))],
+            detail: None,
+        },
         ExportError::Config(error) => profile_config_refusal(error, config_file),
     }
 }
@@ -964,6 +974,7 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::ProfileOptionLeftOut,
             vec![("option", text(option)), ("variable", text(variable))],
         ),
+        ProfileNotice::RetentionEmpty => (WarningCode::ProfileRetentionEmpty, Vec::new()),
     };
     Notice { code, args }
 }
@@ -1918,6 +1929,22 @@ mod tests {
         );
         assert_eq!(reference.code, ErrorCode::ProfileExportReference);
         assert!(said(&reference).contains("repository"));
+        let url = export_refusal(
+            ExportError::Render(ExportRefusal::UrlPassword {
+                key: "repo-hot".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(url.code, ErrorCode::ProfileExportUrlPassword);
+        assert!(said(&url).contains("repo-hot"));
+        let tag = export_refusal(
+            ExportError::Render(ExportRefusal::TagComma {
+                tag: "a,b".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(tag.code, ErrorCode::ProfileExportTagComma);
+        assert!(said(&tag).contains("a,b"));
         let config = export_refusal(
             ExportError::Config(ConfigError::SchemaMissing {
                 file: "/cfg/c.toml".to_owned(),
@@ -2020,6 +2047,7 @@ mod tests {
                 },
                 "OPENDAL_SECRET_KEY",
             ),
+            (ProfileNotice::RetentionEmpty, "keep-*"),
         ];
         for (notice, expected) in notices {
             let notice = profile_notice(notice);
