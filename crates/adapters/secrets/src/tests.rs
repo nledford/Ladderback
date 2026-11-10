@@ -1041,6 +1041,35 @@ async fn a_command_can_still_write_to_its_output_when_it_gets_sigterm() {
     );
 }
 
+/// A pipe holds 64 KiB or so. A command that says more than that on its way
+/// out is not left blocked on a pipe nobody reads until the SIGKILL: what a
+/// command being stopped writes is read on and dropped, so its handler gets to
+/// the end. The handler writes with the shell's own `printf`, 300 writes of
+/// 1000 bytes to each stream: what `head` or `yes` do with a full pipe differs
+/// between coreutils, and the test must not depend on it.
+#[tokio::test]
+async fn a_command_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'n=0; while [ $n -lt 300 ]; do printf "%1000s" ""; printf "%1000s" "" >&2; n=$((n+1)); done; echo done >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        Duration::from_secs(1),
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(trapped.result, timed_out());
+    assert!(
+        trapped.wrote("done"),
+        "the handler was blocked on its output: {:?}",
+        trapped.lines
+    );
+    assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
+}
+
 /// A command that ignores SIGTERM is killed once its grace is over: not
 /// before, so the polite signal had its time, and not much later, so the
 /// call is bounded. Each signal went once, while the leader was there.

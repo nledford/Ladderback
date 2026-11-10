@@ -359,6 +359,37 @@ async fn a_hook_that_ends_by_itself_is_never_signalled() {
     assert_eq!(signals.sent(), []);
 }
 
+/// A hook that ends is reaped when it ends, though a process it started
+/// still holds its stdout and stderr open: the call returns soon after the
+/// exit, not at the timeout, and signals nothing, as the hook was reaped.
+#[tokio::test]
+async fn a_hook_that_ends_is_reaped_while_a_descendant_holds_its_output() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let timeout = Duration::from_secs(10);
+    let runner = ProcessHookRunner::with_timeout(timeout);
+    let signals = Signals::default();
+    let stop = Stop {
+        grace: Duration::from_secs(5),
+        reap_limit: Duration::from_secs(5),
+        signal: &|group, signal| signals.send(group, signal),
+    };
+    let entry = sh(
+        concat!("sleep 300 &\n", r#"echo "pid $!" >> "$1""#, "\nexit 0"),
+        &log,
+    );
+    let started = Instant::now();
+    let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+    let elapsed = started.elapsed();
+    let _reaper = Reaper(pid_in(&lines(&log)));
+    assert_eq!(status, HookStatus::Succeeded);
+    assert!(
+        elapsed < timeout / 2,
+        "the call waited for the timeout: {elapsed:?}"
+    );
+    assert_eq!(signals.sent(), []);
+}
+
 /// The call returns once the killed hook is reaped, not when the SIGKILL is
 /// sent: here the SIGKILL takes a while to arrive, as it does for a hook that
 /// is busy in the kernel, and the call waits for it. (The SIGTERM is not
