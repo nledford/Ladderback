@@ -134,6 +134,15 @@ impl ProcessHookRunner {
         entry: &HookEntry,
         context: &HookContext,
     ) -> (HookStatus, Captured) {
+        self.spawn_and_wait_with(entry, context, &Stop::REAL).await
+    }
+
+    async fn spawn_and_wait_with(
+        &self,
+        entry: &HookEntry,
+        context: &HookContext,
+        stop: &Stop<'_>,
+    ) -> (HookStatus, Captured) {
         let mut command = tokio::process::Command::new(entry.command.program());
         command
             .args(entry.command.args())
@@ -159,7 +168,7 @@ impl ProcessHookRunner {
         };
         // From here on, whatever ends this call early (the timeout, the
         // caller giving up) takes the group with it.
-        let group = Group::of(&child);
+        let group = Group::of(&child, stop);
         let Some(pipes) = Pipes::take(&mut child) else {
             group.kill_and_reap(&mut child).await;
             return (
@@ -306,40 +315,65 @@ fn exit_status(status: ExitStatus) -> HookStatus {
     }
 }
 
+/// What stops a hook that outlives its timeout; tests replace the parts.
+struct Stop<'a> {
+    /// How long a hook that got SIGTERM is given to end before SIGKILL.
+    grace: Duration,
+    /// How long a hook that got SIGKILL is waited for.
+    reap_limit: Duration,
+    /// Sends a signal to the process group with this id.
+    signal: &'a (dyn Fn(Pid, Signal) + Send + Sync),
+}
+
+impl Stop<'static> {
+    /// The real stop: SIGTERM to the group, SIGKILL after [`KILL_GRACE`].
+    const REAL: Self = Self {
+        grace: KILL_GRACE,
+        reap_limit: KILL_GRACE,
+        signal: &signal_group,
+    };
+}
+
+/// Signals the whole process group: nothing left in it is not an error.
+fn signal_group(group: Pid, signal: Signal) {
+    let _ = killpg(group, signal);
+}
+
 /// The process group of a hook, killed when this is dropped unless it was
 /// released: a future that is dropped mid-run must not leave a command
 /// behind, and `kill_on_drop` reaches only the command itself.
-struct Group(Option<Pid>);
+struct Group<'a>(Option<Pid>, &'a Stop<'a>);
 
-impl Group {
+impl<'a> Group<'a> {
     /// The group of `child`, which was started in a group of its own.
-    fn of(child: &Child) -> Self {
+    fn of(child: &Child, stop: &'a Stop<'a>) -> Self {
         Self(
             child
                 .id()
                 .and_then(|id| i32::try_from(id).ok())
                 .map(Pid::from_raw),
+            stop,
         )
     }
 
     fn kill(&self) {
         if let Some(group) = self.0 {
-            // Nothing left in the group is not an error.
-            let _ = killpg(group, Signal::SIGKILL);
+            (self.1.signal)(group, Signal::SIGKILL);
         }
     }
 
     /// Stops a hook that outlived its timeout: SIGTERM to its process
-    /// group, then SIGKILL after [`KILL_GRACE`] if that was not enough.
+    /// group, then SIGKILL after the grace if that was not enough.
     async fn stop_and_reap(&self, child: &mut Child) {
         if let Some(group) = self.0 {
-            let _ = killpg(group, Signal::SIGTERM);
+            (self.1.signal)(group, Signal::SIGTERM);
         }
-        if tokio::time::timeout(KILL_GRACE, child.wait())
+        if tokio::time::timeout(self.1.grace, child.wait())
             .await
             .is_err()
         {
             self.kill();
+            let _reap_limit = self.1.reap_limit;
             let _ = child.wait().await;
         }
     }
@@ -355,8 +389,11 @@ impl Group {
     }
 }
 
-impl Drop for Group {
+impl Drop for Group<'_> {
     fn drop(&mut self) {
         self.kill();
     }
 }
+
+#[cfg(test)]
+mod tests;
