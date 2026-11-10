@@ -1116,6 +1116,11 @@ mod tests {
             .await
             .expect("a cancel straight after the answer is accepted");
         let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    /// The status the operation ends with, once it has.
+    async fn ended(runner: &PlanRunner, operation: OperationId) -> OperationStatus {
         let ended = async {
             loop {
                 let detail = GetOperation::new(Arc::clone(&runner.store))
@@ -1130,9 +1135,94 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         };
-        let status = tokio::time::timeout(std::time::Duration::from_secs(30), ended)
+        tokio::time::timeout(std::time::Duration::from_secs(30), ended)
             .await
-            .expect("the cancelled operation ends");
-        assert_eq!(status, OperationStatus::Cancelled);
+            .expect("the cancelled operation ends")
+    }
+
+    /// An operation log whose writes wait until the test opens it.
+    struct GatedSaves {
+        inner: Arc<dyn OperationStore>,
+        open: tokio::sync::watch::Receiver<bool>,
+    }
+
+    #[async_trait]
+    impl OperationStore for GatedSaves {
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            let mut open = self.open.clone();
+            while !*open.borrow_and_update() {
+                open.changed().await.expect("the gate stays open");
+            }
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            self.inner.try_start(operation).await
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// A client that gives up on its start while the log is still being
+    /// written (the connection drops, and the handler with it) leaves a run
+    /// that goes on: nothing is left queued and never run, or registered and
+    /// never cancellable.
+    #[tokio::test]
+    async fn a_start_whose_client_gave_up_still_runs_and_still_cancels() {
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let (open_log, log_is_open) = tokio::sync::watch::channel(false);
+        runner.store = Arc::new(GatedSaves {
+            inner: Arc::clone(&runner.store),
+            open: log_is_open,
+        });
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            runner.start_backup("home".into()),
+        )
+        .await;
+        assert!(answered.is_err(), "the start waits for the log");
+        open_log.send(true).expect("the log opens");
+        let operation = *runner
+            .registry
+            .running()
+            .keys()
+            .next()
+            .expect("the start parked a cancel switch");
+        let id = operation.as_uuid().hyphenated().to_string();
+        let accepted = async {
+            loop {
+                match runner.cancel(id.clone()).await {
+                    Err(http_adapter::CancelError::Unknown) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    other => return other,
+                }
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), accepted)
+            .await
+            .expect("the operation ends up in the log")
+            .expect("the operation that was started is cancellable");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
     }
 }
