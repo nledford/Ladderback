@@ -4,6 +4,11 @@
 //! [`skip!`] is how a test says it can't run here (running as root makes
 //! `chmod 000` ineffective, a backend tool isn't installed). A silent early
 //! return would read as a pass.
+//!
+//! [`daemon::isolate`] is how a test that starts the daemon gives it folders
+//! of its own, never the platform's.
+
+pub mod daemon;
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};

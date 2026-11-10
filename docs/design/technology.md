@@ -41,7 +41,7 @@ ladderback/
 │  ├─ app/                    # use cases, runtime loops, port traits, in-memory fakes and port contract suites
 │  │                          # (feature "fakes"); tests/acceptance.rs runs non-@e2e scenarios
 │  ├─ api/                    # wasm-safe DTOs: REST, UiEvent, sync protocol (the published language)
-│  ├─ testkit/                # test support, a dev-dependency only: `skip!` (§13.5)
+│  ├─ testkit/                # test support, a dev-dependency only: `skip!`, `daemon::isolate` (§13.5)
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
 │  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,
 │  │                          # browser-intl, pseudo); build.rs generates message IDs from en-US

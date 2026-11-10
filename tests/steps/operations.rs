@@ -110,7 +110,7 @@ async fn save_config_with_hooks(agent: &Agent, run_finally: Option<String>) {
         )],
     )
     .expect("a valid configuration");
-    let dir = agent.scratch().join("events-config");
+    let dir = super::events_steps::Events::config_dir(agent);
     std::fs::create_dir_all(&dir).expect("the config folder");
     app::ports::ConfigStore::save(
         &config_adapter::FileConfigStore::new(
