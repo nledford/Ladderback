@@ -899,6 +899,63 @@ async fn the_group_is_signalled_once_and_only_while_its_leader_is_unreaped() {
     assert_eq!(*leader_there.lock().unwrap(), [true]);
 }
 
+/// A command that ignores the polite signal and outlives its limit is gone
+/// when the call returns, and the call did not wait for it in vain.
+#[tokio::test]
+async fn a_command_that_ignores_termination_is_killed_at_its_limit() {
+    let scratch = TempDir::new().unwrap();
+    let pidfile = scratch.path().join("pid");
+    let script = format!("trap '' TERM; echo $$ > {}; sleep 60", pidfile.display());
+    let result = run_with(
+        &sh(&script, Vec::<String>::new()),
+        Duration::from_millis(300),
+        &Stop {
+            reap_limit: Duration::from_secs(5),
+            kill: &|group| {
+                let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
+            },
+        },
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+    let pid = recorded_pid(&pidfile).await;
+    let _reaper = Reaper(pid);
+    assert!(is_gone_soon(pid).await, "{pid} is still running");
+}
+
+/// A command that ended by itself is reaped: nothing is signalled, as the
+/// process id of its group may be another process's by now.
+#[tokio::test]
+async fn a_command_that_ends_by_itself_is_never_signalled() {
+    let signalled = Mutex::new(0_u32);
+    let signal = |_: Pid| *signalled.lock().unwrap() += 1;
+    let stop = Stop {
+        reap_limit: Duration::from_secs(5),
+        kill: &signal,
+    };
+    let result = run_with(
+        &sh("echo hunter2", Vec::<String>::new()),
+        Duration::from_secs(5),
+        &stop,
+    )
+    .await;
+    assert_eq!(result, Ok(SecretValue::new("hunter2")));
+    let failed = run_with(
+        &sh("exit 3", Vec::<String>::new()),
+        Duration::from_secs(5),
+        &stop,
+    )
+    .await;
+    assert!(failed.is_err());
+    assert_eq!(*signalled.lock().unwrap(), 0);
+}
+
 // Where a file really is decides whose permissions it has.
 
 #[tokio::test]

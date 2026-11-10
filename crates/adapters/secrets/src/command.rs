@@ -26,10 +26,38 @@ const PIPE_GRACE: Duration = Duration::from_secs(1);
 
 const READ_CHUNK: usize = 8 * 1024;
 
+/// How long a command that was killed is waited for: one in uninterruptible
+/// sleep (a hung mount) may never be reaped.
+const REAP_LIMIT: Duration = Duration::from_secs(5);
+
+/// What stops a command that outlives its limit; tests replace both parts.
+pub(crate) struct Stop<'a> {
+    /// How long a command that was signalled is waited for.
+    pub(crate) reap_limit: Duration,
+    /// Signals the process group with this id.
+    pub(crate) kill: &'a (dyn Fn(Pid) + Send + Sync),
+}
+
+impl Stop<'static> {
+    /// SIGKILL to the group, and five seconds for the command to be reaped.
+    const SIGKILL: Self = Self {
+        reap_limit: REAP_LIMIT,
+        kill: &kill_group,
+    };
+}
+
 /// Runs `command` and gives the first line of its output.
 pub(crate) async fn run(
     command: &CommandLine,
     limit: Duration,
+) -> Result<SecretValue, SecretError> {
+    run_with(command, limit, &Stop::SIGKILL).await
+}
+
+pub(crate) async fn run_with(
+    command: &CommandLine,
+    limit: Duration,
+    stop: &Stop<'_>,
 ) -> Result<SecretValue, SecretError> {
     // The program only: the arguments may hold the secret itself.
     let source = SourceName::Command {
@@ -41,7 +69,7 @@ pub(crate) async fn run(
     };
     let unreachable = |detail: String| fail(Problem::Unreachable { detail });
 
-    let mut child = Command::new(command.program())
+    let child = Command::new(command.program())
         .args(command.args())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -52,13 +80,9 @@ pub(crate) async fn run(
         .map_err(|error| unreachable(error.to_string()))?;
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
-    let group = Group(
-        child
-            .id()
-            .and_then(|id| i32::try_from(id).ok())
-            .map(Pid::from_raw),
-    );
-    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+    let mut running = Running::new(child, stop);
+    let (Some(stdout), Some(stderr)) = (running.child.stdout.take(), running.child.stderr.take())
+    else {
         return Err(unreachable("the command's output is not piped".to_owned()));
     };
 
@@ -66,54 +90,35 @@ pub(crate) async fn run(
     let mut err = Vec::new();
     let outcome = timeout(
         limit,
-        collect(&mut child, stdout, stderr, &mut out, &mut err),
+        collect(&mut running.child, stdout, stderr, &mut out, &mut err),
     )
     .await;
     let status = match outcome {
         Ok(Ok(Outcome::Exited(status))) => status,
         Ok(Ok(Outcome::TooLarge)) => {
-            group.kill_and_reap(&mut child).await;
+            running.kill_and_reap().await;
             return Err(fail(Problem::TooLarge {
                 limit: MAX_SECRET_BYTES,
             }));
         }
         Ok(Err(error)) => {
-            group.kill_and_reap(&mut child).await;
+            running.kill_and_reap().await;
             return Err(unreachable(error.to_string()));
         }
         Err(_elapsed) => {
-            group.kill_and_reap(&mut child).await;
+            running.kill_and_reap().await;
             return Err(fail(Problem::TimedOut {
                 seconds: whole_seconds_up(limit),
             }));
         }
     };
-    // It ran to its end: what it left running is its own business.
-    group.release();
-
+    // It ran to its end and was reaped: what it left running is its own
+    // business, and the group is not signalled any more.
     if status.success() {
         command_secret(&source, &out)
     } else {
         Err(command_failure(&source, status.code(), &out, &err))
     }
-}
-
-/// What stops a command that outlives its limit: tests replace both.
-#[cfg(test)]
-pub(crate) struct Stop<'a> {
-    /// How long a command that was signalled is waited for.
-    pub(crate) reap_limit: Duration,
-    /// Signals the process group with this id.
-    pub(crate) kill: &'a (dyn Fn(Pid) + Send + Sync),
-}
-
-#[cfg(test)]
-pub(crate) async fn run_with(
-    _command: &CommandLine,
-    _limit: Duration,
-    _stop: &Stop<'_>,
-) -> Result<SecretValue, SecretError> {
-    todo!()
 }
 
 /// The limit in whole seconds, rounded up, and at least one.
@@ -124,33 +129,63 @@ pub(crate) fn whole_seconds_up(limit: Duration) -> u64 {
         .max(1)
 }
 
-/// The process group of a command, killed when this is dropped unless it was
-/// released: a future that is dropped mid-run must not leave a command
-/// behind, and `kill_on_drop` reaches only the command itself.
-struct Group(Option<Pid>);
+/// The command and its process group, which is killed when this is dropped
+/// while the command is still unreaped: a future that is dropped mid-run must
+/// not leave a command behind, and `kill_on_drop` reaches only the command
+/// itself.
+///
+/// A group is named by the process id of its leader, and that id is free for
+/// an unrelated process once the leader has been reaped, so the group is
+/// signalled only while the leader is not, and at most once.
+struct Running<'a> {
+    child: Child,
+    group: Option<Pid>,
+    stop: &'a Stop<'a>,
+    signalled: bool,
+}
 
-impl Group {
-    fn kill(&self) {
-        if let Some(group) = self.0 {
-            // Nothing left in the group is not an error.
-            let _ = killpg(group, Signal::SIGKILL);
+impl<'a> Running<'a> {
+    fn new(child: Child, stop: &'a Stop<'a>) -> Self {
+        let group = child
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .map(Pid::from_raw);
+        Self {
+            child,
+            group,
+            stop,
+            signalled: false,
         }
     }
 
-    async fn kill_and_reap(&self, child: &mut Child) {
-        self.kill();
-        let _ = child.wait().await;
+    fn kill(&mut self) {
+        // Tokio gives no id once the child has been waited for.
+        if self.signalled || self.child.id().is_none() {
+            return;
+        }
+        if let Some(group) = self.group {
+            self.signalled = true;
+            (self.stop.kill)(group);
+        }
     }
 
-    fn release(mut self) {
-        self.0 = None;
+    /// Signals the group and waits for the command, for as long as the stop
+    /// allows: a command no signal reaches does not hold the caller up.
+    async fn kill_and_reap(&mut self) {
+        self.kill();
+        let _ = timeout(self.stop.reap_limit, self.child.wait()).await;
     }
 }
 
-impl Drop for Group {
+impl Drop for Running<'_> {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// Kills the whole process group: nothing left in it is not an error.
+fn kill_group(group: Pid) {
+    let _ = killpg(group, Signal::SIGKILL);
 }
 
 enum Outcome {
