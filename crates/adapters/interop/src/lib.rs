@@ -34,6 +34,9 @@ pub const MAX_USE_DEPTH: usize = 8;
 /// profile used twice is read twice, as rustic merges it twice.
 pub const MAX_PROFILES: usize = 32;
 
+/// How many snapshot entries, hence plans, one import takes.
+pub const MAX_ENTRIES: usize = 1000;
+
 /// Reads profiles from files, and the profiles they use from the folders it
 /// is given, in order.
 ///

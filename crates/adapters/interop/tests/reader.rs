@@ -11,6 +11,7 @@ use common::{
 };
 use domain::planning::{GroupBy, KeepCount, KeepWithin, Maintenance, OnFailure};
 use domain::secrets::{FileRead, Part, Reference, SecretRef, SecretValue, Template};
+use interop::MAX_ENTRIES;
 
 /// The key, the line and the problem of a refusal for an invalid profile.
 fn invalid(error: ProfileError) -> (String, Option<usize>, ProfileProblem) {
@@ -1208,4 +1209,27 @@ async fn the_profile_is_found_wherever_the_user_names_it() {
         .await
         .expect("a profile");
     assert_eq!(ids(&profile), ["home"]);
+}
+
+#[tokio::test]
+async fn only_so_many_snapshot_entries_are_taken() {
+    let entries = |count: usize| -> String {
+        (0..count)
+            .map(|n| format!("[[backup.snapshots]]\nname = \"p{n}\"\nsources = [\"/srv/{n}\"]\n"))
+            .collect()
+    };
+    let scratch = Scratch::new();
+    let profile = scratch
+        .read(&format!("{REPOSITORY}\n{}", entries(MAX_ENTRIES)))
+        .await
+        .expect("a profile");
+    assert_eq!(profile.plans.len(), MAX_ENTRIES);
+
+    let error = scratch
+        .read(&format!("{REPOSITORY}\n{}", entries(MAX_ENTRIES + 1)))
+        .await
+        .unwrap_err();
+    let (key, _, problem) = invalid(error);
+    assert_eq!(key, "backup.snapshots");
+    assert_eq!(problem, ProfileProblem::TooManyEntries);
 }
