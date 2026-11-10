@@ -28,15 +28,18 @@ use futures::stream;
 use tokio::sync::Notify;
 
 use super::Agent;
-use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
+use app::fakes::{FakeRetention, InMemoryConfigStore};
 use app::maintenance::{
     MaintenanceAssessment, MaintenanceError, MaintenanceKind, PreparedMaintenance, RunMaintenance,
 };
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, MAX_JOB_IDS, OperationStore, PrunePlanSummary, PruneSummary, RewriteSummary,
-    RunningJob, SnapshotSummary, Start,
+    JobControl, MAX_JOB_IDS, NormalizeSources, OperationStore, PrunePlanSummary, PruneSummary,
+    RepositoryAccess, Retention, RetentionError, RewriteSummary, RunningJob, SnapshotSummary,
+    SourcesError, Start,
 };
+use domain::maintenance::Snapshot;
+use domain::planning::{RetentionPolicy, Source};
 
 /// The alias every forget scenario's repository goes under.
 fn alias() -> RepositoryAlias {
@@ -75,6 +78,9 @@ pub enum ReadFailure {
     /// The repository never answers: the identify and the listing start and
     /// say nothing more.
     Silent,
+    /// The repository lists its snapshots, and a read of them for a plan's
+    /// retention never answers.
+    RetentionSilent,
 }
 
 /// What the forget scenarios set up and what the runs answered.
@@ -107,6 +113,12 @@ pub struct ForgetWorld {
     fail_at: Option<usize>,
     /// The run a scenario assessed and has not started.
     assessed: Option<MaintenanceAssessment>,
+    /// The folder whose normalization the sources port refuses, when a
+    /// scenario says: a drive that is not mounted.
+    unreadable_folder: Option<String>,
+    /// How many times the sources port was asked to normalize a plan's
+    /// sources.
+    source_reads: Arc<AtomicUsize>,
 }
 
 impl Default for ForgetWorld {
@@ -125,6 +137,8 @@ impl Default for ForgetWorld {
             hold_at: Some(0),
             fail_at: None,
             assessed: None,
+            unreadable_folder: None,
+            source_reads: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -525,11 +539,17 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 agent.clock.clone(),
                 agent.store.clone(),
                 app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
-                Arc::new(FakeRetention),
+                match agent.forget.fail {
+                    ReadFailure::RetentionSilent => Arc::new(NeverAnswers),
+                    _ => Arc::new(FakeRetention),
+                },
                 agent.forget.store.clone(),
                 self_agent(),
                 "demo-host".to_owned(),
-                Arc::new(FakeSources),
+                Arc::new(ScriptedSources {
+                    unreadable_folder: agent.forget.unreadable_folder.clone(),
+                    reads: Arc::clone(&agent.forget.source_reads),
+                }),
             )),
     )
 }
@@ -543,6 +563,44 @@ pub async fn assess_and_start(
 ) -> Result<PreparedMaintenance, MaintenanceError> {
     let assessment = use_case.assess(operation, &alias(), kind).await?;
     use_case.start(assessment).await
+}
+
+/// A retention port whose read never answers: the repository listed its
+/// snapshots and then stalled.
+struct NeverAnswers;
+
+#[async_trait]
+impl Retention for NeverAnswers {
+    async fn removes(
+        &self,
+        _repository: &RepositoryAccess,
+        _policy: &RetentionPolicy,
+        _group: &[Snapshot],
+    ) -> Result<Vec<SnapshotId>, RetentionError> {
+        std::future::pending().await
+    }
+}
+
+/// The sources as written, as the scripted listing reports them, except a
+/// plan that backs up the unreadable folder: its sources can't be read.
+struct ScriptedSources {
+    unreadable_folder: Option<String>,
+    reads: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl NormalizeSources for ScriptedSources {
+    async fn normalized(&self, sources: &[Source]) -> Result<Vec<Source>, SourcesError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        match &self.unreadable_folder {
+            Some(folder) if sources.iter().any(|source| source.as_str() == folder) => {
+                Err(SourcesError::Unreadable {
+                    detail: "no such folder".to_owned(),
+                })
+            }
+            _ => Ok(sources.to_vec()),
+        }
+    }
 }
 
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s)")]
@@ -598,6 +656,11 @@ async fn engine_unreachable(agent: &mut Agent) {
 #[given("the repository never answers")]
 async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
+}
+
+#[given("the repository lists its snapshots but never answers a read of them for retention")]
+async fn retention_silent(agent: &mut Agent) {
+    agent.forget.fail_read(ReadFailure::RetentionSilent);
 }
 
 #[given("the engine fails the second forget job")]

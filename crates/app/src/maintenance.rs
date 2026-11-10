@@ -58,8 +58,8 @@ pub fn default_keep_delete() -> KeepDelete {
 }
 
 /// How long `assess` waits for each of its reads (the repository's ID, its
-/// snapshot list) before it gives up. A repository that never answers would
-/// otherwise hold the caller's request open for ever.
+/// snapshot list, each plan's retention) before it gives up. A repository
+/// that never answers would otherwise hold the caller's request open for ever.
 pub const READ_TIMEOUT: SignedDuration = SignedDuration::from_mins(10);
 
 /// Which maintenance operation to run.
@@ -688,11 +688,13 @@ impl RunMaintenance {
                     plan: plan.plan.clone(),
                 });
             }
-            let ids = self
-                .retention
-                .removes(access, &plan.policy, &group.snapshots)
-                .await
-                .map_err(retention_failed)?;
+            let ids = within_read_timeout(
+                self.clock.as_ref(),
+                self.retention
+                    .removes(access, &plan.policy, &group.snapshots)
+                    .map(|answer| answer.map_err(retention_failed)),
+            )
+            .await?;
             removals.push((plan.plan.clone(), ids));
         }
         let forget = ForgetPreview::new(&partition, removals);
@@ -1123,7 +1125,7 @@ async fn run_read(
     op: OperationId,
     job: Job,
 ) -> Result<EngineResult, MaintenanceError> {
-    let read = async {
+    within_read_timeout(clock, async {
         let RunningJob { events, .. } = engine.run(op, job).await.map_err(engine_error)?;
         let mut events = events.fuse();
         while let Some(event) = events.next().await {
@@ -1136,7 +1138,16 @@ async fn run_read(
         Err(MaintenanceError::Failed(FailureReason::EngineExited {
             exit_code: None,
         }))
-    };
+    })
+    .await
+}
+
+/// Awaits a read of the repository, giving it up when [`READ_TIMEOUT`] has
+/// passed on `clock` (dropping the read cancels what can be cancelled).
+async fn within_read_timeout<T>(
+    clock: &dyn Clock,
+    read: impl Future<Output = Result<T, MaintenanceError>>,
+) -> Result<T, MaintenanceError> {
     let give_up = clock.sleep_until(clock.now() + READ_TIMEOUT);
     // The read first: one that is ready is never lost to a timer.
     select_biased! {

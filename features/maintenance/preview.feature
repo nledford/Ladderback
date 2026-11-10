@@ -261,3 +261,19 @@ Feature: A maintenance preview tells what a run would do before it does anything
     And the repository never answers
     When the owner lists the repository's groups
     Then the groups are refused because the repository did not answer in time
+
+  Scenario: A forget preview of a repository that lists its snapshots and then stalls is refused
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository lists its snapshots but never answers a read of them for retention
+    When the owner previews forgetting the repository
+    Then the preview is refused because the repository did not answer in time
+    And the engine was never asked to remove anything
+
+  Scenario: A forget of a repository that lists its snapshots and then stalls is refused
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository lists its snapshots but never answers a read of them for retention
+    When the owner forgets the repository
+    Then the forget is refused because the repository did not answer in time
+    And the log holds no operation of this forget
