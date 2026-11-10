@@ -10,7 +10,7 @@
 //! decided here: retention is evaluated with rustic's own rules, through the
 //! `Retention` port in `app` (§3.2).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::execution::plan_tags;
 use crate::planning::{Plan, RetentionPolicy};
@@ -276,19 +276,7 @@ impl AdoptSelection {
         into: &'a Plan,
         plans: &'a [Plan],
     ) -> Result<&'a UnmanagedGroup, AdoptionRefusal> {
-        let key = |plan: &Plan| {
-            (
-                plan.host
-                    .as_ref()
-                    .map(|host| host.as_str().to_owned())
-                    .unwrap_or_else(|| hostname.to_owned()),
-                plan.label.clone().unwrap_or_default(),
-                plan.sources
-                    .iter()
-                    .map(|source| source.as_str().to_owned())
-                    .collect::<Vec<_>>(),
-            )
-        };
+        let key = |plan: &Plan| adoption_key(plan, hostname);
         let mine = key(into);
         let Some(group) = partition.unmanaged.iter().find(|group| {
             (group.hostname.as_str(), &group.label, &group.paths) == (&mine.0, &mine.1, &mine.2)
@@ -315,10 +303,34 @@ impl AdoptSelection {
     /// the history is the person's decision (the same key `unmanaged`
     /// matches by, so a group listed with one claimant is one an adoption
     /// into that plan finds).
-    #[allow(clippy::todo, reason = "red test: claimants are decided next")]
-    pub fn claimants(_group: &UnmanagedGroup, _hostname: &str, _plans: &[Plan]) -> Vec<PlanId> {
-        todo!("the plans that would adopt an unmanaged group")
+    pub fn claimants(group: &UnmanagedGroup, hostname: &str, plans: &[Plan]) -> Vec<PlanId> {
+        plans
+            .iter()
+            .filter(|plan| {
+                let (host, label, paths) = adoption_key(plan, hostname);
+                host == group.hostname && label == group.label && paths == group.paths
+            })
+            .map(|plan| plan.id.clone())
+            .collect()
     }
+}
+
+/// The host, label and sources an adoption matches a plan by, as the engine
+/// records them on a snapshot of the plan: the plan's own host, or
+/// `hostname` when it names none, its label or an empty one, and its sources
+/// in order.
+fn adoption_key(plan: &Plan, hostname: &str) -> (String, String, Vec<String>) {
+    (
+        plan.host
+            .as_ref()
+            .map(|host| host.as_str().to_owned())
+            .unwrap_or_else(|| hostname.to_owned()),
+        plan.label.clone().unwrap_or_default(),
+        plan.sources
+            .iter()
+            .map(|source| source.as_str().to_owned())
+            .collect(),
+    )
 }
 
 /// A fingerprint of the snapshots a forget or an adoption acts on. A preview
@@ -329,27 +341,37 @@ impl AdoptSelection {
 /// FNV-1a 64-bit hash of the snapshot IDs, sorted and joined by newlines,
 /// written as 16 lower-case hex digits.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code, reason = "red test: the token is filled in next")]
 pub struct SelectionToken(String);
 
 impl SelectionToken {
     /// The token of the set `ids` names, whatever the order they come in.
-    #[allow(clippy::todo, reason = "red test: the token is computed next")]
-    pub fn of(_ids: &[SnapshotId]) -> Self {
-        todo!("the fingerprint of a selection")
+    pub fn of(ids: &[SnapshotId]) -> Self {
+        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut sorted: Vec<&str> = ids.iter().map(SnapshotId::as_str).collect();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let bytes = sorted
+            .iter()
+            .enumerate()
+            .flat_map(|(n, id)| (n > 0).then_some(b'\n').into_iter().chain(id.bytes()));
+        let hash = bytes.fold(OFFSET, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+        });
+        Self(format!("{hash:016x}"))
     }
 
     /// The token `text` writes: exactly 16 lower-case hex digits, nothing
     /// else.
-    #[allow(clippy::todo, reason = "red test: the token is parsed next")]
-    pub fn parse(_text: &str) -> Option<Self> {
-        todo!("a token from its text")
+    pub fn parse(text: &str) -> Option<Self> {
+        let written =
+            text.len() == 16 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        written.then(|| Self(text.to_owned()))
     }
 
     /// The token as it is written on the wire.
-    #[allow(clippy::todo, reason = "red test: the token is written next")]
     pub fn as_str(&self) -> &str {
-        todo!("a token as text")
+        &self.0
     }
 }
 
@@ -395,28 +417,66 @@ impl ForgetPreview {
     /// doesn't own is not part of the preview, so a forget never names a
     /// snapshot outside the plan's own group (I6), whatever a retention
     /// evaluation answered.
-    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
-    pub fn new(_partition: &Partition, _removals: Vec<(PlanId, Vec<SnapshotId>)>) -> Self {
-        todo!("a forget preview")
+    pub fn new(partition: &Partition, removals: Vec<(PlanId, Vec<SnapshotId>)>) -> Self {
+        let plans = partition
+            .managed
+            .iter()
+            .map(|group| {
+                let named: HashSet<&SnapshotId> = removals
+                    .iter()
+                    .filter(|(plan, _)| *plan == group.plan)
+                    .flat_map(|(_, ids)| ids)
+                    .collect();
+                PlanForget {
+                    plan: group.plan.clone(),
+                    total: group.snapshots.len(),
+                    remove: group
+                        .snapshots
+                        .iter()
+                        .filter(|snapshot| named.contains(&snapshot.id))
+                        .cloned()
+                        .collect(),
+                }
+            })
+            .collect();
+        let left_alone = LeftAlone {
+            orphaned: Tally {
+                groups: partition.orphaned.len(),
+                snapshots: partition
+                    .orphaned
+                    .iter()
+                    .map(|group| group.snapshots.len())
+                    .sum(),
+            },
+            unmanaged: Tally {
+                groups: partition.unmanaged.len(),
+                snapshots: partition
+                    .unmanaged
+                    .iter()
+                    .map(|group| group.snapshots.len())
+                    .sum(),
+            },
+        };
+        Self { plans, left_alone }
     }
 
     /// The IDs a forget removes: each plan's, in the plans' order, newest
     /// first within a plan.
-    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
     pub fn removal(&self) -> Vec<SnapshotId> {
-        todo!("the snapshots a forget removes")
+        self.plans
+            .iter()
+            .flat_map(|plan| plan.remove.iter().map(|snapshot| snapshot.id.clone()))
+            .collect()
     }
 
     /// The fingerprint of what the forget removes.
-    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
     pub fn selection(&self) -> SelectionToken {
-        todo!("the selection of a forget")
+        SelectionToken::of(&self.removal())
     }
 
     /// Whether the forget removes nothing.
-    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
     pub fn is_empty(&self) -> bool {
-        todo!("whether a forget removes nothing")
+        self.plans.iter().all(|plan| plan.remove.is_empty())
     }
 }
 
