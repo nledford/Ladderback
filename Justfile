@@ -157,13 +157,15 @@ serve: build
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
 # copy of it, when the local one is missing, and that package exits 0. The
 # binary is built here, after `web-test`, so that it embeds the web UI with the
-# gallery, not the release one `build` makes.
+# gallery, not the release one `build` makes. The scenarios run the binary
+# cargo just built, wherever its target directory is (`CARGO_TARGET_DIR`, as
+# each worktree sets its own), unless `LADDERBACK_BIN` names another.
 [doc('Run the @ui scenarios in Chromium against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    cd ui-tests && node_modules/.bin/cucumber-js "$@"
+    target="$(cargo metadata --format-version 1 --no-deps | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s).target_directory))')" && cd ui-tests && LADDERBACK_BIN="${LADDERBACK_BIN:-$target/debug/ladderback}" node_modules/.bin/cucumber-js "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.
