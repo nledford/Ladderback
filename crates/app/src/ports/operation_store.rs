@@ -141,7 +141,10 @@ impl StoreError {
     /// it says what went wrong without the failure's own words, which nobody
     /// has checked for a value (I4).
     pub fn code(&self) -> &'static str {
-        todo!("StoreError::code")
+        match self {
+            Self::Unavailable { .. } => "store-unavailable",
+            Self::Corrupt { .. } => "store-corrupt",
+        }
     }
 }
 
