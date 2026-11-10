@@ -1236,6 +1236,39 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_command_that_ended_on_it()
     assert!(is_running(descendant), "{descendant} was killed");
 }
 
+/// The call returns once the killed command is reaped, not when the SIGKILL
+/// is sent: here the SIGKILL takes a while to arrive, as it does for a
+/// command that is busy in the kernel, and the call waits for it. (The
+/// SIGTERM is not delivered at all, so the command is still there when the
+/// grace is over.)
+#[tokio::test]
+async fn the_call_waits_for_a_killed_command_to_be_reaped() {
+    let delay = Duration::from_millis(400);
+    let (limit, grace) = (Duration::from_millis(300), Duration::from_millis(300));
+    let late = |group: Pid, signal: Signal| {
+        if signal == Signal::SIGKILL {
+            std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let _ = nix::sys::signal::killpg(group, Signal::SIGKILL);
+            });
+        }
+    };
+    let stop = Stop {
+        grace,
+        reap_limit: Duration::from_secs(5),
+        signal: &late,
+    };
+    let started = Instant::now();
+    let result = run_with(&sh("sleep 60", Vec::<String>::new()), limit, &stop).await;
+    let elapsed = started.elapsed();
+    assert_eq!(result, timed_out());
+    assert!(
+        elapsed >= limit + grace + delay,
+        "the call did not wait for the command: {elapsed:?}"
+    );
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+}
+
 /// A command that ended by itself is reaped: nothing is signalled, as the
 /// process id of its group may be another process's by now.
 #[tokio::test]
