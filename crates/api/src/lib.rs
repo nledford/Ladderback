@@ -884,6 +884,35 @@ mod tests {
             ErrorCode::ProtocolViolated.args(),
             &[spec("transition", ArgKind::Text, false)]
         );
+        let named = [
+            spec("field", ArgKind::Text, false),
+            spec("source", ArgKind::Text, false),
+        ];
+        for code in [
+            ErrorCode::SecretMissing,
+            ErrorCode::SecretUnreadable,
+            ErrorCode::SecretNotText,
+            ErrorCode::SecretCommandFailed,
+        ] {
+            assert_eq!(code.args(), &named, "{code:?}");
+        }
+        assert_eq!(
+            ErrorCode::SecretTooLarge.args(),
+            &[named[0], named[1], spec("limit", ArgKind::Bytes, false)]
+        );
+        assert_eq!(
+            ErrorCode::SecretCommandTimedOut.args(),
+            &[named[0], named[1], spec("seconds", ArgKind::Count, false)]
+        );
+        assert_eq!(ErrorCode::SecretInProcessArguments.args(), &[named[0]]);
+        assert_eq!(
+            ErrorCode::SecretExpansionTooLong.args(),
+            &[named[0], spec("limit", ArgKind::Bytes, false)]
+        );
+        assert_eq!(
+            ErrorCode::TemplateInvalid.args(),
+            &[named[0], spec("at", ArgKind::Text, true)]
+        );
         for code in [
             ErrorCode::InvalidJobSpec,
             ErrorCode::OperationFailed,

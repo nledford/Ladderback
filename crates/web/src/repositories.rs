@@ -622,6 +622,27 @@ mod tests {
     }
 
     #[test]
+    fn every_secret_and_template_refusal_belongs_to_the_field_that_holds_it() {
+        for code in [
+            ErrorCode::SecretMissing,
+            ErrorCode::SecretUnreadable,
+            ErrorCode::SecretNotText,
+            ErrorCode::SecretTooLarge,
+            ErrorCode::SecretCommandFailed,
+            ErrorCode::SecretCommandTimedOut,
+            ErrorCode::SecretInProcessArguments,
+            ErrorCode::SecretExpansionTooLong,
+            ErrorCode::TemplateInvalid,
+        ] {
+            assert_eq!(
+                field_of(code, &[("field".into(), text("password"))]),
+                Some(Field::Password),
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
     fn an_unreadable_secret_belongs_to_the_field_that_holds_it() {
         let field =
             |name: &str| field_of(ErrorCode::SecretMissing, &[("field".into(), text(name))]);
