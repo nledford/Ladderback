@@ -25,7 +25,7 @@ use app::secrets::ResolveRepository;
 use app::snapshots::{ListSnapshots, SnapshotError};
 use secrets::SystemSecrets;
 
-use super::Agent;
+use super::{Agent, blocking};
 
 /// Not a real secret: the scratch repositories' password.
 const PASSWORD: &str = "demo-password";
@@ -46,15 +46,36 @@ fn repository(cold: &Path) -> Repository<()> {
 }
 
 /// Every snapshot in the scratch repository, oldest first, as rustic knows
-/// them: the truth the listing is checked against.
-fn snapshots(cold: &Path) -> Vec<SnapshotFile> {
-    let mut snapshots = repository(cold)
-        .open(&credentials())
-        .expect("the scratch repository opens")
-        .get_all_snapshots()
-        .expect("the snapshots load");
-    snapshots.sort_by(|a, b| a.time.cmp(&b.time));
-    snapshots
+/// them: the truth the listing is checked against. Opening a repository
+/// derives its key, which takes a second in a debug build, so this and the
+/// steps below run it on a blocking thread: see [`blocking`].
+async fn snapshots(cold: &Path) -> Vec<SnapshotFile> {
+    let cold = cold.to_owned();
+    blocking(move || {
+        let mut snapshots = repository(&cold)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .get_all_snapshots()
+            .expect("the snapshots load");
+        snapshots.sort_by(|a, b| a.time.cmp(&b.time));
+        snapshots
+    })
+    .await
+}
+
+/// Initialises a scratch repository at `cold`.
+async fn init(cold: &Path) {
+    let cold = cold.to_owned();
+    blocking(move || {
+        repository(&cold)
+            .init(
+                &credentials(),
+                &KeyOptions::default(),
+                &ConfigOptions::default(),
+            )
+            .expect("the scratch repository initialises");
+    })
+    .await;
 }
 
 /// What the scenarios set up, and what the listing gave.
@@ -92,56 +113,48 @@ fn text(path: &Path) -> String {
 
 /// Initialises a scratch repository and makes three snapshots in it, with
 /// the labels "first", "second" and "third" in that order of age.
-fn three_snapshots(agent: &mut Agent) {
+async fn three_snapshots(agent: &mut Agent) {
     let cold = agent.scratch().join("repo");
-    repository(&cold)
-        .init(
-            &credentials(),
-            &KeyOptions::default(),
-            &ConfigOptions::default(),
-        )
-        .expect("the scratch repository initialises");
+    init(&cold).await;
     let source = agent.scratch().join("source");
     fs::create_dir_all(&source).expect("the source folder");
     fs::write(source.join("a.txt"), b"hello").expect("a file to back up");
-    let repo = repository(&cold)
-        .open(&credentials())
-        .expect("the scratch repository opens")
-        .to_indexed_ids()
-        .expect("the scratch repository indexes");
-    let paths = PathList::from_iter([&source])
-        .sanitize()
-        .expect("the paths");
-    for label in ["first", "second", "third"] {
-        let options = SnapshotOptions::default()
-            .label(label.to_owned())
-            .host("demo-host".to_owned());
-        repo.backup(
-            &BackupOptions::default(),
-            &paths,
-            options.to_snapshot().expect("the snapshot options"),
-        )
-        .expect("a plain rustic backup");
-    }
+    let at = cold.clone();
+    blocking(move || {
+        let repo = repository(&at)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .to_indexed_ids()
+            .expect("the scratch repository indexes");
+        let paths = PathList::from_iter([&source])
+            .sanitize()
+            .expect("the paths");
+        for label in ["first", "second", "third"] {
+            let options = SnapshotOptions::default()
+                .label(label.to_owned())
+                .host("demo-host".to_owned());
+            repo.backup(
+                &BackupOptions::default(),
+                &paths,
+                options.to_snapshot().expect("the snapshot options"),
+            )
+            .expect("a plain rustic backup");
+        }
+    })
+    .await;
     agent.snapshots.cold = Some(cold.clone());
     agent.snapshot_settings().repository = text(&cold);
 }
 
 #[given("a repository with three snapshots")]
-fn a_repository_with_three_snapshots(agent: &mut Agent) {
-    three_snapshots(agent);
+async fn a_repository_with_three_snapshots(agent: &mut Agent) {
+    three_snapshots(agent).await;
 }
 
 #[given("a repository with no snapshots")]
-fn a_repository_with_no_snapshots(agent: &mut Agent) {
+async fn a_repository_with_no_snapshots(agent: &mut Agent) {
     let cold = agent.scratch().join("repo");
-    repository(&cold)
-        .init(
-            &credentials(),
-            &KeyOptions::default(),
-            &ConfigOptions::default(),
-        )
-        .expect("the scratch repository initialises");
+    init(&cold).await;
     agent.snapshots.cold = Some(cold.clone());
     agent.snapshot_settings().repository = text(&cold);
 }
@@ -174,7 +187,7 @@ async fn lists(agent: &mut Agent) {
 }
 
 #[then("the listing shows the three snapshots newest first with id, time, host and label")]
-fn shows_three_newest_first(agent: &mut Agent) {
+async fn shows_three_newest_first(agent: &mut Agent) {
     let listed = agent
         .snapshots
         .listed
@@ -182,7 +195,7 @@ fn shows_three_newest_first(agent: &mut Agent) {
         .expect("the listing ran")
         .expect("the listing succeeds");
     let cold = agent.snapshots.cold.clone().expect("the location");
-    let truth = snapshots(&cold);
+    let truth = snapshots(&cold).await;
     assert_eq!(listed.len(), 3, "{listed:?}");
     // rustic's oldest-first order reversed is the expected newest-first one.
     for (summary, snapshot) in listed.iter().zip(truth.iter().rev()) {

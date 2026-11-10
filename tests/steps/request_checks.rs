@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use cucumber::{given, then, when};
 
-use super::{Agent, LADDERBACK};
+use super::{Agent, LADDERBACK, blocking};
 
 /// How long a freshly started daemon may take to listen or give up.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
@@ -69,7 +69,18 @@ struct Response {
 static LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Starts `ladderback serve` with `args`, and waits until it listens or exits.
-fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
+/// The wait is on a blocking thread: see [`blocking`].
+async fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
+    let scratch = scratch.to_owned();
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    blocking(move || {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        spawn_daemon(&scratch, &args)
+    })
+    .await
+}
+
+fn spawn_daemon(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
     let started = LOGS.fetch_add(1, Ordering::Relaxed);
     let log_path = scratch.join(format!("serve-{started}.log"));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
@@ -219,11 +230,12 @@ impl Web {
 }
 
 #[given(expr = "Ladderback is serving on loopback, configured for the host name {string}")]
-fn serving(agent: &mut Agent, name: String) {
+async fn serving(agent: &mut Agent, name: String) {
     let (child, outcome) = start(
         agent.scratch(),
         &["--listen", "127.0.0.1:0", "--allowed-host", &name],
-    );
+    )
+    .await;
     match outcome {
         Outcome::Listening(addr) => agent.web.server = Some(Server { child, addr }),
         Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
@@ -344,9 +356,9 @@ fn no_header(agent: &mut Agent, name: String) {
 }
 
 #[when(expr = "Ladderback is started with the arguments {string}")]
-fn started_with(agent: &mut Agent, arguments: String) {
+async fn started_with(agent: &mut Agent, arguments: String) {
     let args: Vec<&str> = arguments.split_whitespace().collect();
-    let (child, outcome) = start(agent.scratch(), &args);
+    let (child, outcome) = start(agent.scratch(), &args).await;
     if let Outcome::Listening(addr) = &outcome {
         // Stopped when the scenario ends, as the daemon from the Background.
         agent.web.server = Some(Server { child, addr: *addr });

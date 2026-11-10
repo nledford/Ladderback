@@ -245,6 +245,11 @@ async fn main() {
     let run = Agent::cucumber()
         .with_cli(cli)
         .fail_on_skipped()
+        // Each backup runs a worker process that uses every core, so more
+        // scenarios at once than a few only make the runner's own thread
+        // wait for the processor: 64 at once (cucumber's default) held it
+        // for 26 s here, 4 for under a second, and the run is faster.
+        .max_concurrent_scenarios(4)
         .filter_run_and_exit(features, move |feature, rule, scenario| {
             if !operation_steps::tagged(feature, rule, scenario, "e2e")
                 || !name.as_ref().is_none_or(|re| re.is_match(&scenario.name))
@@ -283,15 +288,31 @@ async fn main() {
         "a step kept the runner's thread for {:?}, longer than the {MAX_STALL:?} allowed: \
          every other scenario waited that long, and the operation log gives up on a \
          connection after 10 s. A step that blocks (rustic_core, a blocking socket, a long \
-         file walk) runs through `blocking(…)`.",
+         file walk) runs through `blocking(…)`; too many scenarios at once starve it too.",
         worst_stall.get()
     );
 }
 
-/// How long a step may keep the runner's thread before the run fails. The
-/// operation log gives up on a connection after 10 s; this is well inside
-/// that, and well beyond what steps that don't block take.
-const MAX_STALL: Duration = Duration::from_secs(2);
+/// Runs `work` on a blocking thread and waits for it without holding the
+/// runner's thread. The runner polls every scenario from one task, so a step
+/// that blocks, such as `rustic_core` deriving a repository's key (about a
+/// second in a debug build) or a blocking socket, stops every other scenario
+/// until it returns. Steps that block call this instead. A panic in `work` is
+/// the step's panic.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(done) => done,
+        Err(error) => match error.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            Err(error) => panic!("the blocking step's thread was cancelled: {error}"),
+        },
+    }
+}
+
+/// How long the runner's thread may go unpolled before the run fails: half of
+/// the 10 s the operation log waits for a connection, and several times what
+/// a run that blocks nothing and shares the machine with its workers sees.
+const MAX_STALL: Duration = Duration::from_secs(5);
 
 /// Records in `worst` the longest a timer was late being polled, forever.
 /// Joined with the runner in one task, a late poll is a step that blocked the

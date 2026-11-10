@@ -21,7 +21,7 @@ use app::ports::ConfigStore;
 use secrets::SystemSecrets;
 
 use super::Agent;
-use super::forget_steps::{open, snapshots_of};
+use super::forget_steps::{snapshots_of, with_repository};
 
 const PASSWORD: &str = "e2e-scratch-password";
 
@@ -41,49 +41,54 @@ fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
 }
 
 /// Backs the scenario's folder up with plain rustic, carrying `tags`.
-fn back_up_with_tags(agent: &Agent, tags: &[String]) -> rustic_core::repofile::SnapshotFile {
-    let repository = open(agent);
+async fn back_up_with_tags(agent: &Agent, tags: &[String]) -> rustic_core::repofile::SnapshotFile {
     let source = agent.backup.source.clone().expect("a plan source");
-    let paths = rustic_core::PathList::from_iter([source])
-        .sanitize()
-        .expect("the folder's path");
-    let mut options = rustic_core::SnapshotOptions::default();
-    for tag in tags {
-        options = options.add_tags(tag).expect("a tag");
-    }
-    let snapshot = options.to_snapshot().expect("a snapshot");
-    repository
-        .backup(&rustic_core::BackupOptions::default(), &paths, snapshot)
-        .expect("a plain rustic backup")
+    let tags = tags.to_vec();
+    with_repository(agent, move |repository| {
+        let paths = rustic_core::PathList::from_iter([source])
+            .sanitize()
+            .expect("the folder's path");
+        let mut options = rustic_core::SnapshotOptions::default();
+        for tag in &tags {
+            options = options.add_tags(tag).expect("a tag");
+        }
+        let snapshot = options.to_snapshot().expect("a snapshot");
+        repository
+            .backup(&rustic_core::BackupOptions::default(), &paths, snapshot)
+            .expect("a plain rustic backup")
+    })
+    .await
 }
 
 #[given(expr = "the plan {string} already holds a snapshot of the folder")]
-fn plan_holds_snapshot(agent: &mut Agent, plan: String) {
+async fn plan_holds_snapshot(agent: &mut Agent, plan: String) {
     let tags = plan_tags(agent, &plan);
-    back_up_with_tags(agent, &tags);
+    back_up_with_tags(agent, &tags).await;
 }
 
 #[given(expr = "the folder was backed up without Ladderback with the tag {string}")]
-fn backed_up_with_tag(agent: &mut Agent, tag: String) {
-    back_up_with_tags(agent, &[tag]);
+async fn backed_up_with_tag(agent: &mut Agent, tag: String) {
+    back_up_with_tags(agent, &[tag]).await;
 }
 
 #[given(expr = "an earlier adoption into the plan {string} saved its copy but left the original")]
-fn interrupted_adoption(agent: &mut Agent, plan: String) {
+async fn interrupted_adoption(agent: &mut Agent, plan: String) {
     // What a worker killed between saving the copies and removing the
     // originals leaves: each original, and a copy of it with the plan's tags.
-    let repository = open(agent);
-    let mut copies = repository.get_all_snapshots().expect("the snapshots load");
     let tags: rustic_core::repofile::StringList = plan_tags(agent, &plan)
         .join(",")
         .parse()
         .expect("the plan's tags");
-    for copy in &mut copies {
-        copy.tags.add_list(tags.clone());
-    }
-    repository
-        .save_snapshots(copies)
-        .expect("the copies are saved");
+    with_repository(agent, move |repository| {
+        let mut copies = repository.get_all_snapshots().expect("the snapshots load");
+        for copy in &mut copies {
+            copy.tags.add_list(tags.clone());
+        }
+        repository
+            .save_snapshots(copies)
+            .expect("the copies are saved");
+    })
+    .await;
 }
 
 fn alias() -> RepositoryAlias {
@@ -169,6 +174,7 @@ async fn adopt(agent: &mut Agent, plan: String) {
         .expect("the history matches the plan");
     // What the run replaces, read before anything is written.
     agent.adopt.originals = snapshots_of(agent)
+        .await
         .into_iter()
         .filter(|(_, _, tags)| !tags.iter().any(|tag| tag.starts_with("ladderback-")))
         .map(|(id, _, _)| id)
@@ -181,11 +187,11 @@ async fn adopt(agent: &mut Agent, plan: String) {
 }
 
 #[then("every snapshot of the folder carries this agent's and the plan's tags")]
-fn tagged(agent: &mut Agent) {
+async fn tagged(agent: &mut Agent) {
     let plan = agent.backup.plan.clone().expect("a plan");
     let plan_tag = format!("ladderback-plan:{}", plan.as_str());
     let agent_tag = format!("ladderback-agent:{}", agent.agent_id.as_uuid().hyphenated());
-    let after = snapshots_of(agent);
+    let after = snapshots_of(agent).await;
     assert_eq!(
         after.len(),
         agent.adopt.originals.len(),
@@ -201,8 +207,9 @@ fn tagged(agent: &mut Agent) {
 }
 
 #[then("no snapshot made without Ladderback is left")]
-fn originals_gone(agent: &mut Agent) {
+async fn originals_gone(agent: &mut Agent) {
     let present: Vec<SnapshotId> = snapshots_of(agent)
+        .await
         .into_iter()
         .map(|(id, _, _)| id)
         .collect();
@@ -216,13 +223,14 @@ fn originals_gone(agent: &mut Agent) {
 }
 
 #[then(expr = "the adoption reports {int} snapshot(s) rewritten")]
-fn reports_rewritten(agent: &mut Agent, count: usize) {
+async fn reports_rewritten(agent: &mut Agent, count: usize) {
     let finished = agent.finished.as_ref().expect("the adoption has run");
     let Some(app::ports::EngineResult::Rewrite(summary)) = &finished.result else {
         panic!("a rewrite's result, not {:?}", finished.result)
     };
     assert_eq!(summary.created.len(), count, "{:?}", summary.created);
     let present: Vec<SnapshotId> = snapshots_of(agent)
+        .await
         .into_iter()
         .map(|(id, _, _)| id)
         .collect();
@@ -235,14 +243,14 @@ fn reports_rewritten(agent: &mut Agent, count: usize) {
 }
 
 #[then(expr = "the adopted snapshot still carries the tag {string}")]
-fn keeps_user_tag(agent: &mut Agent, tag: String) {
+async fn keeps_user_tag(agent: &mut Agent, tag: String) {
     let finished = agent.finished.as_ref().expect("the adoption has run");
     let Some(app::ports::EngineResult::Rewrite(summary)) = &finished.result else {
         panic!("a rewrite's result, not {:?}", finished.result)
     };
     let plan = agent.backup.plan.clone().expect("a plan");
     let expected = plan_tags(agent, plan.as_str());
-    for (id, _, tags) in snapshots_of(agent) {
+    for (id, _, tags) in snapshots_of(agent).await {
         if summary.created.contains(&id) {
             assert!(tags.contains(&tag), "{id:?} kept {tag:?}: {tags:?}");
             for plan_tag in &expected {
