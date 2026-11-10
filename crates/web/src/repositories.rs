@@ -4,11 +4,13 @@
 //! the form and the list. Host-tested here; the DOM glue that holds the
 //! signals and sends the requests is `routes.rs` and `ws.rs`.
 
+use std::collections::BTreeMap;
+
 use api::{
     ConnectRepositoryDto, ErrorCode, InitRepositoryDto, MsgArg, PasswordDto, PasswordSourceDto,
     RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto,
 };
-use l10n::MessageId;
+use l10n::{MessageId, msg};
 
 /// A field of the form, in the order the page shows them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +24,23 @@ pub(crate) enum Field {
 impl Field {
     /// The `id` of the field's input, which an error summary's link points at.
     pub(crate) fn id(self) -> &'static str {
-        todo!("the red commit: tests first")
+        match self {
+            Self::Name => "repository-name",
+            Self::Location => "repository-location",
+            Self::HotStorage => "repository-hot-storage",
+            Self::Password => "repository-password",
+        }
+    }
+
+    /// The message that says the field is empty, for a field a form can leave
+    /// empty and still be refused: hot storage is optional.
+    pub(crate) fn required(self) -> Option<MessageId> {
+        match self {
+            Self::Name => Some(msg::UI_REPOSITORIES_NAME_REQUIRED),
+            Self::Location => Some(msg::UI_REPOSITORIES_LOCATION_REQUIRED),
+            Self::HotStorage => None,
+            Self::Password => Some(msg::UI_REPOSITORIES_PASSWORD_REQUIRED),
+        }
     }
 }
 
@@ -40,7 +58,11 @@ pub(crate) enum Action {
 impl Action {
     /// The route the action posts to, from the API's root.
     pub(crate) fn path(self) -> &'static str {
-        todo!("the red commit: tests first")
+        match self {
+            Self::Test => "/api/v1/repositories/_test",
+            Self::Connect => "/api/v1/repositories",
+            Self::Create => "/api/v1/repositories/_init",
+        }
     }
 }
 
@@ -57,43 +79,96 @@ impl Form {
     /// The fields the action needs and the form leaves empty, in the order the
     /// page shows them. Spaces around a name or a location are not part of it,
     /// so a field of only spaces is empty; a password is taken as typed.
-    pub(crate) fn missing(&self, _action: Action) -> Vec<Field> {
-        todo!("the red commit: tests first")
+    pub(crate) fn missing(&self, action: Action) -> Vec<Field> {
+        let wanted = [
+            (
+                Field::Name,
+                action == Action::Connect && self.name.trim().is_empty(),
+            ),
+            (Field::Location, self.location.trim().is_empty()),
+            (Field::Password, self.password.is_empty()),
+        ];
+        wanted
+            .into_iter()
+            .filter_map(|(field, missing)| missing.then_some(field))
+            .collect()
+    }
+
+    /// The name the repository is to be saved under: what was typed, without
+    /// the spaces around it.
+    pub(crate) fn alias(&self) -> &str {
+        self.name.trim()
     }
 
     /// The settings the form describes: the password is the one typed, and
     /// hot storage is left out when it is empty.
     pub(crate) fn settings(&self) -> RepositorySettingsDto {
-        todo!("the red commit: tests first")
+        RepositorySettingsDto {
+            repository: self.location.trim().to_owned(),
+            repo_hot: Some(self.hot_storage.trim())
+                .filter(|hot| !hot.is_empty())
+                .map(str::to_owned),
+            password: PasswordDto::Inline {
+                value: self.password.clone(),
+            },
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        }
     }
 
     /// The body of `Action::Test`.
     pub(crate) fn test_request(&self) -> TestRepositoryDto {
-        todo!("the red commit: tests first")
+        TestRepositoryDto {
+            settings: self.settings(),
+        }
     }
 
     /// The body of `Action::Connect`.
     pub(crate) fn connect_request(&self) -> ConnectRepositoryDto {
-        todo!("the red commit: tests first")
+        ConnectRepositoryDto {
+            alias: self.alias().to_owned(),
+            settings: self.settings(),
+        }
     }
 
     /// The body of `Action::Create`: the repository is saved only when the
     /// form names it.
     pub(crate) fn create_request(&self) -> InitRepositoryDto {
-        todo!("the red commit: tests first")
+        InitRepositoryDto {
+            alias: Some(self.alias())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned),
+            settings: self.settings(),
+        }
     }
 }
 
 /// The field a refusal is about, when it is about one: a name the daemon will
 /// not take, or a secret it could not read.
-pub(crate) fn field_of(_code: ErrorCode, _args: &[(String, MsgArg)]) -> Option<Field> {
-    todo!("the red commit: tests first")
+pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Field> {
+    match code {
+        ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
+        ErrorCode::SecretUnresolved => {
+            let named = args.iter().find_map(|(name, value)| match value {
+                MsgArg::Text(field) if name == "field" => Some(field.as_str()),
+                _ => None,
+            })?;
+            match named {
+                "password" => Some(Field::Password),
+                "repository" => Some(Field::Location),
+                "repo-hot" => Some(Field::HotStorage),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Whether a refusal comes with the page's own advice for the next try: the
 /// engine could not open the repository with what was typed.
-pub(crate) fn advises_retry(_code: ErrorCode) -> bool {
-    todo!("the red commit: tests first")
+pub(crate) fn advises_retry(code: ErrorCode) -> bool {
+    code == ErrorCode::OperationFailed
 }
 
 /// What an answer from the daemon means.
@@ -110,23 +185,82 @@ pub(crate) enum Outcome {
 impl Outcome {
     /// What the daemon's answer to `action` says, or `None` when it is not
     /// the answer that action gets.
-    pub(crate) fn of(_action: Action, _answer: &str) -> Option<Self> {
-        todo!("the red commit: tests first")
+    pub(crate) fn of(action: Action, answer: &str) -> Option<Self> {
+        match action {
+            Action::Test => serde_json::from_str::<RepositoryIdDto>(answer)
+                .ok()
+                .map(|answered| Self::Opens { id: answered.id }),
+            Action::Connect => serde_json::from_str::<RepositoryIdDto>(answer)
+                .ok()
+                .map(|answered| Self::Connected { id: answered.id }),
+            Action::Create => {
+                serde_json::from_str::<RepositoryInitDto>(answer)
+                    .ok()
+                    .map(|answered| Self::Created {
+                        id: answered.id,
+                        saved: answered.saved,
+                    })
+            }
+        }
     }
 
     /// Whether the configuration changed, so the list is read again and what
     /// was typed has been kept.
     pub(crate) fn saved(&self) -> bool {
-        todo!("the red commit: tests first")
+        match self {
+            Self::Opens { .. } => false,
+            Self::Connected { .. } => true,
+            Self::Created { saved, .. } => *saved,
+        }
     }
+}
+
+impl Outcome {
+    /// The sentence the page shows once the daemon answered: the message and
+    /// its arguments. `alias` is the name the form was connected under.
+    pub(crate) fn shown(&self, alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+        match self {
+            Self::Opens { id } => (msg::UI_REPOSITORIES_OPENS_WITH_ID, vec![("id", text(id))]),
+            Self::Connected { .. } => {
+                (msg::UI_REPOSITORIES_CONNECTED, vec![("alias", text(alias))])
+            }
+            Self::Created { id, .. } => {
+                (msg::UI_REPOSITORIES_CREATED_WITH_ID, vec![("id", text(id))])
+            }
+        }
+    }
+
+    /// The sentence the announcer says politely: the same news without the
+    /// ID, which is a long run of digits a screen reader would spell out.
+    pub(crate) fn announced(&self, alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+        match self {
+            Self::Opens { .. } => (msg::UI_REPOSITORIES_OPENS, vec![]),
+            Self::Connected { .. } => self.shown(alias),
+            Self::Created { .. } => (msg::UI_REPOSITORIES_CREATED, vec![]),
+        }
+    }
+}
+
+fn text(value: &str) -> MsgArg {
+    MsgArg::Text(value.to_owned())
 }
 
 /// The message that says where a configured repository's password comes
 /// from, with its arguments. Never the password itself.
 pub(crate) fn password_source(
-    _source: &PasswordSourceDto,
+    source: &PasswordSourceDto,
 ) -> (MessageId, Vec<(&'static str, MsgArg)>) {
-    todo!("the red commit: tests first")
+    match source {
+        PasswordSourceDto::Inline => (msg::UI_PASSWORD_INLINE, vec![]),
+        PasswordSourceDto::File { path } => (msg::UI_PASSWORD_FILE, vec![("path", text(path))]),
+        PasswordSourceDto::Keyring { entry } => {
+            (msg::UI_PASSWORD_KEYRING, vec![("entry", text(entry))])
+        }
+        PasswordSourceDto::Env { name } => (msg::UI_PASSWORD_ENV, vec![("name", text(name))]),
+        PasswordSourceDto::Command { program } => {
+            (msg::UI_PASSWORD_COMMAND, vec![("program", text(program))])
+        }
+    }
 }
 
 /// A refusal's sentence, in two parts when the engine's own words are in it:
@@ -139,17 +273,40 @@ pub(crate) struct Sentence {
 }
 
 impl Sentence {
+    /// The whole sentence as plain text, for a place that cannot mark the
+    /// engine's words.
+    pub(crate) fn plain(&self) -> String {
+        match &self.detail {
+            Some((detail, after)) => format!("{}{detail}{after}", self.before),
+            None => self.before.clone(),
+        }
+    }
+
     /// `text` with `detail` marked, when `detail` is in it; a text that
     /// holds none of it (the catalog cut a long one short) is one plain run.
-    pub(crate) fn new(_text: &str, _detail: Option<&str>) -> Self {
-        todo!("the red commit: tests first")
+    pub(crate) fn new(text: &str, detail: Option<&str>) -> Self {
+        let marked = detail
+            .filter(|detail| !detail.is_empty())
+            .and_then(|detail| text.find(detail).map(|at| (detail, at)));
+        match marked {
+            Some((detail, at)) => Self {
+                before: text.get(..at).unwrap_or_default().to_owned(),
+                detail: Some((
+                    detail.to_owned(),
+                    text.get(at + detail.len()..).unwrap_or_default().to_owned(),
+                )),
+            },
+            None => Self {
+                before: text.to_owned(),
+                detail: None,
+            },
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l10n::msg;
 
     fn form() -> Form {
         Form {
@@ -490,5 +647,71 @@ mod tests {
             plain("The operation failed."),
             "nothing to mark is no mark"
         );
+    }
+
+    #[test]
+    fn only_a_field_a_form_can_leave_empty_and_be_refused_has_a_required_message() {
+        assert_eq!(
+            Field::Name.required(),
+            Some(msg::UI_REPOSITORIES_NAME_REQUIRED)
+        );
+        assert_eq!(
+            Field::Location.required(),
+            Some(msg::UI_REPOSITORIES_LOCATION_REQUIRED)
+        );
+        assert_eq!(
+            Field::Password.required(),
+            Some(msg::UI_REPOSITORIES_PASSWORD_REQUIRED)
+        );
+        assert_eq!(
+            Field::HotStorage.required(),
+            None,
+            "hot storage is optional"
+        );
+    }
+
+    #[test]
+    fn each_outcome_is_shown_with_what_the_reader_needs_and_announced_without_the_id() {
+        let opens = Outcome::Opens { id: "abc".into() };
+        assert_eq!(
+            opens.shown("copy"),
+            (
+                msg::UI_REPOSITORIES_OPENS_WITH_ID,
+                vec![("id", text("abc"))]
+            )
+        );
+        assert_eq!(
+            opens.announced("copy"),
+            (msg::UI_REPOSITORIES_OPENS, vec![])
+        );
+        let created = Outcome::Created {
+            id: "abc".into(),
+            saved: false,
+        };
+        assert_eq!(
+            created.shown("copy"),
+            (
+                msg::UI_REPOSITORIES_CREATED_WITH_ID,
+                vec![("id", text("abc"))]
+            )
+        );
+        assert_eq!(
+            created.announced("copy"),
+            (msg::UI_REPOSITORIES_CREATED, vec![])
+        );
+        let connected = Outcome::Connected { id: "abc".into() };
+        let said = (
+            msg::UI_REPOSITORIES_CONNECTED,
+            vec![("alias", text("copy"))],
+        );
+        assert_eq!(connected.shown("copy"), said);
+        assert_eq!(connected.announced("copy"), said);
+    }
+
+    #[test]
+    fn a_sentence_is_whole_again_as_plain_text() {
+        let text = "The operation failed: wrong password.";
+        assert_eq!(Sentence::new(text, Some("wrong password")).plain(), text);
+        assert_eq!(Sentence::new(text, None).plain(), text);
     }
 }

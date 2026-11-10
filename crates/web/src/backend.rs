@@ -215,8 +215,8 @@ pub(crate) fn ended(status: &str) -> bool {
 /// Whether a POST's answer is a success: any 2xx. An operation is accepted
 /// with 202, a repository that was tested with 200 and one that was connected
 /// or created with 201; anything else is a refusal, with a typed body.
-pub(crate) fn succeeded(_status: u16) -> bool {
-    todo!("the red commit: tests first")
+pub(crate) fn succeeded(status: u16) -> bool {
+    (200..300).contains(&status)
 }
 
 #[cfg(test)]

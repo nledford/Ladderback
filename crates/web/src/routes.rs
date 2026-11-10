@@ -883,3 +883,5 @@ mod tests {
         );
     }
 }
+    } else if path == "/repositories" {
+        msg::UI_REPOSITORIES_TITLE
