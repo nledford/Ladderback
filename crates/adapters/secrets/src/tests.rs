@@ -1006,6 +1006,31 @@ async fn a_timed_out_command_gets_sigterm_before_anything_else() {
     );
 }
 
+/// What a command says on its way out, it can say: a handler that writes to
+/// stdout or stderr (a helper that logs that it is closing its session) must
+/// find the pipes open, or the SIGPIPE ends it before it is done.
+#[tokio::test]
+async fn a_command_can_still_write_to_its_output_when_it_gets_sigterm() {
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'echo closing; echo closing >&2; echo done >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
+    )
+    .await;
+    assert_eq!(trapped.result, timed_out());
+    assert!(
+        trapped.wrote("done"),
+        "the handler was cut short: {:?}",
+        trapped.lines
+    );
+}
+
 /// A command that ignores SIGTERM is killed once its grace is over: not
 /// before, so the polite signal had its time, and not much later, so the
 /// call is bounded. Each signal went once, while the leader was there.
