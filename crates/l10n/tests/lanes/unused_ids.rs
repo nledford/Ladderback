@@ -237,8 +237,18 @@ fn text_a_lexer_cannot_read_is_an_error_not_silence() {
 
 /// What `exclude_test_modules` keeps of `files`, given their texts by path.
 fn product_files(files: &[(&str, &str)]) -> Result<Vec<String>, String> {
+    product_files_with(files, &[])
+}
+
+/// The same, with files that exist but aren't in the list, as `tests.rs` isn't
+/// when the scan collects the sources.
+fn product_files_with(
+    files: &[(&str, &str)],
+    unlisted: &[(&str, &str)],
+) -> Result<Vec<String>, String> {
     let texts: BTreeMap<PathBuf, String> = files
         .iter()
+        .chain(unlisted)
         .map(|(path, text)| (PathBuf::from(path), (*text).to_owned()))
         .collect();
     let paths = files.iter().map(|(path, _)| PathBuf::from(path)).collect();
@@ -369,4 +379,107 @@ fn a_test_module_with_no_file_is_an_error_not_a_hole() {
     let kept = product_files(&[("src/lib.rs", "#[cfg(test)] mod support;")]);
     let error = kept.expect_err("a module with no file");
     assert!(error.contains("support"), "{error}");
+}
+
+#[test]
+fn a_file_a_product_declaration_also_points_at_is_product_code() {
+    // `l10n`'s `constants.rs` is a test module of the library and, through
+    // `#[path]`, a module of its build script.
+    let kept = product_files(&[
+        ("build.rs", "#[path = \"src/constants.rs\"] mod constants;"),
+        ("src/lib.rs", "#[cfg(test)] mod constants;"),
+        ("src/constants.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(
+        kept,
+        Ok(["build.rs", "src/lib.rs", "src/constants.rs"]
+            .map(str::to_owned)
+            .to_vec())
+    );
+}
+
+#[test]
+fn a_module_file_in_a_bin_folder_keeps_its_modules_in_a_folder_of_its_own() {
+    // Only the crate roots in `src/bin` keep them beside; a module of one
+    // doesn't.
+    let kept = product_files_with(
+        &[
+            ("src/bin/tool.rs", "mod helpers;"),
+            ("src/bin/helpers.rs", "#[cfg(test)] mod tests;"),
+        ],
+        &[("src/bin/helpers/tests.rs", "fn t() { msg::CLI_A; }")],
+    );
+    assert_eq!(
+        kept,
+        Ok(["src/bin/tool.rs", "src/bin/helpers.rs"]
+            .map(str::to_owned)
+            .to_vec())
+    );
+}
+
+#[test]
+fn a_tests_rs_that_the_scan_never_lists_is_still_found_where_it_is_declared() {
+    let kept = product_files_with(
+        &[
+            ("src/lib.rs", "mod store;"),
+            (
+                "src/store.rs",
+                "#[cfg(test)] mod tests;\n#[cfg(test)] mod more;",
+            ),
+            ("src/store/more.rs", "mod nested;"),
+        ],
+        &[
+            ("src/store/tests.rs", "mod inner;"),
+            ("src/store/tests/inner.rs", "fn t() { msg::CLI_A; }"),
+            ("src/store/more/nested.rs", ""),
+        ],
+    );
+    assert_eq!(
+        kept,
+        Ok(["src/lib.rs", "src/store.rs"].map(str::to_owned).to_vec()),
+        "more.rs is listed and goes; what the unlisted files declare is never reached as product"
+    );
+}
+
+#[test]
+fn a_file_loaded_by_path_keeps_its_modules_beside_it() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(test)] #[path = \"steps/all.rs\"] mod all;",
+        ),
+        ("src/steps/all.rs", "mod child;"),
+        ("src/steps/child.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_path_with_dots_in_it_is_compared_as_the_file_it_names() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(test)] #[path = \"../shared/./x.rs\"] mod x;",
+        ),
+        ("shared/x.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_raw_identifier_names_the_file_without_its_prefix() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)] mod r#type;"),
+        ("src/type.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_file_that_cannot_be_read_or_a_path_that_is_not_plain_is_an_error() {
+    let missing = exclude_test_modules(vec![PathBuf::from("src/lib.rs")], |_: &Path| None);
+    assert!(missing.expect_err("no such file").contains("src/lib.rs"));
+
+    let raw = product_files(&[("src/lib.rs", "#[cfg(test)] #[path = r\"x.rs\"] mod x;")]);
+    assert!(raw.expect_err("a raw string").contains("path"));
 }
