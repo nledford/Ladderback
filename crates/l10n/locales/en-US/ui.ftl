@@ -408,11 +408,11 @@ ui-snapshots-plan = Plan { $plan }
 # The caption of the table of one plan's snapshots.
 ui-snapshots-of-plan = Snapshots of plan { $plan }
 
-# What follows a list that shows only the newest of its snapshots; $count is how many it leaves out.
+# What follows a list that shows only the newest of its snapshots, a sentence of its own; $count is how many it leaves out.
 ui-snapshots-more =
     { $count ->
-        [one] and 1 more snapshot
-       *[other] and { $count } more snapshots
+        [one] 1 more snapshot is not listed.
+       *[other] { $count } more snapshots are not listed.
     }
 
 # The heading of the section of history that no plan of this agent owns.
@@ -421,20 +421,23 @@ ui-orphaned-heading = Orphaned history
 # What the orphaned section says about its groups.
 ui-orphaned-body = No plan of this agent owns these snapshots now. A forget leaves them alone, and adopting a group rewrites it into a plan.
 
-# The heading of an orphaned group that carries the tags of an agent and a plan.
-ui-orphaned-both = Plan { $plan } of agent { $agent }
+# The heading of an orphaned group. $owner is both when the group carries the tags of an agent and a plan, plan or agent when it carries one of them, and neither when it carries none; $plan and $agent are the tags.
+ui-orphaned-group =
+    { $owner ->
+        [both] Plan { $plan } of agent { $agent }
+        [plan] Plan { $plan } of an unknown agent
+        [agent] An unknown plan of agent { $agent }
+       *[neither] History of an unknown agent and plan
+    }
 
-# The heading of an orphaned group that carries the tag of a plan but none of an agent.
-ui-orphaned-plan = Plan { $plan } of an unknown agent
-
-# The heading of an orphaned group that carries the tag of an agent but none of a plan.
-ui-orphaned-agent = An unknown plan of agent { $agent }
-
-# The heading of an orphaned group that carries neither tag.
-ui-orphaned-neither = History of an unknown agent and plan
-
-# The caption of the table of an orphaned group's snapshots; $group is the group's heading.
-ui-orphaned-caption = Snapshots of { $group }
+# The caption of the table of an orphaned group's snapshots; $owner, $plan and $agent are as in the group's heading.
+ui-orphaned-caption =
+    { $owner ->
+        [both] Snapshots of plan { $plan } of agent { $agent }
+        [plan] Snapshots of plan { $plan } of an unknown agent
+        [agent] Snapshots of an unknown plan of agent { $agent }
+       *[neither] Snapshots of an unknown agent and plan
+    }
 
 # The button that adopts an orphaned group, named by its agent and plan, into a plan of this agent.
 ui-adopt-orphaned = Adopt history of plan { $plan } from agent { $agent } into plan { $into }
@@ -445,20 +448,29 @@ ui-unmanaged-heading = Unmanaged history
 # What the unmanaged section says about its groups.
 ui-unmanaged-body = No agent tagged these snapshots. A forget leaves them alone, and a plan that backs up the same host, label and paths can adopt them.
 
-# The heading of an unmanaged group that has a label.
-ui-unmanaged-labeled = Host { $hostname }, label { $label }
+# The heading of an unmanaged group. $labeled is yes when the group has a label and no when it has none; $hostname is its host and $label its label.
+ui-unmanaged-group =
+    { $labeled ->
+        [yes] Host { $hostname }, label { $label }
+       *[no] Host { $hostname }, no label
+    }
 
-# The heading of an unmanaged group that has no label.
-ui-unmanaged-unlabeled = Host { $hostname }, no label
+# What introduces the list of the paths an unmanaged group backed up.
+ui-unmanaged-paths = Paths:
 
-# The paths an unmanaged group backed up; $paths is the list of them.
-ui-unmanaged-paths = Paths: { $paths }
+# The caption of the table of an unmanaged group's snapshots; $labeled, $hostname and $label are as in the group's heading.
+ui-unmanaged-caption =
+    { $labeled ->
+        [yes] Snapshots of host { $hostname }, label { $label }
+       *[no] Snapshots of host { $hostname }, no label
+    }
 
-# The caption of the table of an unmanaged group's snapshots; $group is the group's heading.
-ui-unmanaged-caption = Snapshots of { $group }
-
-# The button that adopts an unmanaged group into the plan that backs up the same things; $group is the group's heading.
-ui-adopt-unmanaged = Adopt history of { $group } into plan { $into }
+# The button that adopts an unmanaged group into the plan that backs up the same things; $labeled, $hostname and $label are as in the group's heading, $into is the plan.
+ui-adopt-unmanaged =
+    { $labeled ->
+        [yes] Adopt history of host { $hostname }, label { $label } into plan { $into }
+       *[no] Adopt history of host { $hostname }, no label into plan { $into }
+    }
 
 # What an unmanaged group says when no plan of this agent could adopt it.
 ui-unmanaged-no-plan = No plan of this agent backs up this host, label and paths, so this history cannot be adopted.
@@ -496,10 +508,22 @@ ui-review-confirm-prune = Start prune
 ui-review-confirm-check = Start check
 
 # What a forget does to the snapshots of one plan; $remove of its $total go.
-ui-review-removes = Plan { $plan }: { $remove } of its { $total } snapshots are forgotten.
+ui-review-removes =
+    { $remove ->
+        [one]
+            { $total ->
+                [one] Plan { $plan }: its 1 snapshot is forgotten.
+               *[other] Plan { $plan }: 1 of its { $total } snapshots is forgotten.
+            }
+       *[other] Plan { $plan }: { $remove } of its { $total } snapshots are forgotten.
+    }
 
 # What a forget does to a plan whose retention lets none of its $total snapshots go.
-ui-review-removes-none = Plan { $plan }: nothing is forgotten among its { $total } snapshots.
+ui-review-removes-none =
+    { $total ->
+        [one] Plan { $plan }: nothing is forgotten among its 1 snapshot.
+       *[other] Plan { $plan }: nothing is forgotten among its { $total } snapshots.
+    }
 
 # What a forget says when no plan of this agent backs up to the repository.
 ui-review-no-plans = No plan of this agent backs up to this repository, so a forget has nothing to keep or remove.

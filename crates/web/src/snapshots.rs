@@ -613,10 +613,7 @@ fn orphaned_view(page: Page, groups: Vec<OrphanedGroupDto>) -> impl IntoView {
 
 fn orphaned_group_view(page: Page, index: usize, group: OrphanedGroupDto) -> impl IntoView {
     let heading = page.words(&wording::owner(Owner::of(&group)));
-    let caption = page.text(
-        msg::UI_ORPHANED_CAPTION,
-        &[("group", MsgArg::Text(heading.clone()))],
-    );
+    let caption = page.words(&wording::owner_caption(Owner::of(&group)));
     let rows = Rows::of(group.count, group.snapshots.len());
     let adoptions = group
         .adopt_into
@@ -658,18 +655,27 @@ fn unmanaged_view(page: Page, groups: Vec<UnmanagedGroupDto>) -> impl IntoView {
 
 fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> impl IntoView {
     let heading = page.words(&wording::unmanaged(&group));
-    let paths = page.words(&wording::paths(&group.paths));
-    let caption = page.text(
-        msg::UI_UNMANAGED_CAPTION,
-        &[("group", MsgArg::Text(heading.clone()))],
-    );
+    let caption = page.words(&wording::unmanaged_caption(&group));
+    // The paths, one to an item: each is data, laid out in a direction of its
+    // own.
+    let paths = (!group.paths.is_empty()).then(|| {
+        let items = group
+            .paths
+            .iter()
+            .map(|path| view! { <li><bdi>{path.clone()}</bdi></li> })
+            .collect_view();
+        view! {
+            <p>{page.plain(msg::UI_UNMANAGED_PATHS)}</p>
+            <ul>{items}</ul>
+        }
+    });
     let rows = Rows::of(group.count, group.snapshots.len());
     let adoptions = group
         .adopt_into
         .iter()
         .enumerate()
         .map(|(target, into)| {
-            let adoption = wording::adopt_unmanaged(&heading, into);
+            let adoption = wording::adopt_unmanaged(&group, into);
             adoption_view(page, format!("adopt-unmanaged-{index}-{target}"), adoption)
         })
         .collect_view();
@@ -679,7 +685,7 @@ fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> i
         .then(|| view! { <p>{page.plain(msg::UI_UNMANAGED_NO_PLAN)}</p> });
     view! {
         <h3>{heading}</h3>
-        <p>{paths}</p>
+        {paths}
         {snapshots_view(page, caption, group.snapshots, rows)}
         {adoptions}
         {no_plan}

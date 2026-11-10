@@ -226,44 +226,54 @@ pub(crate) fn told(told: Told) -> Words {
     }
 }
 
+/// What an orphaned group is told by: which tags it carries, and their text.
+fn owner_args(owner: Owner<'_>) -> Vec<(&'static str, MsgArg)> {
+    match owner {
+        Owner::Both { agent, plan } => vec![
+            ("owner", text("both")),
+            ("plan", text(plan)),
+            ("agent", text(agent)),
+        ],
+        Owner::Plan(plan) => vec![("owner", text("plan")), ("plan", text(plan))],
+        Owner::Agent(agent) => vec![("owner", text("agent")), ("agent", text(agent))],
+        Owner::Neither => vec![("owner", text("neither"))],
+    }
+}
+
 /// The heading of an orphaned group, by the tags it carries.
 pub(crate) fn owner(owner: Owner<'_>) -> Words {
-    match owner {
-        Owner::Both { agent, plan } => words(
-            msg::UI_ORPHANED_BOTH,
-            vec![("plan", text(plan)), ("agent", text(agent))],
+    words(msg::UI_ORPHANED_GROUP, owner_args(owner))
+}
+
+/// The caption of the table of an orphaned group's snapshots, by the tags it
+/// carries.
+pub(crate) fn owner_caption(owner: Owner<'_>) -> Words {
+    words(msg::UI_ORPHANED_CAPTION, owner_args(owner))
+}
+
+/// What an unmanaged group is told by: whether it has a label, its host and
+/// its label.
+fn unmanaged_args(group: &UnmanagedGroupDto) -> Vec<(&'static str, MsgArg)> {
+    vec![
+        (
+            "labeled",
+            text(if group.label.is_empty() { "no" } else { "yes" }),
         ),
-        Owner::Plan(plan) => words(msg::UI_ORPHANED_PLAN, vec![("plan", text(plan))]),
-        Owner::Agent(agent) => words(msg::UI_ORPHANED_AGENT, vec![("agent", text(agent))]),
-        Owner::Neither => words(msg::UI_ORPHANED_NEITHER, Vec::new()),
-    }
+        ("hostname", text(&group.hostname)),
+        ("label", text(&group.label)),
+    ]
 }
 
 /// The heading of an unmanaged group: its host, and its label when it has
 /// one.
 pub(crate) fn unmanaged(group: &UnmanagedGroupDto) -> Words {
-    if group.label.is_empty() {
-        words(
-            msg::UI_UNMANAGED_UNLABELED,
-            vec![("hostname", text(&group.hostname))],
-        )
-    } else {
-        words(
-            msg::UI_UNMANAGED_LABELED,
-            vec![
-                ("hostname", text(&group.hostname)),
-                ("label", text(&group.label)),
-            ],
-        )
-    }
+    words(msg::UI_UNMANAGED_GROUP, unmanaged_args(group))
 }
 
-/// The paths an unmanaged group backed up, as one list.
-pub(crate) fn paths(paths: &[String]) -> Words {
-    words(
-        msg::UI_UNMANAGED_PATHS,
-        vec![("paths", text(&paths.join(", ")))],
-    )
+/// The caption of the table of an unmanaged group's snapshots, by its host and
+/// its label.
+pub(crate) fn unmanaged_caption(group: &UnmanagedGroupDto) -> Words {
+    words(msg::UI_UNMANAGED_CAPTION, unmanaged_args(group))
 }
 
 /// The button that adopts the orphaned `group` into the plan `into`, with
@@ -285,14 +295,13 @@ pub(crate) fn adopt_orphaned(group: &OrphanedGroupDto, into: &str) -> Option<Ado
     })
 }
 
-/// The button that adopts an unmanaged group, named by its heading `group`,
+/// The button that adopts the unmanaged `group`, named by its host and label,
 /// into the plan `into`, with its request.
-pub(crate) fn adopt_unmanaged(group: &str, into: &str) -> Adoption {
+pub(crate) fn adopt_unmanaged(group: &UnmanagedGroupDto, into: &str) -> Adoption {
+    let mut args = unmanaged_args(group);
+    args.push(("into", text(into)));
     Adoption {
-        label: words(
-            msg::UI_ADOPT_UNMANAGED,
-            vec![("group", text(group)), ("into", text(into))],
-        ),
+        label: words(msg::UI_ADOPT_UNMANAGED, args),
         request: maintenance::adoption(into, AdoptionFromDto::Unmanaged),
     }
 }
@@ -301,7 +310,9 @@ pub(crate) fn adopt_unmanaged(group: &str, into: &str) -> Adoption {
 mod tests {
     use super::*;
     use crate::announcer::Politeness;
+    use crate::routes::text_with;
     use api::SnapshotDto;
+    use l10n::Localizer;
 
     fn review(kind: Kind, confirm: Option<Confirm>) -> Review {
         Review {
@@ -692,53 +703,80 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_orphaned_group_is_headed_by_the_tags_it_carries() {
-        assert_eq!(
-            owner(Owner::Both {
-                agent: "agent-a",
-                plan: "old"
-            }),
-            said(
-                msg::UI_ORPHANED_BOTH,
-                &[("plan", name("old")), ("agent", name("agent-a"))]
-            )
-        );
-        assert_eq!(
-            owner(Owner::Plan("old")),
-            said(msg::UI_ORPHANED_PLAN, &[("plan", name("old"))])
-        );
-        assert_eq!(
-            owner(Owner::Agent("agent-a")),
-            said(msg::UI_ORPHANED_AGENT, &[("agent", name("agent-a"))])
-        );
-        assert_eq!(owner(Owner::Neither), said(msg::UI_ORPHANED_NEITHER, &[]));
+    fn owners() -> Vec<(Owner<'static>, Vec<(&'static str, MsgArg)>)> {
+        vec![
+            (
+                Owner::Both {
+                    agent: "agent-a",
+                    plan: "old",
+                },
+                vec![
+                    ("owner", name("both")),
+                    ("plan", name("old")),
+                    ("agent", name("agent-a")),
+                ],
+            ),
+            (
+                Owner::Plan("old"),
+                vec![("owner", name("plan")), ("plan", name("old"))],
+            ),
+            (
+                Owner::Agent("agent-a"),
+                vec![("owner", name("agent")), ("agent", name("agent-a"))],
+            ),
+            (Owner::Neither, vec![("owner", name("neither"))]),
+        ]
     }
 
     #[test]
-    fn an_unmanaged_group_with_a_label_is_headed_by_its_host_and_label() {
+    fn an_orphaned_group_is_headed_by_one_message_that_takes_the_tags_it_carries() {
+        for (carried, args) in owners() {
+            assert_eq!(
+                owner(carried),
+                said(msg::UI_ORPHANED_GROUP, &args),
+                "{carried:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_orphaned_groups_table_is_captioned_by_one_message_that_takes_the_same_tags() {
+        for (carried, args) in owners() {
+            assert_eq!(
+                owner_caption(carried),
+                said(msg::UI_ORPHANED_CAPTION, &args),
+                "{carried:?}"
+            );
+        }
+    }
+
+    fn unmanaged_args_of(labeled: &str, label: &str) -> [(&'static str, MsgArg); 3] {
+        [
+            ("labeled", name(labeled)),
+            ("hostname", name("laptop")),
+            ("label", name(label)),
+        ]
+    }
+
+    #[test]
+    fn an_unmanaged_group_is_told_by_one_message_that_takes_its_host_and_label() {
+        let group = unmanaged_group("docs");
+        let args = unmanaged_args_of("yes", "docs");
+        assert_eq!(unmanaged(&group), said(msg::UI_UNMANAGED_GROUP, &args));
         assert_eq!(
-            unmanaged(&unmanaged_group("docs")),
-            said(
-                msg::UI_UNMANAGED_LABELED,
-                &[("hostname", name("laptop")), ("label", name("docs"))]
-            )
+            unmanaged_caption(&group),
+            said(msg::UI_UNMANAGED_CAPTION, &args)
         );
     }
 
     #[test]
-    fn an_unmanaged_group_without_a_label_is_headed_by_its_host_alone() {
+    fn an_unmanaged_group_without_a_label_says_so_through_the_same_messages() {
+        let group = unmanaged_group("");
+        let args = unmanaged_args_of("no", "");
+        assert_eq!(unmanaged(&group), said(msg::UI_UNMANAGED_GROUP, &args));
         assert_eq!(
-            unmanaged(&unmanaged_group("")),
-            said(msg::UI_UNMANAGED_UNLABELED, &[("hostname", name("laptop"))])
-        );
-    }
-
-    #[test]
-    fn the_paths_of_an_unmanaged_group_are_one_list() {
-        assert_eq!(
-            paths(&["/home".to_owned(), "/etc".to_owned()]),
-            said(msg::UI_UNMANAGED_PATHS, &[("paths", name("/home, /etc"))])
+            unmanaged_caption(&group),
+            said(msg::UI_UNMANAGED_CAPTION, &args)
         );
     }
 
@@ -779,14 +817,16 @@ mod tests {
     }
 
     #[test]
-    fn an_unmanaged_group_is_adopted_by_a_button_naming_its_heading_and_the_plan() {
-        let adoption = adopt_unmanaged("Host laptop, no label", "home");
+    fn an_unmanaged_group_is_adopted_by_a_button_that_takes_its_host_label_and_the_plan() {
+        let adoption = adopt_unmanaged(&unmanaged_group("docs"), "home");
         assert_eq!(
             adoption.label,
             said(
                 msg::UI_ADOPT_UNMANAGED,
                 &[
-                    ("group", name("Host laptop, no label")),
+                    ("labeled", name("yes")),
+                    ("hostname", name("laptop")),
+                    ("label", name("docs")),
                     ("into", name("home")),
                 ]
             )
@@ -795,5 +835,162 @@ mod tests {
             adoption.request,
             maintenance::adoption("home", AdoptionFromDto::Unmanaged)
         );
+    }
+
+    /// What a reader gets: the words as the catalog writes them in American
+    /// English. A select whose key the code never sends falls to its default
+    /// silently, so the words of each branch are pinned here.
+    fn written(words: &Words) -> String {
+        text_with(&Localizer::new(&[]), words.id, &words.args)
+    }
+
+    #[test]
+    fn a_forget_counts_the_snapshots_of_a_plan_in_the_forms_english_has() {
+        let removes = |remove, total| {
+            let fact = Fact::Removes {
+                plan: "home".to_owned(),
+                remove,
+                total,
+            };
+            written(&fact_words(&fact))
+        };
+        assert_eq!(removes(1, 1), "Plan home: its 1 snapshot is forgotten.");
+        assert_eq!(
+            removes(1, 3),
+            "Plan home: 1 of its 3 snapshots is forgotten."
+        );
+        assert_eq!(
+            removes(2, 3),
+            "Plan home: 2 of its 3 snapshots are forgotten."
+        );
+        assert_eq!(
+            removes(0, 1),
+            "Plan home: nothing is forgotten among its 1 snapshot."
+        );
+        assert_eq!(
+            removes(0, 3),
+            "Plan home: nothing is forgotten among its 3 snapshots."
+        );
+    }
+
+    fn fact_words(single: &Fact) -> Words {
+        fact(single).remove(0)
+    }
+
+    #[test]
+    fn a_list_that_leaves_snapshots_out_says_so_in_a_sentence_of_its_own() {
+        let left_out = |count| written(&more(count).expect("snapshots are left out"));
+        assert_eq!(left_out(1), "1 more snapshot is not listed.");
+        assert_eq!(left_out(70), "70 more snapshots are not listed.");
+    }
+
+    #[test]
+    fn every_kind_of_orphaned_group_reads_as_its_own_heading_and_caption() {
+        let read = |carried| (written(&owner(carried)), written(&owner_caption(carried)));
+        let both = Owner::Both {
+            agent: "agent-a",
+            plan: "old",
+        };
+        assert_eq!(
+            read(both),
+            (
+                "Plan old of agent agent-a".to_owned(),
+                "Snapshots of plan old of agent agent-a".to_owned()
+            )
+        );
+        assert_eq!(
+            read(Owner::Plan("old")),
+            (
+                "Plan old of an unknown agent".to_owned(),
+                "Snapshots of plan old of an unknown agent".to_owned()
+            )
+        );
+        assert_eq!(
+            read(Owner::Agent("agent-a")),
+            (
+                "An unknown plan of agent agent-a".to_owned(),
+                "Snapshots of an unknown plan of agent agent-a".to_owned()
+            )
+        );
+        assert_eq!(
+            read(Owner::Neither),
+            (
+                "History of an unknown agent and plan".to_owned(),
+                "Snapshots of an unknown agent and plan".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_group_reads_with_its_label_or_without_one() {
+        let read = |label| {
+            let group = unmanaged_group(label);
+            (
+                written(&unmanaged(&group)),
+                written(&unmanaged_caption(&group)),
+                written(&adopt_unmanaged(&group, "home").label),
+            )
+        };
+        assert_eq!(
+            read("docs"),
+            (
+                "Host laptop, label docs".to_owned(),
+                "Snapshots of host laptop, label docs".to_owned(),
+                "Adopt history of host laptop, label docs into plan home".to_owned()
+            )
+        );
+        assert_eq!(
+            read(""),
+            (
+                "Host laptop, no label".to_owned(),
+                "Snapshots of host laptop, no label".to_owned(),
+                "Adopt history of host laptop, no label into plan home".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn what_the_page_tells_of_a_run_reads_by_what_the_run_is() {
+        let read = |kind| {
+            (
+                written(&told(Told::Starting(kind))),
+                written(&told(Told::Running(kind))),
+                written(&told(Told::Unwatched(kind))),
+            )
+        };
+        let on = "which goes on. The Operations page shows how it ends.";
+        for (kind, starting, running, watching) in [
+            (
+                Kind::Forget,
+                "Starting the forget…",
+                "A forget is running.",
+                "the forget",
+            ),
+            (
+                Kind::Prune,
+                "Starting the prune…",
+                "A prune is running.",
+                "the prune",
+            ),
+            (
+                Kind::Check,
+                "Starting the check…",
+                "A check is running.",
+                "the check",
+            ),
+            (
+                Kind::Adopt,
+                "Starting the adoption…",
+                "An adoption is running.",
+                "the adoption",
+            ),
+        ] {
+            let unwatched = format!("This page stopped watching {watching}, {on}");
+            assert_eq!(
+                read(kind),
+                (starting.to_owned(), running.to_owned(), unwatched),
+                "{kind:?}"
+            );
+        }
     }
 }
