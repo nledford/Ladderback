@@ -52,10 +52,42 @@ fn folder_of(path: &Path) -> &Path {
     }
 }
 
+/// How many links in a row [`resolve`] follows before it gives up: the limit
+/// the operating systems have, rounded up.
+const MAX_LINKS: usize = 40;
+
+/// The file at the end of the symlinks at `path`, which needn't exist: a link
+/// that points at nothing leads to where the file would be. A name that isn't
+/// a link is itself. A relative link is relative to the folder of the link.
+fn resolve(path: &Path) -> io::Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    for _ in 0..MAX_LINKS {
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let target = fs::read_link(&current)?;
+                current = folder_of(&current).join(target);
+            }
+            Ok(_) => return Ok(current),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(current),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other(format!(
+        "{} leads through more than {MAX_LINKS} symbolic links",
+        path.display()
+    )))
+}
+
 /// Writes `bytes` as the whole of the file at `path`, or leaves the file as it
 /// was: they go to a temporary file in the same folder, which is flushed to
 /// disk and then renamed over the file. The folder is made if it is missing.
+///
+/// If `path` is a symlink, the file it leads to is written, in its folder, and
+/// the link stays: renaming over the link would cut the file a dotfile manager
+/// keeps from the config.
 pub(crate) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let path = resolve(path)?;
+    let path = path.as_path();
     let folder = folder_of(path);
     private_folder(folder)?;
     let mut temporary = tempfile::NamedTempFile::new_in(folder)?;
