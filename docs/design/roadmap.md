@@ -55,7 +55,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 
 ## 16. Decisions
 
-Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decisions 17–18 recorded 2026-11-08. Decisions 21–22 recorded 2026-11-08 with the robustness rules and the time library. Decision 25 recorded 2026-11-09 with manual maintenance. Decision 26 recorded 2026-11-09 with adoption. Decision 30 recorded 2026-11-10 with the time-zone data.
+Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after the adversarial review. Decisions 13–16 recorded 2026-11-08 with the development method and license. Decisions 17–18 recorded 2026-11-08. Decisions 21–22 recorded 2026-11-08 with the robustness rules and the time library. Decision 25 recorded 2026-11-09 with manual maintenance. Decision 26 recorded 2026-11-09 with adoption. Decision 29 recorded 2026-11-10 with the config history. Decision 30 recorded 2026-11-10 with the time-zone data.
 | # | Question | Decision |
 |---|---|---|
 | 1 | Name | **Ladderback** (binary `ladderback`). |
