@@ -209,3 +209,183 @@ async fn a_hook_that_will_not_die_does_not_hold_the_runner_up() {
         started.elapsed()
     );
 }
+
+/// A hook that ignores SIGTERM is killed once its grace is over: not before,
+/// so the polite signal had its time, and not much later, so the call is
+/// bounded. Each signal went once, while the leader was there, and the hook
+/// is reaped, not only killed, when the call returns.
+#[tokio::test]
+async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
+    let limit = Duration::from_secs(1);
+    let grace = Duration::from_secs(1);
+    let trapped = run_trapping(
+        concat!(
+            r#"trap 'echo term >> "$1"' TERM"#,
+            "\n",
+            r#"echo "pid $$" >> "$1""#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        limit,
+        grace,
+    )
+    .await;
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(trapped.wrote("term"), "{:?}", trapped.lines);
+    assert_eq!(
+        trapped.sent,
+        [(Signal::SIGTERM, true), (Signal::SIGKILL, true)]
+    );
+    assert!(
+        trapped.elapsed >= limit + grace,
+        "the grace was not given: {:?}",
+        trapped.elapsed
+    );
+    // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
+    assert!(
+        trapped.elapsed < limit + grace + Duration::from_secs(15),
+        "the call waited {:?}",
+        trapped.elapsed
+    );
+    let pid = pid_in(&trapped.lines);
+    let _reaper = Reaper(pid);
+    // Reaped: gone from the process table (a zombie still answers signal 0).
+    assert!(
+        kill(Pid::from_raw(pid), None).is_err(),
+        "{pid} was not reaped when the call returned"
+    );
+}
+
+/// Waits until the log at `log` has the line `line`.
+async fn logged(log: &Path, line: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if lines(log).iter().any(|written| written == line) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {line:?} in {}",
+            log.display()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A call that is given up on while the hook has its grace is not a reason to
+/// leave the hook running: the drop sends the SIGKILL. The call is dropped
+/// once the hook has said that it got the SIGTERM; one that ended before it
+/// had trapped anything proves nothing and is tried again.
+#[tokio::test]
+async fn dropping_the_call_during_the_grace_kills_the_hook() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let entry = sh(
+        concat!(
+            r#"trap 'echo term >> "$1"' TERM"#,
+            "\n",
+            r#"echo "pid $$" >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        &log,
+    );
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(1));
+    let context = context();
+    for attempt in 0..3 {
+        fs::write(&log, "").unwrap();
+        let signals = Signals::default();
+        let stop = Stop {
+            grace: Duration::from_secs(60),
+            reap_limit: Duration::from_secs(5),
+            signal: &|group, signal| signals.send(group, signal),
+        };
+        {
+            let running = runner.spawn_and_wait_with(&entry, &context, &stop);
+            tokio::pin!(running);
+            tokio::select! {
+                outcome = &mut running => {
+                    assert!(attempt < 2, "the hook never reached its trap: {:?}", outcome.0);
+                    continue;
+                }
+                () = logged(&log, "term") => {}
+            }
+            // `running` is dropped here, in the middle of the grace.
+        }
+        let pid = pid_in(&lines(&log));
+        let _reaper = Reaper(pid);
+        assert_eq!(
+            signals.sent(),
+            [(Signal::SIGTERM, true), (Signal::SIGKILL, true)]
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while kill(Pid::from_raw(pid), None).is_ok() {
+            assert!(Instant::now() < deadline, "{pid} is still running");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        return;
+    }
+}
+
+/// A hook that ended by itself is reaped: nothing is signalled, as the
+/// process id of its group may be another process's by now.
+#[tokio::test]
+async fn a_hook_that_ends_by_itself_is_never_signalled() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(5));
+    let signals = Signals::default();
+    let stop = Stop {
+        grace: Duration::from_secs(5),
+        reap_limit: Duration::from_secs(5),
+        signal: &|group, signal| signals.send(group, signal),
+    };
+    let context = context();
+    for (script, status) in [
+        ("exit 0", HookStatus::Succeeded),
+        ("exit 3", HookStatus::Failed { exit_code: Some(3) }),
+    ] {
+        let (got, _) = runner
+            .spawn_and_wait_with(&sh(script, &log), &context, &stop)
+            .await;
+        assert_eq!(got, status);
+    }
+    assert_eq!(signals.sent(), []);
+}
+
+/// The call returns once the killed hook is reaped, not when the SIGKILL is
+/// sent: here the SIGKILL takes a while to arrive, as it does for a hook that
+/// is busy in the kernel, and the call waits for it. (The SIGTERM is not
+/// delivered at all, so the hook is still there when the grace is over.)
+#[tokio::test]
+async fn the_call_waits_for_a_killed_hook_to_be_reaped() {
+    let delay = Duration::from_millis(400);
+    let (timeout, grace) = (Duration::from_millis(300), Duration::from_millis(300));
+    let late = |group: Pid, signal: Signal| {
+        if signal == Signal::SIGKILL {
+            std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let _ = killpg(group, Signal::SIGKILL);
+            });
+        }
+    };
+    let stop = Stop {
+        grace,
+        reap_limit: Duration::from_secs(5),
+        signal: &late,
+    };
+    let scratch = TempDir::new().unwrap();
+    let entry = sh("exec sleep 60", &scratch.path().join("log"));
+    let runner = ProcessHookRunner::with_timeout(timeout);
+    let started = Instant::now();
+    let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+    let elapsed = started.elapsed();
+    assert_eq!(status, HookStatus::TimedOut);
+    assert!(
+        elapsed >= timeout + grace + delay,
+        "the call did not wait for the hook: {elapsed:?}"
+    );
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+}
