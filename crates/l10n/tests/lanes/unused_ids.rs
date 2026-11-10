@@ -2,12 +2,13 @@
 //! product code names is a dead string, and dead strings pile up. Test code
 //! doesn't count: a message only a test reads is still dead.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use l10n::msg;
 
-use crate::support::sources::{product_sources, scan};
+use crate::support::sources::{exclude_test_modules, product_sources, scan};
 use crate::support::workspace_root;
 
 /// The constant the generator gives a message: `cli-listening` is `CLI_LISTENING`.
@@ -25,7 +26,8 @@ fn every_message_id_is_named_by_some_product_code() {
     let root = workspace_root();
     let mut named = BTreeSet::new();
     let mut problems = Vec::new();
-    for path in product_sources(&root) {
+    let sources = product_sources(&root).unwrap_or_else(|error| panic!("{error}"));
+    for path in sources {
         let shown = path
             .strip_prefix(&root)
             .unwrap_or(&path)
@@ -231,4 +233,253 @@ fn a_glob_import_is_flagged_because_it_hides_what_is_used() {
 fn text_a_lexer_cannot_read_is_an_error_not_silence() {
     assert!(scan("fn broken() { let _ = \"unterminated; }").is_err());
     assert!(scan("fn broken() { ").is_err());
+}
+
+/// What `exclude_test_modules` keeps of `files`, given their texts by path.
+fn product_files(files: &[(&str, &str)]) -> Result<Vec<String>, String> {
+    product_files_with(files, &[])
+}
+
+/// The same, with files that exist but aren't in the list, as `tests.rs` isn't
+/// when the scan collects the sources.
+fn product_files_with(
+    files: &[(&str, &str)],
+    unlisted: &[(&str, &str)],
+) -> Result<Vec<String>, String> {
+    let texts: BTreeMap<PathBuf, String> = files
+        .iter()
+        .chain(unlisted)
+        .map(|(path, text)| (PathBuf::from(path), (*text).to_owned()))
+        .collect();
+    let paths = files.iter().map(|(path, _)| PathBuf::from(path)).collect();
+    exclude_test_modules(paths, |path: &Path| texts.get(path).cloned())
+        .map(|kept| kept.iter().map(|path| path.display().to_string()).collect())
+}
+
+#[test]
+fn a_file_a_cfg_test_mod_declaration_points_at_is_not_product_code() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)]\nmod support;\nmod product;"),
+        ("src/support.rs", "fn helper() { msg::CLI_A; }"),
+        ("src/product.rs", "fn real() { msg::CLI_B; }"),
+    ]);
+    assert_eq!(
+        kept,
+        Ok(vec!["src/lib.rs".to_owned(), "src/product.rs".to_owned()])
+    );
+}
+
+#[test]
+fn a_test_module_directory_with_a_mod_rs_is_not_product_code_either() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)] mod support;"),
+        ("src/support/mod.rs", "mod helper;"),
+        ("src/support/helper.rs", "fn h() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn the_files_a_test_module_declares_are_test_code_too() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)] mod support;"),
+        ("src/support.rs", "mod deeper;"),
+        ("src/support/deeper.rs", "mod deepest;"),
+        ("src/support/deeper/deepest.rs", "fn h() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_cfg_that_only_holds_under_test_and_other_attributes_still_mark_the_module() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(all(test, unix))] mod a;
+             #[cfg(test)] pub(crate) mod b;
+             #[allow(dead_code)] #[cfg(test)] #[doc = \"x\"] mod c;
+             #[cfg(not(test))] mod d;
+             #[cfg(any(test, unix))] mod e;
+             #[cfg(unix)] mod f;",
+        ),
+        ("src/a.rs", ""),
+        ("src/b.rs", ""),
+        ("src/c.rs", ""),
+        ("src/d.rs", ""),
+        ("src/e.rs", ""),
+        ("src/f.rs", ""),
+    ]);
+    assert_eq!(
+        kept,
+        Ok(["src/lib.rs", "src/d.rs", "src/e.rs", "src/f.rs"]
+            .map(str::to_owned)
+            .to_vec())
+    );
+}
+
+#[test]
+fn a_module_file_is_looked_for_where_rust_looks_for_it() {
+    // A file that isn't a crate root or a `mod.rs` keeps its modules in a
+    // folder named for it; so does an inline module; a crate root doesn't.
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "mod store; mod outer { #[cfg(test)] mod helpers; }",
+        ),
+        ("src/store.rs", "#[cfg(test)] mod fixtures;"),
+        ("src/store/fixtures.rs", ""),
+        ("src/outer/helpers.rs", ""),
+        ("src/bin/tool.rs", "#[cfg(test)] mod parts;"),
+        ("src/bin/parts.rs", ""),
+        ("src/helpers.rs", "fn not_a_test_module() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(
+        kept,
+        Ok([
+            "src/lib.rs",
+            "src/store.rs",
+            "src/bin/tool.rs",
+            "src/helpers.rs"
+        ]
+        .map(str::to_owned)
+        .to_vec())
+    );
+}
+
+#[test]
+fn what_an_inline_test_module_or_a_test_only_file_declares_is_test_code() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)] mod tests { mod deep; } mod x;"),
+        ("src/tests/deep.rs", "fn h() { msg::CLI_A; }"),
+        ("src/x.rs", "#![cfg(test)]\nmod y;"),
+        ("src/x/y.rs", "fn h() { msg::CLI_B; }"),
+    ]);
+    assert_eq!(
+        kept,
+        Ok(["src/lib.rs", "src/x.rs"].map(str::to_owned).to_vec())
+    );
+}
+
+#[test]
+fn a_path_attribute_names_the_file_of_a_test_module() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(test)] #[path = \"steps/config.rs\"] mod config;
+             mod inline { #[cfg(test)] #[path = \"x.rs\"] mod y; }",
+        ),
+        ("src/steps/config.rs", ""),
+        ("src/inline/x.rs", ""),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_test_module_with_no_file_is_an_error_not_a_hole() {
+    let kept = product_files(&[("src/lib.rs", "#[cfg(test)] mod support;")]);
+    let error = kept.expect_err("a module with no file");
+    assert!(error.contains("support"), "{error}");
+}
+
+#[test]
+fn a_file_a_product_declaration_also_points_at_is_product_code() {
+    // `l10n`'s `constants.rs` is a test module of the library and, through
+    // `#[path]`, a module of its build script.
+    let kept = product_files(&[
+        ("build.rs", "#[path = \"src/constants.rs\"] mod constants;"),
+        ("src/lib.rs", "#[cfg(test)] mod constants;"),
+        ("src/constants.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(
+        kept,
+        Ok(["build.rs", "src/lib.rs", "src/constants.rs"]
+            .map(str::to_owned)
+            .to_vec())
+    );
+}
+
+#[test]
+fn a_module_of_a_binary_keeps_its_modules_in_a_folder_of_its_own() {
+    // The root of `src/bin/tool/` keeps its modules beside it, and a module of
+    // it doesn't.
+    let kept = product_files_with(
+        &[
+            ("src/bin/tool/main.rs", "mod helpers;"),
+            ("src/bin/tool/helpers.rs", "#[cfg(test)] mod tests;"),
+        ],
+        &[("src/bin/tool/helpers/tests.rs", "fn t() { msg::CLI_A; }")],
+    );
+    assert_eq!(
+        kept,
+        Ok(["src/bin/tool/main.rs", "src/bin/tool/helpers.rs"]
+            .map(str::to_owned)
+            .to_vec())
+    );
+}
+
+#[test]
+fn a_tests_rs_that_the_scan_never_lists_is_still_found_where_it_is_declared() {
+    let kept = product_files_with(
+        &[
+            ("src/lib.rs", "mod store;"),
+            (
+                "src/store.rs",
+                "#[cfg(test)] mod tests;\n#[cfg(test)] mod more;",
+            ),
+            ("src/store/more.rs", "mod nested;"),
+        ],
+        &[
+            ("src/store/tests.rs", "mod inner;"),
+            ("src/store/tests/inner.rs", "fn t() { msg::CLI_A; }"),
+            ("src/store/more/nested.rs", ""),
+        ],
+    );
+    assert_eq!(
+        kept,
+        Ok(["src/lib.rs", "src/store.rs"].map(str::to_owned).to_vec()),
+        "more.rs is listed and goes; what the unlisted files declare is never reached as product"
+    );
+}
+
+#[test]
+fn a_file_loaded_by_path_keeps_its_modules_beside_it() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(test)] #[path = \"steps/all.rs\"] mod all;",
+        ),
+        ("src/steps/all.rs", "mod child;"),
+        ("src/steps/child.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_path_with_dots_in_it_is_compared_as_the_file_it_names() {
+    let kept = product_files(&[
+        (
+            "src/lib.rs",
+            "#[cfg(test)] #[path = \"../shared/./x.rs\"] mod x;",
+        ),
+        ("shared/x.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_raw_identifier_names_the_file_without_its_prefix() {
+    let kept = product_files(&[
+        ("src/lib.rs", "#[cfg(test)] mod r#type;"),
+        ("src/type.rs", "fn c() { msg::CLI_A; }"),
+    ]);
+    assert_eq!(kept, Ok(vec!["src/lib.rs".to_owned()]));
+}
+
+#[test]
+fn a_file_that_cannot_be_read_or_a_path_that_is_not_plain_is_an_error() {
+    let missing = exclude_test_modules(vec![PathBuf::from("src/lib.rs")], |_: &Path| None);
+    assert!(missing.expect_err("no such file").contains("src/lib.rs"));
+
+    let raw = product_files(&[("src/lib.rs", "#[cfg(test)] #[path = r\"x.rs\"] mod x;")]);
+    assert!(raw.expect_err("a raw string").contains("path"));
 }
