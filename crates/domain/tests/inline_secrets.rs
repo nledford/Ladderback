@@ -138,3 +138,15 @@ fn a_credential_option_that_holds_a_reference_is_not_written_inline() {
     ]);
     assert_eq!(demo.inline_secrets(), []);
 }
+
+#[test]
+fn an_option_name_with_a_line_break_or_without_end_is_shown_as_one_bounded_line() {
+    // A name is what a person typed: it must not forge a log line, and no
+    // length of it may make the line or the row's note unbounded.
+    let forged = InlineSecret::Option("token\n[ERROR] backups disabled\u{1b}[0m".to_owned());
+    assert_eq!(forged.field(), "options.token?[ERROR] backups disabled?[0m");
+    let long = InlineSecret::OptionHot(format!("token{}", "x".repeat(500)));
+    let field = long.field();
+    assert!(field.starts_with("options-hot.tokenxxx"), "{field}");
+    assert_eq!(field.chars().count(), "options-hot.".len() + 80);
+}
