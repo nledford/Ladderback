@@ -216,6 +216,16 @@ mod tests {
         path
     }
 
+    /// Makes a folder writable again when dropped, so a failing test doesn't
+    /// leave one the scratch folder can't remove.
+    struct Writable(PathBuf);
+
+    impl Drop for Writable {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+
     // The cache folder.
 
     #[test]
@@ -260,14 +270,18 @@ mod tests {
         let file = root.path().join("a-file");
         fs::write(&file, b"x").unwrap();
         let dir = file.join("cache");
+        let reason = CacheLock::acquire(&dir)
+            .expect_err("under a file")
+            .to_string();
         let (ctx, capture) = context(Some(dir.clone()));
         assert_eq!(cache_dir(&ctx).unwrap(), None);
         let [(level, message)] = logged(&capture).try_into().unwrap();
         assert_eq!(level, Level::Warn);
         assert!(
             message.contains("running without a cache")
-                && message.contains(&dir.display().to_string()),
-            "{message}"
+                && message.contains(&dir.display().to_string())
+                && message.contains(&reason),
+            "{message} should give the reason: {reason}"
         );
         assert!(
             !message.contains("another worker"),
@@ -301,6 +315,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_repository_opened_while_another_worker_holds_the_cache_folder_leaves_it_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let cache = root.path().join("cache");
+        let _other_worker = CacheLock::acquire(&cache).unwrap();
+        let (ctx, capture) = context(Some(cache.clone()));
+        drop(open(&ctx, &spec_at(&repository.to_string_lossy())).unwrap());
+        assert_eq!(
+            fs::read_dir(&cache).unwrap().count(),
+            0,
+            "two workers shared one cache folder"
+        );
+        assert!(
+            logged(&capture)
+                .iter()
+                .any(|(level, _)| *level == Level::Warn)
+        );
+    }
+
     // Opening.
 
     #[test]
@@ -309,14 +344,16 @@ mod tests {
         let repository = root.path().join("repo");
         init(&repository);
         let (ctx, _capture) = context(None);
+        let wrong = "hunter2-not-the-password";
         let spec = RepositorySpec {
-            password: SecretValue::new("hunter2-not-the-password"),
+            password: SecretValue::new(wrong),
             ..spec_at(&repository.to_string_lossy())
         };
         let Err(JobError::Failed { detail, .. }) = open(&ctx, &spec) else {
             panic!("a wrong password must fail the job");
         };
         assert!(!detail.is_empty());
+        assert!(!detail.contains(wrong), "the password is in {detail}");
     }
 
     #[test]
@@ -358,6 +395,12 @@ mod tests {
         let id = repository_id(&opened).unwrap();
         assert_eq!(id.as_str(), opened.config().id.to_hex().as_str());
         assert_eq!(id.as_str().len(), 64);
+        assert!(
+            id.as_str()
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
+            "{id:?}"
+        );
     }
 
     // Leftovers.
@@ -381,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn both_halves_of_a_hot_cold_repository_are_cleaned_and_a_remote_one_is_not_a_folder() {
+    fn both_halves_of_a_hot_cold_repository_are_cleaned() {
         let root = tempfile::tempdir().unwrap();
         let cold = root.path().join("cold");
         let hot = root.path().join("hot");
@@ -409,18 +452,26 @@ mod tests {
         assert_eq!(logged(&capture).len(), 2, "one line for each");
     }
 
+    /// What decides is the kind of backend, not whether the place exists: a
+    /// folder of a repository is cleaned when it is the local half, and left
+    /// alone when the same path is what another backend is told to use.
     #[test]
-    fn a_half_that_is_not_a_local_folder_has_nothing_to_clean() {
+    fn only_a_local_half_is_cleaned_whatever_exists_at_its_path() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let old = leftover(&repository);
         let (ctx, capture) = context(None);
         for half in [
-            "rest:http://127.0.0.1:1/repo",
-            "opendal:fs",
-            "rclone:remote:path",
-            "",
+            format!("rest:{}", repository.display()),
+            format!("rclone:{}", repository.display()),
         ] {
-            remove_leftovers(&ctx, half).unwrap();
+            remove_leftovers(&ctx, &half).unwrap();
+            assert!(old.exists(), "{half} was cleaned like a local folder");
         }
         assert_eq!(logged(&capture), []);
+        remove_leftovers(&ctx, &repository.to_string_lossy()).unwrap();
+        assert!(!old.exists(), "the local half is cleaned");
     }
 
     #[test]
@@ -430,12 +481,12 @@ mod tests {
         init(&repository);
         let stuck = leftover(&repository);
         let folder = stuck.parent().unwrap().to_owned();
+        let _restored = Writable(folder.clone());
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
         // Running as root, permissions don't stop a delete.
         let can_write_anyway = File::create(folder.join("probe")).is_ok();
         let (ctx, capture) = context(None);
         let opened = open(&ctx, &spec_at(&repository.to_string_lossy()));
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
         if can_write_anyway {
             testkit::skip!("running as root: permissions don't stop deleting a file");
         }
