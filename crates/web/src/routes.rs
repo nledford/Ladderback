@@ -19,7 +19,8 @@ use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
 use crate::live::say;
 use crate::repositories::{
-    Action, Field, Form, Outcome, Sentence, advises_retry, field_of, password_source,
+    Action, Field, Form, Outcome, Sentence, advises_retry, error_of, field_of, password_source,
+    problems_of, rereads_list,
 };
 use crate::ws::{self, Phase, Posted};
 use crate::{page, text};
@@ -716,10 +717,7 @@ impl Problems {
     /// is shows it, and every other field is clear. No items is a clear form.
     fn show(self, items: Vec<SummaryItem>, advice: Option<String>) {
         for field in FIELDS {
-            let error = items
-                .iter()
-                .find(|item| item.field == Some(field.id()))
-                .map(|item| item.sentence.plain());
+            let error = error_of(&items, field);
             self.of(field).set(error);
         }
         self.advice.set(advice);
@@ -784,18 +782,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         }
         let form = inputs.read();
         result.set(None);
-        let missing = form.missing(action);
-        if !missing.is_empty() {
-            let items = missing
-                .into_iter()
-                .filter_map(|field| {
-                    let required = field.required()?;
-                    Some(SummaryItem {
-                        field: Some(field.id()),
-                        sentence: Sentence::new(&text(&submit_localizer, required), None),
-                    })
-                })
-                .collect();
+        if let Some(items) = problems_of(&form, action, |id| text(&submit_localizer, id)) {
             problems.show(items, None);
             return;
         }
@@ -819,9 +806,8 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 return;
             };
             busy.set(false);
-            // An answer, of any kind, is a daemon that is there: a page that
-            // could not read the list takes it up again.
-            if posted.is_some() && phase_now == Phase::Unreachable {
+            // An answer, of any kind, is a daemon that is there.
+            if rereads_list(posted.is_some(), phase_now) {
                 load.run(());
             }
             match posted {
@@ -1103,6 +1089,91 @@ mod tests {
     fn a_path_that_only_starts_like_a_page_is_not_that_page() {
         assert_eq!(title_of("/_gallery-2"), "Page not found – Ladderback");
         assert_eq!(title_of("//"), "Page not found – Ladderback");
+    }
+
+    #[test]
+    fn each_field_has_its_own_input_and_the_form_reads_them_all() {
+        let inputs = Inputs::new();
+        for (field, value) in [
+            (Field::Name, "copy"),
+            (Field::Location, "/srv/main"),
+            (Field::HotStorage, "/srv/hot"),
+            (Field::Password, "typed"),
+        ] {
+            assert_eq!(
+                inputs.of(field).get_untracked(),
+                "",
+                "{field:?} starts empty"
+            );
+            inputs.of(field).set(value.to_owned());
+        }
+        // `Form` has no `Debug`, so that nothing can print a password: compare.
+        assert!(
+            inputs.read()
+                == Form {
+                    name: "copy".to_owned(),
+                    location: "/srv/main".to_owned(),
+                    hot_storage: "/srv/hot".to_owned(),
+                    password: "typed".to_owned(),
+                }
+        );
+        for field in FIELDS {
+            assert!(!inputs.of(field).get_untracked().is_empty(), "{field:?}");
+        }
+    }
+
+    #[test]
+    fn clearing_the_form_empties_every_input() {
+        let inputs = Inputs::new();
+        for field in FIELDS {
+            inputs.of(field).set("typed".to_owned());
+        }
+        inputs.clear();
+        assert!(inputs.read() == Form::default());
+    }
+
+    #[test]
+    fn the_problems_a_form_shows_are_the_summary_and_each_field_s_own_error() {
+        let problems = Problems::new();
+        let items = vec![SummaryItem {
+            field: Some(Field::Location.id()),
+            sentence: Sentence::new("Enter where the repository is.", None),
+        }];
+        problems.show(items.clone(), Some("Try again.".to_owned()));
+        assert_eq!(problems.summary.get_untracked(), items);
+        assert_eq!(
+            problems.advice.get_untracked().as_deref(),
+            Some("Try again.")
+        );
+        assert_eq!(
+            problems.of(Field::Location).get_untracked().as_deref(),
+            Some("Enter where the repository is.")
+        );
+        for field in [Field::Name, Field::HotStorage, Field::Password] {
+            assert_eq!(problems.of(field).get_untracked(), None, "{field:?}");
+        }
+        // No items clears the form again, and the advice with it.
+        problems.show(Vec::new(), None);
+        assert!(problems.summary.get_untracked().is_empty());
+        assert_eq!(problems.advice.get_untracked(), None);
+        for field in FIELDS {
+            assert_eq!(problems.of(field).get_untracked(), None, "{field:?}");
+        }
+    }
+
+    #[test]
+    fn each_field_has_its_own_error_signal() {
+        let problems = Problems::new();
+        for field in FIELDS {
+            problems.of(field).set(Some(format!("{field:?}")));
+        }
+        for field in FIELDS {
+            assert_eq!(
+                problems.of(field).get_untracked(),
+                Some(format!("{field:?}")),
+                "{field:?} shares a signal"
+            );
+        }
     }
 
     /// A summary as the store sends it, with the fields the key reads.

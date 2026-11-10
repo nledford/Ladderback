@@ -12,6 +12,9 @@ use api::{
 };
 use l10n::{MessageId, msg};
 
+use crate::components::SummaryItem;
+use crate::ws::Phase;
+
 /// A field of the form, in the order the page shows them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Field {
@@ -143,6 +146,43 @@ impl Form {
             settings: self.settings(),
         }
     }
+}
+
+/// What the form lacks for `action`, as the error summary lists it: one item
+/// for each field the action needs and the form leaves empty, in the page's
+/// order, worded by `say`. `None` when nothing is lacking.
+pub(crate) fn problems_of(
+    form: &Form,
+    action: Action,
+    say: impl Fn(MessageId) -> String,
+) -> Option<Vec<SummaryItem>> {
+    let items: Vec<_> = form
+        .missing(action)
+        .into_iter()
+        .filter_map(|field| {
+            Some(SummaryItem {
+                field: Some(field.id()),
+                sentence: Sentence::new(&say(field.required()?), None),
+            })
+        })
+        .collect();
+    (!items.is_empty()).then_some(items)
+}
+
+/// The error `field` shows under the summary `items`: the sentence of the
+/// item that is about it, if there is one.
+pub(crate) fn error_of(items: &[SummaryItem], field: Field) -> Option<String> {
+    items
+        .iter()
+        .find(|item| item.field == Some(field.id()))
+        .map(|item| item.sentence.plain())
+}
+
+/// Whether an answer to a request makes the page read its list again: any
+/// answer shows a daemon that is there, and a page that could not read the
+/// list takes it up again.
+pub(crate) fn rereads_list(answered: bool, phase: Phase) -> bool {
+    answered && phase == Phase::Unreachable
 }
 
 /// The field a refusal is about, when it is about one: a name the daemon will
@@ -413,6 +453,68 @@ mod tests {
     #[test]
     fn hot_storage_is_never_required() {
         assert_eq!(form().missing(Action::Connect), vec![]);
+    }
+
+    fn english(id: MessageId) -> String {
+        crate::text(&l10n::Localizer::new(&[]), id)
+    }
+
+    #[test]
+    fn a_form_that_lacks_nothing_has_no_problems() {
+        for action in [Action::Test, Action::Connect, Action::Create] {
+            assert_eq!(problems_of(&form(), action, english), None, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn each_missing_field_is_a_problem_about_it_in_page_order() {
+        let items = problems_of(&Form::default(), Action::Connect, english)
+            .expect("an empty form lacks fields");
+        let listed: Vec<_> = items
+            .iter()
+            .map(|item| (item.field, item.sentence.plain()))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                (
+                    Some("repository-name"),
+                    "Enter a name for the repository.".to_owned()
+                ),
+                (
+                    Some("repository-location"),
+                    "Enter where the repository is.".to_owned()
+                ),
+                (
+                    Some("repository-password"),
+                    "Enter the repository's password.".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_field_shows_the_error_of_the_item_about_it_and_no_other() {
+        let items = problems_of(&Form::default(), Action::Test, english).expect("problems");
+        assert_eq!(error_of(&items, Field::Name), None);
+        assert_eq!(
+            error_of(&items, Field::Location).as_deref(),
+            Some("Enter where the repository is.")
+        );
+        assert_eq!(error_of(&items, Field::HotStorage), None);
+        assert_eq!(
+            error_of(&items, Field::Password).as_deref(),
+            Some("Enter the repository's password.")
+        );
+        assert_eq!(error_of(&[], Field::Location), None);
+    }
+
+    #[test]
+    fn only_an_answer_to_a_page_that_could_not_read_its_list_rereads_it() {
+        assert!(rereads_list(true, Phase::Unreachable));
+        assert!(!rereads_list(false, Phase::Unreachable), "no answer at all");
+        assert!(!rereads_list(true, Phase::Ready));
+        assert!(!rereads_list(true, Phase::Loading));
     }
 
     #[test]
