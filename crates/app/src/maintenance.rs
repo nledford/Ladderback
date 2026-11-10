@@ -21,7 +21,8 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 
 use domain::maintenance::{
-    AdoptSelection, AdoptionRefusal, ForgetSelection, ManagedPlan, Partition, Snapshot,
+    AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
+    Partition, SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -140,6 +141,10 @@ pub enum MaintenanceError {
     },
     /// The operation log couldn't be written.
     Store(StoreError),
+    /// A run was asked to act on the snapshots a preview named, and what it
+    /// would act on now is not that: the repository changed in between.
+    /// Nothing was removed or rewritten; preview again.
+    SelectionChanged,
 }
 
 /// A maintenance run with every decision made and its I7 slot held: the
@@ -171,6 +176,105 @@ pub struct MaintenanceAssessment {
     operation: OperationId,
     job: Job,
     partition: Option<Partition>,
+}
+
+/// What a run would do, decided and not yet done (§7.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaintenancePreview {
+    /// What each plan's policy lets go, and the history left alone.
+    Forget(ForgetPreview),
+    /// The snapshots an adoption would rewrite.
+    Adopt(AdoptPreview),
+    /// What a prune would do, from a dry run of the engine's own plan.
+    Prune(PrunePreview),
+    /// A check changes nothing.
+    Check(CheckPreview),
+}
+
+impl MaintenancePreview {
+    /// The selection a start must carry for the run to act on what this
+    /// preview showed: a forget's and an adoption's; none for a prune or a
+    /// check, which select nothing.
+    #[allow(clippy::todo, reason = "red test: previews are decided next")]
+    pub fn selection(&self) -> Option<SelectionToken> {
+        todo!("the selection of a preview")
+    }
+}
+
+/// The snapshots an adoption would rewrite with the tags of `into`, newest
+/// first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdoptPreview {
+    pub into: PlanId,
+    pub snapshots: Vec<Snapshot>,
+}
+
+impl AdoptPreview {
+    /// The fingerprint of what the adoption rewrites.
+    #[allow(clippy::todo, reason = "red test: previews are decided next")]
+    pub fn selection(&self) -> SelectionToken {
+        todo!("the selection of an adoption")
+    }
+}
+
+/// What a prune would do, as the engine's own dry-run plan counts it. The
+/// plan is computed again when the prune runs, so these are estimates: the
+/// repository can change in between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrunePreview {
+    /// Packs the prune would mark for deletion: unused ones and ones to
+    /// repack.
+    pub packs_marked: u64,
+    /// Packs it would delete now: marked by an earlier prune and past
+    /// `keep_delete`.
+    pub packs_deleted: u64,
+    /// Packs an earlier prune marked and this one would bring back, because
+    /// something uses them again.
+    pub packs_recovered: u64,
+    /// The bytes the deletions would free.
+    pub bytes_deleted: u64,
+    /// How long a pack stays marked before a later prune deletes it (I2).
+    pub keep_delete: KeepDelete,
+}
+
+/// What a check would do: it reads, and changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckPreview {
+    /// Whether it reads every pack's data. A manual check reads the
+    /// repository's structure only.
+    pub read_data: bool,
+}
+
+/// One plan of this agent, and the snapshots it owns, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanHistory {
+    pub plan: PlanId,
+    pub snapshots: Vec<Snapshot>,
+}
+
+/// History carrying `ladderback-` tags no plan of this agent owns, and the
+/// plans of the repository that could take it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrphanedHistory {
+    pub group: OrphanedGroup,
+    pub adopt_into: Vec<PlanId>,
+}
+
+/// Untagged history, and the plans whose host, label and sources equal its.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnmanagedHistory {
+    pub group: UnmanagedGroup,
+    pub adopt_into: Vec<PlanId>,
+}
+
+/// A repository's snapshots by who owns them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RepositoryGroups {
+    /// Every plan of this agent on the repository, in the configuration's
+    /// order, the ones with no snapshots too.
+    pub plans: Vec<PlanHistory>,
+    pub orphaned: Vec<OrphanedHistory>,
+    pub unmanaged: Vec<UnmanagedHistory>,
 }
 
 /// Runs maintenance manually on the local owner.
@@ -467,6 +571,49 @@ impl RunMaintenance {
             Ok(Start::Refused { running }) => Err(MaintenanceError::Busy { running }),
             Err(error) => Err(MaintenanceError::Store(error)),
         }
+    }
+
+    /// What `kind` would do, decided from a read of the repository and told
+    /// before anything runs: a read like a snapshot listing, so it takes no
+    /// I7 slot and writes nothing to the operation log. A forget and an
+    /// adoption return the snapshots they would act on and a selection a
+    /// later [`assess_previewed`](Self::assess_previewed) can be held to.
+    #[allow(clippy::todo, reason = "red test: previews are decided next")]
+    pub async fn preview(
+        &self,
+        _op: OperationId,
+        _alias: &RepositoryAlias,
+        _kind: &MaintenanceKind,
+    ) -> Result<MaintenancePreview, MaintenanceError> {
+        todo!("a maintenance preview")
+    }
+
+    /// The repository's snapshots grouped by who owns them (§7.3), as a
+    /// read: every plan of this agent on the repository, the history no plan
+    /// of this agent owns, and for each group of it the plans that could
+    /// take it.
+    #[allow(clippy::todo, reason = "red test: groups are decided next")]
+    pub async fn groups(
+        &self,
+        _op: OperationId,
+        _alias: &RepositoryAlias,
+    ) -> Result<RepositoryGroups, MaintenanceError> {
+        todo!("a repository's groups")
+    }
+
+    /// [`assess`](Self::assess) for a run a person reviewed: refused with
+    /// [`MaintenanceError::SelectionChanged`], before the slot is taken, when
+    /// what the run would act on is not what `selection` names. Nothing is
+    /// removed or rewritten then.
+    #[allow(clippy::todo, reason = "red test: the held selection is decided next")]
+    pub async fn assess_previewed(
+        &self,
+        _op: OperationId,
+        _alias: &RepositoryAlias,
+        _kind: MaintenanceKind,
+        _selection: &SelectionToken,
+    ) -> Result<MaintenanceAssessment, MaintenanceError> {
+        todo!("a run held to its preview's selection")
     }
 
     /// Runs the prepared job to its end, playing the engine's events into

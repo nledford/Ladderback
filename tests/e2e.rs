@@ -49,6 +49,8 @@ mod cli_output_steps;
 mod forget_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/maintenance.rs"]
+mod maintenance_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/restart.rs"]
@@ -83,6 +85,7 @@ struct Agent {
     forget: forget_steps::ForgetE2e,
     interop: interop_steps::InteropE2e,
     adopt: adopt_steps::AdoptE2e,
+    maintenance: maintenance_steps::MaintenanceE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -126,6 +129,7 @@ impl Agent {
             forget: forget_steps::ForgetE2e::default(),
             interop: interop_steps::InteropE2e::default(),
             adopt: adopt_steps::AdoptE2e::default(),
+            maintenance: maintenance_steps::MaintenanceE2e::default(),
         }
     }
 

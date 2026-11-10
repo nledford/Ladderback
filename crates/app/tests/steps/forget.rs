@@ -72,8 +72,8 @@ pub enum ReadFailure {
     Unreachable,
     /// The listing answers a failure event.
     Listing,
-    /// The repository never answers: the identify starts and says nothing
-    /// more.
+    /// The repository never answers: the identify and the listing start and
+    /// say nothing more.
     Silent,
 }
 
@@ -329,7 +329,7 @@ impl ForgetWorld {
     }
 
     /// The IDs of the snapshots the plan `plan` owns, newest first.
-    fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
+    pub fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
         self.snapshots
             .iter()
             .filter(|snapshot| {
@@ -346,7 +346,7 @@ impl ForgetWorld {
     }
 
     /// The IDs the engine was asked to remove, or none when it never was.
-    fn removed(&self) -> Vec<SnapshotId> {
+    pub fn removed(&self) -> Vec<SnapshotId> {
         self.jobs
             .lock()
             .expect("the job list answers")
@@ -430,7 +430,7 @@ impl Engine for Scripted {
         // Which of the forgets and rewrites this is, counting from 0.
         let change = matches!(job, Job::Forget(_) | Job::Rewrite(_))
             .then(|| self.changes.fetch_add(1, Ordering::SeqCst));
-        if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_)) {
+        if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_) | Job::Ls(_)) {
             return Ok(RunningJob {
                 events: stream::pending().boxed(),
                 control: Box::new(Nothing),

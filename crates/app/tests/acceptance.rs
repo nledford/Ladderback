@@ -28,6 +28,8 @@ mod operation_steps;
 mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/preview.rs"]
+mod preview_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
@@ -57,6 +59,7 @@ struct Agent {
     interop: interop_steps::InteropWorld,
     recovery: recovery_steps::RecoveryWorld,
     announcement: announcement_steps::AnnouncementWorld,
+    preview: preview_steps::PreviewWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -94,6 +97,7 @@ impl Agent {
             interop: Default::default(),
             recovery: Default::default(),
             announcement: Default::default(),
+            preview: Default::default(),
         }
     }
 

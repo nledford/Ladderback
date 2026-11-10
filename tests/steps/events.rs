@@ -285,14 +285,42 @@ async fn connect(agent: &Agent) -> Page {
 async fn serving_with_plan(agent: &mut Agent, plan: String) {
     // A real plan the daemon can run: a real scratch repository, a folder of
     // demo files, and a config.toml naming both.
-    let repository = super::backup_steps::new_repository(agent).await;
+    super::backup_steps::new_repository(agent).await;
+    super::backup_steps::source_with_files(agent, &plan, 3);
+    save_daemon_config(agent, None).await;
+    match start(agent).await {
+        Outcome::Listening(_) => {}
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
+    }
+}
+
+/// Writes the daemon's config.toml: the scenario's scratch repository as
+/// `demo` and its plan over the scenario's source folder, keeping the last
+/// `keep_last` snapshots when given, and everything otherwise. The daemon
+/// reads its configuration on every request, so calling this again changes
+/// what a running daemon does next.
+pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
+    let repository = agent.backup.repository.clone().expect("a repository");
+    let source = agent.backup.source.clone().expect("a plan source");
+    let plan = agent.backup.plan.clone().expect("a plan");
     let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
-    let source = super::backup_steps::source_with_files(agent, &plan, 3);
+    let mut plan = domain::planning::Plan::new(
+        plan,
+        alias.clone(),
+        vec![
+            domain::planning::Source::parse(source.to_str().expect("a UTF-8 path"))
+                .expect("a source"),
+        ],
+    );
+    if let Some(keep) = keep_last {
+        plan.retention.keep_last =
+            Some(domain::planning::KeepCount::new(keep).expect("a keep count"));
+    }
     let config = domain::planning::AgentConfig::new(
         domain::planning::AgentSettings::default(),
         domain::planning::Hooks::default(),
         std::collections::BTreeMap::from([(
-            alias.clone(),
+            alias,
             domain::planning::RepositoryConfig {
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
@@ -309,14 +337,7 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
                 hooks: Default::default(),
             },
         )]),
-        vec![domain::planning::Plan::new(
-            domain::PlanId::parse(&plan).expect("a plan ID"),
-            alias,
-            vec![
-                domain::planning::Source::parse(source.to_str().expect("a UTF-8 path"))
-                    .expect("a source"),
-            ],
-        )],
+        vec![plan],
     )
     .expect("a valid configuration");
     let dir = Events::config_dir(agent);
@@ -330,10 +351,6 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
     )
     .await
     .expect("the config saves");
-    match start(agent).await {
-        Outcome::Listening(_) => {}
-        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
-    }
 }
 
 #[given("Ladderback is serving on loopback with no repositories")]

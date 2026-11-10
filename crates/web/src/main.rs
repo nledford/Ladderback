@@ -53,6 +53,8 @@ mod live;
 mod backend;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
+#[allow(dead_code, reason = "red test: the Snapshots page uses these next")]
+mod maintenance;
 mod page;
 mod repositories;
 mod routes;

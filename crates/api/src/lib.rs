@@ -2025,6 +2025,184 @@ pub struct SnapshotsDto {
     pub snapshots: Vec<SnapshotDto>,
 }
 
+/// How many snapshots one group of [`SnapshotGroupsDto`] lists. An
+/// input-derived size, capped (§13.5): a repository can hold thousands of
+/// snapshots of one plan, and a page that lists them all is no use to the
+/// person reading it. The `count` next to a capped list is the real total.
+pub const MAX_GROUP_SNAPSHOTS: usize = 500;
+
+/// How many snapshots one list of a [`MaintenancePreviewDto`] names: a
+/// review is read in one sitting, so it names fewer than a group's page.
+pub const MAX_PREVIEW_SNAPSHOTS: usize = 50;
+
+/// One plan of this agent on a repository, and the snapshots it owns, newest
+/// first, at most [`MAX_GROUP_SNAPSHOTS`] of them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PlanGroupDto {
+    pub plan: String,
+    /// How many snapshots the plan owns, listed or not.
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+}
+
+/// Snapshots a `ladderback-` tag owns that no plan of this agent does:
+/// another agent's plan, or a plan this configuration no longer has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OrphanedGroupDto {
+    /// The `ladderback-agent:` tag's text, `null` when the snapshots carry
+    /// none.
+    pub agent: Option<String>,
+    /// The `ladderback-plan:` tag's text, `null` when the snapshots carry
+    /// none.
+    pub plan: Option<String>,
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+    /// The plans of this repository the group can be adopted into: all of
+    /// them, since which one takes the history is the person's choice.
+    pub adopt_into: Vec<String>,
+}
+
+/// Untagged snapshots, grouped by host, label and paths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct UnmanagedGroupDto {
+    pub hostname: String,
+    /// Empty when the snapshots carry no label.
+    pub label: String,
+    pub paths: Vec<String>,
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+    /// The plans whose host, label and sources equal the group's: none when
+    /// no plan would adopt it, one when it is clear which does, several when
+    /// it is ambiguous.
+    pub adopt_into: Vec<String>,
+}
+
+/// One repository's snapshots grouped by who owns them (technical design
+/// §7.3): what the Snapshots page shows beside its maintenance buttons.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SnapshotGroupsDto {
+    /// Every plan of this agent on the repository, in the configuration's
+    /// order, the ones with no snapshots too.
+    pub plans: Vec<PlanGroupDto>,
+    pub orphaned: Vec<OrphanedGroupDto>,
+    pub unmanaged: Vec<UnmanagedGroupDto>,
+}
+
+/// What a forget run would do to one plan's history.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ForgetPlanDto {
+    pub plan: String,
+    /// How many snapshots the plan owns.
+    pub total: u64,
+    /// How many of them the plan's retention lets go.
+    pub remove: u64,
+    /// The ones it lets go, newest first, at most [`MAX_PREVIEW_SNAPSHOTS`].
+    pub listed: Vec<SnapshotDto>,
+}
+
+/// How many groups and snapshots a forget leaves alone of one kind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TallyDto {
+    pub groups: u64,
+    pub snapshots: u64,
+}
+
+/// The history a forget leaves alone (I6): groups no plan of this agent
+/// owns, which only an adoption or an explicit deletion touches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LeftAloneDto {
+    pub orphaned: TallyDto,
+    pub unmanaged: TallyDto,
+}
+
+/// What a maintenance run would do, told before it starts: a read, so it
+/// takes no maintenance slot and writes no log row (§7.3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
+pub enum MaintenancePreviewDto {
+    /// Which snapshots of each plan the plan's retention lets go, and what
+    /// is left alone. `selection` names that selection: a start that carries
+    /// it is refused when the repository has changed since.
+    Forget {
+        plans: Vec<ForgetPlanDto>,
+        left_alone: LeftAloneDto,
+        selection: String,
+    },
+    /// The snapshots an adoption would rewrite into the plan `into`.
+    Adopt {
+        into: String,
+        /// How many snapshots the adoption rewrites.
+        count: u64,
+        /// The first of them, newest first, at most
+        /// [`MAX_PREVIEW_SNAPSHOTS`].
+        listed: Vec<SnapshotDto>,
+        selection: String,
+    },
+    /// What a prune would do, from a dry run of the engine's own plan. Its
+    /// figures are estimates: the plan is computed again when the prune
+    /// runs.
+    Prune {
+        packs_marked: u64,
+        packs_deleted: u64,
+        packs_recovered: u64,
+        bytes_deleted: u64,
+        /// How long a pack stays marked before a later prune deletes it
+        /// (I2).
+        keep_delete_hours: u64,
+    },
+    /// A check changes nothing; it holds the repository while it runs.
+    Check { read_data: bool },
+}
+
+/// How a request names the group an adoption rewrites.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "from")]
+pub enum AdoptionFromDto {
+    /// The orphaned group these two tags name.
+    Orphaned {
+        /// The `ladderback-agent:` tag's text.
+        agent: String,
+        /// The `ladderback-plan:` tag's text.
+        plan: String,
+    },
+    /// The unmanaged group whose host, label and paths equal the
+    /// destination plan's host, label and sources.
+    Unmanaged,
+}
+
+/// The body of a maintenance preview and of a maintenance start: the kind,
+/// for an adoption its destination plan and the group it rewrites, and, on a
+/// start, the selection a preview named.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MaintenanceRequestDto {
+    /// `forget`, `prune`, `check` or `adopt`.
+    pub kind: String,
+    /// The plan an adoption's history becomes part of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<String>,
+    /// The group an adoption rewrites: another owner's tagged history, or
+    /// the unmanaged history that matches the destination plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<AdoptionFromDto>,
+    /// The selection a preview named, for a forget or an adoption. Absent,
+    /// the run selects as it finds the repository; present, it is refused
+    /// when what it would select is not what the preview showed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<String>,
+}
+
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

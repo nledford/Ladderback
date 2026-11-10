@@ -308,6 +308,116 @@ impl AdoptSelection {
             Err(AdoptionRefusal::Ambiguous { plans: ambiguous })
         }
     }
+
+    /// The plans that would adopt `group`: every plan whose host, label and
+    /// sources equal the group's, in `plans`' order. None when no plan
+    /// would, one when it is clear which does, several when which one takes
+    /// the history is the person's decision (the same key `unmanaged`
+    /// matches by, so a group listed with one claimant is one an adoption
+    /// into that plan finds).
+    #[allow(clippy::todo, reason = "red test: claimants are decided next")]
+    pub fn claimants(_group: &UnmanagedGroup, _hostname: &str, _plans: &[Plan]) -> Vec<PlanId> {
+        todo!("the plans that would adopt an unmanaged group")
+    }
+}
+
+/// A fingerprint of the snapshots a forget or an adoption acts on. A preview
+/// hands it out and a start hands it back, so a run that would act on other
+/// snapshots than the preview showed — a backup landed in between — is
+/// refused instead of removing what nobody reviewed (I6). It guards against
+/// change, not against an adversary, so a short, fixed hash is enough: the
+/// FNV-1a 64-bit hash of the snapshot IDs, sorted and joined by newlines,
+/// written as 16 lower-case hex digits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "red test: the token is filled in next")]
+pub struct SelectionToken(String);
+
+impl SelectionToken {
+    /// The token of the set `ids` names, whatever the order they come in.
+    #[allow(clippy::todo, reason = "red test: the token is computed next")]
+    pub fn of(_ids: &[SnapshotId]) -> Self {
+        todo!("the fingerprint of a selection")
+    }
+
+    /// The token `text` writes: exactly 16 lower-case hex digits, nothing
+    /// else.
+    #[allow(clippy::todo, reason = "red test: the token is parsed next")]
+    pub fn parse(_text: &str) -> Option<Self> {
+        todo!("a token from its text")
+    }
+
+    /// The token as it is written on the wire.
+    #[allow(clippy::todo, reason = "red test: the token is written next")]
+    pub fn as_str(&self) -> &str {
+        todo!("a token as text")
+    }
+}
+
+/// What a forget would do to one plan's history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanForget {
+    pub plan: PlanId,
+    /// How many snapshots the plan owns.
+    pub total: usize,
+    /// The plan's own snapshots its policy lets go, newest first.
+    pub remove: Vec<Snapshot>,
+}
+
+/// How many groups and snapshots a forget leaves alone of one kind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    pub groups: usize,
+    pub snapshots: usize,
+}
+
+/// The history a forget leaves alone (I6): tagged groups no plan of this
+/// agent owns, and untagged ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LeftAlone {
+    pub orphaned: Tally,
+    pub unmanaged: Tally,
+}
+
+/// A forget, decided and not yet done: what each plan's policy lets go and
+/// what is left alone. A run and its preview are made from this one value,
+/// so what a person reviews is what a run removes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgetPreview {
+    /// One entry per plan of this agent that has snapshots, in the plans'
+    /// own order.
+    pub plans: Vec<PlanForget>,
+    pub left_alone: LeftAlone,
+}
+
+impl ForgetPreview {
+    /// The preview of a forget over `partition`, where `removals` says, per
+    /// plan, which of its snapshots the policy lets go. An ID the plan
+    /// doesn't own is not part of the preview, so a forget never names a
+    /// snapshot outside the plan's own group (I6), whatever a retention
+    /// evaluation answered.
+    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
+    pub fn new(_partition: &Partition, _removals: Vec<(PlanId, Vec<SnapshotId>)>) -> Self {
+        todo!("a forget preview")
+    }
+
+    /// The IDs a forget removes: each plan's, in the plans' order, newest
+    /// first within a plan.
+    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
+    pub fn removal(&self) -> Vec<SnapshotId> {
+        todo!("the snapshots a forget removes")
+    }
+
+    /// The fingerprint of what the forget removes.
+    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
+    pub fn selection(&self) -> SelectionToken {
+        todo!("the selection of a forget")
+    }
+
+    /// Whether the forget removes nothing.
+    #[allow(clippy::todo, reason = "red test: the preview is decided next")]
+    pub fn is_empty(&self) -> bool {
+        todo!("whether a forget removes nothing")
+    }
 }
 
 #[cfg(test)]
@@ -604,6 +714,288 @@ mod tests {
         assert!(
             AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans).is_ok(),
             "the agent's hostname stands in"
+        );
+    }
+
+    fn id(number: i64) -> SnapshotId {
+        SnapshotId::parse(&format!("{number:064x}")).expect("a snapshot ID")
+    }
+
+    fn plan(name: &str) -> PlanId {
+        PlanId::parse(name).expect("a plan ID")
+    }
+
+    fn token_text(ids: &[i64]) -> String {
+        let ids: Vec<SnapshotId> = ids.iter().copied().map(id).collect();
+        SelectionToken::of(&ids).as_str().to_owned()
+    }
+
+    #[test]
+    fn a_selection_token_is_sixteen_lower_case_hex_digits() {
+        for ids in [&[][..], &[1], &[1, 2, 3]] {
+            let text = token_text(ids);
+            assert_eq!(text.len(), 16, "{text}");
+            assert!(
+                text.bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_selection_token_does_not_depend_on_the_order_of_the_snapshots() {
+        assert_eq!(token_text(&[1, 2, 3]), token_text(&[3, 1, 2]));
+        assert_eq!(token_text(&[1, 2]), token_text(&[2, 1]));
+    }
+
+    #[test]
+    fn a_selection_token_differs_for_a_different_set() {
+        assert_ne!(token_text(&[1, 2]), token_text(&[1, 3]));
+        assert_ne!(token_text(&[1]), token_text(&[1, 2]));
+        assert_ne!(token_text(&[]), token_text(&[1]));
+        assert_ne!(token_text(&[1, 2]), token_text(&[3]));
+    }
+
+    #[test]
+    fn a_selection_token_has_fixed_values() {
+        // FNV-1a 64 of the sorted IDs joined by newlines: the empty text
+        // hashes to the algorithm's offset basis.
+        assert_eq!(token_text(&[]), "cbf29ce484222325");
+        assert_eq!(token_text(&[1]), "68497038cf038672");
+        assert_eq!(token_text(&[2, 1]), "f1ab8ae83457c94e");
+        assert_eq!(token_text(&[1, 2, 3]), "312cd2115e3903a5");
+    }
+
+    #[test]
+    fn a_selection_token_reads_back_from_its_text() {
+        let ids = [id(1), id(2)];
+        let token = SelectionToken::of(&ids);
+        assert_eq!(SelectionToken::parse(token.as_str()), Some(token));
+    }
+
+    #[test]
+    fn only_sixteen_lower_case_hex_digits_read_as_a_token() {
+        assert!(SelectionToken::parse("0123456789abcdef").is_some());
+        for text in [
+            "",
+            "0123456789abcde",
+            "0123456789abcdef0",
+            "0123456789ABCDEF",
+            "0123456789abcdeg",
+            " 123456789abcdef",
+            "0123456789abcdef\n",
+            "+123456789abcdef",
+        ] {
+            assert_eq!(SelectionToken::parse(text), None, "{text:?}");
+        }
+    }
+
+    /// `home` and `photos`, both keeping two: `home` holds snapshots 1 to 4
+    /// and `photos` snapshot 5, all of this agent's; another agent's plan
+    /// and a retired plan hold 6 to 8; 9 and 10 are untagged and 11 is
+    /// untagged of another folder.
+    fn busy_repository() -> Partition {
+        let mut snapshots: Vec<Snapshot> = (1..=4).map(|n| tagged("home", &agent(), n)).collect();
+        snapshots.push(tagged("photos", &agent(), 5));
+        snapshots.push(tagged("home", &other_agent(), 6));
+        snapshots.push(tagged("home", &other_agent(), 7));
+        snapshots.push(tagged("retired", &agent(), 8));
+        snapshots.push(untagged(9));
+        snapshots.push(untagged(10));
+        let mut elsewhere = untagged(11);
+        elsewhere.paths = vec!["/srv/other".to_owned()];
+        snapshots.push(elsewhere);
+        ForgetSelection::partition(
+            &snapshots,
+            &agent(),
+            &plans(&[("home", home_policy()), ("photos", home_policy())]),
+        )
+    }
+
+    fn removals(list: &[(&str, &[i64])]) -> Vec<(PlanId, Vec<SnapshotId>)> {
+        list.iter()
+            .map(|(name, numbers)| (plan(name), numbers.iter().copied().map(id).collect()))
+            .collect()
+    }
+
+    fn removed_ids(planned: &PlanForget) -> Vec<SnapshotId> {
+        planned.remove.iter().map(|s| s.id.clone()).collect()
+    }
+
+    #[test]
+    fn a_forget_preview_counts_each_plans_snapshots_and_names_what_goes() {
+        let preview = ForgetPreview::new(
+            &busy_repository(),
+            removals(&[("home", &[3, 4]), ("photos", &[])]),
+        );
+        let [home, photos] = preview.plans.as_slice() else {
+            panic!("one entry per plan with snapshots: {:?}", preview.plans);
+        };
+        assert_eq!(home.plan, plan("home"));
+        assert_eq!(home.total, 4, "the plan owns four snapshots");
+        assert_eq!(removed_ids(home), [id(3), id(4)]);
+        assert_eq!(photos.plan, plan("photos"));
+        assert_eq!(photos.total, 1);
+        assert_eq!(removed_ids(photos), Vec::<SnapshotId>::new());
+    }
+
+    #[test]
+    fn what_a_forget_lists_for_removal_is_newest_first_within_a_plan() {
+        // Asked for in any order, the plan's own order (newest first) wins.
+        let preview = ForgetPreview::new(&busy_repository(), removals(&[("home", &[4, 2])]));
+        let [home, _photos] = preview.plans.as_slice() else {
+            panic!("one entry per plan with snapshots: {:?}", preview.plans);
+        };
+        assert_eq!(removed_ids(home), [id(2), id(4)]);
+    }
+
+    #[test]
+    fn a_forget_preview_counts_what_it_leaves_alone() {
+        let preview = ForgetPreview::new(&busy_repository(), removals(&[("home", &[3, 4])]));
+        assert_eq!(
+            preview.left_alone.orphaned,
+            Tally {
+                groups: 2,
+                snapshots: 3
+            },
+            "another agent's `home` (two) and this agent's retired plan (one): two groups"
+        );
+        assert_eq!(
+            preview.left_alone.unmanaged,
+            Tally {
+                groups: 2,
+                snapshots: 3
+            },
+            "two untagged folders: three snapshots"
+        );
+    }
+
+    #[test]
+    fn a_repository_with_nothing_unowned_leaves_nothing_alone() {
+        let snapshots = vec![tagged("home", &agent(), 1), tagged("home", &agent(), 2)];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        let preview = ForgetPreview::new(&partition, removals(&[("home", &[2])]));
+        assert_eq!(preview.left_alone, LeftAlone::default());
+    }
+
+    #[test]
+    fn the_removal_lists_the_ids_across_plans_in_the_plans_order() {
+        let preview = ForgetPreview::new(
+            &busy_repository(),
+            removals(&[("photos", &[5]), ("home", &[3, 4])]),
+        );
+        assert_eq!(
+            preview.removal(),
+            [id(3), id(4), id(5)],
+            "home comes before photos in the configuration, whatever order they were asked in"
+        );
+    }
+
+    #[test]
+    fn the_selection_is_the_token_of_everything_the_forget_removes() {
+        let preview = ForgetPreview::new(
+            &busy_repository(),
+            removals(&[("home", &[3, 4]), ("photos", &[5])]),
+        );
+        assert_eq!(
+            preview.selection(),
+            SelectionToken::of(&[id(3), id(4), id(5)])
+        );
+        let narrower = ForgetPreview::new(&busy_repository(), removals(&[("home", &[3, 4])]));
+        assert_ne!(
+            preview.selection(),
+            narrower.selection(),
+            "a plan's removals are part of the selection"
+        );
+    }
+
+    #[test]
+    fn a_preview_removing_nothing_is_empty() {
+        let nothing = ForgetPreview::new(&busy_repository(), removals(&[("home", &[])]));
+        assert!(nothing.is_empty());
+        assert!(nothing.removal().is_empty());
+        let something = ForgetPreview::new(&busy_repository(), removals(&[("photos", &[5])]));
+        assert!(!something.is_empty());
+    }
+
+    #[test]
+    fn a_forget_never_names_a_snapshot_the_plan_does_not_own() {
+        // 6 is another agent's, 9 is untagged, 5 is the other plan's and 99
+        // is nowhere: only 4 is `home`'s own.
+        let preview = ForgetPreview::new(
+            &busy_repository(),
+            removals(&[("home", &[6, 9, 5, 99, 4]), ("ghost", &[1])]),
+        );
+        assert_eq!(preview.removal(), [id(4)]);
+        assert_eq!(
+            preview.plans.len(),
+            2,
+            "a plan with no snapshots is not listed"
+        );
+    }
+
+    #[test]
+    fn one_plan_with_the_same_host_label_and_sources_claims_an_unmanaged_group() {
+        let snapshots = vec![untagged(1), untagged(2)];
+        let partition = ForgetSelection::partition(&snapshots, &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let candidates = vec![
+            full_plan("home", "/home/demo"),
+            full_plan("photos", "/srv/photos"),
+        ];
+        assert_eq!(
+            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            [plan("home")]
+        );
+    }
+
+    #[test]
+    fn two_plans_with_the_same_host_label_and_sources_both_claim_it_in_the_plans_order() {
+        let partition = ForgetSelection::partition(&[untagged(1)], &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let candidates = vec![
+            full_plan("mirror", "/home/demo"),
+            full_plan("photos", "/srv/photos"),
+            full_plan("home", "/home/demo"),
+        ];
+        assert_eq!(
+            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            [plan("mirror"), plan("home")]
+        );
+    }
+
+    #[test]
+    fn no_plan_claims_a_group_of_another_folder_host_or_label() {
+        let partition = ForgetSelection::partition(&[untagged(1)], &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let mut other_host = full_plan("elsewhere", "/home/demo");
+        other_host.host = Some(crate::planning::Hostname::parse("other-host").expect("a hostname"));
+        let mut labelled = full_plan("labelled", "/home/demo");
+        labelled.label = Some("weekly".to_owned());
+        let candidates = vec![full_plan("photos", "/srv/photos"), other_host, labelled];
+        assert_eq!(
+            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            Vec::<PlanId>::new()
+        );
+    }
+
+    #[test]
+    fn a_plan_without_a_host_of_its_own_claims_by_the_agents_hostname() {
+        let partition = ForgetSelection::partition(&[untagged(1)], &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let mut home = full_plan("home", "/home/demo");
+        home.host = None;
+        let candidates = vec![home];
+        assert_eq!(
+            AdoptSelection::claimants(&group, "demo-host", &candidates),
+            [plan("home")]
+        );
+        assert_eq!(
+            AdoptSelection::claimants(&group, "another-host", &candidates),
+            Vec::<PlanId>::new(),
+            "the agent's hostname is the one it is asked with"
         );
     }
 }

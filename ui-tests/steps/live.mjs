@@ -28,12 +28,13 @@ const ROW_PATIENCE_MS = 120_000;
 // moment at most: this long, not as long as a real backup.
 const UPDATE_PATIENCE_MS = 5_000;
 
-// The two sources a demo plan backs up: `small` runs long enough that its
+// The three sources a demo plan backs up: `tiny` ends at once, for journeys
+// that need several real snapshots; `small` runs long enough that its
 // Running row is there to be read (a second or two) and then ends; `big`
 // outlives the moment a journey cancels it or reloads the page mid-run
 // (about ten seconds). Each file's content is unique to its number, so the
 // repository cannot collapse the source into one chunk and end at once.
-const SOURCE_FILES = { small: 10_000, big: 50_000 };
+const SOURCE_FILES = { tiny: 3, small: 10_000, big: 50_000 };
 const FILE_BYTES = 2048;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -59,7 +60,7 @@ function table(world, name) {
 
 /** Writes a demo plan's config and repository into a scratch folder, starts
  *  a daemon on it, and points the scenario's pages at that daemon. */
-async function serveDemoPlan(world, plan, size) {
+export async function serveDemoPlan(world, plan, size) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");

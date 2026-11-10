@@ -91,7 +91,7 @@ pub struct RepositoriesSetup {
     /// Every body the daemon answered, to check that none holds a password.
     api_answers: Vec<String>,
     /// The last answer: its status and body.
-    api_last: Option<(u16, String)>,
+    pub(crate) api_last: Option<(u16, String)>,
     /// Every repository folder's contents, as a refusal found them.
     before: Vec<(String, Vec<u8>)>,
 }
@@ -413,7 +413,7 @@ fn api_secret(agent: &Agent) -> &'static str {
 /// Posts `body` to `path`, remembering the answer. A request that opens or
 /// creates a repository takes seconds, so the wait is on a blocking thread:
 /// see [`blocking`].
-async fn api_post(agent: &mut Agent, path: &str, body: &str) {
+pub(crate) async fn api_post(agent: &mut Agent, path: &str, body: &str) {
     let addr = agent.events.addr();
     let (path, body) = (path.to_owned(), body.to_owned());
     let (status, answer) = blocking(move || exchange_at(addr, "POST", &path, &body)).await;
@@ -422,7 +422,7 @@ async fn api_post(agent: &mut Agent, path: &str, body: &str) {
 }
 
 /// The last answer's status and its body as JSON.
-fn api_answer(agent: &Agent) -> (u16, serde_json::Value) {
+pub(crate) fn api_answer(agent: &Agent) -> (u16, serde_json::Value) {
     let (status, body) = agent
         .repositories
         .api_last
