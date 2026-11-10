@@ -3419,6 +3419,64 @@ mod repository_service_tests {
         assert!(!logged.contains("canary-from-a-file"), "{logged}");
     }
 
+    /// A command's line cut at the cap can end in the beginning of a secret
+    /// the mask would not find: the first characters of it are not shown
+    /// either (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_command_cut_at_the_cap_show_no_start_of_a_secret() {
+        use domain::secrets::Problem;
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [("secret_access_key".to_owned(), "canary-inline".to_owned())].into();
+        let stderr = format!("{}canary-inline", "x".repeat(505));
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::command_failed(Some(1), stderr.as_bytes()),
+        );
+        let detail = secret_refusal(&error, &settings)
+            .await
+            .detail
+            .expect("the words are kept");
+        assert!(detail.ends_with('…'), "{detail}");
+        assert!(!detail.contains("canary"), "{detail}");
+    }
+
+    /// A file or a keyring that doesn't answer in time is a source that
+    /// can't be read, not a command that ran for too long.
+    #[tokio::test]
+    async fn a_file_or_keyring_that_does_not_answer_in_time_is_unreadable_not_a_slow_command() {
+        use domain::secrets::{Problem, SourceName};
+        let settings = settings_of(settings_dto()).expect("settings");
+        for (source, field) in [
+            (
+                SourceName::File {
+                    path: "/mnt/nfs/pw".to_owned(),
+                },
+                "/mnt/nfs/pw",
+            ),
+            (
+                SourceName::Keyring {
+                    entry: "ladderback/demo".to_owned(),
+                },
+                "ladderback/demo",
+            ),
+        ] {
+            let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 60 });
+            let refusal = secret_refusal(&error, &settings).await;
+            assert_eq!(refusal.code, ErrorCode::SecretUnreadable, "{field}");
+            assert_eq!(
+                refusal.args,
+                vec![
+                    ("field", MsgArg::Text("password".to_owned())),
+                    ("source", MsgArg::Text(field.to_owned())),
+                ]
+            );
+            assert_eq!(refusal.detail, None);
+        }
+    }
+
     #[tokio::test]
     async fn a_configuration_that_cannot_be_used_is_unavailable_with_its_code() {
         let text = |value: &str| MsgArg::Text(value.to_owned());
