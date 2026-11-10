@@ -22,6 +22,10 @@
 # `ws.rs` is only the glue around them: the fetch and WebSocket calls whose
 # results the journeys check, and the settle-poll's budget; every decision
 # a settle or a reconnect makes on those results lives in `backend.rs`.
+#
+# `crates/web/src/time_zones.rs` is a test module that compiles only for wasm32
+# (`just test-wasm`), so on the host its test "survives" being emptied without
+# ever running.
 exclude_globs = [
     "crates/app/src/contract/**",
     "crates/l10n/src/browser.rs",
@@ -30,6 +34,7 @@ exclude_globs = [
     "crates/web/src/page.rs",
     "crates/web/src/gallery.rs",
     "crates/web/src/ws.rs",
+    "crates/web/src/time_zones.rs",
 ]
 # Core error types implement Display only because `Error` requires it; they
 # carry codes and values, and adapters render them (technical design §8.4).
