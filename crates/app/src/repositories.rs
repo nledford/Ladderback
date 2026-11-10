@@ -345,7 +345,9 @@ mod tests {
     use super::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
     use crate::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
     use crate::ports::ConfigStore;
-    use crate::ports::{Clock, Engine, EngineError, EngineEvent, Job, JobControl, RunningJob};
+    use crate::ports::{
+        Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RunningJob,
+    };
     use crate::secrets::ResolveRepository;
 
     /// An engine that answers every repository job with the scripted outcome,
@@ -460,6 +462,10 @@ mod tests {
         }
     }
 
+    fn found() -> EngineEvent {
+        EngineEvent::Succeeded(EngineResult::Repository { id: id() })
+    }
+
     /// Runs `work` against a manual clock, moving time by `steps` once the
     /// work waits on it. Gives, after each step, whether the work had ended
     /// and what `watch` said, and then what the work ended with.
@@ -554,6 +560,37 @@ mod tests {
             Err(RepositoryError::TimedOut)
         );
         assert!(engine.killed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_result_that_arrives_as_time_runs_out_stands() {
+        // The repository was created: refusing now would say it was not.
+        let clock = Arc::new(FakeClock::new(start()));
+        let ticking = clock.clone();
+        let engine = Playing::new(vec![found()], move || {
+            ticking.advance(REPOSITORY_JOB_BUDGET + SignedDuration::from_secs(1));
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        let use_case = InitRepository::new(
+            clock,
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+        let outcome = use_case
+            .init(op(), &settings(), Some(alias()))
+            .await
+            .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+        assert!(outcome.saved);
+        assert_eq!(
+            config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"))
+                .repositories()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

@@ -2059,6 +2059,15 @@ mod repository_request_tests {
     }
 
     #[test]
+    fn a_repository_that_did_not_answer_is_a_code_with_no_arguments() {
+        assert_eq!(
+            to_string(&ErrorCode::RepositoryTimedOut).unwrap(),
+            r#""repository-timed-out""#
+        );
+        assert!(ErrorCode::RepositoryTimedOut.args().is_empty());
+    }
+
+    #[test]
     fn a_name_that_is_not_an_alias_is_a_code_with_no_arguments() {
         assert_eq!(
             to_string(&ErrorCode::RepositoryAliasInvalid).unwrap(),
