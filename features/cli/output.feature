@@ -380,6 +380,10 @@ Feature: The command line's output
 
   Rule: Only a command that reports state takes --json
 
+    The rows ask for --help as well: if serve took --json it would print its
+    help and exit 0, so the scenario fails, where a bare serve --json would
+    start a daemon and hang the runner.
+
     Scenario Outline: A command with no state to report refuses --json before it runs
       When the owner runs "<command line>"
       Then the command exits with status 2
@@ -388,7 +392,7 @@ Feature: The command line's output
       Examples:
         | command line                      |
         | export-profile --plan home --json |
-        | serve --json                      |
+        | serve --json --help               |
 
   Rule: A command that cannot start says why in words, on standard error, and the status is 1
 
