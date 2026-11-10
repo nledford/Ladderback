@@ -153,6 +153,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         rows
     });
     let table_localizer = Arc::clone(&localizer);
+    // The zone the browser reads its clock in, asked once: every instant the
+    // page shows is written in it (§8.4).
+    let viewer = l10n::viewer_zone();
     let cancel_localizer = Arc::clone(&localizer);
     let start_base = base.clone();
     let cancel_base = base.clone();
@@ -232,6 +235,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             let rows_localizer = table_localizer.clone();
             let rows_errors = cancel_localizer.clone();
             let rows_base = cancel_base.clone();
+            let rows_zone = viewer.clone();
             match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => {
@@ -296,6 +300,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             rows_errors.clone(),
                                             row,
                                             error,
+                                            rows_zone.clone(),
                                         )
                                     }
                                 />
@@ -321,6 +326,7 @@ fn row_view(
     error_localizer: Arc<Localizer>,
     row: OperationRow,
     error: RwSignal<Option<String>>,
+    zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     let (state, label) = match status_display(&row.summary.status) {
         Some((state, label_id)) => (state, text(&localizer, label_id)),
@@ -333,7 +339,7 @@ fn row_view(
         .started_at
         .clone()
         .unwrap_or_else(|| row.summary.queued_at.clone());
-    let shown = instant(&localizer, &raw, None);
+    let shown = instant(&localizer, &raw, zone.as_ref());
     let plan = row.summary.plan.clone();
     let cancel_label = text_with(
         &localizer,
@@ -554,6 +560,8 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     });
     let picker_loading = loading.clone();
     let table_localizer = Arc::clone(&localizer);
+    // The zone the browser reads its clock in: each time is written in it.
+    let viewer = l10n::viewer_zone();
     view! {
         <PageHeading>
             {move || if unreachable.get() { unreachable_heading.clone() } else { heading.clone() }}
@@ -593,6 +601,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                 }
                 Some(_) => {
                     let rows_localizer = Arc::clone(&table_localizer);
+                    let rows_zone = viewer.clone();
                     view! {
                     <table>
                         <caption class="text-muted">{caption.clone()}</caption>
@@ -608,7 +617,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                                 key=|snapshot| snapshot.id.clone()
                                 children=move |snapshot| {
                                     let raw = snapshot.time.clone();
-                                    let shown = instant(&rows_localizer, &raw, None);
+                                    let shown = instant(&rows_localizer, &raw, rows_zone.as_ref());
                                     view! {
                                         <tr>
                                             <td>{short_id(&snapshot.id)}</td>
@@ -1241,6 +1250,17 @@ mod tests {
             "not-an-instant",
             "never a blank cell, never a guess"
         );
+    }
+
+    #[test]
+    fn an_instant_is_read_in_the_zone_it_is_given_and_in_utc_without_one() {
+        let localizer = Localizer::new(&[]);
+        let raw = "2026-11-09T10:00:02Z";
+        let tokyo = api::IanaZone::new("Asia/Tokyo").unwrap();
+        let utc = instant(&localizer, raw, None);
+        let in_tokyo = instant(&localizer, raw, Some(&tokyo));
+        assert!(utc.contains("10:00:02"), "{utc}");
+        assert!(in_tokyo.contains("7:00:02"), "{in_tokyo}");
     }
 
     #[test]
