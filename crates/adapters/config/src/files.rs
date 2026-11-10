@@ -108,7 +108,7 @@ pub(crate) fn history_folder(path: &Path) -> PathBuf {
     folder_of(path).join("history")
 }
 
-/// `20261108T132021.123Z`: the moment in UTC, so that names sort by time.
+/// `20261108T132021.123Z`: the moment in UTC, for a person reading the names.
 fn stamp(at: Timestamp) -> String {
     let at = at.to_zoned(TimeZone::UTC).datetime();
     format!(
@@ -124,67 +124,81 @@ fn stamp(at: Timestamp) -> String {
 }
 
 /// Keeps `old`, the bytes of the file about to be replaced, in the history as
-/// `<stamp>-<nn>.toml`, `nn` counting up for saves in the same millisecond, and
-/// forgets the versions beyond the newest [`KEPT_VERSIONS`].
+/// `<number>-<stamp>.toml`, and forgets the versions beyond the newest
+/// [`KEPT_VERSIONS`]. The number counts up from the highest one in the folder,
+/// and it, not the time, is the order of the versions: a clock set back would
+/// put the newest versions first by their time, and forget them first.
+///
+/// The version is on disk, and so is its place in the folder, when this
+/// returns `Ok`.
 pub(crate) fn keep(path: &Path, old: &[u8], at: Timestamp) -> io::Result<()> {
+    keep_with(path, old, at, |folder| File::open(folder)?.sync_all())
+}
+
+/// [`keep`] with the way a folder is flushed to disk given, so a test sees
+/// which folders are, and when: a power loss can't be made to happen.
+fn keep_with(
+    path: &Path,
+    old: &[u8],
+    at: Timestamp,
+    flush_folder: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     let folder = history_folder(path);
     private_folder(&folder)?;
-    let prefix = format!("{}-", stamp(at));
-    let next = names(&folder)?
-        .iter()
-        .filter_map(|name| {
-            name.strip_prefix(&prefix)?
-                .strip_suffix(".toml")?
-                .parse::<u32>()
-                .ok()
-        })
-        .max()
-        .map_or(0, |last| last.saturating_add(1));
+    let number = versions(&folder)?
+        .last()
+        .map_or(Some(1), |(last, _)| last.checked_add(1))
+        .ok_or_else(|| io::Error::other("the history has run out of version numbers"))?;
     let mut kept = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(folder.join(format!("{prefix}{next:02}.toml")))?;
+        .open(folder.join(format!("{number:06}-{}.toml", stamp(at))))?;
     kept.write_all(old)?;
     kept.sync_all()?;
+    // The file is whole, but its entry in the folder isn't safe until the
+    // folder is flushed, and neither is the folder's own, if it is new: a
+    // version reported as kept must survive a power loss, because the file is
+    // about to be replaced.
+    flush_folder(&folder)?;
+    flush_folder(folder_of(path))?;
     // Forgetting is housekeeping: a version that can't be removed now is
     // removed by a later save, and must not fail this one.
     let _ = forget_old(&folder);
     Ok(())
 }
 
-/// The names of the kept versions, oldest first.
-fn names(folder: &Path) -> io::Result<Vec<String>> {
-    let mut names = Vec::new();
+/// The number a kept version's name starts with: `000042` in
+/// `000042-20261108T132021.123Z.toml`. Names of other shapes aren't versions.
+fn number_of(name: &str) -> Option<u64> {
+    let (number, _) = name.strip_suffix(".toml")?.split_once('-')?;
+    if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+/// The kept versions as (number, name), oldest first.
+fn versions(folder: &Path) -> io::Result<Vec<(u64, String)>> {
+    let mut versions = Vec::new();
     for entry in fs::read_dir(folder)? {
         if let Ok(name) = entry?.file_name().into_string()
-            && name.ends_with(".toml")
+            && let Some(number) = number_of(&name)
         {
-            names.push(name);
+            versions.push((number, name));
         }
     }
-    names.sort_unstable();
-    Ok(names)
+    versions.sort_unstable();
+    Ok(versions)
 }
 
 fn forget_old(folder: &Path) -> io::Result<()> {
-    let names = names(folder)?;
-    let surplus = names.len().saturating_sub(KEPT_VERSIONS);
-    for name in names.iter().take(surplus) {
+    let versions = versions(folder)?;
+    let surplus = versions.len().saturating_sub(KEPT_VERSIONS);
+    for (_, name) in versions.iter().take(surplus) {
         fs::remove_file(folder.join(name))?;
     }
     Ok(())
-}
-
-/// Not yet written: the red test below needs it to exist.
-#[allow(dead_code, reason = "the fix makes `keep` use it")]
-fn keep_with(
-    _path: &Path,
-    _old: &[u8],
-    _at: Timestamp,
-    _flush_folder: impl Fn(&Path) -> io::Result<()>,
-) -> io::Result<()> {
-    todo!("keep_with")
 }
 
 #[cfg(test)]
@@ -194,7 +208,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_history_folder_is_flushed_after_a_version_is_in_it() {
+    fn the_history_folder_and_its_parent_are_flushed_after_a_version_is_in_it() {
         let scratch = tempfile::tempdir().expect("a scratch folder");
         let path = scratch.path().join("config.toml");
         let flushed = RefCell::new(Vec::new());
@@ -209,9 +223,84 @@ mod tests {
 
         assert_eq!(
             flushed.into_inner(),
-            [(history_folder(&path), 1)],
-            "flushed once, the history folder, with the version already in it"
+            [
+                (history_folder(&path), 1),
+                (scratch.path().to_path_buf(), 1)
+            ],
+            "the history folder, with the version already in it, then the folder it is new in"
         );
+    }
+
+    #[test]
+    fn a_name_is_a_version_when_it_starts_with_a_number_and_ends_in_toml() {
+        let number = |name| number_of(name);
+        assert_eq!(number("000042-20261108T132021.123Z.toml"), Some(42));
+        assert_eq!(number("7-x.toml"), Some(7));
+        assert_eq!(number("000042-20261108T132021.123Z.txt"), None);
+        assert_eq!(
+            number("20261108T132021.123Z-00.toml"),
+            None,
+            "no number first"
+        );
+        assert_eq!(number("42.toml"), None, "no stamp");
+        assert_eq!(number("-x.toml"), None, "an empty number");
+        assert_eq!(number("+7-x.toml"), None, "a sign isn't a digit");
+        assert_eq!(number("99999999999999999999999-x.toml"), None, "too big");
+    }
+
+    #[test]
+    fn the_next_version_is_numbered_after_the_highest_whatever_the_clock_says() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let folder = history_folder(&path);
+        fs::create_dir(&folder).expect("the history");
+        for name in ["000041-20990101T000000.000Z.toml", "notes.toml", "x-1.toml"] {
+            fs::write(folder.join(name), "").expect("a file");
+        }
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        keep_with(&path, b"old", at, |_| Ok(())).expect("kept");
+
+        assert!(
+            folder.join("000042-20261108T132021.123Z.toml").exists(),
+            "{:?}",
+            names_in(&folder)
+        );
+        assert!(
+            folder.join("notes.toml").exists() && folder.join("x-1.toml").exists(),
+            "files that aren't versions are left alone"
+        );
+    }
+
+    #[test]
+    fn a_history_with_no_number_left_refuses_the_version_and_changes_nothing() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let folder = history_folder(&path);
+        fs::create_dir(&folder).expect("the history");
+        let last = format!("{}-x.toml", u64::MAX);
+        fs::write(folder.join(&last), "").expect("a file");
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        let kept = keep_with(&path, b"old", at, |_| Ok(()));
+
+        assert!(kept.is_err(), "{kept:?}");
+        assert_eq!(names_in(&folder), [last]);
+    }
+
+    fn names_in(folder: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(folder)
+            .expect("the folder")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]

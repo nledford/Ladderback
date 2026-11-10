@@ -223,7 +223,7 @@ async fn an_older_file_is_kept_whole_then_replaced_by_the_current_version() {
         OLD_FILE.as_bytes(),
         "the old file, byte for byte"
     );
-    assert_eq!(kept[0].0, "20261108T132021.123Z-00.toml");
+    assert_eq!(kept[0].0, "000001-20261108T132021.123Z.toml");
     assert_eq!(mode_of(&scratch.history_dir()), 0o700);
     assert_eq!(mode_of(&scratch.history_dir().join(&kept[0].0)), 0o600);
 
