@@ -613,6 +613,20 @@ fn api_lists_inline(agent: &mut Agent, alias: String) {
     assert_eq!(row["password"], serde_json::json!({"source": "inline"}));
 }
 
+#[then(
+    expr = "the daemon lists the repository {string} with a warning that its password is written in the config"
+)]
+fn api_lists_inline_warning(agent: &mut Agent, alias: String) {
+    let row = api_row(agent, &alias);
+    assert_eq!(
+        row["warnings"],
+        serde_json::json!([{
+            "code": "config-inline-secret",
+            "args": {"field": {"type": "text", "value": "password"}}
+        }])
+    );
+}
+
 #[then(expr = "the daemon lists the repository {string} at the location, its password in the file")]
 fn api_lists_file(agent: &mut Agent, alias: String) {
     let location = text(agent.repositories.cold.as_ref().expect("the location"));

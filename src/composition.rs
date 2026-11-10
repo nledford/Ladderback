@@ -1389,6 +1389,7 @@ fn repository_row(alias: &RepositoryAlias, settings: &RepositorySettings) -> api
                 program: command.program().to_owned(),
             },
         },
+        warnings: Vec::new(),
     }
 }
 
@@ -1479,6 +1480,48 @@ mod tests {
         let dto = snapshot_dto(&listed(false, false)).expect("a valid snapshot");
         assert!(!dto.paths_truncated && !dto.tags_truncated);
         assert_eq!(dto.label, "home");
+    }
+
+    fn demo_settings(password: SecretRef) -> RepositorySettings {
+        RepositorySettings {
+            repository: "s3:s3.example.net/demo".to_owned(),
+            repo_hot: None,
+            password,
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        }
+    }
+
+    fn field_warning(field: &str) -> api::RepositoryWarningDto {
+        api::RepositoryWarningDto {
+            code: WarningCode::ConfigInlineSecret,
+            args: [("field".to_owned(), MsgArg::Text(field.to_owned()))].into(),
+        }
+    }
+
+    #[test]
+    fn a_listed_repository_with_secrets_in_the_config_carries_a_warning_for_each_without_the_value()
+    {
+        let (password, key) = ("not-a-real-password", "not-a-real-key");
+        let mut settings = demo_settings(SecretRef::Inline(SecretValue::new(password)));
+        settings
+            .options_cold
+            .insert("secret_access_key".to_owned(), key.to_owned());
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let row = repository_row(&alias, &settings);
+        assert_eq!(
+            row.warnings,
+            [
+                field_warning("password"),
+                field_warning("options-cold.secret_access_key")
+            ]
+        );
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        assert!(
+            !wire.contains(password) && !wire.contains(key),
+            "the row repeats a secret: {wire}"
+        );
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has

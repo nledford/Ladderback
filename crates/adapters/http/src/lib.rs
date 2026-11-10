@@ -937,6 +937,7 @@ mod tests {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,
                     password: api::PasswordSourceDto::Inline,
+                    warnings: Vec::new(),
                 }],
             })
         }

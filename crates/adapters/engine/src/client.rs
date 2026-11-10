@@ -1051,6 +1051,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileHooksPerPlan
                 | WarningCode::ProfileUsedMissing
                 | WarningCode::InlineSecret
+                | WarningCode::ConfigInlineSecret
                 | WarningCode::ProfileTagDropped
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty

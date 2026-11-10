@@ -4,12 +4,14 @@
 use std::collections::BTreeMap;
 
 mod command;
+mod inline;
 mod options;
 mod outcome;
 mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
+pub use inline::InlineSecret;
 pub use options::is_secret_option;
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
