@@ -1516,3 +1516,33 @@ async fn a_switch_that_is_not_true_or_false_is_a_wrong_type() {
     assert_eq!(key, "global.profile-substitute-env");
     assert_eq!(problem, ProfileProblem::WrongType);
 }
+
+// --- Text of a profile in a notice ------------------------------------------------
+
+#[tokio::test]
+async fn a_dropped_tag_is_noted_without_control_characters_and_cut_short() {
+    // The notice goes to a terminal: an escape sequence in a tag must not.
+    let long = format!("ladderback-plan:{}", "t".repeat(200));
+    let profile = read_ok(&with(&format!(
+        "[backup]\ntags = [\"ladderback-plan:a\\u001b[2Jb\", \"ladderback-agent:x\\ny\", \"{long}\"]\n"
+    )))
+    .await;
+    let dropped: Vec<&str> = profile
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            ProfileNotice::TagDropped { tag } => Some(tag.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dropped.len(), 3, "{dropped:?}");
+    assert!(dropped.contains(&"ladderback-plan:a?[2Jb"), "{dropped:?}");
+    assert!(dropped.contains(&"ladderback-agent:x?y"), "{dropped:?}");
+    assert!(
+        dropped
+            .iter()
+            .any(|tag| tag.chars().count() == 80 && tag.starts_with("ladderback-plan:t")),
+        "{dropped:?}"
+    );
+    assert!(dropped.iter().all(|tag| !tag.chars().any(char::is_control)));
+}
