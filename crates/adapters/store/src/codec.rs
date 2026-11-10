@@ -179,7 +179,7 @@ pub(crate) fn encode_failure(
                 .unwrap_or_default(),
             None,
         ),
-        FailureReason::DaemonStopped => todo!("encode FailureReason::DaemonStopped"),
+        FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
     };
     Ok(FailureColumns {
         code,
@@ -229,6 +229,7 @@ pub(crate) fn decode_failure(
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
+        "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "hook-failed" => Ok(FailureReason::HookFailed {
             exit_code: exit_code(&args)?,
         }),

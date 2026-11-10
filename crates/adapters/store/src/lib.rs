@@ -449,7 +449,20 @@ impl OperationStore for SqliteStore {
         Ok(HistoryPage { operations, next })
     }
 
-    async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
-        todo!("SqliteStore::fail_unfinished")
+    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
+        let failure = codec::encode_failure(reason).map_err(encoding)?;
+        // One statement, so it is atomic: every unfinished row ends or none
+        // does, and the write lock it takes keeps a save out meanwhile.
+        let ended = sqlx::query(sql::FAIL_UNFINISHED)
+            .bind(codec::FAILED)
+            .bind(failure.code)
+            .bind(failure.args.as_str())
+            .bind(failure.detail)
+            .bind(codec::status_text(&OperationStatus::Queued))
+            .bind(codec::status_text(&OperationStatus::Running))
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(ended.rows_affected())
     }
 }
