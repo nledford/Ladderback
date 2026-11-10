@@ -26,7 +26,8 @@ fn every_message_id_is_named_by_some_product_code() {
     let root = workspace_root();
     let mut named = BTreeSet::new();
     let mut problems = Vec::new();
-    for path in product_sources(&root) {
+    let sources = product_sources(&root).unwrap_or_else(|error| panic!("{error}"));
+    for path in sources {
         let shown = path
             .strip_prefix(&root)
             .unwrap_or(&path)
