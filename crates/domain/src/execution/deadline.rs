@@ -63,6 +63,15 @@ pub fn backup_budget(
         .saturating_sub(margin)
 }
 
+/// How long a repository job (a test, a connection or an initialisation from
+/// the Repositories page) may run before the daemon kills its worker and
+/// refuses the request. The job only opens or creates a repository, which
+/// reads or writes a few small files, so a healthy backend answers in
+/// seconds; two minutes leaves room for a slow link, an `rclone` remote that
+/// has to start, and a backend's own retries, and bounds how long the
+/// configuration lock stays held by a repository that doesn't answer.
+pub const REPOSITORY_JOB_BUDGET: SignedDuration = SignedDuration::from_mins(2);
+
 /// The latest wall-clock time a backup may write its snapshot. Time asleep
 /// counts, because a prune elsewhere doesn't wait for a sleeping laptop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

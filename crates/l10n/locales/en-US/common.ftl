@@ -212,6 +212,9 @@ warning-unknown = The operation reported a problem that this version of { -brand
 # $location (text): where the repository is.
 error-repository-exists = { -brand-name } did not initialise a repository at { $location }, because one is already there. Connect the existing repository instead.
 
+# A repository did not answer a test, a connection or an initialisation in time.
+error-repository-timed-out = The repository did not answer in time, so { -brand-name } stopped waiting and saved nothing. Check that it can be reached, then try again.
+
 # The configuration already holds a repository under this alias.
 # $alias (text): the alias the configuration already uses.
 error-repository-alias-taken = { -brand-name } already has a repository called { $alias }. Choose another name.

@@ -38,6 +38,28 @@ Feature: Connecting a repository
     When the agent initialises the repository as "demo"
     Then the agent has the repository "demo" configured with its settings
 
+  Scenario: Testing a repository that never answers is refused once its time is up
+    Given a repository the engine never answers
+    When the agent tests the repository
+    Then the request is refused because the repository did not answer in time
+    And the request gave up when the repository job's time was up
+    And the repository's worker was stopped
+    And the agent has no repository configured
+
+  Scenario: Connecting a repository that never answers is refused and saves nothing
+    Given a repository the engine never answers
+    When the agent connects it as "demo"
+    Then the request is refused because the repository did not answer in time
+    And the repository's worker was stopped
+    And the agent has no repository configured
+
+  Scenario: Initialising a repository that never answers is refused and saves nothing
+    Given a repository the engine never answers
+    When the agent initialises the repository as "demo"
+    Then the request is refused because the repository did not answer in time
+    And the repository's worker was stopped
+    And the agent has no repository configured
+
   @e2e
   Scenario: Initialising a new local repository gives it an ID
     Given an empty repository location

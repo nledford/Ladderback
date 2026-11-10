@@ -1137,6 +1137,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
                 | ErrorCode::EngineExitTimedOut
+                | ErrorCode::RepositoryTimedOut
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired

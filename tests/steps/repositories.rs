@@ -193,7 +193,11 @@ fn settings(agent: &Agent) -> RepositorySettings {
 
 #[when("the agent tests the repository")]
 async fn tests(agent: &mut Agent) {
-    let use_case = app::repositories::TestRepository::new(agent.engine.clone(), Agent::resolver());
+    let use_case = app::repositories::TestRepository::new(
+        Arc::new(platform::SystemClock),
+        agent.engine.clone(),
+        Agent::resolver(),
+    );
     agent.repositories.test = Some(use_case.test(agent.next_op(), &settings(agent)).await);
 }
 
@@ -216,6 +220,7 @@ async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
         .map(|cold| contents(cold))
         .unwrap_or_default();
     let use_case = app::repositories::InitRepository::new(
+        Arc::new(platform::SystemClock),
         agent.engine.clone(),
         Agent::resolver(),
         agent.config_store(),
@@ -231,6 +236,7 @@ async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
 async fn connects(agent: &mut Agent, name: String) {
     let alias = RepositoryAlias::try_from(name).expect("a valid alias");
     let use_case = app::repositories::ConnectRepository::new(
+        Arc::new(platform::SystemClock),
         agent.engine.clone(),
         Agent::resolver(),
         agent.config_store(),
