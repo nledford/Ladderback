@@ -283,3 +283,106 @@ Feature: The command line's output
         | --plain --help         | 0      |
         | import-profile --plain | 2      |
         | --plain --bogus        | 2      |
+
+  Rule: NO_COLOR, and output that is not a terminal, leave a command's output with no colour
+
+    The first two scenarios are controls: forced colour does colour the help,
+    the usage errors and the daemon's log, so the ones after them can fail.
+
+    Scenario Outline: Forced colour colours the help and the usage errors
+      Given colour is forced on
+      When the owner runs "<command line>"
+      Then the command exits with status <status>
+      And the output has colour
+
+      Examples:
+        | command line | status |
+        | --help       | 0      |
+        | --bogus      | 2      |
+
+    Scenario: Forced colour colours the daemon's log
+      Given colour is forced on
+      When the daemon is started with "--listen 127.0.0.1:0"
+      Then the output has colour
+
+    Scenario Outline: NO_COLOR beats forced colour in the help and the usage errors
+      Given colour is forced on
+      And NO_COLOR is set
+      When the owner runs "<command line>"
+      Then the command exits with status <status>
+      And the output is plain text
+
+      Examples:
+        | command line   | status |
+        | --help         | 0      |
+        | import-profile | 2      |
+        | --bogus        | 2      |
+
+    Scenario: NO_COLOR beats forced colour in the daemon's log
+      Given colour is forced on
+      And NO_COLOR is set
+      When the daemon is started with "--listen 127.0.0.1:0"
+      Then the output is plain text
+
+    Scenario: An import has no colour under NO_COLOR, though colour is forced
+      Given colour is forced on
+      And NO_COLOR is set
+      And a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [copy]
+        targets = ["/srv/copy"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner runs "import-profile nas.toml"
+      Then the command exits with status 0
+      And the output is plain text
+
+    Scenario: A terminal type alone colours nothing that goes to a pipe
+      Given the environment sets "TERM" to "xterm-256color"
+      When the owner runs "--help"
+      Then the command exits with status 0
+      And the output is plain text
+
+    Scenario: A terminal type alone colours nothing the daemon logs to a file
+      Given the environment sets "TERM" to "xterm-256color"
+      When the daemon is started with "--listen 127.0.0.1:0"
+      Then the output is plain text
+
+  Rule: Only a command that reports state takes --json
+
+    Scenario Outline: A command with no state to report refuses --json before it runs
+      When the owner runs "<command line>"
+      Then the command exits with status 2
+      And standard output is empty
+
+      Examples:
+        | command line                      |
+        | export-profile --plan home --json |
+        | serve --json                      |
+
+  Rule: A command that cannot start says why in words, on standard error, and the status is 1
+
+    Scenario: An import with no place for the configuration
+      Given there is no home folder and no configuration folder is named
+      When the owner runs "import-profile nas.toml"
+      Then the command exits with status 1
+      And standard output is empty
+      And standard error says "no configuration folder"
+
+    Scenario Outline: An import under a name that cannot be a name
+      When the owner runs "<command line>"
+      Then the command exits with status 1
+      And standard output is empty
+      And standard error says "<words>"
+
+      Examples:
+        | command line                                   | words                                          |
+        | import-profile nas.toml --repo-name Not_A_Name | Not_A_Name is not a repository name            |
+        | import-profile ./---.toml                      | cannot make a repository name of the file name |

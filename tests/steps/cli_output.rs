@@ -32,6 +32,24 @@ fn colour_is_forced(agent: &mut Agent) {
         .push(("CLICOLOR_FORCE".to_owned(), "1".to_owned()));
 }
 
+#[given("NO_COLOR is set")]
+fn no_colour_is_set(agent: &mut Agent) {
+    agent
+        .interop
+        .env
+        .push(("NO_COLOR".to_owned(), "1".to_owned()));
+}
+
+/// An empty value is as good as none for the two variables that name the
+/// folder (`platform::dirs`). The runner sets both before a scenario's
+/// variables, so these replace them.
+#[given("there is no home folder and no configuration folder is named")]
+fn no_folder_for_the_configuration(agent: &mut Agent) {
+    for name in ["HOME", "LADDERBACK_CONFIG_DIR"] {
+        agent.interop.env.push((name.to_owned(), String::new()));
+    }
+}
+
 #[given(expr = "the environment sets {string} to {string}")]
 fn environment_sets(agent: &mut Agent, name: String, value: String) {
     agent.interop.env.push((name, value));
@@ -191,6 +209,21 @@ fn stderr_is_empty(agent: &mut Agent) {
     assert!(stderr.is_empty(), "standard error holds {stderr:?}");
 }
 
+#[then(expr = "standard error says {string}")]
+fn stderr_says(agent: &mut Agent, text: String) {
+    let stderr = &ran(agent).stderr;
+    assert!(
+        stderr.contains(&text),
+        "standard error {stderr:?} doesn't say {text:?}"
+    );
+}
+
+#[then("standard output is empty")]
+fn stdout_is_empty(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    assert!(stdout.is_empty(), "standard output holds {stdout:?}");
+}
+
 #[then(expr = "standard output has {int} line(s)")]
 fn stdout_lines(agent: &mut Agent, count: usize) {
     let stdout = &ran(agent).stdout;
@@ -217,5 +250,15 @@ fn output_is_plain(agent: &mut Agent) {
     assert!(
         controls.is_empty(),
         "the output holds control characters {controls:?}: {said:?}"
+    );
+}
+
+#[then("the output has colour")]
+fn output_has_colour(agent: &mut Agent) {
+    let said = said(agent);
+    // The start of a control sequence that sets a style.
+    assert!(
+        said.contains("\u{1b}["),
+        "the output has no colour: {said:?}"
     );
 }
