@@ -1426,8 +1426,9 @@ impl SnapshotDto {
 /// One live update the daemon pushes to a connected page over the events
 /// WebSocket (technical design §4.4): what an operation reported, or that an
 /// agent came or went. Identifiers are text, counts are numbers, and times
-/// are RFC 3339 strings. The daemon forwards these unchanged: coalescing is
-/// the worker's, once (§4.1).
+/// are RFC 3339 strings. The daemon forwards the worker's started, progress
+/// and warning events unchanged: coalescing is the worker's, once (§4.1).
+/// How an operation ended is announced by the run that recorded it (§4.4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum UiEvent {
@@ -1451,12 +1452,16 @@ pub enum UiEvent {
         code: WarningCode,
         args: Vec<MsgArg>,
     },
-    /// The operation ended well.
+    /// The operation ended well. The run that recorded it announces this once,
+    /// after its ending hooks and its last write to the operation log, so a
+    /// page that reads the history on hearing it finds the end there, unless
+    /// the log lost that write. A cancelled operation has no such event.
     OperationSucceeded {
         operation: String,
         finished_at: String,
     },
-    /// The operation ended badly.
+    /// The operation ended badly: announced like [`Self::OperationSucceeded`],
+    /// for a failure the run found out itself as well as the engine's own.
     OperationFailed {
         operation: String,
         code: ErrorCode,
