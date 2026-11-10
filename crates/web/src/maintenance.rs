@@ -1,12 +1,18 @@
 //! The decisions behind the Snapshots page's maintenance (technical design
 //! §4.4): the request each button sends, what a preview tells a person before
-//! they confirm, how many rows a list shows, and how a run's end is
-//! announced. Every answer is data; `routes.rs` words it from the catalog.
-//! Host-tested here; the DOM glue that sends the requests is `routes.rs`.
+//! they confirm, how many rows a list shows, which group can be adopted and
+//! how a run's end is awaited and announced. Every answer is data; the page
+//! words it from the catalog. Host-tested here; the DOM glue that sends the
+//! requests is `routes.rs`.
 
-use api::{AdoptionFromDto, MaintenancePreviewDto, MaintenanceRequestDto};
+use std::time::Duration;
+
+use api::{
+    AdoptionFromDto, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto, SnapshotDto,
+};
 
 use crate::announcer::Politeness;
+use crate::backend::{ended, reconnect_backoff};
 
 /// What a maintenance run does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,53 +25,60 @@ pub(crate) enum Kind {
 
 impl Kind {
     /// The kind text a request carries.
-    #[allow(clippy::todo, reason = "red test: the wire texts come next")]
     pub(crate) fn wire(self) -> &'static str {
-        todo!("the request's kind text")
+        match self {
+            Self::Forget => "forget",
+            Self::Prune => "prune",
+            Self::Check => "check",
+            Self::Adopt => "adopt",
+        }
     }
 
     /// The kind a request's text names; the exact lower-case text only.
-    #[allow(clippy::todo, reason = "red test: the wire texts come next")]
     pub(crate) fn of(text: &str) -> Option<Kind> {
-        let _ = text;
-        todo!("the kind a text names")
+        match text {
+            "forget" => Some(Self::Forget),
+            "prune" => Some(Self::Prune),
+            "check" => Some(Self::Check),
+            "adopt" => Some(Self::Adopt),
+            _ => None,
+        }
     }
 }
 
 /// The request that starts or previews `kind`: its kind text and nothing
 /// else. An adoption names its plan and group, so it has [`adoption`].
-#[allow(clippy::todo, reason = "red test: the request builders come next")]
 pub(crate) fn request(kind: Kind) -> MaintenanceRequestDto {
-    let _ = kind;
-    todo!("a request with only a kind")
+    MaintenanceRequestDto {
+        kind: kind.wire().to_owned(),
+        into: None,
+        from: None,
+        selection: None,
+    }
 }
 
 /// The request that adopts the group `from` into the plan `into`.
-#[allow(clippy::todo, reason = "red test: the request builders come next")]
 pub(crate) fn adoption(into: &str, from: AdoptionFromDto) -> MaintenanceRequestDto {
-    let _ = (into, from);
-    todo!("an adoption request")
+    MaintenanceRequestDto {
+        into: Some(into.to_owned()),
+        from: Some(from),
+        ..request(Kind::Adopt)
+    }
 }
 
 /// The route that reads a repository's history, grouped by owner.
-#[allow(clippy::todo, reason = "red test: the route paths come next")]
 pub(crate) fn groups_path(alias: &str) -> String {
-    let _ = alias;
-    todo!("the groups route")
+    format!("/api/v1/repositories/{alias}/groups")
 }
 
 /// The route that previews a maintenance run.
-#[allow(clippy::todo, reason = "red test: the route paths come next")]
 pub(crate) fn preview_path(alias: &str) -> String {
-    let _ = alias;
-    todo!("the preview route")
+    format!("/api/v1/repositories/{alias}/maintenance/preview")
 }
 
 /// The route that starts a maintenance run.
-#[allow(clippy::todo, reason = "red test: the route paths come next")]
 pub(crate) fn start_path(alias: &str) -> String {
-    let _ = alias;
-    todo!("the start route")
+    format!("/api/v1/repositories/{alias}/maintenance")
 }
 
 /// How long a pack stays marked before a later prune deletes it.
@@ -78,10 +91,12 @@ pub(crate) enum Wait {
 impl Wait {
     /// Whole days when `hours` is a multiple of 24 that is at least 24,
     /// otherwise hours.
-    #[allow(clippy::todo, reason = "red test: the wait's unit comes next")]
     pub(crate) fn of(hours: u64) -> Wait {
-        let _ = hours;
-        todo!("days or hours")
+        if hours >= 24 && hours.is_multiple_of(24) {
+            Wait::Days(hours / 24)
+        } else {
+            Wait::Hours(hours)
+        }
     }
 }
 
@@ -131,6 +146,9 @@ pub(crate) struct Review {
     /// The request that was previewed.
     pub(crate) request: MaintenanceRequestDto,
     pub(crate) facts: Vec<Fact>,
+    /// The snapshots the preview names, for a forget or an adoption: the
+    /// plans that lose some, or the plan that takes them.
+    pub(crate) listings: Vec<Listing>,
     /// What confirming commits to; `None` when there is nothing to do.
     pub(crate) confirm: Option<Confirm>,
     /// The token the preview named, for a forget or an adoption.
@@ -139,24 +157,141 @@ pub(crate) struct Review {
 
 impl Review {
     /// The review of `preview`, the answer to `request`.
-    #[allow(clippy::todo, reason = "red test: the review's facts come next")]
     pub(crate) fn of(request: &MaintenanceRequestDto, preview: &MaintenancePreviewDto) -> Review {
-        let _ = (request, preview);
-        todo!("the facts and confirmation of a preview")
+        let request = request.clone();
+        match preview {
+            MaintenancePreviewDto::Forget {
+                plans,
+                left_alone,
+                selection,
+            } => {
+                let mut facts: Vec<Fact> = plans
+                    .iter()
+                    .map(|plan| Fact::Removes {
+                        plan: plan.plan.clone(),
+                        remove: plan.remove,
+                        total: plan.total,
+                    })
+                    .collect();
+                if left_alone.orphaned.snapshots > 0 || left_alone.unmanaged.snapshots > 0 {
+                    facts.push(Fact::LeavesAlone {
+                        orphaned_groups: left_alone.orphaned.groups,
+                        orphaned_snapshots: left_alone.orphaned.snapshots,
+                        unmanaged_groups: left_alone.unmanaged.groups,
+                        unmanaged_snapshots: left_alone.unmanaged.snapshots,
+                    });
+                }
+                let removing = plans
+                    .iter()
+                    .fold(0, |total: u64, plan| total.saturating_add(plan.remove));
+                Review {
+                    kind: Kind::Forget,
+                    request,
+                    facts,
+                    listings: plans
+                        .iter()
+                        .filter_map(|plan| Listing::of(&plan.plan, plan.remove, &plan.listed))
+                        .collect(),
+                    confirm: (removing > 0).then_some(Confirm::Forget {
+                        snapshots: removing,
+                    }),
+                    selection: Some(selection.clone()),
+                }
+            }
+            MaintenancePreviewDto::Adopt {
+                into,
+                count,
+                listed,
+                selection,
+            } => Review {
+                kind: Kind::Adopt,
+                request,
+                facts: vec![Fact::Adopts {
+                    into: into.clone(),
+                    snapshots: *count,
+                }],
+                listings: Listing::of(into, *count, listed).into_iter().collect(),
+                confirm: (*count > 0).then_some(Confirm::Adopt { snapshots: *count }),
+                selection: Some(selection.clone()),
+            },
+            MaintenancePreviewDto::Prune {
+                packs_marked,
+                packs_deleted,
+                packs_recovered,
+                bytes_deleted,
+                keep_delete_hours,
+            } => Review {
+                kind: Kind::Prune,
+                request,
+                facts: vec![Fact::Prunes {
+                    marked: *packs_marked,
+                    deleted: *packs_deleted,
+                    recovered: *packs_recovered,
+                    bytes: *bytes_deleted,
+                    wait: Wait::of(*keep_delete_hours),
+                }],
+                listings: Vec::new(),
+                confirm: (*packs_marked > 0
+                    || *packs_deleted > 0
+                    || *packs_recovered > 0
+                    || *bytes_deleted > 0)
+                    .then_some(Confirm::Prune),
+                selection: None,
+            },
+            MaintenancePreviewDto::Check { read_data } => Review {
+                kind: Kind::Check,
+                request,
+                facts: vec![Fact::Checks {
+                    read_data: *read_data,
+                }],
+                listings: Vec::new(),
+                confirm: Some(Confirm::Check),
+                selection: None,
+            },
+        }
     }
 
     /// The request that confirming sends: the previewed request carrying the
     /// preview's token for a forget or an adoption, and none for a prune or
     /// a check.
-    #[allow(clippy::todo, reason = "red test: the start body comes next")]
     pub(crate) fn start_body(&self) -> MaintenanceRequestDto {
-        todo!("the request that starts the run")
+        let selection = match self.kind {
+            Kind::Forget | Kind::Adopt => self.selection.clone(),
+            Kind::Prune | Kind::Check => None,
+        };
+        MaintenanceRequestDto {
+            selection,
+            ..self.request.clone()
+        }
     }
 
     /// Whether there is nothing to confirm.
-    #[allow(clippy::todo, reason = "red test: the confirmation comes next")]
     pub(crate) fn nothing_to_do(&self) -> bool {
-        todo!("no confirmation")
+        self.confirm.is_none()
+    }
+}
+
+/// The snapshots a preview names under one plan: the ones a forget removes
+/// from it, or the ones an adoption rewrites into it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Listing {
+    pub(crate) plan: String,
+    /// The snapshots the preview listed, in its order.
+    pub(crate) snapshots: Vec<SnapshotDto>,
+    /// How many more the run acts on than the preview lists.
+    pub(crate) more: u64,
+}
+
+impl Listing {
+    /// What a preview names for `plan`, of `count` snapshots it acts on of
+    /// which it listed `listed`; `None` when there is nothing to name.
+    fn of(plan: &str, count: u64, listed: &[SnapshotDto]) -> Option<Listing> {
+        let rows = Rows::of(count, listed.len());
+        (rows.shown > 0 || rows.more > 0).then(|| Listing {
+            plan: plan.to_owned(),
+            snapshots: listed.to_vec(),
+            more: rows.more,
+        })
     }
 }
 
@@ -169,10 +304,52 @@ pub(crate) struct Rows {
 
 impl Rows {
     /// The rows of a list of `listed` items out of `count`.
-    #[allow(clippy::todo, reason = "red test: the row counts come next")]
     pub(crate) fn of(count: u64, listed: usize) -> Rows {
-        let _ = (count, listed);
-        todo!("shown and more")
+        Rows {
+            shown: listed,
+            more: count.saturating_sub(u64::try_from(listed).unwrap_or(u64::MAX)),
+        }
+    }
+}
+
+/// How an orphaned group names the plan and agent that owned it: by both
+/// tags, by one, or by neither. A group is orphaned for a tag it carries, so
+/// neither is not expected, but the wire can say it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Owner<'a> {
+    Both { agent: &'a str, plan: &'a str },
+    Plan(&'a str),
+    Agent(&'a str),
+    Neither,
+}
+
+impl<'a> Owner<'a> {
+    pub(crate) fn of(group: &'a OrphanedGroupDto) -> Owner<'a> {
+        match (group.agent.as_deref(), group.plan.as_deref()) {
+            (Some(agent), Some(plan)) => Owner::Both { agent, plan },
+            (None, Some(plan)) => Owner::Plan(plan),
+            (Some(agent), None) => Owner::Agent(agent),
+            (None, None) => Owner::Neither,
+        }
+    }
+}
+
+/// The request that adopts the orphaned `group` into the plan `into`. The
+/// daemon finds the group by both its tags, so a group that lacks one cannot
+/// be named, and has none.
+pub(crate) fn adopt_orphaned(
+    group: &OrphanedGroupDto,
+    into: &str,
+) -> Option<MaintenanceRequestDto> {
+    match Owner::of(group) {
+        Owner::Both { agent, plan } => Some(adoption(
+            into,
+            AdoptionFromDto::Orphaned {
+                agent: agent.to_owned(),
+                plan: plan.to_owned(),
+            },
+        )),
+        Owner::Plan(_) | Owner::Agent(_) | Owner::Neither => None,
     }
 }
 
@@ -195,10 +372,97 @@ pub(crate) struct End {
 impl End {
     /// The end of a `kind` run whose operation status is `status`: only a
     /// failure is assertive.
-    #[allow(clippy::todo, reason = "red test: the announcement comes next")]
     pub(crate) fn of(kind: Kind, status: &str) -> End {
-        let _ = (kind, status);
-        todo!("how the end is announced")
+        let outcome = match status {
+            "failed" => Outcome::Failed,
+            "cancelled" => Outcome::Cancelled,
+            _ => Outcome::Finished,
+        };
+        let politeness = match outcome {
+            Outcome::Failed => Politeness::Assertive,
+            Outcome::Cancelled | Outcome::Finished => Politeness::Polite,
+        };
+        End {
+            kind,
+            outcome,
+            politeness,
+        }
+    }
+}
+
+/// How long to wait before reading a running maintenance's status again,
+/// after its `reads`-th read, counting from 1: a quarter of a second at
+/// first, so a run that ends in a moment is told at once, then every second,
+/// then every five, so a prune that takes an hour costs the daemon a few
+/// hundred reads and not thousands.
+pub(crate) fn poll_delay(reads: u32) -> Duration {
+    if reads <= QUARTER_SECOND_READS {
+        Duration::from_millis(250)
+    } else if reads <= SECOND_READS {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
+/// The last read a quarter of a second follows, and the last read a second
+/// follows.
+const QUARTER_SECOND_READS: u32 = 20;
+const SECOND_READS: u32 = 80;
+
+/// How many reads of a run's status may fail one after the other before the
+/// wait gives up: with the back-off between them (1, 2, 4, 8, 16 and 30
+/// seconds), a minute of a daemon that does not answer.
+const MAX_MISSES: u32 = 7;
+
+/// What the wait for a run does next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Next {
+    /// Read again after this long.
+    Again(Duration),
+    /// The run is over.
+    Ended(End),
+    /// The daemon has not answered for too long to say how the run went.
+    GaveUp,
+}
+
+/// The wait for one run to end: it counts the reads and the misses, and
+/// says after each what comes next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Watch {
+    kind: Kind,
+    reads: u32,
+    misses: u32,
+}
+
+impl Watch {
+    pub(crate) fn new(kind: Kind) -> Watch {
+        Watch {
+            kind,
+            reads: 0,
+            misses: 0,
+        }
+    }
+
+    /// What comes after a read of the run's status: `None` is a read that
+    /// got no answer.
+    pub(crate) fn after(&mut self, status: Option<&str>) -> Next {
+        match status {
+            Some(status) if ended(status) => Next::Ended(End::of(self.kind, status)),
+            Some(_) => {
+                self.misses = 0;
+                self.reads = self.reads.saturating_add(1);
+                Next::Again(poll_delay(self.reads))
+            }
+            None => {
+                self.misses = self.misses.saturating_add(1);
+                if self.misses >= MAX_MISSES {
+                    Next::GaveUp
+                } else {
+                    Next::Again(reconnect_backoff(self.misses))
+                }
+            }
+        }
     }
 }
 
@@ -666,5 +930,268 @@ mod tests {
             assert_eq!(end.outcome, Outcome::Finished, "{status:?}");
             assert_eq!(end.politeness, Politeness::Polite, "{status:?}");
         }
+    }
+
+    // What a review names, who can be adopted, and how a run is awaited: the
+    // decisions the Snapshots page adds to the ones above.
+
+    fn orphaned(agent: Option<&str>, plan: Option<&str>) -> OrphanedGroupDto {
+        OrphanedGroupDto {
+            agent: agent.map(str::to_owned),
+            plan: plan.map(str::to_owned),
+            count: 2,
+            snapshots: vec![snapshot(1), snapshot(2)],
+            adopt_into: vec!["home".to_owned()],
+        }
+    }
+
+    #[test]
+    fn a_forget_review_names_the_snapshots_each_plan_loses_in_the_previews_order() {
+        let preview = forget(
+            vec![plan("home", 9, 4), plan("work", 2, 0), plan("misc", 5, 2)],
+            left(0, 0, 0, 0),
+        );
+        let review = Review::of(&plain(Kind::Forget), &preview);
+        let named: Vec<(&str, usize, u64)> = review
+            .listings
+            .iter()
+            .map(|listing| (listing.plan.as_str(), listing.snapshots.len(), listing.more))
+            .collect();
+        // `plan()` lists up to three snapshots of the ones a plan removes.
+        assert_eq!(named, vec![("home", 3, 1), ("misc", 2, 0)]);
+    }
+
+    #[test]
+    fn a_listing_keeps_the_snapshots_the_preview_listed() {
+        let preview = forget(vec![plan("home", 9, 2)], left(0, 0, 0, 0));
+        let review = Review::of(&plain(Kind::Forget), &preview);
+        assert_eq!(
+            review.listings,
+            vec![Listing {
+                plan: "home".to_owned(),
+                snapshots: vec![snapshot(0), snapshot(1)],
+                more: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_plan_whose_removals_the_preview_did_not_list_is_still_named() {
+        let mut unlisted = plan("home", 9, 4);
+        unlisted.listed.clear();
+        let review = Review::of(
+            &plain(Kind::Forget),
+            &forget(vec![unlisted], left(0, 0, 0, 0)),
+        );
+        assert_eq!(
+            review.listings,
+            vec![Listing {
+                plan: "home".to_owned(),
+                snapshots: Vec::new(),
+                more: 4,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_adoption_review_names_the_snapshots_it_rewrites_into_the_plan() {
+        let request = adoption("home", AdoptionFromDto::Unmanaged);
+        let preview = MaintenancePreviewDto::Adopt {
+            into: "home".to_owned(),
+            count: 120,
+            listed: vec![snapshot(1), snapshot(2)],
+            selection: "fedcba9876543210".to_owned(),
+        };
+        let review = Review::of(&request, &preview);
+        assert_eq!(
+            review.listings,
+            vec![Listing {
+                plan: "home".to_owned(),
+                snapshots: vec![snapshot(1), snapshot(2)],
+                more: 118,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_adoption_of_nothing_names_nothing() {
+        let request = adoption("home", AdoptionFromDto::Unmanaged);
+        let preview = MaintenancePreviewDto::Adopt {
+            into: "home".to_owned(),
+            count: 0,
+            listed: Vec::new(),
+            selection: "fedcba9876543210".to_owned(),
+        };
+        assert_eq!(Review::of(&request, &preview).listings, Vec::new());
+    }
+
+    #[test]
+    fn a_prune_and_a_check_name_no_snapshots() {
+        assert_eq!(
+            Review::of(&plain(Kind::Prune), &prune(3, 2, 1, 4096)).listings,
+            Vec::new()
+        );
+        let check = MaintenancePreviewDto::Check { read_data: true };
+        assert_eq!(Review::of(&plain(Kind::Check), &check).listings, Vec::new());
+    }
+
+    #[test]
+    fn an_orphaned_group_is_owned_by_the_tags_it_carries() {
+        assert_eq!(
+            Owner::of(&orphaned(Some("agent-a"), Some("old"))),
+            Owner::Both {
+                agent: "agent-a",
+                plan: "old"
+            }
+        );
+        assert_eq!(Owner::of(&orphaned(None, Some("old"))), Owner::Plan("old"));
+        assert_eq!(
+            Owner::of(&orphaned(Some("agent-a"), None)),
+            Owner::Agent("agent-a")
+        );
+        assert_eq!(Owner::of(&orphaned(None, None)), Owner::Neither);
+    }
+
+    #[test]
+    fn an_orphaned_group_with_both_tags_is_adopted_by_naming_them() {
+        let group = orphaned(Some("agent-a"), Some("old"));
+        assert_eq!(
+            adopt_orphaned(&group, "home"),
+            Some(adoption(
+                "home",
+                AdoptionFromDto::Orphaned {
+                    agent: "agent-a".to_owned(),
+                    plan: "old".to_owned(),
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn an_orphaned_group_that_lacks_a_tag_cannot_be_named_so_it_has_no_adoption() {
+        assert_eq!(adopt_orphaned(&orphaned(None, Some("old")), "home"), None);
+        assert_eq!(
+            adopt_orphaned(&orphaned(Some("agent-a"), None), "home"),
+            None
+        );
+        assert_eq!(adopt_orphaned(&orphaned(None, None), "home"), None);
+    }
+
+    #[test]
+    fn the_status_of_a_run_is_read_every_quarter_of_a_second_at_first() {
+        for reads in [0, 1, 20] {
+            assert_eq!(poll_delay(reads), Duration::from_millis(250), "{reads}");
+        }
+    }
+
+    #[test]
+    fn the_status_of_a_run_is_then_read_every_second() {
+        for reads in [21, 50, 80] {
+            assert_eq!(poll_delay(reads), Duration::from_secs(1), "{reads}");
+        }
+    }
+
+    #[test]
+    fn the_status_of_a_long_run_is_read_every_five_seconds() {
+        for reads in [81, 1_000, u32::MAX] {
+            assert_eq!(poll_delay(reads), Duration::from_secs(5), "{reads}");
+        }
+    }
+
+    #[test]
+    fn a_run_that_is_still_going_is_read_again_after_the_poll_delay() {
+        let mut watch = Watch::new(Kind::Prune);
+        for status in ["queued", "running"] {
+            assert_eq!(
+                watch.after(Some(status)),
+                Next::Again(Duration::from_millis(250)),
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wait_slows_down_as_the_reads_pile_up() {
+        let mut watch = Watch::new(Kind::Prune);
+        for _ in 0..20 {
+            watch.after(Some("running"));
+        }
+        assert_eq!(
+            watch.after(Some("running")),
+            Next::Again(Duration::from_secs(1))
+        );
+    }
+
+    #[test]
+    fn a_run_that_ended_is_announced_as_its_kind_and_status_say() {
+        for (status, outcome, politeness) in [
+            ("succeeded", Outcome::Finished, Politeness::Polite),
+            (
+                "succeeded-with-warnings",
+                Outcome::Finished,
+                Politeness::Polite,
+            ),
+            ("cancelled", Outcome::Cancelled, Politeness::Polite),
+            ("failed", Outcome::Failed, Politeness::Assertive),
+        ] {
+            let mut watch = Watch::new(Kind::Check);
+            assert_eq!(
+                watch.after(Some(status)),
+                Next::Ended(End {
+                    kind: Kind::Check,
+                    outcome,
+                    politeness
+                }),
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_read_that_got_no_answer_is_tried_again_after_a_growing_pause() {
+        let mut watch = Watch::new(Kind::Forget);
+        let pauses: Vec<Next> = (0..6).map(|_| watch.after(None)).collect();
+        assert_eq!(
+            pauses,
+            [1, 2, 4, 8, 16, 30].map(|seconds| Next::Again(Duration::from_secs(seconds)))
+        );
+    }
+
+    #[test]
+    fn the_wait_gives_up_when_the_daemon_stays_silent() {
+        let mut watch = Watch::new(Kind::Forget);
+        for _ in 0..6 {
+            assert!(matches!(watch.after(None), Next::Again(_)));
+        }
+        assert_eq!(watch.after(None), Next::GaveUp);
+    }
+
+    #[test]
+    fn an_answer_forgives_the_reads_that_went_before_it() {
+        let mut watch = Watch::new(Kind::Forget);
+        for _ in 0..6 {
+            watch.after(None);
+        }
+        assert!(matches!(watch.after(Some("running")), Next::Again(_)));
+        assert_eq!(
+            watch.after(None),
+            Next::Again(Duration::from_secs(1)),
+            "the misses start over"
+        );
+    }
+
+    #[test]
+    fn the_reads_that_got_no_answer_do_not_slow_the_poll() {
+        let mut watch = Watch::new(Kind::Forget);
+        for _ in 0..10 {
+            watch.after(None);
+            watch.after(Some("running"));
+        }
+        // The eleventh answered read: still within the quarter-second pace,
+        // as it would not be if the ten misses counted as reads.
+        assert_eq!(
+            watch.after(Some("running")),
+            Next::Again(Duration::from_millis(250))
+        );
     }
 }
