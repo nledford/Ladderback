@@ -207,81 +207,126 @@ fn collect_idents(stream: TokenStream, names: &mut BTreeSet<String>) {
 }
 
 /// `files` without the ones only test code declares: the files `#[cfg(test)]
-/// mod name;` points at, and the files those declare in turn. `read` gives a
-/// file's text, or `None` if there is no such file. An error if a file can't be
-/// read as Rust, or a test module has no file: a hole in the scan would pass
+/// mod name;` points at, and the files those declare in turn, unless product
+/// code declares them too (a `#[path]` module of a build script). `read` gives
+/// a file's text, or `None` if there is no such file. An error if a file can't
+/// be read as Rust, or a test module has no file: a hole in the scan would pass
 /// for a message nothing but tests uses.
+///
+/// The modules are followed from the crate roots in `files`, then from any file
+/// they didn't reach, as product code, so each file is looked at in the place
+/// Rust would find it. A declaration the scan can't see (a `mod` in a function
+/// body, `#[cfg_attr(test, path = "…")]`) leaves its file counted as product.
 pub fn exclude_test_modules(
     files: Vec<PathBuf>,
     read: impl Fn(&Path) -> Option<String>,
 ) -> Result<Vec<PathBuf>, String> {
-    let mut test_files = BTreeSet::new();
-    // (file, whether it is a `mod.rs`-like file, whether it is test code)
-    let mut pending: Vec<(PathBuf, bool, bool)> = files
-        .iter()
-        .map(|file| (file.clone(), is_mod_rs(file), false))
-        .collect();
-    while let Some((file, mod_rs, in_test)) = pending.pop() {
-        let shown = file.display();
-        let source = read(&file).ok_or_else(|| format!("{shown}: cannot be read"))?;
-        let declared = test_modules(&file, &source, mod_rs, in_test)
-            .map_err(|error| format!("{shown}: {error}"))?;
-        for module in declared {
-            let found = module
-                .candidates
-                .iter()
-                .find(|(candidate, _)| read(candidate).is_some());
-            let Some((path, mod_rs)) = found else {
-                let looked: Vec<_> = module
-                    .candidates
-                    .iter()
-                    .map(|(candidate, _)| candidate.display().to_string())
-                    .collect();
-                return Err(format!(
-                    "{shown}: `mod {};` is test code, and none of {looked:?} exists",
-                    module.name
-                ));
-            };
-            if test_files.insert(path.clone()) {
-                pending.push((path.clone(), *mod_rs, true));
-            }
+    let mut product = BTreeSet::new();
+    let mut test = BTreeSet::new();
+    let roots = files.iter().filter(|file| is_crate_root(file));
+    let others = files.iter().filter(|file| !is_crate_root(file));
+    for start in roots.chain(others) {
+        if !product.contains(start) && !test.contains(start) {
+            product.insert(start.clone());
+            follow(
+                start,
+                is_mod_rs(start),
+                false,
+                &read,
+                &mut product,
+                &mut test,
+            )?;
         }
     }
     Ok(files
         .into_iter()
-        .filter(|file| !test_files.contains(file))
+        .filter(|file| product.contains(file) || !test.contains(file))
         .collect())
 }
 
-/// A `mod name;` that is test code, and the files it can be.
-struct TestModule {
+/// Follows the modules `file` declares, and theirs, into `product` or `test`.
+fn follow(
+    file: &Path,
+    mod_rs: bool,
+    in_test: bool,
+    read: &impl Fn(&Path) -> Option<String>,
+    product: &mut BTreeSet<PathBuf>,
+    test: &mut BTreeSet<PathBuf>,
+) -> Result<(), String> {
+    let shown = file.display();
+    let source = read(file).ok_or_else(|| format!("{shown}: cannot be read"))?;
+    let declared = declared_modules(file, &source, mod_rs, in_test)
+        .map_err(|error| format!("{shown}: {error}"))?;
+    for module in declared {
+        let found = module
+            .candidates
+            .iter()
+            .find(|(candidate, _)| read(candidate).is_some());
+        let Some((path, mod_rs)) = found else {
+            if !module.test {
+                // A product module the build leaves out (a `cfg` for another
+                // system) has no file to look at, and nothing to hide.
+                continue;
+            }
+            let looked: Vec<_> = module
+                .candidates
+                .iter()
+                .map(|(candidate, _)| candidate.display().to_string())
+                .collect();
+            return Err(format!(
+                "{shown}: `mod {};` is test code, and none of {looked:?} exists",
+                module.name
+            ));
+        };
+        let reached = if module.test {
+            &mut *test
+        } else {
+            &mut *product
+        };
+        if reached.insert(path.clone()) {
+            follow(path, *mod_rs, module.test, read, product, test)?;
+        }
+    }
+    Ok(())
+}
+
+/// A `mod name;` declaration, and the files it can mean.
+struct DeclaredModule {
     name: String,
+    /// Whether it is test code.
+    test: bool,
     /// Each file the declaration can mean, and whether it is a `mod.rs`-like
     /// file, whose own modules sit beside it.
     candidates: Vec<(PathBuf, bool)>,
 }
 
-/// Whether the modules of the file at `path` are found beside it, not in a
-/// folder named for it: crate roots (`lib.rs`, `main.rs`, `build.rs`, anything
-/// in `src/bin`) and `mod.rs` files.
-fn is_mod_rs(path: &Path) -> bool {
+/// Whether `path` is the root of a crate: `lib.rs`, `main.rs`, `build.rs` or a
+/// file in `src/bin`.
+fn is_crate_root(path: &Path) -> bool {
     let name = path.file_name().and_then(|name| name.to_str());
     let folder = path
         .parent()
         .and_then(Path::file_name)
         .and_then(|name| name.to_str());
-    matches!(name, Some("mod.rs" | "lib.rs" | "main.rs" | "build.rs")) || folder == Some("bin")
+    matches!(name, Some("lib.rs" | "main.rs" | "build.rs")) || folder == Some("bin")
 }
 
-/// The `mod name;` declarations in a file that are test code: marked by a
-/// `cfg` that only holds under test, inside such an inline module, or in a
-/// file that is test code as a whole (`in_test`, or an inner `#![cfg(test)]`).
-fn test_modules(
+/// Whether the modules of the file at `path` are found beside it, not in a
+/// folder named for it: crate roots and `mod.rs` files.
+fn is_mod_rs(path: &Path) -> bool {
+    is_crate_root(path) || path.file_name().is_some_and(|name| name == "mod.rs")
+}
+
+/// The `mod name;` declarations in a file. One is test code when it is marked
+/// by a `cfg` that only holds under test, is inside such an inline module, or
+/// is in a file that is test code as a whole (`in_test`, or an inner
+/// `#![cfg(test)]`).
+fn declared_modules(
     file: &Path,
     source: &str,
     mod_rs: bool,
     in_test: bool,
-) -> Result<Vec<TestModule>, String> {
+) -> Result<Vec<DeclaredModule>, String> {
     let stream = TokenStream::from_str(source).map_err(|error| error.to_string())?;
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     let parent = file.parent().unwrap_or_else(|| Path::new(""));
@@ -314,7 +359,7 @@ fn declarations(
     tokens: &[TokenTree],
     folders: &Folders,
     in_test: bool,
-    found: &mut Vec<TestModule>,
+    found: &mut Vec<DeclaredModule>,
 ) -> Result<(), String> {
     let in_test = in_test || has_inner_test_cfg(tokens);
     let mut at = 0;
@@ -347,12 +392,13 @@ fn declarations(
                 at += 3;
                 match next {
                     TokenTree::Punct(semicolon) if semicolon.as_char() == ';' => {
-                        if in_test || test {
-                            found.push(TestModule {
-                                name: name.to_string(),
-                                candidates: candidates(folders, &name.to_string(), path.as_deref()),
-                            });
-                        }
+                        let name = name.to_string();
+                        let name = name.strip_prefix("r#").unwrap_or(&name).to_owned();
+                        found.push(DeclaredModule {
+                            test: in_test || test,
+                            candidates: candidates(folders, &name, path.as_deref()),
+                            name,
+                        });
                     }
                     TokenTree::Group(body) if body.delimiter() == Delimiter::Brace => {
                         let inside = folders

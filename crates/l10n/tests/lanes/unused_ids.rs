@@ -399,19 +399,19 @@ fn a_file_a_product_declaration_also_points_at_is_product_code() {
 }
 
 #[test]
-fn a_module_file_in_a_bin_folder_keeps_its_modules_in_a_folder_of_its_own() {
-    // Only the crate roots in `src/bin` keep them beside; a module of one
-    // doesn't.
+fn a_module_of_a_binary_keeps_its_modules_in_a_folder_of_its_own() {
+    // The root of `src/bin/tool/` keeps its modules beside it, and a module of
+    // it doesn't.
     let kept = product_files_with(
         &[
-            ("src/bin/tool.rs", "mod helpers;"),
-            ("src/bin/helpers.rs", "#[cfg(test)] mod tests;"),
+            ("src/bin/tool/main.rs", "mod helpers;"),
+            ("src/bin/tool/helpers.rs", "#[cfg(test)] mod tests;"),
         ],
-        &[("src/bin/helpers/tests.rs", "fn t() { msg::CLI_A; }")],
+        &[("src/bin/tool/helpers/tests.rs", "fn t() { msg::CLI_A; }")],
     );
     assert_eq!(
         kept,
-        Ok(["src/bin/tool.rs", "src/bin/helpers.rs"]
+        Ok(["src/bin/tool/main.rs", "src/bin/tool/helpers.rs"]
             .map(str::to_owned)
             .to_vec())
     );
