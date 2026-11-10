@@ -28,6 +28,21 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 
 The cucumber runners use `harness = false`, so `cargo nextest` can't run them; `just test` excludes them from nextest and runs them with `cargo test`, as do `just test-acceptance` and `just test-e2e`. Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
+### Use this, not that
+
+The recipes carry flags and steps a raw command drops, so a raw command can pass or fail where CI wouldn't.
+
+| Task | Use | Not | Why |
+|---|---|---|---|
+| Every Rust suite | `just test` | `cargo test`, `cargo nextest run` | nextest can't run the cucumber runners and skips doc tests; only the recipe prints the skip list |
+| One test while iterating | `cargo nextest run --workspace <filter>` | `cargo test --package app <filter>` | Cargo unifies features over the packages a command selects, so `--package` alone rebuilds nearly every dependency. `just test <filter>` narrows only nextest; it still runs every scenario |
+| One scenario | `just test-acceptance --name '<regex>'`, `just test-e2e --name '<regex>'` | editing tags, or a raw `cargo test --test …` | the recipes add `--workspace` and the skip log |
+| `@ui` scenarios | `just test-ui` | `npx cucumber-js` | `npx` can run an unrelated registry package of that name, which exits 0; the recipe also builds the UI with the gallery and the binary first |
+| UI build for tests | `just web-test` | `trunk build` | the `@ui` scenarios drive `/_gallery`, which only the `gallery` feature builds |
+| Mutants | `just mutants origin/main --jobs <n>` | `cargo mutants` | the recipe mutates only changed code in the gated crates, as CI does |
+
+Commands run unattended: pass the non-interactive flag (`cargo binstall --no-confirm`, `gh … --json`, `GH_PAGER=cat`). If a command prompts anyway, stop it and report it; never guess the answer.
+
 ## Read first
 
 | File | Owns |
