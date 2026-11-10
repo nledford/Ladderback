@@ -192,6 +192,20 @@ Feature: Repositories page
     Then the page shows the heading "Cannot reach Ladderback"
     And the page has no accessibility violations
 
+  Scenario: Leaving the page while a repository is being tested breaks nothing
+    Given a daemon with a scratch demo repository and no repositories
+    When I open the address "/repositories"
+    And I press Tab until focus is on the textbox "Location"
+    And I type "{repo}"
+    And I press Tab until focus is on the textbox "Password"
+    And I type "demo-password"
+    And I press Tab until focus is on the button "Test the repository"
+    And I press Enter
+    And I press Shift+Tab until focus is on the link "Operations"
+    And I press Enter
+    Then focus is on the main heading "Operations"
+    And the page raises no script error while the daemon answers
+
   Scenario Outline: The repositories page is in the language of the page
     When I open the address "/repositories?locale=<locale>"
     Then the page has 4 text boxes

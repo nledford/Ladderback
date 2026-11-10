@@ -32,15 +32,24 @@ When("I open the address {string}", async function (address) {
   await this.open(address);
 });
 
-When("I press Tab until focus is on the {word} {string}", async function (role, name) {
-  const keys = journey(this.page);
+/** Presses `key` until focus is on the one element with this role and name. */
+async function pressUntilFocusIsOn(world, key, role, name) {
+  const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   const focused = async () =>
     (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
   for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-    await keys.press("Tab");
+    await keys.press(key);
   }
-  assert.ok(await focused(), `focus did not reach the ${role} "${name}" within ${MAX_TABS} Tab presses`);
+  assert.ok(await focused(), `focus did not reach the ${role} "${name}" within ${MAX_TABS} ${key} presses`);
+}
+
+When("I press Tab until focus is on the {word} {string}", async function (role, name) {
+  await pressUntilFocusIsOn(this, "Tab", role, name);
+});
+
+When("I press Shift+Tab until focus is on the {word} {string}", async function (role, name) {
+  await pressUntilFocusIsOn(this, "Shift+Tab", role, name);
 });
 
 Then("focus is on the main heading {string}", async function (name) {

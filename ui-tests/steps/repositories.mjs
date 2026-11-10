@@ -19,6 +19,9 @@ import { fixtureRepo, startServer } from "../support/world.mjs";
 // build more than one.
 const ANSWER_PATIENCE_MS = 25_000;
 
+// How long a test of the scratch repository needs to be answered, with room.
+const ANSWER_SETTLES_MS = 6_000;
+
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -115,6 +118,13 @@ async function focusComesTo(world, role, name, description) {
     }
   }
 }
+
+// A page that is left while a request is on its way gets the answer after it
+// is gone. The engine takes a moment, so the step waits long enough for it.
+Then("the page raises no script error while the daemon answers", async function () {
+  await new Promise((done) => setTimeout(done, ANSWER_SETTLES_MS));
+  assert.deepEqual(this.scriptErrors, [], "the page's scripts threw");
+});
 
 Then("focus is on the heading {string}", async function (name) {
   await focusComesTo(this, "heading", name, `the heading "${name}"`);

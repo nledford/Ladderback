@@ -131,6 +131,8 @@ class BrowserWorld extends World {
   ownServer = null;
   /** Where this scenario's pages are served from; `null` is the run's daemon. */
   baseUrl = null;
+  /** What the page's scripts threw, so a step can say it threw nothing. */
+  scriptErrors = [];
   context;
   page;
 
@@ -143,6 +145,7 @@ class BrowserWorld extends World {
       });
     }
     this.page = await this.context.newPage();
+    this.page.on("pageerror", (error) => this.scriptErrors.push(error.message));
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
     await this.page.getByRole("heading", { level: 1 }).waitFor();
@@ -158,6 +161,7 @@ Before(function () {
   this.contextOptions = { viewport: { width: 1280, height: 800 } };
   this.readerStyles = [];
   this.slowNetwork = false;
+  this.scriptErrors = [];
   this.ownServer = null;
   this.baseUrl = null;
 });
