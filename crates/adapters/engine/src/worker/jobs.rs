@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
     BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList,
-    SnapshotOptions,
+    SnapshotOptions, StringList,
 };
 
 use super::convert::{
@@ -21,6 +21,7 @@ use crate::job::{
     BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, PruneJobSpec,
     RepositorySpec,
 };
+use crate::job::{RewriteJobSpec, RewriteResult};
 
 pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
@@ -68,6 +69,97 @@ pub(crate) fn forget(ctx: &Context, job: &ForgetJobSpec) -> Result<Done, JobErro
         repository: repository_id,
         removed,
     })))
+}
+
+/// Rewrites exactly the snapshots the job names with the tags given (§7.3,
+/// step 3): each becomes a new snapshot file over the same tree, the
+/// originals are removed, and the user's own tags survive. Which snapshots
+/// those are was decided before the job ran, by the owner's own selection.
+///
+/// Saving the copies and removing the originals are two writes, so a worker
+/// stopped between them leaves both. A copy is known by the original's tree
+/// and time and the job's tags; one already there is kept rather than made
+/// again, so the next adoption of that history finishes the first.
+pub(crate) fn rewrite(ctx: &Context, job: &RewriteJobSpec) -> Result<Done, JobError> {
+    // Parsed before the repository is opened, so a malformed ID is refused
+    // before anything is touched.
+    let ids: Vec<RusticSnapshotId> = job
+        .ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .parse()
+                .map_err(|_| JobError::failed(format!("not a snapshot ID: {id}")))
+        })
+        .collect::<Result<_, _>>()?;
+    let new_tags: StringList = job.tags.join(",").parse().map_err(|_| {
+        JobError::failed("the adoption's tags are not a list the repository can store")
+    })?;
+    let repository = open(ctx, &job.repo)?;
+    let repository_id = repository_id(&repository)?;
+    ctx.start(None)?;
+    let originals = repository.get_snapshots(&job.ids)?;
+    if originals.len() != ids.len() {
+        return Err(JobError::failed(
+            "a snapshot the selection named is not in the repository",
+        ));
+    }
+    let before = repository.get_all_snapshots()?;
+    let mut copies = Vec::new();
+    for original in &originals {
+        if copy_of(original, &before, &ids, &new_tags, &[]).is_some() {
+            continue;
+        }
+        // The user's own tags survive; every `ladderback-*` tag is replaced
+        // by the two the job carries.
+        let mut copy = original.clone();
+        let mut tags = new_tags.clone();
+        for tag in original.tags.iter() {
+            if !tag.starts_with("ladderback-") {
+                tags.add(tag.clone());
+            }
+        }
+        copy.tags = tags;
+        copies.push(copy);
+    }
+    repository.save_snapshots(copies)?;
+    repository.delete_snapshots(&ids)?;
+    // What the rewrite leaves for each original, in the order the job named
+    // them: never a snapshot that was there for another reason.
+    let after = repository.get_all_snapshots()?;
+    let mut created: Vec<RusticSnapshotId> = Vec::with_capacity(originals.len());
+    for original in &originals {
+        let copy = copy_of(original, &after, &ids, &new_tags, &created).ok_or_else(|| {
+            JobError::failed("a rewritten snapshot is not in the repository after the save")
+        })?;
+        created.push(copy);
+    }
+    let created = created.iter().map(snapshot_id).collect::<Result<_, _>>()?;
+    Ok(Done::Result(OpResult::Rewrite(RewriteResult {
+        repository: repository_id,
+        created,
+    })))
+}
+
+/// The copy of `original` among `snapshots`: same tree, same time, both of
+/// the job's tags, and neither an original nor a copy already counted.
+fn copy_of(
+    original: &SnapshotFile,
+    snapshots: &[SnapshotFile],
+    originals: &[RusticSnapshotId],
+    tags: &StringList,
+    counted: &[RusticSnapshotId],
+) -> Option<RusticSnapshotId> {
+    snapshots
+        .iter()
+        .find(|snapshot| {
+            snapshot.tree == original.tree
+                && snapshot.time == original.time
+                && snapshot.tags.contains_all(tags)
+                && !originals.contains(&snapshot.id)
+                && !counted.contains(&snapshot.id)
+        })
+        .map(|snapshot| snapshot.id)
 }
 
 /// Initialises a repository at the location, with default key options and

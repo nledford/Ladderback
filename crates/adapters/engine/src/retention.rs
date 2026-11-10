@@ -185,3 +185,43 @@ fn keep_options(policy: &RetentionPolicy) -> rustic_core::KeepOptions {
         .keep_within_half_yearly(span(keep_within_half_yearly))
         .keep_within_yearly(span(keep_within_yearly))
 }
+
+/// Normalizes a plan's sources the way rustic records them: dots removed,
+/// symlinks resolved, sorted and deduplicated, so adoption's matching
+/// compares a plan with its own snapshots' paths.
+#[derive(Default)]
+pub struct RusticSources;
+
+#[async_trait::async_trait]
+impl app::ports::NormalizeSources for RusticSources {
+    async fn normalized(
+        &self,
+        sources: &[domain::planning::Source],
+    ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
+        let texts: Vec<String> = sources.iter().map(|s| s.as_str().to_owned()).collect();
+        tokio::task::spawn_blocking(move || {
+            let list = rustic_core::PathList::from_iter(texts)
+                .sanitize()
+                .map_err(|error| app::ports::SourcesError::Unreadable {
+                    detail: error.to_string(),
+                })?;
+            (0..list.len())
+                .map(|index| &list[index])
+                .map(|path| {
+                    domain::planning::Source::parse(path.to_str().ok_or_else(|| {
+                        app::ports::SourcesError::Unreadable {
+                            detail: "a source is not UTF-8".to_owned(),
+                        }
+                    })?)
+                    .map_err(|error| app::ports::SourcesError::Unreadable {
+                        detail: error.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .await
+        .map_err(|error| app::ports::SourcesError::Unreadable {
+            detail: error.to_string(),
+        })?
+    }
+}

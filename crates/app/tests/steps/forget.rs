@@ -11,6 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::OperationStatus;
+use domain::execution::plan_tags;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::planning::{
@@ -26,11 +27,11 @@ use futures::stream;
 use tokio::sync::Notify;
 
 use super::Agent;
-use app::fakes::{FakeRetention, InMemoryConfigStore};
+use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
 use app::maintenance::{MaintenanceError, MaintenanceKind, RunMaintenance};
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, OperationStore, PruneSummary, RunningJob, SnapshotSummary, Start,
+    JobControl, OperationStore, PruneSummary, RewriteSummary, RunningJob, SnapshotSummary, Start,
 };
 
 /// The alias every forget scenario's repository goes under.
@@ -124,6 +125,21 @@ impl ForgetWorld {
         })
     }
 
+    /// What a refused run answered, for the adoption steps too.
+    pub fn set_refused(&mut self, error: Option<MaintenanceError>) {
+        self.refused = error;
+    }
+
+    /// Takes the refusal a run answered, if it answered one.
+    pub fn take_refused(&mut self) -> Option<MaintenanceError> {
+        self.refused.take()
+    }
+
+    /// The release a held engine run waits for.
+    pub fn release(&self) -> &Notify {
+        &self.release
+    }
+
     /// How many snapshots the scripted engine lists.
     pub fn listed(&self) -> usize {
         self.snapshots.len()
@@ -144,7 +160,7 @@ impl ForgetWorld {
     }
 
     /// Adds the repository every forget scenario runs on.
-    async fn repository(&mut self) {
+    pub async fn repository(&mut self) {
         self.repositories.insert(
             alias(),
             RepositoryConfig {
@@ -177,7 +193,7 @@ impl ForgetWorld {
 
     /// Adds a plan with a `keep-last` policy, or none when `keep_last` is
     /// `None`.
-    async fn plan(&mut self, id: &str, keep_last: Option<i64>) {
+    pub async fn plan(&mut self, id: &str, keep_last: Option<i64>) {
         let mut plan = Plan::new(
             PlanId::parse(id).expect("a plan ID"),
             alias(),
@@ -194,7 +210,18 @@ impl ForgetWorld {
     /// Adds `count` snapshots carrying the plan tag of `plan` and the owning
     /// agent's tag, or no plan tag at all when `plan` is `None`. The first
     /// added is the newest.
-    async fn snapshots(&mut self, count: u64, plan: Option<(String, AgentId)>) {
+    pub async fn snapshots(&mut self, count: u64, plan: Option<(String, AgentId)>) {
+        self.snapshots_of_folder(count, plan, "/home/demo").await;
+    }
+
+    /// Adds `count` snapshots of `folder`, tagged as the plan's or none at
+    /// all. The first added is the newest.
+    pub async fn snapshots_of_folder(
+        &mut self,
+        count: u64,
+        plan: Option<(String, AgentId)>,
+        folder: &str,
+    ) {
         for _ in 0..count {
             self.made += 1;
             let tags = match &plan {
@@ -210,11 +237,52 @@ impl ForgetWorld {
                 hostname: "demo-host".to_owned(),
                 label: String::new(),
                 tags,
-                paths: vec!["/home/demo".to_owned()],
+                paths: vec![folder.to_owned()],
             });
         }
         self.snapshots
             .sort_by_key(|snapshot| std::cmp::Reverse(snapshot.time));
+    }
+
+    /// The IDs of the snapshots carrying no `ladderback-` tag, newest first.
+    pub fn untagged_snapshots(&self) -> Vec<SnapshotId> {
+        self.snapshots
+            .iter()
+            .filter(|snapshot| {
+                !snapshot
+                    .tags
+                    .iter()
+                    .any(|tag| tag.starts_with(plan_tags::RESERVED_TAG_PREFIX))
+            })
+            .map(|snapshot| snapshot.id.clone())
+            .collect()
+    }
+
+    /// The IDs of another agent's snapshots of `plan`, newest first.
+    pub fn foreign_snapshots(&self, plan: &str, agent: AgentId) -> Vec<SnapshotId> {
+        self.snapshots
+            .iter()
+            .filter(|snapshot| {
+                snapshot.tags.contains(&format!("{PLAN_TAG_PREFIX}{plan}"))
+                    && snapshot.tags.contains(&format!(
+                        "{AGENT_TAG_PREFIX}{}",
+                        agent.as_uuid().hyphenated()
+                    ))
+            })
+            .map(|snapshot| snapshot.id.clone())
+            .collect()
+    }
+
+    /// The one rewrite job the engine was given, if any.
+    pub fn rewrite_job(&self) -> Option<(Vec<SnapshotId>, Vec<String>)> {
+        self.jobs
+            .lock()
+            .expect("the job list answers")
+            .iter()
+            .find_map(|job| match job {
+                Job::Rewrite(job) => Some((job.ids.clone(), job.tags.tags().to_vec())),
+                _ => None,
+            })
     }
 
     /// The IDs of the snapshots the plan `plan` owns, newest first.
@@ -249,7 +317,7 @@ impl ForgetWorld {
     }
 
     /// The kinds of job the engine was given, oldest first.
-    fn jobs(&self) -> Vec<&'static str> {
+    pub fn jobs(&self) -> Vec<&'static str> {
         self.jobs
             .lock()
             .expect("the job list answers")
@@ -258,6 +326,7 @@ impl ForgetWorld {
                 Job::Identify(_) => "identify",
                 Job::Ls(_) => "ls",
                 Job::Forget(_) => "forget",
+                Job::Rewrite(_) => "adopt",
                 Job::Prune(_) => "prune",
                 Job::Check(_) => "check",
                 Job::Fake(_) => "fake",
@@ -320,6 +389,12 @@ impl Engine for Scripted {
                     removed: job.ids.clone(),
                 },
             ))],
+            Job::Rewrite(job) => vec![EngineEvent::Succeeded(EngineResult::Rewrite(
+                RewriteSummary {
+                    repository: self.repository_id.clone(),
+                    created: job.ids.clone(),
+                },
+            ))],
             Job::Prune(_) => vec![EngineEvent::Succeeded(EngineResult::Prune(PruneSummary {
                 repository: self.repository_id.clone(),
                 packs_marked: 0,
@@ -337,7 +412,7 @@ impl Engine for Scripted {
         // for the release, so a scenario can hold a run on purpose. A read
         // (identify, listing) answers at once: `prepare` runs them before
         // anything holds the repository.
-        let hold = matches!(job, Job::Forget(_));
+        let hold = matches!(job, Job::Forget(_) | Job::Rewrite(_));
         let release = Arc::clone(&self.release);
         let stream = stream::iter(vec![started]).chain(stream::iter(events).then(move |event| {
             let release = Arc::clone(&release);
@@ -356,7 +431,7 @@ impl Engine for Scripted {
 }
 
 /// The maintenance use case wired to the scenario's own pieces.
-fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
+pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
     Arc::new(RunMaintenance::new(
         agent.forget.engine(),
         agent.clock.clone(),
@@ -365,6 +440,8 @@ fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
         Arc::new(FakeRetention),
         agent.forget.store.clone(),
         self_agent(),
+        "demo-host".to_owned(),
+        Arc::new(FakeSources),
     ))
 }
 
@@ -539,7 +616,9 @@ async fn check(agent: &mut Agent) {
 /// Prepares and runs one maintenance operation, as the route does.
 async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
     let use_case = use_case(agent);
-    let prepared = use_case.prepare(operation_id(0xcc), &alias(), kind).await;
+    let prepared = use_case
+        .prepare(operation_id(0xcc), &alias(), kind.clone())
+        .await;
     match prepared {
         Ok(prepared) => {
             let runner = Arc::clone(&use_case);
@@ -547,7 +626,7 @@ async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
                 tokio::spawn(
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
-            wait_for_job(agent, job_name(kind)).await;
+            wait_for_job(agent, job_name(&kind)).await;
             agent.forget.release.notify_waiters();
             agent.finished = Some(running.await.expect("the run ends"));
         }
@@ -555,9 +634,10 @@ async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
     }
 }
 
-fn job_name(kind: MaintenanceKind) -> &'static str {
+fn job_name(kind: &MaintenanceKind) -> &'static str {
     match kind {
         MaintenanceKind::Forget => "forget",
+        MaintenanceKind::Adopt(_) => "adopt",
         MaintenanceKind::Prune => "prune",
         MaintenanceKind::Check => "check",
     }

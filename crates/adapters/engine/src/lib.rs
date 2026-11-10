@@ -24,4 +24,4 @@ mod retention;
 pub mod worker;
 
 pub use client::WorkerEngine;
-pub use retention::RusticRetention;
+pub use retention::{RusticRetention, RusticSources};

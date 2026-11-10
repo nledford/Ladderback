@@ -72,6 +72,9 @@ pub enum Job {
     Init(RepositoryAccess),
     Backup(BackupJob),
     Forget(ForgetJob),
+    /// Rewrites the named snapshots with the tags given, as new snapshot
+    /// files over the same trees, and removes the originals (§7.3).
+    Rewrite(RewriteJob),
     Prune(PruneJob),
     Check(CheckJob),
     /// Lists the repository's snapshots, newest first. A read, not an
@@ -88,6 +91,7 @@ impl Job {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
             Self::Forget(_)
+            | Self::Rewrite(_)
             | Self::Identify(_)
             | Self::Init(_)
             | Self::Prune(_)
@@ -104,6 +108,7 @@ impl Job {
             Self::Init(_) => OperationKind::Init,
             Self::Backup(_) => OperationKind::Backup,
             Self::Forget(_) => OperationKind::Forget,
+            Self::Rewrite(_) => OperationKind::Adopt,
             Self::Prune(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
             Self::Ls(_) => OperationKind::Ls,
@@ -118,6 +123,7 @@ impl Job {
             Self::Identify(access) | Self::Init(access) | Self::Ls(access) => (None, access),
             Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
             Self::Forget(job) => (None, &job.repository),
+            Self::Rewrite(job) => (Some(job.tags.plan().clone()), &job.repository),
             Self::Prune(job) => (None, &job.repository),
             Self::Check(job) => (None, &job.repository),
         };
@@ -245,6 +251,18 @@ pub struct ForgetJob {
     pub ids: Vec<SnapshotId>,
 }
 
+/// What an adoption rewrites: the group's snapshots, each becoming a new
+/// snapshot file with the plan's tags over the same tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewriteJob {
+    pub repository: RepositoryAccess,
+    /// The snapshots to rewrite, each of them one the selection named.
+    pub ids: Vec<SnapshotId>,
+    /// `ladderback-plan:<id>` and `ladderback-agent:<id>`: what the rewritten
+    /// snapshots carry instead of the `ladderback-*` tags they had.
+    pub tags: PlanTags,
+}
+
 /// A scripted job: count `steps`, waiting `step_delay` before each, report
 /// `warnings` right after starting, then end as `end` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -329,6 +347,9 @@ pub enum EngineResult {
     Prune(PruneSummary),
     Check(CheckSummary),
     Forget(ForgetSummary),
+    /// What an adoption produced: the new snapshots, in the order of the
+    /// originals the job was given.
+    Rewrite(RewriteSummary),
     /// A repository's snapshots, newest first.
     Snapshots(Vec<SnapshotSummary>),
 }
@@ -365,6 +386,15 @@ pub struct CheckSummary {
     pub repository: RepositoryId,
     pub errors: u64,
     pub warnings: u64,
+}
+
+/// What an adoption's rewrite left in the repository.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewriteSummary {
+    pub repository: RepositoryId,
+    /// The copy of each snapshot the job named, in the order it named them:
+    /// new, or one an earlier rewrite cut short had already saved.
+    pub created: Vec<SnapshotId>,
 }
 
 /// What a forget run removed. What survived and why is the selection's own

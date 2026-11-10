@@ -66,7 +66,7 @@ impl crate::Operations for NoOperations {
     async fn start_maintenance(
         &self,
         _repository: String,
-        _kind: String,
+        _request: crate::MaintenanceRequest,
     ) -> Result<String, crate::MaintenanceStartError> {
         Err(crate::MaintenanceStartError::UnknownRepository)
     }

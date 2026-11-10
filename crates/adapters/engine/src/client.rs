@@ -12,7 +12,7 @@ use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
     ForgetSummary, Job, JobControl, ProgressEvent, ProgressKind as AppProgressKind, PruneSummary,
-    RepositoryAccess, RunningJob, SnapshotSummary,
+    RepositoryAccess, RewriteSummary, RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -28,7 +28,7 @@ use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
     JobSpec, Level, MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec, RepositorySpec,
-    WorkerEvent, exit_code,
+    RewriteJobSpec, WorkerEvent, exit_code,
 };
 
 /// How long a worker may keep running after it reported its result, for
@@ -971,6 +971,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 data_added_packed: r.data_added_packed,
                 error_count: r.error_count,
             }),
+            OpResult::Rewrite(r) => EngineResult::Rewrite(RewriteSummary {
+                repository: r.repository,
+                created: r.created,
+            }),
             OpResult::Forget(r) => EngineResult::Forget(ForgetSummary {
                 repository: r.repository,
                 removed: r.removed,
@@ -1038,6 +1042,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
+                | ErrorCode::AdoptionNoMatch
+                | ErrorCode::AdoptionAmbiguous
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor
@@ -1054,6 +1060,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
         Job::Backup(job) => job.repository.id.as_ref(),
         Job::Forget(job) => job.repository.id.as_ref(),
+        Job::Rewrite(job) => job.repository.id.as_ref(),
         Job::Prune(job) => job.repository.id.as_ref(),
         Job::Check(job) => job.repository.id.as_ref(),
     }
@@ -1069,6 +1076,7 @@ fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access,
         Job::Backup(job) => &job.repository,
         Job::Forget(job) => &job.repository,
+        Job::Rewrite(job) => &job.repository,
         Job::Prune(job) => &job.repository,
         Job::Check(job) => &job.repository,
     };
@@ -1151,6 +1159,11 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         Job::Forget(job) => JobKind::Forget(ForgetJobSpec {
             repo: repository_spec(job.repository),
             ids: job.ids.iter().map(|id| id.as_str().to_owned()).collect(),
+        }),
+        Job::Rewrite(job) => JobKind::Rewrite(RewriteJobSpec {
+            repo: repository_spec(job.repository),
+            ids: job.ids.iter().map(|id| id.as_str().to_owned()).collect(),
+            tags: job.tags.tags().to_vec(),
         }),
         Job::Prune(job) => JobKind::Prune(PruneJobSpec {
             repo: repository_spec(job.repository),

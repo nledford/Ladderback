@@ -204,7 +204,10 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
     }
 
     // The rule holds from here on.
-    assert_eq!(applied_versions(&mut raw).await, [(1, true), (2, true)]);
+    assert_eq!(
+        applied_versions(&mut raw).await,
+        [(1, true), (2, true), (3, true)]
+    );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
     assert_eq!(
         store.try_start(&prune).await,
@@ -251,7 +254,10 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
     let mut raw = scratch.raw().await;
 
     assert_eq!(rows_of_operations(&mut raw, &everything).await, before);
-    assert_eq!(applied_versions(&mut raw).await, [(1, true), (2, true)]);
+    assert_eq!(
+        applied_versions(&mut raw).await,
+        [(1, true), (2, true), (3, true)]
+    );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
     assert_eq!(
         store.try_start(&check).await,

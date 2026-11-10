@@ -154,9 +154,18 @@ error-maintenance-busy = Operation { $operation } is already maintaining this re
 # $plan (text): the plan's ID, such as home.
 error-retention-keeps-nothing = The policy of plan { $plan } would keep none of its snapshots, so nothing was removed. Give the policy something to keep, or delete the snapshots you mean to delete.
 
+# The group an adoption named matches no plan of this agent, so nothing
+# was written.
+error-adoption-no-match = No plan of this agent matches that history, so nothing was written. Point the adoption at the plan whose host, label and sources it carries.
+
+# More than one plan matches the group an adoption named, so nothing was
+# written.
+# $plans (text): the plans that match, such as home, mirror.
+error-adoption-ambiguous = Plans { $plans } all match that history, and which one it belongs to is yours to say. Point the adoption at one plan, or change the others so only one matches.
+
 # The request asks for a maintenance kind this version does not run.
 # $kind (text): the kind as it was sent.
-error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, prune or check.
+error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, adopt, prune or check.
 
 # A history request's cursor is not an operation's ID.
 # $cursor (text): the cursor as it was sent.

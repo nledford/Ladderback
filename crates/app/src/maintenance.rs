@@ -14,9 +14,13 @@ use std::future::Future;
 use std::pin::pin;
 use std::sync::Arc;
 
-use domain::maintenance::{ForgetSelection, ManagedPlan, Partition, Snapshot};
-use domain::planning::AgentConfig;
-use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration};
+use domain::maintenance::{
+    AdoptSelection, AdoptionRefusal, ForgetSelection, ManagedPlan, Partition, Snapshot,
+};
+use domain::planning::{AgentConfig, Plan};
+use domain::{
+    AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
+};
 use futures::StreamExt;
 use futures::future::FutureExt;
 use futures::select_biased;
@@ -24,11 +28,12 @@ use futures::select_biased;
 use crate::execution::Finished;
 use crate::ports::{
     CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetJob, Job,
-    OperationStore, PruneJob, RepositoryAccess, Retention, RetentionError, RunningJob,
-    SnapshotSummary, Start, StoreError,
+    NormalizeSources, OperationStore, PruneJob, RepositoryAccess, Retention, RetentionError,
+    RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 use domain::execution::deadline::KeepDelete;
+use domain::execution::plan_tags::PlanTags;
 use domain::execution::{FailureReason, Operation, Trigger};
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
@@ -43,11 +48,37 @@ pub fn default_keep_delete() -> KeepDelete {
 }
 
 /// Which maintenance operation to run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MaintenanceKind {
     Forget,
+    /// Rewrites one foreign group with the tags of `into`, the plan it
+    /// becomes history of (§7.3, step 3).
+    Adopt(Adoption),
     Prune,
     Check,
+}
+
+/// One adoption: the group to rewrite, and the plan it becomes history of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Adoption {
+    pub from: AdoptionSource,
+    pub into: PlanId,
+}
+
+/// The group an adoption rewrites.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdoptionSource {
+    /// The orphaned group these two tags name: another agent's plan, or a
+    /// plan this configuration no longer has.
+    Orphaned {
+        /// The `ladderback-agent:` tag's text.
+        agent: String,
+        /// The `ladderback-plan:` tag's text.
+        plan: String,
+    },
+    /// The unmanaged group whose host, label and paths equal the destination
+    /// plan's host, label and sources.
+    Unmanaged,
 }
 
 /// Why a maintenance run was refused before it started. A typed code, never
@@ -70,6 +101,19 @@ pub enum MaintenanceError {
     /// before anything is removed, and the plan is named.
     KeepsNothing {
         plan: PlanId,
+    },
+    /// The configuration holds no plan to adopt into, under the repository
+    /// asked about. The argument `plan` names it.
+    UnknownPlan {
+        plan: PlanId,
+    },
+    /// The group an adoption named matches no plan of this agent: nothing
+    /// was written.
+    AdoptionNoMatch,
+    /// More than one plan matches the group an adoption named. The plans
+    /// are named; which one the history belongs to is the owner's decision.
+    AdoptionAmbiguous {
+        plans: Vec<PlanId>,
     },
     /// Another maintenance operation, `running`, already holds the
     /// repository (I7): nothing ran and nothing was stored.
@@ -112,6 +156,12 @@ pub struct RunMaintenance {
     retention: Arc<dyn Retention>,
     config: Arc<dyn ConfigStore>,
     agent: AgentId,
+    /// The host name this agent's own backups carry: the fallback a plan
+    /// without a host of its own matches an unmanaged group by.
+    hostname: String,
+    /// A plan's sources as the engine records them, so adoption's matching
+    /// compares like with like.
+    sources: Arc<dyn NormalizeSources>,
 }
 
 impl RunMaintenance {
@@ -124,6 +174,8 @@ impl RunMaintenance {
         retention: Arc<dyn Retention>,
         config: Arc<dyn ConfigStore>,
         agent: AgentId,
+        hostname: String,
+        sources: Arc<dyn NormalizeSources>,
     ) -> Self {
         Self {
             engine,
@@ -133,6 +185,8 @@ impl RunMaintenance {
             retention,
             config,
             agent,
+            hostname,
+            sources,
         }
     }
 
@@ -205,6 +259,84 @@ impl RunMaintenance {
                     Job::Forget(ForgetJob {
                         repository: access,
                         ids,
+                    }),
+                )
+            }
+            MaintenanceKind::Adopt(adoption) => {
+                // Only a plan of this repository can take history: a plan of
+                // another repository, or none at all, would leave the
+                // rewritten snapshots orphaned again.
+                let plans: Vec<Plan> = config
+                    .plans()
+                    .iter()
+                    .filter(|plan| plan.repository == *alias)
+                    .cloned()
+                    .collect();
+                if !plans.iter().any(|plan| plan.id == adoption.into) {
+                    return Err(MaintenanceError::UnknownPlan {
+                        plan: adoption.into.clone(),
+                    });
+                }
+                let listed = list(self.engine.as_ref(), op, access.clone()).await?;
+                let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
+                let managed = plans_of(&config, alias);
+                let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
+                let ids: Vec<SnapshotId> = match &adoption.from {
+                    AdoptionSource::Orphaned { agent, plan } => {
+                        let Some(group) = AdoptSelection::orphaned(&partition, agent, plan) else {
+                            return Err(MaintenanceError::AdoptionNoMatch);
+                        };
+                        group.snapshots.iter().map(|s| s.id.clone()).collect()
+                    }
+                    AdoptionSource::Unmanaged => {
+                        // The destination plan is among `plans`, checked
+                        // above.
+                        let hostname = config
+                            .agent()
+                            .hostname
+                            .as_ref()
+                            .map(|host| host.as_str().to_owned())
+                            .unwrap_or_else(|| self.hostname.clone());
+                        // Every candidate plan's sources as the engine
+                        // records them, so the match compares like with
+                        // like: rustic resolves symlinks when it records a
+                        // snapshot's paths.
+                        let normalized: Vec<Plan> =
+                            futures::future::try_join_all(plans.iter().map(|plan| async {
+                                self.sources.normalized(&plan.sources).await.map(|sources| {
+                                    let mut normalized = plan.clone();
+                                    normalized.sources = sources;
+                                    normalized
+                                })
+                            }))
+                            .await
+                            .map_err(sources_failed)?;
+                        // Every plan of `plans` is among the normalized
+                        // ones, so the destination is too.
+                        let into = normalized
+                            .iter()
+                            .find(|plan| plan.id == adoption.into)
+                            .ok_or(MaintenanceError::UnknownPlan {
+                                plan: adoption.into.clone(),
+                            })?;
+                        let group =
+                            AdoptSelection::unmanaged(&partition, &hostname, into, &normalized)
+                                .map_err(|refusal| match refusal {
+                                    AdoptionRefusal::NoMatch => MaintenanceError::AdoptionNoMatch,
+                                    AdoptionRefusal::Ambiguous { plans } => {
+                                        MaintenanceError::AdoptionAmbiguous { plans }
+                                    }
+                                })?;
+                        group.snapshots.iter().map(|s| s.id.clone()).collect()
+                    }
+                };
+                let tags = PlanTags::new(adoption.into.clone(), self.agent);
+                (
+                    Some(partition),
+                    Job::Rewrite(RewriteJob {
+                        repository: access,
+                        ids,
+                        tags,
                     }),
                 )
             }
@@ -430,6 +562,11 @@ fn engine_error(error: EngineError) -> MaintenanceError {
         EngineError::Unavailable { detail } => MaintenanceError::Engine { detail },
         EngineError::StartTimedOut => MaintenanceError::Failed(FailureReason::EngineStartTimedOut),
     }
+}
+
+fn sources_failed(error: SourcesError) -> MaintenanceError {
+    let SourcesError::Unreadable { detail } = error;
+    MaintenanceError::Engine { detail }
 }
 
 fn retention_failed(error: RetentionError) -> MaintenanceError {

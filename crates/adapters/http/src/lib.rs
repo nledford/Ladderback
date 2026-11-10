@@ -68,7 +68,7 @@ pub trait Operations: Send + Sync {
     async fn start_maintenance(
         &self,
         repository: String,
-        kind: String,
+        request: MaintenanceRequest,
     ) -> Result<String, MaintenanceStartError>;
 
     /// One page of the operation history, newest first, including running
@@ -161,22 +161,59 @@ pub enum CancelError {
 pub enum MaintenanceStartError {
     /// No repository by that alias is configured.
     UnknownRepository,
-    /// The request asks for a maintenance kind this version doesn't run.
-    UnknownKind,
     /// Another maintenance operation holds the repository (I7). Names the
     /// one that does.
     Busy { running: String },
     /// A plan's retention policy would keep nothing; nothing was removed.
     /// Names the plan.
     KeepsNothing { plan: String },
+    /// The configuration holds no plan to adopt into. Names the plan.
+    UnknownPlan { plan: String },
+    /// The group an adoption named matches no plan of this agent; nothing
+    /// was written.
+    AdoptionNoMatch,
+    /// More than one plan matches the group an adoption named. Names them.
+    AdoptionAmbiguous { plans: Vec<String> },
     /// The repository or its configuration can't be read just now.
     Unavailable,
 }
 
-/// The body `POST /api/v1/repositories/{alias}/maintenance` takes.
+/// The body `POST /api/v1/repositories/{alias}/maintenance` takes: the
+/// kind, and for an adoption its destination plan and the group it rewrites.
 #[derive(Deserialize)]
 struct RunMaintenanceBody {
     kind: String,
+    /// The plan an adoption's history becomes part of.
+    into: Option<String>,
+    /// The group an adoption rewrites: another owner's tagged history, or
+    /// the unmanaged history that matches the destination plan.
+    from: Option<AdoptionFrom>,
+}
+
+/// How a request names the group an adoption rewrites.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "from")]
+pub enum AdoptionFrom {
+    /// The orphaned group these two tags name.
+    Orphaned {
+        /// The `ladderback-agent:` tag's text.
+        agent: String,
+        /// The `ladderback-plan:` tag's text.
+        plan: String,
+    },
+    /// The unmanaged group whose host, label and paths equal the
+    /// destination plan's host, label and sources.
+    Unmanaged,
+}
+
+/// What a maintenance request asks for, parsed: the trait's own type, so
+/// adapters never see the wire's strings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaintenanceRequest {
+    Forget,
+    Prune,
+    Check,
+    Adopt { into: String, from: AdoptionFrom },
 }
 
 /// The body `POST /api/v1/operations` takes.
@@ -383,13 +420,33 @@ async fn run_maintenance(
     AxumPath(alias): AxumPath<String>,
     body: Result<axum::Json<RunMaintenanceBody>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let kind = match body {
-        Ok(axum::Json(RunMaintenanceBody { kind })) => kind,
+    let request = match body {
+        Ok(axum::Json(RunMaintenanceBody { kind, into, from })) => {
+            // An adoption names its plan and group; no other kind takes
+            // either, so one that carries them is a body this route doesn't
+            // take rather than a request to ignore part of.
+            match (kind.as_str(), into, from) {
+                ("forget", None, None) => MaintenanceRequest::Forget,
+                ("prune", None, None) => MaintenanceRequest::Prune,
+                ("check", None, None) => MaintenanceRequest::Check,
+                ("adopt", Some(into), Some(from)) => MaintenanceRequest::Adopt { into, from },
+                ("forget" | "prune" | "check" | "adopt", _, _) => {
+                    return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
+                }
+                _ => {
+                    return refused_with(
+                        StatusCode::NOT_FOUND,
+                        api::ErrorCode::MaintenanceKindUnknown,
+                        vec![("kind", api::MsgArg::Text(kind))],
+                    );
+                }
+            }
+        }
         Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
     };
     match state
         .operations
-        .start_maintenance(alias.clone(), kind.clone())
+        .start_maintenance(alias.clone(), request)
         .await
     {
         Ok(operation) => (
@@ -402,10 +459,19 @@ async fn run_maintenance(
             api::ErrorCode::RepositoryUnknown,
             vec![("alias", api::MsgArg::Text(alias))],
         ),
-        Err(MaintenanceStartError::UnknownKind) => refused_with(
+        Err(MaintenanceStartError::UnknownPlan { plan }) => refused_with(
             StatusCode::NOT_FOUND,
-            api::ErrorCode::MaintenanceKindUnknown,
-            vec![("kind", api::MsgArg::Text(kind))],
+            api::ErrorCode::PlanUnknown,
+            vec![("plan", api::MsgArg::Text(plan))],
+        ),
+        Err(MaintenanceStartError::AdoptionNoMatch) => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            api::ErrorCode::AdoptionNoMatch,
+        ),
+        Err(MaintenanceStartError::AdoptionAmbiguous { plans }) => refused_with(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            api::ErrorCode::AdoptionAmbiguous,
+            vec![("plans", api::MsgArg::Text(plans.join(", ")))],
         ),
         Err(MaintenanceStartError::Busy { running }) => refused_with(
             StatusCode::CONFLICT,
@@ -723,11 +789,12 @@ mod tests {
         async fn start_maintenance(
             &self,
             repository: String,
-            kind: String,
+            request: MaintenanceRequest,
         ) -> Result<String, MaintenanceStartError> {
-            match (repository.as_str(), kind.as_str()) {
-                ("demo", "forget") => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
-                ("demo", _) => Err(MaintenanceStartError::UnknownKind),
+            let adopt = matches!(request, MaintenanceRequest::Adopt { .. });
+            match (repository.as_str(), adopt) {
+                ("demo", false) => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
+                ("demo", true) => Ok("018f0000-0000-7000-8000-000000000004".to_owned()),
                 ("missing", _) => Err(MaintenanceStartError::UnknownRepository),
                 ("busy", _) => Err(MaintenanceStartError::Busy {
                     running: "018f0000-0000-7000-8000-000000000003".to_owned(),
@@ -735,7 +802,12 @@ mod tests {
                 ("keeps-nothing", _) => Err(MaintenanceStartError::KeepsNothing {
                     plan: "home".to_owned(),
                 }),
-                _ => Err(MaintenanceStartError::Unavailable),
+                ("no-match", true) => Err(MaintenanceStartError::AdoptionNoMatch),
+                ("ambiguous", true) => Err(MaintenanceStartError::AdoptionAmbiguous {
+                    plans: vec!["home".to_owned(), "mirror".to_owned()],
+                }),
+                ("unreachable", _) => Err(MaintenanceStartError::Unavailable),
+                _ => Err(MaintenanceStartError::UnknownRepository),
             }
         }
 
@@ -1007,6 +1079,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_forget_that_names_a_plan_to_adopt_into_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"forget","into":"home"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body(response).await, r#"{"code":"invalid-body"}"#);
+    }
+
+    #[tokio::test]
     async fn a_busy_repository_is_refused_with_the_operation_that_holds_it() {
         let response = request(
             ui(),
@@ -1036,6 +1121,64 @@ mod tests {
             body(response).await,
             r#"{"code":"retention-keeps-nothing","args":{"plan":{"type":"text","value":"home"}}}"#
         );
+    }
+
+    #[tokio::test]
+    async fn an_adoption_is_accepted_with_its_operation() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"adopt","into":"home","from":{"from":"unmanaged"}}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            body(response).await,
+            r#"{"operation":"018f0000-0000-7000-8000-000000000004"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn an_adoption_that_matches_no_plan_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/no-match/maintenance",
+            r#"{"kind":"adopt","into":"home","from":{"from":"unmanaged"}}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body(response).await, r#"{"code":"adoption-no-match"}"#);
+    }
+
+    #[tokio::test]
+    async fn an_adoption_two_plans_match_is_refused_with_both() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/ambiguous/maintenance",
+            r#"{"kind":"adopt","into":"home","from":{"from":"unmanaged"}}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"adoption-ambiguous","args":{"plans":{"type":"text","value":"home, mirror"}}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn an_adoption_without_its_group_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"adopt","into":"home"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body(response).await, r#"{"code":"invalid-body"}"#);
     }
 
     #[tokio::test]

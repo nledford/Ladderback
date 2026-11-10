@@ -49,6 +49,16 @@ impl Clock for SystemClock {
 /// The longest a sleeper goes without re-reading wall-clock time.
 const MAX_NAP: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// The host name this machine's backups carry: what a plan without a host of
+/// its own records, and what plain rustic on this machine recorded of an
+/// untagged snapshot. Read where the environment is read: in an adapter.
+pub fn hostname() -> String {
+    hostname::get()
+        .ok()
+        .and_then(|name| name.into_string().ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

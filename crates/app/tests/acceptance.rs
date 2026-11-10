@@ -21,6 +21,8 @@ mod maintenance_steps;
 #[path = "steps/operation.rs"]
 mod operation_steps;
 
+#[path = "steps/adopt.rs"]
+mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/secrets.rs"]

@@ -43,7 +43,7 @@ fn alias() -> RepositoryAlias {
 
 /// Opens the scratch repository with rustic itself: the truth the run is
 /// checked against.
-fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
+pub fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
     let cold = agent.backup.repository.clone().expect("a repository");
     let backends = rustic_backend::BackendOptions::default()
         .repository(cold.to_str().expect("a UTF-8 scratch path"))
@@ -62,7 +62,7 @@ fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus>
 
 /// Every snapshot in the repository: its ID, its time and its tags, oldest
 /// first.
-fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
+pub fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
     let mut snapshots: Vec<_> = open(agent)
         .get_all_snapshots()
         .expect("the snapshots load")
@@ -191,6 +191,8 @@ async fn forget(agent: &mut Agent) {
         Arc::new(engine::RusticRetention),
         Arc::new(config),
         agent.agent_id,
+        platform::hostname(),
+        Arc::new(engine::RusticSources),
     );
     agent.runs += 1;
     let operation = OperationId::from_uuid(Uuid::from_u128(agent.runs));
