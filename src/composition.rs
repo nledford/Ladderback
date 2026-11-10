@@ -23,6 +23,7 @@ use app::ports::{
     EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
     ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
+use app::recovery::RecoverOperations;
 use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
@@ -48,6 +49,7 @@ use http_adapter::{
 };
 use l10n::{MessageId, msg};
 use platform::SystemClock;
+use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::{agent_id, dirs};
 use secrets::SystemSecrets;
 use store::SqliteStore;
@@ -89,16 +91,26 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     }
 }
 
-/// What the daemon's router runs against (§4.2), or why it cannot.
-pub(crate) async fn app_state() -> Result<AppState, Refused> {
-    app_state_at(dirs::config_dir(), dirs::data_dir()).await
+/// What `serve` runs: the router's state, and the hold on the data folder that
+/// keeps every other process off it for as long as the daemon lives.
+pub(crate) struct Daemon {
+    pub(crate) state: AppState,
+    _lock: DataDirLock,
 }
 
-/// [`app_state`] with the folders supplied, for tests.
-async fn app_state_at(
+/// What the daemon's router runs against (§4.2), or why it cannot.
+pub(crate) async fn daemon() -> Result<Daemon, Refused> {
+    daemon_at(dirs::config_dir(), dirs::data_dir()).await
+}
+
+/// [`daemon`] with the folders supplied, for tests. The data folder is locked
+/// before the log opens (§9), and what an earlier run left unfinished is ended
+/// before the state is handed over, so nothing serves or listens until both
+/// are done.
+async fn daemon_at(
     config_dir: Option<std::path::PathBuf>,
     data_dir: Option<std::path::PathBuf>,
-) -> Result<AppState, Refused> {
+) -> Result<Daemon, Refused> {
     // The configuration first: a file this build cannot read is a refusal,
     // whatever the rest of the machine says.
     let config_dir = config_dir.ok_or_else(|| plain(msg::CLI_NO_CONFIG_DIR))?;
@@ -108,16 +120,34 @@ async fn app_state_at(
     ));
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
-    // The data dir must be there before the store opens in it.
+    // The data dir must be there before it is locked and the store opens in it.
     let data_dir = data_dir.ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
     std::fs::create_dir_all(&data_dir)
         .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
+    // One daemon per data folder, before the log opens: a second process must
+    // never read what the first is running, let alone end it as the leftover
+    // of a crash (§9).
+    let lock = DataDirLock::acquire(&data_dir).map_err(|error| lock_refused(&data_dir, error))?;
     let database = data_dir.join("ladderback.db");
     let store: Arc<dyn OperationStore> = Arc::new(
         SqliteStore::open(&database)
             .await
             .map_err(|detail| store_refused(&database, &detail.to_string()))?,
     );
+    // Nothing has run yet, so an operation the log still shows as queued or
+    // running was left by a process that stopped. It ends as failed now, which
+    // also lets go of the repository a running maintenance operation held
+    // (I7). A log that cannot be changed is a refusal: serving over it would
+    // keep that repository held for good.
+    let ended = RecoverOperations::new(Arc::clone(&store))
+        .recover()
+        .await
+        .map_err(|error| recovery_refused(&database, &error))?;
+    if ended > 0 {
+        log::warn!(
+            "ended {ended} operation(s) the operation log still showed as queued or running: the daemon that ran them stopped before they finished"
+        );
+    }
     let agent_id = agent_id::load_or_create(&data_dir)
         .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
     // Workers are this program: `ladderback worker` (§4.1).
@@ -149,37 +179,42 @@ async fn app_state_at(
         Arc::clone(&config),
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
-    Ok(AppState {
-        events: bus,
-        operations,
-        catalog,
-        repositories,
+    Ok(Daemon {
+        state: AppState {
+            events: bus,
+            operations,
+            catalog,
+            repositories,
+        },
+        _lock: lock,
     })
 }
 
-/// What `serve` runs: the router's state, and the hold on the data folder that
-/// keeps every other process off it for as long as the daemon lives.
-#[allow(
-    dead_code,
-    reason = "red test: the start-up order is wired by the commit that makes recovery pass"
-)]
-pub(crate) struct Daemon {
-    pub(crate) state: AppState,
-    _lock: platform::data_dir_lock::DataDirLock,
+/// A data folder another process holds, or a lock that couldn't be taken, as
+/// the message for whoever started the daemon.
+fn lock_refused(data_dir: &std::path::Path, error: LockError) -> Refused {
+    match error {
+        LockError::InUse { holder: Some(pid) } => Refused {
+            message: msg::CLI_DATA_DIR_IN_USE,
+            args: vec![("path", text(data_dir.display())), ("pid", text(pid))],
+        },
+        LockError::InUse { holder: None } => Refused {
+            message: msg::CLI_DATA_DIR_IN_USE_UNNAMED,
+            args: vec![("path", text(data_dir.display()))],
+        },
+        LockError::Unavailable { detail } => store_refused(data_dir, &detail),
+    }
 }
 
-/// [`app_state_at`], with the data folder locked and the operations an earlier
-/// run left unfinished ended before the state is handed over (§4.2, §9).
-#[allow(
-    dead_code,
-    reason = "red test: the start-up order is wired by the commit that makes recovery pass"
-)]
-async fn daemon_at(
-    config_dir: Option<std::path::PathBuf>,
-    data_dir: Option<std::path::PathBuf>,
-) -> Result<Daemon, Refused> {
-    let _ = (config_dir, data_dir);
-    todo!("daemon_at")
+/// An operation log that couldn't end what an earlier run left unfinished, as
+/// the message for whoever started the daemon.
+fn recovery_refused(database: &std::path::Path, error: &app::ports::StoreError) -> Refused {
+    let (app::ports::StoreError::Unavailable { detail }
+    | app::ports::StoreError::Corrupt { detail }) = error;
+    Refused {
+        message: msg::CLI_CANNOT_RECOVER_OPERATIONS,
+        args: vec![("path", text(database.display())), ("detail", text(detail))],
+    }
 }
 
 /// A configuration the daemon cannot use, as the message for whoever wrote it.
@@ -1842,7 +1877,7 @@ mod tests {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
         // An agent that was never configured has nothing to do, and starts.
-        let state = app_state_at(Some(config), Some(data)).await;
+        let state = daemon_at(Some(config), Some(data)).await;
         assert!(
             state.is_ok(),
             "an empty configuration serves: {:?}",
@@ -1905,7 +1940,7 @@ mod tests {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
         std::fs::write(config.join("config.toml"), "schema = 999999\n").expect("the config file");
-        let refused = app_state_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data))
             .await
             .err()
             .expect("a newer schema refuses to start");
@@ -1916,6 +1951,99 @@ mod tests {
                 .iter()
                 .any(|(name, value)| *name == "found" && *value == text(999_999u64))
         );
+    }
+
+    #[tokio::test]
+    async fn a_second_daemon_on_a_data_folder_is_refused_naming_the_first() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the first daemon starts");
+        let refused = daemon_at(Some(config), Some(data))
+            .await
+            .err()
+            .expect("a data folder another daemon holds refuses");
+        assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+        assert!(
+            refused
+                .args
+                .iter()
+                .any(|(name, value)| *name == "pid" && *value == text(std::process::id())),
+            "the refusal names the process that holds the folder"
+        );
+        drop(first);
+    }
+
+    #[tokio::test]
+    async fn a_data_folder_is_free_again_once_its_daemon_is_gone() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the first daemon starts");
+        drop(first);
+        let second = daemon_at(Some(config), Some(data)).await;
+        assert!(
+            second.is_ok(),
+            "a folder nobody holds is served: {:?}",
+            second.err().map(|refused| refused.message)
+        );
+    }
+
+    #[test]
+    fn a_lock_that_cannot_be_taken_is_refused_by_what_is_known_of_it() {
+        let folder = std::path::Path::new("/srv/demo/data");
+        let named = lock_refused(folder, LockError::InUse { holder: Some(4321) });
+        assert_eq!(named.message, msg::CLI_DATA_DIR_IN_USE);
+        assert_eq!(
+            named.args,
+            vec![("path", text("/srv/demo/data")), ("pid", text(4321))]
+        );
+        let unnamed = lock_refused(folder, LockError::InUse { holder: None });
+        assert_eq!(unnamed.message, msg::CLI_DATA_DIR_IN_USE_UNNAMED);
+        assert_eq!(unnamed.args, vec![("path", text("/srv/demo/data"))]);
+        let unavailable = lock_refused(
+            folder,
+            LockError::Unavailable {
+                detail: "Permission denied (os error 13)".to_owned(),
+            },
+        );
+        assert_eq!(unavailable.message, msg::CLI_CANNOT_OPEN_STORE);
+        assert_eq!(
+            unavailable.args,
+            vec![
+                ("path", text("/srv/demo/data")),
+                ("detail", text("Permission denied (os error 13)"))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_recovered_is_refused_with_the_stores_own_words() {
+        for error in [
+            app::ports::StoreError::Unavailable {
+                detail: "disk I/O error".to_owned(),
+            },
+            app::ports::StoreError::Corrupt {
+                detail: "operation 5: unknown status `bogus`".to_owned(),
+            },
+        ] {
+            let (app::ports::StoreError::Unavailable { detail }
+            | app::ports::StoreError::Corrupt { detail }) = &error;
+            let refused =
+                recovery_refused(std::path::Path::new("/srv/demo/data/ladderback.db"), &error);
+            assert_eq!(refused.message, msg::CLI_CANNOT_RECOVER_OPERATIONS);
+            assert_eq!(
+                refused.args,
+                vec![
+                    ("path", text("/srv/demo/data/ladderback.db")),
+                    ("detail", text(detail))
+                ]
+            );
+        }
     }
 
     #[tokio::test]

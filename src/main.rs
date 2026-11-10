@@ -174,9 +174,11 @@ fn run_daemon(
     };
     runtime.block_on(async {
         // Before the listener: a daemon that cannot serve must not print
-        // that it is listening.
-        let state = match composition::app_state().await {
-            Ok(state) => state,
+        // that it is listening. By the time it is handed back it has locked
+        // the data folder and ended what an earlier run left unfinished, so no
+        // request is served before the log says what really happened (§4.2, §9).
+        let daemon = match composition::daemon().await {
+            Ok(daemon) => daemon,
             Err(refused) => {
                 say(localizer, refused.message, &refused.args)?;
                 return Ok(ExitCode::FAILURE);
@@ -208,7 +210,7 @@ fn run_daemon(
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(hosts),
-            state,
+            daemon.state,
         );
         match axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())

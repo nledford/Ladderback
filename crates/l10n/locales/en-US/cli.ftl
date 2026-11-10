@@ -49,6 +49,20 @@ cli-no-data-dir = no data folder: set LADDERBACK_DATA_DIR, or run as a user with
 # $detail (text): the operating system's or the store's own message. It is shown as it came.
 cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
 
+# The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
+# $path (text): the database file, as the user wrote it.
+# $detail (text): the store's own message. It is shown as it came.
+cli-cannot-recover-operations = cannot end the operations an earlier run left unfinished in the operation log at { $path }: { $detail }
+
+# Another process already holds the data folder, so the daemon did not start.
+# $path (text): the data folder, as the user wrote it.
+# $pid (text): the ID of the process that holds it.
+cli-data-dir-in-use = the data folder { $path } is in use by process { $pid }: stop that process, or give this one a data folder of its own with { "LADDERBACK_DATA_DIR" }
+
+# As cli-data-dir-in-use, when the lock file names no process.
+# $path (text): the data folder, as the user wrote it.
+cli-data-dir-in-use-unnamed = the data folder { $path } is in use by another process: stop that process, or give this one a data folder of its own with { "LADDERBACK_DATA_DIR" }
+
 # The configuration file could not be read.
 # $file (text): the path of the configuration file.
 # $detail (text): the operating system's own message. It is shown as it came.
