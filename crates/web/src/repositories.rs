@@ -612,6 +612,14 @@ mod tests {
             ),
             None
         );
+        assert_eq!(
+            field_of(
+                ErrorCode::SecretUnresolved,
+                &[("other".into(), text("password"))]
+            ),
+            None,
+            "only the argument named field says which field"
+        );
     }
 
     #[test]
