@@ -173,6 +173,13 @@ jobs:
           tool: just,trunk
       - run: npm ci
         working-directory: ui-tests
+      # Playwright's browsers live outside node_modules; keyed on the lockfile,
+      # which pins the Playwright version. `--with-deps` still installs the
+      # system packages on every run, and a cache miss downloads as before.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('ui-tests/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
         working-directory: ui-tests
       - run: just test-ui
@@ -213,9 +220,9 @@ jobs:
   # The tests of the build a release is: `--no-default-features`, which leaves
   # out the development pseudolocales (technical design §8.4). `just test`
   # builds with the defaults, so the tests that exist only without them run
-  # here alone. A job of its own, so that the `Check` jobs, which the ruleset
-  # requires, stay as they are and this one builds beside them. Not a required
-  # check: add it to the ruleset once it has proved stable.
+  # here alone. A job of its own, so that the `Check` jobs stay as they are and
+  # this one builds beside them. A required check (ruleset "Protect main"):
+  # don't rename it.
   release-tests:
     name: Release-build tests (no default features)
     needs: changes
@@ -266,11 +273,16 @@ jobs:
           name: mutants.out
           path: mutants.out
 
+  # A scheduled run notifies no one, so a failure opens an issue, or comments
+  # on the one already open, rather than going unseen.
   mutants-nightly:
     name: Mutation testing (full)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -287,3 +299,19 @@ jobs:
         with:
           name: mutants.out
           path: mutants.out
+      # Only on a failure of this job's own steps (a timeout counts), not on
+      # a cancel. The title is fixed, so a second failure finds the open issue.
+      - if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly mutation run failed"
+          body="The full mutation run (\`just mutants-all\`) failed: $RUN_URL. The run's \`mutants.out\` artifact lists the missed mutants and timeouts."
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
+          fi
