@@ -11,6 +11,7 @@
     clippy::unreachable
 )]
 
+mod repositories;
 mod request_checks;
 
 use std::borrow::Cow;
@@ -30,6 +31,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
+pub use repositories::{Repositories, RepositoriesError};
 pub use request_checks::{
     InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
 };
@@ -41,8 +43,8 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 /// What the `/api/v1` routes run against (technical design §4.2): the
-/// daemon's event bus, operations and catalog, wired by the composition
-/// root.
+/// daemon's event bus, operations, catalog and repositories, wired by the
+/// composition root.
 #[derive(Clone)]
 pub struct AppState {
     /// Where the daemon's live updates come from.
@@ -52,6 +54,8 @@ pub struct AppState {
     /// How a request reads the configuration's plans, repositories and
     /// snapshots.
     pub catalog: Arc<dyn Catalog>,
+    /// How a request tests, connects and initialises a repository.
+    pub repositories: Arc<dyn Repositories>,
 }
 
 /// The operations the API asks of the daemon (technical design §4.2): the
@@ -301,9 +305,10 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// Routes for the web UI and the API: files by path, `index.html` for any
 /// other extensionless path (the client-side router handles it), the
 /// live-updates WebSocket under `/api/v1`, the operations routes — start,
-/// history, one operation, cancel — and the catalog routes the pages read:
-/// the plans, the repositories, one repository's snapshots. A request that
-/// fails `checks` never reaches a route.
+/// history, one operation, cancel — the catalog routes the pages read: the
+/// plans, the repositories, one repository's snapshots — and the routes that
+/// test, connect and initialise a repository. A request that fails `checks`
+/// never reaches a route.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -319,7 +324,16 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route("/api/v1/plans", axum::routing::get(list_plans))
         .route(
             "/api/v1/repositories",
-            axum::routing::get(list_repositories),
+            axum::routing::get(list_repositories).post(repositories::connect_repository),
+        )
+        // Underscore-prefixed, so no alias (a slug) can ever be one of them.
+        .route(
+            "/api/v1/repositories/_test",
+            axum::routing::post(repositories::test_repository),
+        )
+        .route(
+            "/api/v1/repositories/_init",
+            axum::routing::post(repositories::init_repository),
         )
         .route(
             "/api/v1/repositories/{alias}/snapshots",
@@ -897,6 +911,7 @@ mod tests {
             events: Arc::new(InMemoryEventBus::new()),
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
+            repositories: Arc::new(Repos::default()),
         }
     }
 
@@ -930,6 +945,7 @@ mod tests {
             events: events.clone(),
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
+            repositories: Arc::new(Repos::default()),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -1417,5 +1433,323 @@ mod tests {
             body(response).await,
             r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
         );
+    }
+
+    /// Answers by the location a request names, and counts the requests
+    /// that reach it.
+    #[derive(Default)]
+    struct Repos {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Repos {
+        /// The one answer a location stands for: `Ok` for any other.
+        fn answer(&self, settings: &api::RepositorySettingsDto) -> Result<(), RepositoriesError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match settings.repository.as_str() {
+                "/invalid" => Err(RepositoriesError::InvalidBody),
+                "/alias-invalid" => Err(RepositoriesError::AliasInvalid),
+                "/alias-taken" => Err(RepositoriesError::AliasTaken {
+                    alias: "demo".to_owned(),
+                }),
+                "/exists" => Err(RepositoriesError::Exists {
+                    location: "/exists".to_owned(),
+                }),
+                "/secret" => Err(RepositoriesError::SecretUnresolved {
+                    field: "password".to_owned(),
+                }),
+                "/failed" => Err(RepositoriesError::OperationFailed {
+                    detail: "wrong password or no repository at the location".to_owned(),
+                }),
+                "/unavailable" => Err(RepositoriesError::Unavailable {
+                    code: api::ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: Some("no worker program".to_owned()),
+                }),
+                "/config" => Err(RepositoriesError::Unavailable {
+                    code: api::ErrorCode::ConfigUnavailable,
+                    args: vec![("file", api::MsgArg::Text("/etc/config.toml".to_owned()))],
+                    detail: Some("permission denied".to_owned()),
+                }),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Repositories for Repos {
+        async fn test(
+            &self,
+            request: api::TestRepositoryDto,
+        ) -> Result<api::RepositoryIdDto, RepositoriesError> {
+            self.answer(&request.settings)?;
+            Ok(api::RepositoryIdDto {
+                id: format!("test:{}", request.settings.repository),
+            })
+        }
+
+        async fn connect(
+            &self,
+            request: api::ConnectRepositoryDto,
+        ) -> Result<api::RepositoryIdDto, RepositoriesError> {
+            self.answer(&request.settings)?;
+            Ok(api::RepositoryIdDto {
+                id: format!(
+                    "{}:{}:{}",
+                    request.alias,
+                    request.settings.repository,
+                    request.settings.repo_hot.as_deref().unwrap_or("-")
+                ),
+            })
+        }
+
+        async fn init(
+            &self,
+            request: api::InitRepositoryDto,
+        ) -> Result<api::RepositoryInitDto, RepositoriesError> {
+            self.answer(&request.settings)?;
+            Ok(api::RepositoryInitDto {
+                id: format!("init:{}", request.settings.repository),
+                saved: request.alias.is_some(),
+            })
+        }
+    }
+
+    const TEST: &str = "/api/v1/repositories/_test";
+    const CONNECT: &str = "/api/v1/repositories";
+    const INIT: &str = "/api/v1/repositories/_init";
+
+    /// A request body for `repository`, typed with a password.
+    fn settings_json(repository: &str) -> serde_json::Value {
+        serde_json::json!({
+            "repository": repository,
+            "password": {"source": "inline", "value": "correct-horse"},
+        })
+    }
+
+    /// Posts `body` to `path` against a fake that counts what reaches it:
+    /// the answer, and how many requests the fake took.
+    async fn post_counted(path: &str, body: String) -> (Response, usize) {
+        let repos = Arc::new(Repos::default());
+        let state = AppState {
+            events: Arc::new(InMemoryEventBus::new()),
+            operations: Arc::new(Plans),
+            catalog: Arc::new(DemoCatalog),
+            repositories: repos.clone(),
+        };
+        let response = router(ui(), RequestChecks::default(), state)
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(path)
+                    .header(header::HOST, "localhost:9898")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        (
+            response,
+            repos.calls.load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+
+    async fn json_of(response: Response) -> (StatusCode, serde_json::Value) {
+        let status = response.status();
+        (status, serde_json::from_str(&body(response).await).unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_test_answers_with_the_repositorys_id() {
+        let request = serde_json::json!({"settings": settings_json("/ok")});
+        let (response, calls) = post_counted(TEST, request.to_string()).await;
+        assert_eq!(calls, 1);
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(answer, serde_json::json!({"id": "test:/ok"}));
+    }
+
+    #[tokio::test]
+    async fn a_connection_is_created_and_answers_with_the_repositorys_id() {
+        let mut settings = settings_json("/ok");
+        settings["repo-hot"] = serde_json::json!("/hot");
+        let request = serde_json::json!({"alias": "demo", "settings": settings});
+        let (response, _) = post_counted(CONNECT, request.to_string()).await;
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(answer, serde_json::json!({"id": "demo:/ok:/hot"}));
+    }
+
+    #[tokio::test]
+    async fn an_initialisation_says_whether_it_was_saved() {
+        for (alias, saved) in [(None, false), (Some("fresh"), true)] {
+            let mut request = serde_json::json!({"settings": settings_json("/new")});
+            if let Some(alias) = alias {
+                request["alias"] = serde_json::json!(alias);
+            }
+            let (response, _) = post_counted(INIT, request.to_string()).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::CREATED, "{alias:?}");
+            assert_eq!(
+                answer,
+                serde_json::json!({"id": "init:/new", "saved": saved}),
+                "{alias:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_refusal_is_typed_with_the_status_of_its_kind() {
+        use serde_json::json;
+        let text = |value: &str| json!({"type": "text", "value": value});
+        for (location, status, expected) in [
+            ("/invalid", 400, json!({"code": "invalid-body"})),
+            (
+                "/alias-invalid",
+                422,
+                json!({"code": "repository-alias-invalid"}),
+            ),
+            (
+                "/alias-taken",
+                409,
+                json!({"code": "repository-alias-taken", "args": {"alias": text("demo")}}),
+            ),
+            (
+                "/exists",
+                409,
+                json!({"code": "repository-exists", "args": {"location": text("/exists")}}),
+            ),
+            (
+                "/secret",
+                422,
+                json!({"code": "secret-unresolved", "args": {"field": text("password")}}),
+            ),
+            (
+                "/failed",
+                422,
+                json!({
+                    "code": "operation-failed",
+                    "detail": "wrong password or no repository at the location",
+                }),
+            ),
+            (
+                "/unavailable",
+                503,
+                json!({"code": "engine-unavailable", "detail": "no worker program"}),
+            ),
+            (
+                "/config",
+                503,
+                json!({
+                    "code": "config-unavailable",
+                    "args": {"file": text("/etc/config.toml")},
+                    "detail": "permission denied",
+                }),
+            ),
+        ] {
+            for (route, body) in [
+                (TEST, json!({"settings": settings_json(location)})),
+                (
+                    CONNECT,
+                    json!({"alias": "demo", "settings": settings_json(location)}),
+                ),
+                (INIT, json!({"settings": settings_json(location)})),
+            ] {
+                let (response, _) = post_counted(route, body.to_string()).await;
+                let (actual, answer) = json_of(response).await;
+                assert_eq!(actual.as_u16(), status, "{location} on {route}");
+                assert_eq!(answer, expected, "{location} on {route}");
+                assert!(
+                    !answer.to_string().contains("correct-horse"),
+                    "an answer holds the password: {answer}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_body_that_is_not_the_json_the_route_takes_is_refused_before_the_daemon_sees_it() {
+        let valid = settings_json("/ok");
+        let hot_underscore = {
+            let mut settings = valid.clone();
+            settings["repo_hot"] = serde_json::json!("/y");
+            settings
+        };
+        let command = serde_json::json!({
+            "repository": "/ok",
+            "password": {"source": "command", "command": "pass show x"},
+        });
+        let oversize = "a".repeat(3 * 1024 * 1024);
+        for route in [TEST, CONNECT, INIT] {
+            let wrap = |settings: &serde_json::Value| {
+                serde_json::json!({"alias": "demo", "settings": settings}).to_string()
+            };
+            for (what, body) in [
+                ("not JSON", "not json".to_owned()),
+                ("an empty body", String::new()),
+                ("an array", "[]".to_owned()),
+                ("no settings", r#"{"alias":"demo"}"#.to_owned()),
+                (
+                    "null settings",
+                    r#"{"alias":"demo","settings":null}"#.to_owned(),
+                ),
+                ("an unknown field", wrap(&hot_underscore)),
+                ("a source the API refuses", wrap(&command)),
+                (
+                    "an unknown field at the top",
+                    serde_json::json!({"alias": "demo", "settings": valid, "x": 1}).to_string(),
+                ),
+                (
+                    "a body over the limit",
+                    serde_json::json!({"alias": "demo", "settings": settings_json(&oversize)})
+                        .to_string(),
+                ),
+            ] {
+                let (response, calls) = post_counted(route, body).await;
+                let (status, answer) = json_of(response).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{what} to {route}");
+                assert_eq!(
+                    answer,
+                    serde_json::json!({"code": "invalid-body"}),
+                    "{what} to {route}"
+                );
+                assert_eq!(calls, 0, "{what} to {route} reached the daemon");
+            }
+        }
+        // A connection needs the name to save it under.
+        let (response, calls) =
+            post_counted(CONNECT, serde_json::json!({"settings": valid}).to_string()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn the_routes_want_a_json_content_type() {
+        for route in [TEST, CONNECT, INIT] {
+            let response = router(ui(), RequestChecks::default(), state())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(route)
+                        .header(header::HOST, "localhost:9898")
+                        .header(header::CONTENT_TYPE, "text/plain")
+                        .body(Body::from(r#"{"settings":{}}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{route}");
+            assert_eq!(answer["code"], "json-required", "{route}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_test_and_init_routes_take_nothing_but_a_post() {
+        for route in [TEST, INIT] {
+            let response = request(ui(), Method::GET, route, "").await;
+            assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED, "{route}");
+        }
     }
 }

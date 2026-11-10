@@ -34,7 +34,10 @@ use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
-use http_adapter::{AppState, Catalog, CatalogError, Operations, SnapshotsError, StartError};
+use http_adapter::{
+    AppState, Catalog, CatalogError, Operations, Repositories, RepositoriesError, SnapshotsError,
+    StartError,
+};
 use l10n::{MessageId, msg};
 use platform::SystemClock;
 use platform::{agent_id, dirs};
@@ -113,11 +116,18 @@ async fn app_state_at(
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
     });
+    let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService {
+        engine: Arc::clone(&engine),
+        resolve: resolve.as_ref().clone(),
+        config: Arc::clone(&config),
+        writes: tokio::sync::Mutex::new(()),
+    });
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
     Ok(AppState {
         events: bus,
         operations,
         catalog,
+        repositories,
     })
 }
 
@@ -841,6 +851,44 @@ fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::Inv
         snapshot.paths.clone(),
     )
     .map(|dto| dto.truncated(snapshot.paths_truncated, snapshot.tags_truncated))
+}
+
+/// Tests, connects and initialises repositories for the API (§4.2): each
+/// request's settings become domain values, run through the use cases of
+/// `app`, and every refusal becomes a typed one. Writes to the configuration
+/// go one at a time, so two connections made at the same moment are both
+/// kept.
+struct RepositoryService {
+    engine: Arc<dyn Engine>,
+    resolve: ResolveRepository,
+    config: Arc<dyn ConfigStore>,
+    /// Held across a use case's read-modify-write of the configuration.
+    writes: tokio::sync::Mutex<()>,
+}
+
+#[async_trait]
+impl Repositories for RepositoryService {
+    async fn test(
+        &self,
+        _request: api::TestRepositoryDto,
+    ) -> Result<api::RepositoryIdDto, RepositoriesError> {
+        let _ = (&self.engine, &self.resolve, &self.config, &self.writes);
+        todo!("the red commit: tests first")
+    }
+
+    async fn connect(
+        &self,
+        _request: api::ConnectRepositoryDto,
+    ) -> Result<api::RepositoryIdDto, RepositoriesError> {
+        todo!("the red commit: tests first")
+    }
+
+    async fn init(
+        &self,
+        _request: api::InitRepositoryDto,
+    ) -> Result<api::RepositoryInitDto, RepositoriesError> {
+        todo!("the red commit: tests first")
+    }
 }
 
 impl CancelRegistry {
