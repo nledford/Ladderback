@@ -414,20 +414,22 @@ async fn what_a_hook_wrote_before_it_ended_is_kept_while_a_descendant_holds_its_
     assert!(!outcome.stdout.truncated && !outcome.stderr.truncated);
 }
 
-/// What a descendant says as the hook ends, or in the second after it, while
-/// the pipes are still read, is kept with the rest.
+/// What a descendant says once the hook has been reaped is kept, if it says
+/// it in the second the pipes are still read: the descendant waits until the
+/// hook's pid is gone (`kill -0` still finds a hook that has exited and is
+/// not reaped) and a moment more, so its line is written after the reap and
+/// only the read that follows the exit can have it.
 #[tokio::test]
-async fn what_a_descendant_says_just_after_the_hook_ended_is_kept() {
+async fn what_a_descendant_says_after_the_hook_was_reaped_is_kept() {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
     let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
-    // The descendant says its line once the hook is about to exit, so it is
-    // written to the pipes at the exit or just after it.
     let entry = sh(
         concat!(
-            "(until [ -e \"$1.exit\" ]; do :; done; echo late) &\n",
+            "hook=$$\n",
+            "(while kill -0 $hook 2>/dev/null; do :; done; sleep 0.3; echo late) &\n",
             r#"echo "pid $!" >> "$1""#,
-            "\ntouch \"$1.exit\"\nexit 0"
+            "\nexit 0"
         ),
         &log,
     );
@@ -438,19 +440,27 @@ async fn what_a_descendant_says_just_after_the_hook_ended_is_kept() {
 }
 
 /// The pipes are let go when the call returns, though a descendant holds
-/// their write ends: what it writes then fails, with SIGPIPE or, where it
-/// ignores that, with a write error, and nothing reads it.
+/// their write ends: what it writes then fails, and nothing reads it. The
+/// one that handles SIGPIPE gets a write error; the one that doesn't is
+/// ended by the signal, which a child of the runner has at its default.
 #[tokio::test]
 async fn a_descendant_cannot_write_to_a_hook_s_output_after_the_call_returned() {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
     let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    // Both wait for the call to return (the test makes `$1.go`) and write.
+    let wait = r#"while [ ! -e "$1.go" ]; do sleep 1 & wait $!; done"#;
     let entry = sh(
-        concat!(
-            "(trap '' PIPE; while [ ! -e \"$1.go\" ]; do sleep 1 & wait $!; done\n",
-            "echo late 2>/dev/null || echo failed >> \"$1\") &\n",
-            r#"echo "pid $!" >> "$1""#,
-            "\nexit 0"
+        &format!(
+            concat!(
+                "(trap '' PIPE; {wait}\n",
+                "echo late 2>/dev/null || echo failed >> \"$1\") &\n",
+                r#"echo "pid $!" >> "$1""#,
+                "\n(( {wait}\n",
+                "echo late ); echo \"status $?\" >> \"$1\") &\n",
+                "exit 0"
+            ),
+            wait = wait
         ),
         &log,
     );
@@ -459,6 +469,7 @@ async fn a_descendant_cannot_write_to_a_hook_s_output_after_the_call_returned() 
     assert_eq!(outcome.status, HookStatus::Succeeded);
     fs::write(scratch.path().join("log.go"), "").unwrap();
     logged(&log, "failed").await;
+    logged(&log, "status 141").await;
 }
 
 /// The call returns once the killed hook is reaped, not when the SIGKILL is
