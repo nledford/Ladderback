@@ -147,9 +147,12 @@ Given("the repository holds data no snapshot uses", async function () {
   );
 });
 
-/** Presses Tab until the button the locator finds, once, has focus. */
+/** Presses Tab until the button the locator finds, once, has focus. The
+ *  page reads the history it lists from the daemon, so a button made from it
+ *  is not there when the presses would begin: they begin when it is. */
 async function tabUntilFocused(world, target, description) {
   const keys = journey(world.page);
+  await target.waitFor({ state: "attached", timeout: PAGE_PATIENCE_MS });
   const focused = async () =>
     (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
   for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
