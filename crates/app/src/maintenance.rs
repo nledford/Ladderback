@@ -508,6 +508,15 @@ impl RunMaintenance {
             events,
             mut control,
         } = running;
+        // A cancel made before the engine was up is honoured at once, not
+        // raced against the events the engine already has ready: the client
+        // was told it was accepted.
+        if futures::poll!(cancel.as_mut()).is_ready() {
+            control.stop().await;
+            note_partial(operation, done, total);
+            let _ = operation.cancel(self.clock.now());
+            return Played::Ended;
+        }
         let mut events = events.fuse();
         loop {
             select_biased! {
@@ -1103,20 +1112,30 @@ mod cancel_tests {
     };
     use crate::ports::{ForgetSummary, JobControl};
 
-    struct Nothing;
+    /// A worker's control that counts the stops it is given.
+    struct Stops(Arc<AtomicUsize>);
 
     #[async_trait]
-    impl JobControl for Nothing {
-        async fn stop(&mut self) {}
+    impl JobControl for Stops {
+        async fn stop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
-    /// An engine that finishes every forget job at once and counts them.
-    struct Counting(Arc<AtomicUsize>);
+    /// An engine that finishes every forget job at once and counts them. The
+    /// first job to finish fires `cancel_with_the_first_result`, if there is
+    /// one: the cancel is there when the job ends, not before it started.
+    struct Counting {
+        runs: Arc<AtomicUsize>,
+        stops: Arc<AtomicUsize>,
+        cancel_with_the_first_result:
+            std::sync::Mutex<Option<futures::channel::oneshot::Sender<()>>>,
+    }
 
     #[async_trait]
     impl Engine for Counting {
         async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-            self.0.fetch_add(1, Ordering::SeqCst);
+            self.runs.fetch_add(1, Ordering::SeqCst);
             let Job::Forget(job) = job else {
                 return Err(EngineError::StartTimedOut);
             };
@@ -1124,9 +1143,20 @@ mod cancel_tests {
                 repository: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
                 removed: job.ids,
             });
+            let cancel = self
+                .cancel_with_the_first_result
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             Ok(RunningJob {
-                events: stream::iter([EngineEvent::Succeeded(result)]).boxed(),
-                control: Box::new(Nothing),
+                events: stream::once(async move {
+                    if let Some(cancel) = cancel {
+                        let _ = cancel.send(());
+                    }
+                    EngineEvent::Succeeded(result)
+                })
+                .boxed(),
+                control: Box::new(Stops(Arc::clone(&self.stops))),
             })
         }
     }
@@ -1166,9 +1196,21 @@ mod cancel_tests {
         }
     }
 
-    fn use_case(runs: &Arc<AtomicUsize>) -> RunMaintenance {
+    fn use_case(runs: &Arc<AtomicUsize>, stops: &Arc<AtomicUsize>) -> RunMaintenance {
+        use_case_cancelling(runs, stops, None)
+    }
+
+    fn use_case_cancelling(
+        runs: &Arc<AtomicUsize>,
+        stops: &Arc<AtomicUsize>,
+        cancel: Option<futures::channel::oneshot::Sender<()>>,
+    ) -> RunMaintenance {
         RunMaintenance::new(
-            Arc::new(Counting(Arc::clone(runs))),
+            Arc::new(Counting {
+                runs: Arc::clone(runs),
+                stops: Arc::clone(stops),
+                cancel_with_the_first_result: std::sync::Mutex::new(cancel),
+            }),
             Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
             Arc::new(InMemoryOperationStore::new()),
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
@@ -1183,8 +1225,13 @@ mod cancel_tests {
     #[tokio::test]
     async fn a_cancel_that_is_already_there_when_a_job_ends_starts_no_further_job() {
         let runs = Arc::new(AtomicUsize::new(0));
-        let finished = use_case(&runs)
-            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::ready(()))
+        let stops = Arc::new(AtomicUsize::new(0));
+        // Fires as the first job reports, before the second is asked for.
+        let (fire, cancel) = futures::channel::oneshot::channel::<()>();
+        let finished = use_case_cancelling(&runs, &stops, Some(fire))
+            .execute(prepared(2 * MAX_JOB_IDS + 1), async move {
+                let _ = cancel.await;
+            })
             .await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
         assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
@@ -1202,9 +1249,28 @@ mod cancel_tests {
     }
 
     #[tokio::test]
+    async fn a_cancel_that_is_there_before_the_first_result_stops_the_worker_and_keeps_nothing() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let stops = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs, &stops)
+            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::ready(()))
+            .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
+        assert_eq!(stops.load(Ordering::SeqCst), 1, "its worker was stopped");
+        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        assert!(
+            finished.operation.warnings().is_empty(),
+            "nothing had been done to report: {:?}",
+            finished.operation.warnings()
+        );
+        assert_eq!(finished.result, None);
+    }
+
+    #[tokio::test]
     async fn without_a_cancel_every_job_runs_and_the_result_is_one() {
         let runs = Arc::new(AtomicUsize::new(0));
-        let finished = use_case(&runs)
+        let stops = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs, &stops)
             .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::pending())
             .await;
         assert_eq!(runs.load(Ordering::SeqCst), 3);
