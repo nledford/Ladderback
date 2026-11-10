@@ -95,7 +95,7 @@ Hook and notification templates never receive secrets (Backrest leaks them this 
 
 Connecting a repository saves the settings **as written**: a `password-keyring`, `password-file` or `${…}` reference stays a reference in `config.toml`, never the value it resolved to; the resolved value lives only inside the job it was resolved for. The `@e2e` scenario covers this with a file reference — no test writes a real OS-keyring entry — and a keyring reference round-trips the same way through the config store.
 
-**Not yet in place.** Mapping `SecretError` and `TemplateError` to operation failure reasons, API error codes and their localized messages belongs to the job-runner, operation-log and `l10n` work. Seeding a daemon-wide redactor with every secret at config load belongs to the config work. The warning for an inline secret is built (`config-inline-secret`, §16 decision 37).
+**Not yet in place.** `SecretError` and `TemplateError` are mapped to API error codes and localized messages (`secret-*`, `template-invalid`) on the repository routes and the snapshot listing, with the words of a command or a platform masked of every secret of the repository, those a reference resolves to included; mapping them to the failure reasons of an operation that runs belongs to the job-runner and operation-log work. Seeding a daemon-wide redactor with every secret at config load belongs to the config work. The warning for an inline secret is built (`config-inline-secret`, §16 decision 37).
 
 ### 10.3 Agent ↔ hub
 
