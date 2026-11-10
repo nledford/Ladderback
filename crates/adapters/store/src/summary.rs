@@ -7,8 +7,8 @@
 //! `type` is an error.
 
 use app::ports::{
-    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PruneSummary, RewriteSummary,
-    SnapshotSummary,
+    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PrunePlanSummary, PruneSummary,
+    RewriteSummary, SnapshotSummary,
 };
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,15 @@ pub(crate) enum Summary {
         packs_marked: u64,
         packs_deleted: u64,
         packs_recovered: u64,
+    },
+    /// A read's result, like [`Summary::Snapshots`]: a prune plan is never
+    /// logged as an operation, so no row ever holds this variant either.
+    PrunePlan {
+        repository: RepositoryId,
+        packs_marked: u64,
+        packs_deleted: u64,
+        packs_recovered: u64,
+        bytes_deleted: u64,
     },
     Check {
         repository: RepositoryId,
@@ -99,6 +108,13 @@ impl From<&EngineResult> for Summary {
                 packs_marked: summary.packs_marked,
                 packs_deleted: summary.packs_deleted,
                 packs_recovered: summary.packs_recovered,
+            },
+            EngineResult::PrunePlan(summary) => Self::PrunePlan {
+                repository: summary.repository.clone(),
+                packs_marked: summary.packs_marked,
+                packs_deleted: summary.packs_deleted,
+                packs_recovered: summary.packs_recovered,
+                bytes_deleted: summary.bytes_deleted,
             },
             EngineResult::Forget(summary) => Self::Forget {
                 repository: summary.repository.clone(),
@@ -168,6 +184,19 @@ impl From<Summary> for EngineResult {
                 packs_marked,
                 packs_deleted,
                 packs_recovered,
+            }),
+            Summary::PrunePlan {
+                repository,
+                packs_marked,
+                packs_deleted,
+                packs_recovered,
+                bytes_deleted,
+            } => Self::PrunePlan(PrunePlanSummary {
+                repository,
+                packs_marked,
+                packs_deleted,
+                packs_recovered,
+                bytes_deleted,
             }),
             Summary::Forget {
                 repository,

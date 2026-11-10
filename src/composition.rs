@@ -798,8 +798,10 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
             duration_ms,
         }),
+        // Reads: a result no operation row holds, so the page shows none.
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
+        | EngineResult::PrunePlan(_)
         | EngineResult::Snapshots(_) => None,
     }
 }

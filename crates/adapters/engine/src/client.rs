@@ -12,8 +12,8 @@ use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
     ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProgressEvent,
-    ProgressKind as AppProgressKind, PruneSummary, RepositoryAccess, RewriteJob, RewriteSummary,
-    RunningJob, SnapshotSummary,
+    ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary, RepositoryAccess, RewriteJob,
+    RewriteSummary, RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -1101,6 +1101,13 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 packs_deleted: r.packs_deleted,
                 packs_recovered: r.packs_recovered,
             }),
+            OpResult::PrunePlan(r) => EngineResult::PrunePlan(PrunePlanSummary {
+                repository: r.repository,
+                packs_marked: r.packs_marked,
+                packs_deleted: r.packs_deleted,
+                packs_recovered: r.packs_recovered,
+                bytes_deleted: r.bytes_deleted,
+            }),
             OpResult::Check(r) => EngineResult::Check(CheckSummary {
                 repository: r.repository,
                 errors: r.errors,
@@ -1194,7 +1201,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
         Job::Backup(job) => job.repository.id.as_ref(),
         Job::Forget(job) => job.repository.id.as_ref(),
         Job::Rewrite(job) => job.repository.id.as_ref(),
-        Job::Prune(job) => job.repository.id.as_ref(),
+        Job::Prune(job) | Job::PrunePlan(job) => job.repository.id.as_ref(),
         Job::Check(job) => job.repository.id.as_ref(),
     }
 }
@@ -1210,7 +1217,7 @@ fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
         Job::Backup(job) => &job.repository,
         Job::Forget(job) => &job.repository,
         Job::Rewrite(job) => &job.repository,
-        Job::Prune(job) => &job.repository,
+        Job::Prune(job) | Job::PrunePlan(job) => &job.repository,
         Job::Check(job) => &job.repository,
     };
     let resolved: Vec<SecretValue> = access.secrets.iter().cloned().chain(extra).collect();
@@ -1312,6 +1319,10 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
             tags: job.tags.tags().to_vec(),
         }),
         Job::Prune(job) => JobKind::Prune(PruneJobSpec {
+            repo: repository_spec(job.repository),
+            keep_delete: job.keep_delete.get(),
+        }),
+        Job::PrunePlan(job) => JobKind::PrunePlan(PruneJobSpec {
             repo: repository_spec(job.repository),
             keep_delete: job.keep_delete.get(),
         }),

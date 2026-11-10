@@ -4,7 +4,7 @@
 
 mod support;
 
-use app::ports::{BackupSummary, CheckSummary, EngineResult, PruneSummary};
+use app::ports::{BackupSummary, CheckSummary, EngineResult, PrunePlanSummary, PruneSummary};
 use domain::Timestamp;
 use domain::execution::{
     FailureReason, Operation, OperationKind, Target, Transition, Trigger, Warning, WarningKind,
@@ -441,6 +441,20 @@ async fn every_result_is_stored_as_json_of_its_type() {
             json!({
                 "type": "prune", "repository": REPOSITORY_HEX, "packs_marked": 1,
                 "packs_deleted": 2, "packs_recovered": 3
+            }),
+            None,
+        ),
+        (
+            EngineResult::PrunePlan(PrunePlanSummary {
+                repository: repository(),
+                packs_marked: 1,
+                packs_deleted: 2,
+                packs_recovered: 3,
+                bytes_deleted: 4,
+            }),
+            json!({
+                "type": "prune_plan", "repository": REPOSITORY_HEX, "packs_marked": 1,
+                "packs_deleted": 2, "packs_recovered": 3, "bytes_deleted": 4
             }),
             None,
         ),

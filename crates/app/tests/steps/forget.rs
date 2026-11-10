@@ -371,6 +371,7 @@ impl ForgetWorld {
                 Job::Forget(_) => "forget",
                 Job::Rewrite(_) => "adopt",
                 Job::Prune(_) => "prune",
+                Job::PrunePlan(_) => "prune-plan",
                 Job::Check(_) => "check",
                 Job::Fake(_) => "fake",
                 Job::Init(_) => "init",
