@@ -722,11 +722,15 @@ impl ErrorDto {
     /// An error of `code`, with its arguments named as [`ErrorCode::args`]
     /// names them and the sender's own words, if it has some.
     pub fn new(
-        _code: ErrorCode,
-        _args: impl IntoIterator<Item = (&'static str, MsgArg)>,
-        _detail: Option<String>,
+        code: ErrorCode,
+        args: impl IntoIterator<Item = (&'static str, MsgArg)>,
+        detail: Option<String>,
     ) -> Self {
-        todo!()
+        Self {
+            code,
+            args: named(args),
+            detail,
+        }
     }
 }
 
@@ -744,12 +748,19 @@ pub struct WarningDto {
 impl WarningDto {
     /// A warning of `code`, with its arguments named as
     /// [`WarningCode::args`] names them.
-    pub fn new(
-        _code: WarningCode,
-        _args: impl IntoIterator<Item = (&'static str, MsgArg)>,
-    ) -> Self {
-        todo!()
+    pub fn new(code: WarningCode, args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> Self {
+        Self {
+            code,
+            args: named(args),
+        }
     }
+}
+
+/// A message's arguments, keyed by the names its code declares them under.
+fn named(args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> BTreeMap<String, MsgArg> {
+    args.into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
 }
 
 /// What `ladderback import-profile --json` prints when the import saved the
@@ -774,9 +785,11 @@ pub struct FailureDto {
 
 #[cfg(test)]
 mod typed_dto_tests {
-    use serde_json::{json, to_string, to_value};
+    use serde_json::{from_str, json, to_string, to_value};
 
-    use super::{ErrorCode, ErrorDto, MsgArg, WarningCode, WarningDto};
+    use super::{
+        ErrorCode, ErrorDto, FailureDto, MsgArg, ProfileImportDto, WarningCode, WarningDto,
+    };
 
     fn text(value: &str) -> MsgArg {
         MsgArg::Text(value.to_owned())
@@ -833,6 +846,107 @@ mod typed_dto_tests {
     fn a_warning_with_no_arguments_is_its_code_alone() {
         let warning = WarningDto::new(WarningCode::ProfilePrune, []);
         assert_eq!(to_string(&warning).unwrap(), r#"{"code":"profile-prune"}"#);
+    }
+
+    #[test]
+    fn an_import_is_its_repository_its_plans_and_its_notices() {
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: vec!["docs".to_owned(), "home".to_owned()],
+            notices: vec![WarningDto::new(
+                WarningCode::ProfileKeyIgnored,
+                [("key", text("copy"))],
+            )],
+        };
+        assert_eq!(
+            to_value(&import).unwrap(),
+            json!({
+                "repository": "nas",
+                "plans": ["docs", "home"],
+                "notices": [
+                    {
+                        "code": "profile-key-ignored",
+                        "args": {"key": {"type": "text", "value": "copy"}},
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn an_import_that_added_no_plan_and_noted_nothing_still_says_so() {
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: Vec::new(),
+            notices: Vec::new(),
+        };
+        assert_eq!(
+            to_string(&import).unwrap(),
+            r#"{"repository":"nas","plans":[],"notices":[]}"#
+        );
+    }
+
+    #[test]
+    fn a_failure_is_the_typed_error_under_the_one_key_error() {
+        let failure = FailureDto {
+            error: ErrorDto::new(ErrorCode::PlanIdTaken, [("plan", text("home"))], None),
+        };
+        assert_eq!(
+            to_string(&failure).unwrap(),
+            r#"{"error":{"code":"plan-id-taken","args":{"plan":{"type":"text","value":"home"}}}}"#
+        );
+    }
+
+    #[test]
+    fn every_document_reads_back_as_it_was_written() {
+        let error = ErrorDto::new(
+            ErrorCode::ProfileTooLarge,
+            [
+                ("file", text("nas.toml")),
+                ("limit", MsgArg::Bytes(1_048_576)),
+            ],
+            Some("a detail".to_owned()),
+        );
+        let warning = WarningDto::new(
+            WarningCode::ProfileTagDropped,
+            [("tag", text("ladderback-plan:home"))],
+        );
+        let import = ProfileImportDto {
+            repository: "nas".to_owned(),
+            plans: vec!["home".to_owned()],
+            notices: vec![warning.clone()],
+        };
+        let failure = FailureDto {
+            error: error.clone(),
+        };
+        assert_eq!(
+            from_str::<ErrorDto>(&to_string(&error).unwrap()).unwrap(),
+            error
+        );
+        assert_eq!(
+            from_str::<WarningDto>(&to_string(&warning).unwrap()).unwrap(),
+            warning
+        );
+        assert_eq!(
+            from_str::<ProfileImportDto>(&to_string(&import).unwrap()).unwrap(),
+            import
+        );
+        assert_eq!(
+            from_str::<FailureDto>(&to_string(&failure).unwrap()).unwrap(),
+            failure
+        );
+    }
+
+    #[test]
+    fn a_document_that_leaves_out_the_arguments_and_the_detail_reads_as_having_none() {
+        assert_eq!(
+            from_str::<ErrorDto>(r#"{"code":"inline-secret"}"#).unwrap(),
+            ErrorDto::new(ErrorCode::InlineSecret, [], None)
+        );
+        assert_eq!(
+            from_str::<WarningDto>(r#"{"code":"profile-prune"}"#).unwrap(),
+            WarningDto::new(WarningCode::ProfilePrune, [])
+        );
     }
 }
 
