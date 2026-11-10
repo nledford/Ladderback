@@ -144,9 +144,56 @@ fn forget_old(folder: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Not yet written: the red test below needs it to exist.
+#[allow(dead_code, reason = "the fix makes `keep` use it")]
+fn keep_with(
+    _path: &Path,
+    _old: &[u8],
+    _at: Timestamp,
+    _flush_folder: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    todo!("keep_with")
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
+
+    #[test]
+    fn the_history_folder_is_flushed_after_a_version_is_in_it() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let flushed = RefCell::new(Vec::new());
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        keep_with(&path, b"old", at, |folder| {
+            let versions = fs::read_dir(folder)?.count();
+            flushed.borrow_mut().push((folder.to_path_buf(), versions));
+            Ok(())
+        })
+        .expect("kept");
+
+        assert_eq!(
+            flushed.into_inner(),
+            [(history_folder(&path), 1)],
+            "flushed once, the history folder, with the version already in it"
+        );
+    }
+
+    #[test]
+    fn a_version_whose_folder_cannot_be_flushed_is_not_reported_kept() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let path = scratch.path().join("config.toml");
+        let at: Timestamp = "2026-11-08T13:20:21.123Z".parse().expect("a time");
+
+        let kept = keep_with(&path, b"old", at, |_| {
+            Err(io::Error::other("the disk is gone"))
+        });
+
+        assert!(kept.is_err(), "{kept:?}");
+    }
 
     #[test]
     fn a_name_on_its_own_is_in_the_current_folder() {

@@ -6,7 +6,9 @@ mod support;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use app::ports::{ConfigError, ConfigStore, Problem};
+use std::sync::Arc;
+
+use app::ports::{Clock, ConfigError, ConfigStore, Problem};
 use config_adapter::{MAX_CONFIG_BYTES, MigrationError, Schemas, parse, render};
 use domain::planning::{AgentConfig, AgentSettings, Concurrency, Hooks};
 use support::model::expected;
@@ -310,8 +312,8 @@ async fn a_save_over_a_file_keeps_that_file_in_the_history() {
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].1, first);
     assert_eq!(
-        kept[0].0, "20261108T132022.123Z-00.toml",
-        "named for the time of the save that replaced it, in UTC"
+        kept[0].0, "000001-20261108T132022.123Z.toml",
+        "numbered in order of keeping, then the time of the save that replaced it, in UTC"
     );
     assert_eq!(mode_of(&scratch.history_dir()), 0o700);
     assert_eq!(mode_of(&scratch.history_dir().join(&kept[0].0)), 0o600);
@@ -332,9 +334,9 @@ async fn saves_in_the_same_millisecond_are_kept_apart_and_sort_in_order() {
     assert_eq!(
         names,
         [
-            "20261108T132021.123Z-00.toml",
-            "20261108T132021.123Z-01.toml",
-            "20261108T132021.123Z-02.toml"
+            "000001-20261108T132021.123Z.toml",
+            "000002-20261108T132021.123Z.toml",
+            "000003-20261108T132021.123Z.toml"
         ]
     );
     let contents: Vec<_> = kept.into_iter().map(|(_, bytes)| bytes).collect();
@@ -504,3 +506,173 @@ async fn saves_made_at_once_all_land_whole_and_each_keeps_what_it_replaced() {
         "every version is somewhere, once"
     );
 }
+
+/// A clock the test can set to any time, back included: the fake clock only
+/// moves forward, and a real one is set back by a person or by NTP.
+struct SettableClock(std::sync::Mutex<domain::Timestamp>);
+
+impl SettableClock {
+    fn at(timestamp: &str) -> Arc<Self> {
+        Arc::new(Self(std::sync::Mutex::new(
+            timestamp.parse().expect("a timestamp"),
+        )))
+    }
+
+    fn set(&self, timestamp: &str) {
+        *self.0.lock().expect("the clock") = timestamp.parse().expect("a timestamp");
+    }
+}
+
+#[async_trait::async_trait]
+impl Clock for SettableClock {
+    fn now(&self) -> domain::Timestamp {
+        *self.0.lock().expect("the clock")
+    }
+
+    async fn sleep_until(&self, _deadline: domain::Timestamp) {}
+}
+
+#[tokio::test]
+async fn a_clock_set_back_never_makes_a_save_drop_the_newest_versions() {
+    let scratch = Scratch::new();
+    let clock = SettableClock::at("2026-11-08T13:20:21.123Z");
+    let store = config_adapter::FileConfigStore::new(scratch.path.clone(), clock.clone());
+    let mut written = Vec::new();
+    for n in 1..=14 {
+        if n == 7 {
+            clock.set("2026-11-07T09:00:00.000Z");
+        }
+        store.save(&with_concurrency(n)).await.expect("saved");
+        written.push(scratch.read_bytes());
+    }
+    let kept: Vec<_> = scratch
+        .history()
+        .into_iter()
+        .map(|(_, bytes)| bytes)
+        .collect();
+    // Saves 2 to 14 each kept the version before; the three oldest are gone,
+    // though saves 7 to 14 were made a day before the first six.
+    assert_eq!(kept, written[3..13], "versions 4 to 13, oldest first");
+}
+
+#[tokio::test]
+async fn a_save_after_a_clock_set_back_keeps_the_version_it_replaced() {
+    let scratch = Scratch::new();
+    let clock = SettableClock::at("2026-11-08T13:20:21.123Z");
+    let store = config_adapter::FileConfigStore::new(scratch.path.clone(), clock.clone());
+    for n in 1..=12 {
+        store.save(&with_concurrency(n)).await.expect("saved");
+    }
+    clock.set("2025-01-01T00:00:00.000Z");
+    let replaced = scratch.read_bytes();
+    store.save(&with_concurrency(13)).await.expect("saved");
+    let kept = scratch.history();
+    assert_eq!(kept.len(), config_adapter::KEPT_VERSIONS);
+    assert_eq!(
+        kept.last().map(|(_, bytes)| bytes),
+        Some(&replaced),
+        "the version just replaced is the newest one kept, though its time is a year earlier"
+    );
+}
+
+/// A scratch folder with the config in a folder of its own, as a dotfiles
+/// repository would hold it, and `config.toml` a link to it.
+struct Linked {
+    scratch: Scratch,
+    target: std::path::PathBuf,
+}
+
+impl Linked {
+    fn to(relative: &str) -> Self {
+        let scratch = Scratch::new();
+        let target = scratch.dir.path().join(relative);
+        std::fs::create_dir_all(target.parent().expect("a folder")).expect("the target's folder");
+        Self { scratch, target }
+    }
+
+    fn link_to(&self, to: &std::path::Path) {
+        std::os::unix::fs::symlink(to, &self.scratch.path).expect("a symlink");
+    }
+
+    fn link_is_kept(&self, to: &std::path::Path) {
+        let meta = std::fs::symlink_metadata(&self.scratch.path).expect("the link");
+        assert!(meta.file_type().is_symlink(), "config.toml is still a link");
+        assert_eq!(
+            std::fs::read_link(&self.scratch.path).expect("the link"),
+            to
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_save_through_a_symlinked_config_keeps_the_link_and_writes_its_target() {
+    let linked = Linked::to("dotfiles/ladderback/config.toml");
+    let scratch = &linked.scratch;
+    std::fs::write(&linked.target, "schema = 1\n# mine\n").expect("the target");
+    linked.link_to(&linked.target);
+    let store = scratch.store();
+
+    store.save(&with_concurrency(2)).await.expect("saved");
+
+    linked.link_is_kept(&linked.target);
+    assert_eq!(
+        std::fs::read_to_string(&linked.target).expect("the target"),
+        render(&scratch.path, &with_concurrency(2)).expect("written"),
+        "the file behind the link has the new version"
+    );
+    assert_eq!(mode_of(&linked.target), 0o600);
+    assert_eq!(store.load().await, Ok(with_concurrency(2)));
+    assert_eq!(
+        std::fs::read_dir(linked.target.parent().expect("a folder"))
+            .expect("the target's folder")
+            .count(),
+        1,
+        "only the target is in its folder: no temporary file, and no history"
+    );
+}
+
+#[tokio::test]
+async fn a_relative_link_through_a_chain_of_links_is_followed_to_the_end() {
+    let linked = Linked::to("dotfiles/real.toml");
+    let scratch = &linked.scratch;
+    std::fs::write(&linked.target, OLD_FILE).expect("the target");
+    let middle = scratch.dir.path().join("dotfiles").join("middle.toml");
+    std::os::unix::fs::symlink("real.toml", &middle).expect("a symlink");
+    let first = std::path::Path::new("dotfiles/middle.toml");
+    linked.link_to(first);
+
+    scratch
+        .store()
+        .save(&with_concurrency(2))
+        .await
+        .expect("saved");
+
+    linked.link_is_kept(first);
+    assert_eq!(
+        std::fs::read_link(&middle).expect("the middle link"),
+        std::path::Path::new("real.toml")
+    );
+    assert_eq!(
+        std::fs::read_to_string(&linked.target).expect("the target"),
+        render(&scratch.path, &with_concurrency(2)).expect("written")
+    );
+}
+
+#[tokio::test]
+async fn a_save_through_a_link_to_nothing_makes_the_target_and_keeps_the_link() {
+    let linked = Linked::to("dotfiles/config.toml");
+    let scratch = &linked.scratch;
+    linked.link_to(&linked.target);
+    assert!(!linked.target.exists());
+
+    scratch
+        .store()
+        .save(&with_concurrency(2))
+        .await
+        .expect("saved");
+
+    linked.link_is_kept(&linked.target);
+    assert_eq!(scratch.store().load().await, Ok(with_concurrency(2)));
+    assert!(scratch.history().is_empty(), "nothing was there to keep");
+}
+
