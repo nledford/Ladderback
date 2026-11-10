@@ -667,6 +667,33 @@ mod tests {
     }
 
     #[test]
+    fn a_repository_row_carries_its_warnings_as_a_code_and_arguments_and_leaves_none_out() {
+        let row = RepositoryDto {
+            alias: "demo".to_owned(),
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: PasswordSourceDto::Inline,
+            warnings: vec![RepositoryWarningDto {
+                code: WarningCode::ConfigInlineSecret,
+                args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
+            }],
+        };
+        let json = serde_json::to_string(&row).unwrap();
+        assert_eq!(
+            json,
+            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<RepositoryDto>(&json).unwrap(), row);
+        let bare = r#"{"alias":"demo","repository":"/x","password":{"source":"inline"}}"#;
+        assert!(
+            serde_json::from_str::<RepositoryDto>(bare)
+                .unwrap()
+                .warnings
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn a_zone_name_with_the_shape_of_one_is_accepted_up_to_the_length_cap() {
         let longest = "a".repeat(IanaZone::MAX_LEN);
         for name in [
@@ -860,6 +887,10 @@ mod tests {
         assert_eq!(
             WarningCode::ProfileOptionLeftOut.args(),
             &[text("option", false), text("variable", false)]
+        );
+        assert_eq!(
+            WarningCode::ConfigInlineSecret.args(),
+            &[text("field", false)]
         );
         for code in [
             WarningCode::ProfilePrune,

@@ -76,6 +76,7 @@ Feature: Repositories over HTTP
     When the client connects it as "demo"
     Then the daemon's config file doesn't hold "demo-password"
     And the daemon lists the repository "demo" at the location, its password in the file
+    And the daemon lists the repository "demo" with no warnings
 
   Scenario: Initialising a new local repository gives it an ID and saves nothing
     Given an empty repository location

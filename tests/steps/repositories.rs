@@ -627,6 +627,12 @@ fn api_lists_inline_warning(agent: &mut Agent, alias: String) {
     );
 }
 
+#[then(expr = "the daemon lists the repository {string} with no warnings")]
+fn api_lists_no_warnings(agent: &mut Agent, alias: String) {
+    let row = api_row(agent, &alias);
+    assert!(row.get("warnings").is_none(), "{row}");
+}
+
 #[then(expr = "the daemon lists the repository {string} at the location, its password in the file")]
 fn api_lists_file(agent: &mut Agent, alias: String) {
     let location = text(agent.repositories.cold.as_ref().expect("the location"));
