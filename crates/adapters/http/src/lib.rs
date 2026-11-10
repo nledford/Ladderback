@@ -12,6 +12,7 @@
 )]
 
 mod body_limit;
+mod maintenance;
 mod repositories;
 mod request_checks;
 mod response_headers;
@@ -23,7 +24,6 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
@@ -33,6 +33,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
+pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
@@ -61,7 +62,8 @@ pub struct AppState {
 }
 
 /// The operations the API asks of the daemon (technical design §4.2): the
-/// M1b start-by-plan route, and E2's cancel and history.
+/// M1b start-by-plan route, maintenance (its history groups, its previews
+/// and its start), and E2's cancel and history.
 ///
 /// A call is dropped when its client hangs up before the answer, so a start
 /// writes the operation log, and takes a repository's slot (I7), on a task of
@@ -72,15 +74,35 @@ pub trait Operations: Send + Sync {
     /// Starts a backup of the plan named in the request, returning the
     /// operation's ID.
     async fn start_backup(&self, plan: String) -> Result<String, StartError>;
-    /// Starts maintenance (forget, prune or check) on the repository named
-    /// in the request, returning the operation's ID. Refusals are typed: an
-    /// unknown repository or kind, a busy repository (I7), or a policy that
-    /// would keep nothing.
+    /// Starts maintenance (forget, prune, check or adopt) on the repository
+    /// named in the request, returning the operation's ID. A forget or an
+    /// adoption that carries the `selection` its preview named runs only if
+    /// it would act on that selection still. Refusals are typed: an unknown
+    /// repository or kind, a busy repository (I7), a policy that would keep
+    /// nothing, or a selection the repository no longer matches.
     async fn start_maintenance(
         &self,
         repository: String,
         request: MaintenanceRequest,
-    ) -> Result<String, MaintenanceStartError>;
+        selection: Option<String>,
+    ) -> Result<String, MaintenanceRefusal>;
+
+    /// What `request` would do to the repository, told before it starts: a
+    /// read of the repository that takes no maintenance slot and writes
+    /// nothing. A forget's and an adoption's preview names the selection a
+    /// start can carry.
+    async fn preview(
+        &self,
+        repository: String,
+        request: MaintenanceRequest,
+    ) -> Result<api::MaintenancePreviewDto, MaintenanceRefusal>;
+
+    /// The repository's snapshots grouped by who owns them, read live like
+    /// a snapshot listing: the history the maintenance runs act on.
+    async fn groups(
+        &self,
+        repository: String,
+    ) -> Result<api::SnapshotGroupsDto, MaintenanceRefusal>;
 
     /// One page of the operation history, newest first, including running
     /// operations. `after` continues from a page's `next`; `plan` lists one
@@ -169,66 +191,6 @@ pub enum CancelError {
     NotRunning,
 }
 
-/// Why a maintenance request couldn't start.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MaintenanceStartError {
-    /// No repository by that alias is configured.
-    UnknownRepository,
-    /// Another maintenance operation holds the repository (I7). Names the
-    /// one that does.
-    Busy { running: String },
-    /// A plan's retention policy would keep nothing; nothing was removed.
-    /// Names the plan.
-    KeepsNothing { plan: String },
-    /// The configuration holds no plan to adopt into. Names the plan.
-    UnknownPlan { plan: String },
-    /// The group an adoption named matches no plan of this agent; nothing
-    /// was written.
-    AdoptionNoMatch,
-    /// More than one plan matches the group an adoption named. Names them.
-    AdoptionAmbiguous { plans: Vec<String> },
-    /// The repository or its configuration can't be read just now.
-    Unavailable,
-}
-
-/// The body `POST /api/v1/repositories/{alias}/maintenance` takes: the
-/// kind, and for an adoption its destination plan and the group it rewrites.
-#[derive(Deserialize)]
-struct RunMaintenanceBody {
-    kind: String,
-    /// The plan an adoption's history becomes part of.
-    into: Option<String>,
-    /// The group an adoption rewrites: another owner's tagged history, or
-    /// the unmanaged history that matches the destination plan.
-    from: Option<AdoptionFrom>,
-}
-
-/// How a request names the group an adoption rewrites.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case", tag = "from")]
-pub enum AdoptionFrom {
-    /// The orphaned group these two tags name.
-    Orphaned {
-        /// The `ladderback-agent:` tag's text.
-        agent: String,
-        /// The `ladderback-plan:` tag's text.
-        plan: String,
-    },
-    /// The unmanaged group whose host, label and paths equal the
-    /// destination plan's host, label and sources.
-    Unmanaged,
-}
-
-/// What a maintenance request asks for, parsed: the trait's own type, so
-/// adapters never see the wire's strings.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MaintenanceRequest {
-    Forget,
-    Prune,
-    Check,
-    Adopt { into: String, from: AdoptionFrom },
-}
-
 /// The body `POST /api/v1/operations` takes.
 #[derive(Deserialize)]
 struct RunPlanBody {
@@ -237,8 +199,8 @@ struct RunPlanBody {
 
 /// What the same route answers: the started operation's ID, unenveloped.
 #[derive(Serialize)]
-struct StartedOperation {
-    operation: String,
+pub(crate) struct StartedOperation {
+    pub(crate) operation: String,
 }
 
 /// A file of the built web UI.
@@ -315,11 +277,13 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// other extensionless path (the client-side router handles it), the
 /// live-updates WebSocket under `/api/v1`, the operations routes — start,
 /// history, one operation, cancel — the catalog routes the pages read: the
-/// plans, the repositories, one repository's snapshots — and the routes that
-/// test, connect and initialise a repository. A request that fails `checks`
-/// never reaches a route, and neither does one whose body is over the limit
-/// of its class of route (§10.1). Every response, a refusal included, carries
-/// the security headers.
+/// plans, the repositories, one repository's snapshots — the routes that
+/// maintain a repository: its history by owner, a preview of each run and
+/// the start of one — and the routes that test, connect and initialise a
+/// repository. A request that fails `checks` never reaches a route, and
+/// neither does one whose body is over the limit of its class of route
+/// (§10.1). Every response, a refusal included, carries the security
+/// headers.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -351,8 +315,16 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(list_snapshots),
         )
         .route(
+            "/api/v1/repositories/{alias}/groups",
+            axum::routing::get(maintenance::groups),
+        )
+        .route(
             "/api/v1/repositories/{alias}/maintenance",
-            axum::routing::post(run_maintenance),
+            axum::routing::post(maintenance::start),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/maintenance/preview",
+            axum::routing::post(maintenance::preview),
         )
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
@@ -440,85 +412,6 @@ async fn run_plan(
             vec![("plan", api::MsgArg::Text(plan))],
         ),
         Err(StartError::Unavailable) => refused(
-            StatusCode::SERVICE_UNAVAILABLE,
-            api::ErrorCode::ConfigUnavailable,
-        ),
-    }
-}
-
-/// Starts maintenance on the repository the path names, of the kind the
-/// body names: forget, prune or check. The answer is the operation's ID,
-/// and the refusals are typed — an unknown repository or kind, a busy
-/// repository (I7), or a retention policy that would keep nothing.
-async fn run_maintenance(
-    State(state): State<AppState>,
-    AxumPath(alias): AxumPath<String>,
-    body: Result<axum::Json<RunMaintenanceBody>, axum::extract::rejection::JsonRejection>,
-) -> Response {
-    let request = match body {
-        Ok(axum::Json(RunMaintenanceBody { kind, into, from })) => {
-            // An adoption names its plan and group; no other kind takes
-            // either, so one that carries them is a body this route doesn't
-            // take rather than a request to ignore part of.
-            match (kind.as_str(), into, from) {
-                ("forget", None, None) => MaintenanceRequest::Forget,
-                ("prune", None, None) => MaintenanceRequest::Prune,
-                ("check", None, None) => MaintenanceRequest::Check,
-                ("adopt", Some(into), Some(from)) => MaintenanceRequest::Adopt { into, from },
-                ("forget" | "prune" | "check" | "adopt", _, _) => {
-                    return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
-                }
-                _ => {
-                    return refused_with(
-                        StatusCode::NOT_FOUND,
-                        api::ErrorCode::MaintenanceKindUnknown,
-                        vec![("kind", api::MsgArg::Text(kind))],
-                    );
-                }
-            }
-        }
-        Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
-    };
-    match state
-        .operations
-        .start_maintenance(alias.clone(), request)
-        .await
-    {
-        Ok(operation) => (
-            StatusCode::ACCEPTED,
-            axum::Json(StartedOperation { operation }),
-        )
-            .into_response(),
-        Err(MaintenanceStartError::UnknownRepository) => refused_with(
-            StatusCode::NOT_FOUND,
-            api::ErrorCode::RepositoryUnknown,
-            vec![("alias", api::MsgArg::Text(alias))],
-        ),
-        Err(MaintenanceStartError::UnknownPlan { plan }) => refused_with(
-            StatusCode::NOT_FOUND,
-            api::ErrorCode::PlanUnknown,
-            vec![("plan", api::MsgArg::Text(plan))],
-        ),
-        Err(MaintenanceStartError::AdoptionNoMatch) => refused(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            api::ErrorCode::AdoptionNoMatch,
-        ),
-        Err(MaintenanceStartError::AdoptionAmbiguous { plans }) => refused_with(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            api::ErrorCode::AdoptionAmbiguous,
-            vec![("plans", api::MsgArg::Text(plans.join(", ")))],
-        ),
-        Err(MaintenanceStartError::Busy { running }) => refused_with(
-            StatusCode::CONFLICT,
-            api::ErrorCode::MaintenanceBusy,
-            vec![("operation", api::MsgArg::Text(running))],
-        ),
-        Err(MaintenanceStartError::KeepsNothing { plan }) => refused_with(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            api::ErrorCode::RetentionKeepsNothing,
-            vec![("plan", api::MsgArg::Text(plan))],
-        ),
-        Err(MaintenanceStartError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::ConfigUnavailable,
         ),
@@ -819,6 +712,51 @@ mod tests {
         .unwrap()
     }
 
+    /// The refusal the fake stands for `repository` with: `None` for a
+    /// repository it answers.
+    fn refusal_of(repository: &str) -> Option<MaintenanceRefusal> {
+        let text = |value: &str| value.to_owned();
+        Some(match repository {
+            "missing" => MaintenanceRefusal::UnknownRepository,
+            "busy" => MaintenanceRefusal::Busy {
+                running: text("018f0000-0000-7000-8000-000000000003"),
+            },
+            "keeps-nothing" => MaintenanceRefusal::KeepsNothing { plan: text("home") },
+            "unknown-plan" => MaintenanceRefusal::UnknownPlan {
+                plan: text("nowhere"),
+            },
+            "no-match" => MaintenanceRefusal::AdoptionNoMatch,
+            "ambiguous" => MaintenanceRefusal::AdoptionAmbiguous {
+                plans: vec![text("home"), text("mirror")],
+            },
+            "bad-token" => MaintenanceRefusal::InvalidBody,
+            "stale" => MaintenanceRefusal::SelectionChanged,
+            "no-secret" => MaintenanceRefusal::SecretRefused(SecretRefusal {
+                code: api::ErrorCode::SecretMissing,
+                args: vec![
+                    ("field", api::MsgArg::Text(text("password"))),
+                    ("source", api::MsgArg::Text(text("PW"))),
+                ],
+                detail: None,
+            }),
+            "failed" => MaintenanceRefusal::OperationFailed {
+                detail: text("wrong password or no repository at the location"),
+            },
+            "slow" => MaintenanceRefusal::TimedOut,
+            "unreachable" => MaintenanceRefusal::Unavailable {
+                code: api::ErrorCode::ConfigUnavailable,
+                args: Vec::new(),
+                detail: None,
+            },
+            "engine-down" => MaintenanceRefusal::Unavailable {
+                code: api::ErrorCode::EngineUnavailable,
+                args: Vec::new(),
+                detail: Some(text("no worker program")),
+            },
+            _ => return None,
+        })
+    }
+
     #[async_trait]
     impl Operations for Plans {
         async fn start_backup(&self, plan: String) -> Result<String, StartError> {
@@ -833,25 +771,83 @@ mod tests {
             &self,
             repository: String,
             request: MaintenanceRequest,
-        ) -> Result<String, MaintenanceStartError> {
-            let adopt = matches!(request, MaintenanceRequest::Adopt { .. });
-            match (repository.as_str(), adopt) {
-                ("demo", false) => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
-                ("demo", true) => Ok("018f0000-0000-7000-8000-000000000004".to_owned()),
-                ("missing", _) => Err(MaintenanceStartError::UnknownRepository),
-                ("busy", _) => Err(MaintenanceStartError::Busy {
-                    running: "018f0000-0000-7000-8000-000000000003".to_owned(),
-                }),
-                ("keeps-nothing", _) => Err(MaintenanceStartError::KeepsNothing {
-                    plan: "home".to_owned(),
-                }),
-                ("no-match", true) => Err(MaintenanceStartError::AdoptionNoMatch),
-                ("ambiguous", true) => Err(MaintenanceStartError::AdoptionAmbiguous {
-                    plans: vec!["home".to_owned(), "mirror".to_owned()],
-                }),
-                ("unreachable", _) => Err(MaintenanceStartError::Unavailable),
-                _ => Err(MaintenanceStartError::UnknownRepository),
+            selection: Option<String>,
+        ) -> Result<String, MaintenanceRefusal> {
+            if let Some(refusal) = refusal_of(&repository) {
+                return Err(refusal);
             }
+            if repository != "demo" {
+                return Err(MaintenanceRefusal::UnknownRepository);
+            }
+            let adopt = matches!(request, MaintenanceRequest::Adopt { .. });
+            match (adopt, selection.as_deref()) {
+                (false, None) => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
+                (true, None) => Ok("018f0000-0000-7000-8000-000000000004".to_owned()),
+                // The selection a preview named: the run goes ahead.
+                (false, Some(SELECTION)) => Ok("018f0000-0000-7000-8000-000000000005".to_owned()),
+                (true, Some(SELECTION)) => Ok("018f0000-0000-7000-8000-000000000006".to_owned()),
+                // Any other: the repository has changed since.
+                (_, Some(_)) => Err(MaintenanceRefusal::SelectionChanged),
+            }
+        }
+
+        async fn preview(
+            &self,
+            repository: String,
+            request: MaintenanceRequest,
+        ) -> Result<api::MaintenancePreviewDto, MaintenanceRefusal> {
+            if let Some(refusal) = refusal_of(&repository) {
+                return Err(refusal);
+            }
+            if repository != "demo" {
+                return Err(MaintenanceRefusal::UnknownRepository);
+            }
+            let shown = |snapshot: &api::SnapshotDto| Some(snapshot.clone());
+            let snapshots = [demo_snapshot()];
+            Ok(match request {
+                MaintenanceRequest::Forget => api::MaintenancePreviewDto::Forget {
+                    plans: vec![api::ForgetPlanDto::new(
+                        "home".to_owned(),
+                        3,
+                        &snapshots,
+                        shown,
+                    )],
+                    left_alone: api::LeftAloneDto::default(),
+                    selection: SELECTION.to_owned(),
+                },
+                MaintenanceRequest::Adopt { into, .. } => {
+                    api::MaintenancePreviewDto::adopt(into, &snapshots, SELECTION.to_owned(), shown)
+                }
+                MaintenanceRequest::Prune => api::MaintenancePreviewDto::Prune {
+                    packs_marked: 2,
+                    packs_deleted: 1,
+                    packs_recovered: 0,
+                    bytes_deleted: 4096,
+                    keep_delete_hours: 144,
+                },
+                MaintenanceRequest::Check => api::MaintenancePreviewDto::Check { read_data: false },
+            })
+        }
+
+        async fn groups(
+            &self,
+            repository: String,
+        ) -> Result<api::SnapshotGroupsDto, MaintenanceRefusal> {
+            if let Some(refusal) = refusal_of(&repository) {
+                return Err(refusal);
+            }
+            if repository != "demo" {
+                return Err(MaintenanceRefusal::UnknownRepository);
+            }
+            Ok(api::SnapshotGroupsDto {
+                plans: vec![api::PlanGroupDto::new(
+                    "home".to_owned(),
+                    &[demo_snapshot()],
+                    |snapshot| Some(snapshot.clone()),
+                )],
+                orphaned: Vec::new(),
+                unmanaged: Vec::new(),
+            })
         }
 
         async fn history(
@@ -1243,6 +1239,338 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body(response).await, r#"{"code":"config-unavailable"}"#);
+    }
+
+    /// The selection every preview of the fake names.
+    const SELECTION: &str = "0123456789abcdef";
+
+    #[tokio::test]
+    async fn a_repositorys_groups_are_listed_by_owner() {
+        let response = get("/api/v1/repositories/demo/groups").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+        assert_eq!(wire["plans"][0]["plan"], "home");
+        assert_eq!(wire["plans"][0]["count"], 1);
+        assert_eq!(wire["plans"][0]["snapshots"][0]["id"], "ab".repeat(32));
+        assert_eq!(wire["orphaned"], serde_json::json!([]));
+        assert_eq!(wire["unmanaged"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn each_preview_names_its_kind_and_what_the_run_would_do() {
+        use serde_json::json;
+        let snapshot = serde_json::to_value(demo_snapshot()).unwrap();
+        for (request_body, expected) in [
+            (
+                r#"{"kind":"forget"}"#,
+                json!({
+                    "kind": "forget",
+                    "plans": [{"plan": "home", "total": 3, "remove": 1, "listed": [snapshot]}],
+                    "left-alone": {
+                        "orphaned": {"groups": 0, "snapshots": 0},
+                        "unmanaged": {"groups": 0, "snapshots": 0},
+                    },
+                    "selection": SELECTION,
+                }),
+            ),
+            (
+                r#"{"kind":"adopt","into":"home","from":{"from":"orphaned","agent":"a","plan":"p"}}"#,
+                json!({
+                    "kind": "adopt",
+                    "into": "home",
+                    "count": 1,
+                    "listed": [snapshot],
+                    "selection": SELECTION,
+                }),
+            ),
+            (
+                r#"{"kind":"prune"}"#,
+                json!({
+                    "kind": "prune",
+                    "packs-marked": 2,
+                    "packs-deleted": 1,
+                    "packs-recovered": 0,
+                    "bytes-deleted": 4096,
+                    "keep-delete-hours": 144,
+                }),
+            ),
+            (
+                r#"{"kind":"check"}"#,
+                json!({"kind": "check", "read-data": false}),
+            ),
+        ] {
+            let response = request(
+                ui(),
+                Method::POST,
+                "/api/v1/repositories/demo/maintenance/preview",
+                request_body,
+            )
+            .await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::OK, "{request_body}");
+            assert_eq!(answer, expected, "{request_body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_start_hands_the_selection_it_carries_to_the_daemon() {
+        use serde_json::json;
+        for (request_body, status, expected) in [
+            (
+                r#"{"kind":"forget"}"#.to_owned(),
+                202,
+                json!({"operation": "018f0000-0000-7000-8000-000000000002"}),
+            ),
+            (
+                format!(r#"{{"kind":"forget","selection":"{SELECTION}"}}"#),
+                202,
+                json!({"operation": "018f0000-0000-7000-8000-000000000005"}),
+            ),
+            (
+                format!(
+                    r#"{{"kind":"adopt","into":"home","from":{{"from":"unmanaged"}},"selection":"{SELECTION}"}}"#
+                ),
+                202,
+                json!({"operation": "018f0000-0000-7000-8000-000000000006"}),
+            ),
+            (
+                r#"{"kind":"forget","selection":"ffffffffffffffff"}"#.to_owned(),
+                409,
+                json!({"code": "maintenance-selection-changed"}),
+            ),
+        ] {
+            let response = request(
+                ui(),
+                Method::POST,
+                "/api/v1/repositories/demo/maintenance",
+                &request_body,
+            )
+            .await;
+            let (actual, answer) = json_of(response).await;
+            assert_eq!(actual.as_u16(), status, "{request_body}");
+            assert_eq!(answer, expected, "{request_body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn every_maintenance_refusal_is_typed_with_the_status_of_its_kind() {
+        use serde_json::json;
+        let text = |value: &str| json!({"type": "text", "value": value});
+        for (alias, status, expected) in [
+            (
+                "missing",
+                404,
+                json!({"code": "repository-unknown", "args": {"alias": text("missing")}}),
+            ),
+            (
+                "unknown-plan",
+                404,
+                json!({"code": "plan-unknown", "args": {"plan": text("nowhere")}}),
+            ),
+            (
+                "busy",
+                409,
+                json!({
+                    "code": "maintenance-busy",
+                    "args": {"operation": text("018f0000-0000-7000-8000-000000000003")},
+                }),
+            ),
+            (
+                "stale",
+                409,
+                json!({"code": "maintenance-selection-changed"}),
+            ),
+            (
+                "keeps-nothing",
+                422,
+                json!({"code": "retention-keeps-nothing", "args": {"plan": text("home")}}),
+            ),
+            ("no-match", 422, json!({"code": "adoption-no-match"})),
+            (
+                "ambiguous",
+                422,
+                json!({"code": "adoption-ambiguous", "args": {"plans": text("home, mirror")}}),
+            ),
+            (
+                "no-secret",
+                422,
+                json!({"code": "secret-missing", "args": {"field": text("password"), "source": text("PW")}}),
+            ),
+            (
+                "failed",
+                422,
+                json!({
+                    "code": "operation-failed",
+                    "detail": "wrong password or no repository at the location",
+                }),
+            ),
+            ("bad-token", 400, json!({"code": "invalid-body"})),
+            ("slow", 504, json!({"code": "repository-read-timed-out"})),
+            ("unreachable", 503, json!({"code": "config-unavailable"})),
+            (
+                "engine-down",
+                503,
+                json!({"code": "engine-unavailable", "detail": "no worker program"}),
+            ),
+        ] {
+            // The groups, a preview and a start refuse alike.
+            for (method, route, request_body) in [
+                (
+                    Method::GET,
+                    format!("/api/v1/repositories/{alias}/groups"),
+                    "",
+                ),
+                (
+                    Method::POST,
+                    format!("/api/v1/repositories/{alias}/maintenance/preview"),
+                    r#"{"kind":"forget"}"#,
+                ),
+                (
+                    Method::POST,
+                    format!("/api/v1/repositories/{alias}/maintenance"),
+                    r#"{"kind":"forget"}"#,
+                ),
+            ] {
+                let response = request(ui(), method, &route, request_body).await;
+                let (actual, answer) = json_of(response).await;
+                assert_eq!(actual.as_u16(), status, "{alias} on {route}");
+                assert_eq!(answer, expected, "{alias} on {route}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_maintenance_request_that_takes_other_fields_is_refused_before_the_daemon_sees_it() {
+        // The `demo` repository answers every request it is given, so each
+        // refusal here is the route's own.
+        const PREVIEW: &str = "/api/v1/repositories/demo/maintenance/preview";
+        const START: &str = "/api/v1/repositories/demo/maintenance";
+        let adopt = format!(
+            r#"{{"kind":"adopt","into":"home","from":{{"from":"unmanaged"}},"selection":"{SELECTION}"}}"#
+        );
+        let selected = |kind: &str| format!(r#"{{"kind":"{kind}","selection":"{SELECTION}"}}"#);
+        for (what, route, request_body) in [
+            ("a selection on a prune", START, selected("prune")),
+            ("a selection on a check", START, selected("check")),
+            (
+                "a selection on a forget preview",
+                PREVIEW,
+                selected("forget"),
+            ),
+            ("a selection on an adoption preview", PREVIEW, adopt),
+            (
+                "a key it does not know",
+                START,
+                r#"{"kind":"forget","selectoin":"0123456789abcdef"}"#.to_owned(),
+            ),
+            (
+                "a key a preview does not know",
+                PREVIEW,
+                r#"{"kind":"forget","extra":1}"#.to_owned(),
+            ),
+            (
+                "a forget that names a plan",
+                PREVIEW,
+                r#"{"kind":"forget","into":"home"}"#.to_owned(),
+            ),
+            (
+                "a prune that names a group",
+                PREVIEW,
+                r#"{"kind":"prune","from":{"from":"unmanaged"}}"#.to_owned(),
+            ),
+            (
+                "an adoption without its group",
+                PREVIEW,
+                r#"{"kind":"adopt","into":"home"}"#.to_owned(),
+            ),
+            (
+                "an adoption without its plan",
+                START,
+                r#"{"kind":"adopt","from":{"from":"unmanaged"}}"#.to_owned(),
+            ),
+            (
+                "a group of no kind",
+                PREVIEW,
+                r#"{"kind":"adopt","into":"home","from":{"from":"elsewhere"}}"#.to_owned(),
+            ),
+            ("a body that is not JSON", PREVIEW, "not json".to_owned()),
+            ("an empty body", START, String::new()),
+        ] {
+            let response = request(ui(), Method::POST, route, &request_body).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{what} to {route}");
+            assert_eq!(
+                answer,
+                serde_json::json!({"code": "invalid-body"}),
+                "{what} to {route}"
+            );
+        }
+        // A kind this version doesn't run is told as such, whatever else the
+        // body holds.
+        for (route, request_body) in [
+            (PREVIEW, r#"{"kind":"wipe"}"#.to_owned()),
+            (START, selected("wipe")),
+        ] {
+            let response = request(ui(), Method::POST, route, &request_body).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{request_body} to {route}");
+            assert_eq!(
+                answer,
+                serde_json::json!({
+                    "code": "maintenance-kind-unknown",
+                    "args": {"kind": {"type": "text", "value": "wipe"}},
+                }),
+                "{request_body} to {route}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_maintenance_routes_want_json_and_bound_their_bodies() {
+        for route in [
+            "/api/v1/repositories/demo/maintenance",
+            "/api/v1/repositories/demo/maintenance/preview",
+        ] {
+            let post = |content_type: &'static str, request_body: String| {
+                router(ui(), RequestChecks::default(), state()).oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(route)
+                        .header(header::HOST, "localhost:9898")
+                        .header(header::CONTENT_TYPE, content_type)
+                        .body(Body::from(request_body))
+                        .unwrap(),
+                )
+            };
+            let (status, answer) = json_of(
+                post("text/plain", r#"{"kind":"forget"}"#.to_owned())
+                    .await
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{route}");
+            assert_eq!(answer["code"], "json-required", "{route}");
+            let oversize = format!(r#"{{"kind":"{}"}}"#, "a".repeat(3 * 1024 * 1024));
+            let (status, answer) = json_of(post("application/json", oversize).await.unwrap()).await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{route}");
+            assert_eq!(answer["code"], "body-too-large", "{route}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_maintenance_routes_take_nothing_but_their_own_method() {
+        for (method, route) in [
+            (Method::GET, "/api/v1/repositories/demo/maintenance"),
+            (Method::GET, "/api/v1/repositories/demo/maintenance/preview"),
+            (Method::POST, "/api/v1/repositories/demo/groups"),
+        ] {
+            let response = request(ui(), method.clone(), route, "{}").await;
+            assert_eq!(
+                response.status(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{method} {route}"
+            );
+        }
     }
     #[tokio::test]
     async fn the_history_route_answers_one_page() {
