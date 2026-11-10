@@ -13,13 +13,14 @@ use rustic_core::{
 
 use super::convert::{
     JobError, backup_result, check_result, prune_options, prune_result, snapshot_id, snapshot_ref,
-    snapshot_result, snapshot_tags,
+    snapshot_tags,
 };
+use super::listing;
 use super::repository::{new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
     BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, PruneJobSpec,
-    RepositorySpec,
+    RepositorySpec, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
 
@@ -32,17 +33,16 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
 }
 
 /// Lists the repository's snapshots, newest first. A read: it emits `Started`
-/// after the open, as `identify` does, and then one final result.
+/// after the open, as `identify` does, then the listing as a series of
+/// `snapshots` events, then one final result that counts them (§4.1).
 pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
     ctx.start(None)?;
-    let mut snapshots: Vec<_> = repository
-        .get_all_snapshots()?
-        .iter()
-        .map(snapshot_result)
-        .collect::<Result<_, JobError>>()?;
-    snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
-    Ok(Done::Result(OpResult::Snapshots { snapshots }))
+    let snapshots = repository.get_all_snapshots()?;
+    let count = listing::send(&snapshots, |snapshots| {
+        ctx.events.emit(&WorkerEvent::Snapshots { snapshots })
+    })?;
+    Ok(Done::Result(OpResult::Snapshots { count }))
 }
 
 /// Removes exactly the snapshots the job names. Which snapshots those are

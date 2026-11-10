@@ -97,6 +97,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
     match kind {
         WarningKind::SourceUnreadable => "source-unreadable",
         WarningKind::Hook => "hook-warning",
+        WarningKind::MaintenancePartial => "maintenance-partial",
         WarningKind::Other => "unknown",
     }
 }
@@ -107,6 +108,7 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
     match text {
         "source-unreadable" => WarningKind::SourceUnreadable,
         "hook-warning" => WarningKind::Hook,
+        "maintenance-partial" => WarningKind::MaintenancePartial,
         _ => WarningKind::Other,
     }
 }
@@ -287,6 +289,20 @@ mod tests {
         ] {
             let text = kind_text(kind);
             assert_eq!(kind_from_text(text), Some(kind), "{text} reads back");
+        }
+    }
+
+    /// Every kind of warning round-trips, a partial maintenance run included.
+    #[test]
+    fn every_warning_kind_round_trips() {
+        for kind in [
+            WarningKind::SourceUnreadable,
+            WarningKind::Hook,
+            WarningKind::MaintenancePartial,
+            WarningKind::Other,
+        ] {
+            let text = warning_code_text(kind);
+            assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
         }
     }
 

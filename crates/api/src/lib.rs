@@ -118,6 +118,9 @@ pub enum ErrorCode {
 pub enum WarningCode {
     SourceUnreadable,
     HookWarning,
+    /// A forget or an adoption ended before its last engine job; the jobs
+    /// that finished stay done.
+    MaintenancePartial,
     #[serde(other)]
     Unknown,
 }
@@ -376,6 +379,23 @@ impl WarningCode {
                     optional: true,
                 },
             ],
+            Self::MaintenancePartial => &[
+                ArgSpec {
+                    name: "what",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "done",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "total",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
             Self::SourceUnreadable | Self::Unknown => &[],
         }
     }
@@ -394,6 +414,27 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WarningCode::SourceUnreadable).unwrap(),
             r#""source-unreadable""#
+        );
+    }
+
+    #[test]
+    fn a_partial_maintenance_run_has_its_own_code_and_declares_its_arguments() {
+        assert_eq!(
+            serde_json::to_string(&WarningCode::MaintenancePartial).unwrap(),
+            r#""maintenance-partial""#
+        );
+        let spec = |name, kind| ArgSpec {
+            name,
+            kind,
+            optional: false,
+        };
+        assert_eq!(
+            WarningCode::MaintenancePartial.args(),
+            &[
+                spec("what", ArgKind::Text),
+                spec("done", ArgKind::Count),
+                spec("total", ArgKind::Count),
+            ]
         );
     }
 
@@ -577,6 +618,10 @@ mod tests {
 /// capped (§13.5): a snapshot lists at most a handful of roots.
 pub const MAX_SNAPSHOT_PATHS: usize = 64;
 
+/// How many tags one listed snapshot may carry. An input-derived size,
+/// capped (§13.5) like the paths.
+pub const MAX_SNAPSHOT_TAGS: usize = 64;
+
 /// One snapshot of a repository's list, as the daemon tells the web UI:
 /// what a list view needs — id, when it was taken (RFC 3339), which host,
 /// its label, tags and paths.
@@ -591,15 +636,26 @@ pub struct SnapshotDto {
     pub label: String,
     pub tags: Vec<String>,
     pub paths: Vec<String>,
+    /// The snapshot has more paths than `paths` lists, or one of them is cut
+    /// short: a list shows at most [`MAX_SNAPSHOT_PATHS`] of them, each of a
+    /// bounded length, and says so here instead of leaving them out silently.
+    #[serde(default)]
+    pub paths_truncated: bool,
+    /// The same for `tags`, which a list shows at most [`MAX_SNAPSHOT_TAGS`]
+    /// of.
+    #[serde(default)]
+    pub tags_truncated: bool,
 }
 
 /// Why a snapshot DTO can't be: an ID that isn't 64 hex digits, a time that
-/// isn't RFC 3339, or more paths than [`MAX_SNAPSHOT_PATHS`].
+/// isn't RFC 3339, or more paths than [`MAX_SNAPSHOT_PATHS`] or tags than
+/// [`MAX_SNAPSHOT_TAGS`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvalidSnapshot {
     Id,
     Time,
     Paths,
+    Tags,
 }
 
 impl std::fmt::Display for InvalidSnapshot {
@@ -613,7 +669,10 @@ impl std::error::Error for InvalidSnapshot {}
 impl SnapshotDto {
     /// Builds the DTO from what the engine reported, refusing an ID that
     /// isn't 64 hex digits, a time that isn't RFC 3339, and more paths than
-    /// [`MAX_SNAPSHOT_PATHS`] (an input-derived size, capped).
+    /// [`MAX_SNAPSHOT_PATHS`] or tags than [`MAX_SNAPSHOT_TAGS`] (input-derived
+    /// sizes, capped). The truncation flags start false: the engine's list
+    /// says which snapshots it cut, and [`SnapshotDto::truncated`] carries that
+    /// over.
     pub fn new(
         id: String,
         time: String,
@@ -631,6 +690,9 @@ impl SnapshotDto {
         if paths.len() > MAX_SNAPSHOT_PATHS {
             return Err(InvalidSnapshot::Paths);
         }
+        if tags.len() > MAX_SNAPSHOT_TAGS {
+            return Err(InvalidSnapshot::Tags);
+        }
         Ok(Self {
             id,
             time,
@@ -638,7 +700,18 @@ impl SnapshotDto {
             label,
             tags,
             paths,
+            paths_truncated: false,
+            tags_truncated: false,
         })
+    }
+
+    /// The snapshot with what the engine reported it cut: some of its paths,
+    /// some of its tags.
+    #[must_use]
+    pub fn truncated(mut self, paths: bool, tags: bool) -> Self {
+        self.paths_truncated = paths;
+        self.tags_truncated = tags;
+        self
     }
 }
 /// One live update the daemon pushes to a connected page over the events
@@ -689,7 +762,7 @@ pub enum UiEvent {
 
 #[cfg(test)]
 mod snapshot_tests {
-    use super::{InvalidSnapshot, MAX_SNAPSHOT_PATHS, SnapshotDto};
+    use super::{InvalidSnapshot, MAX_SNAPSHOT_PATHS, MAX_SNAPSHOT_TAGS, SnapshotDto};
 
     fn dto() -> SnapshotDto {
         SnapshotDto {
@@ -699,6 +772,8 @@ mod snapshot_tests {
             label: "home".to_owned(),
             tags: vec!["ladderback-plan:demo-home".to_owned()],
             paths: vec!["/home/demo".to_owned()],
+            paths_truncated: false,
+            tags_truncated: false,
         }
     }
 
@@ -749,6 +824,41 @@ mod snapshot_tests {
             ),
             Err(InvalidSnapshot::Time)
         );
+    }
+
+    #[test]
+    fn a_snapshot_that_lost_paths_or_tags_says_which() {
+        let truncated = dto().truncated(true, false);
+        assert!(truncated.paths_truncated && !truncated.tags_truncated);
+        let truncated = dto().truncated(false, true);
+        assert!(!truncated.paths_truncated && truncated.tags_truncated);
+        let json = serde_json::to_string(&dto().truncated(true, true)).unwrap();
+        assert!(json.contains(r#""paths_truncated":true"#), "{json}");
+        assert!(json.contains(r#""tags_truncated":true"#), "{json}");
+    }
+
+    #[test]
+    fn a_snapshot_from_a_daemon_that_never_said_is_not_truncated() {
+        let json = r#"{"id":"abababababababababababababababababababababababababababababababab","time":"2026-11-09T10:15:00Z","hostname":"h","label":"","tags":[],"paths":[]}"#;
+        let dto: SnapshotDto = serde_json::from_str(json).unwrap();
+        assert!(!dto.paths_truncated && !dto.tags_truncated);
+    }
+
+    #[test]
+    fn tags_beyond_the_cap_are_refused_and_the_cap_itself_is_taken() {
+        let dto = dto();
+        let build = |tags: usize| {
+            SnapshotDto::new(
+                dto.id.clone(),
+                dto.time.clone(),
+                dto.hostname.clone(),
+                dto.label.clone(),
+                vec!["tag".to_owned(); tags],
+                dto.paths.clone(),
+            )
+        };
+        assert_eq!(build(MAX_SNAPSHOT_TAGS + 1), Err(InvalidSnapshot::Tags));
+        assert!(build(MAX_SNAPSHOT_TAGS).is_ok());
     }
 
     #[test]

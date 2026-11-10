@@ -120,6 +120,10 @@ pub enum WarningKind {
     /// A hook command around the operation failed where its `on-failure`
     /// says to go on: the operation carries it as a warning.
     Hook,
+    /// A forget or an adoption that ran as several engine jobs ended before
+    /// the last: the jobs that finished stay done. `during` says which
+    /// (`forget` or `adopt`) and `detail` is `<done>/<total>` snapshots.
+    MaintenancePartial,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }

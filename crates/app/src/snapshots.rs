@@ -151,6 +151,8 @@ mod tests {
             label: label.to_owned(),
             tags: Vec::new(),
             paths: vec!["/home/demo".to_owned()],
+            paths_truncated: false,
+            tags_truncated: false,
         }
     }
 

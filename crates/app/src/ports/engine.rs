@@ -241,6 +241,13 @@ pub struct CheckJob {
     pub read_data: bool,
 }
 
+/// The most snapshot IDs one `Forget` or `Rewrite` job may name. A job's
+/// spec travels to the worker as one message under a cap of 1 MiB, and an ID
+/// takes about 70 bytes of it, so a run that must name more is split into
+/// several jobs of at most this many. An engine refuses a job that names
+/// more.
+pub const MAX_JOB_IDS: usize = 5_000;
+
 /// Remove exactly `ids` from the repository: the snapshots a forget run's
 /// selection named (I6 — the selection is the owner's own decision, made
 /// before the job runs).
@@ -418,6 +425,12 @@ pub struct SnapshotSummary {
     pub tags: Vec<String>,
     /// The snapshot's paths, capped (an input-derived size).
     pub paths: Vec<String>,
+    /// The snapshot has more paths than `paths` holds, or one of them was
+    /// cut short.
+    pub paths_truncated: bool,
+    /// The snapshot has more tags than `tags` holds, or one of them was cut
+    /// short.
+    pub tags_truncated: bool,
 }
 
 #[cfg(test)]

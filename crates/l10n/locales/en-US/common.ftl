@@ -190,6 +190,15 @@ warning-hook-warning = { $exit_code ->
    *[other] A { $phase } hook command around the operation failed with exit status { $exit_code }, so { -brand-name } went on without it: { $detail }. Check the hook's command, or set its `on-failure` to `error` to stop the operation when it fails.
   }
 
+# A forget or an adoption ran as several jobs and ended before the last. The jobs that finished stay done.
+# $what (text): which one it was: forget or adopt.
+# $done (count): how many snapshots the finished jobs handled.
+# $total (count): how many snapshots the whole run was to handle.
+warning-maintenance-partial = { $what ->
+    [adopt] The adoption stopped after { $done } of { $total } snapshots. Those stay adopted. Adopt again to take in the rest.
+   *[other] The forget stopped after { $done } of { $total } snapshots. Those stay forgotten. Run it again to forget the rest.
+  }
+
 # A warning this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.

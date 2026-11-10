@@ -11,7 +11,7 @@
 //! selected snapshots. Untagged and orphaned history is never named.
 
 use std::future::Future;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 
 use domain::maintenance::{
@@ -22,19 +22,19 @@ use domain::{
     AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
 };
 use futures::StreamExt;
-use futures::future::FutureExt;
+use futures::future::{FusedFuture, FutureExt};
 use futures::select_biased;
 
 use crate::execution::Finished;
 use crate::ports::{
     CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetJob, Job,
-    NormalizeSources, OperationStore, PruneJob, RepositoryAccess, Retention, RetentionError,
-    RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start, StoreError,
+    MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob, RepositoryAccess, Retention,
+    RetentionError, RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{FailureReason, Operation, Trigger};
+use domain::execution::{FailureReason, Operation, Trigger, Warning, WarningKind};
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
 /// just under the weekly interval a prune is expected to run on (§7.3).
@@ -46,6 +46,11 @@ pub fn default_keep_delete() -> KeepDelete {
     KeepDelete::new(SignedDuration::from_hours(24 * 6))
         .expect("six days is never shorter than rustic's own minimum")
 }
+
+/// How long `prepare` waits for each of its reads (the repository's ID, its
+/// snapshot list) before it gives up. A repository that never answers would
+/// otherwise hold the caller's request open for ever.
+pub const READ_TIMEOUT: SignedDuration = SignedDuration::from_mins(10);
 
 /// Which maintenance operation to run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +102,10 @@ pub enum MaintenanceError {
     },
     /// The listing or the identify failed.
     Failed(FailureReason),
+    /// A read of the repository (its ID, its snapshot list) was not answered
+    /// within [`READ_TIMEOUT`]. Nothing was stored and the engine was
+    /// stopped.
+    TimedOut,
     /// A plan's policy is set and would keep nothing: the run is refused
     /// before anything is removed, and the plan is named.
     KeepsNothing {
@@ -218,12 +227,24 @@ impl RunMaintenance {
         // The repository's ID names it in the log, which is what I7 holds
         // it by. A read reports it; nothing else runs before the slot is
         // taken.
-        let id = identify(self.engine.as_ref(), op, access.clone()).await?;
+        let id = identify(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            access.clone(),
+        )
+        .await?;
         access.id = Some(id);
 
         let (partition, job) = match kind {
             MaintenanceKind::Forget => {
-                let listed = list(self.engine.as_ref(), op, access.clone()).await?;
+                let listed = list(
+                    self.engine.as_ref(),
+                    self.clock.as_ref(),
+                    op,
+                    access.clone(),
+                )
+                .await?;
                 let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
                 let plans = plans_of(&config, alias);
                 let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
@@ -277,7 +298,13 @@ impl RunMaintenance {
                         plan: adoption.into.clone(),
                     });
                 }
-                let listed = list(self.engine.as_ref(), op, access.clone()).await?;
+                let listed = list(
+                    self.engine.as_ref(),
+                    self.clock.as_ref(),
+                    op,
+                    access.clone(),
+                )
+                .await?;
                 let snapshots: Vec<Snapshot> = listed.iter().map(selected).collect();
                 let managed = plans_of(&config, alias);
                 let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
@@ -384,6 +411,14 @@ impl RunMaintenance {
     /// Runs the prepared job to its end, playing the engine's events into
     /// the operation, and records the outcome. The operation is already
     /// running, so the engine's own `Started` changes nothing.
+    ///
+    /// A forget or rewrite that names more snapshots than one engine job
+    /// takes ([`MAX_JOB_IDS`]) runs as several jobs one after the other, as
+    /// one operation with one summary. Each job removes or rewrites only
+    /// snapshots the selection named, so a run that ends partway (a failure,
+    /// a cancel) leaves the earlier jobs' work done and the rest untouched;
+    /// the operation says so in a warning, and a later run selects what is
+    /// left.
     pub async fn execute(
         &self,
         prepared: PreparedMaintenance,
@@ -396,39 +431,94 @@ impl RunMaintenance {
         } = prepared;
         let mut result = None;
         let mut recording_errors = Vec::new();
+        let mut cancel = pin!(cancel.fuse());
+        let jobs = split(job);
+        let total: usize = jobs.iter().map(names).sum();
+        let last = jobs.len().saturating_sub(1);
+        // What the jobs finished so far reported, merged into one.
+        let mut done: Option<EngineResult> = None;
+        for (index, job) in jobs.into_iter().enumerate() {
+            // A cancel that came while the last job was finishing is seen
+            // before another worker is started.
+            if index > 0 && futures::poll!(cancel.as_mut()).is_ready() {
+                note_partial(&mut operation, done.as_ref(), total);
+                let _ = operation.cancel(self.clock.now());
+                break;
+            }
+            let running = match self.engine.run(operation.id(), job).await {
+                Ok(running) => running,
+                Err(error) => {
+                    let reason = match error {
+                        EngineError::Unavailable { detail } => {
+                            FailureReason::EngineUnavailable { detail }
+                        }
+                        EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
+                    };
+                    note_partial(&mut operation, done.as_ref(), total);
+                    let _ = operation.fail(reason, self.clock.now());
+                    break;
+                }
+            };
+            match self
+                .play(
+                    &mut operation,
+                    running,
+                    cancel.as_mut(),
+                    done.as_ref(),
+                    total,
+                )
+                .await
+            {
+                Played::Reported(reported) => {
+                    let merged = merge(done.take(), reported);
+                    if index == last {
+                        if operation.succeed(self.clock.now()).is_ok() {
+                            result = Some(merged);
+                        }
+                        break;
+                    }
+                    done = Some(merged);
+                }
+                Played::Ended => break,
+            }
+        }
+        self.record(&operation, &result, &mut recording_errors)
+            .await;
+        Finished {
+            operation,
+            result,
+            recording_errors,
+        }
+    }
+
+    /// Plays one engine job's events into the operation until it reports a
+    /// result (the operation is left running for the caller to settle) or
+    /// the operation ends: failed, or cancelled. `done` is what the jobs
+    /// before this one finished, and `total` how many snapshots the whole
+    /// run names.
+    async fn play(
+        &self,
+        operation: &mut Operation,
+        running: RunningJob,
+        mut cancel: Pin<&mut (impl FusedFuture<Output = ()> + Send)>,
+        done: Option<&EngineResult>,
+        total: usize,
+    ) -> Played {
         let RunningJob {
             events,
             mut control,
-        } = match self.engine.run(operation.id(), job).await {
-            Ok(running) => running,
-            Err(error) => {
-                let reason = match error {
-                    EngineError::Unavailable { detail } => {
-                        FailureReason::EngineUnavailable { detail }
-                    }
-                    EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
-                };
-                let _ = operation.fail(reason, self.clock.now());
-                self.record(&operation, &result, &mut recording_errors)
-                    .await;
-                return Finished {
-                    operation,
-                    result,
-                    recording_errors,
-                };
-            }
-        };
-        let mut cancel = pin!(cancel.fuse());
+        } = running;
         let mut events = events.fuse();
         loop {
             select_biased! {
                 event = events.next() => {
                     let Some(event) = event else {
+                        note_partial(operation, done, total);
                         let _ = operation.fail(
                             FailureReason::EngineExited { exit_code: None },
                             self.clock.now(),
                         );
-                        break;
+                        return Played::Ended;
                     };
                     match event {
                         // The operation started before the engine did; its
@@ -440,31 +530,21 @@ impl RunMaintenance {
                         EngineEvent::Warning(warning) => {
                             let _ = operation.record_warning(warning);
                         }
-                        EngineEvent::Succeeded(reported) => {
-                            if operation.succeed(self.clock.now()).is_ok() {
-                                result = Some(reported);
-                            }
-                            break;
-                        }
+                        EngineEvent::Succeeded(reported) => return Played::Reported(reported),
                         EngineEvent::Failed(reason) => {
+                            note_partial(operation, done, total);
                             let _ = operation.fail(reason, self.clock.now());
-                            break;
+                            return Played::Ended;
                         }
                     }
                 }
                 () = cancel => {
                     control.stop().await;
+                    note_partial(operation, done, total);
                     let _ = operation.cancel(self.clock.now());
-                    break;
+                    return Played::Ended;
                 }
             }
-        }
-        self.record(&operation, &result, &mut recording_errors)
-            .await;
-        Finished {
-            operation,
-            result,
-            recording_errors,
         }
     }
 
@@ -480,6 +560,94 @@ impl RunMaintenance {
             recording_errors.push(error);
         }
     }
+}
+
+/// How one engine job ended, as `execute` plays it.
+enum Played {
+    /// The job reported this result; the operation is still running.
+    Reported(EngineResult),
+    /// The operation ended: failed, or cancelled.
+    Ended,
+}
+
+/// The job as the engine jobs that do it: a forget or rewrite is cut into
+/// jobs of at most [`MAX_JOB_IDS`] snapshots each, in order (one job when they
+/// all fit, and one naming none stays that one); any other job stays whole.
+fn split(job: Job) -> Vec<Job> {
+    match job {
+        Job::Forget(job) => chunks(&job.ids)
+            .map(|ids| {
+                Job::Forget(ForgetJob {
+                    repository: job.repository.clone(),
+                    ids: ids.to_vec(),
+                })
+            })
+            .collect(),
+        Job::Rewrite(job) => chunks(&job.ids)
+            .map(|ids| {
+                Job::Rewrite(RewriteJob {
+                    repository: job.repository.clone(),
+                    ids: ids.to_vec(),
+                    tags: job.tags.clone(),
+                })
+            })
+            .collect(),
+        job => vec![job],
+    }
+}
+
+/// `ids` in consecutive parts of at most [`MAX_JOB_IDS`]; no ids make one
+/// empty part, so a job is never lost.
+fn chunks(ids: &[SnapshotId]) -> impl Iterator<Item = &[SnapshotId]> {
+    (0..ids.len().max(1)).step_by(MAX_JOB_IDS).map(|start| {
+        ids.get(start..ids.len().min(start + MAX_JOB_IDS))
+            .unwrap_or_default()
+    })
+}
+
+/// The result of the jobs so far with the next one's added: the snapshots
+/// removed or created, in order. Any other result stands alone.
+fn merge(done: Option<EngineResult>, next: EngineResult) -> EngineResult {
+    match (done, next) {
+        (Some(EngineResult::Forget(mut all)), EngineResult::Forget(next)) => {
+            all.removed.extend(next.removed);
+            EngineResult::Forget(all)
+        }
+        (Some(EngineResult::Rewrite(mut all)), EngineResult::Rewrite(next)) => {
+            all.created.extend(next.created);
+            EngineResult::Rewrite(all)
+        }
+        (_, next) => next,
+    }
+}
+
+/// How many snapshots a job names; none for a job that names none.
+fn names(job: &Job) -> usize {
+    match job {
+        Job::Forget(job) => job.ids.len(),
+        Job::Rewrite(job) => job.ids.len(),
+        _ => 0,
+    }
+}
+
+/// Warns that the run ends with some of its jobs already done, which stay
+/// done. Called before the operation ends, while it can still take a
+/// warning. The warning carries no English (§8.4): `during` is `forget` or
+/// `adopt` and `detail` is `<done>/<total>`, how many snapshots the finished
+/// jobs handled of how many the run names, which are the arguments of
+/// `WarningCode::MaintenancePartial`.
+fn note_partial(operation: &mut Operation, done: Option<&EngineResult>, total: usize) {
+    let (during, handled) = match done {
+        Some(EngineResult::Forget(done)) => ("forget", done.removed.len()),
+        Some(EngineResult::Rewrite(done)) => ("adopt", done.created.len()),
+        _ => return,
+    };
+    let _ = operation.record_warning(Warning {
+        kind: WarningKind::MaintenancePartial,
+        item: None,
+        during: during.to_owned(),
+        detail: format!("{handled}/{total}"),
+    });
 }
 
 /// The plans of `config` that back up the repository `alias`, with their
@@ -512,10 +680,11 @@ fn selected(summary: &SnapshotSummary) -> Snapshot {
 /// log row, no slot.
 async fn identify(
     engine: &dyn Engine,
+    clock: &dyn Clock,
     op: OperationId,
     access: RepositoryAccess,
 ) -> Result<RepositoryId, MaintenanceError> {
-    match run_read(engine, op, Job::Identify(access)).await? {
+    match run_read(engine, clock, op, Job::Identify(access)).await? {
         EngineResult::Repository { id } => Ok(id),
         _ => Err(MaintenanceError::Failed(FailureReason::EngineExited {
             exit_code: None,
@@ -526,10 +695,11 @@ async fn identify(
 /// Lists the repository's snapshots, as a read.
 async fn list(
     engine: &dyn Engine,
+    clock: &dyn Clock,
     op: OperationId,
     access: RepositoryAccess,
 ) -> Result<Vec<SnapshotSummary>, MaintenanceError> {
-    match run_read(engine, op, Job::Ls(access)).await? {
+    match run_read(engine, clock, op, Job::Ls(access)).await? {
         EngineResult::Snapshots(snapshots) => Ok(snapshots),
         _ => Err(MaintenanceError::Failed(FailureReason::EngineExited {
             exit_code: None,
@@ -537,24 +707,35 @@ async fn list(
     }
 }
 
-/// Runs a read-only job to its end and reports its result.
+/// Runs a read-only job to its end and reports its result. A read not
+/// answered within [`READ_TIMEOUT`] is given up: dropping the job stops the
+/// engine.
 async fn run_read(
     engine: &dyn Engine,
+    clock: &dyn Clock,
     op: OperationId,
     job: Job,
 ) -> Result<EngineResult, MaintenanceError> {
-    let RunningJob { events, .. } = engine.run(op, job).await.map_err(engine_error)?;
-    let mut events = events.fuse();
-    while let Some(event) = events.next().await {
-        match event {
-            EngineEvent::Succeeded(result) => return Ok(result),
-            EngineEvent::Failed(reason) => return Err(MaintenanceError::Failed(reason)),
-            _ => {}
+    let read = async {
+        let RunningJob { events, .. } = engine.run(op, job).await.map_err(engine_error)?;
+        let mut events = events.fuse();
+        while let Some(event) = events.next().await {
+            match event {
+                EngineEvent::Succeeded(result) => return Ok(result),
+                EngineEvent::Failed(reason) => return Err(MaintenanceError::Failed(reason)),
+                _ => {}
+            }
         }
+        Err(MaintenanceError::Failed(FailureReason::EngineExited {
+            exit_code: None,
+        }))
+    };
+    let give_up = clock.sleep_until(clock.now() + READ_TIMEOUT);
+    // The read first: one that is ready is never lost to a timer.
+    select_biased! {
+        result = pin!(read.fuse()) => result,
+        () = pin!(give_up.fuse()) => Err(MaintenanceError::TimedOut),
     }
-    Err(MaintenanceError::Failed(FailureReason::EngineExited {
-        exit_code: None,
-    }))
 }
 
 fn engine_error(error: EngineError) -> MaintenanceError {
@@ -581,6 +762,230 @@ fn retention_failed(error: RetentionError) -> MaintenanceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    use domain::secrets::SecretValue;
+    use domain::{AgentId, Timestamp, Uuid};
+
+    use crate::ports::{ForgetSummary, RewriteSummary};
+
+    fn access() -> RepositoryAccess {
+        RepositoryAccess {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo-password"),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+        }
+    }
+
+    fn ids(count: usize) -> Vec<SnapshotId> {
+        (0..count)
+            .map(|n| SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"))
+            .collect()
+    }
+
+    fn forget(count: usize) -> Job {
+        Job::Forget(ForgetJob {
+            repository: access(),
+            ids: ids(count),
+        })
+    }
+
+    fn sizes(jobs: &[Job]) -> Vec<usize> {
+        jobs.iter()
+            .map(|job| match job {
+                Job::Forget(job) => job.ids.len(),
+                Job::Rewrite(job) => job.ids.len(),
+                _ => 0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_forget_at_the_limit_of_one_job_stays_one_job() {
+        assert_eq!(sizes(&split(forget(MAX_JOB_IDS))), [MAX_JOB_IDS]);
+        assert_eq!(sizes(&split(forget(1))), [1]);
+    }
+
+    #[test]
+    fn a_forget_naming_no_snapshot_still_runs_as_one_job() {
+        assert_eq!(sizes(&split(forget(0))), [0]);
+    }
+
+    #[test]
+    fn a_forget_one_past_the_limit_runs_as_two_jobs_in_order() {
+        let jobs = split(forget(MAX_JOB_IDS + 1));
+        assert_eq!(sizes(&jobs), [MAX_JOB_IDS, 1]);
+        let named: Vec<SnapshotId> = jobs
+            .iter()
+            .flat_map(|job| match job {
+                Job::Forget(job) => job.ids.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(named, ids(MAX_JOB_IDS + 1), "every one once, in order");
+    }
+
+    #[test]
+    fn a_rewrite_past_the_limit_splits_with_the_same_tags_in_each_job() {
+        let tags = PlanTags::new(
+            PlanId::parse("home").expect("a plan ID"),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+        );
+        let jobs = split(Job::Rewrite(RewriteJob {
+            repository: access(),
+            ids: ids(2 * MAX_JOB_IDS + 3),
+            tags: tags.clone(),
+        }));
+        assert_eq!(sizes(&jobs), [MAX_JOB_IDS, MAX_JOB_IDS, 3]);
+        assert!(
+            jobs.iter()
+                .all(|job| matches!(job, Job::Rewrite(job) if job.tags == tags))
+        );
+    }
+
+    #[test]
+    fn a_rewrite_splits_at_the_same_limit_as_a_forget() {
+        let tags = PlanTags::new(
+            PlanId::parse("home").expect("a plan ID"),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+        );
+        let rewrite = |count: usize| {
+            Job::Rewrite(RewriteJob {
+                repository: access(),
+                ids: ids(count),
+                tags: tags.clone(),
+            })
+        };
+        assert_eq!(sizes(&split(rewrite(MAX_JOB_IDS))), [MAX_JOB_IDS]);
+        assert_eq!(sizes(&split(rewrite(MAX_JOB_IDS + 1))), [MAX_JOB_IDS, 1]);
+        assert_eq!(sizes(&split(rewrite(0))), [0]);
+    }
+
+    fn running() -> Operation {
+        let mut operation = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            domain::execution::OperationKind::Forget,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        operation
+            .start(Timestamp::UNIX_EPOCH)
+            .expect("a queued operation starts");
+        operation
+    }
+
+    #[test]
+    fn a_run_that_ends_after_some_jobs_says_how_many_snapshots_they_did() {
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let mut forgot = running();
+        note_partial(&mut forgot, Some(&removed(&repository, ids(3))), 12);
+        let [warning] = forgot.warnings() else {
+            panic!("one warning: {:?}", forgot.warnings());
+        };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
+        assert_eq!(warning.during, "forget");
+        assert_eq!(warning.detail, "3/12");
+        let mut adopted = running();
+        let created = EngineResult::Rewrite(RewriteSummary {
+            repository,
+            created: ids(2),
+        });
+        note_partial(&mut adopted, Some(&created), 7);
+        let [warning] = adopted.warnings() else {
+            panic!("one warning: {:?}", adopted.warnings());
+        };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
+        assert_eq!(warning.during, "adopt");
+        assert_eq!(warning.detail, "2/7");
+    }
+
+    #[test]
+    fn a_run_that_ends_before_any_job_finished_has_nothing_to_say() {
+        let mut operation = running();
+        note_partial(&mut operation, None, 12);
+        assert!(operation.warnings().is_empty());
+    }
+
+    #[test]
+    fn a_job_names_the_snapshots_it_acts_on_and_a_prune_names_none() {
+        let tags = PlanTags::new(
+            PlanId::parse("home").expect("a plan ID"),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+        );
+        assert_eq!(names(&forget(3)), 3);
+        assert_eq!(
+            names(&Job::Rewrite(RewriteJob {
+                repository: access(),
+                ids: ids(4),
+                tags,
+            })),
+            4
+        );
+        assert_eq!(
+            names(&Job::Prune(PruneJob {
+                repository: access(),
+                keep_delete: default_keep_delete(),
+            })),
+            0
+        );
+    }
+
+    #[test]
+    fn a_job_that_names_no_snapshots_is_never_split() {
+        let prune = Job::Prune(PruneJob {
+            repository: access(),
+            keep_delete: default_keep_delete(),
+        });
+        assert_eq!(split(prune.clone()), [prune]);
+    }
+
+    fn removed(repository: &RepositoryId, ids: Vec<SnapshotId>) -> EngineResult {
+        EngineResult::Forget(ForgetSummary {
+            repository: repository.clone(),
+            removed: ids,
+        })
+    }
+
+    #[test]
+    fn the_results_of_several_forget_jobs_merge_in_order() {
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let all = ids(4);
+        let first = removed(&repository, all[..3].to_vec());
+        let second = removed(&repository, all[3..].to_vec());
+        assert_eq!(merge(Some(first), second), removed(&repository, all));
+    }
+
+    #[test]
+    fn the_results_of_several_rewrite_jobs_merge_in_order() {
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let all = ids(4);
+        let created = |ids: Vec<SnapshotId>| {
+            EngineResult::Rewrite(RewriteSummary {
+                repository: repository.clone(),
+                created: ids,
+            })
+        };
+        assert_eq!(
+            merge(Some(created(all[..1].to_vec())), created(all[1..].to_vec())),
+            created(all)
+        );
+    }
+
+    #[test]
+    fn the_first_result_stands_alone() {
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let only = removed(&repository, ids(2));
+        assert_eq!(merge(None, only.clone()), only);
+    }
 
     #[test]
     fn a_manual_prune_keeps_packs_marked_for_six_days() {
@@ -589,5 +994,224 @@ mod tests {
             SignedDuration::from_hours(24 * 6),
             "just under the weekly prune interval (decision 9)"
         );
+    }
+}
+
+#[cfg(all(test, feature = "fakes"))]
+mod read_timeout_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use domain::secrets::SecretValue;
+    use domain::{OperationId, SignedDuration, Timestamp, Uuid};
+    use futures::StreamExt;
+    use futures::stream;
+
+    use super::{MaintenanceError, READ_TIMEOUT, run_read};
+    use crate::fakes::FakeClock;
+    use crate::ports::{Engine, EngineError, Job, JobControl, RepositoryAccess, RunningJob};
+
+    struct Nothing;
+
+    #[async_trait]
+    impl JobControl for Nothing {
+        async fn stop(&mut self) {}
+    }
+
+    /// An engine whose every job starts and then says nothing, as a
+    /// repository that never answers does.
+    struct Silent;
+
+    #[async_trait]
+    impl Engine for Silent {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Ok(RunningJob {
+                events: stream::pending().boxed(),
+                control: Box::new(Nothing),
+            })
+        }
+    }
+
+    fn access() -> RepositoryAccess {
+        RepositoryAccess {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo-password"),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_nobody_answers_is_given_up_exactly_when_the_timeout_ends() {
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let waiting = Arc::clone(&clock);
+        let read = tokio::spawn(async move {
+            run_read(
+                &Silent,
+                waiting.as_ref(),
+                OperationId::from_uuid(Uuid::from_u128(1)),
+                Job::Identify(access()),
+            )
+            .await
+        });
+        for _ in 0..200 {
+            if clock.sleepers() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(clock.sleepers(), 1, "the read set a timer");
+        clock.advance(READ_TIMEOUT - SignedDuration::from_secs(1));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!read.is_finished(), "a second before the timeout ends");
+        clock.advance(SignedDuration::from_secs(1));
+        let outcome = tokio::time::timeout(Duration::from_secs(5), read)
+            .await
+            .expect("the read ends when the timeout does")
+            .expect("the read task ran");
+        assert_eq!(outcome.unwrap_err(), MaintenanceError::TimedOut);
+    }
+}
+
+#[cfg(all(test, feature = "fakes"))]
+mod cancel_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use domain::execution::{OperationKind, OperationStatus, Target};
+    use domain::secrets::SecretValue;
+    use domain::{AgentId, OperationId, RepositoryId, SnapshotId, Timestamp, Uuid};
+    use futures::StreamExt;
+    use futures::stream;
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::{ForgetSummary, JobControl};
+
+    struct Nothing;
+
+    #[async_trait]
+    impl JobControl for Nothing {
+        async fn stop(&mut self) {}
+    }
+
+    /// An engine that finishes every forget job at once and counts them.
+    struct Counting(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Engine for Counting {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let Job::Forget(job) = job else {
+                return Err(EngineError::StartTimedOut);
+            };
+            let result = EngineResult::Forget(ForgetSummary {
+                repository: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
+                removed: job.ids,
+            });
+            Ok(RunningJob {
+                events: stream::iter([EngineEvent::Succeeded(result)]).boxed(),
+                control: Box::new(Nothing),
+            })
+        }
+    }
+
+    fn prepared(count: usize) -> PreparedMaintenance {
+        let mut operation = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            OperationKind::Forget,
+            Trigger::Manual,
+            Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        operation
+            .start(Timestamp::UNIX_EPOCH)
+            .expect("a queued operation starts");
+        PreparedMaintenance {
+            operation,
+            job: Job::Forget(ForgetJob {
+                repository: RepositoryAccess {
+                    repository: "/srv/demo/repo".to_owned(),
+                    repo_hot: None,
+                    password: SecretValue::new("demo-password"),
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                    secrets: Vec::new(),
+                    id: None,
+                },
+                ids: (0..count)
+                    .map(|n| SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"))
+                    .collect(),
+            }),
+            partition: None,
+        }
+    }
+
+    fn use_case(runs: &Arc<AtomicUsize>) -> RunMaintenance {
+        RunMaintenance::new(
+            Arc::new(Counting(Arc::clone(runs))),
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(InMemoryConfigStore::new()),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_cancel_that_is_already_there_when_a_job_ends_starts_no_further_job() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs)
+            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::ready(()))
+            .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
+        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        let [warning] = finished.operation.warnings() else {
+            panic!("one warning: {:?}", finished.operation.warnings());
+        };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
+        assert_eq!(warning.during, "forget");
+        assert_eq!(
+            warning.detail,
+            format!("{MAX_JOB_IDS}/{}", 2 * MAX_JOB_IDS + 1),
+            "the first job's snapshots of all the run names"
+        );
+        assert_eq!(finished.result, None);
+    }
+
+    #[tokio::test]
+    async fn without_a_cancel_every_job_runs_and_the_result_is_one() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs)
+            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::pending())
+            .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 3);
+        assert_eq!(finished.operation.status(), &OperationStatus::Succeeded);
+        let Some(EngineResult::Forget(summary)) = finished.result else {
+            panic!("one merged result");
+        };
+        assert_eq!(summary.removed.len(), 2 * MAX_JOB_IDS + 1);
     }
 }

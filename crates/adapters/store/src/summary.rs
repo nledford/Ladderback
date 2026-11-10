@@ -70,6 +70,10 @@ pub(crate) struct Snapshot {
     pub label: String,
     pub tags: Vec<String>,
     pub paths: Vec<String>,
+    #[serde(default)]
+    pub paths_truncated: bool,
+    #[serde(default)]
+    pub tags_truncated: bool,
 }
 
 impl From<&EngineResult> for Summary {
@@ -119,6 +123,8 @@ impl From<&EngineResult> for Summary {
                         label: s.label.clone(),
                         tags: s.tags.clone(),
                         paths: s.paths.clone(),
+                        paths_truncated: s.paths_truncated,
+                        tags_truncated: s.tags_truncated,
                     })
                     .collect(),
             },
@@ -196,6 +202,8 @@ impl From<Summary> for EngineResult {
                         label: s.label,
                         tags: s.tags,
                         paths: s.paths,
+                        paths_truncated: s.paths_truncated,
+                        tags_truncated: s.tags_truncated,
                     })
                     .collect(),
             ),
