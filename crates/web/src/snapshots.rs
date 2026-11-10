@@ -575,7 +575,7 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
         .collect_view();
     let more = wording::more(rows.more).map(|words| view! { <p>{page.words(&words)}</p> });
     view! {
-        <table>
+        <table class="snapshots">
             <caption class="text-muted">{caption}</caption>
             <thead>
                 <tr>

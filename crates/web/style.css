@@ -289,6 +289,19 @@ table {
   border-collapse: collapse;
 }
 
+/* The tables of snapshots have two columns, an ID and a time, in fixed shares
+   of the width. Automatic widths squeeze the ID's column to a letter or two
+   beside a time that can wrap, and split the header and the IDs in the middle
+   of a word though there is room. Shares that add up to the table's width
+   never overflow it, and a word breaks only when its share is too narrow. */
+table.snapshots {
+  table-layout: fixed;
+}
+
+table.snapshots th:first-child {
+  inline-size: 45%;
+}
+
 th,
 td {
   text-align: start;

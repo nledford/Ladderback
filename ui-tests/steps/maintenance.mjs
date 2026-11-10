@@ -204,6 +204,56 @@ When("I press Tab until focus is on the adoption button into the plan {string}",
   await tabUntilFocused(this, target, `the button that adopts history into the plan "${plan}"`);
 });
 
+// The button of a repository by the repository it picks. Its name is a
+// sentence of the catalog around the alias, so in a pseudolocale the alias is
+// what is left to find it by.
+When("I press Tab until focus is on the button of the repository {string}", async function (alias) {
+  const target = journey(this.page).byRole("button", { name: new RegExp(escape(alias)) });
+  await tabUntilFocused(this, target, `the button of the repository "${alias}"`);
+});
+
+// Every snapshot row of the page together, in whatever language it is in: the
+// headings that name the sections are the catalog's words then.
+Then("the page lists {int} snapshots", async function (count) {
+  const rows = this.page.getByRole("main").locator("tbody tr");
+  const end = Date.now() + LINE_PATIENCE_MS;
+  let found = -1;
+  while (Date.now() < end) {
+    found = await rows.count();
+    if (found === count) return;
+    await sleep(100);
+  }
+  assert.equal(found, count, "the snapshot rows of the page");
+});
+
+// A header or an ID that breaks in the middle of a word, with room beside it,
+// is a layout that squeezed its column. A table's words stay whole: each is
+// laid out on one line.
+Then("no word of a table is broken across lines", async function () {
+  const broken = await this.page.evaluate(async () => {
+    await document.fonts.ready;
+    // Let layout settle after injected styles.
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const found = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const cell = node.parentElement?.closest("th, td");
+      if (!cell || !cell.checkVisibility() || !node.textContent.trim()) continue;
+      for (const word of node.textContent.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        const lines = new Set(
+          [...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)),
+        );
+        if (lines.size > 1) found.push(`"${word[0]}" in <${cell.localName}> is broken across ${lines.size} lines`);
+      }
+    }
+    return found;
+  });
+  assert.deepEqual(broken, [], "words of tables broken across lines");
+});
+
 // The review opens once the preview has come back, and focus moves into it a
 // moment later.
 Then("the dialog {string} opens with focus inside it", async function (name) {

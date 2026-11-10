@@ -319,3 +319,66 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then the page shows the section heading "Orphaned history"
     And the main content shows the line "No plan of this agent could take this history, so it cannot be adopted."
+
+  Scenario Outline: The Snapshots page is in the language of the page, history of both kinds showing
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the plan "home" is now called "away"
+    When I open the address "/snapshots?locale=<locale>"
+    And I press Tab until focus is on the button of the repository "demo"
+    And I press Enter
+    Then the page lists 2 snapshots
+    And every visible text but the data of the tables and lists is transformed
+    And the page title is transformed
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |
+
+  Scenario: The Snapshots page reflows on a small screen
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the plan "home" is now called "away"
+    And a viewport of 320 by 256 pixels
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the section heading "Orphaned history"
+    And no word of a table is broken across lines
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+  Scenario: The history tables keep their words whole on a small screen, the review of a forget open
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And a viewport of 320 by 256 pixels
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And no word of a table is broken across lines
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+  Scenario: The Snapshots page reflows with larger text and wider spacing, a review open
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the reader increases the text spacing
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
