@@ -100,6 +100,24 @@ impl Said {
     }
 }
 
+/// A check of a log that captured nothing has looked at nothing, so it must
+/// fail, not pass: capture that is broken (another logger was installed
+/// first) would otherwise leave every check of the log green.
+#[test]
+fn a_check_of_a_log_that_captured_nothing_fails() {
+    let said = Said {
+        detail: "the connection to 127.0.0.1:9 was refused".to_owned(),
+        logged: Vec::new(),
+    };
+    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        said.assert_hides("CANARY");
+    }));
+    assert!(
+        checked.is_err(),
+        "a log with nothing in it passed the check"
+    );
+}
+
 /// Runs an Identify job that can only fail.
 async fn fails(access: RepositoryAccess) -> Said {
     capture_the_worker_log();

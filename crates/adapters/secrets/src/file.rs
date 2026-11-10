@@ -54,8 +54,13 @@ pub(crate) fn read(
     let value = decode(&source, &bytes, |text| read.extract(text))?;
     Ok(Resolved {
         value,
-        warnings: file_warning(path, metadata.permissions().mode(), credentials_directory)
-            .into_iter()
-            .collect(),
+        warnings: file_warning(
+            path,
+            metadata.permissions().mode(),
+            credentials_directory,
+            |path| Some(path.to_owned()),
+        )
+        .into_iter()
+        .collect(),
     })
 }

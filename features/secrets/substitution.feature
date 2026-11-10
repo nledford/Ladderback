@@ -358,6 +358,21 @@ Feature: Secret references in a repository's settings
       And the failure names the program "pass"
       And the problem is that it isn't text
 
+    Scenario Outline: A command that prints nothing gives no password
+      Given the command "pass show demo/repo" prints "<output>"
+      And the repository's password is printed by the command "pass show demo/repo"
+      When the repository is resolved
+      Then the resolution fails for the field "password"
+      And the failure names the program "pass"
+      And the problem is that it is missing
+
+      Examples:
+        | output |
+        |        |
+        | \\n    |
+        | \\r\\n |
+        | \\n\\n |
+
     Scenario: A command that prints more than the limit
       Given the command "pass show demo/repo" prints 65537 bytes of text
       And the repository's password is printed by the command "pass show demo/repo"
@@ -604,3 +619,27 @@ Feature: Secret references in a repository's settings
         | /run/credentials/demo.service | /run/secrets/../../home/demo/key |
         | /run/credentials/demo.service | /run/secretsdemo/token           |
         | /                             | /home/demo/token                 |
+
+    Scenario Outline: A link out of where the runtime sets permissions gives a warning
+      Given the environment variable "CREDENTIALS_DIRECTORY" is "/run/credentials/demo.service"
+      And the file "/home/demo/token" with mode 644 holds "demo-token"
+      And the file "<path>" is a link to "/home/demo/token"
+      And the option "token" is "${file:<path>}"
+      When the repository is resolved
+      Then the resolved option "token" is "demo-token"
+      And the resolution warns once that others can read the file "<path>"
+
+      Examples:
+        | path                                |
+        | /run/secrets/demo-token             |
+        | /var/run/secrets/demo-token         |
+        | /run/credentials/demo.service/token |
+
+    Scenario: A link that stays where the runtime sets permissions gives no warning
+      Given the environment variable "CREDENTIALS_DIRECTORY" is "/run/credentials/demo.service"
+      And the file "/run/credentials/demo.service/data/token" with mode 644 holds "demo-token"
+      And the file "/run/credentials/demo.service/token" is a link to "/run/credentials/demo.service/data/token"
+      And the option "token" is "${file:/run/credentials/demo.service/token}"
+      When the repository is resolved
+      Then the resolved option "token" is "demo-token"
+      And the resolution warns about nothing

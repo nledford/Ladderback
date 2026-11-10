@@ -108,6 +108,24 @@ pub(crate) async fn run(
     }
 }
 
+/// What stops a command that outlives its limit: tests replace both.
+#[cfg(test)]
+pub(crate) struct Stop<'a> {
+    /// How long a command that was signalled is waited for.
+    pub(crate) reap_limit: Duration,
+    /// Signals the process group with this id.
+    pub(crate) kill: &'a (dyn Fn(Pid) + Send + Sync),
+}
+
+#[cfg(test)]
+pub(crate) async fn run_with(
+    _command: &CommandLine,
+    _limit: Duration,
+    _stop: &Stop<'_>,
+) -> Result<SecretValue, SecretError> {
+    todo!()
+}
+
 /// The limit in whole seconds, rounded up, and at least one.
 pub(crate) fn whole_seconds_up(limit: Duration) -> u64 {
     limit

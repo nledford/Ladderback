@@ -14,12 +14,14 @@ use app::contract::secrets::SecretsHarness;
 use app::ports::{Resolved, SecretResolver};
 use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
-    SecretValue, SourceName,
+    SecretValue, SecretWarning, SourceName,
 };
+use nix::unistd::Pid;
 use tempfile::TempDir;
 
-use crate::SystemSecrets;
+use crate::command::{Stop, run_with};
 use crate::keyring_store::{Failure, KeyringStore, Memory};
+use crate::{FileReader, SystemSecrets};
 
 // ---------------------------------------------------------------- helpers
 
@@ -71,10 +73,23 @@ impl SecretsHarness for RealHarness {
 
     fn write_file(&self, name: &str, contents: &[u8], mode: u32) -> String {
         let path = self.path(name);
+        if let Some(directory) = Path::new(&path).parent() {
+            fs::create_dir_all(directory).unwrap();
+        }
         // A read-only file of that name goes first: a new one replaces it.
         let _ = fs::remove_file(&path);
         fs::write(&path, contents).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        path
+    }
+
+    fn link(&self, name: &str, target: &str) -> String {
+        let path = self.path(name);
+        if let Some(directory) = Path::new(&path).parent() {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let _ = fs::remove_file(&path);
+        std::os::unix::fs::symlink(target, &path).unwrap();
         path
     }
 
@@ -375,7 +390,7 @@ async fn a_command_gets_no_input() {
             CommandLine::new("cat", Vec::<String>::new()).unwrap(),
         ))
         .await;
-    assert_eq!(result, gives(""));
+    assert_eq!(result, Err(SecretError::missing(program("cat"))));
     assert!(started.elapsed() < Duration::from_secs(5));
 }
 
@@ -722,10 +737,34 @@ async fn a_keyring_secret_is_text_and_within_the_limit() {
     assert_eq!(read("limit").await, gives(&"x".repeat(MAX_SECRET_BYTES)));
 }
 
+/// Whether the OS keyring may be used: only when it is asked for, because it
+/// is the session's own store (an unlocked keychain, a Secret Service) and
+/// keeps what a test puts in it.
+fn os_keyring_enabled(_setting: Option<&std::ffi::OsStr>) -> bool {
+    todo!()
+}
+
+#[test]
+fn the_os_keyring_is_used_only_when_it_is_asked_for() {
+    use std::ffi::OsStr;
+    assert!(!os_keyring_enabled(None));
+    for setting in ["", "0", "true", "yes", "11", " 1"] {
+        assert!(
+            !os_keyring_enabled(Some(OsStr::new(setting))),
+            "{setting:?}"
+        );
+    }
+    assert!(os_keyring_enabled(Some(OsStr::new("1"))));
+}
+
 /// The real store of the session. It needs one (an unlocked keychain, a
-/// Secret Service), so it runs only when `LADDERBACK_TEST_OS_KEYRING=1`.
+/// Secret Service), so it runs only when `LADDERBACK_TEST_OS_KEYRING=1`, and
+/// touches nothing before that is checked.
 #[tokio::test]
 async fn the_os_keyring_keeps_and_gives_back_a_secret() {
+    if !os_keyring_enabled(std::env::var_os("LADDERBACK_TEST_OS_KEYRING").as_deref()) {
+        testkit::skip!("LADDERBACK_TEST_OS_KEYRING is not 1");
+    }
     let name = format!("probe-{}", std::process::id());
     let entry = KeyringEntry::parse(&format!("ladderback-test/{name}")).unwrap();
     let secret = SecretRef::Keyring(entry);
@@ -744,9 +783,6 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
         "{before:?}"
     );
 
-    if std::env::var_os("LADDERBACK_TEST_OS_KEYRING").is_none_or(|value| value != "1") {
-        testkit::skip!("LADDERBACK_TEST_OS_KEYRING is not 1");
-    }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let entry = keyring::Entry::new("ladderback-test", &name).unwrap();
@@ -764,4 +800,130 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     testkit::skip!("this platform has no OS keyring");
+}
+
+// A file read has the time limit a keyring read has.
+
+#[tokio::test]
+async fn a_file_that_cannot_be_read_in_time_is_timed_out() {
+    let (release, waiting) = std::sync::mpsc::channel::<()>();
+    let waiting = Mutex::new(waiting);
+    // A mount that has hung: the read doesn't come back until it is let go.
+    let hung: FileReader = Arc::new(move |path, _, _| {
+        let _ = waiting.lock().unwrap().recv();
+        Err(SecretError::missing(SourceName::File {
+            path: path.to_owned(),
+        }))
+    });
+    let started = Instant::now();
+    let result = resolver(Duration::from_millis(300))
+        .with_file_reader(hung)
+        .resolve(&file("/mnt/nas/secret"))
+        .await;
+    release.send(()).unwrap();
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: SourceName::File {
+                path: "/mnt/nas/secret".to_owned()
+            },
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "it waited {:?}",
+        started.elapsed()
+    );
+}
+
+// What stops a command that outlives its limit.
+
+/// A command no signal reaches, as one stuck in the kernel is: the limit ends
+/// the call, and what the call waits for after it is bounded too.
+#[tokio::test]
+async fn a_command_that_will_not_die_does_not_hold_the_resolver_up() {
+    let lost = |_: Pid| {};
+    let stop = Stop {
+        reap_limit: Duration::from_millis(300),
+        kill: &lost,
+    };
+    let started = Instant::now();
+    let sleeping = sh("exec sleep 60", Vec::<String>::new());
+    let running = run_with(&sleeping, Duration::from_millis(300), &stop);
+    let result = tokio::time::timeout(Duration::from_secs(10), running)
+        .await
+        .expect("the call waited for a command that cannot be killed");
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "it waited {:?}",
+        started.elapsed()
+    );
+}
+
+/// A process group is named by the process id of its leader, and that id is
+/// free for another process once the leader has been reaped.
+#[tokio::test]
+async fn the_group_is_signalled_once_and_only_while_its_leader_is_unreaped() {
+    use nix::sys::signal::{Signal, kill, killpg};
+    let leader_there = Mutex::new(Vec::new());
+    let signal = |group: Pid| {
+        // Signal 0 only asks whether the process is there, reaped or not.
+        leader_there.lock().unwrap().push(kill(group, None).is_ok());
+        let _ = killpg(group, Signal::SIGKILL);
+    };
+    let stop = Stop {
+        reap_limit: Duration::from_secs(5),
+        kill: &signal,
+    };
+    let result = run_with(
+        &sh("sleep 60", Vec::<String>::new()),
+        Duration::from_millis(300),
+        &stop,
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+    assert_eq!(*leader_there.lock().unwrap(), [true]);
+}
+
+// Where a file really is decides whose permissions it has.
+
+#[tokio::test]
+async fn a_link_out_of_the_credentials_directory_is_warned_about() {
+    use std::os::unix::fs::symlink;
+    let scratch = TempDir::new().unwrap();
+    let credentials = scratch.path().join("credentials");
+    let outside = scratch.path().join("outside");
+    fs::create_dir_all(&credentials).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    let secret = outside.join("secret");
+    fs::write(&secret, "hunter2\n").unwrap();
+    fs::set_permissions(&secret, fs::Permissions::from_mode(0o644)).unwrap();
+    // A relative link to the file, and a link to the directory it is in.
+    symlink("../outside/secret", credentials.join("token")).unwrap();
+    symlink("../outside", credentials.join("folder")).unwrap();
+    let secrets = resolver(Duration::from_secs(5))
+        .with_environment([("CREDENTIALS_DIRECTORY", credentials.display().to_string())]);
+    for name in ["token", "folder/secret"] {
+        let path = credentials.join(name).display().to_string();
+        let resolved = secrets.resolve(&file(&path)).await.unwrap();
+        assert_eq!(
+            resolved.warnings,
+            [SecretWarning::FileReadableByOthers { path }],
+            "{name}"
+        );
+    }
 }

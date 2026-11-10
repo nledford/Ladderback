@@ -20,8 +20,14 @@ pub trait SecretsHarness: Send + Sync {
     fn set_env(&self, name: &str, value: &str);
 
     /// Writes a file with Unix permission bits `mode`, replacing any file of
-    /// that name, and returns its absolute path.
+    /// that name, and returns its absolute path. `name` may include a
+    /// directory (`credentials/token`), which is created.
     fn write_file(&self, name: &str, contents: &[u8], mode: u32) -> String;
+
+    /// A symbolic link named `name`, where `write_file` would put a file of
+    /// that name, that leads to `target`, the path of a file `write_file`
+    /// wrote. Returns the link's absolute path.
+    fn link(&self, name: &str, target: &str) -> String;
 
     /// An absolute path with nothing at it, in a directory that exists.
     fn missing_file(&self) -> String;
@@ -60,8 +66,11 @@ pub async fn run(harness: &dyn SecretsHarness) {
     a_secret_may_be_as_large_as_the_limit_and_no_larger(harness).await;
     a_file_others_can_read_comes_with_a_warning(harness).await;
     the_credentials_directory_is_trusted(harness).await;
+    a_link_out_of_the_credentials_directory_is_not_trusted(harness).await;
     a_command_gives_the_first_line_of_its_output(harness).await;
+    a_command_that_prints_nothing_is_missing(harness).await;
     a_command_that_fails_is_told_by_its_status_and_its_stderr(harness).await;
+    a_failed_command_that_quotes_what_it_printed_has_it_masked(harness).await;
     a_command_that_cannot_be_started_is_unreachable(harness).await;
     a_command_that_takes_too_long_is_timed_out(harness).await;
     a_keyring_gives_the_secret_of_an_entry(harness).await;
@@ -311,18 +320,59 @@ async fn the_credentials_directory_is_trusted(harness: &dyn SecretsHarness) {
     harness.set_env("CREDENTIALS_DIRECTORY", "");
 }
 
+/// What systemd and the container runtimes put in a directory is theirs, but
+/// a link there to a file they didn't make is not: where a file really is
+/// decides whose permissions it has (§10.2).
+async fn a_link_out_of_the_credentials_directory_is_not_trusted(harness: &dyn SecretsHarness) {
+    let outside = harness.write_file("elsewhere/secret", b"hunter2\n", 0o644);
+    let inside = harness.write_file("credentials/real", b"hunter2\n", 0o644);
+    let leaving = harness.link("credentials/leaving", &outside);
+    let staying = harness.link("credentials/staying", &inside);
+    let directory = inside
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    assert!(!directory.is_empty(), "{inside} is not an absolute path");
+    harness.set_env("CREDENTIALS_DIRECTORY", directory);
+    assert_eq!(
+        resolve(harness, &file(&staying, FileRead::FirstLine)).await,
+        gives("hunter2"),
+        "a link to a file in the directory"
+    );
+    assert_eq!(
+        resolve(harness, &file(&leaving, FileRead::FirstLine)).await,
+        Ok(Resolved {
+            value: SecretValue::new("hunter2"),
+            warnings: vec![SecretWarning::FileReadableByOthers { path: leaving }],
+        }),
+        "a link to a file outside it"
+    );
+    harness.set_env("CREDENTIALS_DIRECTORY", "");
+}
+
 async fn a_command_gives_the_first_line_of_its_output(harness: &dyn SecretsHarness) {
     for (stdout, expected) in [
         ("hunter2\nsecond line\n", "hunter2"),
         ("hunter2\r\n", "hunter2"),
         ("hunter2", "hunter2"),
         ("  hunter2 \n", "  hunter2 "),
-        ("", ""),
     ] {
         let command = harness.printing(stdout.as_bytes());
         assert_eq!(
             resolve(harness, &SecretRef::Command(command)).await,
             gives(expected),
+            "{stdout:?}"
+        );
+    }
+}
+
+/// A command that printed nothing gave no secret: that is not an empty one,
+/// which a repository would then fail to open with, far from its cause.
+async fn a_command_that_prints_nothing_is_missing(harness: &dyn SecretsHarness) {
+    for stdout in ["", "\n", "\r\n", "   ", " \t \n"] {
+        let command = harness.printing(stdout.as_bytes());
+        assert_eq!(
+            resolve(harness, &SecretRef::Command(command.clone())).await,
+            Err(SecretError::missing(command_source(&command))),
             "{stdout:?}"
         );
     }
@@ -337,6 +387,21 @@ async fn a_command_that_fails_is_told_by_its_status_and_its_stderr(harness: &dyn
             problem: Problem::CommandFailed {
                 status: Some(3),
                 detail: "no such entry".to_owned(),
+            },
+        })
+    );
+}
+
+/// A helper that rejects a value may quote it on stderr, which an error shows.
+async fn a_failed_command_that_quotes_what_it_printed_has_it_masked(harness: &dyn SecretsHarness) {
+    let command = harness.failing(1, "hunter2-canary", "rejected hunter2-canary\nsecond line");
+    assert_eq!(
+        resolve(harness, &SecretRef::Command(command.clone())).await,
+        Err(SecretError {
+            source: command_source(&command),
+            problem: Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected ***".to_owned(),
             },
         })
     );

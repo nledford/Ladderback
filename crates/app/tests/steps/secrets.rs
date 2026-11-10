@@ -166,6 +166,11 @@ fn file_is_directory(agent: &mut Agent, path: String) {
     agent.secrets.store.make_directory(&path);
 }
 
+#[given(expr = "the file {string} is a link to {string}")]
+fn file_is_link(agent: &mut Agent, path: String, target: String) {
+    agent.secrets.store.link(&path, &target);
+}
+
 #[given(expr = "the keyring holds {string} under {string}")]
 fn keyring_holds(agent: &mut Agent, secret: String, entry: String) {
     let entry = KeyringEntry::parse(&entry).expect("the scenario's entry is valid");

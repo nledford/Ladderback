@@ -80,7 +80,18 @@ impl SystemSecrets {
         self.keyring = store;
         self
     }
+
+    /// Reads files with `reader`, which a test makes slow.
+    #[cfg(test)]
+    pub(crate) fn with_file_reader(self, _reader: FileReader) -> Self {
+        todo!()
+    }
 }
+
+/// Reads the file at a path, given how it is read and `$CREDENTIALS_DIRECTORY`.
+#[cfg(test)]
+pub(crate) type FileReader =
+    Arc<dyn Fn(&str, FileRead, Option<&str>) -> Result<Resolved, SecretError> + Send + Sync>;
 
 impl Default for SystemSecrets {
     fn default() -> Self {

@@ -4,7 +4,7 @@
 
 use std::path::{Component, Path};
 
-use super::source::SourceName;
+use super::source::{SourceName, first_line};
 use super::{MAX_SECRET_BYTES, SecretValue};
 
 /// A secret that couldn't be read. It names the source, so a job's failure
@@ -118,6 +118,27 @@ pub fn decode(
     Ok(SecretValue::new(extract(text)))
 }
 
+/// The secret that a command gave as its `stdout`: the first line of it. A
+/// command that printed nothing, or only white space, gave no secret: that
+/// is `Missing`, never an empty secret.
+pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue, SecretError> {
+    decode(source, stdout, first_line)
+}
+
+/// The error of a command that ran and failed: its exit `status` and what it
+/// wrote to `stderr`, with what it printed on `stdout` masked in it.
+pub fn command_failure(
+    source: &SourceName,
+    status: Option<i32>,
+    _stdout: &[u8],
+    stderr: &[u8],
+) -> SecretError {
+    SecretError {
+        source: source.clone(),
+        problem: Problem::command_failed(status, stderr),
+    }
+}
+
 /// Where container runtimes and systemd control permissions, so a file there
 /// isn't warned about (§10.2); `$CREDENTIALS_DIRECTORY` is the third.
 const RUNTIME_SECRET_DIRECTORIES: [&str; 2] = ["/run/secrets", "/var/run/secrets"];
@@ -134,6 +155,7 @@ pub fn file_warning(
     path: &str,
     mode: u32,
     credentials_directory: Option<&str>,
+    _resolve: impl Fn(&str) -> Option<String>,
 ) -> Option<SecretWarning> {
     let exposed = mode & READABLE_BY_OTHERS != 0;
     (exposed && !is_runtime_secret(path, credentials_directory)).then(|| {
@@ -174,15 +196,20 @@ mod tests {
     use super::*;
     use crate::secrets::first_line;
 
+    /// Where a path leads when nothing is a link.
+    fn same(path: &str) -> Option<String> {
+        Some(path.to_owned())
+    }
+
     fn warns(path: &str, mode: u32, credentials: Option<&str>) -> bool {
-        file_warning(path, mode, credentials).is_some()
+        file_warning(path, mode, credentials, same).is_some()
     }
 
     #[test]
     fn a_file_others_can_read_is_warned_about() {
         let path = "/home/demo/secrets/nas";
         assert_eq!(
-            file_warning(path, 0o644, None),
+            file_warning(path, 0o644, None, same),
             Some(SecretWarning::FileReadableByOthers {
                 path: path.to_owned()
             })
@@ -425,6 +452,120 @@ mod tests {
         assert_eq!(
             detail_of(shifted.as_bytes()),
             format!("x{}…", "é".repeat(255))
+        );
+    }
+
+    /// A file system where each `(path, target)` is a link, and every other
+    /// path leads to itself.
+    fn linked<'a>(links: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |path| {
+            let target = links
+                .iter()
+                .find(|(link, _)| *link == path)
+                .map_or(path, |(_, target)| *target);
+            Some(target.to_owned())
+        }
+    }
+
+    #[test]
+    fn a_link_out_of_an_exempt_directory_is_warned_about() {
+        let path = "/run/secrets/token";
+        let links = [(path, "/home/demo/token")];
+        assert_eq!(
+            file_warning(path, 0o644, None, linked(&links)),
+            Some(SecretWarning::FileReadableByOthers {
+                path: path.to_owned()
+            })
+        );
+        // The credentials directory is no different.
+        let credentials = Some("/run/credentials/demo.service");
+        let path = "/run/credentials/demo.service/token";
+        let links = [(path, "/home/demo/token")];
+        assert!(file_warning(path, 0o644, credentials, linked(&links)).is_some());
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_followed_is_not_exempt() {
+        for path in ["/run/secrets/token", "/var/run/secrets/token"] {
+            assert!(
+                file_warning(path, 0o644, None, |_| None).is_some(),
+                "{path}"
+            );
+        }
+        let credentials = Some("/run/credentials/demo.service");
+        let path = "/run/credentials/demo.service/token";
+        assert!(file_warning(path, 0o644, credentials, |_| None).is_some());
+    }
+
+    #[test]
+    fn a_credentials_directory_that_leads_to_the_root_exempts_nothing() {
+        let directory = "/run/credentials/demo.service";
+        let path = "/run/credentials/demo.service/token";
+        let links = [(directory, "/"), (path, "/token")];
+        assert!(file_warning(path, 0o644, Some(directory), linked(&links)).is_some());
+    }
+
+    fn command(program: &str) -> SourceName {
+        SourceName::Command {
+            program: program.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_command_that_printed_nothing_gave_no_secret() {
+        let source = command("pass");
+        for stdout in ["", "\n", "\r\n", "   ", " \t \n", "\u{a0}\n"] {
+            assert_eq!(
+                command_secret(&source, stdout.as_bytes()),
+                Err(SecretError::missing(source.clone())),
+                "{stdout:?}"
+            );
+        }
+    }
+
+    /// The secret is the first line, so a blank first line is no secret
+    /// even when a later line holds text.
+    #[test]
+    fn a_command_whose_first_line_is_blank_gave_no_secret() {
+        let source = command("pass");
+        assert_eq!(
+            command_secret(&source, b"\n\nhunter2\n"),
+            Err(SecretError::missing(source))
+        );
+    }
+
+    #[test]
+    fn what_a_failed_command_printed_is_masked_where_it_says_so_on_stderr() {
+        let source = command("pass");
+        let error = command_failure(
+            &source,
+            Some(1),
+            b"hunter2-canary\n",
+            b"rejected hunter2-canary\nsecond line\n",
+        );
+        assert_eq!(
+            error,
+            SecretError {
+                source: source.clone(),
+                problem: Problem::CommandFailed {
+                    status: Some(1),
+                    detail: "rejected ***".to_owned(),
+                },
+            }
+        );
+        // The first line alone is what the command would have given.
+        let error = command_failure(
+            &source,
+            Some(2),
+            b"hunter2\nsecond line\n",
+            b"bad value hunter2\n",
+        );
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(2),
+                detail: "bad value ***".to_owned(),
+            }
         );
     }
 }

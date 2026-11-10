@@ -70,6 +70,13 @@ impl FakeSecrets {
         );
     }
 
+    /// A link at `path` that leads to `target`, a file written with
+    /// [`FakeSecrets::write_file`]: reading `path` reads `target`, and where
+    /// `path` really is is where `target` is.
+    pub fn link(&self, _path: &str, _target: &str) {
+        todo!()
+    }
+
     /// A directory at `path`: reading it as a file fails.
     pub fn make_directory(&self, path: &str) {
         self.lock().directories.insert(path.to_owned());
@@ -149,9 +156,11 @@ impl SecretResolver for FakeSecrets {
                 let credentials = state.env.get("CREDENTIALS_DIRECTORY").map(String::as_str);
                 Ok(Resolved {
                     value,
-                    warnings: file_warning(path, file.mode, credentials)
-                        .into_iter()
-                        .collect(),
+                    warnings: file_warning(path, file.mode, credentials, |path| {
+                        Some(path.to_owned())
+                    })
+                    .into_iter()
+                    .collect(),
                 })
             }
             SecretRef::Command(command) => {

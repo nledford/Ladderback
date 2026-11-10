@@ -11,7 +11,10 @@ mod template;
 
 pub use command::{CommandLine, CommandLineError};
 pub use options::is_secret_option;
-pub use outcome::{MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, decode, file_warning};
+pub use outcome::{
+    MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
+    file_warning,
+};
 pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};
 pub use template::{Part, Reference, Template, TemplateError};
 
@@ -609,6 +612,95 @@ mod tests {
             }
         }
         assert!(checked >= 50, "only {checked} cases ran");
+    }
+
+    /// The pieces of a secret that a URL parser takes apart: each of at
+    /// least 8 bytes, in mixed case, so that a parser that lower-cases a host
+    /// shows a piece in a case the secret doesn't have.
+    const MARKERS: [&str; 3] = ["Canary-Alpha", "Bravo-Delta", "Echo-ZzEnd"];
+
+    /// Secrets made of the markers and the characters a parser splits a URL
+    /// at (`@`, `#`, `?`, `/`), in every order of two.
+    fn splitting_secrets() -> Vec<String> {
+        let delimiters = ["@", "#", "?", "/"];
+        let [first, second, third] = MARKERS;
+        let mut secrets = Vec::new();
+        for one in delimiters {
+            secrets.push(format!("{first}{one}{second}"));
+            for two in delimiters {
+                secrets.push(format!("{first}{one}{second}{two}{third}"));
+            }
+        }
+        secrets
+    }
+
+    const PLACES: [Place; 5] = [
+        Place::Userinfo,
+        Place::Host,
+        Place::Path,
+        Place::Query,
+        Place::Fragment,
+    ];
+
+    /// A secret that holds a character a parser splits a URL at is shown in
+    /// pieces, each as its part of the URL is printed (a host in lower case,
+    /// a path as it is). The whole URL, as it is printed, shows none.
+    #[test]
+    fn a_secret_a_url_parser_splits_shows_nowhere_in_the_url_it_prints() {
+        let mut checked = 0;
+        for secret in splitting_secrets() {
+            let redactor = redactor(&[&secret]);
+            for place in PLACES {
+                // What the parser refuses is not a case of this kind.
+                let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                    continue;
+                };
+                checked += 1;
+                let printed = url.as_str();
+                let redacted = redactor.redact(printed).to_lowercase();
+                for marker in MARKERS {
+                    assert!(
+                        !redacted.contains(&marker.to_lowercase()),
+                        "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                    );
+                }
+            }
+        }
+        assert!(checked >= 70, "only {checked} cases ran");
+    }
+
+    /// A library that takes a URL apart may log its parts one by one. No part
+    /// of a secret that is 8 bytes or more shows in any of them.
+    #[test]
+    fn the_parts_of_a_split_secret_show_nowhere_when_printed_one_by_one() {
+        let mut checked = 0;
+        for secret in splitting_secrets() {
+            let redactor = redactor(&[&secret]);
+            for place in PLACES {
+                let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                    continue;
+                };
+                checked += 1;
+                let parts = [
+                    url.username(),
+                    url.password().unwrap_or_default(),
+                    url.host_str().unwrap_or_default(),
+                    url.path(),
+                    url.query().unwrap_or_default(),
+                    url.fragment().unwrap_or_default(),
+                ];
+                for part in parts {
+                    let redacted = redactor.redact(part).to_lowercase();
+                    for marker in MARKERS {
+                        assert!(
+                            !redacted.contains(&marker.to_lowercase()),
+                            "{secret:?} in {place:?}: the part {part:?} shows {marker}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked >= 70, "only {checked} cases ran");
     }
 
     #[test]
