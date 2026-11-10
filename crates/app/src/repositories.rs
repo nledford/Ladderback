@@ -99,13 +99,17 @@ impl InitRepository {
     /// Initialises the repository the settings describe, and reports its ID.
     /// Saved only when `alias` is given, by the same rule
     /// [`ConnectRepository`] saves one: an alias the configuration already
-    /// holds is refused.
+    /// holds is refused, and before the job runs, so a refused request has
+    /// created no repository the person could not then find again.
     pub async fn init(
         &self,
         op: OperationId,
         settings: &RepositorySettings,
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
+        if let Some(alias) = &alias {
+            unused(&*self.config, alias).await?;
+        }
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.engine, op, Job::Init(access)).await?;
         let saved = match alias {
@@ -210,6 +214,20 @@ fn failed(reason: FailureReason) -> RepositoryError {
     }
 }
 
+/// The configuration as it stands, when it holds no repository under `alias`:
+/// otherwise the alias is refused.
+#[allow(clippy::result_large_err)]
+async fn unused(
+    config: &dyn ConfigStore,
+    alias: &RepositoryAlias,
+) -> Result<AgentConfig, RepositoryError> {
+    let loaded = config.load().await.map_err(RepositoryError::Config)?;
+    if loaded.repository(alias).is_some() {
+        return Err(RepositoryError::AliasTaken(alias.clone()));
+    }
+    Ok(loaded)
+}
+
 /// Saves `settings` under `alias`, refusing an alias the configuration
 /// already holds. What is saved is the settings as written: a secret stays
 #[allow(clippy::result_large_err)]
@@ -218,10 +236,7 @@ async fn save(
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
 ) -> Result<(), RepositoryError> {
-    let loaded = config.load().await.map_err(RepositoryError::Config)?;
-    if loaded.repository(alias).is_some() {
-        return Err(RepositoryError::AliasTaken(alias.clone()));
-    }
+    let loaded = unused(config, alias).await?;
     let mut repositories = loaded.repositories().clone();
     repositories.insert(
         alias.clone(),

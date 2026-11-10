@@ -963,8 +963,14 @@ fn new_operation() -> OperationId {
 
 /// A request's settings as domain values, read as the configuration reader
 /// reads the same keys: a password file is an absolute path, and a keyring
-/// entry is `service/name`. What it can't take is an invalid body.
+/// entry is `service/name`. A typed password and a location (hot ones too)
+/// are not empty. What it can't take is an invalid body.
 fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, RepositoriesError> {
+    let empty_password =
+        matches!(&dto.password, api::PasswordDto::Inline { value } if value.is_empty());
+    if empty_password || dto.repository.is_empty() || dto.repo_hot.as_deref() == Some("") {
+        return Err(RepositoriesError::InvalidBody);
+    }
     let password = match dto.password {
         api::PasswordDto::Inline { value } => SecretRef::Inline(SecretValue::new(value)),
         api::PasswordDto::File { path } if path.starts_with('/') => SecretRef::File {
