@@ -11,8 +11,9 @@ use std::time::Duration;
 use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
-    ForgetSummary, Job, JobControl, ProgressEvent, ProgressKind as AppProgressKind, PruneSummary,
-    RepositoryAccess, RewriteSummary, RunningJob, SnapshotSummary,
+    ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProgressEvent,
+    ProgressKind as AppProgressKind, PruneSummary, RepositoryAccess, RewriteJob, RewriteSummary,
+    RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -1102,6 +1103,18 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
 }
 
 fn job_kind(job: Job) -> Result<JobKind, EngineError> {
+    // A spec names the snapshots it works on, each about 70 bytes of a
+    // message that is capped: the caller splits a longer list into jobs.
+    if let Job::Forget(ForgetJob { ids, .. }) | Job::Rewrite(RewriteJob { ids, .. }) = &job
+        && ids.len() > MAX_JOB_IDS
+    {
+        return Err(EngineError::Unavailable {
+            detail: format!(
+                "a job names {} snapshots, over the {MAX_JOB_IDS} it takes",
+                ids.len()
+            ),
+        });
+    }
     Ok(match job {
         Job::Fake(FakeJob {
             steps,
@@ -2443,6 +2456,71 @@ mod tests {
             matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
             "the error should name the cap: {error:?}"
         );
+    }
+
+    fn access() -> app::ports::RepositoryAccess {
+        app::ports::RepositoryAccess {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: domain::secrets::SecretValue::new("demo-password"),
+            options: std::collections::BTreeMap::new(),
+            options_hot: std::collections::BTreeMap::new(),
+            options_cold: std::collections::BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+        }
+    }
+
+    fn snapshot_ids(count: usize) -> Vec<domain::SnapshotId> {
+        (0..count)
+            .map(|n| domain::SnapshotId::parse(&format!("{n:064x}")).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_forget_of_the_most_one_job_may_name_fits_one_message_with_room_to_spare() {
+        let job = Job::Forget(app::ports::ForgetJob {
+            repository: access(),
+            ids: snapshot_ids(app::ports::MAX_JOB_IDS),
+        });
+        let spec = serde_json::to_vec(&job_kind(job).unwrap()).unwrap();
+        assert!(
+            spec.len() < MAX_MESSAGE_BYTES / 2,
+            "{} bytes for {} IDs",
+            spec.len(),
+            app::ports::MAX_JOB_IDS
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forget_or_rewrite_naming_more_than_a_job_takes_is_refused_before_a_worker_starts() {
+        let too_many = snapshot_ids(app::ports::MAX_JOB_IDS + 1);
+        let forget = Job::Forget(app::ports::ForgetJob {
+            repository: access(),
+            ids: too_many.clone(),
+        });
+        let rewrite = Job::Rewrite(app::ports::RewriteJob {
+            repository: access(),
+            ids: too_many,
+            tags: domain::execution::plan_tags::PlanTags::new(
+                domain::PlanId::parse("home").unwrap(),
+                domain::AgentId::from_uuid(Uuid::from_u128(1)),
+            ),
+        });
+        // A program that can't start, so only the check before spawning can
+        // produce the message.
+        let engine = WorkerEngine::new("/nonexistent/ladderback-worker", ["worker"]);
+        for job in [forget, rewrite] {
+            let error = engine
+                .run(OperationId::from_uuid(Uuid::from_u128(1)), job)
+                .await
+                .err()
+                .expect("a job naming too many snapshots is refused");
+            assert!(
+                matches!(&error, EngineError::Unavailable { detail } if detail.contains(&app::ports::MAX_JOB_IDS.to_string())),
+                "the error should name the limit: {error:?}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -144,6 +144,24 @@ Feature: Forget keeps each plan's history within its policy
     And no forget job names more snapshots than an engine job takes
     And the log shows the forget removed 11999 snapshots
 
+  Scenario: A forget that fails partway says how much it had removed
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 12000 snapshots of the plan "home"
+    And the engine fails the second forget job
+    When the owner forgets the repository
+    Then the operation ends as failed because the engine reported "the forget failed"
+    And the operation lists 1 warning
+    And the engine was given 2 forget jobs
+
+  Scenario: A forget cancelled between its jobs starts no more of them
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 12000 snapshots of the plan "home"
+    And the engine holds the second forget job
+    When the owner forgets the repository and cancels it while the second job runs
+    Then the operation ends as cancelled
+    And the operation lists 1 warning
+    And the engine was given 2 forget jobs
+
   Scenario: A repository that never answers refuses the forget instead of holding the request
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"

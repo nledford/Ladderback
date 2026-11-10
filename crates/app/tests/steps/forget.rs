@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -98,6 +98,11 @@ pub struct ForgetWorld {
     fail: ReadFailure,
     /// The repository's ID, as the scripted identify reports it.
     repository_id: RepositoryId,
+    /// Which forget or rewrite job (counting from 0) the engine holds until
+    /// released: the first, unless a scenario says otherwise.
+    hold_at: Option<usize>,
+    /// Which forget or rewrite job the engine fails, when a scenario says.
+    fail_at: Option<usize>,
 }
 
 impl Default for ForgetWorld {
@@ -113,6 +118,8 @@ impl Default for ForgetWorld {
             refused: None,
             fail: ReadFailure::None,
             repository_id: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
+            hold_at: Some(0),
+            fail_at: None,
         }
     }
 }
@@ -126,7 +133,9 @@ impl ForgetWorld {
             fail: self.fail,
             jobs: Arc::clone(&self.jobs),
             release: Arc::clone(&self.release),
-            held: AtomicBool::new(false),
+            changes: AtomicUsize::new(0),
+            hold_at: self.hold_at,
+            fail_at: self.fail_at,
             repository_id: self.repository_id.clone(),
         })
     }
@@ -281,16 +290,37 @@ impl ForgetWorld {
             .collect()
     }
 
-    /// The one rewrite job the engine was given, if any.
+    /// What the engine was asked to rewrite, if anything: the IDs of every
+    /// rewrite job it was given, in order, and the tags the first one set.
     pub fn rewrite_job(&self) -> Option<(Vec<SnapshotId>, Vec<String>)> {
-        self.jobs
-            .lock()
-            .expect("the job list answers")
+        let jobs = self.jobs.lock().expect("the job list answers");
+        let rewrites: Vec<_> = jobs
             .iter()
-            .find_map(|job| match job {
-                Job::Rewrite(job) => Some((job.ids.clone(), job.tags.tags().to_vec())),
+            .filter_map(|job| match job {
+                Job::Rewrite(job) => Some(job),
                 _ => None,
             })
+            .collect();
+        let first = rewrites.first()?;
+        let ids = rewrites.iter().flat_map(|job| job.ids.clone()).collect();
+        Some((ids, first.tags.tags().to_vec()))
+    }
+
+    /// Makes the engine fail the forget or rewrite job number `at`
+    /// (counting from 0).
+    pub fn fail_change_at(&mut self, at: usize) {
+        self.fail_at = Some(at);
+    }
+
+    /// Makes the engine hold the forget or rewrite job number `at` until
+    /// released, and none before it.
+    pub fn hold_change_at(&mut self, at: usize) {
+        self.hold_at = Some(at);
+    }
+
+    /// How many forget jobs the engine was given.
+    pub fn forget_jobs(&self) -> usize {
+        self.jobs().iter().filter(|&&name| name == "forget").count()
     }
 
     /// The IDs of the snapshots the plan `plan` owns, newest first.
@@ -354,9 +384,10 @@ struct Scripted {
     fail: ReadFailure,
     jobs: Arc<Mutex<Vec<Job>>>,
     release: Arc<Notify>,
-    /// Whether a forget or rewrite was held already: only the first is, so
-    /// a run split into several jobs is released once.
-    held: AtomicBool,
+    /// How many forget or rewrite jobs the engine was given so far.
+    changes: AtomicUsize,
+    hold_at: Option<usize>,
+    fail_at: Option<usize>,
     repository_id: RepositoryId,
 }
 
@@ -391,6 +422,9 @@ impl Engine for Scripted {
             .lock()
             .expect("the job list answers")
             .push(job.clone());
+        // Which of the forgets and rewrites this is, counting from 0.
+        let change = matches!(job, Job::Forget(_) | Job::Rewrite(_))
+            .then(|| self.changes.fetch_add(1, Ordering::SeqCst));
         if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_)) {
             return Ok(RunningJob {
                 events: stream::pending().boxed(),
@@ -401,6 +435,13 @@ impl Engine for Scripted {
             index_read_at: at(0),
         };
         let events: Vec<EngineEvent> = match &job {
+            Job::Forget(_) | Job::Rewrite(_) if change.is_some() && change == self.fail_at => {
+                vec![EngineEvent::Failed(
+                    domain::execution::FailureReason::EngineFailed {
+                        detail: "the forget failed".to_owned(),
+                    },
+                )]
+            }
             Job::Identify(_) => vec![EngineEvent::Succeeded(EngineResult::Repository {
                 id: self.repository_id.clone(),
             })],
@@ -441,8 +482,7 @@ impl Engine for Scripted {
         // for the release, so a scenario can hold a run on purpose. A read
         // (identify, listing) answers at once: `prepare` runs them before
         // anything holds the repository.
-        let hold = matches!(job, Job::Forget(_) | Job::Rewrite(_))
-            && !self.held.swap(true, Ordering::SeqCst);
+        let hold = change.is_some() && change == self.hold_at;
         let release = Arc::clone(&self.release);
         let stream = stream::iter(vec![started]).chain(stream::iter(events).then(move |event| {
             let release = Arc::clone(&release);
@@ -530,6 +570,16 @@ async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
 }
 
+#[given("the engine fails the second forget job")]
+fn second_forget_fails(agent: &mut Agent) {
+    agent.forget.fail_change_at(1);
+}
+
+#[given("the engine holds the second forget job")]
+fn second_forget_held(agent: &mut Agent) {
+    agent.forget.hold_change_at(1);
+}
+
 #[given("the repository's listing fails")]
 async fn listing_fails(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Listing);
@@ -611,6 +661,34 @@ async fn forget(agent: &mut Agent) {
         }
         Err(error) => agent.forget.refused = Some(error),
     }
+}
+
+#[when("the owner forgets the repository and cancels it while the second job runs")]
+async fn forget_then_cancel(agent: &mut Agent) {
+    let use_case = use_case(agent);
+    let prepared = use_case
+        .prepare(operation_id(0xcc), &alias(), MaintenanceKind::Forget)
+        .await
+        .expect("the repository is free");
+    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let runner = Arc::clone(&use_case);
+    let running = tokio::spawn(async move {
+        runner
+            .execute(prepared, async move {
+                let _ = cancelled.await;
+            })
+            .await
+    });
+    // The first job ends at once and the second is held until the cancel.
+    for _ in 0..400 {
+        if agent.forget.forget_jobs() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(agent.forget.forget_jobs() >= 2, "the second job never ran");
+    let _ = cancel.send(());
+    agent.finished = Some(running.await.expect("the run ends"));
 }
 
 #[when("the owner forgets the repository and a prune is asked while it runs")]
@@ -898,6 +976,16 @@ fn forget_jobs_are_small_enough(agent: &mut Agent) {
     assert!(
         sizes.iter().all(|&size| size <= MAX_JOB_IDS),
         "forget jobs of {sizes:?} snapshots"
+    );
+}
+
+#[then(expr = "the engine was given {int} forget job(s)")]
+fn forget_jobs_given(agent: &mut Agent, count: usize) {
+    assert_eq!(
+        agent.forget.forget_jobs(),
+        count,
+        "{:?}",
+        agent.forget.jobs()
     );
 }
 

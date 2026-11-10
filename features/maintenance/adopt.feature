@@ -16,6 +16,13 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     And the 3 snapshots are rewritten with the tags of the plan "home"
     And the snapshots the other agent held are gone
 
+  Scenario: An adoption of more snapshots than one engine job can name runs as several jobs
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 7000 snapshots another agent's plan "home" holds
+    When the owner adopts the other agent's "home" history into the plan "home"
+    Then the operation ends as succeeded
+    And the 7000 snapshots are rewritten with the tags of the plan "home"
+
   Scenario: Adopting one group leaves every other snapshot alone
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"
