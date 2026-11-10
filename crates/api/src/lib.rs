@@ -744,8 +744,10 @@ impl ErrorDto {
     }
 }
 
-/// A typed warning, in a document that reports what a command did: the code
-/// and the arguments its message takes, never the sentence (§8.4).
+/// A typed warning: the code and the arguments its message takes, never the
+/// sentence (§8.4) and never a secret (I4). `import-profile --json` reports
+/// its notices as these, and the row of a configured repository carries its
+/// own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct WarningDto {
@@ -1035,7 +1037,7 @@ mod tests {
             repository: "/srv/demo/repo".to_owned(),
             repo_hot: None,
             password: PasswordSourceDto::Inline,
-            warnings: vec![RepositoryWarningDto {
+            warnings: vec![WarningDto {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
             }],
@@ -1867,18 +1869,7 @@ pub struct RepositoryDto {
     /// repository, one per secret written inline. Left out when there is
     /// none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<RepositoryWarningDto>,
-}
-
-/// A warning about a configured repository, as its row carries it: the typed
-/// code and the arguments its message declares ([`WarningCode::args`]),
-/// never a sentence (§8.4) and never a secret (I4).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct RepositoryWarningDto {
-    pub code: WarningCode,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub args: std::collections::BTreeMap<String, MsgArg>,
+    pub warnings: Vec<WarningDto>,
 }
 
 /// Where a configured repository's password comes from, without its value:

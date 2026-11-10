@@ -1651,7 +1651,7 @@ fn repository_row(alias: &RepositoryAlias, settings: &RepositorySettings) -> api
         warnings: settings
             .inline_secrets()
             .iter()
-            .map(|secret| api::RepositoryWarningDto {
+            .map(|secret| api::WarningDto {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text(secret.field()))].into(),
             })
@@ -1759,8 +1759,8 @@ mod tests {
         }
     }
 
-    fn field_warning(field: &str) -> api::RepositoryWarningDto {
-        api::RepositoryWarningDto {
+    fn field_warning(field: &str) -> api::WarningDto {
+        api::WarningDto {
             code: WarningCode::ConfigInlineSecret,
             args: [("field".to_owned(), MsgArg::Text(field.to_owned()))].into(),
         }
