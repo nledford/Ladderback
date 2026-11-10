@@ -45,15 +45,13 @@ pub(crate) struct Stop<'a> {
 }
 
 impl Stop<'static> {
-    /// The real stop: SIGTERM to the group, SIGKILL after `grace`, and five
-    /// seconds for the command to be reaped.
-    pub(crate) const fn after(grace: Duration) -> Self {
-        Self {
-            grace,
-            reap_limit: REAP_LIMIT,
-            signal: &signal_group,
-        }
-    }
+    /// The real stop: SIGTERM to the group, SIGKILL after [`KILL_GRACE`], and
+    /// [`REAP_LIMIT`] for the command to be reaped.
+    const REAL: Self = Self {
+        grace: KILL_GRACE,
+        reap_limit: REAP_LIMIT,
+        signal: &signal_group,
+    };
 }
 
 /// Runs `command` and gives the first line of its output.
@@ -61,7 +59,7 @@ pub(crate) async fn run(
     command: &CommandLine,
     limit: Duration,
 ) -> Result<SecretValue, SecretError> {
-    run_with(command, limit, &Stop::after(KILL_GRACE)).await
+    run_with(command, limit, &Stop::REAL).await
 }
 
 pub(crate) async fn run_with(
@@ -152,14 +150,18 @@ pub(crate) fn whole_seconds_up(limit: Duration) -> u64 {
 /// not leave a command behind, and `kill_on_drop` reaches only the command
 /// itself.
 ///
-/// A group is named by the process id of its leader, and that id is free for
-/// an unrelated process once the leader has been reaped, so the group is
-/// signalled only while the leader is not, and each signal at most once.
+/// A group is named by the process id of its leader, and a leader that has
+/// been reaped no longer holds that id: once the group has no live member
+/// either, the id is free for an unrelated process, and a signal to it would
+/// reach that one. What is left of the group after the leader is gone can't
+/// be told from here, so the group is signalled only while the leader is
+/// not reaped, and each signal at most once.
 struct Running<'a> {
     child: Child,
     group: Option<Pid>,
     stop: &'a Stop<'a>,
-    sent: Vec<Signal>,
+    terminated: bool,
+    killed: bool,
 }
 
 impl<'a> Running<'a> {
@@ -172,17 +174,22 @@ impl<'a> Running<'a> {
             child,
             group,
             stop,
-            sent: Vec::new(),
+            terminated: false,
+            killed: false,
         }
     }
 
     fn send(&mut self, signal: Signal) {
+        let sent = match signal {
+            Signal::SIGKILL => &mut self.killed,
+            _ => &mut self.terminated,
+        };
         // Tokio gives no id once the child has been waited for.
-        if self.sent.contains(&signal) || self.child.id().is_none() {
+        if *sent || self.child.id().is_none() {
             return;
         }
         if let Some(group) = self.group {
-            self.sent.push(signal);
+            *sent = true;
             (self.stop.signal)(group, signal);
         }
     }
@@ -196,9 +203,10 @@ impl<'a> Running<'a> {
 
     /// SIGTERM to the group, and SIGKILL once the grace has passed with the
     /// command still running. A command that ended on the SIGTERM is reaped
-    /// and nothing more is sent: what it left behind is not signalled, as
-    /// the id of its group may be another process's by now. The whole call
-    /// takes at most the grace and the reap limit.
+    /// and nothing more is sent: what it started and left running, if it
+    /// ignored the SIGTERM, is not signalled, as the group may have no live
+    /// member by now. The whole call takes at most the grace and the reap
+    /// limit.
     async fn terminate_and_reap(&mut self) {
         self.send(Signal::SIGTERM);
         if timeout(self.stop.grace, self.child.wait()).await.is_err() {
