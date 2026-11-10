@@ -258,6 +258,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_that_fill_a_batch_to_the_last_byte_stay_in_it() {
+        let one = listed(0, &"x".repeat(1_000));
+        let size = serde_json::to_vec(&one).expect("serializes").len() + 1;
+        let fits = LISTING_BATCH_BYTES / size;
+        let spare = LISTING_BATCH_BYTES - fits * size;
+        let mut all: Vec<SnapshotResult> = (1..fits as i64)
+            .map(|n| listed(n, &"x".repeat(1_000)))
+            .collect();
+        all.push(listed(0, &"x".repeat(1_000 + spare)));
+        let sent = sent(all);
+        assert_eq!(sent.len(), 1, "{} batches", sent.len());
+        assert_eq!(sent[0].len(), fits);
+    }
+
+    #[test]
     fn a_snapshot_longer_than_a_batch_still_goes_out_alone() {
         let huge = listed(1, &"x".repeat(LISTING_BATCH_BYTES + 10));
         let sent = sent(vec![listed(3, ""), huge.clone(), listed(2, "")]);
