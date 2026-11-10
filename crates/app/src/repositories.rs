@@ -214,6 +214,8 @@ async fn run(
     op: OperationId,
     job: Job,
 ) -> Result<RepositoryId, RepositoryError> {
+    // A deadline counted from now: these jobs read no index, and the rule is
+    // the one a backup's deadline is made with.
     let deadline = Deadline::after_index_read(clock.now(), REPOSITORY_JOB_BUDGET);
     let mut timer = clock.sleep_until(deadline.at()).fuse();
     let job = drive(clock, deadline, engine, op, job).fuse();
@@ -542,13 +544,34 @@ mod tests {
         );
     }
 
+    /// An engine whose worker never stops talking: every message is there
+    /// before it is asked for, and takes a minute of the clock.
+    struct Chatty {
+        clock: Arc<FakeClock>,
+        killed: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl Engine for Chatty {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            let clock = self.clock.clone();
+            Ok(RunningJob {
+                events: futures::stream::repeat_with(move || {
+                    clock.advance(SignedDuration::from_mins(1));
+                    started()
+                })
+                .boxed(),
+                control: Box::new(Killable(self.killed.clone())),
+            })
+        }
+    }
+
     #[tokio::test]
     async fn a_worker_that_keeps_talking_cannot_hold_off_the_deadline() {
         let clock = Arc::new(FakeClock::new(start()));
-        let ticking = clock.clone();
-        // Every message takes a minute, and the worker never stops sending.
-        let engine = Playing::new(vec![started(); 100], move || {
-            ticking.advance(SignedDuration::from_mins(1));
+        let engine = Arc::new(Chatty {
+            clock: clock.clone(),
+            killed: Arc::new(AtomicBool::new(false)),
         });
         let use_case = TestRepository::new(
             clock,
@@ -560,6 +583,23 @@ mod tests {
             Err(RepositoryError::TimedOut)
         );
         assert!(engine.killed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_result_waiting_behind_a_message_after_the_deadline_stands() {
+        // Time ran out while the daemon was not looking: the worker's last
+        // two messages are both waiting, and the second is the answer.
+        let clock = Arc::new(FakeClock::new(start()));
+        let ticking = clock.clone();
+        let engine = Playing::new(vec![started(), found()], move || {
+            ticking.advance(REPOSITORY_JOB_BUDGET + SignedDuration::from_secs(1));
+        });
+        let use_case = TestRepository::new(
+            clock,
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        );
+        assert_eq!(within(use_case.test(op(), &settings())).await, Ok(id()));
     }
 
     #[tokio::test]
