@@ -21,7 +21,8 @@ use app::ports::{
     EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProgressEvent,
     RunningJob, SnapshotSummary,
 };
-use app::secrets::ResolveRepository;
+use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
+use app::secrets::{Field, ResolveRepository};
 use app::snapshots::ListSnapshots;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
@@ -30,6 +31,10 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
+use domain::planning::RepositorySettings;
+use domain::secrets::{
+    FileRead, KeyringEntry, Redactor, RepositorySecrets, SecretRef, SecretValue,
+};
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
@@ -884,31 +889,255 @@ impl RepositoryService {
 impl Repositories for RepositoryService {
     async fn test(
         &self,
-        _request: api::TestRepositoryDto,
+        request: api::TestRepositoryDto,
     ) -> Result<api::RepositoryIdDto, RepositoriesError> {
-        let _ = (&self.engine, &self.resolve, &self.config, &self.writes);
-        todo!("the red commit: tests first")
+        let settings = settings_of(request.settings)?;
+        let id = TestRepository::new(Arc::clone(&self.engine), self.resolve.clone())
+            .test(new_operation(), &settings)
+            .await
+            .map_err(|error| refusal_of(error, &settings))?;
+        Ok(api::RepositoryIdDto {
+            id: id.as_str().to_owned(),
+        })
     }
 
     async fn connect(
         &self,
-        _request: api::ConnectRepositoryDto,
+        request: api::ConnectRepositoryDto,
     ) -> Result<api::RepositoryIdDto, RepositoriesError> {
-        todo!("the red commit: tests first")
+        // The name first: a repository that can't be saved isn't tested.
+        let alias =
+            RepositoryAlias::parse(&request.alias).map_err(|_| RepositoriesError::AliasInvalid)?;
+        let settings = settings_of(request.settings)?;
+        let _writing = self.writes.lock().await;
+        let id = ConnectRepository::new(
+            Arc::clone(&self.engine),
+            self.resolve.clone(),
+            Arc::clone(&self.config),
+        )
+        .connect(new_operation(), alias, &settings)
+        .await
+        .map_err(|error| refusal_of(error, &settings))?;
+        Ok(api::RepositoryIdDto {
+            id: id.as_str().to_owned(),
+        })
     }
 
     async fn init(
         &self,
-        _request: api::InitRepositoryDto,
+        request: api::InitRepositoryDto,
     ) -> Result<api::RepositoryInitDto, RepositoriesError> {
-        todo!("the red commit: tests first")
+        // The name first: a repository that was created and then can't be
+        // saved is one the person has no way to find again.
+        let alias = request
+            .alias
+            .as_deref()
+            .map(RepositoryAlias::parse)
+            .transpose()
+            .map_err(|_| RepositoriesError::AliasInvalid)?;
+        let settings = settings_of(request.settings)?;
+        // Only a saving initialisation writes the configuration.
+        let _writing = match alias {
+            Some(_) => Some(self.writes.lock().await),
+            None => None,
+        };
+        let initialised = InitRepository::new(
+            Arc::clone(&self.engine),
+            self.resolve.clone(),
+            Arc::clone(&self.config),
+        )
+        .init(new_operation(), &settings, alias)
+        .await
+        .map_err(|error| refusal_of(error, &settings))?;
+        Ok(api::RepositoryInitDto {
+            id: initialised.id.as_str().to_owned(),
+            saved: initialised.saved,
+        })
+    }
+}
+
+/// A fresh operation ID: a UUIDv7, as every operation of the daemon has.
+fn new_operation() -> OperationId {
+    OperationId::from_uuid(Uuid::now_v7())
+}
+
+/// A request's settings as domain values, read as the configuration reader
+/// reads the same keys: a password file is an absolute path, and a keyring
+/// entry is `service/name`. What it can't take is an invalid body.
+fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, RepositoriesError> {
+    let password = match dto.password {
+        api::PasswordDto::Inline { value } => SecretRef::Inline(SecretValue::new(value)),
+        api::PasswordDto::File { path } if path.starts_with('/') => SecretRef::File {
+            path,
+            read: FileRead::FirstLine,
+        },
+        api::PasswordDto::File { .. } => return Err(RepositoriesError::InvalidBody),
+        api::PasswordDto::Keyring { entry } => SecretRef::Keyring(
+            KeyringEntry::parse(&entry).map_err(|_| RepositoriesError::InvalidBody)?,
+        ),
+        api::PasswordDto::Env { name } => SecretRef::Env(name),
+    };
+    Ok(RepositorySettings {
+        repository: dto.repository,
+        repo_hot: dto.repo_hot,
+        password,
+        options: dto.options,
+        options_hot: dto.options_hot,
+        options_cold: dto.options_cold,
+    })
+}
+
+/// Why a repository use case failed, as the typed refusal the route answers
+/// with. `settings` are the request's: a location the refusal names is shown
+/// redacted.
+fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> RepositoriesError {
+    match error {
+        RepositoryError::Exists => exists(settings),
+        RepositoryError::AliasTaken(alias) => RepositoriesError::AliasTaken {
+            alias: alias.as_str().to_owned(),
+        },
+        RepositoryError::Resolve(error) => RepositoriesError::SecretUnresolved {
+            field: field_name(&error.field),
+        },
+        RepositoryError::Engine(EngineError::Unavailable { detail }) => {
+            unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
+        }
+        RepositoryError::Engine(EngineError::StartTimedOut) => {
+            unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None)
+        }
+        RepositoryError::Failed(reason) => failed_refusal(reason, settings),
+        RepositoryError::Config(error) => config_refusal(error),
+    }
+}
+
+fn unavailable(
+    code: ErrorCode,
+    args: Vec<(&'static str, MsgArg)>,
+    detail: Option<String>,
+) -> RepositoriesError {
+    RepositoriesError::Unavailable { code, args, detail }
+}
+
+fn exists(settings: &RepositorySettings) -> RepositoriesError {
+    RepositoriesError::Exists {
+        location: redacted_location(settings, &settings.repository),
+    }
+}
+
+/// Where a secret failed to resolve, as the catalog names it: the setting's
+/// own name in the configuration.
+fn field_name(field: &Field) -> String {
+    match field {
+        Field::Repository => "repository".to_owned(),
+        Field::RepoHot => "repo-hot".to_owned(),
+        Field::Password => "password".to_owned(),
+        Field::Option(name) => format!("options.{name}"),
+        Field::OptionHot(name) => format!("options-hot.{name}"),
+        Field::OptionCold(name) => format!("options-cold.{name}"),
+    }
+}
+
+/// A job that ran and failed: the engine's own words for a failure it
+/// reports, a typed code for the rest. The engine redacts what it says.
+fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> RepositoriesError {
+    use FailureReason as F;
+    match reason {
+        F::EngineFailed { detail } => RepositoriesError::OperationFailed { detail },
+        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
+            unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
+        }
+        F::EngineExited { exit_code } => unavailable(
+            ErrorCode::EngineExited,
+            exit_code
+                .map(|code| ("exit_code", text(code)))
+                .into_iter()
+                .collect(),
+            None,
+        ),
+        F::ProtocolViolated { transition } => unavailable(
+            ErrorCode::ProtocolViolated,
+            vec![("transition", text(format!("{transition:?}")))],
+            None,
+        ),
+        F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
+        F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
+        F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
+        // Only a backup's before-hook stops a job this way: a repository job
+        // runs no hooks. It is still a failure, in the catalog's plainest words.
+        F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
+        F::RepositoryExists => exists(settings),
+    }
+}
+
+/// A configuration that couldn't be read or written, as the code and the
+/// arguments its message declares. The store never puts a value in what it
+/// reports (`ConfigError`), so its words can be shown.
+fn config_refusal(error: ConfigError) -> RepositoriesError {
+    match error {
+        ConfigError::Unavailable { file, detail } => unavailable(
+            ErrorCode::ConfigUnavailable,
+            vec![("file", text(file))],
+            Some(detail),
+        ),
+        ConfigError::TooLarge { file, limit } => unavailable(
+            ErrorCode::ConfigTooLarge,
+            vec![("file", text(file)), ("limit", MsgArg::Bytes(limit))],
+            None,
+        ),
+        ConfigError::SchemaMissing { file } => unavailable(
+            ErrorCode::ConfigSchemaMissing,
+            vec![("file", text(file))],
+            None,
+        ),
+        ConfigError::SchemaNewer {
+            file,
+            found,
+            supported,
+        } => unavailable(
+            ErrorCode::ConfigSchemaNewer,
+            vec![
+                ("file", text(file)),
+                ("found", text(found)),
+                ("supported", text(supported)),
+            ],
+            None,
+        ),
+        ConfigError::Invalid {
+            file,
+            key,
+            at,
+            detail,
+            ..
+        } => {
+            let mut args = vec![("file", text(file))];
+            if let Some(at) = at {
+                args.push(("line", text(at.line)));
+            }
+            let detail = match (key, detail.is_empty()) {
+                (Some(key), false) => Some(format!("{key}: {detail}")),
+                (Some(key), true) => Some(key),
+                (None, false) => Some(detail),
+                (None, true) => None,
+            };
+            unavailable(ErrorCode::ConfigInvalid, args, detail)
+        }
     }
 }
 
 /// A location of `settings`, as it may be shown: with the password a URL
-/// holds masked.
-fn redacted_location(_settings: &domain::planning::RepositorySettings, _text: &str) -> String {
-    todo!("the red commit: tests first")
+/// holds masked. The typed password is not masked: it isn't in a location,
+/// and a location that happens to spell it is still a location.
+fn redacted_location(settings: &RepositorySettings, text: &str) -> String {
+    Redactor::for_repository(RepositorySecrets {
+        repository: &settings.repository,
+        repo_hot: settings.repo_hot.as_deref(),
+        password: &SecretValue::new(""),
+        options: &settings.options,
+        options_hot: &settings.options_hot,
+        options_cold: &settings.options_cold,
+        resolved: &[],
+    })
+    .redact(text)
 }
 
 impl CancelRegistry {
@@ -1512,9 +1741,15 @@ mod repository_service_tests {
         settings.options = [("a".to_owned(), "1".to_owned())].into();
         settings.options_hot = [("b".to_owned(), "2".to_owned())].into();
         settings.options_cold = [("c".to_owned(), "3".to_owned())].into();
-        let answer = service(&engine, config.clone())
-            .connect(connect("demo", settings))
-            .await;
+        let secrets = FakeSecrets::new();
+        secrets.write_file("/run/secrets/pw", b"demo-password\n", 0o600);
+        let answer = RepositoryService::new(
+            engine.clone(),
+            ResolveRepository::new(Arc::new(secrets)),
+            config.clone(),
+        )
+        .connect(connect("demo", settings))
+        .await;
         assert_eq!(answer.map(|id| id.id), Ok("a".repeat(64)));
         let config = saved(&*config).await;
         let repository = config.repository(&alias("demo")).expect("saved");
