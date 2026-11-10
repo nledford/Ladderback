@@ -16,13 +16,19 @@ const STARTUP: Duration = Duration::from_secs(30);
 struct Daemon {
     child: Child,
     stderr: Receiver<String>,
+    /// The daemon's own config and data folders, removed after it stops.
+    _scratch: tempfile::TempDir,
 }
 
 impl Daemon {
     /// Starts the daemon on a port of the system's choosing, with `RUST_LOG`
     /// set to `rust_log` or, for `None`, not set at all.
     fn start(rust_log: Option<&str>) -> Self {
+        let scratch = tempfile::tempdir().expect("a scratch folder for the daemon");
         let mut command = Command::new(LADDERBACK);
+        // Folders of its own: the daemons of these tests run side by side,
+        // and none may open the platform's, the developer's real ones.
+        testkit::daemon::isolate(&mut command, scratch.path());
         command
             // Port 0: the system picks a free port, and the daemon says which.
             .args(["serve", "--listen", "127.0.0.1:0"])
@@ -55,6 +61,7 @@ impl Daemon {
         Self {
             child,
             stderr: receiver,
+            _scratch: scratch,
         }
     }
 

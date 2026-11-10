@@ -49,7 +49,9 @@ fn serve_on_a_taken_address(language: &str) -> Said {
     let os_error = TcpListener::bind(&address)
         .expect_err("the address is taken")
         .to_string();
-    let mut child = Command::new(LADDERBACK)
+    let mut command = Command::new(LADDERBACK);
+    testkit::daemon::isolate(&mut command, &scratch);
+    let mut child = command
         .args(["serve", "--listen", &address])
         // `LC_ALL`, `LC_MESSAGES` and `LANG` decide first: a `C` among them,
         // as a container sets, makes the program ignore `LANGUAGE`.
@@ -57,8 +59,6 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .env_remove("LC_MESSAGES")
         .env_remove("LANG")
         .env("LANGUAGE", language)
-        .env("LADDERBACK_CONFIG_DIR", &scratch)
-        .env("LADDERBACK_DATA_DIR", &scratch)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

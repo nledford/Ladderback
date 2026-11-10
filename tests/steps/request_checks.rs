@@ -70,12 +70,14 @@ static LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Starts `ladderback serve` with `args`, and waits until it listens or exits.
 fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
-    let log_path = scratch.join(format!(
-        "serve-{}.log",
-        LOGS.fetch_add(1, Ordering::Relaxed)
-    ));
+    let started = LOGS.fetch_add(1, Ordering::Relaxed);
+    let log_path = scratch.join(format!("serve-{started}.log"));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
-    let mut child = Command::new(LADDERBACK)
+    let mut command = Command::new(LADDERBACK);
+    // Folders of its own, not the platform's, and not those of another daemon
+    // this scenario started.
+    testkit::daemon::isolate(&mut command, &scratch.join(format!("daemon-{started}")));
+    let mut child = command
         .arg("serve")
         .args(args)
         .stdin(Stdio::null())
@@ -88,7 +90,7 @@ fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
         .env_remove("LANGUAGE")
         .spawn()
         .expect("ladderback starts");
-    let started = Instant::now();
+    let began = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();
         // The log's last line may be half written: wait for its newline.
@@ -102,7 +104,7 @@ fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
             return (child, Outcome::Exited(status, text));
         }
         assert!(
-            started.elapsed() < START_TIMEOUT,
+            began.elapsed() < START_TIMEOUT,
             "ladderback neither listened nor exited within {START_TIMEOUT:?}: {text}"
         );
         std::thread::sleep(Duration::from_millis(20));

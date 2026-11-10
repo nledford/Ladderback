@@ -5,7 +5,7 @@
 //! Commit 1 of the M1b event stream: the steps are complete and fail against
 //! the stubbed daemon (development.md §13.1). The daemon reads its
 //! configuration from `LADDERBACK_CONFIG_DIR`, which every step here points
-//! at the scenario's scratch folder.
+//! at a folder of the scenario's scratch folder; its data folder is another.
 
 use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream};
@@ -69,8 +69,14 @@ impl Events {
         self.daemon().addr
     }
 
-    fn config_dir(agent: &Agent) -> PathBuf {
-        agent.scratch().join("events-config")
+    /// The scratch folder of the daemon these scenarios start.
+    fn root(agent: &Agent) -> PathBuf {
+        agent.scratch().join("events")
+    }
+
+    /// The config folder of that daemon.
+    pub fn config_dir(agent: &Agent) -> PathBuf {
+        testkit::daemon::config_dir(&Self::root(agent))
     }
 
     /// Reads page `page`'s events until one of `kinds` arrives, and returns it.
@@ -110,13 +116,13 @@ impl Events {
     }
 }
 
-/// Starts `ladderback serve` with its config folder in the scratch dir, and
+/// Starts `ladderback serve` with its folders in the scratch dir, and
 /// waits until it listens or exits.
 fn start(agent: &mut Agent) -> Outcome {
-    let mut child = Command::new(super::LADDERBACK)
+    let mut command = Command::new(super::LADDERBACK);
+    testkit::daemon::isolate(&mut command, &Events::root(agent));
+    let mut child = command
         .args(["serve", "--listen", "127.0.0.1:0"])
-        .env("LADDERBACK_CONFIG_DIR", Events::config_dir(agent))
-        .env("LADDERBACK_DATA_DIR", agent.scratch().join("events-data"))
         .stderr(Stdio::piped())
         .spawn()
         .expect("ladderback serve starts");
