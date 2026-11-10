@@ -399,8 +399,11 @@ fn tags(
         match UserTag::new(tag) {
             Ok(tag) => kept.push(tag),
             Err(reserved) => {
-                if dropped.insert(reserved.tag.clone()) {
-                    notices.push(ProfileNotice::TagDropped { tag: reserved.tag });
+                // The notice is shown as it is, and the tag is text of the
+                // profile.
+                let tag = plain(&reserved.tag);
+                if dropped.insert(tag.clone()) {
+                    notices.push(ProfileNotice::TagDropped { tag });
                 }
             }
         }
