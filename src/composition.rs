@@ -14,13 +14,13 @@ use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::history::{GetOperation, ListOperations};
-use app::interop::ImportError;
+use app::interop::{ExportError, ImportError};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
 use app::ports::Retention;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, HookRunner, HookSetup, Job, OperationRecord, OperationStore, ProfileError,
-    ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
+    EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
+    ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
 use app::secrets::{Field, ResolveRepository};
@@ -792,6 +792,34 @@ pub(crate) fn import_refusal(error: ImportError, config_file: &std::path::Path) 
             detail: None,
         },
         ImportError::Config(error) => profile_config_refusal(error, config_file),
+    }
+}
+
+/// What came of a refused export: the code, arguments and detail the catalog
+/// renders. `config_file` is as for [`import_refusal`].
+pub(crate) fn export_refusal(error: ExportError, config_file: &std::path::Path) -> Refusal {
+    match error {
+        ExportError::PlanUnknown(plan) => plan_unknown(plan.as_str()),
+        ExportError::Render(ExportRefusal::InlineSecret) => Refusal {
+            code: ErrorCode::InlineSecret,
+            args: Vec::new(),
+            detail: None,
+        },
+        ExportError::Render(ExportRefusal::Reference { key }) => Refusal {
+            code: ErrorCode::ProfileExportReference,
+            args: vec![("key", text(key))],
+            detail: None,
+        },
+        ExportError::Config(error) => profile_config_refusal(error, config_file),
+    }
+}
+
+/// A plan the configuration does not have, or a name no plan can have.
+pub(crate) fn plan_unknown(plan: &str) -> Refusal {
+    Refusal {
+        code: ErrorCode::PlanUnknown,
+        args: vec![("plan", text(plan))],
+        detail: None,
     }
 }
 
@@ -1868,6 +1896,35 @@ mod tests {
             said.contains("big.toml") && said.contains("1 MiB"),
             "{said}"
         );
+    }
+
+    #[test]
+    fn an_export_that_cannot_be_made_says_which_plan_or_which_setting() {
+        let path = std::path::Path::new("/cfg/c.toml");
+        let unknown = export_refusal(
+            ExportError::PlanUnknown(PlanId::parse("ghost").expect("a slug")),
+            path,
+        );
+        assert_eq!(unknown.code, ErrorCode::PlanUnknown);
+        assert!(said(&unknown).contains("ghost"));
+        let inline = export_refusal(ExportError::Render(ExportRefusal::InlineSecret), path);
+        assert_eq!(inline.code, ErrorCode::InlineSecret);
+        assert!(said(&inline).contains("password"));
+        let reference = export_refusal(
+            ExportError::Render(ExportRefusal::Reference {
+                key: "repository".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(reference.code, ErrorCode::ProfileExportReference);
+        assert!(said(&reference).contains("repository"));
+        let config = export_refusal(
+            ExportError::Config(ConfigError::SchemaMissing {
+                file: "/cfg/c.toml".to_owned(),
+            }),
+            path,
+        );
+        assert_eq!(config.code, ErrorCode::ConfigSchemaMissing);
     }
 
     #[test]

@@ -20,6 +20,7 @@ mod parse;
 mod part;
 mod resolve;
 mod tables;
+mod write;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -103,9 +104,7 @@ impl RusticProfileWriter {
 }
 
 impl ProfileWriter for RusticProfileWriter {
-    #[allow(clippy::todo, reason = "red test: interop export")]
     fn render(&self, export: &PlanExport) -> Result<RenderedProfile, ExportRefusal> {
-        let _ = export;
-        todo!("render one [[backup.snapshots]] entry, [forget] and [snapshot-filter]")
+        write::render(export)
     }
 }

@@ -6,7 +6,7 @@
 //! for their codes; what the import did goes to stdout. A refusal exits with
 //! 1 and leaves the configuration as it was.
 //!
-//! Red commit: the export runs its use case, which is `todo!()`.
+//! The export prints the profile on stdout, and only when it was made.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -22,7 +22,9 @@ use interop::{FileProfileReader, RusticProfileWriter};
 use l10n::{Localizer, PosixEnv, msg};
 use platform::{SystemClock, agent_id, dirs};
 
-use crate::composition::{Notice, Refusal, import_refusal, profile_notice};
+use crate::composition::{
+    Notice, Refusal, export_refusal, import_refusal, plan_unknown, profile_notice,
+};
 use crate::{say, text};
 
 /// Where stock rustic looks for the profiles a profile uses, when it is not
@@ -165,32 +167,63 @@ pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>) -> ExitCo
 }
 
 /// Exports the plan `plan` as a profile on stdout, with its notices on
-/// stderr.
-#[allow(clippy::todo, reason = "red test: interop export")]
+/// stderr. A refusal prints nothing on stdout and exits with 1.
 pub(crate) fn export_profile(plan: String) -> ExitCode {
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     let Some(config_dir) = dirs::config_dir() else {
-        todo!("say there is no config folder")
+        say(&localizer, msg::CLI_NO_CONFIG_DIR, &[]);
+        return ExitCode::FAILURE;
     };
     let Some(data_dir) = dirs::data_dir() else {
-        todo!("say there is no data folder")
+        say(&localizer, msg::CLI_NO_DATA_DIR, &[]);
+        return ExitCode::FAILURE;
     };
-    let Ok(agent) = agent_id::load_or_create(&data_dir) else {
-        todo!("say the agent's ID could not be read")
+    let config_file = config_dir.join("config.toml");
+    // A name that is not a plan ID is not a plan of the configuration either.
+    let Ok(plan_id) = PlanId::parse(&plan) else {
+        refuse(&localizer, &plan_unknown(&plan));
+        return ExitCode::FAILURE;
     };
-    let Ok(plan) = PlanId::parse(&plan) else {
-        todo!("refuse a plan ID that is not a slug")
+    let agent = match agent_id::load_or_create(&data_dir) {
+        Ok(agent) => agent,
+        Err(error) => {
+            say(
+                &localizer,
+                msg::CLI_PROFILE_NO_AGENT_ID,
+                &[("path", text(data_dir.display())), ("detail", text(error))],
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            say(
+                &localizer,
+                msg::CLI_CANNOT_START_RUNTIME,
+                &[("detail", text(error))],
+            );
+            return ExitCode::FAILURE;
+        }
     };
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
-        config_dir.join("config.toml"),
+        config_file.clone(),
         Arc::new(SystemClock),
     ));
-    let Ok(runtime) = tokio::runtime::Runtime::new() else {
-        todo!("say the runtime could not start")
-    };
     let use_case = ExportProfile::new(Arc::new(RusticProfileWriter::new()), config, agent);
-    let outcome = runtime.block_on(use_case.export(&plan));
-    let _ = outcome;
-    todo!("print the profile, the notices and the refusal through the catalog")
+    match runtime.block_on(use_case.export(&plan_id)) {
+        Ok(exported) => {
+            for notice in exported.notices {
+                warn(&localizer, &profile_notice(notice));
+            }
+            print!("{}", exported.text);
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            refuse(&localizer, &export_refusal(error, &config_file));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

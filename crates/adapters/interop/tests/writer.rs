@@ -790,6 +790,10 @@ async fn the_reader_reads_the_plan_back_apart_from_ladderbacks_own_tags() {
     assert_eq!(
         read.notices,
         [
+            // The forget's filter is rustic's and has no place in the config.
+            ProfileNotice::KeyIgnored {
+                key: "snapshot-filter".to_owned()
+            },
             ProfileNotice::TagDropped {
                 tag: "ladderback-plan:home".to_owned()
             },
