@@ -78,6 +78,18 @@ impl std::fmt::Display for TemplateError {
 
 impl std::error::Error for TemplateError {}
 
+/// Whether `text` is a valid template with a `${…}` reference in it. A text
+/// that is not a valid template has none: it is refused when a job resolves
+/// it, and until then it is text as written.
+pub fn has_reference(text: &str) -> bool {
+    Template::parse(text).is_ok_and(|template| {
+        template
+            .parts()
+            .iter()
+            .any(|part| matches!(part, Part::Reference(_)))
+    })
+}
+
 impl Template {
     pub fn parse(text: &str) -> Result<Self, TemplateError> {
         if text.len() > MAX_SECRET_BYTES {

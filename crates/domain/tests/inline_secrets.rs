@@ -58,7 +58,7 @@ fn an_option_that_names_a_credential_is_one_in_each_of_the_three_sets() {
 }
 
 #[test]
-fn a_value_with_a_dollar_brace_that_is_no_reference_is_still_written_inline() {
+fn a_value_that_is_not_a_valid_template_is_still_text_in_the_config() {
     let mut demo = settings(env());
     demo.options = options(&[("token", "not-a-${real-token")]);
     assert_eq!(

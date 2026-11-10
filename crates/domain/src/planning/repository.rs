@@ -8,7 +8,7 @@ use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
 use crate::secrets::{
-    InlineSecret, Part, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, Template,
+    InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
     is_secret_option,
 };
 
@@ -50,17 +50,6 @@ impl RepositorySettings {
         credentials(&self.options_cold, InlineSecret::OptionCold);
         found
     }
-}
-
-/// Whether `text` is a valid template with a `${…}` reference in it. A text
-/// that only holds a `${` is no reference: it is written as it stands.
-fn has_reference(text: &str) -> bool {
-    Template::parse(text).is_ok_and(|template| {
-        template
-            .parts()
-            .iter()
-            .any(|part| matches!(part, Part::Reference(_)))
-    })
 }
 
 /// An option written in the config can be a secret as it stands, so what the

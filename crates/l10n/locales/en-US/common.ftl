@@ -312,7 +312,8 @@ warning-inline-secret = The profile holds a secret in { $field }, which { -brand
 
 # A repository's secret is written as text in the configuration file.
 # $field (text): where it is, as the configuration names it, such as password or options.secret_access_key. Keep it as it is.
-warning-config-inline-secret = The { $field } of this repository is written as text in the configuration file. Keep the secret in a keyring, a file, a command or an environment variable instead, and refer to it from the configuration.
+# `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
+warning-config-inline-secret = The { $field } of this repository is written as text in the configuration file. Keep the secret outside the file and refer to it: a password can come from a keyring, a file, a command or an environment variable, and an option from a { "${VAR}" } or { "${file:/path}" } reference.
 
 # One of the program's own tags was found on a snapshot entry and dropped.
 # $tag (text): the tag.
