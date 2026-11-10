@@ -10,6 +10,7 @@ use domain::{OperationId, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
+use crate::log_write::save_within_bound;
 use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, HookContext, HookOutcome, HookPhase,
     HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
@@ -53,6 +54,14 @@ pub struct Queued {
     job: Job,
 }
 
+/// How the write that says an operation is running ended, or what cut it
+/// short.
+enum Written {
+    Saved(Result<(), StoreError>),
+    Cancelled,
+    DeadlinePassed,
+}
+
 /// How a run ended: the operation as it finished, what the engine reported
 /// when it succeeded, and what went wrong writing the operation log.
 #[derive(Debug)]
@@ -61,7 +70,9 @@ pub struct Finished {
     /// Set only when the operation accepted the engine's result: one the
     /// operation refused (a protocol violation) isn't kept.
     pub result: Option<EngineResult>,
-    /// One for each write the log refused: a run writes at most three times.
+    /// One for each write the log refused or never answered: a run writes at
+    /// most three times. The last of them has no write after it to make it
+    /// good.
     pub recording_errors: Vec<StoreError>,
 }
 
@@ -211,7 +222,35 @@ impl RunOperation {
                         // The operation is running now. Nothing else it does
                         // changes what the log shows until it finishes, so
                         // progress and warnings aren't written one by one.
-                        self.record(run).await;
+                        // A cancel or the deadline doesn't wait for the
+                        // write: a log that stalls must not hold them.
+                        let written = {
+                            let write = save_within_bound(
+                                &*self.clock,
+                                &*self.store,
+                                &run.operation,
+                                run.result.as_ref(),
+                            );
+                            let mut write = pin!(write.fuse());
+                            select_biased! {
+                                saved = write => Written::Saved(saved),
+                                () = cancel => Written::Cancelled,
+                                () = timer => Written::DeadlinePassed,
+                            }
+                        };
+                        match written {
+                            Written::Saved(Ok(())) => {}
+                            Written::Saved(Err(error)) => run.recording_errors.push(error),
+                            Written::Cancelled => {
+                                control.stop().await;
+                                self.cancel(run);
+                                return;
+                            }
+                            Written::DeadlinePassed => {
+                                self.fail(run, FailureReason::DeadlinePassed);
+                                return;
+                            }
+                        }
                     }
                     // Checked on every event, so a stream that never pauses
                     // can't keep the timer from its turn.
@@ -256,10 +295,17 @@ impl RunOperation {
         }
     }
 
-    /// Writes the operation as it stands. A refused write is noted for the
-    /// caller and nothing more.
+    /// Writes the operation as it stands. A refused write, or one that
+    /// stalls past [`crate::log_write::SAVE_BOUND`], is noted for the caller and nothing more.
     async fn record(&self, run: &mut Run) {
-        if let Err(error) = self.store.save(&run.operation, run.result.as_ref()).await {
+        let saved = save_within_bound(
+            &*self.clock,
+            &*self.store,
+            &run.operation,
+            run.result.as_ref(),
+        )
+        .await;
+        if let Err(error) = saved {
             run.recording_errors.push(error);
         }
     }
