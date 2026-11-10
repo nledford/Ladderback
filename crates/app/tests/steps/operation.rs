@@ -179,6 +179,13 @@ async fn history_of_the_operation(agent: &mut Agent) -> OperationDetail {
 
 #[then("the history shows the operation as it ended")]
 async fn history_shows_the_operation(agent: &mut Agent) {
+    // A write the log refused is the reason its record can differ from the
+    // operation, so it is named first.
+    assert!(
+        agent.finished().recording_errors.is_empty(),
+        "the log refused a write: {:?}",
+        agent.finished().recording_errors
+    );
     let detail = history_of_the_operation(agent).await;
     let finished = agent.finished();
     assert_eq!(
@@ -186,11 +193,6 @@ async fn history_shows_the_operation(agent: &mut Agent) {
         OperationRecord::of(&finished.operation, finished.result.as_ref())
     );
     assert_eq!(detail.warnings, finished.operation.warnings());
-    assert!(
-        finished.recording_errors.is_empty(),
-        "the log refused a write: {:?}",
-        finished.recording_errors
-    );
 }
 
 #[then(expr = "the history lists {int} warning(s) for the operation")]
