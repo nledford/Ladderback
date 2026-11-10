@@ -909,6 +909,29 @@ fn an_option_with_credentials_in_an_address_is_left_out_whatever_the_address_loo
 }
 
 #[test]
+fn an_option_name_is_a_bare_key_only_when_toml_allows_it() {
+    let mut export = export();
+    for name in ["", "max_conn", "no-cache", "odd name", "a.b"] {
+        export
+            .repository
+            .settings
+            .options
+            .insert(name.to_owned(), "v".to_owned());
+    }
+    let text = text(&export);
+    for line in [
+        "\"\" = \"v\"\n",
+        "\nmax_conn = \"v\"\n",
+        "\nno-cache = \"v\"\n",
+        "\n\"odd name\" = \"v\"\n",
+        "\n\"a.b\" = \"v\"\n",
+    ] {
+        assert!(text.contains(line), "{line:?}\n{text}");
+    }
+    assert_has(&text, "repository.options.odd name", string("v"));
+}
+
+#[test]
 fn an_option_that_is_an_address_without_credentials_is_written() {
     for value in ["https://s3.demo:9000/path", "proxy.demo:3128", "eu-demo-1"] {
         let mut export = export();

@@ -10,7 +10,7 @@ use app::ports::{ProfileError, ProfileNotice, ProfileProblem, ProfileReader};
 use common::{ENTRY, REPOSITORY, Scratch, commands, ids, ignored, line_of, nas, plan, write_in};
 use domain::planning::{GroupBy, KeepCount};
 use domain::secrets::{FileRead, SecretRef};
-use interop::{MAX_PROFILES, MAX_USE_DEPTH};
+use interop::{MAX_ENTRIES, MAX_PROFILES, MAX_USE_DEPTH};
 
 /// `nas.toml`: uses `names`, then `text`.
 fn uses(names: &[&str], text: &str) -> String {
@@ -730,4 +730,51 @@ async fn the_environment_and_prune_of_either_profile_count() {
             "{own:?} {used:?}"
         );
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_used_profile_that_cannot_be_looked_up_is_unreadable_and_not_missing() {
+    // A link that points at itself is neither there nor absent: the lookup
+    // fails, and a profile whose settings might be in it is not imported
+    // as if they were not.
+    let scratch = Scratch::new();
+    let link = scratch.rustic.join("base.toml");
+    std::os::unix::fs::symlink(&link, &link).expect("a link");
+    let error = scratch
+        .read(&uses(&["base"], &format!("{REPOSITORY}\n{ENTRY}")))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProfileError::Unreadable {
+            file: link.display().to_string()
+        }
+    );
+}
+
+/// `count` snapshot entries named from `first` on, each with one source.
+fn entries(first: usize, count: usize) -> String {
+    (first..first + count)
+        .map(|n| format!("[[backup.snapshots]]\nname = \"p{n}\"\nsources = [\"/srv/{n}\"]\n"))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_entries_of_a_profile_and_the_profiles_it_uses_are_bounded_together() {
+    let scratch = Scratch::new();
+    scratch.profile("base.toml", &entries(MAX_ENTRIES, MAX_ENTRIES / 2));
+    let own = |count: usize| uses(&["base"], &format!("{REPOSITORY}\n{}", entries(0, count)));
+
+    let profile = scratch
+        .read(&own(MAX_ENTRIES / 2))
+        .await
+        .expect("a profile");
+    assert_eq!(profile.plans.len(), MAX_ENTRIES);
+
+    let error = scratch.read(&own(MAX_ENTRIES / 2 + 1)).await.unwrap_err();
+    let (file, key, _, problem) = invalid(error);
+    assert_eq!(problem, ProfileProblem::TooManyEntries);
+    assert_eq!(key, "backup.snapshots");
+    assert_eq!(file, scratch.work.join("nas.toml").display().to_string());
 }

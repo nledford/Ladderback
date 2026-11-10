@@ -853,6 +853,20 @@ async fn a_hook_that_is_not_a_command_is_refused_without_its_text() {
 }
 
 #[tokio::test]
+async fn a_hook_that_is_a_number_is_refused_saying_what_a_hook_is() {
+    let text = profile_text("[global.hooks]\nrun-before = [3]\n");
+    match read_err(&text).await {
+        ProfileError::Invalid {
+            problem, detail, ..
+        } => {
+            assert_eq!(problem, ProfileProblem::WrongType);
+            assert!(detail.contains("a command line or a table"), "{detail}");
+        }
+        other => panic!("the profile should be invalid, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn the_profiles_environment_is_left_out_with_a_notice_and_never_kept() {
     let profile = read_ok(&profile_text("[global.env]\nDEMO_VARIABLE = \"CANARY\"\n")).await;
     assert!(profile.notices.contains(&ProfileNotice::EnvIgnored));
