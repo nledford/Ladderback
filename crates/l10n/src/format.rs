@@ -33,7 +33,8 @@
 //!   as both ICU4X and `Intl` do.
 //! - **Instants** follow `DATETIME`'s [`Style`]. The zone is how the instant
 //!   is read: without one, or with one the host doesn't know, it is read as
-//!   UTC. A browser's host may read no zone as the viewer's.
+//!   UTC, on every host, and never as the viewer's: a page that wants the
+//!   viewer's zone passes it, as the web UI does (`viewer_zone`).
 
 use std::borrow::Cow;
 use std::convert::Infallible;

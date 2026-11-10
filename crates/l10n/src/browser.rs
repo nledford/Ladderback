@@ -40,7 +40,8 @@ pub(crate) struct Instants {
     locale: String,
     style: Style,
     /// The formatter of UTC: no zone, and a zone the browser doesn't have,
-    /// are read as UTC, never as the viewer's.
+    /// are read as UTC, never as the viewer's (a page passes the viewer's
+    /// zone, [`viewer_zone`]).
     utc: JsValue,
     /// The formatters built so far, by zone name; `None` for a zone the
     /// browser refused.
@@ -59,6 +60,21 @@ pub(crate) fn construct(name: &str, locale: &str, options: &Object) -> Option<Js
     let constructor = intl(name)?.dyn_into::<Function>().ok()?;
     let arguments = Array::of2(&JsValue::from_str(locale), options);
     Reflect::construct(&constructor, &arguments).ok()
+}
+
+/// The zone the browser reads its own clock in:
+/// `Intl.DateTimeFormat().resolvedOptions().timeZone`. `None` when the browser
+/// has no `Intl.DateTimeFormat`, doesn't say, or names a zone that isn't shaped
+/// like an IANA name (a page then shows UTC, as the formatter does).
+#[must_use]
+pub fn viewer_zone() -> Option<IanaZone> {
+    let constructor = intl("DateTimeFormat")?.dyn_into::<Function>().ok()?;
+    let formatter = Reflect::construct(&constructor, &Array::new()).ok()?;
+    let resolved = member(&formatter, "resolvedOptions")?
+        .call0(&formatter)
+        .ok()?;
+    let zone = Reflect::get(&resolved, &JsValue::from_str("timeZone")).ok()?;
+    IanaZone::new(zone.as_string()?).ok()
 }
 
 /// `Intl[name]`, if the browser has it.

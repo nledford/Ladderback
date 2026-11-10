@@ -204,8 +204,10 @@ pub enum MsgArg {
     Bytes(u64),
     DurationMs(u64),
     /// An instant, as milliseconds since the Unix epoch. The zone, when the
-    /// sender has one that matters (a plan's own zone, the agent's zone),
-    /// is how the instant is read; without one the viewer's zone applies.
+    /// sender has one that matters (a plan's own zone, the agent's zone, or the
+    /// browser's own, which the web UI always passes), is how the instant is
+    /// read; without one it is read as UTC, on every host, and never as the
+    /// viewer's zone.
     Timestamp {
         utc_ms: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -279,7 +279,7 @@ const about =
   "as CLDR does, where V8 writes U+0020, so a host running on V8 folds U+202F and U+00A0 to U+0020 before comparing. " +
   "A number literal's decimals are its minimum fraction digits, and the maximum wins over a larger minimum; " +
   "a count above 2^53 is its digits. A size and a duration are the en-US catalog's helpers around numbers " +
-  "written by the locale. An instant with no zone, or a zone nobody has, is read as UTC. " +
+  "written by the locale. An instant with no zone, or a zone nobody has, is read as UTC, never as the viewer's: a caller that wants the viewer's zone passes it, and the browser lane runs with TZ set to a zone that is not UTC so a host that read the environment's zone fails. " +
   "Sizes, counts and durations travel as text, which holds a 64-bit number exactly.";
 
 const lines = cases.map((c) => `    ${escape(JSON.stringify(c))}`);

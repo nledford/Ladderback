@@ -5,9 +5,10 @@
 //! table of every case a host writes is `l10n`'s own lane; this is the check
 //! that `web` is built with that host.
 //!
-//! The catalog is the test's own: the web UI's own instants come out of the
-//! `ui-instant` message, whose browser journeys read through the cells'
-//! `title` attributes; this lane checks the host itself writes `DATETIME`.
+//! The German catalog is the test's own, for the host's writing of `DATETIME`;
+//! the page's own instants come out of the real `ui-instant` message, which
+//! the last test reads through `routes::instant`, with the viewer's zone as
+//! the pages pass it.
 
 use api::{IanaZone, MsgArg};
 use l10n::catalog::{Catalog, Source};
@@ -63,5 +64,22 @@ fn an_instant_in_the_web_bundle_is_written_in_its_zone_as_the_locale_writes_it()
     assert_eq!(
         written(&german(), "long", &when()),
         "8. November 2026 um 14:30"
+    );
+}
+
+#[wasm_bindgen_test]
+fn a_page_writes_an_instant_in_the_viewers_zone_and_the_formatter_without_one_in_utc() {
+    let localizer = Localizer::new(&["en-US".parse().unwrap()]);
+    let raw = "2026-11-08T13:30:45Z";
+    let viewer = l10n::viewer_zone();
+    let fold = |text: String| text.replace(['\u{202f}', '\u{a0}'], " ");
+    // `just test-wasm` pins `TZ=America/New_York`: 13:30 UTC is 8:30 there.
+    assert_eq!(
+        fold(crate::routes::instant(&localizer, raw, viewer.as_ref())),
+        "11/8/26, 8:30:45 AM"
+    );
+    assert_eq!(
+        fold(crate::routes::instant(&localizer, raw, None)),
+        "11/8/26, 1:30:45 PM"
     );
 }

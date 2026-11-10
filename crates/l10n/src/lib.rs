@@ -54,6 +54,19 @@ mod localizer;
 pub mod msg;
 mod pseudo;
 
+#[cfg(all(feature = "browser-intl", target_arch = "wasm32"))]
+pub use browser::viewer_zone;
+
+/// The zone the viewer reads the clock in, for a page to pass to `DATETIME`
+/// when it shows an instant (technical design §8.4): the formatter's own
+/// reading of an instant with no zone is UTC, on every host. There is no
+/// viewer outside a browser's build, so here there is no zone.
+#[cfg(not(all(feature = "browser-intl", target_arch = "wasm32")))]
+#[must_use]
+pub fn viewer_zone() -> Option<api::IanaZone> {
+    None
+}
+
 pub use id::MessageId;
 pub use locale::{BrowserLanguages, Direction, PosixEnv};
 pub use localizer::{Formatted, Localizer};
