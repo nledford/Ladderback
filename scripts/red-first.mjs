@@ -4,7 +4,8 @@
 // scenario that commit adds must fail *at run time* on that commit: a compile
 // error doesn't count, and a test that already passes specifies nothing new.
 // The commit may carry `todo!()` stubs in src so the tests compile; the check
-// doesn't constrain which files it touches.
+// doesn't constrain which files it touches. Each red scenario prints its first
+// failing step and message under its `red` line (scripts/failure-reason.mjs).
 //
 // The two trees (the merge base and the test: commit) are checked out at fixed
 // paths, target/red-first/trees/base and trees/first, each with its own target
@@ -25,6 +26,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { failureReason } from "./failure-reason.mjs";
 import path from "node:path";
 
 const WASM_TARGET = "wasm32-unknown-unknown";
@@ -417,7 +419,14 @@ try {
   for (const [key, scenario] of newScenarios) {
     const result = scenarioFails(trees.first, scenario, uiReady);
     console.log(`${result.failed ? "red " : "GREEN"} ${key} (${scenario.runner})`);
-    if (!result.failed) fail(`${key} doesn't fail on the test: commit:\n${result.output}`);
+    if (result.failed) {
+      // Why it is red: a scenario whose page never loaded and one whose
+      // assertion failed are both red, and the log should say which this is.
+      const reason = failureReason(scenario.runner, result.output) ?? "no failing step in the runner's output";
+      console.log(`     failed at: ${reason}`);
+    } else {
+      fail(`${key} doesn't fail on the test: commit:\n${result.output}`);
+    }
   }
 } catch (error) {
   fail(error.message);
