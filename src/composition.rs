@@ -49,7 +49,7 @@ use http_adapter::{
 };
 use l10n::{MessageId, msg};
 use platform::SystemClock;
-use platform::data_dir_lock::{DataDirLock, LockError};
+use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
 use platform::{agent_id, dirs};
 use secrets::SystemSecrets;
 use store::SqliteStore;
@@ -92,10 +92,11 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
 }
 
 /// What `serve` runs: the router's state, and the hold on the data folder that
-/// keeps every other process off it for as long as the daemon lives.
+/// keeps every other process off it. The caller keeps the lock until the
+/// daemon is gone.
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
-    _lock: DataDirLock,
+    pub(crate) lock: DataDirLock,
 }
 
 /// What the daemon's router runs against (§4.2), or why it cannot.
@@ -104,30 +105,30 @@ pub(crate) async fn daemon() -> Result<Daemon, Refused> {
 }
 
 /// [`daemon`] with the folders supplied, for tests. The data folder is locked
-/// before the log opens (§9), and what an earlier run left unfinished is ended
-/// before the state is handed over, so nothing serves or listens until both
-/// are done.
+/// before anything else is read or opened (§9), and what an earlier run left
+/// unfinished is ended before the state is handed over, so nothing serves or
+/// listens until both are done.
 async fn daemon_at(
     config_dir: Option<std::path::PathBuf>,
     data_dir: Option<std::path::PathBuf>,
 ) -> Result<Daemon, Refused> {
-    // The configuration first: a file this build cannot read is a refusal,
-    // whatever the rest of the machine says.
     let config_dir = config_dir.ok_or_else(|| plain(msg::CLI_NO_CONFIG_DIR))?;
+    let data_dir = data_dir.ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
+    // The data dir must be there before it is locked and the store opens in it.
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
+    // One daemon per data folder, before anything is read or opened: a second
+    // process must not migrate the configuration the first is running on, read
+    // what it runs, or end it as the leftover of a crash (§9).
+    let lock = DataDirLock::acquire(&data_dir).map_err(|error| lock_refused(&data_dir, error))?;
+    // The configuration next: a file this build cannot read is a refusal,
+    // whatever the rest of the machine says.
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
         config_dir.join("config.toml"),
         Arc::new(SystemClock),
     ));
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
-    // The data dir must be there before it is locked and the store opens in it.
-    let data_dir = data_dir.ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
-    std::fs::create_dir_all(&data_dir)
-        .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
-    // One daemon per data folder, before the log opens: a second process must
-    // never read what the first is running, let alone end it as the leftover
-    // of a crash (§9).
-    let lock = DataDirLock::acquire(&data_dir).map_err(|error| lock_refused(&data_dir, error))?;
     let database = data_dir.join("ladderback.db");
     let store: Arc<dyn OperationStore> = Arc::new(
         SqliteStore::open(&database)
@@ -186,7 +187,7 @@ async fn daemon_at(
             catalog,
             repositories,
         },
-        _lock: lock,
+        lock,
     })
 }
 
@@ -202,7 +203,13 @@ fn lock_refused(data_dir: &std::path::Path, error: LockError) -> Refused {
             message: msg::CLI_DATA_DIR_IN_USE_UNNAMED,
             args: vec![("path", text(data_dir.display()))],
         },
-        LockError::Unavailable { detail } => store_refused(data_dir, &detail),
+        LockError::Unavailable { detail } => Refused {
+            message: msg::CLI_CANNOT_LOCK_DATA_DIR,
+            args: vec![
+                ("path", text(data_dir.join(LOCK_FILE).display())),
+                ("detail", text(detail)),
+            ],
+        },
     }
 }
 
@@ -1872,6 +1879,24 @@ mod tests {
         (config, data)
     }
 
+    /// A backup that was running when the daemon that ran it stopped.
+    fn running_backup(id: OperationId) -> domain::execution::Operation {
+        let mut backup = domain::execution::Operation::queue(
+            id,
+            OperationKind::Backup,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: None,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        backup
+            .start(domain::Timestamp::from_second(1_800_000_001).expect("a time"))
+            .expect("the backup starts");
+        backup
+    }
+
     #[tokio::test]
     async fn the_daemon_starts_with_no_configuration() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
@@ -1894,21 +1919,8 @@ mod tests {
         // that run stopped.
         let earlier = SqliteStore::open(&database).await.expect("the log opens");
         let id = OperationId::from_uuid(Uuid::from_u128(1));
-        let mut backup = domain::execution::Operation::queue(
-            id,
-            OperationKind::Backup,
-            Trigger::Manual,
-            domain::execution::Target {
-                plan: None,
-                repository: None,
-            },
-            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
-        );
-        backup
-            .start(domain::Timestamp::from_second(1_800_000_001).expect("a time"))
-            .expect("the backup starts");
         earlier
-            .save(&backup, None)
+            .save(&running_backup(id), None)
             .await
             .expect("the running backup is saved");
         earlier.close().await;
@@ -1933,6 +1945,74 @@ mod tests {
                 reason: FailureReason::DaemonStopped
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held() {
+        use sqlx::{ConnectOptions, Connection};
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        let id = OperationId::from_uuid(Uuid::from_u128(1));
+        let earlier = SqliteStore::open(&database).await.expect("the log opens");
+        earlier
+            .save(&running_backup(id), None)
+            .await
+            .expect("the running backup is saved");
+        earlier.close().await;
+        // A log that refuses every change to its operations, as a failing disk
+        // would.
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database)
+            .connect()
+            .await
+            .expect("a raw connection to the log");
+        sqlx::query(
+            "CREATE TRIGGER refuse_changes BEFORE UPDATE ON operations
+             BEGIN SELECT RAISE(ABORT, 'refused'); END",
+        )
+        .execute(&mut raw)
+        .await
+        .expect("the log is made to refuse changes");
+        raw.close().await.expect("the connection closes");
+
+        let refused = daemon_at(Some(config), Some(data))
+            .await
+            .err()
+            .expect("a log that cannot be changed refuses the start");
+        assert_eq!(refused.message, msg::CLI_CANNOT_RECOVER_OPERATIONS);
+
+        let log = SqliteStore::open(&database)
+            .await
+            .expect("the log opens again");
+        let detail = log
+            .get(id)
+            .await
+            .expect("the log reads")
+            .expect("the backup is still in the log");
+        assert_eq!(
+            detail.record.status,
+            OperationStatus::Running,
+            "the log is as it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_data_folder_another_process_holds_is_refused_before_its_log_is_opened() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        // Held as another process holds it, before any log exists.
+        let held = DataDirLock::acquire(&data).expect("the folder is free");
+        let refused = daemon_at(Some(config), Some(data.clone()))
+            .await
+            .err()
+            .expect("a data folder another process holds refuses");
+        assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+        assert!(
+            !data.join("ladderback.db").exists(),
+            "a refused daemon never opens the log"
+        );
+        drop(held);
     }
 
     #[tokio::test]
@@ -1977,6 +2057,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_daemon_refused_the_data_folder_has_not_read_the_configuration() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the first daemon starts");
+        // A configuration only a newer build reads: a daemon that read it
+        // would refuse it for that, and one that migrated an older file would
+        // rewrite what the first daemon runs on.
+        std::fs::write(config.join("config.toml"), "schema = 999999\n").expect("the config file");
+        let refused = daemon_at(Some(config), Some(data))
+            .await
+            .err()
+            .expect("a data folder another daemon holds refuses");
+        assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+        drop(first);
+    }
+
+    #[tokio::test]
     async fn a_data_folder_is_free_again_once_its_daemon_is_gone() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
@@ -2011,11 +2111,11 @@ mod tests {
                 detail: "Permission denied (os error 13)".to_owned(),
             },
         );
-        assert_eq!(unavailable.message, msg::CLI_CANNOT_OPEN_STORE);
+        assert_eq!(unavailable.message, msg::CLI_CANNOT_LOCK_DATA_DIR);
         assert_eq!(
             unavailable.args,
             vec![
-                ("path", text("/srv/demo/data")),
+                ("path", text("/srv/demo/data/ladderback.lock")),
                 ("detail", text("Permission denied (os error 13)"))
             ]
         );

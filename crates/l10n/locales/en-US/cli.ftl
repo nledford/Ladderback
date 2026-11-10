@@ -57,11 +57,16 @@ cli-cannot-recover-operations = cannot end the operations an earlier run left un
 # Another process already holds the data folder, so the daemon did not start.
 # $path (text): the data folder, as the user wrote it.
 # $pid (text): the ID of the process that holds it.
-cli-data-dir-in-use = the data folder { $path } is in use by process { $pid }: stop that process, or give this one a data folder of its own with { "LADDERBACK_DATA_DIR" }
+cli-data-dir-in-use = the data folder { $path } is in use by process { $pid }: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" })
 
 # As cli-data-dir-in-use, when the lock file names no process.
 # $path (text): the data folder, as the user wrote it.
-cli-data-dir-in-use-unnamed = the data folder { $path } is in use by another process: stop that process, or give this one a data folder of its own with { "LADDERBACK_DATA_DIR" }
+cli-data-dir-in-use-unnamed = the data folder { $path } is in use by another process: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" })
+
+# The lock on the data folder could not be taken, so the daemon did not start. A file system that does not support locks gives this.
+# $path (text): the lock file.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-cannot-lock-data-dir = cannot lock the data folder through { $path }: { $detail }
 
 # The configuration file could not be read.
 # $file (text): the path of the configuration file.

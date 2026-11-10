@@ -31,6 +31,7 @@ Feature: Live updates
     And the daemon is still serving
 
   Scenario: The daemon refuses to start on a config file from a newer Ladderback
-    Given the config folder holds a config.toml from a newer schema
+    Given the daemon is killed
+    And the config folder holds a config.toml from a newer schema
     When Ladderback is asked to serve
     Then Ladderback refuses to start, naming the newer schema

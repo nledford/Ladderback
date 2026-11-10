@@ -9,6 +9,8 @@
 //! it exits. The operating system lets go of the lock when the process ends,
 //! however it ends, so a crash never leaves it stale. The file stays, naming
 //! the process that held it, until the next holder writes its own ID into it.
+//! It is the lock itself, so deleting it while a daemon serves would let a second
+//! daemon take a fresh one.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -184,5 +186,18 @@ mod tests {
         let error = DataDirLock::acquire(&missing).expect_err("no data dir");
         assert!(matches!(error, LockError::Unavailable { .. }), "{error:?}");
         assert!(!missing.exists(), "locking doesn't make the data dir");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_file_is_the_owners_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let _lock = DataDirLock::acquire(dir.path()).unwrap();
+        let mode = fs::metadata(lock_file(dir.path()))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "the mode is {mode:o}");
     }
 }
