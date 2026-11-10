@@ -30,7 +30,7 @@ use app::ports::{
     maintained_repository,
 };
 use async_trait::async_trait;
-use domain::execution::{MAX_STORED_WARNINGS, Operation, OperationStatus};
+use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::pool::PoolConnection;
@@ -447,5 +447,9 @@ impl OperationStore for SqliteStore {
             None
         };
         Ok(HistoryPage { operations, next })
+    }
+
+    async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
+        todo!("SqliteStore::fail_unfinished")
     }
 }

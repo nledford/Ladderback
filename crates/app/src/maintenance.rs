@@ -1114,6 +1114,13 @@ mod record_tests {
 
     #[async_trait]
     impl OperationStore for Stalled {
+        async fn fail_unfinished(
+            &self,
+            _reason: &domain::execution::FailureReason,
+        ) -> Result<u64, StoreError> {
+            futures::future::pending().await
+        }
+
         async fn save(
             &self,
             _operation: &Operation,

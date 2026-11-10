@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::OperationId;
-use domain::execution::{Operation, OperationStatus};
+use domain::execution::{FailureReason, Operation, OperationStatus};
 
 use crate::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
@@ -111,5 +111,9 @@ impl OperationStore for InMemoryOperationStore {
             .filter(|_| more_remain)
             .map(|last| last.id);
         Ok(HistoryPage { operations, next })
+    }
+
+    async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
+        todo!("InMemoryOperationStore::fail_unfinished")
     }
 }

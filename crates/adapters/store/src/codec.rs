@@ -179,6 +179,7 @@ pub(crate) fn encode_failure(
                 .unwrap_or_default(),
             None,
         ),
+        FailureReason::DaemonStopped => todo!("encode FailureReason::DaemonStopped"),
     };
     Ok(FailureColumns {
         code,
@@ -319,5 +320,21 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryExists);
+    }
+
+    /// A persisted `daemon-stopped` failure reads back as the typed reason:
+    /// it has no arguments and no detail, and its columns say exactly that.
+    #[test]
+    fn daemon_stopped_round_trips() {
+        let columns = encode_failure(&FailureReason::DaemonStopped)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "daemon-stopped");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::DaemonStopped);
     }
 }

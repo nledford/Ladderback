@@ -51,6 +51,8 @@ mod forget_steps;
 mod interop_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
+#[path = "steps/restart.rs"]
+mod restart_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
 

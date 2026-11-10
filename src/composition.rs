@@ -157,6 +157,31 @@ async fn app_state_at(
     })
 }
 
+/// What `serve` runs: the router's state, and the hold on the data folder that
+/// keeps every other process off it for as long as the daemon lives.
+#[allow(
+    dead_code,
+    reason = "red test: the start-up order is wired by the commit that makes recovery pass"
+)]
+pub(crate) struct Daemon {
+    pub(crate) state: AppState,
+    _lock: platform::data_dir_lock::DataDirLock,
+}
+
+/// [`app_state_at`], with the data folder locked and the operations an earlier
+/// run left unfinished ended before the state is handed over (§4.2, §9).
+#[allow(
+    dead_code,
+    reason = "red test: the start-up order is wired by the commit that makes recovery pass"
+)]
+async fn daemon_at(
+    config_dir: Option<std::path::PathBuf>,
+    data_dir: Option<std::path::PathBuf>,
+) -> Result<Daemon, Refused> {
+    let _ = (config_dir, data_dir);
+    todo!("daemon_at")
+}
+
 /// A configuration the daemon cannot use, as the message for whoever wrote it.
 fn config_refused(error: ConfigError) -> Refused {
     fn refused(message: MessageId, args: Vec<(&'static str, MsgArg)>) -> Refused {
@@ -378,6 +403,7 @@ fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::EngineStartTimedOut => (ErrorCode::EngineStartTimedOut, Vec::new()),
         F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
+        F::DaemonStopped => todo!("the code a stopped daemon's operation reports"),
     }
 }
 
@@ -1568,6 +1594,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         // runs no hooks. It is still a failure, in the catalog's plainest words.
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
+        F::DaemonStopped => todo!("the refusal a stopped daemon's operation gives"),
     }
 }
 
@@ -1824,6 +1851,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_daemon_ends_what_a_crash_left_unfinished_before_it_hands_over_its_state() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        // The log an earlier run left behind: a backup that was running when
+        // that run stopped.
+        let earlier = SqliteStore::open(&database).await.expect("the log opens");
+        let id = OperationId::from_uuid(Uuid::from_u128(1));
+        let mut backup = domain::execution::Operation::queue(
+            id,
+            OperationKind::Backup,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: None,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        backup
+            .start(domain::Timestamp::from_second(1_800_000_001).expect("a time"))
+            .expect("the backup starts");
+        earlier
+            .save(&backup, None)
+            .await
+            .expect("the running backup is saved");
+        earlier.close().await;
+
+        let daemon = daemon_at(Some(config), Some(data))
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the daemon starts");
+        drop(daemon);
+
+        let log = SqliteStore::open(&database)
+            .await
+            .expect("the log opens again");
+        let detail = log
+            .get(id)
+            .await
+            .expect("the log reads")
+            .expect("the backup is still in the log");
+        assert_eq!(
+            detail.record.status,
+            OperationStatus::Failed {
+                reason: FailureReason::DaemonStopped
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn a_newer_schema_is_a_typed_refusal() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
@@ -2071,6 +2148,13 @@ mod tests {
 
     #[async_trait]
     impl OperationStore for GatedSaves {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
         async fn save(
             &self,
             operation: &domain::execution::Operation,

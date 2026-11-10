@@ -184,6 +184,13 @@ struct Broken(StoreError);
 
 #[async_trait]
 impl OperationStore for Broken {
+    async fn fail_unfinished(
+        &self,
+        _: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        Err(self.0.clone())
+    }
+
     async fn save(&self, _: &Operation, _: Option<&EngineResult>) -> Result<(), StoreError> {
         Err(self.0.clone())
     }
