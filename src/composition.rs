@@ -1249,8 +1249,7 @@ fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Reposito
         }
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
-        #[allow(clippy::todo, reason = "a stub, until the green commit")]
-        RepositoryError::TimedOut => todo!("refuse a repository that did not answer in time"),
+        RepositoryError::TimedOut => unavailable(ErrorCode::RepositoryTimedOut, Vec::new(), None),
     }
 }
 

@@ -7,9 +7,10 @@
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
+use domain::execution::deadline::{Deadline, REPOSITORY_JOB_BUDGET};
 use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
 use domain::{OperationId, RepositoryAlias, RepositoryId};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
 use crate::ports::{
     Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Problem,
@@ -198,19 +199,56 @@ async fn access(
 
 /// Runs a repository job to its end and reports the repository's ID. Only the
 /// result and a failure matter here; progress and warnings belong to the
+/// operation log, which these requests don't write.
+///
+/// The job has [`REPOSITORY_JOB_BUDGET`] from now, engine start included. A
+/// repository that hasn't answered by then is refused with
+/// [`RepositoryError::TimedOut`], and dropping the job kills its worker at
+/// once (no grace: there is nothing in it to finish). Its caller holds the
+/// configuration lock across this call, so the bound is also how long a
+/// repository that never answers can hold up every other save.
 #[allow(clippy::result_large_err)]
 async fn run(
-    _clock: &dyn Clock,
+    clock: &dyn Clock,
     engine: &dyn Engine,
     op: OperationId,
     job: Job,
 ) -> Result<RepositoryId, RepositoryError> {
-    let RunningJob { events, .. } = engine.run(op, job).await.map_err(RepositoryError::Engine)?;
+    let deadline = Deadline::after_index_read(clock.now(), REPOSITORY_JOB_BUDGET);
+    let mut timer = clock.sleep_until(deadline.at()).fuse();
+    let job = drive(clock, deadline, engine, op, job).fuse();
+    pin_mut!(job);
+    select_biased! {
+        done = job => done,
+        () = timer => Err(RepositoryError::TimedOut),
+    }
+}
+
+/// Plays a job's events until its result. A result stands even when it
+/// arrives as the time runs out: a repository that was created is not made
+/// not created by a refusal. Any other event after the deadline is refused
+/// here, on the event itself, so a worker that never stops talking can't keep
+/// the timer from its turn.
+#[allow(clippy::result_large_err)]
+async fn drive(
+    clock: &dyn Clock,
+    deadline: Deadline,
+    engine: &dyn Engine,
+    op: OperationId,
+    job: Job,
+) -> Result<RepositoryId, RepositoryError> {
+    // The whole job is held until this returns: dropping it is what kills
+    // the worker.
+    let RunningJob {
+        events,
+        control: _running,
+    } = engine.run(op, job).await.map_err(RepositoryError::Engine)?;
     let mut events = events.fuse();
     while let Some(event) = events.next().await {
         match event {
             EngineEvent::Succeeded(EngineResult::Repository { id }) => return Ok(id),
             EngineEvent::Failed(reason) => return Err(failed(reason)),
+            _ if deadline.has_passed(clock.now()) => return Err(RepositoryError::TimedOut),
             _ => {}
         }
     }
@@ -423,13 +461,14 @@ mod tests {
     }
 
     /// Runs `work` against a manual clock, moving time by `steps` once the
-    /// work waits on it, and gives what it ended with after each step (None
-    /// while it still waits).
+    /// work waits on it. Gives, after each step, whether the work had ended
+    /// and what `watch` said, and then what the work ended with.
     async fn timed<T>(
         clock: &FakeClock,
+        watch: &AtomicBool,
         work: impl std::future::Future<Output = T>,
         steps: &[SignedDuration],
-    ) -> (Vec<bool>, T) {
+    ) -> (Vec<(bool, bool)>, T) {
         let finished = AtomicBool::new(false);
         let work = async {
             let done = work.await;
@@ -446,7 +485,10 @@ mod tests {
                 for _ in 0..8 {
                     tokio::task::yield_now().await;
                 }
-                seen.push(finished.load(Ordering::SeqCst));
+                seen.push((
+                    finished.load(Ordering::SeqCst),
+                    watch.load(Ordering::SeqCst),
+                ));
             }
             seen
         };
@@ -475,14 +517,17 @@ mod tests {
         let one = SignedDuration::from_secs(1);
         let (finished, answer) = timed(
             &clock,
+            &engine.killed,
             within(use_case.test(op(), &settings())),
             &[REPOSITORY_JOB_BUDGET - one, one],
         )
         .await;
         assert_eq!(
             finished,
-            [false, true],
-            "refused one second early, or kept waiting past the time"
+            // (ended, worker killed) after each step
+            [(false, false), (true, true)],
+            "refused one second early, or kept waiting past the time, or the worker was \
+             stopped at another moment"
         );
         assert_eq!(answer, Err(RepositoryError::TimedOut));
         assert!(
