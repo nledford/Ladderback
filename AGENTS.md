@@ -43,6 +43,16 @@ The recipes carry flags and steps a raw command drops, so a raw command can pass
 
 Commands run unattended: pass the non-interactive flag (`cargo binstall --no-confirm`, `gh … --json`, `GH_PAGER=cat`). If a command prompts anyway, stop it and report it; never guess the answer.
 
+### Known traps
+
+Keyed by what you see. Each line points at where the full reason lives.
+
+- **"a step kept the runner's thread for …, longer than the 8s allowed"** in `just test-e2e`: a step blocks the runner's one task. Run it through `blocking(…)` in `tests/e2e.rs` (§13.2).
+- **"the test: commit doesn't compile; a compile error doesn't count as red"** from `just red-first`: add `todo!()` stubs for the new API so the tests compile and fail at run time (§13.1).
+- **A `GREEN` line from `just red-first`:** that test already passes on the `test:` commit, so it specifies nothing new. Make it assert the missing behaviour (§13.1).
+- **An `@e2e` cancel scenario ends `Succeeded` on a fast runner (macOS CI):** the job finished before the cancel. Cancel once the operation has started, on a source big enough to outlive it, never after a fixed delay (`features/execution/cancel.feature`).
+- **A mutant "survives" in `web` DOM glue or in wasm32-only code:** that code never runs on the host, so the mutant proves nothing. Such files are excluded in `.cargo/mutants.toml`, each with its reason, and tested by `just test-wasm` or the `@ui` scenarios. A new file of that kind joins the list with its reason, and the pull request says so; code that decides anything moves out of the glue into a host-tested module instead.
+
 ## Read first
 
 | File | Owns |
