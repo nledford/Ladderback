@@ -79,9 +79,39 @@ pub enum ErrorCode {
     /// name is up to 64 lower-case letters, digits and hyphens, starting
     /// with a letter or a digit.
     RepositoryAliasInvalid,
-    /// A repository's settings hold a secret reference that couldn't be
-    /// resolved. The argument `field` names where it is.
-    SecretUnresolved,
+    /// A repository's secret has nothing in its source: the variable isn't
+    /// set, the file or keyring entry isn't there, the command printed
+    /// nothing. The arguments name the setting (`field`) and the source
+    /// (`source`), never a value.
+    SecretMissing,
+    /// A repository's secret has a source that couldn't be reached: a file
+    /// that can't be read, a program that can't be started, a keyring that
+    /// can't be opened. As `SecretMissing`; the platform's words, redacted,
+    /// are the `detail`.
+    SecretUnreadable,
+    /// A repository's secret isn't text: its source holds bytes that are not
+    /// UTF-8. As `SecretMissing`.
+    SecretNotText,
+    /// A repository's secret is more than `limit` bytes. As `SecretMissing`,
+    /// and `limit`.
+    SecretTooLarge,
+    /// A command that gives a repository's secret ran and failed. As
+    /// `SecretMissing`; its first line of stderr, redacted, is the `detail`.
+    SecretCommandFailed,
+    /// A command that gives a repository's secret ran for longer than it
+    /// may. As `SecretMissing`, and `seconds`.
+    SecretCommandTimedOut,
+    /// A repository's setting becomes an argument of a process and holds a
+    /// reference, so the secret it names would show in the process list. The
+    /// argument `field` names the setting.
+    SecretInProcessArguments,
+    /// A repository's setting, once its references are in, is longer than a
+    /// secret may be. The arguments are `field` and `limit`.
+    SecretExpansionTooLong,
+    /// A repository's setting is not a valid template: a `${` that is not a
+    /// reference. The argument `field` names the setting, and `at`, when the
+    /// fault has a place, the byte of the setting it starts at.
+    TemplateInvalid,
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
@@ -389,11 +419,84 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::RepositoryAliasInvalid => &[],
-            Self::SecretUnresolved => &[ArgSpec {
+            Self::SecretMissing
+            | Self::SecretUnreadable
+            | Self::SecretNotText
+            | Self::SecretCommandFailed => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "source",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::SecretTooLarge => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "source",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ],
+            Self::SecretCommandTimedOut => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "source",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "seconds",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
+            Self::SecretInProcessArguments => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::SecretExpansionTooLong => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+            ],
+            Self::TemplateInvalid => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "at",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::PlanUnknown => &[ArgSpec {
                 name: "plan",
                 kind: ArgKind::Text,
@@ -780,6 +883,35 @@ mod tests {
         assert_eq!(
             ErrorCode::ProtocolViolated.args(),
             &[spec("transition", ArgKind::Text, false)]
+        );
+        let named = [
+            spec("field", ArgKind::Text, false),
+            spec("source", ArgKind::Text, false),
+        ];
+        for code in [
+            ErrorCode::SecretMissing,
+            ErrorCode::SecretUnreadable,
+            ErrorCode::SecretNotText,
+            ErrorCode::SecretCommandFailed,
+        ] {
+            assert_eq!(code.args(), &named, "{code:?}");
+        }
+        assert_eq!(
+            ErrorCode::SecretTooLarge.args(),
+            &[named[0], named[1], spec("limit", ArgKind::Bytes, false)]
+        );
+        assert_eq!(
+            ErrorCode::SecretCommandTimedOut.args(),
+            &[named[0], named[1], spec("seconds", ArgKind::Count, false)]
+        );
+        assert_eq!(ErrorCode::SecretInProcessArguments.args(), &[named[0]]);
+        assert_eq!(
+            ErrorCode::SecretExpansionTooLong.args(),
+            &[named[0], spec("limit", ArgKind::Bytes, false)]
+        );
+        assert_eq!(
+            ErrorCode::TemplateInvalid.args(),
+            &[named[0], spec("at", ArgKind::Text, true)]
         );
         for code in [
             ErrorCode::InvalidJobSpec,

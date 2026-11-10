@@ -17,14 +17,15 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
 use app::ports::Retention;
+use app::ports::SecretResolver as _;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
     ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
-use app::secrets::{Field, ResolveRepository};
-use app::snapshots::ListSnapshots;
+use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
+use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::RepositoryAlias;
@@ -34,15 +35,16 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    FileRead, KeyringEntry, Redactor, RepositorySecrets, SecretRef, SecretValue,
+    FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
+    Template, TemplateError,
 };
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
-    AppState, Catalog, CatalogError, Operations, Repositories, RepositoriesError, SnapshotsError,
-    StartError,
+    AppState, Catalog, CatalogError, Operations, Repositories, RepositoriesError, SecretRefusal,
+    SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
 use platform::SystemClock;
@@ -1058,19 +1060,42 @@ impl Catalog for ConfigCatalog {
             .await
             .map_err(|_| SnapshotsError::Unavailable)?;
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
-        let listed = ListSnapshots::new(
+        let listing = ListSnapshots::new(
             Arc::clone(&self.engine),
             ResolveRepository::new(Arc::new(SystemSecrets::default())),
         )
         .list(OperationId::from_uuid(Uuid::now_v7()), &repository.settings)
-        .await
-        .map_err(|error| {
-            log::warn!(
-                "the snapshots of {} could not be listed: {error:?}",
-                alias.as_str()
-            );
-            SnapshotsError::Unavailable
-        })?;
+        .await;
+        let listed = match listing {
+            Ok(listed) => listed,
+            // A secret: its code and the words a command or the platform
+            // gave, masked of every secret of the repository, in the log
+            // as in the answer (I4).
+            Err(SnapshotError::Resolve(error)) => {
+                let refusal = secret_refusal(&error, &repository.settings).await;
+                log::warn!(
+                    "the snapshots of {} could not be listed: {:?}{}",
+                    alias.as_str(),
+                    refusal.code,
+                    refusal
+                        .detail
+                        .as_deref()
+                        .map(|detail| format!(" ({detail})"))
+                        .unwrap_or_default()
+                );
+                return Err(SnapshotsError::SecretRefused(refusal));
+            }
+            Err(error) => {
+                let said = failure_redactor(&repository.settings)
+                    .await
+                    .redact(&format!("{error:?}"));
+                log::warn!(
+                    "the snapshots of {} could not be listed: {said}",
+                    alias.as_str()
+                );
+                return Err(SnapshotsError::Unavailable);
+            }
+        };
         let snapshots = listed
             .iter()
             .filter_map(|snapshot| {
@@ -1140,14 +1165,17 @@ impl Repositories for RepositoryService {
         request: api::TestRepositoryDto,
     ) -> Result<api::RepositoryIdDto, RepositoriesError> {
         let settings = settings_of(request.settings)?;
-        let id = TestRepository::new(
+        let id = match TestRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
         )
         .test(new_operation(), &settings)
         .await
-        .map_err(|error| refusal_of(error, &settings))?;
+        {
+            Ok(value) => value,
+            Err(error) => return Err(refusal_of(error, &settings).await),
+        };
         Ok(api::RepositoryIdDto {
             id: id.as_str().to_owned(),
         })
@@ -1162,7 +1190,7 @@ impl Repositories for RepositoryService {
             RepositoryAlias::parse(&request.alias).map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
         let _writing = self.writes.lock().await;
-        let id = ConnectRepository::new(
+        let id = match ConnectRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
@@ -1170,7 +1198,10 @@ impl Repositories for RepositoryService {
         )
         .connect(new_operation(), alias, &settings)
         .await
-        .map_err(|error| refusal_of(error, &settings))?;
+        {
+            Ok(value) => value,
+            Err(error) => return Err(refusal_of(error, &settings).await),
+        };
         Ok(api::RepositoryIdDto {
             id: id.as_str().to_owned(),
         })
@@ -1194,7 +1225,7 @@ impl Repositories for RepositoryService {
             Some(_) => Some(self.writes.lock().await),
             None => None,
         };
-        let initialised = InitRepository::new(
+        let initialised = match InitRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
@@ -1202,7 +1233,10 @@ impl Repositories for RepositoryService {
         )
         .init(new_operation(), &settings, alias)
         .await
-        .map_err(|error| refusal_of(error, &settings))?;
+        {
+            Ok(value) => value,
+            Err(error) => return Err(refusal_of(error, &settings).await),
+        };
         Ok(api::RepositoryInitDto {
             id: initialised.id.as_str().to_owned(),
             saved: initialised.saved,
@@ -1250,15 +1284,15 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
 /// Why a repository use case failed, as the typed refusal the route answers
 /// with. `settings` are the request's: a location the refusal names is shown
 /// redacted.
-fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> RepositoriesError {
+async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> RepositoriesError {
     match error {
         RepositoryError::Exists => exists(settings),
         RepositoryError::AliasTaken(alias) => RepositoriesError::AliasTaken {
             alias: alias.as_str().to_owned(),
         },
-        RepositoryError::Resolve(error) => RepositoriesError::SecretUnresolved {
-            field: field_name(&error.field),
-        },
+        RepositoryError::Resolve(error) => {
+            RepositoriesError::SecretRefused(secret_refusal(&error, settings).await)
+        }
         RepositoryError::Engine(EngineError::Unavailable { detail }) => {
             unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
         }
@@ -1283,6 +1317,183 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
     RepositoriesError::Exists {
         location: redacted_location(settings, &settings.repository),
     }
+}
+
+/// A secret that couldn't be resolved, as the typed refusal of its cause.
+/// What a platform or a command said is masked of every secret of the
+/// repository first (I4).
+async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> SecretRefusal {
+    use domain::secrets::Problem;
+    let redactor = failure_redactor(settings).await;
+    let field = || ("field", MsgArg::Text(field_name(&error.field)));
+    let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
+        code,
+        args,
+        detail: detail.filter(|detail| !detail.is_empty()),
+    };
+    let bytes = |limit: usize| MsgArg::Bytes(u64::try_from(limit).unwrap_or(u64::MAX));
+    match &error.cause {
+        Cause::Unresolved(secret) => {
+            let source = (
+                "source",
+                MsgArg::Text(redactor.redact(&source_text(&secret.source))),
+            );
+            let named = vec![field(), source.clone()];
+            match &secret.problem {
+                Problem::Missing => refusal(ErrorCode::SecretMissing, named, None),
+                Problem::Unreachable { detail } => refusal(
+                    ErrorCode::SecretUnreadable,
+                    named,
+                    Some(masked_detail(&redactor, detail)),
+                ),
+                Problem::NotUnicode => refusal(ErrorCode::SecretNotText, named, None),
+                Problem::TooLarge { limit } => refusal(
+                    ErrorCode::SecretTooLarge,
+                    vec![field(), source, ("limit", bytes(*limit))],
+                    None,
+                ),
+                Problem::CommandFailed { detail, .. } => refusal(
+                    ErrorCode::SecretCommandFailed,
+                    named,
+                    Some(masked_detail(&redactor, detail)),
+                ),
+                // Only a command is run for a time; a file or a keyring that
+                // doesn't answer is a source that can't be read.
+                Problem::TimedOut { seconds } => match secret.source {
+                    SourceName::Command { .. } => refusal(
+                        ErrorCode::SecretCommandTimedOut,
+                        vec![field(), source, ("seconds", MsgArg::Count(*seconds))],
+                        None,
+                    ),
+                    SourceName::Keyring { .. }
+                    | SourceName::File { .. }
+                    | SourceName::Env { .. } => refusal(ErrorCode::SecretUnreadable, named, None),
+                },
+            }
+        }
+        Cause::ReferenceInProcessArguments => {
+            refusal(ErrorCode::SecretInProcessArguments, vec![field()], None)
+        }
+        Cause::ExpansionTooLong { limit } => refusal(
+            ErrorCode::SecretExpansionTooLong,
+            vec![field(), ("limit", bytes(*limit))],
+            None,
+        ),
+        Cause::Invalid(template) => {
+            let mut args = vec![field()];
+            if let Some(at) = template_error_place(template) {
+                args.push(("at", MsgArg::Text(at.to_string())));
+            }
+            refusal(ErrorCode::TemplateInvalid, args, None)
+        }
+    }
+}
+
+/// What a command or a platform said, with the secrets of the repository
+/// masked. A line that was cut at its cap (it ends in `…`) first loses as
+/// many bytes of its end as the longest secret has, less one: a secret that
+/// straddles the cut can't leave its first characters behind, for the mask
+/// only finds what is whole.
+fn masked_detail(redactor: &Redactor, detail: &str) -> String {
+    let Some(cut) = detail.strip_suffix('…') else {
+        return redactor.redact(detail);
+    };
+    let kept = cut
+        .len()
+        .saturating_sub(redactor.longest_match().saturating_sub(1));
+    let end = (0..=kept)
+        .rev()
+        .find(|&at| cut.is_char_boundary(at))
+        .unwrap_or_default();
+    format!("{}…", redactor.redact(cut.get(..end).unwrap_or_default()))
+}
+
+/// Where in a setting a template goes wrong, when the fault has a place.
+fn template_error_place(error: &TemplateError) -> Option<usize> {
+    match error {
+        TemplateError::TooLong { .. } | TemplateError::TooManyReferences { .. } => None,
+        TemplateError::Unterminated { at }
+        | TemplateError::EmptyReference { at }
+        | TemplateError::InvalidName { at }
+        | TemplateError::EmptyPath { at }
+        | TemplateError::RelativePath { at }
+        | TemplateError::NestedReference { at } => Some(*at),
+    }
+}
+
+/// What names a source in a refusal: the variable, the path, the keyring
+/// entry or the program, never what it gave.
+fn source_text(source: &SourceName) -> String {
+    match source {
+        SourceName::Command { program } => program.clone(),
+        SourceName::Keyring { entry } => entry.clone(),
+        SourceName::File { path } => path.clone(),
+        SourceName::Env { name } => name.clone(),
+    }
+}
+
+/// How long a secret is read again for a redactor: a source that does not
+/// answer in this time adds nothing, and a failure doesn't wait for it.
+const REREAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A secret read again, for a redactor: `None` when it can't be read, since
+/// what can't be read can't show in what a failure says.
+async fn read_again(resolver: &SystemSecrets, secret: &SecretRef) -> Option<SecretValue> {
+    tokio::time::timeout(REREAD_LIMIT, resolver.resolve(secret))
+        .await
+        .ok()?
+        .ok()
+        .map(|found| found.value)
+}
+
+/// A redactor for what a failure of `settings` says: its inline password and
+/// credential options, and what the references of its settings, and a
+/// password read from the environment or a file, resolve to. A failed
+/// resolution stops at the first fault, so the other secrets of the
+/// repository were not read yet: they are read again here, so that a command
+/// that prints one of them in its error doesn't show it. A command is not
+/// run a second time.
+async fn failure_redactor(settings: &RepositorySettings) -> Redactor {
+    let resolver = SystemSecrets::default();
+    let mut resolved = Vec::new();
+    if matches!(
+        settings.password,
+        SecretRef::Env(_) | SecretRef::File { .. }
+    ) && let Some(value) = read_again(&resolver, &settings.password).await
+    {
+        resolved.push(value);
+    }
+    let texts = std::iter::once(&settings.repository)
+        .chain(&settings.repo_hot)
+        .chain(settings.options.values())
+        .chain(settings.options_hot.values())
+        .chain(settings.options_cold.values());
+    // Each distinct reference once, as the resolution reads it.
+    let mut references = std::collections::BTreeSet::new();
+    for text in texts {
+        if let Ok(template) = Template::parse(text) {
+            for part in template.parts() {
+                if let Part::Reference(reference) = part {
+                    references.insert(reference.clone());
+                }
+            }
+        }
+    }
+    for reference in references {
+        if let Some(value) = read_again(&resolver, &reference.secret_ref()).await {
+            resolved.push(value);
+        }
+    }
+    let none = SecretValue::new("");
+    Redactor::for_repository(RepositorySecrets {
+        repository: &settings.repository,
+        repo_hot: settings.repo_hot.as_deref(),
+        password: settings.password.inline().unwrap_or(&none),
+        options: &settings.options,
+        options_hot: &settings.options_hot,
+        options_cold: &settings.options_cold,
+        resolved: &resolved,
+    })
 }
 
 /// Where a secret failed to resolve, as the catalog names it: the setting's
@@ -2896,11 +3107,417 @@ mod repository_service_tests {
                 .await;
             assert_eq!(
                 answer,
-                Err(RepositoriesError::SecretUnresolved {
-                    field: field.to_owned()
-                })
+                Err(RepositoriesError::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretMissing,
+                    args: vec![
+                        ("field", MsgArg::Text(field.to_owned())),
+                        ("source", MsgArg::Text("NOT_SET_ANYWHERE".to_owned())),
+                    ],
+                    detail: None,
+                }))
             );
             assert_eq!(jobs(&engine), 0, "{field}");
+        }
+    }
+
+    fn env_source(name: &str) -> domain::secrets::SourceName {
+        domain::secrets::SourceName::Env {
+            name: name.to_owned(),
+        }
+    }
+
+    fn unresolved(
+        field: Field,
+        source: domain::secrets::SourceName,
+        problem: domain::secrets::Problem,
+    ) -> ResolveError {
+        ResolveError {
+            field,
+            cause: Cause::Unresolved(domain::secrets::SecretError { source, problem }),
+        }
+    }
+
+    /// Every cause a secret or a template can fail by has a code of its own,
+    /// with the names the message reads: the setting, and the source.
+    #[tokio::test]
+    async fn a_secret_that_failed_to_resolve_is_refused_with_the_code_of_its_cause() {
+        use domain::secrets::{Problem, SourceName, TemplateError};
+        let text = |value: &str| MsgArg::Text(value.to_owned());
+        let count = |value: u64| MsgArg::Count(value);
+        let settings = settings_of(settings_dto()).expect("settings");
+        let file = || SourceName::File {
+            path: "/run/secrets/pw".to_owned(),
+        };
+        let command = || SourceName::Command {
+            program: "pass".to_owned(),
+        };
+        let at = |field: &str, source: &str| vec![("field", text(field)), ("source", text(source))];
+        type Case = (
+            ResolveError,
+            ErrorCode,
+            Vec<(&'static str, MsgArg)>,
+            Option<&'static str>,
+        );
+        let cases: Vec<Case> = vec![
+            (
+                unresolved(Field::Password, env_source("PW"), Problem::Missing),
+                ErrorCode::SecretMissing,
+                at("password", "PW"),
+                None,
+            ),
+            (
+                unresolved(
+                    Field::Password,
+                    file(),
+                    Problem::Unreachable {
+                        detail: "permission denied".to_owned(),
+                    },
+                ),
+                ErrorCode::SecretUnreadable,
+                at("password", "/run/secrets/pw"),
+                Some("permission denied"),
+            ),
+            (
+                unresolved(
+                    Field::Option("token".to_owned()),
+                    file(),
+                    Problem::NotUnicode,
+                ),
+                ErrorCode::SecretNotText,
+                at("options.token", "/run/secrets/pw"),
+                None,
+            ),
+            (
+                unresolved(
+                    Field::OptionHot("token".to_owned()),
+                    file(),
+                    Problem::TooLarge { limit: 4096 },
+                ),
+                ErrorCode::SecretTooLarge,
+                vec![
+                    ("field", text("options-hot.token")),
+                    ("source", text("/run/secrets/pw")),
+                    ("limit", MsgArg::Bytes(4096)),
+                ],
+                None,
+            ),
+            (
+                unresolved(
+                    Field::Password,
+                    command(),
+                    Problem::CommandFailed {
+                        status: Some(3),
+                        detail: "no such entry".to_owned(),
+                    },
+                ),
+                ErrorCode::SecretCommandFailed,
+                at("password", "pass"),
+                Some("no such entry"),
+            ),
+            (
+                unresolved(
+                    Field::Password,
+                    command(),
+                    Problem::TimedOut { seconds: 60 },
+                ),
+                ErrorCode::SecretCommandTimedOut,
+                vec![
+                    ("field", text("password")),
+                    ("source", text("pass")),
+                    ("seconds", count(60)),
+                ],
+                None,
+            ),
+            (
+                ResolveError {
+                    field: Field::Repository,
+                    cause: Cause::ReferenceInProcessArguments,
+                },
+                ErrorCode::SecretInProcessArguments,
+                vec![("field", text("repository"))],
+                None,
+            ),
+            (
+                ResolveError {
+                    field: Field::RepoHot,
+                    cause: Cause::ExpansionTooLong { limit: 4096 },
+                },
+                ErrorCode::SecretExpansionTooLong,
+                vec![("field", text("repo-hot")), ("limit", MsgArg::Bytes(4096))],
+                None,
+            ),
+            (
+                ResolveError {
+                    field: Field::OptionCold("token".to_owned()),
+                    cause: Cause::Invalid(TemplateError::Unterminated { at: 3 }),
+                },
+                ErrorCode::TemplateInvalid,
+                vec![("field", text("options-cold.token")), ("at", text("3"))],
+                None,
+            ),
+            (
+                ResolveError {
+                    field: Field::Repository,
+                    cause: Cause::Invalid(TemplateError::TooLong { limit: 4096 }),
+                },
+                ErrorCode::TemplateInvalid,
+                vec![("field", text("repository"))],
+                None,
+            ),
+        ];
+        for (error, code, args, detail) in cases {
+            assert_eq!(
+                secret_refusal(&error, &settings).await,
+                SecretRefusal {
+                    code,
+                    args,
+                    detail: detail.map(str::to_owned),
+                },
+                "{error:?}"
+            );
+        }
+    }
+
+    /// What a command said, and what a platform said, is masked of every
+    /// secret of the repository before it is an answer: the typed password,
+    /// a credential option written inline, and a credential a reference in
+    /// the settings resolves to (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_secret_are_masked_of_every_secret_of_the_repository() {
+        use domain::secrets::Problem;
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let referenced = scratch.path().join("token");
+        std::fs::write(&referenced, "canary-from-a-file\n").expect("the file is written");
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [
+            ("secret_access_key".to_owned(), "canary-inline".to_owned()),
+            (
+                "application_key".to_owned(),
+                format!("${{file:{}}}", referenced.display()),
+            ),
+        ]
+        .into();
+        let said = "wrote canary-inline, canary-from-a-file and demo-password to stderr";
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: said.to_owned(),
+            },
+        );
+        let refusal = secret_refusal(&error, &settings).await;
+        let detail = refusal.detail.expect("the command's words are kept");
+        assert_eq!(
+            detail,
+            format!(
+                "wrote {0}, {0} and {0} to stderr",
+                domain::secrets::REDACTED
+            )
+        );
+        // Not the name of an option or of a program, which are not secrets.
+        assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
+    }
+
+    /// Captures what the daemon logs at warning level, for the tests that
+    /// look at the log.
+    struct Captured;
+
+    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    impl log::Log for Captured {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            LOGGED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(record.args().to_string());
+        }
+        fn flush(&self) {}
+    }
+
+    /// Starts capturing, before the code that logs runs.
+    fn capture() {
+        let _ = log::set_logger(&Captured);
+        log::set_max_level(log::LevelFilter::Warn);
+    }
+
+    /// The lines logged so far about the snapshots of `alias`.
+    fn logged_about(alias: &str) -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|line| line.contains(&format!("snapshots of {alias} ")))
+            .cloned()
+            .collect()
+    }
+
+    /// A catalog whose repository `alias` has the password from `command`, a
+    /// credential written inline, and one read from a file.
+    async fn catalog_with_a_password_command(
+        alias: &str,
+        command: &str,
+        engine: Arc<dyn Engine>,
+    ) -> (ConfigCatalog, tempfile::TempDir) {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let referenced = scratch.path().join("token");
+        std::fs::write(&referenced, "canary-from-a-file\n").expect("the file is written");
+        let config = Arc::new(InMemoryConfigStore::new());
+        let settings = RepositorySettings {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Command(
+                domain::secrets::CommandLine::parse(command).expect("a command"),
+            ),
+            options: [
+                ("secret_access_key".to_owned(), "canary-inline".to_owned()),
+                (
+                    "application_key".to_owned(),
+                    format!("${{file:{}}}", referenced.display()),
+                ),
+            ]
+            .into(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        config
+            .save(
+                &domain::planning::AgentConfig::new(
+                    Default::default(),
+                    Default::default(),
+                    std::collections::BTreeMap::from([(
+                        RepositoryAlias::parse(alias).expect("an alias"),
+                        domain::planning::RepositoryConfig {
+                            settings,
+                            maintenance: domain::planning::Maintenance::None,
+                            group_by: Default::default(),
+                            hooks: Default::default(),
+                        },
+                    )]),
+                    Vec::new(),
+                )
+                .expect("a valid configuration"),
+            )
+            .await
+            .expect("the configuration saves");
+        (ConfigCatalog { config, engine }, scratch)
+    }
+
+    /// A listing whose password command fails with the other secrets of the
+    /// repository in its stderr is refused with the code of the failure,
+    /// and neither the answer nor the log holds one of them (I4).
+    #[tokio::test]
+    async fn a_listing_whose_password_command_fails_is_refused_with_its_code_and_masks_the_secrets()
+    {
+        capture();
+        let (catalog, _scratch) = catalog_with_a_password_command(
+            "failing-pass",
+            "sh -c 'echo canary-inline canary-from-a-file >&2; exit 3'",
+            engine(),
+        )
+        .await;
+        let refused = catalog
+            .snapshots("failing-pass".to_owned())
+            .await
+            .expect_err("the listing is refused");
+        let SnapshotsError::SecretRefused(refusal) = refused else {
+            panic!("a secret refusal, not {refused:?}");
+        };
+        assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
+        let said = format!("{refusal:?}");
+        let logged = logged_about("failing-pass").join("\n");
+        for line in [&said, &logged] {
+            assert!(!line.contains("canary-inline"), "{line}");
+            assert!(!line.contains("canary-from-a-file"), "{line}");
+        }
+        assert!(logged.contains("SecretCommandFailed"), "{logged}");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+    }
+
+    /// An engine that can't be started says what it likes: what reaches the
+    /// log of the listing has the secrets of the repository masked, and the
+    /// debug text of the error is not logged as it is.
+    #[tokio::test]
+    async fn the_log_of_a_listing_the_engine_refused_masks_the_secrets_of_the_repository() {
+        capture();
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::Unavailable {
+            detail: "could not start with canary-inline and canary-from-a-file".to_owned(),
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("engine-down", "echo not-a-real-password", engine)
+                .await;
+        let refused = catalog.snapshots("engine-down".to_owned()).await;
+        assert_eq!(refused, Err(SnapshotsError::Unavailable));
+        let logged = logged_about("engine-down").join("\n");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+        assert!(!logged.contains("canary-inline"), "{logged}");
+        assert!(!logged.contains("canary-from-a-file"), "{logged}");
+    }
+
+    /// A command's line cut at the cap can end in the beginning of a secret
+    /// the mask would not find: the first characters of it are not shown
+    /// either (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_command_cut_at_the_cap_show_no_start_of_a_secret() {
+        use domain::secrets::Problem;
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [("secret_access_key".to_owned(), "canary-inline".to_owned())].into();
+        let stderr = format!("{}canary-inline", "x".repeat(505));
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::command_failed(Some(1), stderr.as_bytes()),
+        );
+        let detail = secret_refusal(&error, &settings)
+            .await
+            .detail
+            .expect("the words are kept");
+        assert!(detail.ends_with('…'), "{detail}");
+        assert!(!detail.contains("canary"), "{detail}");
+    }
+
+    /// A file or a keyring that doesn't answer in time is a source that
+    /// can't be read, not a command that ran for too long.
+    #[tokio::test]
+    async fn a_file_or_keyring_that_does_not_answer_in_time_is_unreadable_not_a_slow_command() {
+        use domain::secrets::{Problem, SourceName};
+        let settings = settings_of(settings_dto()).expect("settings");
+        for (source, field) in [
+            (
+                SourceName::File {
+                    path: "/mnt/nfs/pw".to_owned(),
+                },
+                "/mnt/nfs/pw",
+            ),
+            (
+                SourceName::Keyring {
+                    entry: "ladderback/demo".to_owned(),
+                },
+                "ladderback/demo",
+            ),
+        ] {
+            let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 60 });
+            let refusal = secret_refusal(&error, &settings).await;
+            assert_eq!(refusal.code, ErrorCode::SecretUnreadable, "{field}");
+            assert_eq!(
+                refusal.args,
+                vec![
+                    ("field", MsgArg::Text("password".to_owned())),
+                    ("source", MsgArg::Text(field.to_owned())),
+                ]
+            );
+            assert_eq!(refusal.detail, None);
         }
     }
 

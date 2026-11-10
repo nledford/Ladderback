@@ -39,6 +39,18 @@ pub trait Repositories: Send + Sync {
     ) -> Result<api::RepositoryInitDto, RepositoriesError>;
 }
 
+/// A refusal for a secret that couldn't be resolved or a template that isn't
+/// valid: the code of its cause, the arguments the code declares (names of
+/// where the secret is and where it is read from, never a value) and the
+/// words of the platform or of a command, with every secret of the
+/// repository masked (I4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecretRefusal {
+    pub code: api::ErrorCode,
+    pub args: Vec<(&'static str, api::MsgArg)>,
+    pub detail: Option<String>,
+}
+
 /// Why a repository request was refused. Each variant is one typed refusal;
 /// none holds a secret: a location is as the daemon redacts it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,8 +65,9 @@ pub enum RepositoriesError {
     AliasTaken { alias: String },
     /// A repository already exists at `location`, which is redacted.
     Exists { location: String },
-    /// A secret reference couldn't be resolved: `field` says where it is.
-    SecretUnresolved { field: String },
+    /// A secret couldn't be resolved, or a setting with a reference isn't
+    /// valid: the refusal says which, with the setting it is about.
+    SecretRefused(SecretRefusal),
     /// The engine ran the job and it failed: the wrong password, no
     /// repository at the location. `detail` is the engine's own words.
     OperationFailed { detail: String },
@@ -110,6 +123,16 @@ pub(crate) async fn init_repository(
     }
 }
 
+/// The refusal for a secret: 422, like a setting the daemon can't take.
+pub(crate) fn secret_refusal(secret: &SecretRefusal) -> Response {
+    refused(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        secret.code,
+        secret.args.clone(),
+        secret.detail.clone(),
+    )
+}
+
 /// The typed refusal of `error`, with the status of its kind: a body that
 /// can't be read is 400; a name the configuration can't take, or a job the
 /// engine ran and failed, 422; something that is already there, 409; and the
@@ -142,12 +165,7 @@ fn refusal(error: &RepositoriesError) -> Response {
             text("location", location),
             None,
         ),
-        RepositoriesError::SecretUnresolved { field } => refused(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ErrorCode::SecretUnresolved,
-            text("field", field),
-            None,
-        ),
+        RepositoriesError::SecretRefused(secret) => secret_refusal(secret),
         RepositoriesError::OperationFailed { detail } => refused(
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::OperationFailed,

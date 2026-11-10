@@ -191,7 +191,15 @@ pub(crate) fn rereads_list(answered: bool, phase: Phase) -> bool {
 pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Field> {
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
-        ErrorCode::SecretUnresolved => {
+        ErrorCode::SecretMissing
+        | ErrorCode::SecretUnreadable
+        | ErrorCode::SecretNotText
+        | ErrorCode::SecretTooLarge
+        | ErrorCode::SecretCommandFailed
+        | ErrorCode::SecretCommandTimedOut
+        | ErrorCode::SecretInProcessArguments
+        | ErrorCode::SecretExpansionTooLong
+        | ErrorCode::TemplateInvalid => {
             let named = args.iter().find_map(|(name, value)| match value {
                 MsgArg::Text(field) if name == "field" => Some(field.as_str()),
                 _ => None,
@@ -614,9 +622,30 @@ mod tests {
     }
 
     #[test]
+    fn every_secret_and_template_refusal_belongs_to_the_field_that_holds_it() {
+        for code in [
+            ErrorCode::SecretMissing,
+            ErrorCode::SecretUnreadable,
+            ErrorCode::SecretNotText,
+            ErrorCode::SecretTooLarge,
+            ErrorCode::SecretCommandFailed,
+            ErrorCode::SecretCommandTimedOut,
+            ErrorCode::SecretInProcessArguments,
+            ErrorCode::SecretExpansionTooLong,
+            ErrorCode::TemplateInvalid,
+        ] {
+            assert_eq!(
+                field_of(code, &[("field".into(), text("password"))]),
+                Some(Field::Password),
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
     fn an_unreadable_secret_belongs_to_the_field_that_holds_it() {
         let field =
-            |name: &str| field_of(ErrorCode::SecretUnresolved, &[("field".into(), text(name))]);
+            |name: &str| field_of(ErrorCode::SecretMissing, &[("field".into(), text(name))]);
         assert_eq!(field("password"), Some(Field::Password));
         assert_eq!(field("repository"), Some(Field::Location));
         assert_eq!(field("repo-hot"), Some(Field::HotStorage));
@@ -625,17 +654,17 @@ mod tests {
             None,
             "the form has no field for an option"
         );
-        assert_eq!(field_of(ErrorCode::SecretUnresolved, &[]), None);
+        assert_eq!(field_of(ErrorCode::SecretMissing, &[]), None);
         assert_eq!(
             field_of(
-                ErrorCode::SecretUnresolved,
+                ErrorCode::SecretMissing,
                 &[("field".into(), MsgArg::Count(1))]
             ),
             None
         );
         assert_eq!(
             field_of(
-                ErrorCode::SecretUnresolved,
+                ErrorCode::SecretMissing,
                 &[("other".into(), text("password"))]
             ),
             None,
@@ -663,7 +692,7 @@ mod tests {
             ErrorCode::RepositoryExists,
             ErrorCode::EngineUnavailable,
             ErrorCode::RepositoryAliasTaken,
-            ErrorCode::SecretUnresolved,
+            ErrorCode::SecretMissing,
         ] {
             assert!(!advises_retry(code), "{code:?} says its own next step");
         }

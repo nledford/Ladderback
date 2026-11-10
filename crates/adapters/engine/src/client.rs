@@ -1133,7 +1133,15 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::EngineUnavailable
                 | ErrorCode::RepositoryAliasTaken
                 | ErrorCode::RepositoryAliasInvalid
-                | ErrorCode::SecretUnresolved
+                | ErrorCode::SecretMissing
+                | ErrorCode::SecretUnreadable
+                | ErrorCode::SecretNotText
+                | ErrorCode::SecretTooLarge
+                | ErrorCode::SecretCommandFailed
+                | ErrorCode::SecretCommandTimedOut
+                | ErrorCode::SecretInProcessArguments
+                | ErrorCode::SecretExpansionTooLong
+                | ErrorCode::TemplateInvalid
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
