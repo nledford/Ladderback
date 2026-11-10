@@ -9,6 +9,14 @@ root := justfile_directory()
 # when it lands, so `mutants` and `mutants-all` both cover it.
 mutants_packages := "--package domain --package app --package api --package l10n --package config-adapter --package web --package hooks --package interop"
 
+# The cargo flags a release build is made with (technical design §12.1): the
+# development pseudolocales and the component gallery stay out. `architecture`
+# checks a build with them, and release packaging (cargo-dist, the image, `trunk
+# build --release` for the web UI) must pass them too: `just --evaluate
+# release_flags` prints them. A feature a release needs joins this string, so
+# the checks and the artifacts change together.
+release_flags := "--no-default-features"
+
 # List available workflows.
 [group('help')]
 default:
@@ -51,7 +59,7 @@ lint:
 # Check the dependency rule: banned crates in domain and app, domain on wasm32.
 [group('quality')]
 architecture:
-    scripts/check-architecture.sh
+    RELEASE_FLAGS='{{ release_flags }}' scripts/check-architecture.sh
 
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
