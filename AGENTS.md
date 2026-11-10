@@ -12,7 +12,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 
 | Command | Does |
 |---|---|
-| `just setup` | Installs the wasm target, trunk, wasm-bindgen-cli (at the version of `Cargo.lock`'s `wasm-bindgen`), cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the UI test dependencies and Chromium |
+| `just setup` | Installs the wasm target, trunk, wasm-bindgen-cli (at the version of `Cargo.lock`'s `wasm-bindgen`), cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the rustic CLI the profile golden tests compare against (`scripts/install-rustic.sh`: the official release, checked against a pinned SHA-256), the UI test dependencies and Chromium |
 | `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-wasm`, `test-ui` |
 | `just fmt` | Formats Rust code |
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, plus the journey lint (no pointer actions in `ui-tests/steps`) |
