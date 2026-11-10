@@ -480,6 +480,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialising_under_an_alias_already_taken_is_refused_before_the_job_runs() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        let use_case = InitRepository::new(
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+        use_case
+            .init(op(), &settings(), Some(alias()))
+            .await
+            .unwrap_or_else(|e| panic!("the first initialisation: {e:?}"));
+        let jobs_before = engine
+            .seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
+        let mut elsewhere = settings();
+        elsewhere.repository = "/home/demo/scratch/other".to_owned();
+        assert!(matches!(
+            use_case.init(op(), &elsewhere, Some(alias())).await,
+            Err(RepositoryError::AliasTaken(_))
+        ));
+        assert_eq!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len(),
+            jobs_before,
+            "the refused initialisation ran a job, and so created a repository"
+        );
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            saved.repository(&alias()).map(|r| &r.settings),
+            Some(&settings())
+        );
+    }
+
+    #[tokio::test]
     async fn initialising_runs_job_init() {
         let engine = Arc::new(Scripted {
             outcome: Mutex::new(Ok(id())),

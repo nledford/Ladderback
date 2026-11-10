@@ -1977,6 +1977,68 @@ mod repository_service_tests {
     }
 
     #[tokio::test]
+    async fn an_empty_password_or_location_is_an_invalid_body_and_nothing_runs() {
+        let mut empty_password = settings_dto();
+        empty_password.password = PasswordDto::Inline {
+            value: String::new(),
+        };
+        let mut empty_location = settings_dto();
+        empty_location.repository = String::new();
+        let mut empty_hot = settings_dto();
+        empty_hot.repo_hot = Some(String::new());
+        for (what, settings) in [
+            ("password", empty_password),
+            ("location", empty_location),
+            ("hot location", empty_hot),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            assert_eq!(
+                service
+                    .test(api::TestRepositoryDto {
+                        settings: settings.clone()
+                    })
+                    .await,
+                Err(RepositoriesError::InvalidBody),
+                "an empty {what}"
+            );
+            assert_eq!(
+                service.connect(connect("demo", settings.clone())).await,
+                Err(RepositoriesError::InvalidBody),
+                "an empty {what}"
+            );
+            assert_eq!(
+                service.init(init(Some("demo"), settings)).await,
+                Err(RepositoriesError::InvalidBody),
+                "an empty {what}"
+            );
+            assert_eq!(jobs(&engine), 0, "an empty {what} ran a job");
+            assert!(saved(&*config).await.repositories().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn an_initialisation_under_an_alias_already_used_runs_no_job() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the first connection");
+        let jobs_before = jobs(&engine);
+        let mut other = settings_dto();
+        other.repository = "/srv/other".to_owned();
+        assert_eq!(
+            service.init(init(Some("demo"), other)).await,
+            Err(RepositoriesError::AliasTaken {
+                alias: "demo".to_owned()
+            })
+        );
+        assert_eq!(jobs(&engine), jobs_before, "a repository was created");
+        assert_eq!(saved(&*config).await.repositories().len(), 1);
+    }
+
+    #[tokio::test]
     async fn two_connections_made_at_the_same_moment_are_both_kept() {
         let engine = engine();
         let config = Arc::new(Yielding(InMemoryConfigStore::new()));

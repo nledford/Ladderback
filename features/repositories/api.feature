@@ -84,6 +84,15 @@ Feature: Repositories over HTTP
     Then the answer has status 201 and the repository's ID, saved
     And the daemon lists the repository "fresh" at the location, its password stored inline
 
+  Scenario: Initialising under an alias already used is refused and creates nothing
+    Given an initialised repository
+    And the client has connected it as "demo"
+    And the client's repository is at another, empty location
+    When the client initialises the repository as "demo"
+    Then the refusal has status 409 and the typed code "repository-alias-taken"
+    And the repository is unchanged
+    And the daemon lists 1 repository
+
   Scenario: Initialising over HTTP where a repository already exists is refused, and the repository is unchanged
     Given an initialised repository
     When the client initialises the repository
@@ -110,3 +119,5 @@ Feature: Repositories over HTTP
       | a source the API refuses | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"command","command":"pass show x"}}} |
       | an unknown field         | /api/v1/repositories/_init | {"settings":{"repository":"/x","password":{"source":"inline","value":"p"},"repo_hot":"/y"}} |
       | a relative password file | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}}      |
+      | an empty password        | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"inline","value":""}}}               |
+      | an empty location        | /api/v1/repositories/_test | {"settings":{"repository":"","password":{"source":"inline","value":"p"}}}                |

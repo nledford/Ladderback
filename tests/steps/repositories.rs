@@ -457,6 +457,13 @@ fn api_password_in_file(agent: &mut Agent) {
     agent.repositories.api_password_file = Some(path);
 }
 
+#[given("the client's repository is at another, empty location")]
+fn api_other_empty_location(agent: &mut Agent) {
+    let other = agent.scratch().join("other-repo");
+    fs::create_dir_all(&other).expect("the other repository folder");
+    agent.repositories.cold = Some(other);
+}
+
 #[given(expr = "the client has connected it as {string}")]
 async fn api_has_connected(agent: &mut Agent, alias: String) {
     api_connect(agent, &alias).await;
