@@ -123,6 +123,7 @@ async fn app_state_at(
         hooks: Arc::new(ProcessHookRunner::new()),
     });
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
+        Arc::new(SystemClock),
         Arc::clone(&engine),
         resolve.as_ref().clone(),
         Arc::clone(&config),
@@ -1089,6 +1090,7 @@ fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::Inv
 /// go one at a time, so two connections made at the same moment are both
 /// kept.
 struct RepositoryService {
+    clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
@@ -1098,11 +1100,13 @@ struct RepositoryService {
 
 impl RepositoryService {
     fn new(
+        clock: Arc<dyn Clock>,
         engine: Arc<dyn Engine>,
         resolve: ResolveRepository,
         config: Arc<dyn ConfigStore>,
     ) -> Self {
         Self {
+            clock,
             engine,
             resolve,
             config,
@@ -1118,10 +1122,14 @@ impl Repositories for RepositoryService {
         request: api::TestRepositoryDto,
     ) -> Result<api::RepositoryIdDto, RepositoriesError> {
         let settings = settings_of(request.settings)?;
-        let id = TestRepository::new(Arc::clone(&self.engine), self.resolve.clone())
-            .test(new_operation(), &settings)
-            .await
-            .map_err(|error| refusal_of(error, &settings))?;
+        let id = TestRepository::new(
+            Arc::clone(&self.clock),
+            Arc::clone(&self.engine),
+            self.resolve.clone(),
+        )
+        .test(new_operation(), &settings)
+        .await
+        .map_err(|error| refusal_of(error, &settings))?;
         Ok(api::RepositoryIdDto {
             id: id.as_str().to_owned(),
         })
@@ -1137,6 +1145,7 @@ impl Repositories for RepositoryService {
         let settings = settings_of(request.settings)?;
         let _writing = self.writes.lock().await;
         let id = ConnectRepository::new(
+            Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
@@ -1168,6 +1177,7 @@ impl Repositories for RepositoryService {
             None => None,
         };
         let initialised = InitRepository::new(
+            Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
@@ -1239,6 +1249,8 @@ fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Reposito
         }
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
+        #[allow(clippy::todo, reason = "a stub, until the green commit")]
+        RepositoryError::TimedOut => todo!("refuse a repository that did not answer in time"),
     }
 }
 
@@ -2074,6 +2086,8 @@ mod repository_service_tests {
     struct Scripted {
         outcome: Mutex<Result<RepositoryId, FailureReason>>,
         refuses: Mutex<Option<EngineError>>,
+        /// How many of the next jobs never answer.
+        hangs: Mutex<usize>,
         seen: Mutex<Vec<Job>>,
     }
 
@@ -2098,6 +2112,16 @@ mod repository_service_tests {
                 .clone()
             {
                 return Err(error);
+            }
+            {
+                let mut hangs = self.hangs.lock().unwrap_or_else(PoisonError::into_inner);
+                if *hangs > 0 {
+                    *hangs -= 1;
+                    return Ok(RunningJob {
+                        events: futures::stream::pending().boxed(),
+                        control: Box::new(Stop),
+                    });
+                }
             }
             let event = match self
                 .outcome
@@ -2154,16 +2178,26 @@ mod repository_service_tests {
         Arc::new(Scripted {
             outcome: Mutex::new(Ok(repository_id())),
             refuses: Mutex::new(None),
+            hangs: Mutex::new(0),
             seen: Mutex::new(Vec::new()),
         })
     }
 
     fn service(engine: &Arc<Scripted>, config: Arc<dyn ConfigStore>) -> RepositoryService {
         RepositoryService::new(
+            clock(),
             engine.clone(),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config,
         )
+    }
+
+    /// A clock that jumps to the deadline of whoever sleeps on it, so a job
+    /// that never answers is out of time the moment it is waited for.
+    fn clock() -> Arc<dyn Clock> {
+        Arc::new(app::fakes::FakeClock::auto_advancing(
+            domain::Timestamp::from_second(1_800_000_000).expect("a timestamp"),
+        ))
     }
 
     fn jobs(engine: &Scripted) -> usize {
@@ -2239,6 +2273,7 @@ mod repository_service_tests {
         let secrets = FakeSecrets::new();
         secrets.write_file("/run/secrets/pw", b"demo-password\n", 0o600);
         let answer = RepositoryService::new(
+            clock(),
             engine.clone(),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
@@ -2302,6 +2337,7 @@ mod repository_service_tests {
                 "demo-password",
             );
             let service = RepositoryService::new(
+                clock(),
                 engine.clone(),
                 ResolveRepository::new(Arc::new(secrets)),
                 config.clone(),
@@ -2522,6 +2558,88 @@ mod repository_service_tests {
         let config = saved(&*config).await;
         assert!(config.repository(&alias("first")).is_some());
         assert!(config.repository(&alias("second")).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_repository_that_never_answers_is_refused_and_the_lock_is_released() {
+        // A job that is waited on for ever is a failure of the test, not a
+        // stuck run.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let timed_out = || {
+                Err(RepositoriesError::Unavailable {
+                    code: ErrorCode::RepositoryTimedOut,
+                    args: vec![],
+                    detail: None,
+                })
+            };
+            let engine = engine();
+            *engine.hangs.lock().unwrap_or_else(PoisonError::into_inner) = 3;
+            let config = Arc::new(InMemoryConfigStore::new());
+            let service = service(&engine, config.clone());
+            assert_eq!(
+                service
+                    .test(api::TestRepositoryDto {
+                        settings: settings_dto()
+                    })
+                    .await
+                    .map(|_| ()),
+                timed_out()
+            );
+            assert_eq!(
+                service
+                    .connect(connect("first", settings_dto()))
+                    .await
+                    .map(|_| ()),
+                timed_out()
+            );
+            assert_eq!(
+                service
+                    .init(init(Some("second"), settings_dto()))
+                    .await
+                    .map(|_| ()),
+                timed_out()
+            );
+            assert!(saved(&*config).await.repositories().is_empty());
+            // The lock was let go each time: the next connection takes it.
+            service
+                .connect(connect("third", settings_dto()))
+                .await
+                .expect("a connection after the timeouts");
+            assert!(saved(&*config).await.repository(&alias("third")).is_some());
+        })
+        .await
+        .expect("the service waited for ever");
+    }
+
+    #[tokio::test]
+    async fn a_connection_waiting_for_the_lock_goes_on_when_the_one_holding_it_times_out() {
+        // A job that is waited on for ever is a failure of the test, not a
+        // stuck run.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let engine = engine();
+            // Only the first job to reach the engine hangs.
+            *engine.hangs.lock().unwrap_or_else(PoisonError::into_inner) = 1;
+            let config = Arc::new(Yielding(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            let (first, second) = tokio::join!(
+                service.connect(connect("first", settings_dto())),
+                service.connect(connect("second", settings_dto())),
+            );
+            assert_eq!(
+                first.map(|_| ()),
+                Err(RepositoriesError::Unavailable {
+                    code: ErrorCode::RepositoryTimedOut,
+                    args: vec![],
+                    detail: None,
+                })
+            );
+            second.expect("the second connection, once the first let go");
+            let config = saved(&*config).await;
+            assert!(config.repository(&alias("first")).is_none());
+            assert!(config.repository(&alias("second")).is_some());
+        })
+        .await
+        .expect("the service waited for ever");
     }
 
     #[tokio::test]

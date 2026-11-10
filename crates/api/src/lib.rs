@@ -69,6 +69,9 @@ pub enum ErrorCode {
     /// A repository already exists where one was to be initialised, so
     /// nothing was written. The argument `location` is where it is.
     RepositoryExists,
+    /// A repository didn't answer a test, a connection or an initialisation
+    /// in time, so the engine's worker was stopped and nothing was saved.
+    RepositoryTimedOut,
     /// The configuration already holds a repository under the alias. The
     /// argument `alias` names it.
     RepositoryAliasTaken,
@@ -504,6 +507,7 @@ impl ErrorCode {
             | Self::EngineUnavailable
             | Self::EngineStartTimedOut
             | Self::EngineExitTimedOut
+            | Self::RepositoryTimedOut
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
@@ -751,6 +755,7 @@ mod tests {
             ErrorCode::EngineUnavailable,
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
+            ErrorCode::RepositoryTimedOut,
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,

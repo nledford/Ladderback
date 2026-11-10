@@ -4,18 +4,22 @@
 //! store stands in for the configuration file.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::FailureReason;
+use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
 use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
 use domain::secrets::{SecretRef, SecretValue};
-use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
+use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
 use app::fakes::{FakeSecrets, InMemoryConfigStore};
 use app::ports::{
-    ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RunningJob,
+    Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RunningJob,
 };
 use app::repositories::{ConnectRepository, InitOutcome, RepositoryError, TestRepository};
 use app::secrets::ResolveRepository;
@@ -27,9 +31,26 @@ impl JobControl for Stop {
     async fn stop(&mut self) {}
 }
 
-/// An engine that answers every repository job with the scripted outcome.
+/// A job's control that notes when its worker is dropped, which kills it.
+struct Killable(Arc<AtomicBool>);
+
+#[async_trait]
+impl JobControl for Killable {
+    async fn stop(&mut self) {}
+}
+
+impl Drop for Killable {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// An engine that answers every repository job with the scripted outcome, or
+/// never answers.
 struct Scripted {
     outcome: Mutex<Result<RepositoryId, FailureReason>>,
+    hangs: AtomicBool,
+    killed: Arc<AtomicBool>,
 }
 
 /// What a use case gave: the ID it reported, or how it was refused.
@@ -38,6 +59,9 @@ enum Outcome {
     Id(RepositoryId),
     Saved(InitOutcome),
     Refused(RepositoryError),
+    /// The use case was still waiting after more real time than a fake
+    /// clock needs: it would have waited for ever.
+    Hung,
 }
 
 /// What the connect scenarios set up and what the use cases gave.
@@ -47,6 +71,8 @@ pub struct RepositoriesWorld {
     settings: RepositorySettings,
     id: RepositoryId,
     outcome: Option<Outcome>,
+    /// When the request began, on the agent's clock.
+    began: Option<Timestamp>,
 }
 
 impl Default for RepositoriesWorld {
@@ -54,6 +80,8 @@ impl Default for RepositoriesWorld {
         Self {
             engine: Arc::new(Scripted {
                 outcome: Mutex::new(Ok(id())),
+                hangs: AtomicBool::new(false),
+                killed: Arc::new(AtomicBool::new(false)),
             }),
             store: Arc::new(InMemoryConfigStore::new()),
             settings: RepositorySettings {
@@ -66,6 +94,7 @@ impl Default for RepositoriesWorld {
             },
             id: id(),
             outcome: None,
+            began: None,
         }
     }
 }
@@ -103,6 +132,12 @@ fn alias(name: &str) -> RepositoryAlias {
 #[async_trait]
 impl Engine for Scripted {
     async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+        if self.hangs.load(Ordering::SeqCst) {
+            return Ok(RunningJob {
+                events: Box::pin(futures::stream::pending()),
+                control: Box::new(Killable(self.killed.clone())),
+            });
+        }
         let event = match self.outcome.lock().expect("the outcome").clone() {
             Ok(id) => EngineEvent::Succeeded(EngineResult::Repository { id }),
             Err(reason) => EngineEvent::Failed(reason),
@@ -136,6 +171,32 @@ fn cannot_open(agent: &mut super::Agent) {
     });
 }
 
+#[given("a repository the engine never answers")]
+fn never_answers(agent: &mut super::Agent) {
+    agent
+        .repositories
+        .engine
+        .hangs
+        .store(true, Ordering::SeqCst);
+}
+
+/// Runs a use case to its end, and notes when it began. A use case that
+/// waits for ever is a failure of the scenario, not a stuck run.
+async fn within<T>(
+    agent: &mut super::Agent,
+    run: impl Future<Output = Result<T, RepositoryError>>,
+    wrap: impl FnOnce(T) -> Outcome,
+) {
+    agent.repositories.began = Some(agent.clock.now());
+    agent.repositories.outcome = Some(
+        match tokio::time::timeout(Duration::from_secs(5), run).await {
+            Ok(Ok(done)) => wrap(done),
+            Ok(Err(error)) => Outcome::Refused(error),
+            Err(_) => Outcome::Hung,
+        },
+    );
+}
+
 #[given(expr = "the agent has the repository {string} configured with its settings")]
 async fn already_configured(agent: &mut super::Agent, name: String) {
     let config = config_with(&name, &agent.repositories.settings);
@@ -150,33 +211,29 @@ async fn already_configured(agent: &mut super::Agent, name: String) {
 #[when("the agent tests the repository")]
 async fn tests(agent: &mut super::Agent) {
     let use_case = TestRepository::new(
+        agent.clock.clone(),
         agent.repositories.engine.clone(),
         ResolveRepository::new(Arc::new(FakeSecrets::new())),
     );
-    agent.repositories.outcome = Some(
-        match use_case.test(op(), &agent.repositories.settings).await {
-            Ok(id) => Outcome::Id(id),
-            Err(error) => Outcome::Refused(error),
-        },
-    );
+    let settings = agent.repositories.settings.clone();
+    within(agent, use_case.test(op(), &settings), Outcome::Id).await;
 }
 
 #[when(expr = "the agent connects it as {string}")]
 async fn connects(agent: &mut super::Agent, name: String) {
     let use_case = ConnectRepository::new(
+        agent.clock.clone(),
         agent.repositories.engine.clone(),
         ResolveRepository::new(Arc::new(FakeSecrets::new())),
         agent.repositories.store.clone(),
     );
-    agent.repositories.outcome = Some(
-        match use_case
-            .connect(op(), alias(&name), &agent.repositories.settings)
-            .await
-        {
-            Ok(id) => Outcome::Id(id),
-            Err(error) => Outcome::Refused(error),
-        },
-    );
+    let settings = agent.repositories.settings.clone();
+    within(
+        agent,
+        use_case.connect(op(), alias(&name), &settings),
+        Outcome::Id,
+    )
+    .await;
 }
 
 #[when("the agent initialises the repository")]
@@ -191,23 +248,18 @@ async fn initialises_as(agent: &mut super::Agent, name: String) {
 
 async fn initialise(agent: &mut super::Agent, name: Option<String>) {
     let use_case = app::repositories::InitRepository::new(
+        agent.clock.clone(),
         agent.repositories.engine.clone(),
         ResolveRepository::new(Arc::new(FakeSecrets::new())),
         agent.repositories.store.clone(),
     );
-    agent.repositories.outcome = Some(
-        match use_case
-            .init(
-                op(),
-                &agent.repositories.settings,
-                name.map(|name| alias(&name)),
-            )
-            .await
-        {
-            Ok(outcome) => Outcome::Saved(outcome),
-            Err(error) => Outcome::Refused(error),
-        },
-    );
+    let settings = agent.repositories.settings.clone();
+    within(
+        agent,
+        use_case.init(op(), &settings, name.map(|name| alias(&name))),
+        Outcome::Saved,
+    )
+    .await;
 }
 
 async fn saved(agent: &super::Agent) -> AgentConfig {
@@ -270,4 +322,32 @@ fn connection_fails(agent: &mut super::Agent) {
         Some(Outcome::Refused(RepositoryError::Failed(_))) => {}
         other => panic!("the connect did not fail: {other:?}"),
     }
+}
+
+#[then("the request is refused because the repository did not answer in time")]
+fn timed_out(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::TimedOut)) => {}
+        other => panic!("the request was not refused as timed out: {other:?}"),
+    }
+}
+
+#[then("the repository's worker was stopped")]
+fn worker_stopped(agent: &mut super::Agent) {
+    assert!(
+        agent.repositories.engine.killed.load(Ordering::SeqCst),
+        "the worker of a repository that never answered was left running"
+    );
+}
+
+#[then("the request gave up when the repository job's time was up")]
+fn gave_up_on_time(agent: &mut super::Agent) {
+    let began = agent.repositories.began.expect("the request began");
+    assert_eq!(
+        agent.clock.now(),
+        began
+            .checked_add(REPOSITORY_JOB_BUDGET)
+            .expect("a time within range"),
+        "the request waited for another time than the job's"
+    );
 }
