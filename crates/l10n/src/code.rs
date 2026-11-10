@@ -49,6 +49,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ConfigSchemaNewer => msg::ERROR_CONFIG_SCHEMA_NEWER,
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
+    RepositoryAliasInvalid => msg::ERROR_REPOSITORY_ALIAS_INVALID,
     SecretUnresolved => msg::ERROR_SECRET_UNRESOLVED,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
     RepositoryUnknown => msg::ERROR_REPOSITORY_UNKNOWN,

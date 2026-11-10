@@ -212,6 +212,9 @@ error-repository-exists = { -brand-name } did not initialise a repository at { $
 # $alias (text): the alias the configuration already uses.
 error-repository-alias-taken = { -brand-name } already has a repository called { $alias }. Choose another name.
 
+# A repository was to be saved under a name that is not an alias.
+error-repository-alias-invalid = { -brand-name } cannot use that name for a repository. Use up to 64 lower-case letters, digits and hyphens, and start with a letter or a digit.
+
 # A repository's settings hold a secret reference that could not be resolved.
 # $field (text): where in the settings the reference is.
 error-secret-unresolved = { -brand-name } could not read the secret in the repository's { $field }. Check where the secret is kept.
