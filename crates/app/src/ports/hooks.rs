@@ -120,7 +120,9 @@ impl HookOutcome {
 /// - The command runs as parsed, without a shell, in a process group of its
 ///   own, and is stopped the way the password-command runner stops one
 ///   (SIGTERM to the group, then SIGKILL after 5 s) when it outlives its
-///   timeout.
+///   timeout. A hook that ends on the SIGTERM is not signalled again, so a
+///   process it started that ignored the SIGTERM can outlive it
+///   (scheduling-and-config.md §6.1).
 /// - Its environment is the worker's allow-list (components.md §4.1) plus
 ///   the `LADDERBACK_*` variables of the context, and nothing else: no
 ///   secret, no repository URL with credentials.
