@@ -1,8 +1,8 @@
 //! The tables of a profile as serde reads them: only the keys the import
-//! carries over and the few it must see to refuse, every one of them
-//! optional. A key rustic doesn't know is
-//! refused before these are read (`parse`), and a key the import leaves out is
-//! not read at all, so they are not here.
+//! carries over and the one it must see to refuse, every one of them
+//! optional. A key rustic doesn't know is refused before these are read
+//! (`parse`), and a key the import leaves out is not read at all, so they
+//! are not here.
 
 use std::collections::BTreeMap;
 use std::fmt;
