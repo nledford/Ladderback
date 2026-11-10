@@ -39,6 +39,13 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 ///   operation recorded them. Times are kept to the millisecond.
 /// - [`list`](Self::list) returns operations newest first, which is highest
 ///   ID first, because IDs are UUIDv7 and so ordered by time.
+/// - A call may be dropped before it answers: a run drops the write that says
+///   an operation is running when a cancel or the deadline comes first, and
+///   one that stalls past [`SAVE_BOUND`](crate::log_write::SAVE_BOUND). Cut
+///   short at any point, a call has stored all of what it would have or none
+///   of it, and the calls after it work as they would have: nothing the
+///   dropped call began holds them up. The contract suite has no runtime to
+///   cut a call with, so the SQLite store's `cancellation` tests check this.
 #[async_trait]
 pub trait OperationStore: Send + Sync {
     /// Stores `operation`, and `result` when the engine reported one.

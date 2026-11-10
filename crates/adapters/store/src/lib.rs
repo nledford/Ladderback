@@ -33,8 +33,9 @@ use async_trait::async_trait;
 use domain::execution::{MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
+use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{SqliteConnection, SqlitePool};
+use sqlx::{Connection, Sqlite, SqliteConnection, SqlitePool};
 
 use crate::report::cap;
 use crate::summary::Summary;
@@ -127,6 +128,13 @@ impl SqliteStore {
     /// after it is [`StoreError::Unavailable`].
     pub async fn close(&self) {
         self.pool.close().await;
+    }
+
+    /// A connection for one write, closed rather than reused if the write
+    /// is cut short: see [`Checkout`].
+    async fn checkout(&self) -> Result<Checkout, StoreError> {
+        let conn = self.pool.acquire().await.map_err(unavailable)?;
+        Ok(Checkout { conn, ended: false })
     }
 }
 
@@ -232,6 +240,92 @@ async fn write(
     Ok(())
 }
 
+/// A connection checked out of the pool for one write.
+///
+/// A write is cut short when its future is dropped before it ends: a run does
+/// that to the write that says an operation is running when a cancel or the
+/// deadline comes first (§9). sqlx starts a transaction on the connection's
+/// own thread, and a future dropped after the thread has acknowledged the
+/// start but before the `Transaction` that would roll it back exists leaves
+/// the connection inside the transaction, holding the database's write lock,
+/// and returns it to the pool that way: the next write waits out the busy
+/// timeout and fails, or is given the connection and fails at once, and so
+/// does every write after it until the connection is closed. A connection
+/// whose write was cut short, or ended in an error, is closed instead, which
+/// rolls back what it began and frees the lock.
+struct Checkout {
+    conn: PoolConnection<Sqlite>,
+    ended: bool,
+}
+
+impl Checkout {
+    /// The write ended without an error: its transaction is over, so the
+    /// connection is fit for the pool again.
+    fn end(&mut self) {
+        self.ended = true;
+    }
+}
+
+impl Drop for Checkout {
+    fn drop(&mut self) {
+        if !self.ended {
+            self.conn.close_on_drop();
+        }
+    }
+}
+
+/// One save, as one transaction. The write lock is taken up front, so the
+/// busy timeout covers the wait for it, and the whole save is one
+/// transaction: it all happens or none of it does. The one-maintenance index
+/// is the backstop for I7: a save that would make a second running
+/// maintenance operation fails here and stores nothing.
+async fn save_in_transaction(
+    conn: &mut SqliteConnection,
+    operation: &Operation,
+    encoded: &Encoded<'_>,
+) -> Result<(), StoreError> {
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(unavailable)?;
+    write(&mut tx, operation, encoded).await?;
+    tx.commit().await.map_err(unavailable)
+}
+
+/// One start, as one transaction: the lookup of the repository's holder and
+/// the write. The lock is taken before the lookup, so no other handle can
+/// start a maintenance operation between the lookup and the write.
+async fn start_in_transaction(
+    conn: &mut SqliteConnection,
+    operation: &Operation,
+    encoded: &Encoded<'_>,
+) -> Result<Start, StoreError> {
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(unavailable)?;
+    if let Some(repository) =
+        maintained_repository(operation.kind(), operation.status(), operation.target())
+    {
+        let holder = sqlx::query(sql::FIND_RUNNING_MAINTENANCE)
+            .bind(repository.as_str())
+            .bind(encoded.id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        if let Some(holder) = holder {
+            // A holder that can't be read is an error, never a way in: a
+            // return here drops the transaction, which rolls it back.
+            let running = row::operation_id(&holder)?;
+            tx.rollback().await.map_err(unavailable)?;
+            return Ok(Start::Refused { running });
+        }
+    }
+    write(&mut tx, operation, encoded).await?;
+    tx.commit().await.map_err(unavailable)?;
+    Ok(Start::Started)
+}
+
 #[async_trait]
 impl OperationStore for SqliteStore {
     async fn save(
@@ -240,18 +334,12 @@ impl OperationStore for SqliteStore {
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
         let encoded = Encoded::new(operation, result)?;
-        // The write lock is taken up front, so the busy timeout covers the
-        // wait for it, and the whole save is one transaction: it all
-        // happens or none of it does. The one-maintenance index is the
-        // backstop for I7: a save that would make a second running
-        // maintenance operation fails here and stores nothing.
-        let mut tx = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(unavailable)?;
-        write(&mut tx, operation, &encoded).await?;
-        tx.commit().await.map_err(unavailable)
+        let mut checkout = self.checkout().await?;
+        let saved = save_in_transaction(&mut checkout.conn, operation, &encoded).await;
+        if saved.is_ok() {
+            checkout.end();
+        }
+        saved
     }
 
     async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
@@ -264,33 +352,12 @@ impl OperationStore for SqliteStore {
             });
         }
         let encoded = Encoded::new(operation, None)?;
-        // The lock is taken before the lookup, so no other handle can start a
-        // maintenance operation between the lookup and the write.
-        let mut tx = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(unavailable)?;
-        if let Some(repository) =
-            maintained_repository(operation.kind(), operation.status(), operation.target())
-        {
-            let holder = sqlx::query(sql::FIND_RUNNING_MAINTENANCE)
-                .bind(repository.as_str())
-                .bind(encoded.id.as_str())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(unavailable)?;
-            if let Some(holder) = holder {
-                // A holder that can't be read is an error, never a way in: a
-                // return here drops the transaction, which rolls it back.
-                let running = row::operation_id(&holder)?;
-                tx.rollback().await.map_err(unavailable)?;
-                return Ok(Start::Refused { running });
-            }
+        let mut checkout = self.checkout().await?;
+        let started = start_in_transaction(&mut checkout.conn, operation, &encoded).await;
+        if started.is_ok() {
+            checkout.end();
         }
-        write(&mut tx, operation, &encoded).await?;
-        tx.commit().await.map_err(unavailable)?;
-        Ok(Start::Started)
+        started
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
