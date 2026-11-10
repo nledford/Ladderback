@@ -157,7 +157,13 @@ When("the daemon has stopped", async function () {
 // The page's own loading state (§4.4): every answer the daemon owes the UI
 // arrives late, so the page opens on "Loading…" alone.
 When("the daemon's answers to the UI are delayed", function () {
-  this.slowNetwork = true;
+  this.answerDelayMs = 10_000;
+});
+
+// A shorter wait, for a journey that has to read a wait and then act within
+// it: every answer arrives this many seconds late.
+When("the daemon's answers to the UI are delayed by {int} seconds", function (seconds) {
+  this.answerDelayMs = seconds * 1_000;
 });
 
 When("I reload the page", async function () {

@@ -345,6 +345,15 @@ ui-maintenance-check = Check the repository
 # What the maintenance section shows while a review is being prepared.
 ui-maintenance-preparing = Preparing the review…
 
+# What the maintenance section shows, and the review that confirmed it says, while the start of a run is on its way. $kind is the wire text of what starts: forget, prune, check or adopt.
+ui-maintenance-starting =
+    { $kind ->
+        [forget] Starting the forget…
+        [prune] Starting the prune…
+        [check] Starting the check…
+       *[adopt] Starting the adoption…
+    }
+
 # What the maintenance section says while a run goes on. $kind is the wire text of what runs: forget, prune, check or adopt.
 ui-maintenance-running =
     { $kind ->
@@ -382,6 +391,15 @@ ui-maintenance-failed =
         [prune] Prune failed.
         [check] Check failed.
        *[adopt] Adoption failed.
+    }
+
+# Said politely, and shown, when this page stopped watching a run that goes on. $kind is the wire text of what runs: forget, prune, check or adopt.
+ui-maintenance-unwatched =
+    { $kind ->
+        [forget] This page stopped watching the forget, which goes on. The Operations page shows how it ends.
+        [prune] This page stopped watching the prune, which goes on. The Operations page shows how it ends.
+        [check] This page stopped watching the check, which goes on. The Operations page shows how it ends.
+       *[adopt] This page stopped watching the adoption, which goes on. The Operations page shows how it ends.
     }
 
 # The heading of the section of one plan's snapshots.
@@ -482,6 +500,9 @@ ui-review-removes = Plan { $plan }: { $remove } of its { $total } snapshots are 
 
 # What a forget does to a plan whose retention lets none of its $total snapshots go.
 ui-review-removes-none = Plan { $plan }: nothing is forgotten among its { $total } snapshots.
+
+# What a forget says when no plan of this agent backs up to the repository.
+ui-review-no-plans = No plan of this agent backs up to this repository, so a forget has nothing to keep or remove.
 
 # What a forget leaves alone when it finds only orphaned history; $snapshots counts the snapshots.
 ui-review-leaves-orphaned = Left alone: orphaned snapshots ({ $snapshots }), which no plan of this agent owns.

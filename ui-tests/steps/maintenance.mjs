@@ -210,6 +210,33 @@ Then("the dialog {string} is closed", async function (name) {
   await dialogOf(this, name).waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
 });
 
+// A control that cannot be used for now is still on the page, and says so
+// with `aria-disabled`, which keeps it where a keyboard and a screen reader
+// find it.
+Then("the dialog {string} has its button {string} unavailable", async function (name, button) {
+  const found = dialogOf(this, name).getByRole("button", { name: namePattern(button) });
+  await found.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  assert.equal(
+    await found.getAttribute("aria-disabled"),
+    "true",
+    `the button "${button}" of the dialog "${name}" can be used`,
+  );
+});
+
+// Silence is shown by waiting: a dialog that was going to close has done so
+// by the end of a beat.
+Then("the dialog {string} stays open", async function (name) {
+  await sleep(1_000);
+  assert.ok(await dialogOf(this, name).isVisible(), `the dialog "${name}" was dismissed`);
+});
+
+Then("the page shows the button {string}", async function (name) {
+  await this.page
+    .getByRole("button", { name: namePattern(name) })
+    .first()
+    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+});
+
 // Any level: the groups' headings are not the page's main heading.
 Then("the page shows the section heading {string}", async function (name) {
   await this.page

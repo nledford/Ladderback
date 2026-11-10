@@ -25,12 +25,16 @@
 # a settle or a reconnect makes on those results lives in `backend.rs`.
 #
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
-# page: it sends the history read, the previews, the starts and the cancel,
-# and shows the answers; the maintenance journeys of
-# `features/ui/maintenance.feature` check it in Chromium. What it sends and
-# says is decided on the host and mutated there: the request and the review
-# of a preview, the rows, the adoptions, the refusals that read the history
-# again and the pace and patience of the wait for a run
+# page, and only this stays in it: sending the history read, the previews, the
+# starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
+# say it, open or close the review, read the history again, wait for the run,
+# move focus); and drawing the elements. The maintenance journeys of
+# `features/ui/maintenance.feature` check it in Chromium. Everything the page
+# decides is decided on the host and mutated there: the request and the review
+# of a preview, the rows, the adoptions, what shows of the history, what the
+# page holds while a request is out or a run goes on and what it does next,
+# the refusals that read the history again, whether the daemon is called
+# unreachable, and the pace and patience of the wait for a run
 # (`maintenance.rs`), and the message and arguments of every sentence
 # (`wording.rs`).
 #

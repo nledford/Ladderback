@@ -132,6 +132,20 @@ pub struct Confirmation {
     pub action: Callback<()>,
 }
 
+/// What a review shows while the run it confirmed is being started, which
+/// is a request to the daemon and can take a while to answer.
+#[derive(Clone)]
+pub struct Working {
+    /// Whether the start is out. The review then holds still: its buttons stay
+    /// where a keyboard and a screen reader find them, `aria-disabled`, and
+    /// Escape does not dismiss it.
+    pub active: Signal<bool>,
+    /// What the review says while it holds still. It is said in a polite live
+    /// region of the dialog's own, since the page's announcer waits while a
+    /// modal is open.
+    pub status: String,
+}
+
 /// A review dialog (§4.5): what a run would do, shown before it runs, with the
 /// person's word asked for. It is a native `<dialog>` opened with `showModal`,
 /// as [`ModalDialog`] is, but opened by whoever owns the run: the page sets
@@ -139,7 +153,9 @@ pub struct Confirmation {
 /// however it closes (Escape, the dismiss button, or the owner clearing it
 /// first). It opens with focus on its first button, the dismiss one, so a
 /// stray Enter backs out and never confirms. Closing returns focus to the
-/// control with the id `returns_to`, the one that asked for the review.
+/// control with the id `returns_to`, the one that asked for the review, or to
+/// the element with the id `fallback` when that control is gone, so that
+/// focus never falls to the page.
 ///
 /// A review with something to confirm has a [`Confirmation`]: the dismiss
 /// button and then the confirm one, whose action leaves the dialog open until
@@ -148,6 +164,10 @@ pub struct Confirmation {
 /// that says what the review is about, which a screen reader reads as the
 /// dialog's description. While the dialog is open, polite messages wait
 /// ([`crate::live::modal_opened`]).
+///
+/// While the owner is starting the run ([`Working`]), neither button does
+/// anything and Escape does not close the dialog, so a review that is being
+/// confirmed is never dismissed from under the request it sent.
 #[component]
 pub fn ReviewDialog(
     open: RwSignal<bool>,
@@ -156,6 +176,8 @@ pub fn ReviewDialog(
     confirm: Option<Confirmation>,
     returns_to: String,
     described_by: String,
+    #[prop(optional)] working: Option<Working>,
+    #[prop(optional)] fallback: Option<String>,
     children: Children,
 ) -> impl IntoView {
     let dialog = NodeRef::<leptos::html::Dialog>::new();
@@ -164,8 +186,12 @@ pub fn ReviewDialog(
     // page while it is open ends the count however the dialog went away.
     let counted = RwSignal::new(false);
     on_cleanup(move || modal_gone(counted));
+    let (busy, status) = match working {
+        Some(Working { active, status }) => (active, status),
+        None => (Signal::stored(false), String::new()),
+    };
     let title_id = format!("{returns_to}-title");
-    let opener = returns_to.clone();
+    let (opener, opener_fallback) = (returns_to.clone(), fallback.clone());
     Effect::new(move |_| {
         let wanted = open.get();
         let Some(dialog) = dialog.get() else {
@@ -182,13 +208,19 @@ pub fn ReviewDialog(
             // Closed by its owner, which no `close` handler can be counted on
             // to follow once the owner has taken the dialog off the page.
             dialog.close();
-            focus_element(&opener);
+            return_focus(&opener, opener_fallback.as_deref());
         }
     });
     let body = children();
     let confirm = confirm.map(|Confirmation { label, action }| {
         view! {
-            <button type="button" on:click=move |_| action.run(())>
+            <button
+                type="button"
+                aria-disabled=move || busy.get().then_some("true")
+                on:click=move |_| if !busy.get_untracked() {
+                    action.run(());
+                }
+            >
                 {label}
             </button>
         }
@@ -198,20 +230,29 @@ pub fn ReviewDialog(
             node_ref=dialog
             aria-labelledby=title_id.clone()
             aria-describedby=described_by
+            on:cancel=move |ev: web_sys::Event| if busy.get_untracked() {
+                ev.prevent_default();
+            }
             on:close=move |_| {
                 modal_gone(counted);
                 open.try_set(false);
-                focus_element(&returns_to);
+                return_focus(&returns_to, fallback.as_deref());
             }
             on:keydown=move |ev: web_sys::KeyboardEvent| trap_focus(&dialog, &ev)
         >
             <h3 id=title_id.clone()>{title}</h3>
             {body}
+            <p aria-live="polite" aria-atomic="true">
+                {move || busy.get().then(|| status.clone())}
+            </p>
             <p class="actions">
                 <button
                     type="button"
                     node_ref=dismiss
-                    on:click=move |_| if let Some(dialog) = dialog.get() {
+                    aria-disabled=move || busy.get().then_some("true")
+                    on:click=move |_| if !busy.get_untracked()
+                        && let Some(dialog) = dialog.get()
+                    {
                         dialog.close();
                     }
                 >
@@ -398,7 +439,7 @@ pub(crate) fn ErrorSummary(
 }
 
 /// A sentence, with the engine's own words in it marked as English.
-fn sentence_view(sentence: Sentence) -> impl IntoView {
+pub(crate) fn sentence_view(sentence: Sentence) -> impl IntoView {
     let Sentence { before, detail } = sentence;
     let detail = detail.map(|(detail, after)| {
         view! {
@@ -412,15 +453,33 @@ fn sentence_view(sentence: Sentence) -> impl IntoView {
     }
 }
 
-/// Moves focus to the element with `id`, when the page has one.
-fn focus_element(id: &str) {
-    if let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(id))
+/// Moves focus to the element with `id`, when the page has one that takes it.
+/// Whether focus is on it now.
+fn focus_element(id: &str) -> bool {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return false;
+    };
+    let Some(element) = document
+        .get_element_by_id(id)
         .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return false;
+    };
+    // A failed focus leaves focus where it was.
+    let _ = element.focus();
+    let node: &web_sys::Node = &element;
+    document
+        .active_element()
+        .is_some_and(|active| active.is_same_node(Some(node)))
+}
+
+/// Returns focus to the control `to` that asked for a dialog, or to `fallback`
+/// when that control is gone, so that focus never falls to the page.
+fn return_focus(to: &str, fallback: Option<&str>) {
+    if !focus_element(to)
+        && let Some(fallback) = fallback
     {
-        // A failed focus leaves focus where it was.
-        let _ = element.focus();
+        focus_element(fallback);
     }
 }
 

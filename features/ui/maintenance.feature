@@ -169,3 +169,57 @@ Feature: Maintenance of a repository on the Snapshots page
     Then the page shows the section heading "Plan away"
     And the page shows the section heading "Orphaned history"
     And the page has no accessibility violations
+
+  # Every answer of the daemon arrives late in the next two scenarios, so each
+  # wait of the page lasts long enough to be read.
+  Scenario: The waits before a review are shown and announced
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 5 snapshots
+    And the plan "home" has been backed up 2 times
+    And the daemon's answers to the UI are delayed by 3 seconds
+    When I open the address "/snapshots"
+    Then the page shows the button "Snapshots of demo"
+    When I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the paragraph "Loading…"
+    When I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the polite region comes to contain "Preparing the review…"
+    And the dialog "Forget snapshots of demo" opens with focus inside it
+
+  Scenario: A review that is being confirmed says so and cannot be dismissed
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And the daemon's answers to the UI are delayed by 3 seconds
+    When I open the address "/snapshots"
+    Then the page shows the button "Snapshots of demo"
+    When I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" says "Starting the forget"
+    And the dialog "Forget snapshots of demo" has its button "Forget 2 snapshots" unavailable
+    And the dialog "Forget snapshots of demo" has its button "Cancel" unavailable
+    When I press Escape
+    Then the dialog "Forget snapshots of demo" stays open
+    And the dialog "Forget snapshots of demo" is closed
+    And the polite region comes to contain "A forget is running."
+
+  Scenario: The start of a forget is announced
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" is closed
+    And the polite region comes to contain "A forget is running."

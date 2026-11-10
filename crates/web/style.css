@@ -271,6 +271,19 @@ main:focus {
   padding-inline: 0.75rem;
 }
 
+/* A button that cannot be used for now stays on the page, where a keyboard and
+   a screen reader find it, and looks unavailable. */
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The line a dialog keeps for what it says while it waits takes no room while
+   it is empty. */
+dialog p[aria-live]:empty {
+  margin-block: 0;
+}
+
 table {
   inline-size: 100%;
   border-collapse: collapse;

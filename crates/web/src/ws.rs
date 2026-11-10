@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use crate::backend::{OperationsState, ended, events_url, reconnect_backoff, succeeded};
-use crate::maintenance::{self, End, Kind, Next, Watch};
+use crate::maintenance::{self, Kind, Next, Watch, Watched};
 use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
 use futures::StreamExt;
 use gloo_net::http::Request;
@@ -210,16 +210,6 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
     false
 }
 
-/// What the wait for a maintenance run came to.
-pub(crate) enum Waited {
-    /// The run ended, and how.
-    Ended(End),
-    /// The daemon stayed silent for too long to go on waiting.
-    GaveUp,
-    /// The page that waited is gone.
-    Gone,
-}
-
 /// Reads the operation of a maintenance run of `kind` until it has ended. The
 /// pace of the reads and the patience with a silent daemon are
 /// `maintenance::Watch`'s; `alive` says whether the page that waits is still
@@ -229,7 +219,7 @@ pub(crate) async fn await_end(
     operation: &str,
     kind: Kind,
     alive: impl Fn() -> bool,
-) -> Waited {
+) -> Watched {
     let url = format!("{base}{}", maintenance::operation_path(operation));
     let mut watch = Watch::new(kind);
     while alive() {
@@ -238,11 +228,11 @@ pub(crate) async fn await_end(
             .map(|detail| detail.operation.status);
         match watch.after(status.as_deref()) {
             Next::Again(delay) => sleep(delay).await,
-            Next::Ended(end) => return Waited::Ended(end),
-            Next::GaveUp => return Waited::GaveUp,
+            Next::Ended(end) => return Watched::Ended(end),
+            Next::GaveUp => return Watched::GaveUp,
         }
     }
-    Waited::Gone
+    Watched::Gone
 }
 
 /// How long a settle-poll keeps reading, and how often.

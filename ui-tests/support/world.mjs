@@ -123,9 +123,10 @@ class BrowserWorld extends World {
   contextOptions = { viewport: { width: 1280, height: 800 } };
   /** Stylesheets injected after the page loads, as a reader's would be. */
   readerStyles = [];
-  /** Whether the daemon's API answers arrive late, so a page's loading state
-   * can be tried (§4.4): every `/api/v1/` request waits before it continues. */
-  slowNetwork = false;
+  /** How long the daemon's API answers wait before they arrive, so a page's
+   * loading state and its waits can be tried (§4.4): every `/api/v1/` request
+   * waits this long before it continues. `0` is no wait. */
+  answerDelayMs = 0;
   /** A daemon the scenario plays itself, whose answers and events the page
    *  gets in place of the real daemon's; `null` is the real daemon's. */
   scriptedDaemon = null;
@@ -146,9 +147,9 @@ class BrowserWorld extends World {
   async open(pathname = "/") {
     this.context = await browser.newContext(this.contextOptions);
     await this.scriptedDaemon?.install(this.context);
-    if (this.slowNetwork) {
+    if (this.answerDelayMs > 0) {
       await this.context.route("**/api/v1/**", async (route) => {
-        await new Promise((done) => setTimeout(done, 10_000));
+        await new Promise((done) => setTimeout(done, this.answerDelayMs));
         await route.continue();
       });
     }
@@ -178,7 +179,7 @@ setWorldConstructor(BrowserWorld);
 Before(function () {
   this.contextOptions = { viewport: { width: 1280, height: 800 } };
   this.readerStyles = [];
-  this.slowNetwork = false;
+  this.answerDelayMs = 0;
   this.scriptedDaemon = null;
   this.scriptErrors = [];
   this.policyBlocks = [];

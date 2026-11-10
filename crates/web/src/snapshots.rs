@@ -1,30 +1,33 @@
 //! The Snapshots page's DOM glue (technical design §4.4): the route
 //! `/snapshots`, one repository's history grouped by owner, and the
 //! maintenance that changes it, each run reviewed in a dialog before it
-//! starts. It decides nothing: what a request carries, what a review says,
-//! which group can be adopted and how a run's end is awaited are
-//! `maintenance.rs` and `wording.rs`, host-tested; this module sends the
-//! requests and shows the answers, and `features/ui/maintenance.feature` runs
-//! it in a browser, the `ws.rs` precedent.
+//! starts. It decides nothing. What a request carries, what a review says,
+//! which group can be adopted, what the page holds while a request is out or a
+//! run goes on and what it does next (`maintenance::Panel`), what shows of the
+//! history and how a run's end is awaited are `maintenance.rs` and
+//! `wording.rs`, host-tested. What stays here is sending the requests, doing
+//! what the panel decides (`Page::act`) and drawing the elements; the
+//! journeys of `features/ui` run it in a browser, the `ws.rs` precedent.
 
 use std::sync::Arc;
 
 use api::{
-    ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto,
-    PlanGroupDto, RepositoriesDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto,
+    MaintenancePreviewDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, PlanGroupDto,
+    RepositoriesDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto,
 };
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 
-use crate::announcer::Politeness;
-use crate::components::{Confirmation, ReviewDialog, recover_focus};
+use crate::components::{Confirmation, ReviewDialog, Working, recover_focus};
 use crate::live::say;
-use crate::maintenance::{self, Kind, Owner, Review, Rows};
+use crate::maintenance::{
+    self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
+};
 use crate::routes::{Empty, PageHeading, instant, refusal, short_id, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
-use crate::ws::{self, Got, Posted, Waited};
+use crate::ws::{self, Got, Posted};
 
 /// The heading of a repository's maintenance: where focus goes when the
 /// control that held it leaves the page with the history it showed.
@@ -46,13 +49,6 @@ struct Reviewing {
     returns_to: String,
 }
 
-/// The run that goes on: what it is, and the operation to stop it by.
-#[derive(Clone)]
-struct Running {
-    kind: Kind,
-    operation: String,
-}
-
 /// What the page holds of the repository it shows. Every field is a handle,
 /// so the whole is copied into the closure of each button.
 #[derive(Clone, Copy)]
@@ -64,12 +60,12 @@ struct Page {
     base: StoredValue<String>,
     alias: StoredValue<String>,
     unreachable: RwSignal<bool>,
+    /// The history read last: `None` until a read is answered, and again when
+    /// the history is asked for as if for the first time.
     groups: RwSignal<Option<SnapshotGroupsDto>>,
-    alert: RwSignal<Option<String>>,
-    preparing: RwSignal<bool>,
-    busy: RwSignal<bool>,
-    running: RwSignal<Option<Running>>,
-    ended: RwSignal<Option<String>>,
+    /// Whether a read of the history is out.
+    reading: RwSignal<bool>,
+    panel: RwSignal<Panel>,
     review: RwSignal<Option<Reviewing>>,
     open: RwSignal<bool>,
 }
@@ -83,11 +79,8 @@ impl Page {
             alias: StoredValue::new(alias),
             unreachable,
             groups: RwSignal::new(None),
-            alert: RwSignal::new(None),
-            preparing: RwSignal::new(false),
-            busy: RwSignal::new(false),
-            running: RwSignal::new(None),
-            ended: RwSignal::new(None),
+            reading: RwSignal::new(false),
+            panel: RwSignal::new(Panel::default()),
             review: RwSignal::new(None),
             open: RwSignal::new(false),
         }
@@ -96,7 +89,7 @@ impl Page {
     /// Whether the page is still there. Its handles go with it, and an answer
     /// that arrives late must neither read nor write them.
     fn alive(self) -> bool {
-        self.busy.try_get_untracked().is_some()
+        self.open.try_get_untracked().is_some()
     }
 
     fn text(self, id: MessageId, args: &[(&str, MsgArg)]) -> String {
@@ -115,32 +108,85 @@ impl Page {
         format!("{}{route}", self.base.get_value())
     }
 
-    /// Shows a refusal where a reader is looking, as an alert.
-    fn refuse(self, code: ErrorCode, args: &[(String, MsgArg)], detail: Option<&str>) {
-        let shown = refusal(&self.localizer.get_value(), code, args, detail);
-        self.alert.set(Some(shown));
+    /// What a refusal says.
+    fn refused_text(self, refused: &Refusal) -> String {
+        refusal(
+            &self.localizer.get_value(),
+            refused.code,
+            &refused.args,
+            refused.detail.as_deref(),
+        )
     }
 
-    /// Reads the repository's history afresh.
-    fn reload(self) {
+    /// Notes whether a request got an answer at all: any answer, a refusal
+    /// too, says the daemon is there.
+    fn answered(self, answered: bool) {
+        self.unreachable.set(unreachable_after(answered));
+    }
+
+    /// Changes the panel, then does what the change decides.
+    fn change(self, change: impl FnOnce(&mut Panel) -> Vec<maintenance::Effect>) {
+        if let Some(effects) = self.panel.try_update(change) {
+            self.act(effects);
+        }
+    }
+
+    /// Does what the panel decided.
+    fn act(self, effects: Vec<maintenance::Effect>) {
+        use maintenance::Effect::{CloseReview, OpenReview, RecoverFocus, Reload, Say, Watch};
+        for effect in effects {
+            match effect {
+                Say(told) => say(told.politeness(), &self.words(&wording::told(told))),
+                OpenReview => self.open.set(true),
+                CloseReview => self.open.set(false),
+                Reload => self.reload(false),
+                Watch => self.watch(),
+                RecoverFocus => self.recover_focus(),
+            }
+        }
+    }
+
+    /// Puts focus on the maintenance heading if it has fallen to the page,
+    /// once the elements the change removed are gone: the control that held it
+    /// may have been one of them.
+    fn recover_focus(self) {
+        spawn_local(async {
+            tick().await;
+            recover_focus(MAINTENANCE_HEADING);
+        });
+    }
+
+    /// Reads the repository's history afresh. `clear` first drops what was
+    /// read, as the page does when the history is asked for as if for the
+    /// first time; a read for a run that ended leaves it, so that the page
+    /// does not blank while the new history is on its way.
+    fn reload(self, clear: bool) {
+        if !self.alive() {
+            return;
+        }
+        if clear {
+            self.groups.set(None);
+        }
+        self.reading.set(true);
+        let url = self.url(maintenance::groups_path(&self.alias.get_value()));
         spawn_local(async move {
-            let route = maintenance::groups_path(&self.alias.get_value());
-            let answer = ws::get::<SnapshotGroupsDto>(&self.url(route)).await;
+            let answer = ws::get::<SnapshotGroupsDto>(&url).await;
             if !self.alive() {
                 return;
             }
+            self.reading.set(false);
+            self.answered(answer.is_some());
             match answer {
                 Some(Got::Read(groups)) => {
                     self.groups.set(Some(groups));
                     // The control that held focus may have gone with the
                     // groups it was in.
-                    tick().await;
-                    recover_focus(MAINTENANCE_HEADING);
+                    self.recover_focus();
                 }
-                Some(Got::Refused(code, args, detail)) => {
-                    self.refuse(code, &args, detail.as_deref());
-                }
-                None => self.unreachable.set(true),
+                Some(Got::Refused(code, args, detail)) => self
+                    .panel
+                    .update(|panel| panel.reports(Refusal { code, args, detail })),
+                None => {}
             }
         });
     }
@@ -148,113 +194,118 @@ impl Page {
     /// Asks what `request` would do, and shows the answer as a review that
     /// the control `returns_to` asked for.
     fn preview(self, request: MaintenanceRequestDto, returns_to: String) {
-        if self.busy.get_untracked() {
+        let Some(effects) = self
+            .panel
+            .try_update(|panel| panel.asks(Step::Preparing))
+            .flatten()
+        else {
             return;
-        }
-        self.busy.set(true);
-        self.preparing.set(true);
-        self.alert.set(None);
+        };
+        self.act(effects);
+        let url = self.url(maintenance::preview_path(&self.alias.get_value()));
         spawn_local(async move {
-            let route = maintenance::preview_path(&self.alias.get_value());
-            let answer = ws::post(&self.url(route), &request).await;
+            let answer = ws::post(&url, &request).await;
             if !self.alive() {
                 return;
             }
-            self.preparing.set(false);
-            self.busy.set(false);
             match answer {
                 Some(Posted::Done(body)) => {
                     match serde_json::from_str::<MaintenancePreviewDto>(&body) {
                         Ok(preview) => {
+                            self.answered(true);
                             let review = Review::of(&request, &preview);
                             self.review.set(Some(Reviewing { review, returns_to }));
-                            self.open.set(true);
+                            self.change(Panel::previewed);
                         }
-                        Err(_) => self.unreachable.set(true),
+                        Err(_) => {
+                            self.answered(false);
+                            self.change(Panel::silent);
+                        }
                     }
                 }
                 Some(Posted::Refused(code, args, detail)) => {
-                    self.refuse(code, &args, detail.as_deref());
-                    if maintenance::rereads(code) {
-                        self.reload();
-                    }
+                    self.answered(true);
+                    self.change(|panel| panel.refused(Refusal { code, args, detail }));
                 }
-                None => self.unreachable.set(true),
+                None => {
+                    self.answered(false);
+                    self.change(Panel::silent);
+                }
             }
         });
     }
 
-    /// Confirms a review: starts the run it describes, closes the review
-    /// whatever the answer, and waits for the run's end.
+    /// Confirms a review: starts the run it describes. The review stays open,
+    /// saying so, until the daemon answers.
     fn start(self, review: Review) {
-        if self.busy.get_untracked() {
+        let kind = review.kind;
+        let Some(effects) = self
+            .panel
+            .try_update(|panel| panel.asks(Step::Starting(kind)))
+            .flatten()
+        else {
             return;
-        }
-        self.busy.set(true);
-        self.alert.set(None);
+        };
+        self.act(effects);
+        let url = self.url(maintenance::start_path(&self.alias.get_value()));
         spawn_local(async move {
-            let route = maintenance::start_path(&self.alias.get_value());
-            let answer = ws::post(&self.url(route), &review.start_body()).await;
+            let answer = ws::post(&url, &review.start_body()).await;
             if !self.alive() {
                 return;
             }
-            self.busy.set(false);
-            self.open.set(false);
             match answer {
                 Some(Posted::Done(body)) => match ws::started_operation(&body) {
-                    Some(operation) => self.wait(review.kind, operation).await,
-                    None => self.unreachable.set(true),
+                    Some(operation) => {
+                        self.answered(true);
+                        self.change(|panel| panel.started(kind, operation));
+                    }
+                    None => {
+                        self.answered(false);
+                        self.change(Panel::silent);
+                    }
                 },
                 Some(Posted::Refused(code, args, detail)) => {
-                    self.refuse(code, &args, detail.as_deref());
-                    if maintenance::rereads(code) {
-                        self.reload();
-                    }
+                    self.answered(true);
+                    self.change(|panel| panel.refused(Refusal { code, args, detail }));
                 }
-                None => self.unreachable.set(true),
+                None => {
+                    self.answered(false);
+                    self.change(Panel::silent);
+                }
             }
         });
     }
 
-    /// Shows the run that goes on and, when it has ended, tells how it ended
-    /// and reads the history it changed.
-    async fn wait(self, kind: Kind, operation: String) {
-        self.ended.set(None);
-        self.running.set(Some(Running {
-            kind,
-            operation: operation.clone(),
-        }));
-        let base = self.base.get_value();
-        let waited = ws::await_end(&base, &operation, kind, move || self.alive()).await;
-        if !self.alive() {
+    /// Waits for the run that started to end, and tells the panel how the
+    /// wait came out.
+    fn watch(self) {
+        let Some(run) = self.panel.with_untracked(|panel| panel.run.clone()) else {
             return;
-        }
-        self.running.set(None);
-        match waited {
-            Waited::Ended(end) => {
-                let shown = self.words(&wording::end(&end));
-                say(end.politeness, &shown);
-                self.ended.set(Some(shown));
+        };
+        let base = self.base.get_value();
+        spawn_local(async move {
+            let how = ws::await_end(&base, &run.operation, run.kind, move || self.alive()).await;
+            if self.alive() {
+                self.change(|panel| panel.watched(how));
             }
-            Waited::GaveUp => say(Politeness::Polite, &self.plain(msg::UI_STILL_WAITING)),
-            Waited::Gone => {}
-        }
-        self.reload();
+        });
     }
 
     /// Asks the run that goes on to stop.
     fn cancel(self) {
-        let Some(running) = self.running.get_untracked() else {
+        let Some(run) = self.panel.with_untracked(|panel| panel.run.clone()) else {
             return;
         };
+        let url = self.url(maintenance::cancel_path(&run.operation));
         spawn_local(async move {
-            let route = maintenance::cancel_path(&running.operation);
-            let answer = ws::post(&self.url(route), &Empty {}).await;
+            let answer = ws::post(&url, &Empty {}).await;
             if !self.alive() {
                 return;
             }
+            self.answered(answer.is_some());
             if let Some(Posted::Refused(code, args, detail)) = answer {
-                self.refuse(code, &args, detail.as_deref());
+                self.panel
+                    .update(|panel| panel.reports(Refusal { code, args, detail }));
             }
         });
     }
@@ -276,13 +327,20 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     // The repositories to pick from; `None` while the read is on its way.
     let repositories = RwSignal::<Option<Vec<String>>>::new(None);
     let chosen = RwSignal::<Option<String>>::new(None);
+    // The page of a repository is made anew when another is picked, not when
+    // the one shown is picked again; that only asks for its history again.
+    let shown_alias = Memo::new(move |_| chosen.get());
+    let picks = RwSignal::new(0_u32);
     let repositories_url = format!("{}/api/v1/repositories", ws::origin());
     spawn_local(async move {
         match ws::read::<RepositoriesDto>(&repositories_url).await {
-            Some(read) => repositories.set(Some(
-                read.repositories.into_iter().map(|row| row.alias).collect(),
-            )),
-            None => unreachable.set(true),
+            Some(read) => {
+                unreachable.set(unreachable_after(true));
+                repositories.set(Some(
+                    read.repositories.into_iter().map(|row| row.alias).collect(),
+                ));
+            }
+            None => unreachable.set(unreachable_after(false)),
         }
     });
     let picker = Arc::clone(&localizer);
@@ -307,7 +365,13 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                         &[("alias", MsgArg::Text(alias.clone()))],
                     );
                     view! {
-                        <button type="button" on:click=move |_| chosen.set(Some(alias.clone()))>
+                        <button
+                            type="button"
+                            on:click=move |_| {
+                                chosen.set(Some(alias.clone()));
+                                picks.update(|picks| *picks = picks.wrapping_add(1));
+                            }
+                        >
                             {label}
                         </button>
                     }
@@ -316,7 +380,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                 .into_any(),
         }}
         {move || {
-            chosen
+            shown_alias
                 .get()
                 .map(|alias| {
                     view! {
@@ -324,6 +388,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             localizer=Arc::clone(&localizer)
                             alias=alias
                             unreachable=unreachable
+                            picks=picks
                         />
                     }
                 })
@@ -332,15 +397,20 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
 }
 
 /// One repository: its maintenance, its history by owner and the review of
-/// whatever is asked. It is made anew for each repository picked.
+/// whatever is asked. It is made anew for each repository picked, and reads
+/// its history again each time its repository is picked.
 #[component]
 fn Repository(
     localizer: Arc<Localizer>,
     alias: String,
     unreachable: RwSignal<bool>,
+    picks: RwSignal<u32>,
 ) -> impl IntoView {
     let page = Page::new(localizer, alias.clone(), unreachable);
-    page.reload();
+    Effect::new(move |_| {
+        picks.track();
+        untrack(|| page.reload(true));
+    });
     let heading = page.text(
         msg::UI_MAINTENANCE_HEADING,
         &[("alias", MsgArg::Text(alias))],
@@ -351,8 +421,19 @@ fn Repository(
         page.plain(msg::UI_MAINTENANCE_PRUNE),
         page.plain(msg::UI_MAINTENANCE_CHECK),
     );
-    let preparing = page.plain(msg::UI_MAINTENANCE_PREPARING);
     let cancel = page.plain(msg::UI_MAINTENANCE_CANCEL);
+    let loading = page.plain(msg::UI_LOADING);
+    let empty = page.plain(msg::UI_NO_SNAPSHOTS);
+    // Each part of the panel has a memo of its own, so that a change of one
+    // does not draw the others again: an alert drawn again is announced again.
+    let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
+    let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
+    let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
+    let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
+    let area = Memo::new(move |_| {
+        let reading = page.reading.get();
+        page.groups.with(|groups| shown(groups.as_ref(), reading))
+    });
     view! {
         <section aria-labelledby=MAINTENANCE_HEADING>
             <h2 id=MAINTENANCE_HEADING tabindex="-1">
@@ -388,13 +469,23 @@ fn Repository(
                     {check}
                 </button>
             </p>
-            {move || page.preparing.get().then(|| view! { <p>{preparing.clone()}</p> })}
-            {move || page.alert.get().map(|shown| view! { <p role="alert">{shown}</p> })}
             {move || {
-                page.running
+                step.get()
+                    .map(|step| {
+                        view! { <p>{page.words(&wording::told(Told::from(step)))}</p> }
+                    })
+            }}
+            {move || {
+                refused
                     .get()
-                    .map(|running| {
-                        let shown = page.words(&wording::running(running.kind));
+                    .map(|refused| {
+                        view! { <p role="alert">{page.refused_text(&refused)}</p> }
+                    })
+            }}
+            {move || {
+                run.get()
+                    .map(|run| {
+                        let shown = page.words(&wording::told(Told::Running(run.kind)));
                         view! {
                             <p>{shown}</p>
                             <p>
@@ -405,9 +496,20 @@ fn Repository(
                         }
                     })
             }}
-            {move || page.ended.get().map(|shown| view! { <p>{shown}</p> })}
+            {move || {
+                ended
+                    .get()
+                    .map(|told| view! { <p>{page.words(&wording::told(told))}</p> })
+            }}
         </section>
-        {move || page.groups.get().map(|groups| groups_view(page, groups))}
+        {move || match area.get() {
+            Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
+            Shown::Nothing => ().into_any(),
+            Shown::Lists => {
+                (move || page.groups.get().map(|groups| groups_view(page, groups))).into_any()
+            }
+        }}
         {move || page.review.get().map(|reviewing| review_view(page, reviewing))}
     }
 }
@@ -599,9 +701,11 @@ fn adoption_view(page: Page, id: String, adoption: Adoption) -> impl IntoView {
 }
 
 /// The review of a run: what it would do, the snapshots it names, and the
-/// buttons that close it or confirm it.
+/// buttons that close it or confirm it. While the run is being started it
+/// says so and holds still.
 fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
     let Reviewing { review, returns_to } = reviewing;
+    let kind = review.kind;
     let title = page.words(&wording::title(&review, &page.alias.get_value()));
     let dismiss_label = page.plain(wording::dismiss(&review));
     let confirm = review.confirm.map(|confirm| {
@@ -611,13 +715,16 @@ fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
             action: Callback::new(move |()| page.start(started.clone())),
         }
     });
+    let working = Working {
+        active: Signal::derive(move || page.panel.with(Panel::starting)),
+        status: page.words(&wording::told(Told::Starting(kind))),
+    };
     let facts = review
         .facts
         .iter()
         .flat_map(wording::fact)
         .map(|words| view! { <p>{page.words(&words)}</p> })
         .collect_view();
-    let kind = review.kind;
     let listings = review
         .listings
         .into_iter()
@@ -638,6 +745,8 @@ fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
             confirm=confirm
             returns_to=returns_to
             described_by=REVIEW_SUMMARY.to_owned()
+            working=working
+            fallback=MAINTENANCE_HEADING.to_owned()
         >
             <div id=REVIEW_SUMMARY>{facts}</div>
             {listings}

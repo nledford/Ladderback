@@ -1,15 +1,16 @@
 //! The decisions behind the Snapshots page's maintenance (technical design
 //! §4.4): the request each button sends, what a preview tells a person before
 //! they confirm, how many rows a list shows, which group can be adopted and
-//! how a run's end is awaited and announced. Every answer is data; the page
-//! words it from the catalog. Host-tested here; the DOM glue that sends the
-//! requests is `routes.rs`.
+//! how a run's end is awaited and announced, and what the page holds and
+//! shows while a request is out or a run goes on. Every answer is data; the
+//! page words it from the catalog (`wording.rs`). Host-tested here; the DOM
+//! glue that sends the requests and shows the answers is `snapshots.rs`.
 
 use std::time::Duration;
 
 use api::{
-    AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto,
-    SnapshotDto,
+    AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg,
+    OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto,
 };
 
 use crate::announcer::Politeness;
@@ -36,10 +37,7 @@ impl Kind {
     }
 
     /// The kind a request's text names; the exact lower-case text only.
-    #[allow(
-        dead_code,
-        reason = "the inverse of `wire`, which the host tests pin; the page names a kind and never reads one"
-    )]
+    #[cfg(test)]
     pub(crate) fn of(text: &str) -> Option<Kind> {
         match text {
             "forget" => Some(Self::Forget),
@@ -129,6 +127,9 @@ impl Wait {
 /// One thing a preview tells a person, with no text of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Fact {
+    /// No plan of this agent backs up to the repository, so a forget has
+    /// nothing to keep or remove.
+    NoPlans,
     /// A forget removes `remove` of the `total` snapshots of `plan`.
     Removes {
         plan: String,
@@ -191,14 +192,18 @@ impl Review {
                 left_alone,
                 selection,
             } => {
-                let mut facts: Vec<Fact> = plans
-                    .iter()
-                    .map(|plan| Fact::Removes {
-                        plan: plan.plan.clone(),
-                        remove: plan.remove,
-                        total: plan.total,
-                    })
-                    .collect();
+                let mut facts: Vec<Fact> = if plans.is_empty() {
+                    vec![Fact::NoPlans]
+                } else {
+                    plans
+                        .iter()
+                        .map(|plan| Fact::Removes {
+                            plan: plan.plan.clone(),
+                            remove: plan.remove,
+                            total: plan.total,
+                        })
+                        .collect()
+                };
                 if left_alone.orphaned.snapshots > 0 || left_alone.unmanaged.snapshots > 0 {
                     facts.push(Fact::LeavesAlone {
                         orphaned_groups: left_alone.orphaned.groups,
@@ -497,10 +502,250 @@ impl Watch {
     }
 }
 
+/// What the wait for a run came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Watched {
+    /// The run ended, and how.
+    Ended(End),
+    /// The daemon stayed silent for too long to go on waiting.
+    GaveUp,
+    /// The page that waited is gone.
+    Gone,
+}
+
+/// A request the page has out, which it waits on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// The preview of a run is on its way.
+    Preparing,
+    /// The start of a run of this kind is on its way, and the review that
+    /// confirmed it is still open.
+    Starting(Kind),
+}
+
+/// What the page tells a person about a run: a line to read and, but for the
+/// start, which its own dialog says, a message to hear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Told {
+    /// A review is being prepared.
+    Preparing,
+    /// A run of this kind is being started.
+    Starting(Kind),
+    /// A run of this kind goes on.
+    Running(Kind),
+    /// A run ended.
+    Ended(End),
+    /// The page stopped watching a run of this kind, which goes on.
+    Unwatched(Kind),
+}
+
+impl From<Step> for Told {
+    fn from(step: Step) -> Told {
+        match step {
+            Step::Preparing => Told::Preparing,
+            Step::Starting(kind) => Told::Starting(kind),
+        }
+    }
+}
+
+impl Told {
+    /// How it is announced: only the end of a run that failed is assertive.
+    pub(crate) fn politeness(self) -> Politeness {
+        match self {
+            Told::Ended(end) => end.politeness,
+            Told::Preparing | Told::Starting(_) | Told::Running(_) | Told::Unwatched(_) => {
+                Politeness::Polite
+            }
+        }
+    }
+}
+
+/// A refusal the daemon answered with: its typed code, the arguments of its
+/// message, and the engine's own words when it sent any.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Refusal {
+    pub(crate) code: ErrorCode,
+    pub(crate) args: Vec<(String, MsgArg)>,
+    pub(crate) detail: Option<String>,
+}
+
+/// The run that goes on: what it is, and the operation to stop it by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Run {
+    pub(crate) kind: Kind,
+    pub(crate) operation: String,
+}
+
+/// What the page does next, as the panel decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Effect {
+    /// Say it to a screen reader.
+    Say(Told),
+    /// Open the review that was prepared.
+    OpenReview,
+    /// Close the review: what it confirmed is on its way, or was refused.
+    CloseReview,
+    /// Read the repository's history again.
+    Reload,
+    /// Wait for the run that started to end.
+    Watch,
+    /// Move focus to the maintenance heading if it has fallen to the page, as
+    /// it does when the control that held it is gone.
+    RecoverFocus,
+}
+
+/// What the page's maintenance holds besides the history it lists: the
+/// request that is out, the run that goes on, how the last one ended and the
+/// refusal to read. Each change returns what the page then does, so that what
+/// is shown, said and focused is decided here and not where the elements are.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Panel {
+    pub(crate) step: Option<Step>,
+    pub(crate) run: Option<Run>,
+    pub(crate) ended: Option<Told>,
+    pub(crate) refusal: Option<Refusal>,
+}
+
+impl Panel {
+    /// A person asks for `step`: the preview of a run, or the start of the
+    /// one a review describes. Nothing is asked while a request is out, which
+    /// answers `None`. What was told of the last run, and the refusal that
+    /// was shown, are stale once something new is asked.
+    pub(crate) fn asks(&mut self, step: Step) -> Option<Vec<Effect>> {
+        if self.step.is_some() {
+            return None;
+        }
+        self.step = Some(step);
+        self.ended = None;
+        self.refusal = None;
+        Some(match step {
+            Step::Preparing => vec![Effect::Say(Told::Preparing)],
+            Step::Starting(_) => Vec::new(),
+        })
+    }
+
+    /// Whether the start of a run is out: the review that confirmed it then
+    /// holds still.
+    pub(crate) fn starting(&self) -> bool {
+        matches!(self.step, Some(Step::Starting(_)))
+    }
+
+    /// The preview came back and holds a review.
+    pub(crate) fn previewed(&mut self) -> Vec<Effect> {
+        self.step = None;
+        vec![Effect::OpenReview]
+    }
+
+    /// The request out was refused. The review that asked for it is closed,
+    /// and what the page shows is read again when the refusal says that it
+    /// is out of date.
+    pub(crate) fn refused(&mut self, refusal: Refusal) -> Vec<Effect> {
+        let stale = rereads(refusal.code);
+        self.step = None;
+        self.ended = None;
+        self.refusal = Some(refusal);
+        vec![
+            Effect::CloseReview,
+            if stale {
+                Effect::Reload
+            } else {
+                Effect::RecoverFocus
+            },
+        ]
+    }
+
+    /// The request out got no usable answer: nothing is waited on any more.
+    pub(crate) fn silent(&mut self) -> Vec<Effect> {
+        self.step = None;
+        vec![Effect::CloseReview]
+    }
+
+    /// A refusal of something the person did not ask for as a request, the
+    /// read of the history or a cancel: it is shown, and nothing else changes.
+    pub(crate) fn reports(&mut self, refusal: Refusal) {
+        self.refusal = Some(refusal);
+    }
+
+    /// The start was accepted: the run goes on, and is watched.
+    pub(crate) fn started(&mut self, kind: Kind, operation: String) -> Vec<Effect> {
+        self.step = None;
+        self.ended = None;
+        self.refusal = None;
+        self.run = Some(Run { kind, operation });
+        vec![
+            Effect::CloseReview,
+            Effect::Say(Told::Running(kind)),
+            Effect::Watch,
+        ]
+    }
+
+    /// The wait for the run came to `how`. A run that ended is told, and the
+    /// history it changed is read again; a run the page no longer watches is
+    /// said to go on.
+    pub(crate) fn watched(&mut self, how: Watched) -> Vec<Effect> {
+        let Some(run) = self.run.as_ref() else {
+            return Vec::new();
+        };
+        let told = match how {
+            Watched::Ended(end) => Told::Ended(end),
+            Watched::GaveUp => Told::Unwatched(run.kind),
+            Watched::Gone => return Vec::new(),
+        };
+        self.run = None;
+        self.ended = Some(told);
+        let mut effects = vec![Effect::Say(told), Effect::RecoverFocus];
+        if matches!(how, Watched::Ended(_)) {
+            effects.push(Effect::Reload);
+        }
+        effects
+    }
+}
+
+/// What the area of the repository's history shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shown {
+    /// The history is being read, and none has been read yet.
+    Loading,
+    /// None was read and none is being read: a refusal or the page's heading
+    /// says why.
+    Nothing,
+    /// The repository has no plan of this agent and holds no snapshots.
+    Empty,
+    /// The groups of the history.
+    Lists,
+}
+
+/// What shows of the `groups` read so far, while the history is being read
+/// again or not (`reading`): the groups already read stay until the new ones
+/// come.
+pub(crate) fn shown(groups: Option<&SnapshotGroupsDto>, reading: bool) -> Shown {
+    match groups {
+        Some(groups)
+            if groups.plans.is_empty()
+                && groups.orphaned.is_empty()
+                && groups.unmanaged.is_empty() =>
+        {
+            Shown::Empty
+        }
+        Some(_) => Shown::Lists,
+        None if reading => Shown::Loading,
+        None => Shown::Nothing,
+    }
+}
+
+/// Whether the page says it cannot reach the daemon after a request: any
+/// answer, a refusal too, says it can, and heals what an earlier silence
+/// broke; only no answer says it cannot.
+pub(crate) fn unreachable_after(answered: bool) -> bool {
+    !answered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use api::{ForgetPlanDto, LeftAloneDto, SnapshotDto, TallyDto};
+    use api::{
+        ForgetPlanDto, LeftAloneDto, PlanGroupDto, SnapshotDto, TallyDto, UnmanagedGroupDto,
+    };
 
     fn snapshot(n: u8) -> SnapshotDto {
         SnapshotDto::new(
@@ -1261,5 +1506,308 @@ mod tests {
         assert!(!Rows::of(3, 3).is_empty());
         assert!(!Rows::of(3, 0).is_empty());
         assert!(!Rows::of(0, 2).is_empty());
+    }
+
+    fn refusal(code: ErrorCode) -> Refusal {
+        Refusal {
+            code,
+            args: Vec::new(),
+            detail: None,
+        }
+    }
+
+    fn operation() -> String {
+        "01a1c74a-2d40-7288-86c8-04ba8db8aa1a".to_owned()
+    }
+
+    fn groups(plans: usize, orphaned: usize, unmanaged: usize) -> SnapshotGroupsDto {
+        SnapshotGroupsDto {
+            plans: (0..plans)
+                .map(|n| PlanGroupDto {
+                    plan: format!("plan{n}"),
+                    count: 0,
+                    snapshots: Vec::new(),
+                })
+                .collect(),
+            orphaned: (0..orphaned)
+                .map(|_| OrphanedGroupDto {
+                    agent: Some("laptop".to_owned()),
+                    plan: Some("old".to_owned()),
+                    count: 0,
+                    snapshots: Vec::new(),
+                    adopt_into: Vec::new(),
+                })
+                .collect(),
+            unmanaged: (0..unmanaged)
+                .map(|_| UnmanagedGroupDto {
+                    hostname: "laptop".to_owned(),
+                    label: String::new(),
+                    paths: Vec::new(),
+                    count: 0,
+                    snapshots: Vec::new(),
+                    adopt_into: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn nothing_is_asked_while_a_request_is_out() {
+        let mut panel = Panel::default();
+        assert!(panel.asks(Step::Preparing).is_some());
+        let before = panel.clone();
+        assert_eq!(panel.asks(Step::Preparing), None);
+        assert_eq!(panel.asks(Step::Starting(Kind::Forget)), None);
+        assert_eq!(panel, before);
+    }
+
+    #[test]
+    fn asking_for_a_review_says_so_and_drops_what_was_told_of_the_last_run() {
+        let mut panel = Panel {
+            ended: Some(Told::Ended(End::of(Kind::Forget, "succeeded"))),
+            refusal: Some(refusal(ErrorCode::MaintenanceBusy)),
+            ..Panel::default()
+        };
+        assert_eq!(
+            panel.asks(Step::Preparing),
+            Some(vec![Effect::Say(Told::Preparing)])
+        );
+        assert_eq!(panel.step, Some(Step::Preparing));
+        assert_eq!(panel.ended, None);
+        assert_eq!(panel.refusal, None);
+    }
+
+    #[test]
+    fn confirming_a_review_says_nothing_aloud_since_its_dialog_says_it() {
+        let mut panel = Panel {
+            ended: Some(Told::Ended(End::of(Kind::Prune, "succeeded"))),
+            ..Panel::default()
+        };
+        assert_eq!(panel.asks(Step::Starting(Kind::Prune)), Some(Vec::new()));
+        assert_eq!(panel.step, Some(Step::Starting(Kind::Prune)));
+        assert_eq!(panel.ended, None);
+    }
+
+    #[test]
+    fn only_the_start_of_a_run_that_is_out_makes_a_review_hold_still() {
+        let mut panel = Panel::default();
+        assert!(!panel.starting());
+        panel.asks(Step::Preparing);
+        assert!(!panel.starting());
+        panel.previewed();
+        panel.asks(Step::Starting(Kind::Prune));
+        assert!(panel.starting());
+        panel.started(Kind::Prune, operation());
+        assert!(!panel.starting());
+    }
+
+    #[test]
+    fn a_preview_that_came_back_opens_its_review() {
+        let mut panel = Panel::default();
+        panel.asks(Step::Preparing);
+        assert_eq!(panel.previewed(), vec![Effect::OpenReview]);
+        assert_eq!(panel.step, None);
+    }
+
+    #[test]
+    fn a_refusal_ends_the_request_closes_the_review_and_drops_the_old_end() {
+        let mut panel = Panel {
+            step: Some(Step::Starting(Kind::Forget)),
+            ended: Some(Told::Ended(End::of(Kind::Forget, "succeeded"))),
+            ..Panel::default()
+        };
+        let refused = refusal(ErrorCode::OperationFailed);
+        assert_eq!(
+            panel.refused(refused.clone()),
+            vec![Effect::CloseReview, Effect::RecoverFocus]
+        );
+        assert_eq!(panel.step, None);
+        assert_eq!(panel.ended, None);
+        assert_eq!(panel.refusal, Some(refused));
+    }
+
+    #[test]
+    fn a_refusal_that_says_the_page_is_out_of_date_reads_the_history_again() {
+        for code in [
+            ErrorCode::MaintenanceBusy,
+            ErrorCode::MaintenanceSelectionChanged,
+        ] {
+            let mut panel = Panel::default();
+            assert_eq!(
+                panel.refused(refusal(code)),
+                vec![Effect::CloseReview, Effect::Reload],
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_nobody_answered_ends_and_closes_its_review() {
+        let mut panel = Panel::default();
+        panel.asks(Step::Starting(Kind::Forget));
+        assert_eq!(panel.silent(), vec![Effect::CloseReview]);
+        assert_eq!(panel.step, None);
+    }
+
+    #[test]
+    fn a_refusal_to_read_or_to_cancel_is_shown_and_changes_nothing_else() {
+        let mut panel = Panel::default();
+        panel.asks(Step::Starting(Kind::Check));
+        let before = panel.clone();
+        panel.reports(refusal(ErrorCode::RepositoryReadTimedOut));
+        assert_eq!(
+            panel,
+            Panel {
+                refusal: Some(refusal(ErrorCode::RepositoryReadTimedOut)),
+                ..before
+            }
+        );
+    }
+
+    #[test]
+    fn a_run_that_started_closes_its_review_announces_itself_and_is_watched() {
+        let mut panel = Panel::default();
+        panel.asks(Step::Starting(Kind::Forget));
+        assert_eq!(
+            panel.started(Kind::Forget, operation()),
+            vec![
+                Effect::CloseReview,
+                Effect::Say(Told::Running(Kind::Forget)),
+                Effect::Watch
+            ]
+        );
+        assert_eq!(panel.step, None);
+        assert_eq!(
+            panel.run,
+            Some(Run {
+                kind: Kind::Forget,
+                operation: operation()
+            })
+        );
+    }
+
+    #[test]
+    fn a_run_that_ended_is_told_and_the_history_it_changed_is_read_again() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Check, operation());
+        let end = End::of(Kind::Check, "failed");
+        assert_eq!(
+            panel.watched(Watched::Ended(end)),
+            vec![
+                Effect::Say(Told::Ended(end)),
+                Effect::RecoverFocus,
+                Effect::Reload
+            ]
+        );
+        assert_eq!(panel.run, None);
+        assert_eq!(panel.ended, Some(Told::Ended(end)));
+    }
+
+    #[test]
+    fn a_run_the_page_stopped_watching_is_told_to_go_on_without_it() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Prune, operation());
+        assert_eq!(
+            panel.watched(Watched::GaveUp),
+            vec![
+                Effect::Say(Told::Unwatched(Kind::Prune)),
+                Effect::RecoverFocus
+            ]
+        );
+        assert_eq!(panel.run, None);
+        assert_eq!(panel.ended, Some(Told::Unwatched(Kind::Prune)));
+    }
+
+    #[test]
+    fn a_page_that_is_gone_changes_nothing() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Check, operation());
+        let before = panel.clone();
+        assert_eq!(panel.watched(Watched::Gone), Vec::new());
+        assert_eq!(panel, before);
+    }
+
+    #[test]
+    fn a_wait_that_ends_with_no_run_to_end_changes_nothing() {
+        let mut panel = Panel::default();
+        assert_eq!(
+            panel.watched(Watched::Ended(End::of(Kind::Check, "succeeded"))),
+            Vec::new()
+        );
+        assert_eq!(panel.watched(Watched::GaveUp), Vec::new());
+        assert_eq!(panel, Panel::default());
+    }
+
+    #[test]
+    fn only_a_failure_is_told_assertively() {
+        for told in [
+            Told::Preparing,
+            Told::Starting(Kind::Forget),
+            Told::Running(Kind::Forget),
+            Told::Unwatched(Kind::Forget),
+            Told::Ended(End::of(Kind::Forget, "succeeded")),
+            Told::Ended(End::of(Kind::Forget, "cancelled")),
+        ] {
+            assert_eq!(told.politeness(), Politeness::Polite, "{told:?}");
+        }
+        assert_eq!(
+            Told::Ended(End::of(Kind::Forget, "failed")).politeness(),
+            Politeness::Assertive
+        );
+    }
+
+    #[test]
+    fn a_step_is_told_as_the_wait_it_is() {
+        assert_eq!(Told::from(Step::Preparing), Told::Preparing);
+        assert_eq!(
+            Told::from(Step::Starting(Kind::Adopt)),
+            Told::Starting(Kind::Adopt)
+        );
+    }
+
+    #[test]
+    fn the_history_area_shows_a_wait_a_read_an_absence_or_an_empty_repository() {
+        assert_eq!(shown(None, true), Shown::Loading);
+        assert_eq!(shown(None, false), Shown::Nothing);
+        for reading in [false, true] {
+            assert_eq!(shown(Some(&groups(0, 0, 0)), reading), Shown::Empty);
+            for (plans, orphaned, unmanaged) in [(1, 0, 0), (0, 1, 0), (0, 0, 1)] {
+                assert_eq!(
+                    shown(Some(&groups(plans, orphaned, unmanaged)), reading),
+                    Shown::Lists
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn any_answer_even_a_refusal_says_the_daemon_is_reachable_and_silence_says_not() {
+        assert!(!unreachable_after(true));
+        assert!(unreachable_after(false));
+    }
+
+    #[test]
+    fn a_forget_of_a_repository_no_plan_uses_says_so_and_has_nothing_to_confirm() {
+        let review = Review::of(&plain(Kind::Forget), &forget(Vec::new(), left(0, 0, 0, 0)));
+        assert_eq!(review.facts, vec![Fact::NoPlans]);
+        assert!(review.listings.is_empty());
+        assert!(review.nothing_to_do());
+    }
+
+    #[test]
+    fn a_forget_of_a_repository_no_plan_uses_still_names_the_history_it_leaves_alone() {
+        let review = Review::of(&plain(Kind::Forget), &forget(Vec::new(), left(1, 2, 0, 0)));
+        assert_eq!(
+            review.facts,
+            vec![
+                Fact::NoPlans,
+                Fact::LeavesAlone {
+                    orphaned_groups: 1,
+                    orphaned_snapshots: 2,
+                    unmanaged_groups: 0,
+                    unmanaged_snapshots: 0,
+                },
+            ]
+        );
     }
 }

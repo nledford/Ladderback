@@ -6,7 +6,7 @@
 use api::{AdoptionFromDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, UnmanagedGroupDto};
 use l10n::{MessageId, msg};
 
-use crate::maintenance::{self, Confirm, End, Fact, Kind, Outcome, Owner, Review, Wait};
+use crate::maintenance::{self, Confirm, End, Fact, Kind, Outcome, Owner, Review, Told, Wait};
 
 /// A catalog message and what its variables read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +81,7 @@ pub(crate) fn confirmation(confirm: Confirm) -> Words {
 /// second says how long a marked pack waits.
 pub(crate) fn fact(fact: &Fact) -> Vec<Words> {
     match fact {
+        Fact::NoPlans => vec![words(msg::UI_REVIEW_NO_PLANS, Vec::new())],
         Fact::Removes {
             plan,
             remove,
@@ -190,7 +191,7 @@ pub(crate) fn more(count: u64) -> Option<Words> {
 }
 
 /// What a run that is going on says, by what it runs.
-pub(crate) fn running(kind: Kind) -> Words {
+fn running(kind: Kind) -> Words {
     words(
         msg::UI_MAINTENANCE_RUNNING,
         vec![("kind", text(kind.wire()))],
@@ -198,13 +199,31 @@ pub(crate) fn running(kind: Kind) -> Words {
 }
 
 /// How a run's end is told, by what ran and how it ended.
-pub(crate) fn end(end: &End) -> Words {
+fn end(end: &End) -> Words {
     let id = match end.outcome {
         Outcome::Finished => msg::UI_MAINTENANCE_FINISHED,
         Outcome::Cancelled => msg::UI_MAINTENANCE_CANCELLED,
         Outcome::Failed => msg::UI_MAINTENANCE_FAILED,
     };
     words(id, vec![("kind", text(end.kind.wire()))])
+}
+
+/// What the page tells a person of a run, or of the request that comes before
+/// one, by what it is.
+pub(crate) fn told(told: Told) -> Words {
+    match told {
+        Told::Preparing => words(msg::UI_MAINTENANCE_PREPARING, Vec::new()),
+        Told::Starting(kind) => words(
+            msg::UI_MAINTENANCE_STARTING,
+            vec![("kind", text(kind.wire()))],
+        ),
+        Told::Running(kind) => running(kind),
+        Told::Ended(ended) => end(&ended),
+        Told::Unwatched(kind) => words(
+            msg::UI_MAINTENANCE_UNWATCHED,
+            vec![("kind", text(kind.wire()))],
+        ),
+    }
 }
 
 /// The heading of an orphaned group, by the tags it carries.
@@ -619,6 +638,58 @@ mod tests {
                 "{outcome:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_review_that_is_being_prepared_says_so() {
+        assert_eq!(
+            told(Told::Preparing),
+            said(msg::UI_MAINTENANCE_PREPARING, &[])
+        );
+    }
+
+    #[test]
+    fn a_run_that_is_being_started_is_told_by_its_kind() {
+        for kind in [Kind::Forget, Kind::Prune, Kind::Check, Kind::Adopt] {
+            assert_eq!(
+                told(Told::Starting(kind)),
+                said(msg::UI_MAINTENANCE_STARTING, &[("kind", name(kind.wire()))]),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_the_page_stopped_watching_is_told_to_go_on_by_its_kind() {
+        for kind in [Kind::Forget, Kind::Prune, Kind::Check, Kind::Adopt] {
+            assert_eq!(
+                told(Told::Unwatched(kind)),
+                said(
+                    msg::UI_MAINTENANCE_UNWATCHED,
+                    &[("kind", name(kind.wire()))]
+                ),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_that_goes_on_or_ended_is_told_as_it_is_by_itself() {
+        assert_eq!(told(Told::Running(Kind::Check)), running(Kind::Check));
+        let ended = End {
+            kind: Kind::Forget,
+            outcome: Outcome::Failed,
+            politeness: Politeness::Assertive,
+        };
+        assert_eq!(told(Told::Ended(ended)), end(&ended));
+    }
+
+    #[test]
+    fn a_forget_of_a_repository_no_plan_uses_says_so() {
+        assert_eq!(
+            fact(&Fact::NoPlans),
+            vec![said(msg::UI_REVIEW_NO_PLANS, &[])]
+        );
     }
 
     #[test]
