@@ -1793,6 +1793,25 @@ mod repository_request_tests {
     }
 
     #[test]
+    fn debug_names_where_a_password_comes_from_but_never_a_typed_one() {
+        let inline = format!(
+            "{:?}",
+            PasswordDto::Inline {
+                value: "hunter2".into()
+            }
+        );
+        assert!(!inline.contains("hunter2"), "{inline}");
+        assert!(inline.contains("Inline"), "the source helps: {inline}");
+        let file = format!(
+            "{:?}",
+            PasswordDto::File {
+                path: "/etc/demo/pw".into()
+            }
+        );
+        assert!(file.contains("/etc/demo/pw"), "a path is no secret: {file}");
+    }
+
+    #[test]
     fn a_name_that_is_not_an_alias_is_a_code_with_no_arguments() {
         assert_eq!(
             to_string(&ErrorCode::RepositoryAliasInvalid).unwrap(),
