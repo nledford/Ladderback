@@ -1253,17 +1253,6 @@ mod tests {
     }
 
     #[test]
-    fn an_instant_is_read_in_the_zone_it_is_given_and_in_utc_without_one() {
-        let localizer = Localizer::new(&[]);
-        let raw = "2026-11-09T10:00:02Z";
-        let tokyo = api::IanaZone::new("Asia/Tokyo").unwrap();
-        let utc = instant(&localizer, raw, None);
-        let in_tokyo = instant(&localizer, raw, Some(&tokyo));
-        assert!(utc.contains("10:00:02"), "{utc}");
-        assert!(in_tokyo.contains("7:00:02"), "{in_tokyo}");
-    }
-
-    #[test]
     fn a_refusal_is_written_through_the_catalog_with_its_argument() {
         let shown = refusal(
             &Localizer::new(&[]),

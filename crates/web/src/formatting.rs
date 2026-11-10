@@ -5,9 +5,10 @@
 //! table of every case a host writes is `l10n`'s own lane; this is the check
 //! that `web` is built with that host.
 //!
-//! The catalog is the test's own: the web UI's own instants come out of the
-//! `ui-instant` message, whose browser journeys read through the cells'
-//! `title` attributes; this lane checks the host itself writes `DATETIME`.
+//! The German catalog is the test's own, for the host's writing of `DATETIME`;
+//! the page's own instants come out of the real `ui-instant` message, which
+//! the last test reads through `routes::instant`, with the viewer's zone as
+//! the pages pass it.
 
 use api::{IanaZone, MsgArg};
 use l10n::catalog::{Catalog, Source};
