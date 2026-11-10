@@ -57,3 +57,5 @@ Not part of the contract: UI layout and wording, log text, the worker protocol (
 3. Merging the PR to `main` triggers the tag and a GitHub release with that entry as its notes.
 
 Until M5's release packaging, a release is source only. M5 adds cargo-dist builds that attach binaries, the signed macOS build and the Docker image to the same tag.
+
+**Release build flags.** A release is built with `--no-default-features`, which leaves out the development pseudolocales (§8.4); the component gallery (§4.5) is off unless asked for, so the same build has none. The flags are one definition, `release_flags` in the `Justfile`, and `just --evaluate release_flags` prints them. `just architecture` checks a build made with them: no `fluent-pseudo`, no gallery. Nothing builds a release yet (`release.yml` only runs release-plz), and the development recipes (`just web`, `just build`) don't use the flags. The release packaging M5 adds must: the daemon and the web UI's wasm both build with `release_flags` (`cargo build --release …`, `trunk build --release …`), so the check and the artifact can't drift apart. A feature a release needs is added to `release_flags`, not to a workflow.

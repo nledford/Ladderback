@@ -9,7 +9,7 @@
 #   - the inner rings share one banned-call list (clippy.toml);
 #   - a release build leaves out the development pseudolocales' `fluent-pseudo`
 #     (technical design §8.4): `ladderback` and `web` have it by default, and not
-#     when built with `--no-default-features`, as a release is;
+#     when built with the release flags (`--no-default-features`, as a release is);
 #   - a release build leaves out the component gallery, the dev-only route
 #     `/_gallery` (the `web` feature `gallery`).
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
@@ -17,6 +17,15 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# The cargo flags a release build is made with: the Justfile's `release_flags`,
+# the one definition (technical design §12.1), which `just architecture` passes
+# in. Release packaging uses the same, so these checks look at what ships.
+if [[ -z ${RELEASE_FLAGS:-} ]]; then
+  echo "error: RELEASE_FLAGS is empty; run this as 'just architecture', which passes the Justfile's release_flags" >&2
+  exit 1
+fi
+read -r -a release_flags <<<"$RELEASE_FLAGS"
 
 banned='^(tokio|sqlx|axum|hyper|reqwest|rustic_core|rustic_backend|fluent-bundle|fluent-langneg|unic-langid|icu_[a-z_]+|rand|chrono|l10n)$'
 status=0
@@ -136,11 +145,11 @@ pseudolocales() {
 
 pseudolocales has ladderback
 pseudolocales has web --target wasm32-unknown-unknown
-pseudolocales lacks ladderback --no-default-features
-pseudolocales lacks web --no-default-features --target wasm32-unknown-unknown
+pseudolocales lacks ladderback "${release_flags[@]}"
+pseudolocales lacks web "${release_flags[@]}" --target wasm32-unknown-unknown
 
 # The component gallery (technical design §4.5) is a dev-only route: the `web`
-# feature `gallery` is off by default, and a release build (`--no-default-features`)
+# feature `gallery` is off by default, and a release build (`release_flags`)
 # leaves it out. `just web-test` turns it on for the UI tests. The feature adds
 # no crate, so the check reads the feature graph. As for the pseudolocales, both
 # sides are checked, so that this cannot pass with nothing to find.
@@ -165,7 +174,7 @@ gallery() {
 
 gallery has --features gallery
 gallery lacks
-gallery lacks --no-default-features
+gallery lacks "${release_flags[@]}"
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   echo "error: crates/domain/clippy.toml and crates/app/clippy.toml differ" >&2
