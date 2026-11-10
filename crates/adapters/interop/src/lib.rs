@@ -12,6 +12,15 @@
     clippy::unreachable
 )]
 
+mod escape;
+mod keys;
+mod locate;
+mod map;
+mod parse;
+mod part;
+mod resolve;
+mod tables;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -63,14 +72,23 @@ impl FileProfileReader {
 
 #[async_trait]
 impl ProfileReader for FileProfileReader {
-    #[allow(clippy::todo, reason = "red test: interop import")]
     async fn read(
         &self,
         file: &Path,
         repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError> {
-        let _ = (file, repository, &self.search, &self.variables);
-        todo!("parse the profile and the profiles it uses, merge as rustic does, map to the domain")
+        let shown = file.display().to_string();
+        let path = file.to_path_buf();
+        let search = self.search.clone();
+        let variables = self.variables.clone();
+        let alias = repository.clone();
+        // The files are read with blocking calls, so off the async threads.
+        let read = tokio::task::spawn_blocking(move || {
+            let resolved = resolve::resolve(&path, &search)?;
+            map::map(resolved, &alias, &variables, &path.display().to_string())
+        })
+        .await;
+        read.unwrap_or(Err(ProfileError::Unreadable { file: shown }))
     }
 }
 
