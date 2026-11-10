@@ -343,6 +343,7 @@ fn failures() -> Vec<(
             "[]",
             None,
         ),
+        (FailureReason::DaemonStopped, "daemon-stopped", "[]", None),
     ]
 }
 

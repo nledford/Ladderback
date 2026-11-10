@@ -362,6 +362,7 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
         FailureReason::DeadlinePassed,
         FailureReason::EngineStartTimedOut,
         FailureReason::EngineExitTimedOut,
+        FailureReason::DaemonStopped,
     ];
 
     let mut ops = vec![

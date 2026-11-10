@@ -403,7 +403,7 @@ fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::EngineStartTimedOut => (ErrorCode::EngineStartTimedOut, Vec::new()),
         F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
-        F::DaemonStopped => todo!("the code a stopped daemon's operation reports"),
+        F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
     }
 }
 
@@ -1594,7 +1594,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         // runs no hooks. It is still a failure, in the catalog's plainest words.
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
-        F::DaemonStopped => todo!("the refusal a stopped daemon's operation gives"),
+        F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }
 
@@ -3129,6 +3129,10 @@ mod repository_service_tests {
             (
                 F::EngineExitTimedOut,
                 unavailable(ErrorCode::EngineExitTimedOut, vec![], None),
+            ),
+            (
+                F::DaemonStopped,
+                unavailable(ErrorCode::DaemonStopped, vec![], None),
             ),
             (
                 F::RepositoryExists,

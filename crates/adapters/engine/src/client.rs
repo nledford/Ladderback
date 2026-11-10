@@ -1147,6 +1147,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::EngineStartTimedOut
                 | ErrorCode::EngineExitTimedOut
                 | ErrorCode::RepositoryTimedOut
+                | ErrorCode::DaemonStopped
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired
@@ -1424,6 +1425,7 @@ mod tests {
             ErrorCode::ProtocolViolated,
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
+            ErrorCode::DaemonStopped,
             ErrorCode::Unknown,
         ] {
             assert_eq!(
@@ -1489,6 +1491,7 @@ mod tests {
             ErrorCode::ProtocolViolated,
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
+            ErrorCode::DaemonStopped,
             ErrorCode::Unknown,
         ] {
             assert_eq!(
