@@ -4,7 +4,7 @@
 //! say in Ladderback's terms, or says in a way Ladderback could only guess
 //! at, is refused.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use app::ports::{ImportedProfile, ProfileError, ProfileNotice, ProfileProblem};
 use domain::execution::plan_tags::UserTag;
@@ -14,6 +14,7 @@ use domain::planning::{
 use domain::secrets::{CommandLine, FileRead, SecretRef, SecretValue, is_secret_option};
 use domain::{PlanId, RepositoryAlias};
 
+use crate::MAX_ITEMS;
 use crate::escape;
 use crate::locate::plain;
 use crate::part::{Entry, Part, Repository, Settings};
@@ -51,6 +52,7 @@ pub(crate) fn map(
             .iter()
             .map(|key| ProfileNotice::KeyIgnored { key: key.clone() }),
     );
+    check_items(&part, file)?;
     let repository = repository(&part, variables, file, &mut notices)?;
     if part.global.env {
         notices.push(ProfileNotice::EnvIgnored);
@@ -61,10 +63,11 @@ pub(crate) fn map(
     if !part.backup.hooks.is_empty() && !part.entries.is_empty() {
         notices.push(ProfileNotice::HooksPerPlan);
     }
+    let mut dropped = BTreeSet::new();
     let plans = part
         .entries
         .iter()
-        .map(|entry| plan(&part, entry, alias, file, &mut notices))
+        .map(|entry| plan(&part, entry, alias, file, &mut notices, &mut dropped))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ImportedProfile {
         repository,
@@ -72,6 +75,51 @@ pub(crate) fn map(
         hooks: part.global.hooks,
         notices,
     })
+}
+
+/// Refuses a profile whose plans would hold more than [`MAX_ITEMS`] items:
+/// every plan gets a copy of what `[backup]` sets next to what its entry sets,
+/// so the memory the plans take is the number of entries times what `[backup]`
+/// holds, which a profile of a megabyte can make as large as it likes.
+fn check_items(part: &Part, file: &str) -> Result<(), ProfileError> {
+    let shared = items(&part.backup);
+    let total = part.entries.iter().fold(0_usize, |total, entry| {
+        total
+            .saturating_add(shared)
+            .saturating_add(entry.sources.len())
+            .saturating_add(items(&entry.settings))
+    });
+    if total <= MAX_ITEMS {
+        return Ok(());
+    }
+    Err(ProfileError::Invalid {
+        file: file.to_owned(),
+        key: Some("backup".to_owned()),
+        at: None,
+        problem: ProfileProblem::TooManyItems,
+        detail: String::new(),
+    })
+}
+
+/// How many items the lists and the hooks of `settings` hold.
+fn items(settings: &Settings) -> usize {
+    let hooks = &settings.hooks;
+    [
+        settings.tags.len(),
+        settings.globs.len(),
+        settings.iglobs.len(),
+        settings.glob_files.len(),
+        settings.iglob_files.len(),
+        settings.custom_ignorefiles.len(),
+        settings.exclude_if_present.len(),
+        settings.exclude_if_xattr.len(),
+        hooks.run_before.len(),
+        hooks.run_after.len(),
+        hooks.run_failed.len(),
+        hooks.run_finally.len(),
+    ]
+    .into_iter()
+    .fold(0_usize, usize::saturating_add)
 }
 
 // --- The repository ---------------------------------------------------------
@@ -275,6 +323,7 @@ fn plan(
     alias: &RepositoryAlias,
     file: &str,
     notices: &mut Vec<ProfileNotice>,
+    dropped: &mut BTreeSet<String>,
 ) -> Result<Plan, ProfileError> {
     let mut settings = entry.settings.clone();
     let entry_hooks = std::mem::take(&mut settings.hooks);
@@ -289,7 +338,7 @@ fn plan(
     );
     plan.host = settings.host.clone();
     plan.label = settings.label.clone();
-    plan.tags = tags(&settings, notices);
+    plan.tags = tags(&settings, notices, dropped);
     plan.filter = filter(settings);
     plan.retention = part.forget.retention.clone();
     plan.hooks = hooks(backup_hooks, entry_hooks);
@@ -323,8 +372,12 @@ fn id(entry: &Entry, settings: &Settings, file: &str) -> Result<PlanId, ProfileE
 }
 
 /// What a tag written as `a,b` is: each of the two, the empty ones left out.
-/// A reserved tag is dropped, with a notice.
-fn tags(settings: &Settings, notices: &mut Vec<ProfileNotice>) -> Vec<UserTag> {
+/// A reserved tag is dropped, with a notice the first time it is.
+fn tags(
+    settings: &Settings,
+    notices: &mut Vec<ProfileNotice>,
+    dropped: &mut BTreeSet<String>,
+) -> Vec<UserTag> {
     let mut kept = Vec::new();
     for tag in settings
         .tags
@@ -335,9 +388,8 @@ fn tags(settings: &Settings, notices: &mut Vec<ProfileNotice>) -> Vec<UserTag> {
         match UserTag::new(tag) {
             Ok(tag) => kept.push(tag),
             Err(reserved) => {
-                let notice = ProfileNotice::TagDropped { tag: reserved.tag };
-                if !notices.contains(&notice) {
-                    notices.push(notice);
+                if dropped.insert(reserved.tag.clone()) {
+                    notices.push(ProfileNotice::TagDropped { tag: reserved.tag });
                 }
             }
         }
