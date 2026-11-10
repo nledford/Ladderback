@@ -9,6 +9,9 @@
 //! leaves the configuration as it was.
 //!
 //! The export prints the profile on stdout, and only when it was made.
+//!
+//! Both write through `output`, never `print!`: a command whose output
+//! nobody reads any more stops quietly (see [`finish`]).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -29,8 +32,8 @@ use crate::composition::{
     Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
     profile_notice, repository_alias_invalid, runtime_unavailable,
 };
-use crate::output::{Report, write_json};
-use crate::{say, text};
+use crate::output::{Report, to_stderr, to_stdout, write_json};
+use crate::{finish, say, text};
 
 /// Where stock rustic looks for the profiles a profile uses, when it is not
 /// told otherwise (rustic's own order): its config folder, `/etc/rustic`,
@@ -57,19 +60,19 @@ fn rustic_variables(
 }
 
 /// Prints a refusal on stderr, as the catalog says it.
-fn refuse(localizer: &Localizer, refusal: &Refusal) {
-    eprintln!(
-        "ladderback: {}",
+fn refuse(localizer: &Localizer, refusal: &Refusal) -> io::Result<()> {
+    to_stderr(&format!(
+        "ladderback: {}\n",
         localizer.error(refusal.code, &refusal.args, refusal.detail.as_deref())
-    );
+    ))
 }
 
 /// Prints a notice on stderr, as the catalog says it.
-fn warn(localizer: &Localizer, notice: &Notice) {
-    eprintln!(
-        "ladderback: {}",
+fn warn(localizer: &Localizer, notice: &Notice) -> io::Result<()> {
+    to_stderr(&format!(
+        "ladderback: {}\n",
         localizer.warning(notice.code, &notice.args, None)
-    );
+    ))
 }
 
 /// What `import-profile --json` prints when the import saved the profile.
@@ -144,7 +147,7 @@ impl NotImported {
     }
 
     /// Says why on stderr, as the catalog says it. `file` is the profile.
-    fn say(&self, localizer: &Localizer, file: &Path) {
+    fn say(&self, localizer: &Localizer, file: &Path) -> io::Result<()> {
         match self {
             Self::NoConfigDir => say(localizer, msg::CLI_NO_CONFIG_DIR, &[]),
             Self::Alias(AliasProblem::BadName(name)) => say(
@@ -193,59 +196,51 @@ fn tell_import(
     localizer: &Localizer,
     file: &Path,
     outcome: Result<Imported, NotImported>,
-) -> ExitCode {
+) -> io::Result<ExitCode> {
     let imported = match outcome {
         Ok(imported) => imported,
         Err(not_imported) => {
-            not_imported.say(localizer, file);
-            return ExitCode::FAILURE;
+            not_imported.say(localizer, file)?;
+            return Ok(ExitCode::FAILURE);
         }
     };
     for notice in imported.notices {
-        warn(localizer, &profile_notice(notice));
+        warn(localizer, &profile_notice(notice))?;
     }
-    println!(
-        "{}",
-        localizer.message(
+    let mut told = localizer
+        .message(
             msg::CLI_PROFILE_IMPORTED,
             &[
                 ("repository", text(imported.repository.as_str())),
                 ("file", text(file.display())),
             ],
         )
-    );
+        .to_string();
+    told.push('\n');
     for plan in imported.plans {
-        println!(
-            "{}",
-            localizer.message(
-                msg::CLI_PROFILE_ADDED_PLAN,
-                &[("plan", text(plan.as_str()))],
-            )
+        let line = localizer.message(
+            msg::CLI_PROFILE_ADDED_PLAN,
+            &[("plan", text(plan.as_str()))],
         );
+        told.push_str(line.text());
+        told.push('\n');
     }
-    ExitCode::SUCCESS
+    to_stdout(&told)?;
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Prints what the import did, or why it saved nothing, as one JSON document
-/// on stdout, and nothing on stderr. Only a document that cannot be written,
-/// which has nowhere to go, is said in words on stderr.
-fn document_import(localizer: &Localizer, outcome: Result<Imported, NotImported>) -> ExitCode {
-    let (written, status) = match outcome {
-        Ok(imported) => (print_json(&import_document(imported)), ExitCode::SUCCESS),
-        Err(not_imported) => (
-            print_json(&failure_document(not_imported.refusal())),
-            ExitCode::FAILURE,
-        ),
-    };
-    match written {
-        Ok(()) => status,
-        Err(error) => {
-            say(
-                localizer,
-                msg::CLI_CANNOT_WRITE_OUTPUT,
-                &[("detail", text(error))],
-            );
-            ExitCode::FAILURE
+/// on stdout, and nothing on stderr. A document that cannot be written has
+/// nowhere to go: that is said in words, on stderr, by [`finish`].
+fn document_import(outcome: Result<Imported, NotImported>) -> io::Result<ExitCode> {
+    match outcome {
+        Ok(imported) => {
+            print_json(&import_document(imported))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(not_imported) => {
+            print_json(&failure_document(not_imported.refusal()))?;
+            Ok(ExitCode::FAILURE)
         }
     }
 }
@@ -260,50 +255,56 @@ fn print_json(document: &impl serde::Serialize) -> io::Result<()> {
 pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>, report: Report) -> ExitCode {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     let outcome = import(&file, repo_name.as_deref());
-    match report {
+    let told = match report {
         Report::Text => tell_import(&localizer, &file, outcome),
-        Report::Json => document_import(&localizer, outcome),
-    }
+        Report::Json => document_import(outcome),
+    };
+    finish(&localizer, told)
 }
 
 /// Exports the plan `plan` as a profile on stdout, with its notices on
 /// stderr. A refusal prints nothing on stdout and exits with 1.
 pub(crate) fn export_profile(plan: String) -> ExitCode {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    finish(&localizer, export(&localizer, &plan))
+}
+
+/// Does the export, and says what came of it.
+fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
     let Some(config_dir) = dirs::config_dir() else {
-        say(&localizer, msg::CLI_NO_CONFIG_DIR, &[]);
-        return ExitCode::FAILURE;
+        say(localizer, msg::CLI_NO_CONFIG_DIR, &[])?;
+        return Ok(ExitCode::FAILURE);
     };
     let Some(data_dir) = dirs::data_dir() else {
-        say(&localizer, msg::CLI_NO_DATA_DIR, &[]);
-        return ExitCode::FAILURE;
+        say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
+        return Ok(ExitCode::FAILURE);
     };
     let config_file = config_dir.join("config.toml");
     // A name that is not a plan ID is not a plan of the configuration either.
-    let Ok(plan_id) = PlanId::parse(&plan) else {
-        refuse(&localizer, &plan_unknown(&plan));
-        return ExitCode::FAILURE;
+    let Ok(plan_id) = PlanId::parse(plan) else {
+        refuse(localizer, &plan_unknown(plan))?;
+        return Ok(ExitCode::FAILURE);
     };
     let agent = match agent_id::load_or_create(&data_dir) {
         Ok(agent) => agent,
         Err(error) => {
             say(
-                &localizer,
+                localizer,
                 msg::CLI_PROFILE_NO_AGENT_ID,
                 &[("path", text(data_dir.display())), ("detail", text(error))],
-            );
-            return ExitCode::FAILURE;
+            )?;
+            return Ok(ExitCode::FAILURE);
         }
     };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
             say(
-                &localizer,
+                localizer,
                 msg::CLI_CANNOT_START_RUNTIME,
                 &[("detail", text(error))],
-            );
-            return ExitCode::FAILURE;
+            )?;
+            return Ok(ExitCode::FAILURE);
         }
     };
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
@@ -314,14 +315,14 @@ pub(crate) fn export_profile(plan: String) -> ExitCode {
     match runtime.block_on(use_case.export(&plan_id)) {
         Ok(exported) => {
             for notice in exported.notices {
-                warn(&localizer, &profile_notice(notice));
+                warn(localizer, &profile_notice(notice))?;
             }
-            print!("{}", exported.text);
-            ExitCode::SUCCESS
+            to_stdout(&exported.text)?;
+            Ok(ExitCode::SUCCESS)
         }
         Err(error) => {
-            refuse(&localizer, &export_refusal(error, &config_file));
-            ExitCode::FAILURE
+            refuse(localizer, &export_refusal(error, &config_file))?;
+            Ok(ExitCode::FAILURE)
         }
     }
 }

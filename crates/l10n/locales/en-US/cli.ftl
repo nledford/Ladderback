@@ -98,6 +98,6 @@ cli-profile-no-repository-name = cannot make a repository name of the file name 
 # $detail (text): the operating system's own message. It is shown as it came.
 cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }
 
-# A command could not write its result to standard output, because whatever reads it has gone.
+# A command could not write what it had to say, and ended with status 1: the disk is full, say. A reader that has gone is not this case: the command ends quietly with 141.
 # $detail (text): the operating system's message. It is shown as it came.
 cli-cannot-write-output = cannot write the result: { $detail }
