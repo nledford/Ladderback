@@ -57,6 +57,8 @@ struct Request {
     headers: Vec<String>,
     /// Whether the request names the daemon's own address as its `Host`.
     default_host: bool,
+    /// What follows the headers, sent with a `Content-Length` of its size.
+    body: String,
 }
 
 #[derive(Debug)]
@@ -135,7 +137,8 @@ impl Request {
         if !self.has_header("connection") {
             text.push_str("Connection: close\r\n");
         }
-        text.push_str("Content-Length: 0\r\n\r\n");
+        text.push_str(&format!("Content-Length: {}\r\n\r\n", self.body.len()));
+        text.push_str(&self.body);
         text
     }
 
@@ -155,9 +158,11 @@ fn exchange(addr: SocketAddr, request: &Request) -> Response {
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
         .expect("a read timeout");
-    stream
-        .write_all(request.text(addr.port()).as_bytes())
-        .expect("the request is written");
+    // A daemon that refuses a body over its limit answers at once and closes,
+    // so a large body may find the connection gone before it is all written.
+    // The answer is already on its way, and a write that failed for any other
+    // reason shows as no answer, just below.
+    let _ = stream.write_all(request.text(addr.port()).as_bytes());
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).expect("a status line");
@@ -260,6 +265,7 @@ fn request_for(agent: &mut Agent, method: String, path: String) {
         path,
         headers,
         default_host: true,
+        body: String::new(),
     });
 }
 
@@ -270,6 +276,22 @@ fn add_header(agent: &mut Agent, header: String) {
         request.default_host = false;
     }
     request.headers.push(header);
+}
+
+#[given(expr = "the request has a JSON body of {int} bytes")]
+fn json_body(agent: &mut Agent, size: usize) {
+    // A body that is valid JSON of the shape the operations route takes, padded
+    // to the size: a route that read it would take it.
+    const FRAME: &str = r#"{"plan":""}"#;
+    let padding = size
+        .checked_sub(FRAME.len())
+        .expect("a JSON body holds at least its braces and key");
+    agent.web.request().body = format!(r#"{{"plan":"{}"}}"#, "a".repeat(padding));
+}
+
+#[given(expr = "the request has a body of {int} byte(s)")]
+fn plain_body(agent: &mut Agent, size: usize) {
+    agent.web.request().body = "x".repeat(size);
 }
 
 #[given("the request has no Host header")]
@@ -350,6 +372,62 @@ fn handshake_accepted(agent: &mut Agent) {
     );
 }
 
+#[then("the request isn't refused for its size")]
+fn not_refused_for_size(agent: &mut Agent) {
+    let response = agent.web.response();
+    assert_ne!(response.status, 413, "body {:?}", response.body);
+    assert_ne!(refusal_code(response), Some("body-too-large"));
+}
+
+#[then(
+    expr = "the request is refused with status {int} and the error code {string}, naming the limit of {int} bytes"
+)]
+fn refused_naming_limit(agent: &mut Agent, status: u16, code: String, limit: u64) {
+    let response = agent.web.response();
+    let body: serde_json::Value = serde_json::from_str(&response.body).expect("a refusal is JSON");
+    assert_eq!(response.status, status, "body {:?}", response.body);
+    assert_eq!(
+        body,
+        serde_json::json!({"code": code, "args": {"limit": {"type": "bytes", "value": limit}}})
+    );
+    assert_eq!(response.header("content-type"), Some("application/json"));
+}
+
+#[then(expr = "the response has the header {string} with the value {string}")]
+fn has_header_value(agent: &mut Agent, name: String, value: String) {
+    assert_eq!(agent.web.response().header(&name), Some(value.as_str()));
+}
+
+#[then(expr = "the response has a {string} header")]
+fn has_header(agent: &mut Agent, name: String) {
+    assert!(
+        agent.web.response().header(&name).is_some(),
+        "no {name} in {:?}",
+        agent.web.response().headers
+    );
+}
+
+#[then(expr = "the response's {string} has the directive {string}")]
+fn has_directive(agent: &mut Agent, name: String, directive: String) {
+    let policy = agent
+        .web
+        .response()
+        .header(&name)
+        .unwrap_or_else(|| panic!("no {name} header"));
+    // A directive may carry more sources after the ones named, such as the
+    // hash of the page's own script.
+    assert!(
+        policy
+            .split(';')
+            .map(str::trim)
+            .any(|have| have == directive
+                || have
+                    .strip_prefix(&directive)
+                    .is_some_and(|rest| rest.starts_with(' '))),
+        "{name} is {policy:?}"
+    );
+}
+
 #[then(expr = "the response has no {string} header")]
 fn no_header(agent: &mut Agent, name: String) {
     assert_eq!(agent.web.response().header(&name), None);
@@ -386,5 +464,13 @@ fn rejects(agent: &mut Agent, value: String) {
     let (status, log) = exited(agent);
     // Exit code 2 is how the argument parser rejects a value.
     assert_eq!(status.code(), Some(2), "log: {log}");
-    assert!(log.contains(&value), "log: {log}");
+    // What a person reads is Ladderback's own message, from the catalog (§8.4),
+    // not the argument parser's English.
+    let message = log
+        .lines()
+        .find(|line| line.starts_with("ladderback: ") && line.contains(&value));
+    assert!(
+        message.is_some(),
+        "no message of Ladderback's own naming {value:?} in: {log}"
+    );
 }

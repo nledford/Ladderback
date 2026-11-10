@@ -755,6 +755,8 @@ fn file(path: &str, asset: Asset) -> Response {
 
 #[cfg(test)]
 mod tests {
+    mod hardening;
+
     use std::collections::HashMap;
 
     use axum::http::Request;
@@ -1704,7 +1706,6 @@ mod tests {
             "repository": "/ok",
             "password": {"source": "command", "command": "pass show x"},
         });
-        let oversize = "a".repeat(3 * 1024 * 1024);
         for route in [TEST, CONNECT, INIT] {
             let wrap = |settings: &serde_json::Value| {
                 serde_json::json!({"alias": "demo", "settings": settings}).to_string()
@@ -1724,11 +1725,6 @@ mod tests {
                     "an unknown field at the top",
                     serde_json::json!({"alias": "demo", "settings": valid, "x": 1}).to_string(),
                 ),
-                (
-                    "a body over the limit",
-                    serde_json::json!({"alias": "demo", "settings": settings_json(&oversize)})
-                        .to_string(),
-                ),
             ] {
                 let (response, calls) = post_counted(route, body).await;
                 let (status, answer) = json_of(response).await;
@@ -1746,6 +1742,20 @@ mod tests {
             post_counted(CONNECT, serde_json::json!({"settings": valid}).to_string()).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn a_body_over_the_limit_is_refused_before_the_daemon_sees_it() {
+        let oversize = "a".repeat(3 * 1024 * 1024);
+        for route in [TEST, CONNECT, INIT] {
+            let request =
+                serde_json::json!({"alias": "demo", "settings": settings_json(&oversize)});
+            let (response, calls) = post_counted(route, request.to_string()).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{route}");
+            assert_eq!(answer["code"], "body-too-large", "{route}");
+            assert_eq!(calls, 0, "{route} reached the daemon");
+        }
     }
 
     #[tokio::test]

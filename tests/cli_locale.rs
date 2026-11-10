@@ -142,3 +142,64 @@ fn a_build_without_pseudolocales_says_it_in_english_whatever_language_is_asked_f
         );
     }
 }
+
+/// What `ladderback serve` said, after its name, when `--allowed-host` was given
+/// a name it can never match, with `LANGUAGE=language`. The daemon exits before
+/// it opens its store or binds, so it needs no folders of its own beyond the
+/// isolated ones every daemon a test starts gets.
+fn serve_with_a_bad_allowed_host(language: &str, name: &str) -> String {
+    let scratch = std::env::temp_dir().join(format!(
+        "ladderback-cli-locale-host-{}-{}",
+        std::process::id(),
+        language
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("the scratch dir is made");
+    let mut command = Command::new(LADDERBACK);
+    testkit::daemon::isolate(&mut command, &scratch);
+    let output = command
+        .args(["serve", "--listen", "127.0.0.1:0", "--allowed-host", name])
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env_remove("LANG")
+        .env("LANGUAGE", language)
+        .stdin(Stdio::null())
+        .output()
+        .expect("ladderback serve ran");
+    let _ = std::fs::remove_dir_all(&scratch);
+    assert_eq!(output.status.code(), Some(2), "a refused argument exits 2");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    stderr
+        .lines()
+        .find(|line| line.starts_with("ladderback: "))
+        .unwrap_or_else(|| panic!("a message with the program's name in {stderr:?}"))
+        .to_owned()
+}
+
+#[test]
+fn a_host_name_that_can_never_match_is_refused_in_the_catalogs_words() {
+    assert_eq!(
+        serve_with_a_bad_allowed_host("en-US", "nas.example.com:9898"),
+        "ladderback: “nas.example.com:9898” is not a host name or an address without a port, \
+         so --allowed-host cannot take it. Give a name such as nas.example.com, or an address \
+         such as 192.168.1.5 or [fd00::1]."
+    );
+}
+
+#[cfg(feature = "pseudo")]
+#[test]
+fn a_refused_host_name_is_transformed_in_a_pseudolocale_and_the_name_is_not() {
+    for language in ["en-XA", "ar-XB"] {
+        let message = serve_with_a_bad_allowed_host(language, "nas.example.com:9898");
+        assert!(
+            !message.is_ascii(),
+            "{language} is not transformed: {message}"
+        );
+        for typed in ["nas.example.com:9898", "--allowed-host", "[fd00::1]"] {
+            assert!(
+                message.contains(typed),
+                "{language} changes {typed}: {message}"
+            );
+        }
+    }
+}
