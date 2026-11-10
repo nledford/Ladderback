@@ -91,7 +91,11 @@ pub(crate) async fn run_with(
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
     let mut running = Running::new(child, stop);
-    let (Some(stdout), Some(stderr)) = (running.child.stdout.take(), running.child.stderr.take())
+    // Held until the command is reaped, though nothing reads them after the
+    // limit: a handler that writes to them when it gets SIGTERM must find
+    // them open, or the SIGPIPE ends it before it is done.
+    let (Some(mut stdout), Some(mut stderr)) =
+        (running.child.stdout.take(), running.child.stderr.take())
     else {
         return Err(unreachable("the command's output is not piped".to_owned()));
     };
@@ -100,8 +104,8 @@ pub(crate) async fn run_with(
     let mut err = Vec::new();
     let outcome = collect(
         &mut running.child,
-        stdout,
-        stderr,
+        &mut stdout,
+        &mut stderr,
         limit,
         &mut out,
         &mut err,
@@ -234,8 +238,8 @@ enum End {
 /// out, and the group is signalled only while its leader is not reaped.
 async fn collect(
     child: &mut Child,
-    stdout: ChildStdout,
-    stderr: ChildStderr,
+    stdout: &mut ChildStdout,
+    stderr: &mut ChildStderr,
     limit: Duration,
     out: &mut Vec<u8>,
     err: &mut Vec<u8>,
