@@ -28,8 +28,8 @@ use crate::cache_lock::CacheLock;
 use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
-    JobSpec, Level, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult, ProgressKind, PruneJobSpec,
-    RepositorySpec, RewriteJobSpec, WorkerEvent, exit_code,
+    JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
+    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, WorkerEvent, exit_code,
 };
 
 /// How long a worker may keep running after it reported its result, for
@@ -617,6 +617,18 @@ struct Reading {
 #[derive(Default)]
 struct Listing {
     snapshots: Vec<SnapshotSummary>,
+    /// What the snapshots held so far weigh, as [`weight`] counts it.
+    bytes: usize,
+}
+
+/// What a listed snapshot costs the daemon to hold: its texts, and a fixed
+/// amount for the rest.
+fn weight(snapshot: &SnapshotSummary) -> usize {
+    let texts = snapshot.hostname.len()
+        + snapshot.label.len()
+        + snapshot.tags.iter().map(String::len).sum::<usize>()
+        + snapshot.paths.iter().map(String::len).sum::<usize>();
+    texts.saturating_add(256)
 }
 
 /// What a [`Listing`] made of one event of the worker's.
@@ -640,8 +652,9 @@ impl Listing {
                         "worker listing longer than {MAX_LISTED_SNAPSHOTS} snapshots"
                     ));
                 }
-                self.snapshots
-                    .extend(snapshots.into_iter().map(|s| SnapshotSummary {
+                let batch: Vec<SnapshotSummary> = snapshots
+                    .into_iter()
+                    .map(|s| SnapshotSummary {
                         id: s.id,
                         time: s.time,
                         hostname: s.hostname,
@@ -650,11 +663,23 @@ impl Listing {
                         paths: s.paths,
                         paths_truncated: s.paths_truncated,
                         tags_truncated: s.tags_truncated,
-                    }));
+                    })
+                    .collect();
+                let bytes = batch
+                    .iter()
+                    .fold(self.bytes, |all, s| all.saturating_add(weight(s)));
+                if bytes > MAX_LISTED_BYTES {
+                    return Absorbed::Refused(format!(
+                        "worker listing larger than {MAX_LISTED_BYTES} bytes"
+                    ));
+                }
+                self.bytes = bytes;
+                self.snapshots.extend(batch);
                 Absorbed::Kept
             }
             WorkerEvent::Result(OpResult::Snapshots { count }) => {
                 let snapshots = std::mem::take(&mut self.snapshots);
+                self.bytes = 0;
                 if u64::try_from(snapshots.len()).is_ok_and(|held| held == count) {
                     Absorbed::Complete(snapshots)
                 } else {
@@ -2643,6 +2668,27 @@ mod tests {
             panic!("one past the most is refused");
         };
         assert!(detail.contains(&most.to_string()), "{detail}");
+    }
+
+    #[test]
+    fn a_listing_past_the_bytes_the_daemon_holds_is_refused_whatever_its_count() {
+        let mut listing = Listing::default();
+        let fat = || crate::job::SnapshotResult {
+            label: "x".repeat(130 * 1024),
+            tags: Vec::new(),
+            paths: Vec::new(),
+            ..listed(1)
+        };
+        let per = 130 * 1024 + "demo-host".len() + 256;
+        let fits = MAX_LISTED_BYTES / per;
+        let batch = |n: usize| WorkerEvent::Snapshots {
+            snapshots: (0..n).map(|_| fat()).collect(),
+        };
+        assert!(matches!(listing.absorb(batch(fits)), Absorbed::Kept));
+        let Absorbed::Refused(detail) = listing.absorb(batch(2)) else {
+            panic!("past the bytes held is refused");
+        };
+        assert!(detail.contains(&MAX_LISTED_BYTES.to_string()), "{detail}");
     }
 
     #[test]

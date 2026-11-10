@@ -46,6 +46,12 @@ pub(crate) const MAX_MESSAGE_READ: u64 = MAX_MESSAGE_BYTES as u64 + 1;
 /// from sizing that allocation (§13.5).
 pub const MAX_LISTED_SNAPSHOTS: usize = 200_000;
 
+/// The most the daemon holds of a listing, counted in the bytes of its texts
+/// (a snapshot also costs a fixed amount). The count above bounds a listing
+/// of small snapshots, this one a listing of the largest: 200,000 snapshots
+/// of 128 KiB each would otherwise be 25 GiB.
+pub const MAX_LISTED_BYTES: usize = 256 * 1024 * 1024;
+
 /// How much of a listing one `snapshots` event carries, serialized. A
 /// listing is sent as a series of them, so that none outgrows
 /// [`MAX_MESSAGE_BYTES`]. A snapshot is cut to a size that fits one event

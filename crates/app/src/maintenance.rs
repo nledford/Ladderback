@@ -437,6 +437,13 @@ impl RunMaintenance {
         // What the jobs finished so far reported, merged into one.
         let mut done: Option<EngineResult> = None;
         for (index, job) in jobs.into_iter().enumerate() {
+            // A cancel that came while the last job was finishing is seen
+            // before another worker is started.
+            if index > 0 && futures::poll!(cancel.as_mut()).is_ready() {
+                note_partial(&mut operation, done.as_ref());
+                let _ = operation.cancel(self.clock.now());
+                break;
+            }
             let running = match self.engine.run(operation.id(), job).await {
                 Ok(running) => running,
                 Err(error) => {
@@ -960,6 +967,8 @@ mod tests {
 
 #[cfg(all(test, feature = "fakes"))]
 mod read_timeout_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1037,5 +1046,131 @@ mod read_timeout_tests {
             .expect("the read ends when the timeout does")
             .expect("the read task ran");
         assert_eq!(outcome.unwrap_err(), MaintenanceError::TimedOut);
+    }
+}
+
+#[cfg(all(test, feature = "fakes"))]
+mod cancel_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use domain::execution::{OperationKind, OperationStatus, Target};
+    use domain::secrets::SecretValue;
+    use domain::{AgentId, OperationId, RepositoryId, SnapshotId, Timestamp, Uuid};
+    use futures::StreamExt;
+    use futures::stream;
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::{ForgetSummary, JobControl};
+
+    struct Nothing;
+
+    #[async_trait]
+    impl JobControl for Nothing {
+        async fn stop(&mut self) {}
+    }
+
+    /// An engine that finishes every forget job at once and counts them.
+    struct Counting(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Engine for Counting {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let Job::Forget(job) = job else {
+                return Err(EngineError::StartTimedOut);
+            };
+            let result = EngineResult::Forget(ForgetSummary {
+                repository: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
+                removed: job.ids,
+            });
+            Ok(RunningJob {
+                events: stream::iter([EngineEvent::Succeeded(result)]).boxed(),
+                control: Box::new(Nothing),
+            })
+        }
+    }
+
+    fn prepared(count: usize) -> PreparedMaintenance {
+        let mut operation = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            OperationKind::Forget,
+            Trigger::Manual,
+            Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        operation
+            .start(Timestamp::UNIX_EPOCH)
+            .expect("a queued operation starts");
+        PreparedMaintenance {
+            operation,
+            job: Job::Forget(ForgetJob {
+                repository: RepositoryAccess {
+                    repository: "/srv/demo/repo".to_owned(),
+                    repo_hot: None,
+                    password: SecretValue::new("demo-password"),
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                    secrets: Vec::new(),
+                    id: None,
+                },
+                ids: (0..count)
+                    .map(|n| SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"))
+                    .collect(),
+            }),
+            partition: None,
+        }
+    }
+
+    fn use_case(runs: &Arc<AtomicUsize>) -> RunMaintenance {
+        RunMaintenance::new(
+            Arc::new(Counting(Arc::clone(runs))),
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(InMemoryConfigStore::new()),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_cancel_that_is_already_there_when_a_job_ends_starts_no_further_job() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs)
+            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::ready(()))
+            .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
+        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        assert_eq!(finished.operation.warnings().len(), 1);
+        assert_eq!(finished.result, None);
+    }
+
+    #[tokio::test]
+    async fn without_a_cancel_every_job_runs_and_the_result_is_one() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let finished = use_case(&runs)
+            .execute(prepared(2 * MAX_JOB_IDS + 1), futures::future::pending())
+            .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 3);
+        assert_eq!(finished.operation.status(), &OperationStatus::Succeeded);
+        let Some(EngineResult::Forget(summary)) = finished.result else {
+            panic!("one merged result");
+        };
+        assert_eq!(summary.removed.len(), 2 * MAX_JOB_IDS + 1);
     }
 }

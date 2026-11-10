@@ -12,6 +12,9 @@ use crate::job::{
     LISTING_BATCH_BYTES, MAX_LISTED_SNAPSHOTS, MAX_LISTED_TEXT_BYTES, SnapshotResult,
 };
 
+/// What the tags that name a snapshot's owner start with (I6).
+const OWNING_TAG_PREFIX: &str = "ladderback-";
+
 /// `text` as a listing carries it, and whether it had to be cut: at most
 /// [`MAX_LISTED_TEXT_BYTES`] bytes, cut at a char boundary and ending in `…`
 /// where it was.
@@ -59,8 +62,19 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
         snapshot.paths.iter().collect::<Vec<_>>().into_iter(),
         api::MAX_SNAPSHOT_PATHS,
     );
+    // The tags that say whose a snapshot is go first: a forget decides who
+    // owns a snapshot by them, so a snapshot with many tags must never lose
+    // them to the cut.
+    let (owning, others): (Vec<&String>, Vec<&String>) = snapshot
+        .tags
+        .iter()
+        .partition(|tag| tag.starts_with(OWNING_TAG_PREFIX));
     let (tags, tags_truncated) = cut_all(
-        snapshot.tags.iter().collect::<Vec<_>>().into_iter(),
+        owning
+            .into_iter()
+            .chain(others)
+            .collect::<Vec<_>>()
+            .into_iter(),
         api::MAX_SNAPSHOT_TAGS,
     );
     Ok(SnapshotResult {
@@ -177,6 +191,20 @@ mod tests {
         assert!(was_cut);
         assert!(cut.len() <= MAX_LISTED_TEXT_BYTES);
         assert!(cut.ends_with('…'));
+        assert!(cut.starts_with("éééé"), "the text is kept up to the cut");
+        assert!(cut.len() >= MAX_LISTED_TEXT_BYTES - 'é'.len_utf8() - '…'.len_utf8());
+    }
+
+    #[test]
+    fn the_tags_that_name_an_owner_survive_a_cut_however_many_tags_come_first() {
+        let mut tags = numbered("a", api::MAX_SNAPSHOT_TAGS + 10);
+        tags.push("ladderback-agent:0000".to_owned());
+        tags.push("ladderback-plan:home".to_owned());
+        let result = snapshot_result(&file(&[], &tags)).expect("converts");
+        assert_eq!(result.tags.len(), api::MAX_SNAPSHOT_TAGS);
+        assert!(result.tags_truncated);
+        assert!(result.tags.contains(&"ladderback-agent:0000".to_owned()));
+        assert!(result.tags.contains(&"ladderback-plan:home".to_owned()));
     }
 
     #[test]

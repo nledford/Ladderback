@@ -46,16 +46,16 @@ async fn a_listing_longer_than_one_message_is_listed_whole_and_newest_first() {
     let scratch = Scratch::new();
     let location = scratch.local();
     let repository = location.init();
-    // 800 snapshots of a 2 KiB label each: over a megabyte of listing, which
-    // no one message of the protocol holds.
-    let snapshots: Vec<SnapshotFile> = (0..800)
+    // 1,500 snapshots of a label that a listing cuts to 1 KiB: well over a
+    // megabyte of listing, which no one message of the protocol holds.
+    let snapshots: Vec<SnapshotFile> = (0..1_500)
         .map(|n| snapshot(1_000 + n, &format!("{n:04}{}", "x".repeat(2_048)), &[], &[]))
         .collect();
     repository.save_snapshots(snapshots).unwrap();
     let listed = listed(&location).await;
-    assert_eq!(listed.len(), 800);
+    assert_eq!(listed.len(), 1_500);
     let labels: Vec<&str> = listed.iter().map(|s| &s.label[..4]).collect();
-    let newest_first: Vec<String> = (0..800).rev().map(|n| format!("{n:04}")).collect();
+    let newest_first: Vec<String> = (0..1_500).rev().map(|n| format!("{n:04}")).collect();
     assert_eq!(labels, newest_first);
 }
 
