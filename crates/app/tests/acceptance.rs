@@ -12,6 +12,9 @@ use cucumber::{World, when};
 use domain::execution::{Operation, Trigger};
 use domain::{OperationId, SignedDuration, Timestamp, Uuid};
 
+#[path = "steps/announcement.rs"]
+mod announcement_steps;
+
 #[path = "steps/config.rs"]
 mod config_steps;
 
@@ -53,6 +56,7 @@ struct Agent {
     forget: forget_steps::ForgetWorld,
     interop: interop_steps::InteropWorld,
     recovery: recovery_steps::RecoveryWorld,
+    announcement: announcement_steps::AnnouncementWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -89,6 +93,7 @@ impl Agent {
             forget: Default::default(),
             interop: Default::default(),
             recovery: Default::default(),
+            announcement: Default::default(),
         }
     }
 
@@ -101,11 +106,15 @@ impl Agent {
     }
 
     async fn run_operation_until(&mut self, cancel: impl Future<Output = ()> + Send) {
-        let mut use_case =
-            RunOperation::new(self.engine.clone(), self.clock.clone(), self.store.clone());
+        let mut use_case = RunOperation::new(
+            self.engine.clone(),
+            self.clock.clone(),
+            self.announcement.log(&self.store),
+        );
         if !self.hooks.setup.is_empty() {
             use_case = use_case.with_hooks(self.hooks.runner.clone(), self.hooks.setup.clone());
         }
+        let use_case = self.announcement.listening(use_case);
         let id = OperationId::from_uuid(Uuid::from_u128(1));
         let job = Job::Fake(self.job.clone());
         self.finished = Some(use_case.run(id, Trigger::Manual, job, cancel).await);

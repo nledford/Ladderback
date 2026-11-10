@@ -10,10 +10,11 @@ use domain::{OperationId, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
+use crate::announce::announce_end;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, HookContext, HookOutcome, HookPhase,
-    HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome,
+    HookPhase, HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
 
 /// Runs one operation on the engine and records its lifecycle in the
@@ -32,11 +33,16 @@ use crate::ports::{
 /// - The log never decides how an operation ends (backups never depend on
 ///   the database, §9): a write it refuses is reported in
 ///   [`Finished::recording_errors`] and nothing else changes.
+/// - With a bus ([`Self::with_events`]) the run announces how the operation
+///   ended, once, after the ending hooks and the last write to the log, so a
+///   page that reads the history on the news finds the end there; a cancelled
+///   operation is not announced (§4.4).
 pub struct RunOperation {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
     store: Arc<dyn OperationStore>,
     hooks: Option<HookPlan>,
+    events: Option<Arc<dyn EventBus>>,
 }
 
 /// The runner and the three levels of hooks one run wraps (§6.1).
@@ -97,6 +103,7 @@ impl RunOperation {
             clock,
             store,
             hooks: None,
+            events: None,
         }
     }
 
@@ -105,6 +112,14 @@ impl RunOperation {
     /// success, failed-hooks on failure, finally-hooks either way.
     pub fn with_hooks(mut self, runner: Arc<dyn HookRunner>, setup: HookSetup) -> Self {
         self.hooks = Some(HookPlan { runner, setup });
+        self
+    }
+
+    /// Announces how each operation ends on `events` (§4.4): once, after the
+    /// ending hooks and the last write to the log, whether the log took that
+    /// write or not.
+    pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
+        self.events = Some(events);
         self
     }
 
@@ -150,6 +165,7 @@ impl RunOperation {
         }
         self.run_ending_hooks(&mut run).await;
         self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
         Finished {
             operation: run.operation,
             result: run.result,

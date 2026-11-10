@@ -502,17 +502,21 @@ impl Engine for Scripted {
 
 /// The maintenance use case wired to the scenario's own pieces.
 pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
-    Arc::new(RunMaintenance::new(
-        agent.forget.engine(),
-        agent.clock.clone(),
-        agent.store.clone(),
-        app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
-        Arc::new(FakeRetention),
-        agent.forget.store.clone(),
-        self_agent(),
-        "demo-host".to_owned(),
-        Arc::new(FakeSources),
-    ))
+    Arc::new(
+        agent
+            .announcement
+            .listening_maintenance(RunMaintenance::new(
+                agent.forget.engine(),
+                agent.clock.clone(),
+                agent.store.clone(),
+                app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
+                Arc::new(FakeRetention),
+                agent.forget.store.clone(),
+                self_agent(),
+                "demo-host".to_owned(),
+                Arc::new(FakeSources),
+            )),
+    )
 }
 
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s)")]
