@@ -25,6 +25,7 @@ use futures::StreamExt;
 use futures::future::{FusedFuture, FutureExt};
 use futures::select_biased;
 
+use crate::announce::announce_end;
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
@@ -173,6 +174,8 @@ pub struct RunMaintenance {
     /// A plan's sources as the engine records them, so adoption's matching
     /// compares like with like.
     sources: Arc<dyn NormalizeSources>,
+    /// Where the end of each run is announced, when anything listens.
+    events: Option<Arc<dyn EventBus>>,
 }
 
 impl RunMaintenance {
@@ -198,14 +201,17 @@ impl RunMaintenance {
             agent,
             hostname,
             sources,
+            events: None,
         }
     }
 
-    /// Announces how each run ends on `events`, once the log has the end
-    /// (§4.4).
-    #[allow(clippy::todo, reason = "red test: the run announces its end next")]
-    pub fn with_events(self, _events: Arc<dyn EventBus>) -> Self {
-        todo!("announce the end of the run")
+    /// Announces how each run ends on `events` (§4.4): once, after the last
+    /// write to the log, whether the log took that write or not. A run of
+    /// several engine jobs ends once, and so does a run that reads the
+    /// repository first; a cancelled run is not announced.
+    pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
+        self.events = Some(events);
+        self
     }
 
     /// Resolves the repository, decides what the run does, and takes the
@@ -493,6 +499,7 @@ impl RunMaintenance {
         }
         self.record(&operation, &result, &mut recording_errors)
             .await;
+        announce_end(self.events.as_deref(), &operation).await;
         Finished {
             operation,
             result,

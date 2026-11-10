@@ -1,21 +1,83 @@
 //! What a page is told when an operation ends (technical design §4.4).
+//!
+//! The run that records an operation tells of its end once, after its last
+//! write to the log is done, so a page that reads the history on the news
+//! finds the end there. The engine's own end is no news: only the run knows
+//! when the ending hooks have run and the log has the end.
 
 use api::{ErrorCode, MsgArg, UiEvent};
-use domain::execution::{FailureReason, Operation};
+use domain::execution::{FailureReason, Operation, OperationStatus};
+
+use crate::ports::EventBus;
 
 /// The news that `operation` ended: a success or a failure, with the time it
 /// finished. `None` for an operation that has not ended, and for a cancelled
 /// one, which no page is told of: the page that cancelled it reads the
 /// history until it settles.
-#[allow(clippy::todo, reason = "red test: the news is built next")]
-pub fn end_of(_operation: &Operation) -> Option<UiEvent> {
-    todo!("the news of an operation's end")
+pub fn end_of(operation: &Operation) -> Option<UiEvent> {
+    let finished_at = operation.finished_at()?.to_string();
+    let id = operation.id().as_uuid().hyphenated().to_string();
+    match operation.status() {
+        OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings => {
+            Some(UiEvent::OperationSucceeded {
+                operation: id,
+                finished_at,
+            })
+        }
+        OperationStatus::Failed { reason } => {
+            let (code, args) = failure(reason);
+            Some(UiEvent::OperationFailed {
+                operation: id,
+                code,
+                args,
+                finished_at,
+            })
+        }
+        OperationStatus::Queued | OperationStatus::Running | OperationStatus::Cancelled => None,
+    }
 }
 
-/// A failure as the code and arguments a page renders (§8.4).
-#[allow(clippy::todo, reason = "red test: the code moves here next")]
-pub fn failure(_reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
-    todo!("a failure as the code a page renders")
+/// Tells `events`, when a run has a bus, how `operation` ended, as
+/// [`end_of`] has it. A run calls it once, after its last write to the log:
+/// whether the log took that write, refused it or was given up on after
+/// [`SAVE_BOUND`](crate::log_write::SAVE_BOUND), the news goes out.
+pub(crate) async fn announce_end(events: Option<&dyn EventBus>, operation: &Operation) {
+    if let Some(events) = events
+        && let Some(news) = end_of(operation)
+    {
+        events.publish(news).await;
+    }
+}
+
+/// A failure the runner reports, as the code and arguments the page renders.
+pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
+    use FailureReason as F;
+    fn with_detail(text: &str) -> Vec<MsgArg> {
+        vec![MsgArg::Text(text.to_owned())]
+    }
+    match reason {
+        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
+            (ErrorCode::EngineUnavailable, with_detail(detail))
+        }
+        F::EngineFailed { detail } => (ErrorCode::OperationFailed, with_detail(detail)),
+        F::HookFailed { .. } => (ErrorCode::OperationFailed, Vec::new()),
+        F::EngineExited { exit_code } => (
+            ErrorCode::EngineExited,
+            exit_code
+                .map(|code| MsgArg::Text(code.to_string()))
+                .into_iter()
+                .collect(),
+        ),
+        F::ProtocolViolated { transition } => (
+            ErrorCode::ProtocolViolated,
+            vec![MsgArg::Text(format!("{transition:?}"))],
+        ),
+        F::DeadlinePassed => (ErrorCode::DeadlinePassed, Vec::new()),
+        F::EngineStartTimedOut => (ErrorCode::EngineStartTimedOut, Vec::new()),
+        F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
+        F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
+        F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
+    }
 }
 
 #[cfg(test)]

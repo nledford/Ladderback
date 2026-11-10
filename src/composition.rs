@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
+use app::announce::failure;
 use app::event_bus::BroadcastEventBus;
 use app::execution::RunOperation;
 use app::history::{GetOperation, ListOperations};
@@ -160,7 +161,6 @@ async fn daemon_at(
     let engine: Arc<dyn Engine> = Arc::new(EventEngine {
         inner: Arc::new(WorkerEngine::new(program, ["worker"])),
         bus: Arc::clone(&bus),
-        clock: Arc::new(SystemClock),
     });
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
     let operations: Arc<dyn Operations> = Arc::new(PlanRunner {
@@ -172,6 +172,7 @@ async fn daemon_at(
         retention: Arc::new(engine::RusticRetention),
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
+        events: Arc::clone(&bus),
     });
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
@@ -284,14 +285,15 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
     }
 }
 
-/// The engine as the daemon runs it (§4.2): every job's events go to the
-/// event bus as [`UiEvent`]s on their way through, in the order the engine
-/// reported them. The daemon never coalesces: that is the worker's, once
-/// (§4.1).
+/// The engine as the daemon runs it (§4.2): a job's start, progress and
+/// warnings go to the event bus as [`UiEvent`]s on their way through, in the
+/// order the engine reported them. The daemon never coalesces: that is the
+/// worker's, once (§4.1). How an operation ended is not announced here: the
+/// run that records it announces it once the log has it (§4.4), and the
+/// engine's jobs include reads that are no operation's end.
 struct EventEngine {
     inner: Arc<dyn Engine>,
     bus: Arc<dyn EventBus>,
-    clock: Arc<dyn Clock>,
 }
 
 #[async_trait]
@@ -310,7 +312,6 @@ impl Engine for EventEngine {
             operation,
             repository,
             progress: HashMap::new(),
-            clock: Arc::clone(&self.clock),
         };
         let bus = Arc::clone(&self.bus);
         Ok(RunningJob {
@@ -334,14 +335,13 @@ impl Engine for EventEngine {
     }
 }
 
-/// Turns one run's [`EngineEvent`]s into [`UiEvent`]s. Progress bars
-/// are stateful: each key remembers where it is, so an `Advance` is a number
-/// the page can show.
+/// Turns one run's [`EngineEvent`]s into [`UiEvent`]s, but for how the run
+/// ended (§4.4). Progress bars are stateful: each key remembers where it is,
+/// so an `Advance` is a number the page can show.
 struct Publish {
     operation: String,
     repository: Option<String>,
     progress: HashMap<u32, (u64, Option<u64>)>,
-    clock: Arc<dyn Clock>,
 }
 
 impl Publish {
@@ -368,19 +368,10 @@ impl Publish {
                     .map(|item| vec![MsgArg::Text(item.clone())])
                     .unwrap_or_default(),
             }),
-            E::Succeeded(_) => Some(UiEvent::OperationSucceeded {
-                operation: self.operation.clone(),
-                finished_at: self.clock.now().to_string(),
-            }),
-            E::Failed(reason) => {
-                let (code, args) = failure(reason);
-                Some(UiEvent::OperationFailed {
-                    operation: self.operation.clone(),
-                    code,
-                    args,
-                    finished_at: self.clock.now().to_string(),
-                })
-            }
+            // The engine's end comes before the run's ending hooks and its
+            // final write to the log, so a page told of it could read a
+            // history that doesn't have it yet. The run announces the end.
+            E::Succeeded(_) | E::Failed(_) => None,
         }
     }
 
@@ -418,37 +409,6 @@ impl Publish {
     }
 }
 
-/// A failure the runner reports, as the code and arguments the page renders.
-fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
-    use FailureReason as F;
-    fn with_detail(text: &str) -> Vec<MsgArg> {
-        vec![MsgArg::Text(text.to_owned())]
-    }
-    match reason {
-        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
-            (ErrorCode::EngineUnavailable, with_detail(detail))
-        }
-        F::EngineFailed { detail } => (ErrorCode::OperationFailed, with_detail(detail)),
-        F::HookFailed { .. } => (ErrorCode::OperationFailed, Vec::new()),
-        F::EngineExited { exit_code } => (
-            ErrorCode::EngineExited,
-            exit_code
-                .map(|code| MsgArg::Text(code.to_string()))
-                .into_iter()
-                .collect(),
-        ),
-        F::ProtocolViolated { transition } => (
-            ErrorCode::ProtocolViolated,
-            vec![MsgArg::Text(format!("{transition:?}"))],
-        ),
-        F::DeadlinePassed => (ErrorCode::DeadlinePassed, Vec::new()),
-        F::EngineStartTimedOut => (ErrorCode::EngineStartTimedOut, Vec::new()),
-        F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
-        F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
-        F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
-    }
-}
-
 /// Starts the operations the API asks for: a backup of a named plan, run to
 /// its end on a task of its own. What happens to the run arrives over the
 /// events WebSocket, so the route answers with the operation's ID alone.
@@ -464,6 +424,9 @@ struct PlanRunner {
     registry: Arc<CancelRegistry>,
     /// Runs the agent, repository and plan hooks around every run (§6.1).
     hooks: Arc<dyn HookRunner>,
+    /// Where each run announces how its operation ended, once the log has the
+    /// end (§4.4).
+    events: Arc<dyn EventBus>,
 }
 
 #[async_trait]
@@ -521,7 +484,8 @@ impl Operations for PlanRunner {
             Arc::new(SystemClock),
             Arc::clone(&self.store),
         )
-        .with_hooks(Arc::clone(&self.hooks), setup);
+        .with_hooks(Arc::clone(&self.hooks), setup)
+        .with_events(Arc::clone(&self.events));
         // Recorded as queued before the route answers, so a cancel that
         // arrives the instant it does finds the operation in the log. The
         // task does the recording and the run, so a handler that is dropped
@@ -579,7 +543,8 @@ impl Operations for PlanRunner {
             self.agent_id,
             platform::hostname(),
             Arc::new(engine::RusticSources),
-        );
+        )
+        .with_events(Arc::clone(&self.events));
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
         let prepared = use_case.prepare(operation, &alias, kind).await;
@@ -2302,6 +2267,7 @@ mod tests {
             ),
             registry: Arc::new(CancelRegistry::new()),
             hooks: Arc::new(hooks),
+            events: Arc::new(BroadcastEventBus::new()),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -2591,9 +2557,9 @@ mod tests {
         let heard = bus.subscribe().await;
         runner.engine = Arc::new(EventEngine {
             inner: Arc::new(inner),
-            bus,
-            clock: Arc::new(SystemClock),
+            bus: bus.clone(),
         });
+        runner.events = bus;
         runner.store = log;
         heard
     }
@@ -2724,7 +2690,6 @@ mod tests {
             let engine = EventEngine {
                 inner: Arc::new(Answers(vec![started(), end.clone()])),
                 bus,
-                clock: Arc::new(SystemClock),
             };
             let job = Job::Fake(app::ports::FakeJob {
                 steps: 1,
