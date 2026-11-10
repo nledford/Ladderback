@@ -535,7 +535,7 @@ async fn a_profile_over_one_mebibyte_is_refused_unread_and_one_at_the_cap_is_rea
     let cap = 1024 * 1024;
     let mut text = profile_text("");
     text.push_str("# ");
-    text.push_str(&"x".repeat(cap - text.len() - 3));
+    text.push_str(&"x".repeat(cap - text.len() - 1));
     text.push('\n');
     assert_eq!(text.len(), cap);
     assert!(
