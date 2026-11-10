@@ -20,6 +20,7 @@ use l10n::{Localizer, MessageId, PosixEnv, msg};
 
 mod composition;
 mod logging;
+mod profiles;
 
 #[derive(Parser)]
 #[command(
@@ -50,6 +51,22 @@ enum Command {
         )]
         allowed_hosts: Vec<String>,
     },
+    /// Add the repository and the plans of a rustic profile to the
+    /// configuration.
+    ImportProfile {
+        /// The rustic profile, a TOML file.
+        file: std::path::PathBuf,
+        /// The name the repository gets in the configuration; the profile's
+        /// file name, as a slug, when it is left out.
+        #[arg(long = "repo-name", value_name = "NAME")]
+        repo_name: Option<String>,
+    },
+    /// Write a plan as a rustic profile on stdout.
+    ExportProfile {
+        /// The ID of the plan to export.
+        #[arg(long, value_name = "ID")]
+        plan: String,
+    },
     /// Run one operation, read from stdin, and report events on stdout.
     /// Started by the agent; not for direct use.
     #[command(hide = true)]
@@ -62,6 +79,8 @@ fn main() -> ExitCode {
             listen,
             allowed_hosts,
         } => serve(listen, allowed_hosts),
+        Command::ImportProfile { file, repo_name } => profiles::import_profile(file, repo_name),
+        Command::ExportProfile { plan } => profiles::export_profile(plan),
         Command::Worker => engine::worker::main(),
     }
 }

@@ -2927,6 +2927,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "interop"
+version = "0.0.0"
+dependencies = [
+ "app",
+ "async-trait",
+ "domain",
+]
+
+[[package]]
 name = "interpolator"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3195,6 +3204,7 @@ dependencies = [
  "futures",
  "hooks",
  "http-adapter",
+ "interop",
  "l10n",
  "log",
  "platform",

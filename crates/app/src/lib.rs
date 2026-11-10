@@ -17,6 +17,7 @@
 pub mod event_bus;
 pub mod execution;
 pub mod history;
+pub mod interop;
 pub mod log_write;
 pub mod maintenance;
 pub mod ports;

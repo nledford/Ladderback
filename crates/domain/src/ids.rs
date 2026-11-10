@@ -133,7 +133,22 @@ fn is_slug(value: &str) -> bool {
         && value.bytes().all(|b| slug(b) || b == b'-')
 }
 
+/// The slug a free-form name becomes: the lowercase ASCII letters and digits
+/// of `text`, every other run of characters one hyphen, no hyphen at either
+/// end, at most 64 bytes. `None` when nothing is left.
+#[allow(clippy::todo, reason = "red test: interop import")]
+fn slugify(text: &str) -> Option<String> {
+    let _ = text;
+    todo!("slugify a free-form name")
+}
+
 impl PlanId {
+    /// The ID a name goes by in the config: `Home Dir` is `home-dir`. `None`
+    /// when the name has no letter or digit of ASCII in it.
+    pub fn slugify(text: &str) -> Option<Self> {
+        slugify(text).map(Self)
+    }
+
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
         if is_slug(value) {
             Ok(Self(value.to_owned()))
@@ -173,6 +188,12 @@ impl From<PlanId> for String {
 pub struct RepositoryAlias(String);
 
 impl RepositoryAlias {
+    /// The alias a free-form name becomes (a profile's file name, say), as
+    /// [`PlanId::slugify`] makes an ID.
+    pub fn slugify(text: &str) -> Option<Self> {
+        slugify(text).map(Self)
+    }
+
     pub fn parse(value: &str) -> Result<Self, InvalidId> {
         if is_slug(value) {
             Ok(Self(value.to_owned()))
@@ -316,5 +337,47 @@ mod tests {
             serde_json::from_str::<RepositoryAlias>(&json).unwrap(),
             alias
         );
+    }
+
+    #[test]
+    fn a_name_becomes_a_slug_of_lowercase_letters_and_digits() {
+        for (name, slug) in [
+            ("home", "home"),
+            ("Home Dir", "home-dir"),
+            ("  --Work_Laptop!!  Docs ", "work-laptop-docs"),
+            ("demo data/", "demo-data"),
+            ("Café 2026", "caf-2026"),
+        ] {
+            assert_eq!(PlanId::slugify(name).unwrap().as_str(), slug, "{name:?}");
+            assert_eq!(RepositoryAlias::slugify(name).unwrap().as_str(), slug);
+        }
+    }
+
+    #[test]
+    fn a_name_without_a_letter_or_digit_has_no_slug() {
+        for name in ["", "/", " - ", "日本", "!!"] {
+            assert_eq!(PlanId::slugify(name), None, "{name:?}");
+            assert_eq!(RepositoryAlias::slugify(name), None);
+        }
+    }
+
+    #[test]
+    fn a_slug_is_cut_at_64_bytes_and_never_ends_in_a_hyphen() {
+        let long = format!("{}-{}", "a".repeat(63), "b".repeat(10));
+        assert_eq!(PlanId::slugify(&long).unwrap().as_str(), "a".repeat(63));
+        let exact = "c".repeat(64);
+        assert_eq!(PlanId::slugify(&exact).unwrap().as_str(), exact);
+        assert_eq!(
+            PlanId::slugify(&"d".repeat(100)).unwrap().as_str().len(),
+            64
+        );
+    }
+
+    #[test]
+    fn a_slug_is_always_a_valid_id() {
+        for name in ["Home Dir", "a--b", "-x-", &"y z ".repeat(40)] {
+            let id = PlanId::slugify(name).unwrap();
+            assert_eq!(PlanId::parse(id.as_str()), Ok(id));
+        }
     }
 }

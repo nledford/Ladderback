@@ -10,6 +10,7 @@ members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/hooks",
+    "crates/adapters/interop",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -26,6 +27,7 @@ default-members = [
     "crates/adapters/engine",
     "crates/adapters/http",
     "crates/adapters/hooks",
+    "crates/adapters/interop",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -52,6 +54,7 @@ l10n = { path = "crates/l10n", default-features = false }
 config-adapter = { path = "crates/adapters/config" }
 engine = { path = "crates/adapters/engine" }
 hooks = { path = "crates/adapters/hooks" }
+interop = { path = "crates/adapters/interop" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
 secrets = { path = "crates/adapters/secrets" }
@@ -212,6 +215,7 @@ async-trait.workspace = true
 engine.workspace = true
 futures.workspace = true
 http-adapter.workspace = true
+interop.workspace = true
 # The daemon formats numbers and instants with ICU4X; the web UI's `l10n` has
 # no `icu` feature, so a browser never downloads the locale data.
 l10n = { workspace = true, features = ["icu"] }

@@ -1,0 +1,16 @@
+[package]
+name = "interop"
+description = "Interop adapter: rustic profiles read into plans and plans written as profiles, behind the ProfileReader and ProfileWriter ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+app.workspace = true
+domain.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true
