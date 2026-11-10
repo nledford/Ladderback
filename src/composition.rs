@@ -17,6 +17,7 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
 use app::ports::Retention;
+use app::ports::SecretResolver as _;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
@@ -34,7 +35,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    FileRead, KeyringEntry, Redactor, RepositorySecrets, SecretRef, SecretValue,
+    FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
+    Template, TemplateError,
 };
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
@@ -1320,18 +1322,134 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
 /// A secret that couldn't be resolved, as the typed refusal of its cause.
 /// What a platform or a command said is masked of every secret of the
 /// repository first (I4).
-async fn secret_refusal(_error: &ResolveError, _settings: &RepositorySettings) -> SecretRefusal {
-    SecretRefusal {
-        code: ErrorCode::SecretMissing,
-        args: Vec::new(),
-        detail: None,
+async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> SecretRefusal {
+    use domain::secrets::Problem;
+    let redactor = failure_redactor(settings).await;
+    let field = || ("field", MsgArg::Text(field_name(&error.field)));
+    let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
+        code,
+        args,
+        detail: detail.filter(|detail| !detail.is_empty()),
+    };
+    let bytes = |limit: usize| MsgArg::Bytes(u64::try_from(limit).unwrap_or(u64::MAX));
+    match &error.cause {
+        Cause::Unresolved(secret) => {
+            let source = (
+                "source",
+                MsgArg::Text(redactor.redact(&source_text(&secret.source))),
+            );
+            let named = vec![field(), source.clone()];
+            match &secret.problem {
+                Problem::Missing => refusal(ErrorCode::SecretMissing, named, None),
+                Problem::Unreachable { detail } => refusal(
+                    ErrorCode::SecretUnreadable,
+                    named,
+                    Some(redactor.redact(detail)),
+                ),
+                Problem::NotUnicode => refusal(ErrorCode::SecretNotText, named, None),
+                Problem::TooLarge { limit } => refusal(
+                    ErrorCode::SecretTooLarge,
+                    vec![field(), source, ("limit", bytes(*limit))],
+                    None,
+                ),
+                Problem::CommandFailed { detail, .. } => refusal(
+                    ErrorCode::SecretCommandFailed,
+                    named,
+                    Some(redactor.redact(detail)),
+                ),
+                Problem::TimedOut { seconds } => refusal(
+                    ErrorCode::SecretCommandTimedOut,
+                    vec![field(), source, ("seconds", MsgArg::Count(*seconds))],
+                    None,
+                ),
+            }
+        }
+        Cause::ReferenceInProcessArguments => {
+            refusal(ErrorCode::SecretInProcessArguments, vec![field()], None)
+        }
+        Cause::ExpansionTooLong { limit } => refusal(
+            ErrorCode::SecretExpansionTooLong,
+            vec![field(), ("limit", bytes(*limit))],
+            None,
+        ),
+        Cause::Invalid(template) => {
+            let mut args = vec![field()];
+            if let Some(at) = template_error_place(template) {
+                args.push(("at", MsgArg::Text(at.to_string())));
+            }
+            refusal(ErrorCode::TemplateInvalid, args, None)
+        }
+    }
+}
+
+/// Where in a setting a template goes wrong, when the fault has a place.
+fn template_error_place(error: &TemplateError) -> Option<usize> {
+    match error {
+        TemplateError::TooLong { .. } | TemplateError::TooManyReferences { .. } => None,
+        TemplateError::Unterminated { at }
+        | TemplateError::EmptyReference { at }
+        | TemplateError::InvalidName { at }
+        | TemplateError::EmptyPath { at }
+        | TemplateError::RelativePath { at }
+        | TemplateError::NestedReference { at } => Some(*at),
+    }
+}
+
+/// What names a source in a refusal: the variable, the path, the keyring
+/// entry or the program, never what it gave.
+fn source_text(source: &SourceName) -> String {
+    match source {
+        SourceName::Command { program } => program.clone(),
+        SourceName::Keyring { entry } => entry.clone(),
+        SourceName::File { path } => path.clone(),
+        SourceName::Env { name } => name.clone(),
     }
 }
 
 /// A redactor for what a failure of `settings` says: its inline password and
-/// credential options, and what the references of its settings resolve to.
-async fn failure_redactor(_settings: &RepositorySettings) -> Redactor {
-    Redactor::new(std::iter::empty())
+/// credential options, and what the references of its settings, and a
+/// password read from the environment or a file, resolve to. A failed
+/// resolution stops at the first fault, so the other secrets of the
+/// repository were not read yet: they are read again here, so that a command
+/// that prints one of them in its error doesn't show it. A command is not
+/// run a second time.
+async fn failure_redactor(settings: &RepositorySettings) -> Redactor {
+    let resolver = SystemSecrets::default();
+    let mut resolved = Vec::new();
+    if matches!(
+        settings.password,
+        SecretRef::Env(_) | SecretRef::File { .. }
+    ) && let Ok(found) = resolver.resolve(&settings.password).await
+    {
+        resolved.push(found.value);
+    }
+    let texts = std::iter::once(&settings.repository)
+        .chain(&settings.repo_hot)
+        .chain(settings.options.values())
+        .chain(settings.options_hot.values())
+        .chain(settings.options_cold.values());
+    for text in texts {
+        let Ok(template) = Template::parse(text) else {
+            continue;
+        };
+        for part in template.parts() {
+            if let Part::Reference(reference) = part
+                && let Ok(found) = resolver.resolve(&reference.secret_ref()).await
+            {
+                resolved.push(found.value);
+            }
+        }
+    }
+    let none = SecretValue::new("");
+    Redactor::for_repository(RepositorySecrets {
+        repository: &settings.repository,
+        repo_hot: settings.repo_hot.as_deref(),
+        password: settings.password.inline().unwrap_or(&none),
+        options: &settings.options,
+        options_hot: &settings.options_hot,
+        options_cold: &settings.options_cold,
+        resolved: &resolved,
+    })
 }
 
 /// Where a secret failed to resolve, as the catalog names it: the setting's
@@ -2990,7 +3108,13 @@ mod repository_service_tests {
             program: "pass".to_owned(),
         };
         let at = |field: &str, source: &str| vec![("field", text(field)), ("source", text(source))];
-        let cases: Vec<(ResolveError, ErrorCode, Vec<(&str, MsgArg)>, Option<&str>)> = vec![
+        type Case = (
+            ResolveError,
+            ErrorCode,
+            Vec<(&'static str, MsgArg)>,
+            Option<&'static str>,
+        );
+        let cases: Vec<Case> = vec![
             (
                 unresolved(Field::Password, env_source("PW"), Problem::Missing),
                 ErrorCode::SecretMissing,
