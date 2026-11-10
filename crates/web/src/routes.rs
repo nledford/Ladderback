@@ -469,9 +469,10 @@ enum Shown {
 }
 
 /// What the page shows while its connection is in `phase` and its state holds
-/// `rows`. Only a change of this rebuilds the table: an update to a row, or to
-/// the order of the rows, leaves the table and the controls in it as they are
-/// (WCAG 2.4.3).
+/// `rows`. Only a change of this rebuilds the table: an update to a row leaves
+/// the table and the controls in it as they are (WCAG 2.4.3), and a change in
+/// the order of the rows leaves the table as it is and moves the rows that
+/// change place.
 fn shown(phase: Phase, rows: &[OperationRow]) -> Shown {
     match phase {
         Phase::Loading => Shown::Loading,
@@ -522,8 +523,8 @@ fn key(row: &OperationRow) -> &str {
 }
 
 /// A status as the badge and the label show it: which pill, and which
-/// message. A status this build doesn't know is the empty pill with the
-/// status as it came, never a blank cell.
+/// message; `None` for a status this build doesn't know, which `badge_of`
+/// shows as it came.
 fn status_display(status: &str) -> Option<(&'static str, MessageId)> {
     match status {
         "queued" => Some(("empty", msg::UI_STATUS_QUEUED)),
