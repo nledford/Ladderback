@@ -3014,6 +3014,79 @@ mod tests {
         );
     }
 
+    /// A maintenance run that could not start is answered with the kind of
+    /// its refusal, and whatever is not the caller's to fix (the
+    /// configuration, a secret, the repository, the log) with `Unavailable`.
+    #[test]
+    fn a_maintenance_start_is_answered_with_the_kind_of_its_refusal() {
+        use http_adapter::MaintenanceStartError as Answer;
+        let plan = |slug: &str| PlanId::parse(slug).expect("a plan ID");
+        let answers = [
+            (
+                MaintenanceError::UnknownRepository,
+                Answer::UnknownRepository,
+            ),
+            (
+                MaintenanceError::Busy {
+                    running: OperationId::from_uuid(Uuid::from_u128(0x7003)),
+                },
+                Answer::Busy {
+                    running: "00000000-0000-0000-0000-000000007003".to_owned(),
+                },
+            ),
+            (
+                MaintenanceError::KeepsNothing { plan: plan("home") },
+                Answer::KeepsNothing {
+                    plan: "home".to_owned(),
+                },
+            ),
+            (
+                MaintenanceError::UnknownPlan { plan: plan("home") },
+                Answer::UnknownPlan {
+                    plan: "home".to_owned(),
+                },
+            ),
+            (MaintenanceError::AdoptionNoMatch, Answer::AdoptionNoMatch),
+            (
+                MaintenanceError::AdoptionAmbiguous {
+                    plans: vec![plan("home"), plan("mirror")],
+                },
+                Answer::AdoptionAmbiguous {
+                    plans: vec!["home".to_owned(), "mirror".to_owned()],
+                },
+            ),
+            (MaintenanceError::Unavailable, Answer::Unavailable),
+            (
+                MaintenanceError::Resolve(ResolveError {
+                    field: Field::Repository,
+                    cause: Cause::ReferenceInProcessArguments,
+                }),
+                Answer::Unavailable,
+            ),
+            (
+                MaintenanceError::Engine {
+                    detail: "no worker".to_owned(),
+                },
+                Answer::Unavailable,
+            ),
+            (
+                MaintenanceError::Failed(FailureReason::DeadlinePassed),
+                Answer::Unavailable,
+            ),
+            (MaintenanceError::TimedOut, Answer::Unavailable),
+            (
+                MaintenanceError::Store(app::ports::StoreError::Unavailable {
+                    detail: "disk full".to_owned(),
+                }),
+                Answer::Unavailable,
+            ),
+        ];
+        for (refused, answer) in answers {
+            let said = format!("{refused:?}");
+            assert_eq!(maintenance_refusal(refused), answer, "{said}");
+        }
+    }
+
     /// An operation log whose starts take their time on both sides of the
     /// write, so that a handler dropped on either side is dropped with the
     /// start still going on or already stored.
