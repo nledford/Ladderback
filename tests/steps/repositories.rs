@@ -20,7 +20,7 @@ use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
 use platform::SystemClock;
 use secrets::SystemSecrets;
 
-use super::Agent;
+use super::{Agent, blocking};
 
 /// Not a real secret: the scratch repositories' password.
 const PASSWORD: &str = "demo-password";
@@ -142,17 +142,22 @@ fn empty_hot_cold_location(agent: &mut Agent) {
 }
 
 #[given("an initialised repository")]
-fn initialised_repository(agent: &mut Agent) {
+async fn initialised_repository(agent: &mut Agent) {
     empty_location(agent);
     let cold = agent.repositories.cold.clone().expect("the location");
     let hot = agent.repositories.hot.clone();
-    repository(&cold, hot.as_deref())
-        .init(
-            &credentials(),
-            &rustic_core::KeyOptions::default(),
-            &rustic_core::ConfigOptions::default(),
-        )
-        .expect("the scratch repository initialises");
+    // Deriving the repository's key takes a second in a debug build: see
+    // [`blocking`].
+    blocking(move || {
+        repository(&cold, hot.as_deref())
+            .init(
+                &credentials(),
+                &rustic_core::KeyOptions::default(),
+                &rustic_core::ConfigOptions::default(),
+            )
+            .expect("the scratch repository initialises");
+    })
+    .await;
 }
 
 #[given("the agent uses the wrong password")]
@@ -229,16 +234,21 @@ async fn connects(agent: &mut Agent, name: String) {
     );
 }
 
-/// The repository's ID as rustic knows it, straight from its config.
-fn rustic_id(agent: &Agent) -> String {
-    let cold = agent.repositories.cold.as_ref().expect("the location");
-    repository(cold, agent.repositories.hot.as_deref())
-        .open(&credentials())
-        .expect("the scratch repository opens")
-        .config()
-        .id
-        .to_hex()
-        .to_string()
+/// The repository's ID as rustic knows it, straight from its config. Opening
+/// it derives its key, which takes a second in a debug build: see [`blocking`].
+async fn rustic_id(agent: &Agent) -> String {
+    let cold = agent.repositories.cold.clone().expect("the location");
+    let hot = agent.repositories.hot.clone();
+    blocking(move || {
+        repository(&cold, hot.as_deref())
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .config()
+            .id
+            .to_hex()
+            .to_string()
+    })
+    .await
 }
 
 async fn config(agent: &Agent) -> domain::planning::AgentConfig {
@@ -250,7 +260,7 @@ async fn config(agent: &Agent) -> domain::planning::AgentConfig {
 }
 
 #[then("the initialisation reports the repository's ID")]
-fn init_reports_id(agent: &mut Agent) {
+async fn init_reports_id(agent: &mut Agent) {
     let id = agent
         .repositories
         .init
@@ -261,12 +271,12 @@ fn init_reports_id(agent: &mut Agent) {
         .id
         .clone();
     assert_eq!(id.as_str().len(), 64, "the ID is 64 hex characters");
-    assert_eq!(id.as_str(), rustic_id(agent));
+    assert_eq!(id.as_str(), rustic_id(agent).await);
 }
 
 #[then("the repository at the location opens with the password")]
-fn opens_with_password(agent: &mut Agent) {
-    let id = rustic_id(agent);
+async fn opens_with_password(agent: &mut Agent) {
+    let id = rustic_id(agent).await;
     assert_eq!(id.len(), 64);
 }
 
@@ -319,7 +329,7 @@ async fn test_reports_id(agent: &mut Agent) {
         .as_ref()
         .expect("the test succeeded")
         .clone();
-    assert_eq!(id.as_str(), rustic_id(agent));
+    assert_eq!(id.as_str(), rustic_id(agent).await);
 }
 
 #[then("the test fails")]

@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::ORIGIN;
 use tokio_tungstenite::{WebSocketStream, connect_async};
 
-use super::Agent;
+use super::{Agent, blocking};
 
 /// How long a page may wait for an event a run already published.
 const EVENT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -117,10 +117,22 @@ impl Events {
 }
 
 /// Starts `ladderback serve` with its folders in the scratch dir, and
-/// waits until it listens or exits.
-fn start(agent: &mut Agent) -> Outcome {
+/// waits until it listens or exits. The wait is on a blocking thread: see
+/// [`blocking`].
+async fn start(agent: &mut Agent) -> Outcome {
+    let root = Events::root(agent);
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root)).await;
+    if daemon.is_some() {
+        agent.events.daemon = daemon;
+    }
+    outcome
+}
+
+/// Starts the daemon and reads its log until it says where it listens or
+/// exits; the daemon is there when it listens.
+fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
     let mut command = Command::new(super::LADDERBACK);
-    testkit::daemon::isolate(&mut command, &Events::root(agent));
+    testkit::daemon::isolate(&mut command, root);
     let mut child = command
         .args(["serve", "--listen", "127.0.0.1:0"])
         .stderr(Stdio::piped())
@@ -156,12 +168,11 @@ fn start(agent: &mut Agent) -> Outcome {
                     }
                 }
             });
-            agent.events.daemon = Some(Daemon { child, addr });
-            Outcome::Listening(addr)
+            (Some(Daemon { child, addr }), Outcome::Listening(addr))
         }
         None => {
             let status = child.wait().expect("the daemon exits");
-            Outcome::Exited(status, log)
+            (None, Outcome::Exited(status, log))
         }
     }
 }
@@ -223,7 +234,7 @@ async fn connect(agent: &Agent) -> Page {
 async fn serving_with_plan(agent: &mut Agent, plan: String) {
     // A real plan the daemon can run: a real scratch repository, a folder of
     // demo files, and a config.toml naming both.
-    let repository = super::backup_steps::new_repository(agent);
+    let repository = super::backup_steps::new_repository(agent).await;
     let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
     let source = super::backup_steps::source_with_files(agent, &plan, 3);
     let config = domain::planning::AgentConfig::new(
@@ -268,7 +279,7 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
     )
     .await
     .expect("the config saves");
-    match start(agent) {
+    match start(agent).await {
         Outcome::Listening(_) => {}
         Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
     }
@@ -300,8 +311,8 @@ fn newer_schema(agent: &mut Agent) {
 }
 
 #[when("Ladderback is asked to serve")]
-fn asked_to_serve(agent: &mut Agent) {
-    let outcome = start(agent);
+async fn asked_to_serve(agent: &mut Agent) {
+    let outcome = start(agent).await;
     agent.events.asked_to_serve = Some(outcome);
 }
 

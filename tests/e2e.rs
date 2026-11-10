@@ -1,6 +1,7 @@
 //! Runs the `@e2e` scenarios in `features/` against the real `ladderback`
 //! binary: operations run in real `ladderback worker` processes (§13.2).
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -240,9 +241,15 @@ async fn main() {
     let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
     let name = cli.re_filter.take();
     let tags = cli.tags_filter.take();
-    Agent::cucumber()
+    let worst_stall = Cell::new(Duration::ZERO);
+    let run = Agent::cucumber()
         .with_cli(cli)
         .fail_on_skipped()
+        // Each backup runs a worker process that uses every core, so more
+        // scenarios at once than a few only make the runner's own thread
+        // wait for the processor: 64 at once (cucumber's default) held it
+        // for 26 s here, 4 for under a second, and the run is faster.
+        .max_concurrent_scenarios(4)
         .filter_run_and_exit(features, move |feature, rule, scenario| {
             if !operation_steps::tagged(feature, rule, scenario, "e2e")
                 || !name.as_ref().is_none_or(|re| re.is_match(&scenario.name))
@@ -270,8 +277,70 @@ async fn main() {
                 return false;
             }
             true
-        })
-        .await;
+        });
+    // The runner polls every scenario from this one task: watching it from
+    // the same task measures how long a step left it unpolled.
+    let _report = ReportStall(&worst_stall);
+    let watch = watch_for_stalls(&worst_stall);
+    futures::pin_mut!(run, watch);
+    futures::future::select(run, watch).await;
+    assert!(
+        worst_stall.get() <= MAX_STALL,
+        "a step kept the runner's thread for {:?}, longer than the {MAX_STALL:?} allowed: \
+         every other scenario waited that long, and the operation log gives up on a \
+         connection after 10 s. A step that blocks for long (rustic_core, waiting for a daemon \
+         to start, thousands of file writes) runs through `blocking(…)`; too many \
+         scenarios at once starve it too.",
+        worst_stall.get()
+    );
+}
+
+/// Runs `work` on a blocking thread and waits for it without holding the
+/// runner's thread. The runner polls every scenario from one task, so a step
+/// that blocks, such as `rustic_core` deriving a repository's key (about a
+/// second in a debug build) or a blocking socket, stops every other scenario
+/// until it returns. Steps that block call this instead. A panic in `work` is
+/// the step's panic.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(done) => done,
+        Err(error) => match error.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            Err(error) => panic!("the blocking step's thread was cancelled: {error}"),
+        },
+    }
+}
+
+/// How long the runner's thread may go unpolled before the run fails: most of
+/// the 10 s the operation log waits for a connection, and several times what
+/// a run that blocks nothing and shares the machine with its workers sees (up
+/// to 1.2 s on ten cores, with 4 scenarios at once).
+const MAX_STALL: Duration = Duration::from_secs(8);
+
+/// Says how long the runner's thread was unavailable at worst when the run
+/// ends, also when a failed step ends it: the figure belongs to a failure
+/// that looks like #92 as much as to a pass.
+struct ReportStall<'a>(&'a Cell<Duration>);
+
+impl Drop for ReportStall<'_> {
+    fn drop(&mut self) {
+        eprintln!(
+            "e2e runner: its thread was unavailable for up to {:?} at once",
+            self.0.get()
+        );
+    }
+}
+
+/// Records in `worst` the longest a timer was late being polled, forever.
+/// Joined with the runner in one task, a late poll is a step that blocked the
+/// thread every scenario shares.
+async fn watch_for_stalls(worst: &Cell<Duration>) {
+    const TICK: Duration = Duration::from_millis(50);
+    loop {
+        let before = std::time::Instant::now();
+        tokio::time::sleep(TICK).await;
+        worst.set(worst.get().max(before.elapsed().saturating_sub(TICK)));
+    }
 }
 
 /// Whether this machine can listen on IPv6: containers often can't, and a

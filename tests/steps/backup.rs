@@ -21,7 +21,7 @@ use rustic_core::{
     SnapshotOptions,
 };
 
-use super::Agent;
+use super::{Agent, blocking};
 
 /// Not a real secret: the scratch repositories' password.
 pub const PASSWORD: &str = "e2e-scratch-password";
@@ -60,55 +60,65 @@ fn repository(folders: &Folders) -> Repository<()> {
         .expect("the scratch repository")
 }
 
-/// Every snapshot in the scratch repository, oldest first.
-pub fn snapshots(folders: &Folders) -> Vec<SnapshotFile> {
-    let mut snapshots = repository(folders)
-        .open(&credentials())
-        .expect("the scratch repository opens")
-        .get_all_snapshots()
-        .expect("the snapshots load");
-    snapshots.sort_by(|a, b| a.time.cmp(&b.time));
-    snapshots
+/// Every snapshot in the scratch repository, oldest first. Opening it derives
+/// its key, which takes a second in a debug build, so the work is on a
+/// blocking thread (see [`blocking`]).
+pub async fn snapshots(folders: &Folders) -> Vec<SnapshotFile> {
+    let folders = folders.clone();
+    blocking(move || {
+        let mut snapshots = repository(&folders)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .get_all_snapshots()
+            .expect("the snapshots load");
+        snapshots.sort_by(|a, b| a.time.cmp(&b.time));
+        snapshots
+    })
+    .await
 }
 
 fn snapshot_id(snapshot: &SnapshotFile) -> SnapshotId {
     SnapshotId::parse(snapshot.id.to_hex().as_str()).expect("rustic's IDs are 64 hex digits")
 }
 
-fn init(folders: &Folders) {
-    repository(folders)
-        .init(
-            &credentials(),
-            &KeyOptions::default(),
-            &ConfigOptions::default(),
-        )
-        .expect("the scratch repository initializes");
+async fn init(folders: &Folders) {
+    let folders = folders.clone();
+    blocking(move || {
+        repository(&folders)
+            .init(
+                &credentials(),
+                &KeyOptions::default(),
+                &ConfigOptions::default(),
+            )
+            .expect("the scratch repository initializes");
+    })
+    .await;
 }
 
 #[given("a new repository")]
-fn a_new_repository(agent: &mut Agent) {
-    new_repository(agent);
+async fn a_new_repository(agent: &mut Agent) {
+    new_repository(agent).await;
 }
 
 /// A scratch repository the scenario's plan backs up into: what "a new
 /// repository" sets up, for the steps that build a configuration around one.
-pub(super) fn new_repository(agent: &mut Agent) -> PathBuf {
+pub(super) async fn new_repository(agent: &mut Agent) -> PathBuf {
     let folders = Folders {
         cold: agent.scratch().join("repo"),
         hot: None,
     };
-    init(&folders);
+    init(&folders).await;
     agent.backup.repository = Some(folders.cold.clone());
     folders.cold
 }
 
 #[given("a new hot/cold repository")]
-fn new_hot_cold_repository(agent: &mut Agent) {
+async fn new_hot_cold_repository(agent: &mut Agent) {
     let folders = Folders {
         cold: agent.scratch().join("repo"),
         hot: Some(agent.scratch().join("hot")),
     };
-    init(&folders);
+    init(&folders).await;
     agent.backup.repository = Some(folders.cold);
     agent.backup.hot = folders.hot;
 }
@@ -187,7 +197,10 @@ async fn backed_up(agent: &mut Agent) {
     agent.run_backup().await;
     let status = agent.operation().status().clone();
     assert_eq!(status, domain::execution::OperationStatus::Succeeded);
-    let latest = snapshots(&agent.repository()).pop().expect("a snapshot");
+    let latest = snapshots(&agent.repository())
+        .await
+        .pop()
+        .expect("a snapshot");
     agent.backup.earlier = Some(snapshot_id(&latest));
 }
 
@@ -200,17 +213,20 @@ fn folder_moved(agent: &mut Agent) {
 }
 
 #[given("the folder was backed up without Ladderback")]
-fn backed_up_without_ladderback(agent: &mut Agent) {
-    let repo = repository(&agent.repository())
-        .open(&credentials())
-        .unwrap()
-        .to_indexed_ids()
-        .unwrap();
-    let source = PathList::from_iter([agent.source()]).sanitize().unwrap();
-    let snapshot = SnapshotOptions::default().to_snapshot().unwrap();
-    let snapshot = repo
-        .backup(&BackupOptions::default(), &source, snapshot)
-        .expect("a plain rustic backup");
+async fn backed_up_without_ladderback(agent: &mut Agent) {
+    let (folders, source) = (agent.repository(), agent.source());
+    let snapshot = blocking(move || {
+        let repo = repository(&folders)
+            .open(&credentials())
+            .unwrap()
+            .to_indexed_ids()
+            .unwrap();
+        let source = PathList::from_iter([source]).sanitize().unwrap();
+        let snapshot = SnapshotOptions::default().to_snapshot().unwrap();
+        repo.backup(&BackupOptions::default(), &source, snapshot)
+            .expect("a plain rustic backup")
+    })
+    .await;
     agent.backup.earlier = Some(snapshot_id(&snapshot));
 }
 
@@ -230,19 +246,22 @@ async fn backs_up_and_cancels(agent: &mut Agent) {
 }
 
 #[then(expr = "the repository has {int} snapshot(s)")]
-fn has_snapshots(agent: &mut Agent, count: usize) {
-    assert_eq!(snapshots(&agent.repository()).len(), count);
+async fn has_snapshots(agent: &mut Agent, count: usize) {
+    assert_eq!(snapshots(&agent.repository()).await.len(), count);
 }
 
 #[then("the repository has no snapshots")]
-fn has_no_snapshots(agent: &mut Agent) {
-    let snapshots = snapshots(&agent.repository());
+async fn has_no_snapshots(agent: &mut Agent) {
+    let snapshots = snapshots(&agent.repository()).await;
     assert!(snapshots.is_empty(), "{snapshots:?}");
 }
 
 #[then("the snapshot is tagged with the plan and the agent")]
-fn tagged(agent: &mut Agent) {
-    let snapshot = snapshots(&agent.repository()).pop().expect("a snapshot");
+async fn tagged(agent: &mut Agent) {
+    let snapshot = snapshots(&agent.repository())
+        .await
+        .pop()
+        .expect("a snapshot");
     let tags: Vec<&String> = snapshot.tags.iter().collect();
     for tag in agent.plan_tags().tags() {
         assert!(tags.contains(&&tag), "{tag} missing from {tags:?}");
@@ -281,7 +300,10 @@ async fn history_shows_the_snapshot(agent: &mut Agent) {
         .await
         .expect("the history answers")
         .expect("the operation is in the history");
-    let latest = snapshots(&agent.repository()).pop().expect("a snapshot");
+    let latest = snapshots(&agent.repository())
+        .await
+        .pop()
+        .expect("a snapshot");
     let Some(EngineResult::Backup(summary)) = &detail.record.result else {
         panic!("the history holds no backup result: {:?}", detail.record);
     };
@@ -291,21 +313,24 @@ async fn history_shows_the_snapshot(agent: &mut Agent) {
     assert_eq!(detail.record.target.plan, agent.backup.plan);
 }
 
-fn new_snapshot_parent(agent: &Agent) -> Option<SnapshotId> {
-    let latest = snapshots(&agent.repository()).pop().expect("a snapshot");
+async fn new_snapshot_parent(agent: &Agent) -> Option<SnapshotId> {
+    let latest = snapshots(&agent.repository())
+        .await
+        .pop()
+        .expect("a snapshot");
     latest
         .parent
         .map(|p| SnapshotId::parse(p.to_hex().as_str()).unwrap())
 }
 
 #[then("the new snapshot's parent is the plan's previous snapshot")]
-fn parent_is_previous(agent: &mut Agent) {
-    assert_eq!(new_snapshot_parent(agent), agent.backup.earlier);
+async fn parent_is_previous(agent: &mut Agent) {
+    assert_eq!(new_snapshot_parent(agent).await, agent.backup.earlier);
 }
 
 #[then("the new snapshot's parent is the snapshot made without Ladderback")]
-fn parent_is_plain(agent: &mut Agent) {
-    assert_eq!(new_snapshot_parent(agent), agent.backup.earlier);
+async fn parent_is_plain(agent: &mut Agent) {
+    assert_eq!(new_snapshot_parent(agent).await, agent.backup.earlier);
 }
 
 /// What the backup scenarios set up.

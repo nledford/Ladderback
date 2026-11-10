@@ -305,15 +305,19 @@ impl Ops {
 }
 
 #[given("the plan's source holds many more files")]
-fn many_more_files(agent: &mut Agent) {
+async fn many_more_files(agent: &mut Agent) {
     let source = source(agent);
-    for n in 1..=MANY_FILES {
-        std::fs::write(
-            source.join(format!("more-{n}.txt")),
-            format!("demo file {n}\n"),
-        )
-        .expect("the demo file");
-    }
+    // Thousands of writes: on a blocking thread, as the runner's is shared.
+    super::blocking(move || {
+        for n in 1..=MANY_FILES {
+            std::fs::write(
+                source.join(format!("more-{n}.txt")),
+                format!("demo file {n}\n"),
+            )
+            .expect("the demo file");
+        }
+    })
+    .await;
 }
 
 #[given("the plan runs a finally hook that notes it ran")]
@@ -352,9 +356,36 @@ async fn finished_backups(agent: &mut Agent, count: usize, plan: String) {
 }
 
 #[when("the operation is cancelled")]
-fn cancel_the_operation(agent: &mut Agent) {
+async fn cancel_the_operation(agent: &mut Agent) {
     let id = agent.ops.the_operation();
-    cancel(agent, &id);
+    // The daemon answers a start before it has recorded the operation and
+    // registered it to be cancelled, so a cancel sent at once can find
+    // neither. Such a cancel is sent again: a refusal stands only when the
+    // operation is unknown after a while, or has ended.
+    let started = Instant::now();
+    loop {
+        cancel(agent, &id);
+        let early = match agent.ops.refusal.as_deref() {
+            Some("operation-unknown") => true,
+            Some("operation-not-running") => {
+                let page = history_page(agent, "limit=50").await;
+                page.get("operations")
+                    .and_then(|ops| ops.as_array())
+                    .and_then(|ops| {
+                        ops.iter().find(|op| {
+                            op.get("id").and_then(serde_json::Value::as_str) == Some(&id)
+                        })
+                    })
+                    .and_then(|op| op.get("status").and_then(serde_json::Value::as_str))
+                    .is_some_and(|status| matches!(status, "queued" | "running"))
+            }
+            _ => false,
+        };
+        if !early || started.elapsed() > Duration::from_secs(10) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 #[when(expr = "the operation {string} is cancelled")]

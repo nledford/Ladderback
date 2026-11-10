@@ -20,7 +20,7 @@ use app::maintenance::{MaintenanceKind, RunMaintenance};
 use app::ports::ConfigStore;
 use secrets::SystemSecrets;
 
-use super::Agent;
+use super::{Agent, blocking};
 
 const PASSWORD: &str = "e2e-scratch-password";
 
@@ -41,10 +41,19 @@ fn alias() -> RepositoryAlias {
     RepositoryAlias::parse("demo").expect("an alias")
 }
 
-/// Opens the scratch repository with rustic itself: the truth the run is
-/// checked against.
-pub fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
+/// Opens the scratch repository with rustic itself, the truth the run is
+/// checked against, and runs `work` on it. Opening derives the repository's
+/// key, which takes a second in a debug build, so both are on a blocking
+/// thread: see [`blocking`].
+pub async fn with_repository<T: Send + 'static>(
+    agent: &Agent,
+    work: impl FnOnce(rustic_core::Repository<rustic_core::IndexedIdsStatus>) -> T + Send + 'static,
+) -> T {
     let cold = agent.backup.repository.clone().expect("a repository");
+    blocking(move || work(open(&cold))).await
+}
+
+fn open(cold: &std::path::Path) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
     let backends = rustic_backend::BackendOptions::default()
         .repository(cold.to_str().expect("a UTF-8 scratch path"))
         .to_backends()
@@ -62,25 +71,28 @@ pub fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsSta
 
 /// Every snapshot in the repository: its ID, its time and its tags, oldest
 /// first.
-pub fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
-    let mut snapshots: Vec<_> = open(agent)
-        .get_all_snapshots()
-        .expect("the snapshots load")
-        .into_iter()
-        .map(|snapshot| {
-            (
-                SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID"),
-                snapshot.time.timestamp(),
-                snapshot
-                    .tags
-                    .iter()
-                    .map(|tag| tag.as_str().to_owned())
-                    .collect(),
-            )
-        })
-        .collect();
-    snapshots.sort_by_key(|(_, time, _)| *time);
-    snapshots
+pub async fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<String>)> {
+    with_repository(agent, |repository| {
+        let mut snapshots: Vec<_> = repository
+            .get_all_snapshots()
+            .expect("the snapshots load")
+            .into_iter()
+            .map(|snapshot| {
+                (
+                    SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID"),
+                    snapshot.time.timestamp(),
+                    snapshot
+                        .tags
+                        .iter()
+                        .map(|tag| tag.as_str().to_owned())
+                        .collect(),
+                )
+            })
+            .collect();
+        snapshots.sort_by_key(|(_, time, _)| *time);
+        snapshots
+    })
+    .await
 }
 
 /// Saves the configuration the run loads: the scenario's repository under
@@ -135,9 +147,10 @@ async fn save_config(agent: &mut Agent, keep_last: Option<i64>) {
 }
 
 /// The snapshots carrying the plan tag, oldest first.
-fn snapshots_tagged(agent: &Agent, plan: &str) -> Vec<SnapshotId> {
+async fn snapshots_tagged(agent: &Agent, plan: &str) -> Vec<SnapshotId> {
     let tag = format!("ladderback-plan:{plan}");
     snapshots_of(agent)
+        .await
         .into_iter()
         .filter(|(_, _, tags)| tags.iter().any(|each| each == &tag))
         .map(|(id, _, _)| id)
@@ -166,10 +179,11 @@ async fn backed_up_times(agent: &mut Agent, times: u64) {
         }
     }
     let plan = agent.backup.plan.clone().expect("a plan");
-    let tagged = snapshots_tagged(agent, plan.as_str());
+    let tagged = snapshots_tagged(agent, plan.as_str()).await;
     agent.forget.of_plan = tagged.len();
     agent.forget.newest = tagged.last().cloned();
     let without = snapshots_of(agent)
+        .await
         .into_iter()
         .find(|(id, _, _)| !tagged.contains(id))
         .map(|(id, _, _)| id);
@@ -201,8 +215,9 @@ async fn forget(agent: &mut Agent) {
         .await
         .expect("the repository is free");
     let plan = agent.backup.plan.clone().expect("a plan");
-    let tagged = snapshots_tagged(agent, plan.as_str());
+    let tagged = snapshots_tagged(agent, plan.as_str()).await;
     agent.forget.unmanaged = snapshots_of(agent)
+        .await
         .into_iter()
         .find(|(id, _, _)| !tagged.contains(id))
         .map(|(id, _, _)| id);
@@ -210,14 +225,14 @@ async fn forget(agent: &mut Agent) {
 }
 
 #[then(expr = "the remaining snapshot of the plan is the newest of its {int}")]
-fn newest_remains(agent: &mut Agent, had: usize) {
+async fn newest_remains(agent: &mut Agent, had: usize) {
     assert_eq!(
         agent.forget.of_plan, had,
         "the plan had this many snapshots"
     );
     let newest = agent.forget.newest.clone().expect("the newest snapshot");
     let plan = agent.backup.plan.clone().expect("a plan");
-    let remaining = snapshots_tagged(agent, plan.as_str());
+    let remaining = snapshots_tagged(agent, plan.as_str()).await;
     assert_eq!(
         remaining,
         vec![newest],
@@ -226,13 +241,14 @@ fn newest_remains(agent: &mut Agent, had: usize) {
 }
 
 #[then("the snapshot made without Ladderback is still there")]
-fn unmanaged_remains(agent: &mut Agent) {
+async fn unmanaged_remains(agent: &mut Agent) {
     let unmanaged = agent
         .forget
         .unmanaged
         .clone()
         .expect("an unmanaged snapshot");
     let present: Vec<SnapshotId> = snapshots_of(agent)
+        .await
         .into_iter()
         .map(|(id, _, _)| id)
         .collect();
