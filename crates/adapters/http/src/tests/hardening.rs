@@ -1,7 +1,9 @@
 //! Body limits and security response headers (technical design §10.1),
 //! checked on the router as a client sees it.
 
-use futures::stream;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use futures::{SinkExt, StreamExt, stream};
 
 use super::*;
 
@@ -180,4 +182,74 @@ async fn the_entry_page_names_its_own_inline_script_by_hash_and_nothing_else_doe
             .unwrap();
         assert!(!policy.contains("sha256-"), "{path}: {policy}");
     }
+}
+
+#[tokio::test]
+async fn a_declared_length_over_the_limit_is_refused_without_reading_the_body() {
+    // A client that sent `Expect: 100-continue` sends its body only once the
+    // daemon polls it, so a body that was read is a body that was asked for.
+    let polled = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&polled);
+    let body = Body::from_stream(stream::poll_fn(move |_| {
+        flag.store(true, Ordering::SeqCst);
+        std::task::Poll::Ready(None::<Result<axum::body::Bytes, std::io::Error>>)
+    }));
+    let response = router(ui(), RequestChecks::default(), state())
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/operations")
+                .header(header::HOST, "localhost:9898")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_LENGTH, API_LIMIT + 1)
+                .body(body)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(json(response).await, too_large(API_LIMIT as u64));
+    assert!(!polled.load(Ordering::SeqCst), "the body was read");
+}
+
+#[tokio::test]
+async fn a_message_from_the_events_client_is_bounded() {
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::header::ORIGIN;
+
+    let (addr, _events) = serving().await;
+    let mut request = format!("ws://{addr}/api/v1/events")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert(ORIGIN, format!("http://{addr}").parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // What the UI sends: a ping, which a control frame keeps to 125 bytes.
+    let ping = vec![b'p'; 125];
+    socket
+        .send(Message::Ping(ping.clone().into()))
+        .await
+        .unwrap();
+    let answer = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next()).await;
+    assert!(
+        matches!(answer, Ok(Some(Ok(Message::Pong(ref payload)))) if payload.as_ref() == ping.as_slice()),
+        "{answer:?}"
+    );
+    // Anything larger is nothing the UI says: the daemon ends the connection
+    // rather than hold a message of whatever size in memory.
+    let _ = socket
+        .send(Message::Text("a".repeat(64 * 1024).into()))
+        .await;
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match socket.next().await {
+                None | Some(Err(_) | Ok(Message::Close(_))) => return,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "the connection stayed open");
 }
