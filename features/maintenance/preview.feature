@@ -180,6 +180,26 @@ Feature: A maintenance preview tells what a run would do before it does anything
     Then the preview says the check does not read the repository's data
     And the engine was never given a job
 
+  Scenario: A prune preview reports what the engine's plan would do and runs no prune
+    Given a plan "home" keeping the last 1 snapshot
+    When the owner previews pruning the repository
+    Then the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
+    And the preview says marked packs wait the default time before a later prune deletes them
+    And the engine was only asked to plan a prune
+    And the log holds no operation of this preview
+
+  Scenario: A prune preview takes no slot
+    Given a plan "home" keeping the last 1 snapshot
+    And a maintenance operation is already running on the repository
+    When the owner previews pruning the repository
+    Then the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
+    And the log holds only the operation that was already running
+
+  Scenario: A prune preview of a repository that is not configured is refused
+    When the owner previews pruning the repository
+    Then the preview is refused because the repository is not configured
+    And the engine was never given a job
+
   Scenario: The groups list every plan of the repository, with history or without
     Given a plan "home" keeping the last 1 snapshot
     And a plan "photos" keeping the last 1 snapshot of the folder "/srv/photos"

@@ -34,8 +34,8 @@ use app::maintenance::{
 };
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, MAX_JOB_IDS, OperationStore, PruneSummary, RewriteSummary, RunningJob,
-    SnapshotSummary, Start,
+    JobControl, MAX_JOB_IDS, OperationStore, PrunePlanSummary, PruneSummary, RewriteSummary,
+    RunningJob, SnapshotSummary, Start,
 };
 
 /// The alias every forget scenario's repository goes under.
@@ -477,6 +477,15 @@ impl Engine for Scripted {
                 packs_deleted: 0,
                 packs_recovered: 0,
             }))],
+            Job::PrunePlan(_) => vec![EngineEvent::Succeeded(EngineResult::PrunePlan(
+                PrunePlanSummary {
+                    repository: self.repository_id.clone(),
+                    packs_marked: 2,
+                    packs_deleted: 1,
+                    packs_recovered: 3,
+                    bytes_deleted: 4096,
+                },
+            ))],
             Job::Check(_) => vec![EngineEvent::Succeeded(EngineResult::Check(CheckSummary {
                 repository: self.repository_id.clone(),
                 errors: 0,

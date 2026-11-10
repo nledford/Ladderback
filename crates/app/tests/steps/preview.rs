@@ -14,7 +14,7 @@ use domain::{AgentId, OperationId, PlanId, RepositoryAlias, SnapshotId, Uuid};
 use super::Agent;
 use app::maintenance::{
     AdoptPreview, Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, MaintenancePreview,
-    PlanHistory, RepositoryGroups,
+    PlanHistory, PrunePreview, RepositoryGroups, default_keep_delete,
 };
 use app::ports::{HistoryQuery, OperationStore};
 
@@ -88,6 +88,11 @@ async fn preview_forget(agent: &mut Agent) {
 #[when("the owner previews checking the repository")]
 async fn preview_check(agent: &mut Agent) {
     preview(agent, MaintenanceKind::Check).await;
+}
+
+#[when("the owner previews pruning the repository")]
+async fn preview_prune(agent: &mut Agent) {
+    preview(agent, MaintenanceKind::Prune).await;
 }
 
 #[when(
@@ -363,6 +368,44 @@ fn check_reads_no_data(agent: &mut Agent) {
         Some(MaintenancePreview::Check(check)) => assert!(!check.read_data, "{check:?}"),
         other => panic!("a check was previewed, not {other:?}"),
     }
+}
+
+fn prune_preview(agent: &Agent) -> &PrunePreview {
+    match &agent.preview.previewed {
+        Some(MaintenancePreview::Prune(prune)) => prune,
+        other => panic!("a prune was previewed, not {other:?}"),
+    }
+}
+
+#[then(
+    expr = "the preview says the prune would mark {int} packs, delete {int} and bring back {int}, freeing {int} bytes"
+)]
+fn prune_figures(agent: &mut Agent, marked: u64, deleted: u64, recovered: u64, bytes: u64) {
+    let prune = prune_preview(agent);
+    assert_eq!(
+        (
+            prune.packs_marked,
+            prune.packs_deleted,
+            prune.packs_recovered,
+            prune.bytes_deleted
+        ),
+        (marked, deleted, recovered, bytes),
+        "{prune:?}"
+    );
+}
+
+#[then("the preview says marked packs wait the default time before a later prune deletes them")]
+fn prune_waits(agent: &mut Agent) {
+    assert_eq!(prune_preview(agent).keep_delete, default_keep_delete());
+}
+
+#[then("the engine was only asked to plan a prune")]
+fn only_a_plan(agent: &mut Agent) {
+    assert_eq!(
+        agent.forget.jobs(),
+        ["prune-plan"],
+        "the engine was asked for more than a plan"
+    );
 }
 
 #[then("the engine was never given a job")]
