@@ -418,12 +418,16 @@ impl Operations for PlanRunner {
         )
         .with_hooks(Arc::clone(&self.hooks), setup);
         // Recorded as queued before the route answers, so a cancel that
-        // arrives the instant it does finds the operation in the log.
-        let queued = use_case.queue(operation, Trigger::Manual, &job).await;
+        // arrives the instant it does finds the operation in the log. The
+        // task does the recording and the run, so a handler that is dropped
+        // meanwhile (the client went away) strands neither.
+        let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
         tokio::spawn(async move {
+            let queued = use_case.queue(operation, Trigger::Manual, job).await;
+            let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus.
-            let finished = use_case.run_queued(queued, job, cancel).await;
+            let finished = use_case.run_queued(queued, cancel).await;
             registry.finish(&operation);
             log::info!(
                 "operation {} ended: {:?}",
@@ -431,6 +435,8 @@ impl Operations for PlanRunner {
                 finished.operation.status()
             );
         });
+        // A task that ended without recording has nothing to wait for.
+        let _ = wait_for_log.await;
         Ok(id_text)
     }
     async fn start_maintenance(

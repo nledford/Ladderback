@@ -553,13 +553,13 @@ async fn a_queued_operation_is_in_the_log_before_anything_runs() {
     let store = log();
     let use_case = RunOperation::new(engine.clone(), clock, store.clone());
     let job = fake_job(None);
-    let queued = use_case.queue(id(), Trigger::Manual, &job).await;
+    let queued = use_case.queue(id(), Trigger::Manual, job).await;
     assert_eq!(logged(&store).await.record.status, OperationStatus::Queued);
     engine.send(started());
     engine.send(EngineEvent::Succeeded(EngineResult::Fake {
         steps_completed: 0,
     }));
-    let ended = use_case.run_queued(queued, job, future::pending()).await;
+    let ended = use_case.run_queued(queued, future::pending()).await;
     assert_eq!(ended.operation.status(), &OperationStatus::Succeeded);
     assert_logged_as_it_ended(&store, &ended).await;
 }
