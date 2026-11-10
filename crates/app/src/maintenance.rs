@@ -744,7 +744,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use domain::secrets::SecretValue;
-    use domain::{AgentId, Uuid};
+    use domain::{AgentId, Timestamp, Uuid};
 
     use crate::ports::{ForgetSummary, RewriteSummary};
 
@@ -825,6 +825,79 @@ mod tests {
             jobs.iter()
                 .all(|job| matches!(job, Job::Rewrite(job) if job.tags == tags))
         );
+    }
+
+    #[test]
+    fn a_rewrite_splits_at_the_same_limit_as_a_forget() {
+        let tags = PlanTags::new(
+            PlanId::parse("home").expect("a plan ID"),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+        );
+        let rewrite = |count: usize| {
+            Job::Rewrite(RewriteJob {
+                repository: access(),
+                ids: ids(count),
+                tags: tags.clone(),
+            })
+        };
+        assert_eq!(sizes(&split(rewrite(MAX_JOB_IDS))), [MAX_JOB_IDS]);
+        assert_eq!(sizes(&split(rewrite(MAX_JOB_IDS + 1))), [MAX_JOB_IDS, 1]);
+        assert_eq!(sizes(&split(rewrite(0))), [0]);
+    }
+
+    fn running() -> Operation {
+        let mut operation = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            domain::execution::OperationKind::Forget,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        operation
+            .start(Timestamp::UNIX_EPOCH)
+            .expect("a queued operation starts");
+        operation
+    }
+
+    #[test]
+    fn a_run_that_ends_after_some_jobs_says_how_many_snapshots_they_did() {
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let mut forgot = running();
+        note_partial(&mut forgot, Some(&removed(&repository, ids(3))));
+        let [warning] = forgot.warnings() else {
+            panic!("one warning: {:?}", forgot.warnings());
+        };
+        assert_eq!(warning.during, "forget");
+        assert!(
+            warning.detail.starts_with("3 snapshots were removed"),
+            "{}",
+            warning.detail
+        );
+        let mut adopted = running();
+        let created = EngineResult::Rewrite(RewriteSummary {
+            repository,
+            created: ids(2),
+        });
+        note_partial(&mut adopted, Some(&created));
+        let [warning] = adopted.warnings() else {
+            panic!("one warning: {:?}", adopted.warnings());
+        };
+        assert_eq!(warning.during, "adopt");
+        assert!(
+            warning.detail.starts_with("2 snapshots were rewritten"),
+            "{}",
+            warning.detail
+        );
+    }
+
+    #[test]
+    fn a_run_that_ends_before_any_job_finished_has_nothing_to_say() {
+        let mut operation = running();
+        note_partial(&mut operation, None);
+        assert!(operation.warnings().is_empty());
     }
 
     #[test]

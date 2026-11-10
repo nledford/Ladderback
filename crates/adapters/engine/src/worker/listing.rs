@@ -358,6 +358,13 @@ mod tests {
     }
 
     #[test]
+    fn exactly_as_many_snapshots_as_a_listing_carries_are_sent() {
+        let snapshots = vec![SnapshotFile::default(); MAX_LISTED_SNAPSHOTS];
+        let count = send(&snapshots, |_| Ok(())).expect("the most is still listed");
+        assert_eq!(count, MAX_LISTED_SNAPSHOTS as u64);
+    }
+
+    #[test]
     fn a_listing_is_sent_newest_first_and_counted() {
         let at = |second: i64| SnapshotFile {
             time: jiff::Timestamp::from_second(second)
