@@ -35,6 +35,14 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     And the 2 snapshots are rewritten with the tags of the plan "home"
     And the snapshots no plan owned are gone
 
+  Scenario: Adopting into a plan this agent doesn't have is refused
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 2 snapshots another agent's plan "home" holds
+    When the owner adopts the other agent's "home" history into the plan "ghost"
+    Then the adoption is refused because the plan "ghost" is not configured
+    And the repository still holds the 2 snapshots the other agent's plan holds
+    And the engine was never asked to rewrite anything
+
   Scenario: An unmanaged group no plan matches is refused
     Given a plan "photos" keeping the last 1 snapshot
     And the repository holds 2 snapshots no plan owns of another folder
@@ -73,5 +81,28 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     And the folder was backed up without Ladderback
     When the owner adopts the unmanaged history that matches the plan "home"
     Then the operation ends as succeeded
+    And every snapshot of the folder carries this agent's and the plan's tags
+    And no snapshot made without Ladderback is left
+
+  @e2e
+  Scenario: A real adoption into a plan with history counts only what it rewrote
+    Given a new repository
+    And a plan "home" keeping the last 1 snapshot
+    And the plan "home" already holds a snapshot of the folder
+    And the folder was backed up without Ladderback with the tag "weekly"
+    When the owner adopts the unmanaged history that matches the plan "home"
+    Then the operation ends as succeeded
+    And the adoption reports 1 snapshot rewritten
+    And the adopted snapshot still carries the tag "weekly"
+
+  @e2e
+  Scenario: An adoption cut short after its copy is finished without a second copy
+    Given a new repository
+    And a plan "home" keeping the last 1 snapshot
+    And the folder was backed up without Ladderback
+    And an earlier adoption into the plan "home" saved its copy but left the original
+    When the owner adopts the unmanaged history that matches the plan "home"
+    Then the operation ends as succeeded
+    And the adoption reports 1 snapshot rewritten
     And every snapshot of the folder carries this agent's and the plan's tags
     And no snapshot made without Ladderback is left

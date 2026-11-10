@@ -43,7 +43,7 @@ fn alias() -> RepositoryAlias {
 
 /// Opens the scratch repository with rustic itself: the truth the run is
 /// checked against.
-fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
+pub fn open(agent: &Agent) -> rustic_core::Repository<rustic_core::IndexedIdsStatus> {
     let cold = agent.backup.repository.clone().expect("a repository");
     let backends = rustic_backend::BackendOptions::default()
         .repository(cold.to_str().expect("a UTF-8 scratch path"))

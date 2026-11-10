@@ -204,6 +204,20 @@ fn refused_no_match(agent: &mut Agent) {
     assert_eq!(error, MaintenanceError::AdoptionNoMatch);
 }
 
+#[then(expr = "the adoption is refused because the plan {string} is not configured")]
+fn refused_unknown_plan(agent: &mut Agent, plan: String) {
+    let error = agent
+        .forget
+        .take_refused()
+        .expect("the adoption was refused");
+    assert_eq!(
+        error,
+        MaintenanceError::UnknownPlan {
+            plan: PlanId::parse(&plan).expect("a plan ID")
+        }
+    );
+}
+
 #[then(expr = "the adoption is refused because two plans match that history")]
 fn refused_ambiguous(agent: &mut Agent) {
     let error = agent
