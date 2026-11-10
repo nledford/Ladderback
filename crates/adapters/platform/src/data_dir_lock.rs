@@ -10,7 +10,8 @@
 //! however it ends, so a crash never leaves it stale. The file stays, naming
 //! the process that held it, until the next holder writes its own ID into it.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// The lock file's name inside the data dir.
@@ -37,9 +38,58 @@ impl DataDirLock {
     /// Locks `data_dir`, which must exist, and records this process's ID in
     /// the lock file for whoever is refused next.
     pub fn acquire(data_dir: &Path) -> Result<Self, LockError> {
-        let _ = data_dir;
-        todo!("DataDirLock::acquire")
+        let mut file = open(&data_dir.join(LOCK_FILE)).map_err(unavailable)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                return Err(LockError::InUse {
+                    holder: holder_named_in(&mut file),
+                });
+            }
+            Err(TryLockError::Error(error)) => return Err(unavailable(error)),
+        }
+        record_this_process(&mut file).map_err(unavailable)?;
+        Ok(Self { _file: file })
     }
+}
+
+/// The most of the lock file that is read for a process ID: an ID is a short
+/// number, and what the file holds is for another process to write.
+const MOST_OF_AN_ID: u64 = 32;
+
+fn unavailable(error: io::Error) -> LockError {
+    LockError::Unavailable {
+        detail: error.to_string(),
+    }
+}
+
+/// Opens the lock file, making it when it isn't there. It is not truncated:
+/// a process that is refused the lock must leave the holder's ID where it is.
+fn open(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// The process ID the lock file names, when it names one.
+fn holder_named_in(file: &mut File) -> Option<u32> {
+    let mut text = String::new();
+    Read::take(&mut *file, MOST_OF_AN_ID)
+        .read_to_string(&mut text)
+        .ok()?;
+    text.trim().parse().ok()
+}
+
+/// Replaces what the lock file says with this process's ID.
+fn record_this_process(file: &mut File) -> io::Result<()> {
+    file.set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
+    writeln!(file, "{}", std::process::id())
 }
 
 #[cfg(test)]
