@@ -7,4 +7,5 @@ pub mod engine;
 pub mod event_bus;
 pub mod hooks;
 pub mod operation_store;
+pub mod profiles;
 pub mod secrets;

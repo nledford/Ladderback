@@ -283,3 +283,38 @@ Feature: Export a plan as a rustic profile
         | plans.home.tags                | ["laptop"]           |
         | plans.home.retention.keep-last | 3                    |
         | repositories.nas.password-file | "/srv/demo-password" |
+
+  @e2e
+  Rule: The stock rustic forgets exactly what Ladderback forgets
+
+    Scenario: A dry run of rustic's forget removes the snapshots Ladderback's forget removes
+      Given a new repository
+      And a plan "home" backing up a folder with 3 files
+      And the plan has been backed up 2 times
+      And the plan's folder has moved
+      And the plan has been backed up 2 times
+      And the folder was backed up without Ladderback
+      And the repository holds 2 snapshots of another agent's plan "home"
+      And the repository's password is in the file "{scratch}/password"
+      And a config file holding:
+        """
+        schema = 1
+
+        [repositories.demo]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[plans]]
+        id = "home"
+        repository = "demo"
+        sources = ["{scratch}/moved-source"]
+
+        [plans.retention]
+        keep-last = 2
+        """
+      When the owner exports the plan "home"
+      And rustic is asked which snapshots its forget would remove, from the exported profile
+      And the owner forgets the repository
+      Then the operation ends as succeeded
+      And rustic would have removed 2 snapshots
+      And Ladderback removed exactly the snapshots rustic would have removed

@@ -2936,6 +2936,7 @@ dependencies = [
  "rustic_core",
  "serde",
  "tempfile",
+ "testkit",
  "tokio",
  "toml",
 ]

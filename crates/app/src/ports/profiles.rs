@@ -16,7 +16,7 @@ use super::Position;
 /// (the profile, the profiles it uses) and never opens a repository or runs a
 /// hook.
 ///
-/// Contract (checked by `contract::profiles`, once built):
+/// Contract (checked by `contract::profiles`):
 /// - a profile it cannot read is a [`ProfileError`] and nothing else;
 /// - every plan it returns backs up into `repository`;
 /// - no value it returns holds a `${` that was not made by the port itself:
@@ -35,7 +35,7 @@ pub trait ProfileReader: Send + Sync {
 
 /// Writes a plan as a rustic profile the stock `rustic` CLI accepts.
 ///
-/// Contract (checked by `contract::profiles`, once built):
+/// Contract (checked by `contract::profiles`):
 /// - the text holds only keys rustic knows, and no secret as text;
 /// - what Ladderback can't say in rustic's words is a [`ProfileNotice`] or a
 ///   [`ExportRefusal`], never silently dropped.

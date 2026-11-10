@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::RepositoryAlias;
+use domain::secrets::{Part, Template, is_secret_option};
 
 use crate::ports::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileReader,
@@ -52,7 +53,9 @@ impl ProfileReader for FakeProfileReader {
 }
 
 /// Renders a fixed text with the scripted notices, or the scripted refusal,
-/// and records every export it was handed.
+/// and records every export it was handed. Like the real writer it refuses a
+/// password written in the config and a location that is a reference, and it
+/// leaves out the options that are references or secrets.
 #[derive(Default)]
 pub struct FakeProfileWriter {
     refusal: Mutex<Option<ExportRefusal>>,
@@ -87,11 +90,46 @@ impl ProfileWriter for FakeProfileWriter {
         if let Some(refusal) = lock(&self.refusal).clone() {
             return Err(refusal);
         }
+        let settings = &export.repository.settings;
+        // What no profile can hold, as the real writer sees it: a secret as
+        // text, and a location that is a reference.
+        if settings.password.inline().is_some() {
+            return Err(ExportRefusal::InlineSecret);
+        }
+        for (key, value) in [
+            ("repository", Some(&settings.repository)),
+            ("repo-hot", settings.repo_hot.as_ref()),
+        ] {
+            if value.is_some_and(|value| !is_plain(value)) {
+                return Err(ExportRefusal::Reference {
+                    key: key.to_owned(),
+                });
+            }
+        }
+        let mut notices = lock(&self.notices).clone();
+        for (name, value) in &settings.options {
+            if !is_plain(value) || is_secret_option(name) {
+                notices.push(ProfileNotice::OptionLeftOut {
+                    option: name.clone(),
+                    variable: format!("RUSTIC_REPO_OPT_{}", name.to_ascii_uppercase()),
+                });
+            }
+        }
         Ok(RenderedProfile {
             text: format!("# a profile for the plan {}\n", export.plan.id.as_str()),
-            notices: lock(&self.notices).clone(),
+            notices,
         })
     }
+}
+
+/// Whether a repository value is only text: no `${…}` reference in it.
+fn is_plain(value: &str) -> bool {
+    Template::parse(value).is_ok_and(|template| {
+        template
+            .parts()
+            .iter()
+            .all(|part| matches!(part, Part::Text(_)))
+    })
 }
 
 // Each value is only ever replaced whole or appended to, so a panic elsewhere
