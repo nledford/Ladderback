@@ -425,4 +425,21 @@ mod tests {
         assert_eq!(refused, Err(ImportError::AliasTaken(alias("nas"))));
         assert!(reader.asked().is_empty());
     }
+
+    #[tokio::test]
+    async fn the_profile_is_read_once_for_the_alias_it_is_imported_as() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let reader = Arc::new(FakeProfileReader::new(Ok(profile(
+            vec![plan("home", None)],
+            Hooks::default(),
+        ))));
+        ImportProfile::new(reader.clone(), config.clone())
+            .import(Path::new("nas.toml"), alias("nas"))
+            .await
+            .expect("imported");
+        assert_eq!(
+            reader.asked(),
+            vec![(Path::new("nas.toml").to_path_buf(), alias("nas"))]
+        );
+    }
 }
