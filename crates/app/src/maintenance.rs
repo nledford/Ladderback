@@ -585,11 +585,16 @@ impl RunMaintenance {
         let partition = ForgetSelection::partition(&snapshots, &self.agent, &managed);
         let plans = repository_plans(&config, alias);
         // Only an unmanaged group is matched by a plan's sources, so only
-        // then does the engine's own spelling of them need asking.
-        let normalized = if partition.unmanaged.is_empty() {
+        // then does the engine's own spelling of them need asking. A plan
+        // whose sources can't be read claims nothing.
+        let normalized: Vec<Plan> = if partition.unmanaged.is_empty() {
             Vec::new()
         } else {
-            self.normalized(&plans).await?
+            self.normalized(&plans)
+                .await
+                .into_iter()
+                .filter_map(|(_, result)| result.ok())
+                .collect()
         };
         let hostname = self.host_of(&config);
         // Which plan takes orphaned history is the person's choice, so every
@@ -738,9 +743,16 @@ impl RunMaintenance {
                     .clone()
             }
             AdoptionSource::Unmanaged => {
-                let normalized = self.normalized(&plans).await?;
-                // Every plan of `plans` is among the normalized ones, so the
-                // destination is too.
+                let mut normalized = Vec::new();
+                for (id, result) in self.normalized(&plans).await {
+                    match result {
+                        Ok(plan) => normalized.push(plan),
+                        // Only the destination has to be readable: a plan
+                        // whose sources can't be read matches nothing.
+                        Err(error) if id == adoption.into => return Err(sources_failed(error)),
+                        Err(_) => {}
+                    }
+                }
                 let into = normalized
                     .iter()
                     .find(|plan| plan.id == adoption.into)
@@ -761,19 +773,24 @@ impl RunMaintenance {
         Ok((partition, group))
     }
 
-    /// `plans` with their sources as the engine records them, so matching an
-    /// unmanaged group compares like with like: rustic resolves symlinks when
-    /// it records a snapshot's paths.
-    async fn normalized(&self, plans: &[Plan]) -> Result<Vec<Plan>, MaintenanceError> {
-        futures::future::try_join_all(plans.iter().map(|plan| async {
-            self.sources.normalized(&plan.sources).await.map(|sources| {
-                let mut normalized = plan.clone();
-                normalized.sources = sources;
-                normalized
-            })
+    /// Each of `plans` with its sources as the engine records them, so
+    /// matching an unmanaged group compares like with like: rustic resolves
+    /// symlinks when it records a snapshot's paths. A plan whose sources
+    /// can't be read (a drive that is not mounted, a folder renamed) fails
+    /// alone, and the others are unaffected.
+    async fn normalized(&self, plans: &[Plan]) -> Vec<(PlanId, Result<Plan, SourcesError>)> {
+        futures::future::join_all(plans.iter().map(|plan| async {
+            let normalized = self
+                .sources
+                .normalized(&plan.sources)
+                .await
+                .map(|sources| Plan {
+                    sources,
+                    ..plan.clone()
+                });
+            (plan.id.clone(), normalized)
         }))
         .await
-        .map_err(sources_failed)
     }
 
     /// The host name a plan that names none matches an unmanaged group by:

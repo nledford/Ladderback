@@ -219,6 +219,11 @@ impl ForgetWorld {
         self.fail = fail;
     }
 
+    /// Makes the sources port refuse every plan that backs up `folder`.
+    pub fn refuse_sources_of(&mut self, folder: &str) {
+        self.unreadable_folder = Some(folder.to_owned());
+    }
+
     /// Adds a plan as drafted, with whatever policy it carries.
     pub async fn plan_raw(&mut self, plan: Plan) {
         self.plans.push(plan);
@@ -656,6 +661,11 @@ async fn engine_unreachable(agent: &mut Agent) {
 #[given("the repository never answers")]
 async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
+}
+
+#[given(expr = "the sources of the folder {string} cannot be read")]
+async fn sources_unreadable(agent: &mut Agent, folder: String) {
+    agent.forget.refuse_sources_of(&folder);
 }
 
 #[given("the repository lists its snapshots but never answers a read of them for retention")]

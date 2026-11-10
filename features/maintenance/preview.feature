@@ -277,3 +277,32 @@ Feature: A maintenance preview tells what a run would do before it does anything
     When the owner forgets the repository
     Then the forget is refused because the repository did not answer in time
     And the log holds no operation of this forget
+
+  Scenario: The groups still list when the sources of one plan cannot be read
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/mnt/gone"
+    And the sources of the folder "/mnt/gone" cannot be read
+    And the repository holds 2 snapshots of the plan "home"
+    And the repository holds 3 snapshots another agent's plan "home" holds
+    And the repository holds 2 snapshots no plan owns that match the plan "home"
+    When the owner lists the repository's groups
+    Then the groups list the plans "home, photos" in that order
+    And the groups list the plan "home" with 2 snapshots
+    And the groups list an orphaned group of 3 snapshots that can be adopted into "home, photos"
+    And the groups list an unmanaged group of 2 snapshots that can be adopted into "home"
+
+  Scenario: An adoption preview is not blocked by another plan whose sources cannot be read
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/mnt/gone"
+    And the sources of the folder "/mnt/gone" cannot be read
+    And the repository holds 2 snapshots no plan owns that match the plan "home"
+    When the owner previews adopting the unmanaged history into the plan "home"
+    Then the preview says 2 snapshots would be rewritten into the plan "home"
+
+  Scenario: An adoption preview into a plan whose sources cannot be read is refused
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot of the folder "/mnt/gone"
+    And the sources of the folder "/mnt/gone" cannot be read
+    And the repository holds 2 snapshots no plan owns that match the plan "home"
+    When the owner previews adopting the unmanaged history into the plan "photos"
+    Then the preview is refused because the engine cannot be reached
