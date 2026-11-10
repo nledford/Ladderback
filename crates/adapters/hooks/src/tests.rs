@@ -190,7 +190,8 @@ async fn a_hook_that_will_not_die_does_not_hold_the_runner_up() {
     let log = scratch.path().join("log");
     let entry = sh(r#"echo "pid $$" >> "$1"; exec sleep 20"#, &log);
     let runner = ProcessHookRunner::with_timeout(Duration::from_millis(300));
-    let lost = |_: Pid, _: Signal| {};
+    let sent = Mutex::new(Vec::new());
+    let lost = |_: Pid, signal: Signal| sent.lock().unwrap().push(signal);
     let stop = Stop {
         grace: Duration::from_millis(300),
         reap_limit: Duration::from_millis(300),
@@ -208,6 +209,9 @@ async fn a_hook_that_will_not_die_does_not_hold_the_runner_up() {
         "it waited {:?}",
         started.elapsed()
     );
+    // Each signal once, though the hook was still there when the call ended
+    // and was dropped.
+    assert_eq!(*sent.lock().unwrap(), [Signal::SIGTERM, Signal::SIGKILL]);
 }
 
 /// A hook that ignores SIGTERM is killed once its grace is over: not before,
@@ -284,9 +288,9 @@ async fn dropping_the_call_during_the_grace_kills_the_hook() {
     let log = scratch.path().join("log");
     let entry = sh(
         concat!(
-            r#"trap 'echo term >> "$1"' TERM"#,
-            "\n",
             r#"echo "pid $$" >> "$1""#,
+            "\n",
+            r#"trap 'echo term >> "$1"' TERM"#,
             "\n",
             "while :; do sleep 1 & wait $!; done",
         ),
@@ -415,4 +419,36 @@ async fn a_hook_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
         trapped.lines
     );
     assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
+}
+
+/// What the grace can't do: a hook that ends on the SIGTERM is reaped, and
+/// the group is not signalled after that, as its id may be another process's
+/// by then. A descendant that ignores the SIGTERM too is left running.
+#[tokio::test]
+async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
+    let trapped = run_trapping(
+        concat!(
+            "trap '' TERM\n",
+            "sleep 300 &\n",
+            r#"echo "pid $!" >> "$1""#,
+            "\n",
+            r#"trap 'echo term >> "$1"; exit 0' TERM"#,
+            "\n",
+            r#"echo ready >> "$1""#,
+            "\n",
+            "while :; do sleep 1 & wait $!; done",
+        ),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
+    )
+    .await;
+    let descendant = pid_in(&trapped.lines);
+    let _reaper = Reaper(descendant);
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(trapped.wrote("term"), "{:?}", trapped.lines);
+    assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
+    assert!(
+        kill(Pid::from_raw(descendant), None).is_ok(),
+        "{descendant} was killed"
+    );
 }
