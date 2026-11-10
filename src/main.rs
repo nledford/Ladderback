@@ -10,12 +10,13 @@
     clippy::unreachable
 )]
 
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use api::MsgArg;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 
 mod composition;
@@ -30,6 +31,10 @@ mod profiles;
     about = "Self-hosted backup manager for rustic"
 )]
 struct Cli {
+    /// Print plain text: no colour, and nothing drawn over what is already
+    /// printed.
+    #[arg(long, global = true)]
+    plain: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -70,20 +75,34 @@ enum Command {
     Worker,
 }
 
+/// The command line, parsed. `clap` colours its help and its usage errors
+/// while it parses, before it has a value for `--plain`, so the raw arguments
+/// are scanned for the flag first (see [`output::asked_for_plain`]).
+fn parse(args: Vec<OsString>) -> Cli {
+    let plain = output::asked_for_plain(&args);
+    let mut command = Cli::command().color(output::clap_colour(plain));
+    let mut matches = command
+        .try_get_matches_from_mut(args)
+        .unwrap_or_else(|error| error.exit());
+    Cli::from_arg_matches_mut(&mut matches)
+        .unwrap_or_else(|error| error.format(&mut command).exit())
+}
+
 fn main() -> ExitCode {
-    match Cli::parse().command {
+    let Cli { plain, command } = parse(std::env::args_os().collect());
+    match command {
         Command::Serve {
             listen,
             allowed_hosts,
-        } => serve(listen, allowed_hosts),
+        } => serve(listen, allowed_hosts, plain),
         Command::ImportProfile { file, repo_name } => profiles::import_profile(file, repo_name),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
         Command::Worker => engine::worker::main(),
     }
 }
 
-fn serve(listen: SocketAddr, allowed_hosts: Vec<String>) -> ExitCode {
-    logging::install();
+fn serve(listen: SocketAddr, allowed_hosts: Vec<String>, plain: bool) -> ExitCode {
+    logging::install(plain);
     log::info!("ladderback {} starting", env!("CARGO_PKG_VERSION"));
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     // Checked here, not by the argument parser, so that the refusal is said

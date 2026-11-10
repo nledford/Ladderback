@@ -10,15 +10,22 @@ use clap::ColorChoice;
 /// because `clap` formats its help and its usage errors while it parses,
 /// before the flag has a value; what follows a bare `--` is a file name or a
 /// value, never a flag.
-pub(crate) fn asked_for_plain(_args: &[OsString]) -> bool {
-    todo!()
+pub(crate) fn asked_for_plain(args: &[OsString]) -> bool {
+    args.iter()
+        .skip(1)
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--plain")
 }
 
 /// The colour `clap` may use in its help and its usage errors: none when
 /// plain output was asked for; otherwise whatever the environment and the
 /// terminal say.
-pub(crate) fn clap_colour(_plain: bool) -> ColorChoice {
-    todo!()
+pub(crate) fn clap_colour(plain: bool) -> ColorChoice {
+    if plain {
+        ColorChoice::Never
+    } else {
+        ColorChoice::Auto
+    }
 }
 
 #[cfg(test)]
