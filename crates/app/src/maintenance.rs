@@ -570,14 +570,12 @@ enum Played {
     Ended,
 }
 
-/// The job as the engine jobs that do it: a forget or rewrite naming more
-/// snapshots than [`MAX_JOB_IDS`] is split into several, in order, each
-/// naming no more; any other job, and one naming none, stays whole.
+/// The job as the engine jobs that do it: a forget or rewrite is cut into
+/// jobs of at most [`MAX_JOB_IDS`] snapshots each, in order (one job when they
+/// all fit, and one naming none stays that one); any other job stays whole.
 fn split(job: Job) -> Vec<Job> {
     match job {
-        Job::Forget(job) if job.ids.len() > MAX_JOB_IDS => job
-            .ids
-            .chunks(MAX_JOB_IDS)
+        Job::Forget(job) => chunks(&job.ids)
             .map(|ids| {
                 Job::Forget(ForgetJob {
                     repository: job.repository.clone(),
@@ -585,9 +583,7 @@ fn split(job: Job) -> Vec<Job> {
                 })
             })
             .collect(),
-        Job::Rewrite(job) if job.ids.len() > MAX_JOB_IDS => job
-            .ids
-            .chunks(MAX_JOB_IDS)
+        Job::Rewrite(job) => chunks(&job.ids)
             .map(|ids| {
                 Job::Rewrite(RewriteJob {
                     repository: job.repository.clone(),
@@ -598,6 +594,15 @@ fn split(job: Job) -> Vec<Job> {
             .collect(),
         job => vec![job],
     }
+}
+
+/// `ids` in consecutive parts of at most [`MAX_JOB_IDS`]; no ids make one
+/// empty part, so a job is never lost.
+fn chunks(ids: &[SnapshotId]) -> impl Iterator<Item = &[SnapshotId]> {
+    (0..ids.len().max(1)).step_by(MAX_JOB_IDS).map(|start| {
+        ids.get(start..ids.len().min(start + MAX_JOB_IDS))
+            .unwrap_or_default()
+    })
 }
 
 /// The result of the jobs so far with the next one's added: the snapshots
