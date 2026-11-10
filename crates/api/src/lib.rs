@@ -2300,7 +2300,7 @@ impl MaintenancePreviewDto {
 
 /// How a request names the group an adoption rewrites.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", tag = "from")]
+#[serde(rename_all = "kebab-case", tag = "from", from = "AdoptionFromWire")]
 pub enum AdoptionFromDto {
     /// The orphaned group these two tags name.
     Orphaned {
@@ -2312,6 +2312,26 @@ pub enum AdoptionFromDto {
     /// The unmanaged group whose host, label and paths equal the
     /// destination plan's host, label and sources.
     Unmanaged,
+}
+
+/// What [`AdoptionFromDto`] is read from. Serde's internally tagged unit
+/// variant skips every key it doesn't know, so the read goes through a
+/// struct variant that refuses them: the wire is the same, and a key the
+/// body doesn't know is an invalid body.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "from", deny_unknown_fields)]
+enum AdoptionFromWire {
+    Orphaned { agent: String, plan: String },
+    Unmanaged {},
+}
+
+impl From<AdoptionFromWire> for AdoptionFromDto {
+    fn from(wire: AdoptionFromWire) -> Self {
+        match wire {
+            AdoptionFromWire::Orphaned { agent, plan } => Self::Orphaned { agent, plan },
+            AdoptionFromWire::Unmanaged {} => Self::Unmanaged,
+        }
+    }
 }
 
 /// The body of a maintenance preview and of a maintenance start: the kind,
@@ -3016,6 +3036,16 @@ mod maintenance_dto_tests {
     fn a_source_that_is_no_kind_of_group_is_not_read() {
         assert!(from_str::<AdoptionFromDto>(r#"{"from":"somewhere"}"#).is_err());
         assert!(from_str::<AdoptionFromDto>(r#"{"agent":"a","plan":"p"}"#).is_err());
+    }
+
+    #[test]
+    fn a_source_with_a_key_its_kind_does_not_know_is_not_read() {
+        for body in [
+            r#"{"kind":"adopt","into":"demo-home","from":{"from":"unmanaged","agent":"a"}}"#,
+            r#"{"kind":"adopt","into":"demo-home","from":{"from":"orphaned","agent":"a","plan":"p","extra":1}}"#,
+        ] {
+            assert!(from_str::<MaintenanceRequestDto>(body).is_err(), "{body}");
+        }
     }
 
     #[test]
