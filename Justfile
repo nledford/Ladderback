@@ -92,6 +92,23 @@ test-acceptance *args:
 test-e2e *args:
     scripts/with-skip-log.sh cargo test --workspace --test e2e -- "$@"
 
+# A release is built with `--no-default-features`, which leaves out the
+# development pseudolocales (`pseudo`, technical design §8.4). `test` builds
+# with the default features, so the tests that exist only without them never
+# run there: the release lane of `l10n`'s tests (`tests/lanes/release.rs`) and
+# the no-pseudo test in `tests/cli_locale.rs`. This runs the tests of `l10n`
+# and `ladderback` built that way, so those run, and so does any test whose
+# result depends on the feature. The packages are named because only these two
+# have tests that read the feature; `web`'s wasm tests run in `test-wasm`. The
+# cucumber runners are left out, as in `test` (nextest's default filter). One
+# test, `isolation`, builds and runs the daemon's other test binaries itself,
+# with the default features. Arguments go to nextest.
+[doc('Run the l10n and daemon tests as a release build is made (no default features).')]
+[group('test')]
+[positional-arguments]
+test-release *args:
+    scripts/with-skip-log.sh cargo nextest run --package l10n --package ladderback --no-default-features "$@"
+
 # The runner is `wasm-bindgen-test-runner` from wasm-bindgen-cli, whose version
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is
 # Cargo's runner for wasm32 in this recipe only, so no other command changes.
@@ -204,7 +221,7 @@ red-first base='origin/main':
 
 # Run every check CI runs, except mutation testing and the red-first check.
 [group('quality')]
-verify: fmt-check lint architecture test test-contrast test-wasm test-ui
+verify: fmt-check lint architecture test test-contrast test-release test-wasm test-ui
 
 # Shows the version bump and CHANGELOG.md entry that the release PR would
 # contain for the committed history (§12.1). Changes nothing.

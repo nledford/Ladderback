@@ -208,6 +208,36 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: just test-wasm
 
+  # The tests of the build a release is: `--no-default-features`, which leaves
+  # out the development pseudolocales (technical design §8.4). `just test`
+  # builds with the defaults, so the tests that exist only without them run
+  # here alone. A job of its own, so that the `Check` jobs, which the ruleset
+  # requires, stay as they are and this one builds beside them. Not a required
+  # check: add it to the ruleset once it has proved stable.
+  release-tests:
+    name: Release-build tests (no default features)
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+        continue-on-error: true
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,cargo-nextest
+      # The rustic CLI an e2e scenario compares against (§6.2), as in `check`:
+      # without it that scenario skips, and the skip list would differ.
+      - run: scripts/install-rustic.sh
+      # The ci profile (.config/nextest.toml) retries and reports flaky tests.
+      - run: just test-release
+        env:
+          NEXTEST_PROFILE: ci
+
   mutants:
     name: Mutation testing (changed code)
     needs: changes
