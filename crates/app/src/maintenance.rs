@@ -911,6 +911,30 @@ mod tests {
     }
 
     #[test]
+    fn a_job_names_the_snapshots_it_acts_on_and_a_prune_names_none() {
+        let tags = PlanTags::new(
+            PlanId::parse("home").expect("a plan ID"),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+        );
+        assert_eq!(names(&forget(3)), 3);
+        assert_eq!(
+            names(&Job::Rewrite(RewriteJob {
+                repository: access(),
+                ids: ids(4),
+                tags,
+            })),
+            4
+        );
+        assert_eq!(
+            names(&Job::Prune(PruneJob {
+                repository: access(),
+                keep_delete: default_keep_delete(),
+            })),
+            0
+        );
+    }
+
+    #[test]
     fn a_job_that_names_no_snapshots_is_never_split() {
         let prune = Job::Prune(PruneJob {
             repository: access(),
@@ -1159,7 +1183,16 @@ mod cancel_tests {
             .await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
         assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
-        assert_eq!(finished.operation.warnings().len(), 1);
+        let [warning] = finished.operation.warnings() else {
+            panic!("one warning: {:?}", finished.operation.warnings());
+        };
+        assert_eq!(warning.kind, WarningKind::MaintenancePartial);
+        assert_eq!(warning.during, "forget");
+        assert_eq!(
+            warning.detail,
+            format!("{MAX_JOB_IDS}/{}", 2 * MAX_JOB_IDS + 1),
+            "the first job's snapshots of all the run names"
+        );
         assert_eq!(finished.result, None);
     }
 
