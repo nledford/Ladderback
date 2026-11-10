@@ -1594,3 +1594,22 @@ async fn a_value_that_is_too_long_once_escaped_is_refused_where_it_is_written() 
         assert_eq!(problem, ProfileProblem::BadValue, "{field}");
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_profile_that_is_a_pipe_is_unreadable_and_is_not_opened() {
+    // Opening a pipe for reading waits for a writer: a profile that is one
+    // must be refused without being opened.
+    let scratch = Scratch::new();
+    let pipe = scratch.work.join("nas.toml");
+    if common::fifo(&pipe).is_none() {
+        testkit::skip!("mkfifo is not available");
+    }
+    let error = scratch.reader().read(&pipe, &nas()).await.unwrap_err();
+    assert_eq!(
+        error,
+        ProfileError::Unreadable {
+            file: pipe.display().to_string()
+        }
+    );
+}

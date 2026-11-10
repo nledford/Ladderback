@@ -88,6 +88,28 @@ impl Scratch {
     }
 }
 
+/// A named pipe at `path`, or `None` where `mkfifo` is not to be had. Opening
+/// one for reading blocks until somebody opens it for writing, so a reader
+/// that opens it anyway would hang; a thread that opens it for writing
+/// unblocks that reader, which reads nothing, so the test fails instead of
+/// hanging. Where the reader leaves the pipe alone, the thread waits for the
+/// rest of the process, which ends with the test run.
+#[cfg(unix)]
+pub fn fifo(path: &Path) -> Option<()> {
+    let made = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made {
+        return None;
+    }
+    let path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = fs::OpenOptions::new().write(true).open(path);
+    });
+    Some(())
+}
+
 pub fn write_in(folder: &Path, name: &str, text: &str) -> PathBuf {
     let path = folder.join(name);
     fs::write(&path, text).expect("a profile");

@@ -663,3 +663,40 @@ async fn the_switch_in_a_used_profile_is_refused_naming_that_profile() {
         other => panic!("unsupported, got {other:?}"),
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_used_profile_that_is_a_pipe_is_unreadable_and_is_not_opened() {
+    let scratch = Scratch::new();
+    let pipe = scratch.rustic.join("base.toml");
+    if common::fifo(&pipe).is_none() {
+        testkit::skip!("mkfifo is not available");
+    }
+    let error = scratch
+        .read(&uses(&["base"], &format!("{REPOSITORY}\n{ENTRY}")))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProfileError::Unreadable {
+            file: pipe.display().to_string()
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_used_profile_that_is_a_folder_is_unreadable() {
+    let scratch = Scratch::new();
+    let folder = scratch.work.join("base.toml");
+    fs::create_dir(&folder).expect("a folder");
+    let error = scratch
+        .read(&uses(&["base"], &format!("{REPOSITORY}\n{ENTRY}")))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProfileError::Unreadable {
+            file: folder.display().to_string()
+        }
+    );
+}
