@@ -30,20 +30,30 @@ const READ_CHUNK: usize = 8 * 1024;
 /// sleep (a hung mount) may never be reaped.
 const REAP_LIMIT: Duration = Duration::from_secs(5);
 
-/// What stops a command that outlives its limit; tests replace both parts.
+/// How long a command that outlived its limit has to end after SIGTERM before
+/// it is killed.
+const KILL_GRACE: Duration = Duration::from_secs(5);
+
+/// What stops a command that outlives its limit; tests replace the parts.
 pub(crate) struct Stop<'a> {
-    /// How long a command that was signalled is waited for.
+    /// How long a command that got SIGTERM is given to end before SIGKILL.
+    pub(crate) grace: Duration,
+    /// How long a command that got SIGKILL is waited for.
     pub(crate) reap_limit: Duration,
-    /// Signals the process group with this id.
-    pub(crate) kill: &'a (dyn Fn(Pid) + Send + Sync),
+    /// Sends a signal to the process group with this id.
+    pub(crate) signal: &'a (dyn Fn(Pid, Signal) + Send + Sync),
 }
 
 impl Stop<'static> {
-    /// SIGKILL to the group, and five seconds for the command to be reaped.
-    const SIGKILL: Self = Self {
-        reap_limit: REAP_LIMIT,
-        kill: &kill_group,
-    };
+    /// The real stop: SIGTERM to the group, SIGKILL after `grace`, and five
+    /// seconds for the command to be reaped.
+    pub(crate) const fn after(grace: Duration) -> Self {
+        Self {
+            grace,
+            reap_limit: REAP_LIMIT,
+            signal: &signal_group,
+        }
+    }
 }
 
 /// Runs `command` and gives the first line of its output.
@@ -51,7 +61,7 @@ pub(crate) async fn run(
     command: &CommandLine,
     limit: Duration,
 ) -> Result<SecretValue, SecretError> {
-    run_with(command, limit, &Stop::SIGKILL).await
+    run_with(command, limit, &Stop::after(KILL_GRACE)).await
 }
 
 pub(crate) async fn run_with(
@@ -110,7 +120,7 @@ pub(crate) async fn run_with(
             return Err(unreachable(error.to_string()));
         }
         Ok(Outcome::TimedOut) => {
-            running.kill_and_reap().await;
+            running.terminate_and_reap().await;
             return Err(fail(Problem::TimedOut {
                 seconds: whole_seconds_up(limit),
             }));
@@ -162,34 +172,40 @@ impl<'a> Running<'a> {
         }
     }
 
-    fn kill(&mut self) {
+    fn send(&mut self, signal: Signal) {
         // Tokio gives no id once the child has been waited for.
         if self.signalled || self.child.id().is_none() {
             return;
         }
         if let Some(group) = self.group {
             self.signalled = true;
-            (self.stop.kill)(group);
+            (self.stop.signal)(group, signal);
         }
     }
 
     /// Signals the group and waits for the command, for as long as the stop
     /// allows: a command no signal reaches does not hold the caller up.
     async fn kill_and_reap(&mut self) {
-        self.kill();
+        self.send(Signal::SIGKILL);
         let _ = timeout(self.stop.reap_limit, self.child.wait()).await;
+    }
+
+    /// Stub: SIGKILL at once.
+    async fn terminate_and_reap(&mut self) {
+        let _grace = self.stop.grace;
+        self.kill_and_reap().await;
     }
 }
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.kill();
+        self.send(Signal::SIGKILL);
     }
 }
 
-/// Kills the whole process group: nothing left in it is not an error.
-fn kill_group(group: Pid) {
-    let _ = killpg(group, Signal::SIGKILL);
+/// Signals the whole process group: nothing left in it is not an error.
+fn signal_group(group: Pid, signal: Signal) {
+    let _ = killpg(group, signal);
 }
 
 enum Outcome {
