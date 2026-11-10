@@ -442,6 +442,12 @@ ui-orphaned-caption =
 # The button that adopts an orphaned group, named by its agent and plan, into a plan of this agent.
 ui-adopt-orphaned = Adopt history of plan { $plan } from agent { $agent } into plan { $into }
 
+# What an orphaned group says when it lacks the tag of an agent or of a plan, which an adoption names.
+ui-orphaned-untagged = This history lacks the tag of an agent or a plan, so it cannot be adopted.
+
+# What an orphaned group says when no plan of this agent could take it.
+ui-orphaned-no-plan = No plan of this agent could take this history, so it cannot be adopted.
+
 # The heading of the section of history that no agent tagged.
 ui-unmanaged-heading = Unmanaged history
 

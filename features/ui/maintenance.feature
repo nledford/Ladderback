@@ -309,3 +309,13 @@ Feature: Maintenance of a repository on the Snapshots page
     Then the dialog "Forget snapshots of demo" opens with focus inside it
     And the dialog "Forget snapshots of demo" says "No plan of this agent backs up to this repository"
     And the dialog "Forget snapshots of demo" offers only the button "Close"
+
+  Scenario: Orphaned history that no plan of this agent could take says why it cannot be adopted
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the config names no plan
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the section heading "Orphaned history"
+    And the main content shows the line "No plan of this agent could take this history, so it cannot be adopted."

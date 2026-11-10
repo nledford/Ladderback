@@ -625,10 +625,13 @@ fn orphaned_group_view(page: Page, index: usize, group: OrphanedGroupDto) -> imp
             })
         })
         .collect_view();
+    let stuck = maintenance::orphaned_stuck(&group)
+        .map(|why| view! { <p>{page.words(&wording::orphaned_stuck(why))}</p> });
     view! {
         <h3>{heading}</h3>
         {snapshots_view(page, caption, group.snapshots, rows)}
         {adoptions}
+        {stuck}
     }
 }
 
@@ -679,10 +682,8 @@ fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> i
             adoption_view(page, format!("adopt-unmanaged-{index}-{target}"), adoption)
         })
         .collect_view();
-    let no_plan = group
-        .adopt_into
-        .is_empty()
-        .then(|| view! { <p>{page.plain(msg::UI_UNMANAGED_NO_PLAN)}</p> });
+    let no_plan = maintenance::unmanaged_stuck(&group)
+        .then(|| view! { <p>{page.words(&wording::unmanaged_stuck())}</p> });
     view! {
         <h3>{heading}</h3>
         {paths}

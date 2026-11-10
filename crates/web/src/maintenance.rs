@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use api::{
     AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg,
-    OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto,
+    OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto,
 };
 
 use crate::announcer::Politeness;
@@ -387,6 +387,34 @@ pub(crate) fn adopt_orphaned(
         )),
         Owner::Plan(_) | Owner::Agent(_) | Owner::Neither => None,
     }
+}
+
+/// Why a group of history is offered no adoption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stuck {
+    /// The group lacks the tag of an agent or of a plan, which an adoption
+    /// names.
+    Untagged,
+    /// No plan of this agent could take the group.
+    NoPlan,
+}
+
+/// Why the orphaned `group` is offered no adoption; nothing when it is
+/// offered one. A missing tag comes first: no plan could make up for it.
+pub(crate) fn orphaned_stuck(group: &OrphanedGroupDto) -> Option<Stuck> {
+    if !matches!(Owner::of(group), Owner::Both { .. }) {
+        Some(Stuck::Untagged)
+    } else if group.adopt_into.is_empty() {
+        Some(Stuck::NoPlan)
+    } else {
+        None
+    }
+}
+
+/// Whether no plan of this agent could take the unmanaged `group`. It carries
+/// no tag for an adoption to lack, so a plan is all that could be missing.
+pub(crate) fn unmanaged_stuck(group: &UnmanagedGroupDto) -> bool {
+    group.adopt_into.is_empty()
 }
 
 /// How a run ended.
@@ -1351,6 +1379,53 @@ mod tests {
             None
         );
         assert_eq!(adopt_orphaned(&orphaned(None, None), "home"), None);
+    }
+
+    #[test]
+    fn an_orphaned_group_with_both_tags_and_a_plan_to_go_to_is_not_stuck() {
+        assert_eq!(
+            orphaned_stuck(&orphaned(Some("agent-a"), Some("old"))),
+            None
+        );
+    }
+
+    #[test]
+    fn an_orphaned_group_that_lacks_a_tag_is_stuck_for_want_of_it() {
+        for (carried, group) in [
+            ("a plan only", orphaned(None, Some("old"))),
+            ("an agent only", orphaned(Some("agent-a"), None)),
+            ("neither", orphaned(None, None)),
+        ] {
+            assert_eq!(orphaned_stuck(&group), Some(Stuck::Untagged), "{carried}");
+        }
+    }
+
+    #[test]
+    fn an_orphaned_group_that_lacks_a_tag_is_untagged_even_with_no_plan_either() {
+        let mut group = orphaned(None, Some("old"));
+        group.adopt_into.clear();
+        assert_eq!(orphaned_stuck(&group), Some(Stuck::Untagged));
+    }
+
+    #[test]
+    fn an_orphaned_group_with_both_tags_and_no_plan_to_go_to_is_stuck_for_want_of_a_plan() {
+        let mut group = orphaned(Some("agent-a"), Some("old"));
+        group.adopt_into.clear();
+        assert_eq!(orphaned_stuck(&group), Some(Stuck::NoPlan));
+    }
+
+    #[test]
+    fn an_unmanaged_group_is_stuck_when_no_plan_could_take_it() {
+        let group = |adopt_into: Vec<String>| UnmanagedGroupDto {
+            hostname: "laptop".to_owned(),
+            label: String::new(),
+            paths: Vec::new(),
+            count: 0,
+            snapshots: Vec::new(),
+            adopt_into,
+        };
+        assert!(unmanaged_stuck(&group(Vec::new())));
+        assert!(!unmanaged_stuck(&group(vec!["home".to_owned()])));
     }
 
     #[test]

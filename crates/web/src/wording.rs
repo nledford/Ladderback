@@ -6,7 +6,9 @@
 use api::{AdoptionFromDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, UnmanagedGroupDto};
 use l10n::{MessageId, msg};
 
-use crate::maintenance::{self, Confirm, End, Fact, Kind, Outcome, Owner, Review, Told, Wait};
+use crate::maintenance::{
+    self, Confirm, End, Fact, Kind, Outcome, Owner, Review, Stuck, Told, Wait,
+};
 
 /// A catalog message and what its variables read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -304,6 +306,19 @@ pub(crate) fn adopt_unmanaged(group: &UnmanagedGroupDto, into: &str) -> Adoption
         label: words(msg::UI_ADOPT_UNMANAGED, args),
         request: maintenance::adoption(into, AdoptionFromDto::Unmanaged),
     }
+}
+
+/// What an orphaned group says when nothing offers to adopt it, by why.
+pub(crate) fn orphaned_stuck(why: Stuck) -> Words {
+    match why {
+        Stuck::Untagged => words(msg::UI_ORPHANED_UNTAGGED, Vec::new()),
+        Stuck::NoPlan => words(msg::UI_ORPHANED_NO_PLAN, Vec::new()),
+    }
+}
+
+/// What an unmanaged group says when no plan of this agent could take it.
+pub(crate) fn unmanaged_stuck() -> Words {
+    words(msg::UI_UNMANAGED_NO_PLAN, Vec::new())
 }
 
 #[cfg(test)]
@@ -814,6 +829,35 @@ mod tests {
             None
         );
         assert_eq!(adopt_orphaned(&orphaned(None, None), "home"), None);
+    }
+
+    #[test]
+    fn a_group_that_cannot_be_adopted_says_why_in_a_message_of_its_own() {
+        assert_eq!(
+            orphaned_stuck(Stuck::Untagged),
+            said(msg::UI_ORPHANED_UNTAGGED, &[])
+        );
+        assert_eq!(
+            orphaned_stuck(Stuck::NoPlan),
+            said(msg::UI_ORPHANED_NO_PLAN, &[])
+        );
+        assert_eq!(unmanaged_stuck(), said(msg::UI_UNMANAGED_NO_PLAN, &[]));
+    }
+
+    #[test]
+    fn the_reasons_no_group_is_adopted_read_in_english() {
+        assert_eq!(
+            written(&orphaned_stuck(Stuck::Untagged)),
+            "This history lacks the tag of an agent or a plan, so it cannot be adopted."
+        );
+        assert_eq!(
+            written(&orphaned_stuck(Stuck::NoPlan)),
+            "No plan of this agent could take this history, so it cannot be adopted."
+        );
+        assert_eq!(
+            written(&unmanaged_stuck()),
+            "No plan of this agent backs up this host, label and paths, so this history cannot be adopted."
+        );
     }
 
     #[test]
