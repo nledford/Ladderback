@@ -641,7 +641,8 @@ mod tests {
             into: plan("home"),
             snapshots: vec![snapshot(2), snapshot(1)],
         };
-        let selection = SelectionToken::of(&[snapshot(2).id, snapshot(1).id]);
+        let selection =
+            SelectionToken::of_adoption(&plan("home"), &[snapshot(2).id, snapshot(1).id]);
         assert_eq!(adopt.selection(), selection);
         assert_eq!(
             preview_dto(&alias(), &MaintenancePreview::Adopt(adopt)),
