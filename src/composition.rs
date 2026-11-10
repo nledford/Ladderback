@@ -864,6 +864,26 @@ pub(crate) fn repository_alias_invalid() -> Refusal {
     }
 }
 
+/// A command that has no folder to keep the configuration in: the platform
+/// names no home folder and no configuration folder is set.
+pub(crate) fn config_folder_unknown() -> Refusal {
+    Refusal {
+        code: ErrorCode::ConfigFolderUnknown,
+        args: Vec::new(),
+        detail: None,
+    }
+}
+
+/// A command whose async runtime did not start. The detail is the operating
+/// system's own message, which the command line shows as it came.
+pub(crate) fn runtime_unavailable(error: &std::io::Error) -> Refusal {
+    Refusal {
+        code: ErrorCode::RuntimeUnavailable,
+        args: Vec::new(),
+        detail: Some(error.to_string()),
+    }
+}
+
 /// What the reader said was wrong with a profile.
 fn profile_refusal(error: ProfileError) -> Refusal {
     match error {
@@ -2288,6 +2308,27 @@ mod tests {
         assert!(refusal.args.is_empty());
         assert_eq!(refusal.detail, None);
         assert!(said(&refusal).contains("lower-case letters"));
+    }
+
+    #[test]
+    fn no_folder_for_the_configuration_is_refused_by_its_code_alone() {
+        let refusal = config_folder_unknown();
+        assert_eq!(refusal.code, ErrorCode::ConfigFolderUnknown);
+        assert!(refusal.args.is_empty());
+        assert_eq!(refusal.detail, None);
+        let shown = said(&refusal);
+        assert!(shown.contains("LADDERBACK_CONFIG_DIR"), "{shown}");
+    }
+
+    #[test]
+    fn a_runtime_that_did_not_start_is_refused_with_the_operating_systems_words() {
+        let refusal = runtime_unavailable(&std::io::Error::other("Too many open files"));
+        assert_eq!(refusal.code, ErrorCode::RuntimeUnavailable);
+        assert!(refusal.args.is_empty());
+        assert_eq!(refusal.detail.as_deref(), Some("Too many open files"));
+        let shown = said(&refusal);
+        assert!(shown.contains("Too many open files"), "{shown}");
+        assert!(shown.contains("open files and threads"), "{shown}");
     }
 
     #[test]

@@ -186,6 +186,14 @@ pub enum ErrorCode {
     /// comma, which rustic reads as two tags. Nothing was written. The
     /// argument `tag` is the tag.
     ProfileExportTagComma,
+    /// A command of the command line has no folder to keep the configuration
+    /// in: the platform names no home folder and no configuration folder is
+    /// set. Nothing was done.
+    ConfigFolderUnknown,
+    /// A command of the command line could not start the async runtime it
+    /// works on, so it did nothing. The detail is the operating system's own
+    /// message.
+    RuntimeUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -623,6 +631,8 @@ impl ErrorCode {
             | Self::OriginNotAllowed
             | Self::JsonRequired
             | Self::InlineSecret
+            | Self::ConfigFolderUnknown
+            | Self::RuntimeUnavailable
             | Self::Unknown => &[],
         }
     }
@@ -1173,6 +1183,8 @@ mod tests {
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,
+            ErrorCode::ConfigFolderUnknown,
+            ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,
         ] {
             assert!(code.args().is_empty(), "{code:?}");
@@ -1280,6 +1292,17 @@ mod tests {
             WarningCode::ProfileRetentionEmpty,
         ] {
             assert!(code.args().is_empty(), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn the_codes_of_a_command_that_cannot_start_are_named_on_the_wire() {
+        for (code, wire) in [
+            (ErrorCode::ConfigFolderUnknown, r#""config-folder-unknown""#),
+            (ErrorCode::RuntimeUnavailable, r#""runtime-unavailable""#),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
         }
     }
 }

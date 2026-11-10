@@ -26,8 +26,8 @@ use l10n::{Localizer, PosixEnv, msg};
 use platform::{SystemClock, agent_id, dirs};
 
 use crate::composition::{
-    Notice, Refusal, export_refusal, import_refusal, plan_unknown, profile_notice,
-    repository_alias_invalid,
+    Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
+    profile_notice, repository_alias_invalid, runtime_unavailable,
 };
 use crate::output::{Report, write_json};
 use crate::{say, text};
@@ -133,6 +133,16 @@ enum NotImported {
 }
 
 impl NotImported {
+    /// Why, as the code, arguments and detail a document carries (§8.4).
+    fn refusal(self) -> Refusal {
+        match self {
+            Self::NoConfigDir => config_folder_unknown(),
+            Self::Alias(_) => repository_alias_invalid(),
+            Self::Runtime(error) => runtime_unavailable(&error),
+            Self::Refused(refusal) => refusal,
+        }
+    }
+
     /// Says why on stderr, as the catalog says it. `file` is the profile.
     fn say(&self, localizer: &Localizer, file: &Path) {
         match self {
@@ -217,27 +227,15 @@ fn tell_import(
 }
 
 /// Prints what the import did, or why it saved nothing, as one JSON document
-/// on stdout, and nothing on stderr. Not yet a document: a failure that has
-/// no code, which is said in words on stderr, as is a document that cannot be
-/// written, which has nowhere to go.
-fn document_import(
-    localizer: &Localizer,
-    file: &Path,
-    outcome: Result<Imported, NotImported>,
-) -> ExitCode {
+/// on stdout, and nothing on stderr. Only a document that cannot be written,
+/// which has nowhere to go, is said in words on stderr.
+fn document_import(localizer: &Localizer, outcome: Result<Imported, NotImported>) -> ExitCode {
     let (written, status) = match outcome {
         Ok(imported) => (print_json(&import_document(imported)), ExitCode::SUCCESS),
-        Err(NotImported::Refused(refusal)) => {
-            (print_json(&failure_document(refusal)), ExitCode::FAILURE)
-        }
-        Err(NotImported::Alias(_)) => (
-            print_json(&failure_document(repository_alias_invalid())),
+        Err(not_imported) => (
+            print_json(&failure_document(not_imported.refusal())),
             ExitCode::FAILURE,
         ),
-        Err(not_imported) => {
-            not_imported.say(localizer, file);
-            return ExitCode::FAILURE;
-        }
     };
     match written {
         Ok(()) => status,
@@ -264,7 +262,7 @@ pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>, report: R
     let outcome = import(&file, repo_name.as_deref());
     match report {
         Report::Text => tell_import(&localizer, &file, outcome),
-        Report::Json => document_import(&localizer, &file, outcome),
+        Report::Json => document_import(&localizer, outcome),
     }
 }
 
@@ -454,6 +452,60 @@ mod tests {
                         "line": {"type": "text", "value": "7"},
                     },
                     "detail": "unknown field",
+                },
+            })
+        );
+    }
+
+    /// An import that saved nothing, as the document `--json` prints.
+    fn failure_of(not_imported: NotImported) -> serde_json::Value {
+        serde_json::to_value(failure_document(not_imported.refusal())).unwrap()
+    }
+
+    #[test]
+    fn an_import_with_no_folder_for_the_configuration_is_a_code_alone() {
+        assert_eq!(
+            failure_of(NotImported::NoConfigDir),
+            serde_json::json!({"error": {"code": "config-folder-unknown"}})
+        );
+    }
+
+    #[test]
+    fn an_import_whose_runtime_did_not_start_carries_the_operating_systems_words() {
+        assert_eq!(
+            failure_of(NotImported::Runtime(io::Error::other(
+                "Too many open files"
+            ))),
+            serde_json::json!({
+                "error": {
+                    "code": "runtime-unavailable",
+                    "detail": "Too many open files",
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn an_import_with_no_name_for_the_repository_is_a_code_alone_whichever_the_problem() {
+        for problem in [
+            AliasProblem::BadName("Not_A_Name".to_owned()),
+            AliasProblem::NoName,
+        ] {
+            assert_eq!(
+                failure_of(NotImported::Alias(problem)),
+                serde_json::json!({"error": {"code": "repository-alias-invalid"}})
+            );
+        }
+    }
+
+    #[test]
+    fn a_refusal_of_the_import_is_the_refusal_itself() {
+        assert_eq!(
+            failure_of(NotImported::Refused(plan_unknown("home"))),
+            serde_json::json!({
+                "error": {
+                    "code": "plan-unknown",
+                    "args": {"plan": {"type": "text", "value": "home"}},
                 },
             })
         );

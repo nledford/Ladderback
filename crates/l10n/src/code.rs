@@ -81,6 +81,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProfileExportReference => msg::ERROR_PROFILE_EXPORT_REFERENCE,
     ProfileExportUrlPassword => msg::ERROR_PROFILE_EXPORT_URL_PASSWORD,
     ProfileExportTagComma => msg::ERROR_PROFILE_EXPORT_TAG_COMMA,
+    ConfigFolderUnknown => msg::ERROR_CONFIG_FOLDER_UNKNOWN,
+    RuntimeUnavailable => msg::ERROR_RUNTIME_UNAVAILABLE,
     Unknown => msg::ERROR_UNKNOWN,
 });
 
