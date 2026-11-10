@@ -11,6 +11,7 @@
     clippy::unreachable
 )]
 
+mod body_limit;
 mod repositories;
 mod request_checks;
 
@@ -25,7 +26,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 #[cfg(not(debug_assertions))]
 use rust_embed::RustEmbed;
@@ -308,7 +309,8 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// history, one operation, cancel — the catalog routes the pages read: the
 /// plans, the repositories, one repository's snapshots — and the routes that
 /// test, connect and initialise a repository. A request that fails `checks`
-/// never reaches a route.
+/// never reaches a route, and neither does one whose body is over the limit
+/// of its class of route (§10.1).
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     Router::new()
         .route("/api/v1/events", axum::routing::get(events))
@@ -348,6 +350,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             let assets = Arc::clone(&assets);
             async move { serve(assets.as_ref(), &method, &uri) }
         })
+        .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce))
 }
 

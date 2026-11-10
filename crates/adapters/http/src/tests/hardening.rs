@@ -26,6 +26,18 @@ async fn json(response: Response) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn a_body_of_exactly_the_limit_is_read() {
+    let response = request(
+        ui(),
+        Method::POST,
+        "/api/v1/operations",
+        &plan_body(API_LIMIT),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn a_body_one_byte_over_the_limit_is_refused_with_a_typed_code() {
     let response = request(
         ui(),

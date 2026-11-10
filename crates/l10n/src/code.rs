@@ -54,6 +54,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
     RepositoryUnknown => msg::ERROR_REPOSITORY_UNKNOWN,
     InvalidBody => msg::ERROR_INVALID_BODY,
+    BodyTooLarge => msg::ERROR_BODY_TOO_LARGE,
     OperationUnknown => msg::ERROR_OPERATION_UNKNOWN,
     OperationNotRunning => msg::ERROR_OPERATION_NOT_RUNNING,
     InvalidCursor => msg::ERROR_INVALID_CURSOR,

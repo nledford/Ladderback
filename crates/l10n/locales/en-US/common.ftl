@@ -135,6 +135,10 @@ error-repository-unknown = There is no repository { $alias }. Add it to the conf
 # A request's body was not the JSON the route takes.
 error-invalid-body = { -brand-name } could not read the request's body. Send the JSON the route takes.
 
+# A request's body was larger than the most its route takes, so nothing ran.
+# $limit (bytes): the most the route takes, as a size such as 128 KiB.
+error-body-too-large = { -brand-name } did not read this request, because its body is larger than { $limit }. Send less in one request, then try again.
+
 # The request names an operation the log has none of.
 # $operation (text): the operation's ID.
 error-operation-unknown = There is no operation { $operation }. Refresh the history page, or run a new operation.

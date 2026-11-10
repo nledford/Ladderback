@@ -11,6 +11,13 @@ Feature: Request body limits
 
   Rule: A request to the API may carry up to 128 KiB (131,072 bytes)
 
+    Scenario: A body of exactly the limit is read
+      Given a "POST" request for "/api/v1/operations"
+      And the request has the header "Content-Type: application/json"
+      And the request has a JSON body of 131072 bytes
+      When the request is sent
+      Then the request isn't refused for its size
+
     Scenario Outline: A body of <size> bytes sent to <path> is refused
       Given a "POST" request for "<path>"
       And the request has the header "Content-Type: application/json"
