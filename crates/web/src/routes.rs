@@ -677,6 +677,11 @@ mod tests {
     }
 
     #[test]
+    fn the_repositories_page_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/repositories"), "Repositories – Ladderback");
+    }
+
+    #[test]
     fn the_snapshots_page_is_titled_with_the_product_name() {
         assert_eq!(title_of("/snapshots"), "Snapshots – Ladderback");
     }

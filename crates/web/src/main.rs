@@ -48,6 +48,7 @@ mod backend;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod page;
+mod repositories;
 mod routes;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod time_zones;

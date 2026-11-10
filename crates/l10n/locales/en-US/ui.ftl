@@ -295,3 +295,145 @@ ui-no-snapshots = No snapshots yet.
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## The navigation every page shares.
+
+# The accessible name of the navigation in the header, the list of links to the pages.
+ui-nav-label = Pages
+
+# The navigation's link to the operations page.
+ui-nav-operations = Operations
+
+# The navigation's link to the snapshots page.
+ui-nav-snapshots = Snapshots
+
+# The navigation's link to the repositories page.
+ui-nav-repositories = Repositories
+
+## The repositories page: the repositories Ladderback backs up to, and the
+## form that tests, connects or creates one (§4.4).
+
+# The repositories page's title, as the browser's tab and history show it.
+ui-repositories-title = Repositories – { -brand-name }
+
+# The repositories page's heading: its one main heading.
+ui-repositories-heading = Repositories
+
+# The repositories page's text, above the list.
+ui-repositories-body = The repositories { -brand-name } backs up to.
+
+# The repositories table's caption.
+ui-repositories-caption = Repositories
+
+# The repositories table's column of names.
+ui-column-name = Name
+
+# The repositories table's column of locations.
+ui-column-location = Location
+
+# The repositories table's column of where each password comes from.
+ui-column-password = Password
+
+# What the repositories page says when none is configured.
+ui-no-repositories = No repositories yet.
+
+# The second line of a location cell: where the hot half of a repository kept in
+# two places is.
+# $location (text): that location, with any password in it masked. It is shown as it came.
+ui-repository-hot = Hot storage: { $location }
+
+# A password source: the configuration file holds the password itself. The
+# password is never shown.
+ui-password-inline = Kept in the configuration file
+
+# A password source: a file holds the password.
+# $path (text): the file's path. It is shown as it came.
+ui-password-file = Read from the file { $path }
+
+# A password source: an entry of the operating system's keyring holds the password.
+# $entry (text): the entry, as service and name. It is shown as it came.
+ui-password-keyring = Read from the keyring entry { $entry }
+
+# A password source: an environment variable of the daemon holds the password.
+# $name (text): the variable's name. It is shown as it came.
+ui-password-env = Read from the environment variable { $name }
+
+# A password source: a program prints the password.
+# $program (text): the program's name. It is shown as it came.
+ui-password-command = Read from the output of { $program }
+
+# The heading of the form that tests, connects or creates a repository.
+ui-repositories-form-heading = Test, connect or create a repository
+
+# The label of the field for the name a repository is saved under.
+ui-repositories-name-label = Name
+
+# The hint under the name field.
+ui-repositories-name-hint = Up to 64 lower-case letters, digits and hyphens. Connecting a repository needs one.
+
+# The label of the field for where the repository is.
+ui-repositories-location-label = Location
+
+# The hint under the location field. The location is typed as it is: keep the example a string literal.
+ui-repositories-location-hint = A folder on this computer, or a remote location such as { "sftp:user@host:/path" }.
+
+# The label of the optional field for the hot half of a repository kept in two places.
+ui-repositories-hot-label = Hot storage (optional)
+
+# The hint under the hot storage field.
+ui-repositories-hot-hint = The fast half of a repository kept in two places. Leave it empty when there is one place.
+
+# The label of the password field.
+ui-repositories-password-label = Password
+
+# The hint under the password field. It says where the typed password goes.
+ui-repositories-password-hint = { -brand-name } keeps it in its configuration file and never shows it again.
+
+# The button that opens the repository and saves nothing.
+ui-repositories-test = Test the repository
+
+# The button that opens the repository and, if it opens, saves it under the name.
+ui-repositories-connect = Connect the repository
+
+# The button that creates a repository where there is none.
+ui-repositories-create = Create the repository
+
+# The heading of the list of what is wrong with the form.
+# $count (number): how many problems the list names.
+ui-repositories-problems = { $count ->
+    [one] There is { $count } problem with the form
+   *[other] There are { $count } problems with the form
+  }
+
+# A problem with the form: the name is missing.
+ui-repositories-name-required = Enter a name for the repository.
+
+# A problem with the form: the location is missing.
+ui-repositories-location-required = Enter where the repository is.
+
+# A problem with the form: the password is missing.
+ui-repositories-password-required = Enter the repository's password.
+
+# What follows a repository that would not open, after the reason.
+ui-repositories-try-again = Check the location and the password, then try again.
+
+# Shown and announced politely while the repository is being opened or created.
+ui-repositories-working = Working with the repository…
+
+# Announced politely when a test opened the repository.
+ui-repositories-opens = The repository opens.
+
+# Shown when a test opened the repository.
+# $id (text): the repository's ID, as rustic knows it.
+ui-repositories-opens-with-id = The repository opens. Its ID is { $id }.
+
+# Announced politely when a repository was created.
+ui-repositories-created = The repository was created.
+
+# Shown when a repository was created.
+# $id (text): the repository's ID, as rustic knows it.
+ui-repositories-created-with-id = The repository was created. Its ID is { $id }.
+
+# Shown and announced politely when a repository was connected and saved.
+# $alias (text): the name it was saved under.
+ui-repositories-connected = Connected { $alias }.
