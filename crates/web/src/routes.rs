@@ -68,7 +68,7 @@ struct StartBackup {
 /// The body a cancel request carries: the JSON-body rule applies to every
 /// mutating method, so even an empty one is `{}`.
 #[derive(Serialize)]
-struct Empty {}
+pub(crate) struct Empty {}
 
 /// The operations page, the route `/operations`: the backup history, live —
 /// a running operation's progress and its end arrive over the events
@@ -570,7 +570,7 @@ fn end_display(status: &str) -> (Politeness, MessageId) {
 }
 
 /// The text of message `id`, with `args` for its variables.
-fn text_with(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String {
+pub(crate) fn text_with(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String {
     localizer.message(id, args).into_text()
 }
 
@@ -595,7 +595,7 @@ pub(crate) fn instant(localizer: &Localizer, raw: &str, zone: Option<&api::IanaZ
 
 /// A refusal the daemon answered with, as the catalog writes it (§8.4): a
 /// typed code with its arguments, never a bare status number.
-fn refusal(
+pub(crate) fn refusal(
     localizer: &Localizer,
     code: ErrorCode,
     args: &[(String, MsgArg)],
@@ -606,136 +606,6 @@ fn refusal(
         .map(|(name, arg)| (name.as_str(), arg.clone()))
         .collect::<Vec<_>>();
     localizer.error(code, &args, detail).into_text()
-}
-
-/// The snapshots page, the route `/snapshots`: one repository's snapshots,
-/// newest first, behind a repository picker (§4.4). The repositories come
-/// from one read; the snapshots of the chosen one from another, and a read
-/// that fails says so in the page's heading, like the operations page.
-#[component]
-pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
-    let heading = text(&localizer, msg::UI_SNAPSHOTS_HEADING);
-    let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
-    let body = text(&localizer, msg::UI_SNAPSHOTS_BODY);
-    let loading = text(&localizer, msg::UI_LOADING);
-    let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
-    let caption = text(&localizer, msg::UI_SNAPSHOTS_CAPTION);
-    let (snapshot_column, time_column) = (
-        text(&localizer, msg::UI_COLUMN_SNAPSHOT),
-        text(&localizer, msg::UI_COLUMN_TIME),
-    );
-    let empty = text(&localizer, msg::UI_NO_SNAPSHOTS);
-    let base = ws::origin();
-    let unreachable = RwSignal::new(false);
-    // The repositories to pick from; `None` while the read is on its way.
-    let repositories = RwSignal::<Option<Vec<String>>>::new(None);
-    // The chosen repository and its snapshots. `None` snapshots of a chosen
-    // repository is the read on its way.
-    let chosen = RwSignal::<Option<String>>::new(None);
-    let snapshots = RwSignal::<Option<Vec<api::SnapshotDto>>>::new(None);
-    let repositories_url = format!("{base}/api/v1/repositories");
-    spawn_local(async move {
-        match ws::read::<api::RepositoriesDto>(&repositories_url).await {
-            Some(read) => repositories.set(Some(
-                read.repositories.into_iter().map(|row| row.alias).collect(),
-            )),
-            None => unreachable.set(true),
-        }
-    });
-    let pick = move |alias: String| {
-        chosen.set(Some(alias.clone()));
-        snapshots.set(None);
-        let url = format!("{base}/api/v1/repositories/{alias}/snapshots");
-        spawn_local(async move {
-            match ws::read::<api::SnapshotsDto>(&url).await {
-                Some(read) => snapshots.set(Some(read.snapshots)),
-                None => unreachable.set(true),
-            }
-        });
-    };
-    // Newest first, by the raw instant each row shows: RFC 3339 UTC orders
-    // as its bytes do.
-    let sorted = Memo::new(move |_| {
-        let mut rows = snapshots.get().unwrap_or_default();
-        rows.sort_by(|a, b| b.time.cmp(&a.time));
-        rows
-    });
-    let picker_loading = loading.clone();
-    let table_localizer = Arc::clone(&localizer);
-    // The zone the browser reads its clock in: each time is written in it.
-    let viewer = l10n::viewer_zone();
-    view! {
-        <PageHeading>
-            {move || if unreachable.get() { unreachable_heading.clone() } else { heading.clone() }}
-        </PageHeading>
-        <p>{body}</p>
-        {move || {
-            unreachable
-                .get()
-                .then(|| view! { <p>{unreachable_body.clone()}</p> })
-        }}
-        {move || match repositories.get() {
-            None => view! { <p>{picker_loading.clone()}</p> }.into_any(),
-            Some(aliases) => aliases
-                .into_iter()
-                .map(|alias| {
-                    let label = text_with(
-                        &localizer,
-                        msg::UI_SNAPSHOTS_OF,
-                        &[("alias", MsgArg::Text(alias.clone()))],
-                    );
-                    let pick = pick.clone();
-                    view! {
-                        <button type="button" on:click=move |_| pick(alias.clone())>
-                            {label.clone()}
-                        </button>
-                    }
-                })
-                .collect_view()
-                .into_any(),
-        }}
-        {move || match chosen.get() {
-            None => ().into_any(),
-            Some(_) => match snapshots.get() {
-                None => view! { <p>{loading.clone()}</p> }.into_any(),
-                Some(rows) if rows.is_empty() => {
-                    view! { <p>{empty.clone()}</p> }.into_any()
-                }
-                Some(_) => {
-                    let rows_localizer = Arc::clone(&table_localizer);
-                    let rows_zone = viewer.clone();
-                    view! {
-                    <table>
-                        <caption class="text-muted">{caption.clone()}</caption>
-                        <thead>
-                            <tr>
-                                <th scope="col">{snapshot_column.clone()}</th>
-                                <th scope="col">{time_column.clone()}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <For
-                                each=move || sorted.get()
-                                key=|snapshot| snapshot.id.clone()
-                                children=move |snapshot| {
-                                    let raw = snapshot.time.clone();
-                                    let shown = instant(&rows_localizer, &raw, rows_zone.as_ref());
-                                    view! {
-                                        <tr>
-                                            <td>{short_id(&snapshot.id)}</td>
-                                            <td title=raw.clone()>{shown}</td>
-                                        </tr>
-                                    }
-                                }
-                            />
-                        </tbody>
-                    </table>
-                    }
-                }
-                    .into_any(),
-            },
-        }}
-    }
 }
 
 /// What a person has typed into the Repositories form, one signal per field.
@@ -1097,7 +967,7 @@ fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
 
 /// A snapshot's short ID: its first eight hex digits, as rustic's own lists
 /// show one. A shorter ID is shown whole.
-fn short_id(id: &str) -> String {
+pub(crate) fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 

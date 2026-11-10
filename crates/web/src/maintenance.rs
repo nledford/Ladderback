@@ -8,7 +8,8 @@
 use std::time::Duration;
 
 use api::{
-    AdoptionFromDto, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto, SnapshotDto,
+    AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto,
+    SnapshotDto,
 };
 
 use crate::announcer::Politeness;
@@ -35,6 +36,10 @@ impl Kind {
     }
 
     /// The kind a request's text names; the exact lower-case text only.
+    #[allow(
+        dead_code,
+        reason = "the inverse of `wire`, which the host tests pin; the page names a kind and never reads one"
+    )]
     pub(crate) fn of(text: &str) -> Option<Kind> {
         match text {
             "forget" => Some(Self::Forget),
@@ -79,6 +84,27 @@ pub(crate) fn preview_path(alias: &str) -> String {
 /// The route that starts a maintenance run.
 pub(crate) fn start_path(alias: &str) -> String {
     format!("/api/v1/repositories/{alias}/maintenance")
+}
+
+/// The route that reads a run's operation: its status says how far it is.
+pub(crate) fn operation_path(operation: &str) -> String {
+    format!("/api/v1/operations/{operation}")
+}
+
+/// The route that asks a run to stop.
+pub(crate) fn cancel_path(operation: &str) -> String {
+    format!("/api/v1/operations/{operation}/cancel")
+}
+
+/// Whether a refusal of a preview or a start says that what the page shows
+/// is out of date: another run holds the repository, or the history changed
+/// after the review. The page reads the history again, so that what it shows
+/// is what the next review would be about.
+pub(crate) fn rereads(code: ErrorCode) -> bool {
+    matches!(
+        code,
+        ErrorCode::MaintenanceBusy | ErrorCode::MaintenanceSelectionChanged
+    )
 }
 
 /// How long a pack stays marked before a later prune deletes it.
@@ -309,6 +335,11 @@ impl Rows {
             shown: listed,
             more: count.saturating_sub(u64::try_from(listed).unwrap_or(u64::MAX)),
         }
+    }
+
+    /// Whether there is nothing to show and nothing more to say.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.shown == 0 && self.more == 0
     }
 }
 
@@ -1193,5 +1224,42 @@ mod tests {
             watch.after(Some("running")),
             Next::Again(Duration::from_millis(250))
         );
+    }
+
+    #[test]
+    fn a_run_is_read_and_cancelled_through_its_own_routes() {
+        assert_eq!(operation_path("0a1b"), "/api/v1/operations/0a1b");
+        assert_eq!(cancel_path("0a1b"), "/api/v1/operations/0a1b/cancel");
+    }
+
+    #[test]
+    fn a_refusal_that_says_the_page_is_out_of_date_rereads_the_history() {
+        assert!(rereads(ErrorCode::MaintenanceBusy));
+        assert!(rereads(ErrorCode::MaintenanceSelectionChanged));
+    }
+
+    #[test]
+    fn a_refusal_about_the_request_itself_leaves_the_history_as_it_is() {
+        for code in [
+            ErrorCode::RetentionKeepsNothing,
+            ErrorCode::AdoptionNoMatch,
+            ErrorCode::AdoptionAmbiguous,
+            ErrorCode::OperationFailed,
+            ErrorCode::RepositoryReadTimedOut,
+        ] {
+            assert!(!rereads(code), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_list_with_nothing_shown_and_nothing_more_is_empty() {
+        assert!(Rows::of(0, 0).is_empty());
+    }
+
+    #[test]
+    fn a_list_with_rows_or_with_more_to_say_is_not_empty() {
+        assert!(!Rows::of(3, 3).is_empty());
+        assert!(!Rows::of(3, 0).is_empty());
+        assert!(!Rows::of(0, 2).is_empty());
     }
 }

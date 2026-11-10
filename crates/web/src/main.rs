@@ -51,28 +51,30 @@ mod live;
 // `backend.rs` for why the fetch-and-socket glue is only covered by the
 // browser journeys.
 mod backend;
-// The live pages' fetch and WebSocket glue; see `backend.rs` for why this
-// one is only covered by the browser journeys.
-#[allow(
-    dead_code,
-    reason = "the Snapshots page, which uses these decisions, is the next commit"
-)]
 mod maintenance;
 mod page;
 mod repositories;
 mod routes;
+// The Snapshots page's DOM glue; the decisions it sends and shows are
+// `maintenance.rs` and `wording.rs`.
+mod snapshots;
 // Declared as `formatting` is, for the same reason.
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod time_zones;
+// The live pages' fetch and WebSocket glue; see `backend.rs` for why this
+// one is only covered by the browser journeys.
 mod ws;
+// What the Snapshots page says, decided on the host.
+mod wording;
 
 // The toast's arrival and lifetime decisions are host-testable; the DOM
 // glue around them runs in a browser via the gallery's @ui scenarios.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod toast;
 
-use routes::{NotFound, Operations, Repositories, Snapshots, Start};
+use routes::{NotFound, Operations, Repositories, Start};
+use snapshots::Snapshots;
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {

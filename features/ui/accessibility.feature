@@ -178,7 +178,7 @@ Feature: Accessibility of the app shell
     And the table "Operations" announces its "Started" column as sorted ascending
     And the polite region comes to contain "Sorted by started, oldest first."
 
-  Scenario: The snapshots page announces the empty state of a repository without snapshots
+  Scenario: The snapshots page announces the empty state of a plan without snapshots
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/snapshots"
     Then the page is titled "Snapshots – Ladderback"
@@ -187,7 +187,7 @@ Feature: Accessibility of the app shell
     Then the page shows the paragraph "No snapshots yet."
     And the page has no accessibility violations
 
-  Scenario: The snapshots page lists a repository's snapshots newest first
+  Scenario: The snapshots page lists a plan's snapshots newest first
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
     And I press Tab until focus is on the button "Start backup"
@@ -200,8 +200,8 @@ Feature: Accessibility of the app shell
     When I open the address "/snapshots"
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    Then the table "Snapshots" has 2 rows
-    And the table "Snapshots" shows its "Time" column newest first
+    Then the table "Snapshots of plan demo-home" has 2 rows
+    And the table "Snapshots of plan demo-home" shows its "Time" column newest first
     And the page has no accessibility violations
 
   Scenario: The snapshots page writes each time in the zone of the browser
@@ -215,8 +215,8 @@ Feature: Accessibility of the app shell
     When I open the address "/snapshots"
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    Then the table "Snapshots" has 1 rows
-    And the table "Snapshots" shows its "Time" column in the time zone "Pacific/Auckland"
+    Then the table "Snapshots of plan demo-home" has 1 rows
+    And the table "Snapshots of plan demo-home" shows its "Time" column in the time zone "Pacific/Auckland"
 
   Scenario: The operations page announces its empty state
     Given a demo plan "demo-home" with a scratch repository

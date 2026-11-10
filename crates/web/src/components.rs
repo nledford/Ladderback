@@ -165,6 +165,7 @@ pub fn ReviewDialog(
     let counted = RwSignal::new(false);
     on_cleanup(move || modal_gone(counted));
     let title_id = format!("{returns_to}-title");
+    let opener = returns_to.clone();
     Effect::new(move |_| {
         let wanted = open.get();
         let Some(dialog) = dialog.get() else {
@@ -178,7 +179,10 @@ pub fn ReviewDialog(
                 let _ = dismiss.focus();
             }
         } else if dialog.open() {
+            // Closed by its owner, which no `close` handler can be counted on
+            // to follow once the owner has taken the dialog off the page.
             dialog.close();
+            focus_element(&opener);
         }
     });
     let body = children();
@@ -417,6 +421,22 @@ fn focus_element(id: &str) {
     {
         // A failed focus leaves focus where it was.
         let _ = element.focus();
+    }
+}
+
+/// Moves focus to the element with `id` when focus has fallen to the page
+/// itself, as it does when the control that held it leaves the page. Focus
+/// anywhere else stays where the reader put it.
+pub(crate) fn recover_focus(id: &str) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let body: Option<web_sys::Node> = document.body().map(Into::into);
+    let lost = document
+        .active_element()
+        .is_none_or(|active| active.is_same_node(body.as_ref()));
+    if lost {
+        focus_element(id);
     }
 }
 

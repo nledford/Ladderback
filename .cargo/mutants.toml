@@ -24,6 +24,16 @@
 # results the journeys check, and the settle-poll's budget; every decision
 # a settle or a reconnect makes on those results lives in `backend.rs`.
 #
+# `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
+# page: it sends the history read, the previews, the starts and the cancel,
+# and shows the answers; the maintenance journeys of
+# `features/ui/maintenance.feature` check it in Chromium. What it sends and
+# says is decided on the host and mutated there: the request and the review
+# of a preview, the rows, the adoptions, the refusals that read the history
+# again and the pace and patience of the wait for a run
+# (`maintenance.rs`), and the message and arguments of every sentence
+# (`wording.rs`).
+#
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
@@ -35,6 +45,7 @@ exclude_globs = [
     "crates/web/src/page.rs",
     "crates/web/src/gallery.rs",
     "crates/web/src/ws.rs",
+    "crates/web/src/snapshots.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [

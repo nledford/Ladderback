@@ -8,7 +8,8 @@
 use std::time::Duration;
 
 use crate::backend::{OperationsState, ended, events_url, reconnect_backoff, succeeded};
-use api::{ErrorCode, MsgArg, OperationsPageDto, UiEvent};
+use crate::maintenance::{self, End, Kind, Next, Watch};
+use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
 use futures::StreamExt;
 use gloo_net::http::Request;
 use gloo_net::websocket::Message;
@@ -80,6 +81,31 @@ pub(crate) async fn read<T: DeserializeOwned>(url: &str) -> Option<T> {
         return None;
     }
     response.json::<T>().await.ok()
+}
+
+/// What a GET came back with: the typed answer, or a typed refusal, which
+/// the page renders as it renders a refused POST.
+pub(crate) enum Got<T> {
+    Read(T),
+    Refused(ErrorCode, Vec<(String, MsgArg)>, Option<String>),
+}
+
+/// Reads `url` as typed JSON like `read`, but tells a refusal from a daemon
+/// that did not answer: `None` is the daemon not answering, or an answer that
+/// is neither the JSON asked for nor a typed refusal.
+pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
+    let response = Request::get(url).send().await.ok()?;
+    let status = response.status();
+    let text = response.text().await.ok()?;
+    if succeeded(status) {
+        return serde_json::from_str::<T>(&text).ok().map(Got::Read);
+    }
+    let refusal = serde_json::from_str::<Refusal>(&text).ok()?;
+    Some(Got::Refused(
+        refusal.code,
+        refusal.args.into_iter().collect::<Vec<_>>(),
+        refusal.detail,
+    ))
 }
 
 /// Posts `body` as JSON to `url` (the JSON-body rule applies to every
@@ -182,6 +208,41 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
         sleep(POLL_EVERY).await;
     }
     false
+}
+
+/// What the wait for a maintenance run came to.
+pub(crate) enum Waited {
+    /// The run ended, and how.
+    Ended(End),
+    /// The daemon stayed silent for too long to go on waiting.
+    GaveUp,
+    /// The page that waited is gone.
+    Gone,
+}
+
+/// Reads the operation of a maintenance run of `kind` until it has ended. The
+/// pace of the reads and the patience with a silent daemon are
+/// `maintenance::Watch`'s; `alive` says whether the page that waits is still
+/// there.
+pub(crate) async fn await_end(
+    base: &str,
+    operation: &str,
+    kind: Kind,
+    alive: impl Fn() -> bool,
+) -> Waited {
+    let url = format!("{base}{}", maintenance::operation_path(operation));
+    let mut watch = Watch::new(kind);
+    while alive() {
+        let status = read::<OperationDetailDto>(&url)
+            .await
+            .map(|detail| detail.operation.status);
+        match watch.after(status.as_deref()) {
+            Next::Again(delay) => sleep(delay).await,
+            Next::Ended(end) => return Waited::Ended(end),
+            Next::GaveUp => return Waited::GaveUp,
+        }
+    }
+    Waited::Gone
 }
 
 /// How long a settle-poll keeps reading, and how often.
