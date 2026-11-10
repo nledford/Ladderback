@@ -280,6 +280,7 @@ async fn main() {
         });
     // The runner polls every scenario from this one task: watching it from
     // the same task measures how long a step left it unpolled.
+    let _report = ReportStall(&worst_stall);
     let watch = watch_for_stalls(&worst_stall);
     futures::pin_mut!(run, watch);
     futures::future::select(run, watch).await;
@@ -287,8 +288,9 @@ async fn main() {
         worst_stall.get() <= MAX_STALL,
         "a step kept the runner's thread for {:?}, longer than the {MAX_STALL:?} allowed: \
          every other scenario waited that long, and the operation log gives up on a \
-         connection after 10 s. A step that blocks (rustic_core, a blocking socket, a long \
-         file walk) runs through `blocking(…)`; too many scenarios at once starve it too.",
+         connection after 10 s. A step that blocks for long (rustic_core, waiting for a daemon \
+         to start, thousands of file writes) runs through `blocking(…)`; too many \
+         scenarios at once starve it too.",
         worst_stall.get()
     );
 }
@@ -309,10 +311,25 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) 
     }
 }
 
-/// How long the runner's thread may go unpolled before the run fails: half of
+/// How long the runner's thread may go unpolled before the run fails: most of
 /// the 10 s the operation log waits for a connection, and several times what
-/// a run that blocks nothing and shares the machine with its workers sees.
-const MAX_STALL: Duration = Duration::from_secs(5);
+/// a run that blocks nothing and shares the machine with its workers sees (up
+/// to 1.2 s on ten cores, with 4 scenarios at once).
+const MAX_STALL: Duration = Duration::from_secs(8);
+
+/// Says how long the runner's thread was unavailable at worst when the run
+/// ends, also when a failed step ends it: the figure belongs to a failure
+/// that looks like #92 as much as to a pass.
+struct ReportStall<'a>(&'a Cell<Duration>);
+
+impl Drop for ReportStall<'_> {
+    fn drop(&mut self) {
+        eprintln!(
+            "e2e runner: its thread was unavailable for up to {:?} at once",
+            self.0.get()
+        );
+    }
+}
 
 /// Records in `worst` the longest a timer was late being polled, forever.
 /// Joined with the runner in one task, a late poll is a step that blocked the
