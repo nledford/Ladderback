@@ -58,9 +58,19 @@ pub(crate) fn read(
             path,
             metadata.permissions().mode(),
             credentials_directory,
-            |path| Some(path.to_owned()),
+            real_path,
         )
         .into_iter()
         .collect(),
     })
+}
+
+/// Where `path` really is, every link followed; `None` when it can't be
+/// (or isn't text). The file and the directory it is said to be in are both
+/// resolved: a temporary directory may itself be a link, as `/var` is on
+/// macOS.
+fn real_path(path: &str) -> Option<String> {
+    std::fs::canonicalize(path)
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_owned))
 }

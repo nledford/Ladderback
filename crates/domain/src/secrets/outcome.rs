@@ -167,34 +167,57 @@ const READABLE_BY_OTHERS: u32 = 0o044;
 /// directories where a container runtime or systemd sets permissions.
 /// `credentials_directory` is the value of `$CREDENTIALS_DIRECTORY`, which
 /// only counts when it is a real absolute directory.
+///
+/// Where a file is written isn't where it is: a link in `/run/secrets` may
+/// lead anywhere. `resolve` follows every link in a path (`None` when it
+/// can't), and the file is exempt only if it really is in one of the
+/// directories, which really are directories below the root. A path that
+/// can't be followed is not exempt. The warning names the path as written.
 pub fn file_warning(
     path: &str,
     mode: u32,
     credentials_directory: Option<&str>,
-    _resolve: impl Fn(&str) -> Option<String>,
+    resolve: impl Fn(&str) -> Option<String>,
 ) -> Option<SecretWarning> {
     let exposed = mode & READABLE_BY_OTHERS != 0;
-    (exposed && !is_runtime_secret(path, credentials_directory)).then(|| {
+    (exposed && !is_runtime_secret(path, credentials_directory, resolve)).then(|| {
         SecretWarning::FileReadableByOthers {
             path: path.to_owned(),
         }
     })
 }
 
-fn is_runtime_secret(path: &str, credentials_directory: Option<&str>) -> bool {
-    let path = Path::new(path);
+fn is_runtime_secret(
+    path: &str,
+    credentials_directory: Option<&str>,
+    resolve: impl Fn(&str) -> Option<String>,
+) -> bool {
+    let written = Path::new(path);
     // `/run/secrets/../../home/demo/key` isn't in `/run/secrets`.
-    if path
+    if written
         .components()
         .any(|component| matches!(component, Component::ParentDir))
     {
         return false;
     }
     let credentials = credentials_directory.filter(|directory| names_a_directory(directory));
+    // Where the file really is; looked up once, and only if some directory
+    // names it.
+    let mut file = None;
     RUNTIME_SECRET_DIRECTORIES
         .into_iter()
         .chain(credentials)
-        .any(|directory| path.starts_with(directory))
+        .filter(|directory| written.starts_with(directory))
+        .any(|directory| {
+            let Some(directory) = resolve(directory) else {
+                return false;
+            };
+            let file = file.get_or_insert_with(|| resolve(path));
+            names_a_directory(&directory)
+                && file
+                    .as_deref()
+                    .is_some_and(|file| Path::new(file).starts_with(&directory))
+        })
 }
 
 /// An absolute path below the root. An empty or relative value, or the root
@@ -519,6 +542,51 @@ mod tests {
         let path = "/run/credentials/demo.service/token";
         let links = [(directory, "/"), (path, "/token")];
         assert!(file_warning(path, 0o644, Some(directory), linked(&links)).is_some());
+    }
+
+    fn warns_through(
+        path: &str,
+        mode: u32,
+        credentials: Option<&str>,
+        links: &[(&str, &str)],
+    ) -> bool {
+        file_warning(path, mode, credentials, linked(links)).is_some()
+    }
+
+    #[test]
+    fn a_link_that_stays_in_the_exempt_directory_is_not_warned_about() {
+        let path = "/run/secrets/token";
+        let links = [(path, "/run/secrets/generation-2/token")];
+        assert!(!warns_through(path, 0o644, None, &links));
+        let credentials = Some("/run/credentials/demo.service");
+        let path = "/run/credentials/demo.service/token";
+        let links = [(path, "/run/credentials/demo.service/real")];
+        assert!(!warns_through(path, 0o644, credentials, &links));
+    }
+
+    /// `/var/run` is a link to `/run`: the directory and the file in it lead
+    /// to the same place, so the file is where the directory is.
+    #[test]
+    fn a_directory_that_is_itself_a_link_exempts_what_really_is_in_it() {
+        let directory = "/var/run/credentials/demo.service";
+        let path = "/var/run/credentials/demo.service/token";
+        let links = [
+            (directory, "/run/credentials/demo.service"),
+            (path, "/run/credentials/demo.service/token"),
+        ];
+        assert!(!warns_through(path, 0o644, Some(directory), &links));
+        let links = [
+            (directory, "/run/credentials/demo.service"),
+            (path, "/tmp/x"),
+        ];
+        assert!(warns_through(path, 0o644, Some(directory), &links));
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_followed_exempts_nothing() {
+        let path = "/run/secrets/token";
+        let resolve = |at: &str| (at == path).then(|| path.to_owned());
+        assert!(file_warning(path, 0o644, None, resolve).is_some());
     }
 
     fn command(program: &str) -> SourceName {
