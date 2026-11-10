@@ -29,6 +29,7 @@ Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 | Surface | Breaking (major from 1.0) | Compatible (minor) |
 |---|---|---|
 | CLI: commands, flags, exit codes | Removing or renaming one, changing a default's meaning | New command or flag |
+| CLI `--json` documents (§4.5): keys, error and warning codes | Removing or renaming one | New keys or codes |
 | `config.toml` (§6.1) | Dropping the migration from an old `schema`, so a file stops loading | New keys; a new `schema` whose migration runs on load |
 | REST and WebSocket API `/api/v1` | Anything that needs `/api/v2` | New endpoints and optional fields |
 | Sync protocol `/sync/v1` (§7.2) | A new `protocol` number that the previous release can't speak | New optional message fields |
@@ -38,7 +39,7 @@ Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 | Database and data directory (§9) | A migration with no automatic path | Automatic migrations |
 | MCP tools (§4.6): names, input schemas, result fields | Removing or renaming a tool, a new required argument, a result field whose meaning changes | New tools, optional arguments and result fields |
 
-Not part of the contract: UI layout and wording, log text, the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back.
+Not part of the contract: UI layout and wording, log text, the CLI's sentences (a script reads `--json`; the daemon's `listening on` line stays as §8.4 says), the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back.
 
 **Bump rules.** A release takes the highest bump among its changes, judged by the table, not by commit labels:
 
