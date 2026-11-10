@@ -62,6 +62,11 @@ code_messages!(ERRORS, error_message, ErrorCode {
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
     AdoptionNoMatch => msg::ERROR_ADOPTION_NO_MATCH,
     AdoptionAmbiguous => msg::ERROR_ADOPTION_AMBIGUOUS,
+    ProfileUnreadable => msg::ERROR_PROFILE_UNREADABLE,
+    ProfileTooLarge => msg::ERROR_PROFILE_TOO_LARGE,
+    ProfileInvalid => msg::ERROR_PROFILE_INVALID,
+    ProfileUnsupported => msg::ERROR_PROFILE_UNSUPPORTED,
+    PlanIdTaken => msg::ERROR_PLAN_ID_TAKEN,
     Unknown => msg::ERROR_UNKNOWN,
 });
 
@@ -69,5 +74,13 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     SourceUnreadable => msg::WARNING_SOURCE_UNREADABLE,
     HookWarning => msg::WARNING_HOOK_WARNING,
     MaintenancePartial => msg::WARNING_MAINTENANCE_PARTIAL,
+    ProfileKeyIgnored => msg::WARNING_PROFILE_KEY_IGNORED,
+    ProfilePrune => msg::WARNING_PROFILE_PRUNE,
+    ProfileEnvIgnored => msg::WARNING_PROFILE_ENV_IGNORED,
+    ProfileHooksPerPlan => msg::WARNING_PROFILE_HOOKS_PER_PLAN,
+    ProfileUsedMissing => msg::WARNING_PROFILE_USED_MISSING,
+    InlineSecret => msg::WARNING_INLINE_SECRET,
+    ProfileTagDropped => msg::WARNING_PROFILE_TAG_DROPPED,
+    ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
     Unknown => msg::WARNING_UNKNOWN,
 });

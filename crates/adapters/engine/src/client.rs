@@ -1042,7 +1042,18 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 WarningCode::SourceUnreadable => WarningKind::SourceUnreadable,
                 WarningCode::HookWarning => WarningKind::Hook,
                 WarningCode::MaintenancePartial => WarningKind::MaintenancePartial,
-                WarningCode::Unknown => WarningKind::Other,
+                // The profile codes belong to the import and export, which
+                // run in the CLI; a worker that sent one is reported as the
+                // problem it claims, in its own words.
+                WarningCode::ProfileKeyIgnored
+                | WarningCode::ProfilePrune
+                | WarningCode::ProfileEnvIgnored
+                | WarningCode::ProfileHooksPerPlan
+                | WarningCode::ProfileUsedMissing
+                | WarningCode::InlineSecret
+                | WarningCode::ProfileTagDropped
+                | WarningCode::ProfileOptionLeftOut
+                | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact(&item)),
             during: redactor.redact(&during),
@@ -1140,6 +1151,11 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch
                 | ErrorCode::AdoptionAmbiguous
+                | ErrorCode::ProfileUnreadable
+                | ErrorCode::ProfileTooLarge
+                | ErrorCode::ProfileInvalid
+                | ErrorCode::ProfileUnsupported
+                | ErrorCode::PlanIdTaken
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor
