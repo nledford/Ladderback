@@ -227,6 +227,47 @@ Feature: An agent's configuration
       Then the load is refused because the glob file "plans[0].iglob-files[0]" is not an absolute path
       And the refusal points at line 12 of the config file
 
+    Scenario: A location longer than a job takes is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "{a location of 65537 bytes}"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because the location "repositories.nas.repository" is longer than 64 KiB
+      And the refusal points at line 4 of the config file
+
+    Scenario: An option longer than a job takes is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "opendal:s3"
+        password-env = "DEMO_PASSWORD"
+        options = { endpoint = "{a value of 65537 bytes}" }
+        """
+      When the agent loads the config file
+      Then the load is refused because the option "repositories.nas.options.endpoint" is longer than 64 KiB
+      And the refusal points at line 6 of the config file
+
+    Scenario: More options than a job takes are refused where they are written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "opendal:s3"
+        password-env = "DEMO_PASSWORD"
+        options = { {65 options} }
+        """
+      When the agent loads the config file
+      Then the load is refused because "repositories.nas.options" holds more than 64 options
+      And the refusal points at line 6 of the config file
+
     Scenario: A file with two entries for one location is refused, naming both
       Given a config file holding:
         """

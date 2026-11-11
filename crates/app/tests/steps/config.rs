@@ -74,6 +74,9 @@ impl From<InvalidValue> for Refusal {
             ValueKind::GroupBy => "group-by",
             ValueKind::OnFailure => "on-failure",
             ValueKind::HookCommand => "hook-command",
+            ValueKind::Location => "location",
+            ValueKind::OptionValue => "option-value",
+            ValueKind::Options => "options",
         };
         Self {
             kind,

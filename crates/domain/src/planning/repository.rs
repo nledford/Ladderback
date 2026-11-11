@@ -9,9 +9,37 @@ use std::fmt;
 use super::{Hooks, InvalidValue, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
-    InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
-    is_secret_option, location_secret_written, url_password_written,
+    InlineSecret, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, REDACTED, Redactor,
+    RepositorySecrets, SecretRef, SecretValue, has_reference, is_secret_option,
+    location_secret_written, url_password_written,
 };
+
+/// Refuses a location longer than [`MAX_LOCATION_BYTES`]. A location may
+/// hold a password, so the refusal keeps none of its text.
+pub fn check_location(location: &str) -> Result<(), InvalidValue> {
+    if location.len() > MAX_LOCATION_BYTES {
+        return Err(InvalidValue::new(ValueKind::Location, ""));
+    }
+    Ok(())
+}
+
+/// Refuses the value of an option longer than [`MAX_OPTION_VALUE_BYTES`].
+/// A value may be a secret, so the refusal keeps none of its text.
+pub fn check_option_value(value: &str) -> Result<(), InvalidValue> {
+    if value.len() > MAX_OPTION_VALUE_BYTES {
+        return Err(InvalidValue::new(ValueKind::OptionValue, ""));
+    }
+    Ok(())
+}
+
+/// Refuses a table of options (`options`, `options-hot`, `options-cold`)
+/// that holds more than [`MAX_OPTIONS`].
+pub fn check_options(options: &BTreeMap<String, String>) -> Result<(), InvalidValue> {
+    if options.len() > MAX_OPTIONS {
+        return Err(InvalidValue::new(ValueKind::Options, ""));
+    }
+    Ok(())
+}
 
 /// A repository as the configuration describes it: its fields may hold
 /// `${VAR}` and `${file:/path}` references, which are resolved when a job
@@ -28,6 +56,25 @@ pub struct RepositorySettings {
 }
 
 impl RepositorySettings {
+    /// Refuses settings that hold more than a job takes: a location longer
+    /// than [`MAX_LOCATION_BYTES`], a table of options with more than
+    /// [`MAX_OPTIONS`], or an option's value longer than
+    /// [`MAX_OPTION_VALUE_BYTES`]. The configuration and an import refuse
+    /// each at its own key, with [`check_location`], [`check_options`] and
+    /// [`check_option_value`]; this is for settings that come whole, from a
+    /// request.
+    pub fn check_sizes(&self) -> Result<(), InvalidValue> {
+        check_location(&self.repository)?;
+        self.repo_hot.as_deref().map_or(Ok(()), check_location)?;
+        for table in [&self.options, &self.options_hot, &self.options_cold] {
+            check_options(table)?;
+            table
+                .values()
+                .try_for_each(|value| check_option_value(value))?;
+        }
+        Ok(())
+    }
+
     /// Every secret these settings hold as text: a credential written in
     /// `repository` or `repo-hot` ([`location_secret_written`]), the password
     /// when it is inline, and each option whose name says it is a credential
@@ -317,6 +364,131 @@ impl RepositoryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_location_holds_at_most_64_kib_and_its_refusal_holds_none_of_it() {
+        assert_eq!(MAX_LOCATION_BYTES, 64 * 1024);
+        let at_the_cap = format!(
+            "rest:https://demo:{}@nas/",
+            "s".repeat(MAX_LOCATION_BYTES - 23)
+        );
+        assert_eq!(at_the_cap.len(), MAX_LOCATION_BYTES);
+        assert_eq!(check_location(&at_the_cap), Ok(()));
+        let refused = Err(InvalidValue::new(ValueKind::Location, ""));
+        assert_eq!(check_location(&format!("{at_the_cap}/")), refused);
+        // The cap counts bytes, not characters.
+        let wide = "é".repeat(MAX_LOCATION_BYTES / 2 + 1);
+        assert_eq!(check_location(&wide), refused);
+        assert_eq!(check_location(""), Ok(()));
+    }
+
+    #[test]
+    fn an_option_value_holds_at_most_64_kib_and_its_refusal_holds_none_of_it() {
+        assert_eq!(MAX_OPTION_VALUE_BYTES, 64 * 1024);
+        let at_the_cap = "k".repeat(MAX_OPTION_VALUE_BYTES);
+        assert_eq!(check_option_value(&at_the_cap), Ok(()));
+        let refused = Err(InvalidValue::new(ValueKind::OptionValue, ""));
+        assert_eq!(check_option_value(&format!("{at_the_cap}k")), refused);
+        // The cap counts bytes, not characters.
+        let wide = "é".repeat(MAX_OPTION_VALUE_BYTES / 2 + 1);
+        assert_eq!(check_option_value(&wide), refused);
+        assert_eq!(check_option_value(""), Ok(()));
+    }
+
+    fn options(count: usize) -> BTreeMap<String, String> {
+        (0..count)
+            .map(|n| (format!("o{n}"), "demo".to_owned()))
+            .collect()
+    }
+
+    /// One option value a byte longer than a job takes.
+    fn long_value(table: &mut BTreeMap<String, String>) {
+        table.insert("o1".to_owned(), "v".repeat(MAX_OPTION_VALUE_BYTES + 1));
+    }
+
+    /// One option more than a table holds, when it is full.
+    fn one_more(table: &mut BTreeMap<String, String>) {
+        table.insert("extra".to_owned(), String::new());
+    }
+
+    /// A field's name, the change that takes it over its cap, and the kind refused.
+    type OverCap = (&'static str, fn(&mut RepositorySettings), ValueKind);
+
+    #[test]
+    fn a_table_holds_at_most_64_options() {
+        assert_eq!(MAX_OPTIONS, 64);
+        assert_eq!(check_options(&options(0)), Ok(()));
+        assert_eq!(check_options(&options(MAX_OPTIONS)), Ok(()));
+        assert_eq!(
+            check_options(&options(MAX_OPTIONS + 1)),
+            Err(InvalidValue::new(ValueKind::Options, ""))
+        );
+    }
+
+    #[test]
+    fn settings_are_refused_when_any_field_holds_more_than_a_job_takes() {
+        let long = |bytes: usize| "v".repeat(bytes);
+        let full = || {
+            let mut table = options(MAX_OPTIONS);
+            table.insert("o0".to_owned(), long(MAX_OPTION_VALUE_BYTES));
+            table
+        };
+        let at_the_caps = RepositorySettings {
+            repository: long(MAX_LOCATION_BYTES),
+            repo_hot: Some(long(MAX_LOCATION_BYTES)),
+            password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            options: full(),
+            options_hot: full(),
+            options_cold: full(),
+        };
+        assert_eq!(at_the_caps.check_sizes(), Ok(()));
+        let over = |change: fn(&mut RepositorySettings)| {
+            let mut settings = at_the_caps.clone();
+            change(&mut settings);
+            settings.check_sizes().map_err(|refused| refused.kind)
+        };
+        let cases: [OverCap; 8] = [
+            (
+                "repository",
+                |s| s.repository.push('/'),
+                ValueKind::Location,
+            ),
+            (
+                "repo-hot",
+                |s| s.repo_hot = Some("v".repeat(MAX_LOCATION_BYTES + 1)),
+                ValueKind::Location,
+            ),
+            (
+                "options",
+                |s| long_value(&mut s.options),
+                ValueKind::OptionValue,
+            ),
+            (
+                "options-hot",
+                |s| long_value(&mut s.options_hot),
+                ValueKind::OptionValue,
+            ),
+            (
+                "options-cold",
+                |s| long_value(&mut s.options_cold),
+                ValueKind::OptionValue,
+            ),
+            ("options", |s| one_more(&mut s.options), ValueKind::Options),
+            (
+                "options-hot",
+                |s| one_more(&mut s.options_hot),
+                ValueKind::Options,
+            ),
+            (
+                "options-cold",
+                |s| one_more(&mut s.options_cold),
+                ValueKind::Options,
+            ),
+        ];
+        for (field, change, kind) in cases {
+            assert_eq!(over(change), Err(kind), "{field}");
+        }
+    }
 
     #[test]
     fn a_repository_nobody_was_asked_about_gets_no_maintenance() {

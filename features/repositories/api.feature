@@ -136,3 +136,6 @@ Feature: Repositories over HTTP
       | a relative password file | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}}      |
       | an empty password        | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"inline","value":""}}}               |
       | an empty location        | /api/v1/repositories/_test | {"settings":{"repository":"","password":{"source":"inline","value":"p"}}}                |
+      | a location over 64 KiB   | /api/v1/repositories/_test | {"settings":{"repository":"{a location of 65537 bytes}","password":{"source":"inline","value":"p"}}} |
+      | an option over 64 KiB    | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"inline","value":"p"},"options":{"endpoint":"{a value of 65537 bytes}"}}} |
+      | 65 options in one table  | /api/v1/repositories/_test | {"settings":{"repository":"/x","repo-hot":"/y","password":{"source":"inline","value":"p"},"options-hot":{65 options as JSON}}} |

@@ -10,7 +10,10 @@ use common::{
     write_in,
 };
 use domain::planning::{GroupBy, KeepCount, KeepWithin, Maintenance, OnFailure};
-use domain::secrets::{FileRead, Part, Reference, SecretRef, SecretValue, Template};
+use domain::secrets::{
+    FileRead, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, Part, Reference, SecretRef,
+    SecretValue, Template,
+};
 use interop::{MAX_ENTRIES, MAX_ITEMS, MAX_LEFT_OUT_KEYS};
 
 /// The key, the line and the problem of a refusal for an invalid profile.
@@ -1758,6 +1761,100 @@ async fn a_value_that_is_too_long_once_escaped_is_refused_where_it_is_written() 
         assert_eq!(found, key, "{field}");
         assert_eq!(problem, ProfileProblem::BadValue, "{field}");
     }
+}
+
+/// A location longer than the config takes is refused as the config refuses
+/// it, where the profile writes it, before it is escaped (#236).
+#[tokio::test]
+async fn a_location_longer_than_the_config_takes_is_refused_at_its_key_and_line() {
+    let over = format!("/srv/{}", "r".repeat(MAX_LOCATION_BYTES - 4));
+    let scratch = Scratch::new();
+    for (text, key, line) in [
+        (
+            format!("[repository]\nrepository = {over:?}\npassword-file = \"/srv/p\"\n\n{ENTRY}"),
+            "repository.repository",
+            2,
+        ),
+        (
+            format!(
+                "[repository]\nrepository = \"/srv/demo-repo\"\nrepo-hot = {over:?}\n\
+                 password-file = \"/srv/p\"\n\n{ENTRY}"
+            ),
+            "repository.repo-hot",
+            3,
+        ),
+    ] {
+        let (found, at, problem) = invalid(scratch.read(&text).await.unwrap_err());
+        assert_eq!(found, key);
+        assert_eq!(problem, ProfileProblem::BadValue, "{key}");
+        assert_eq!(at, Some(line), "{key}");
+    }
+}
+
+/// `count` options, `o0 = "demo"` on, as the inside of an inline table.
+fn options(count: usize) -> String {
+    (0..count)
+        .map(|n| format!("o{n} = \"demo\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// An option longer than the config takes, or a table of more options than
+/// it takes, is refused as the config refuses it, where the profile writes
+/// it (#236).
+#[tokio::test]
+async fn a_long_option_or_one_option_too_many_is_refused_at_its_key_and_line() {
+    let over = "k".repeat(MAX_OPTION_VALUE_BYTES + 1);
+    let scratch = Scratch::new();
+    for table in ["options", "options-hot", "options-cold"] {
+        let text = |body: &str| {
+            format!(
+                "[repository]\nrepository = \"/srv/demo-repo\"\npassword-file = \"/srv/p\"\n\
+                 {table} = {{ {body} }}\n\n{ENTRY}"
+            )
+        };
+        scratch
+            .read(&text(&options(MAX_OPTIONS)))
+            .await
+            .unwrap_or_else(|error| panic!("{table} at the cap: {error:?}"));
+        for (body, key) in [
+            (
+                format!("endpoint = {over:?}"),
+                format!("repository.{table}.endpoint"),
+            ),
+            (options(MAX_OPTIONS + 1), format!("repository.{table}")),
+        ] {
+            let (found, at, problem) = invalid(scratch.read(&text(&body)).await.unwrap_err());
+            assert_eq!(found, key);
+            assert_eq!(problem, ProfileProblem::BadValue, "{key}");
+            assert_eq!(at, Some(4), "{key}");
+        }
+    }
+}
+
+/// The options rustic's variables add count toward the cap: the table the
+/// import writes holds at most 64, wherever they came from (#236).
+#[tokio::test]
+async fn options_rustics_variables_add_count_toward_the_cap() {
+    let scratch = Scratch::new();
+    let text = format!(
+        "[repository]\nrepository = \"/srv/demo-repo\"\npassword-file = \"/srv/p\"\n\
+         options = {{ {} }}\n\n{ENTRY}",
+        options(MAX_OPTIONS)
+    );
+    // A variable for an option the profile has adds none.
+    let profile = scratch
+        .read_with(&[("RUSTIC_REPO_OPT_O0", "x")], &text)
+        .await
+        .expect("64 options");
+    assert_eq!(profile.repository.settings.options.len(), MAX_OPTIONS);
+    let error = scratch
+        .read_with(&[("RUSTIC_REPO_OPT_EXTRA", "x")], &text)
+        .await
+        .unwrap_err();
+    let (found, _, problem) = invalid(error);
+    assert_eq!(found, "repository.options");
+    assert_eq!(problem, ProfileProblem::BadValue);
 }
 
 #[cfg(unix)]

@@ -10,7 +10,7 @@ use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
     Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
     RepositoryConfig, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source,
-    SourceFilter, Violation, parse_duration,
+    SourceFilter, Violation, check_location, check_option_value, check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -218,6 +218,19 @@ fn repository(
         hooks: hooks_table,
     } = table;
     let repository = reader.required(path, "repository", repository)?;
+    reader.value(&path.key("repository"), check_location(&repository))?;
+    if let Some(hot) = &repo_hot {
+        reader.value(&path.key("repo-hot"), check_location(hot))?;
+    }
+    for (key, table) in [
+        ("options", &options),
+        ("options-hot", &options_hot),
+        ("options-cold", &options_cold),
+    ] {
+        if let Some(table) = table {
+            option_table(reader, &path.key(key), table)?;
+        }
+    }
     let id = repository_id
         .map(|text| reader.id(&path.key("repository-id"), RepositoryId::parse(&text)))
         .transpose()?;
@@ -254,6 +267,21 @@ fn repository(
         group_by,
         hooks: hooks(reader, &path.key("hooks"), hooks_table.unwrap_or_default())?,
     })
+}
+
+/// A table of options a job can take, refused at the table when it holds too
+/// many and at the value when one is too long (`check_options`,
+/// `check_option_value`).
+fn option_table(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    table: &BTreeMap<String, String>,
+) -> Read<()> {
+    reader.value(path, check_options(table))?;
+    for (name, value) in table {
+        reader.value(&path.key(name), check_option_value(value))?;
+    }
+    Ok(())
 }
 
 /// The five ways to give a password, in the order of the keys:

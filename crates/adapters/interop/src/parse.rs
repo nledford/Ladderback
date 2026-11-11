@@ -10,7 +10,7 @@ use app::ports::{Position, ProfileError, ProfileProblem};
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::planning::{
     GlobFile, GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
-    RetentionPolicy, Source,
+    RetentionPolicy, Source, check_location, check_option_value, check_options,
 };
 use domain::secrets::CommandLine;
 use serde::Deserialize;
@@ -508,6 +508,29 @@ fn repository(reader: &Reader<'_, '_>, path: &Path, table: RepositoryTable) -> R
         .password_command
         .map(|command| command_line(reader, &path.key("password-command"), command))
         .transpose()?;
+    // As the config refuses them when it loads, before escaping can lengthen
+    // a value. The options the profiles it uses and rustic's variables add
+    // are counted again once they are merged (`map`).
+    for (key, location) in [
+        ("repository", table.repository.as_deref()),
+        ("repo-hot", table.repo_hot.as_deref()),
+    ] {
+        if let Some(location) = location {
+            reader.value(&path.key(key), check_location(location))?;
+        }
+    }
+    for (key, options) in [
+        ("options", &table.options),
+        ("options-hot", &table.options_hot),
+        ("options-cold", &table.options_cold),
+    ] {
+        let Some(options) = options else { continue };
+        let path = path.key(key);
+        reader.value(&path, check_options(options))?;
+        for (name, value) in options {
+            reader.value(&path.key(name), check_option_value(value))?;
+        }
+    }
     Ok(Repository {
         repository: table.repository,
         repo_hot: table.repo_hot,

@@ -60,14 +60,17 @@ pub(super) struct Ran {
     pub(super) stderr: String,
 }
 
-/// `{scratch}` in a step's text stands for the scenario's scratch folder, and
-/// `{agent}` for the agent's ID.
+/// `{scratch}` in a step's text stands for the scenario's scratch folder,
+/// `{agent}` for the agent's ID, and the placeholders `long_texts` knows for
+/// what they say.
 fn expand(agent: &Agent, text: &str) -> String {
-    text.replace("{scratch}", &agent.scratch().display().to_string())
+    let text = text
+        .replace("{scratch}", &agent.scratch().display().to_string())
         .replace(
             "{agent}",
             &agent.agent_id.as_uuid().hyphenated().to_string(),
-        )
+        );
+    super::config_steps::long_texts(&text)
 }
 
 fn work_dir(agent: &Agent) -> PathBuf {
