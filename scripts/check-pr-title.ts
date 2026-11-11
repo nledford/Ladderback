@@ -1,8 +1,8 @@
 // Checks a pull request's title against Conventional Commits (AGENTS.md,
-// "Pull requests"). The title becomes the squash commit's subject, and
-// release-plz builds the changelog and the version bump from that subject
-// (release-plz.toml), so a malformed title silently drops a change from the
-// changelog or misses a release.
+// "Conventions"; docs/design/development.md §13.8). The title becomes the
+// squash commit's subject, and release-plz builds the changelog and the version
+// bump from that subject (release-plz.toml), so a malformed title silently drops
+// a change from the changelog or misses a release.
 //
 // Usage: node scripts/check-pr-title.ts "<title>"
 // Exits 0 when the title is valid, 1 with the reasons on standard error
