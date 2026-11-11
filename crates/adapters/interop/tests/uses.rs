@@ -9,7 +9,7 @@ use std::fs;
 use app::ports::{ProfileError, ProfileNotice, ProfileProblem, ProfileReader};
 use common::{ENTRY, REPOSITORY, Scratch, commands, ids, ignored, line_of, nas, plan, write_in};
 use domain::planning::{GroupBy, KeepCount};
-use domain::secrets::{FileRead, SecretRef};
+use domain::secrets::{FileRead, MAX_OPTIONS, SecretRef};
 use interop::{MAX_ENTRIES, MAX_PROFILES, MAX_USE_DEPTH};
 
 /// `nas.toml`: uses `names`, then `text`.
@@ -776,5 +776,39 @@ async fn the_entries_of_a_profile_and_the_profiles_it_uses_are_bounded_together(
     let (file, key, _, problem) = invalid(error);
     assert_eq!(problem, ProfileProblem::TooManyEntries);
     assert_eq!(key, "backup.snapshots");
+    assert_eq!(file, scratch.work.join("nas.toml").display().to_string());
+}
+
+/// An inline table of `count` options named `prefix0` on.
+fn option_table(prefix: &str, count: usize) -> String {
+    let options: Vec<_> = (0..count)
+        .map(|n| format!("{prefix}{n} = \"demo\""))
+        .collect();
+    format!("options = {{ {} }}\n", options.join(", "))
+}
+
+/// The options a profile writes and those of the profiles it uses are one
+/// table in the configuration, so they are counted together: each file
+/// within the cap can't make a table over it (#236).
+#[tokio::test]
+async fn the_options_of_a_profile_and_the_profiles_it_uses_are_capped_together() {
+    let scratch = Scratch::new();
+    let half = MAX_OPTIONS / 2;
+    let base = |count: usize| format!("[repository]\n{}", option_table("b", count));
+    let own = uses(
+        &["base"],
+        &format!("{REPOSITORY}{}\n{ENTRY}", option_table("o", half)),
+    );
+
+    scratch.profile("base.toml", &base(half));
+    let profile = scratch.read(&own).await.expect("a profile");
+    assert_eq!(profile.repository.settings.options.len(), MAX_OPTIONS);
+
+    scratch.profile("base.toml", &base(half + 1));
+    let error = scratch.read(&own).await.unwrap_err();
+    let (file, key, line, problem) = invalid(error);
+    assert_eq!(problem, ProfileProblem::BadValue);
+    assert_eq!(key, "repository.options");
+    assert_eq!(line, None, "no one line wrote the table");
     assert_eq!(file, scratch.work.join("nas.toml").display().to_string());
 }

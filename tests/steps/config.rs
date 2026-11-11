@@ -26,9 +26,66 @@ pub struct ConfigSetup {
     loaded: Option<Result<AgentConfig, ConfigError>>,
 }
 
-/// `{scratch}` in a step's text stands for the scenario's scratch folder.
+/// `{scratch}` in a step's text stands for the scenario's scratch folder,
+/// and the placeholders [`long_texts`] knows for what they say.
 fn in_scratch(agent: &Agent, text: &str) -> String {
-    text.replace("{scratch}", &agent.scratch().display().to_string())
+    long_texts(&text.replace("{scratch}", &agent.scratch().display().to_string()))
+}
+
+/// `text` with each placeholder for a text too long to write in a step
+/// replaced: a file or a request a person wrote can be that long, a step's
+/// text can't. `{a location of N bytes}` is a local path of `N` bytes,
+/// `{a value of N bytes}` is `N` bytes of `v`, `{N options}` is `N` options
+/// (`o1 = "demo", …`) as the inside of a TOML inline table, and `{N options
+/// as JSON}` is the same as a JSON object. Any other `{` is left as it is.
+pub(super) fn long_texts(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        let (before, after) = rest.split_at(open);
+        out.push_str(before);
+        let inside = after.get(1..).and_then(|after| after.split_once('}'));
+        match inside.and_then(|(name, after)| Some((placeholder(name)?, after))) {
+            Some((text, after)) => {
+                out.push_str(&text);
+                rest = after;
+            }
+            None => {
+                out.push('{');
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What the placeholder `{name}` stands for, if it is one.
+fn placeholder(name: &str) -> Option<String> {
+    let bytes = |prefix: &str| -> Option<usize> {
+        name.strip_prefix(prefix)?
+            .strip_suffix(" bytes")?
+            .parse()
+            .ok()
+    };
+    let options = |count: &str, one: fn(usize) -> String, comma: &str| -> Option<String> {
+        let count: usize = count.parse().ok()?;
+        Some((1..=count).map(one).collect::<Vec<_>>().join(comma))
+    };
+    if let Some(bytes) = bytes("a location of ") {
+        Some(format!("/srv/{}", "r".repeat(bytes - "/srv/".len())))
+    } else if let Some(bytes) = bytes("a value of ") {
+        Some("v".repeat(bytes))
+    } else if let Some(count) = name.strip_suffix(" options as JSON") {
+        let json = options(count, |n| format!("\"o{n}\":\"demo\""), ",")?;
+        Some(format!("{{{json}}}"))
+    } else {
+        options(
+            name.strip_suffix(" options")?,
+            |n| format!("o{n} = \"demo\""),
+            ", ",
+        )
+    }
 }
 
 fn config_path(agent: &Agent) -> PathBuf {
@@ -157,6 +214,42 @@ fn refused_relative_glob_file(agent: &mut Agent, key: String) {
             ..
         } => assert_eq!(*found, key),
         other => panic!("the load should refuse the glob file at {key:?}, got {other:?}"),
+    }
+}
+
+#[then(expr = "the load is refused because the location {string} is longer than 64 KiB")]
+fn refused_long_location(agent: &mut Agent, key: String) {
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Value(ValueKind::Location),
+            key: Some(found),
+            ..
+        } => assert_eq!(*found, key),
+        other => panic!("the load should refuse the location at {key:?}, got {other:?}"),
+    }
+}
+
+#[then(expr = "the load is refused because the option {string} is longer than 64 KiB")]
+fn refused_long_option(agent: &mut Agent, key: String) {
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Value(ValueKind::OptionValue),
+            key: Some(found),
+            ..
+        } => assert_eq!(*found, key),
+        other => panic!("the load should refuse the option at {key:?}, got {other:?}"),
+    }
+}
+
+#[then(expr = "the load is refused because {string} holds more than 64 options")]
+fn refused_too_many_options(agent: &mut Agent, key: String) {
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Value(ValueKind::Options),
+            key: Some(found),
+            ..
+        } => assert_eq!(*found, key),
+        other => panic!("the load should refuse the options at {key:?}, got {other:?}"),
     }
 }
 

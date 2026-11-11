@@ -5014,6 +5014,67 @@ mod repository_service_tests {
         }
     }
 
+    // The configuration refuses settings longer than a job takes when it
+    // loads (#236), so a request that would save them is refused first: the
+    // daemon would otherwise not start again.
+    #[tokio::test]
+    async fn settings_over_a_cap_are_an_invalid_body_and_nothing_runs() {
+        use domain::secrets::{MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS};
+        let long = |bytes: usize| format!("/{}", "v".repeat(bytes - 1));
+        let long_option =
+            || BTreeMap::from([("endpoint".to_owned(), long(MAX_OPTION_VALUE_BYTES + 1))]);
+        let many = || {
+            (0..=MAX_OPTIONS)
+                .map(|n| (format!("o{n}"), "demo".to_owned()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let with = |change: &dyn Fn(&mut RepositorySettingsDto)| {
+            let mut settings = settings_dto();
+            change(&mut settings);
+            settings
+        };
+        for (what, settings) in [
+            (
+                "location",
+                with(&|s| s.repository = long(MAX_LOCATION_BYTES + 1)),
+            ),
+            (
+                "hot location",
+                with(&|s| s.repo_hot = Some(long(MAX_LOCATION_BYTES + 1))),
+            ),
+            ("option", with(&|s| s.options = long_option())),
+            ("hot option", with(&|s| s.options_hot = long_option())),
+            ("cold option", with(&|s| s.options_cold = long_option())),
+            ("table of options", with(&|s| s.options = many())),
+            ("table of hot options", with(&|s| s.options_hot = many())),
+            ("table of cold options", with(&|s| s.options_cold = many())),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            assert_eq!(
+                service
+                    .test(api::TestRepositoryDto {
+                        settings: settings.clone()
+                    })
+                    .await,
+                Err(RepositoriesError::InvalidBody),
+                "a long {what}"
+            );
+            assert_eq!(
+                service.connect(connect("demo", settings.clone())).await,
+                Err(RepositoriesError::InvalidBody),
+                "a long {what}"
+            );
+            assert_eq!(
+                service.init(init(Some("demo"), settings)).await,
+                Err(RepositoriesError::InvalidBody),
+                "a long {what}"
+            );
+            assert_eq!(jobs(&engine), 0, "a long {what} ran a job");
+            assert!(saved(&*config).await.repositories().is_empty());
+        }
+    }
+
     #[tokio::test]
     async fn an_initialisation_under_an_alias_already_used_runs_no_job() {
         let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));

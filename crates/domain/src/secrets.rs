@@ -35,6 +35,24 @@ pub const MAX_SECRET_BYTES: usize = 64 * 1024;
 /// The most `${…}` references one field may hold.
 pub const MAX_REFERENCES: usize = 16;
 
+/// The most bytes a location (`repository`, `repo-hot`) may hold as it is
+/// written: what a job reads of it as a template. A longer one could never
+/// run a job, and every page and log that shows it masks it first, so the
+/// configuration refuses it when it is read, and an import and a request
+/// when they write it (technical design §10.2).
+pub const MAX_LOCATION_BYTES: usize = MAX_SECRET_BYTES;
+
+/// The most bytes the value of an option (in `options`, `options-hot` or
+/// `options-cold`) may hold as it is written, for the reasons a location
+/// has ([`MAX_LOCATION_BYTES`]).
+pub const MAX_OPTION_VALUE_BYTES: usize = MAX_SECRET_BYTES;
+
+/// The most options one of `options`, `options-hot` and `options-cold` may
+/// hold. A value may be a secret, or hold one, that a redactor looks for in
+/// every text it masks, so the work grows with their number; a backend takes
+/// a handful.
+pub const MAX_OPTIONS: usize = 64;
+
 /// A resolved secret, such as a repository password. Its `Debug` form never
 /// shows the value, so it can't leak through a log or a test failure.
 #[derive(Clone, PartialEq, Eq)]
@@ -1798,5 +1816,56 @@ mod tests {
         let blank = super::Redactor::new(&[SecretValue::new(" \n ")]);
         assert_eq!(blank.redact("a b"), "a b");
         assert_eq!(blank.redact("x \n y"), "x***y");
+    }
+
+    /// What `work` gives, and how many bytes of a needle and the text a
+    /// redactor compared while doing it, on this thread.
+    fn compared<T>(work: impl FnOnce() -> T) -> (T, usize) {
+        let _ = work;
+        todo!()
+    }
+
+    /// Masking compares each byte of the text at least once and at most
+    /// twice per needle, however long and repetitive a secret and the text
+    /// are: the work grows with the length of the text, never with the
+    /// length of a needle (#236). A count, not a time, so it can't flake.
+    #[test]
+    fn masking_a_text_compares_each_byte_at_most_twice_per_needle() {
+        let cap = MAX_SECRET_BYTES;
+        // A password half the cap long, one byte over and over, then the
+        // characters a URL parser writes in different ways: dozens of
+        // needles that share their first 32 KiB, all of it in the text at
+        // every byte. And a location at the cap whose password is the same.
+        let mut settings =
+            Settings::new(&format!("rest:https://demo:{}@nas/", "a".repeat(cap - 23)));
+        assert_eq!(settings.repository.len(), cap);
+        settings.password =
+            SecretValue::new(format!("{}\"`#'^{{}}?/:@\\ <>|", "a".repeat(cap / 2)));
+        let redactor = settings.redactor();
+        let needles = redactor.needles.len();
+        assert!(needles > 40, "{needles}");
+        let text = "a".repeat(cap);
+        let clipped = format!("{text}…");
+        for (what, length, (masked, work), expected) in [
+            ("whole", cap, compared(|| redactor.redact(&text)), "***"),
+            (
+                "cut",
+                cap,
+                compared(|| redactor.redact_cut(text.as_bytes())),
+                "***",
+            ),
+            (
+                "clipped",
+                clipped.len(),
+                compared(|| redactor.redact_clipped(&clipped, "…")),
+                "***…",
+            ),
+        ] {
+            assert_eq!(masked, expected, "{what}");
+            assert!(
+                (length * needles..=2 * length * needles).contains(&work),
+                "{what}: {work} comparisons for {length} bytes and {needles} needles"
+            );
+        }
     }
 }

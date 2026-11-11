@@ -24,7 +24,10 @@ pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Plan, RetryPolicy};
-pub use repository::{GroupBy, Maintenance, RepositoryConfig, RepositorySettings, masked_options};
+pub use repository::{
+    GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,
+    check_options, masked_options,
+};
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
 pub use schedule::{CronExpression, Schedule};
 
@@ -46,11 +49,22 @@ pub enum ValueKind {
     GroupBy,
     OnFailure,
     HookCommand,
+    /// A repository's `repository` or `repo-hot`, longer than
+    /// [`MAX_LOCATION_BYTES`](crate::secrets::MAX_LOCATION_BYTES).
+    Location,
+    /// The value of an option, longer than
+    /// [`MAX_OPTION_VALUE_BYTES`](crate::secrets::MAX_OPTION_VALUE_BYTES).
+    OptionValue,
+    /// A table of options (`options`, `options-hot`, `options-cold`) with
+    /// more than [`MAX_OPTIONS`](crate::secrets::MAX_OPTIONS).
+    Options,
 }
 
 /// A value the model refuses. `value` is the text as it was written, except
-/// for [`ValueKind::HookCommand`]: a command line may hold a secret, so its
-/// text is never kept here, and an error shows no more than the key it is at.
+/// for [`ValueKind::HookCommand`], [`ValueKind::Location`] and
+/// [`ValueKind::OptionValue`], which may hold a secret, so their text is
+/// never kept here, and an error shows no more than the key it is at; and
+/// [`ValueKind::Options`], a table, which has no text of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidValue {
     pub kind: ValueKind,

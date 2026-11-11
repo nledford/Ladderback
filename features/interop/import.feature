@@ -488,6 +488,58 @@ Feature: Import a rustic profile
       Then the import is refused naming "backup.snapshots[0].iglob-files[0]"
       And no config file was written
 
+    Scenario: A location longer than the config takes is refused where the profile writes it
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{a location of 65537 bytes}"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.repository"
+      And the refusal points at line 2 of the profile
+      And no config file was written
+
+    Scenario: An option longer than the config takes is refused where the profile writes it
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "opendal:s3"
+        password-file = "{scratch}/password"
+
+        [repository.options]
+        endpoint = "{a value of 65537 bytes}"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.options.endpoint"
+      And the refusal points at line 6 of the profile
+      And no config file was written
+
+    Scenario: More options than the config takes are refused where the profile writes them
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "opendal:s3"
+        password-file = "{scratch}/password"
+        options = { {65 options} }
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.options"
+      And the refusal points at line 4 of the profile
+      And no config file was written
+
     Scenario: Tags Ladderback keeps for itself are dropped
       Given a rustic profile "nas.toml" holding:
         """

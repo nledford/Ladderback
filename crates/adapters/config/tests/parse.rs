@@ -10,7 +10,10 @@ use domain::planning::{
     KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RetentionPolicy, RetryPolicy, Schedule,
     Source, SourceFilter, ValueKind, Violation,
 };
-use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
+use domain::secrets::{
+    CommandLine, FileRead, KeyringEntry, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS,
+    SecretRef, SecretValue,
+};
 use domain::{IdKind, PlanId, RepositoryAlias, SignedDuration};
 use support::*;
 
@@ -571,6 +574,90 @@ fn a_glob_file_that_is_not_an_absolute_path_is_refused_at_its_plan_and_key() {
             "\"globs/home.txt\"",
         ),
     ]);
+}
+
+// A job reads a location as a template, which ends at 64 KiB: a longer one
+// could never run, and the Repositories page and the daemon's log would mask
+// an unbounded text (#236). A location may hold a password, so the refusal
+// shows none of it.
+#[test]
+fn a_location_longer_than_a_job_takes_is_refused_where_it_is_written() {
+    let location = |bytes: usize| format!("/srv/{}", "r".repeat(bytes - 5));
+    let at_the_cap = location(MAX_LOCATION_BYTES);
+    let over = location(MAX_LOCATION_BYTES + 1);
+    let file = |repository: &str, hot: &str| {
+        format!(
+            "schema = 1\n\n[repositories.nas]\nrepository = \"{repository}\"\n\
+             repo-hot = \"{hot}\"\npassword-env = \"DEMO_PASSWORD\"\n"
+        )
+    };
+    let loaded = parsed(&file(&at_the_cap, &at_the_cap)).expect("a location at the cap");
+    let settings = &loaded.config.repositories()[&alias("nas")].settings;
+    assert_eq!(settings.repository, at_the_cap);
+    for (text, key) in [
+        (file(&over, &at_the_cap), "repositories.nas.repository"),
+        (file(&at_the_cap, &over), "repositories.nas.repo-hot"),
+    ] {
+        let error = invalid(parsed(&text));
+        assert_eq!(error.problem, Problem::Value(ValueKind::Location), "{key}");
+        assert_eq!(error.key.as_deref(), Some(key));
+        assert_eq!(error.at, Some(position_of(&text, &format!("\"{over}\""))));
+        assert_eq!(error.detail, "", "{key}");
+    }
+}
+
+// An option's value is read as a template too, and each value may be a
+// secret that a redactor looks for in every text it masks, so a table holds
+// at most 64 options (#236). A value may be a secret, so the refusal shows
+// none of it.
+#[test]
+fn a_long_option_or_one_option_too_many_is_refused_where_it_is_written() {
+    let at_the_cap = "k".repeat(MAX_OPTION_VALUE_BYTES);
+    let over = format!("{at_the_cap}k");
+    let options = |count: usize| {
+        (0..count)
+            .map(|n| format!("o{n} = \"demo\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let file = |table: &str, body: &str| {
+        format!(
+            "schema = 1\n\n[repositories.nas]\nrepository = \"/srv/demo-repo\"\n\
+             password-env = \"DEMO_PASSWORD\"\n{table} = {{ {body} }}\n"
+        )
+    };
+    for table in ["options", "options-hot", "options-cold"] {
+        let full = format!("{}, token = \"{at_the_cap}\"", options(MAX_OPTIONS - 1));
+        let loaded = parsed(&file(table, &full)).expect("options at the caps");
+        let settings = &loaded.config.repositories()[&alias("nas")].settings;
+        let read = match table {
+            "options" => &settings.options,
+            "options-hot" => &settings.options_hot,
+            _ => &settings.options_cold,
+        };
+        assert_eq!(read.len(), MAX_OPTIONS, "{table}");
+        assert_eq!(read["token"], at_the_cap, "{table}");
+
+        let long = file(table, &format!("endpoint = \"{over}\""));
+        let error = invalid(parsed(&long));
+        assert_eq!(
+            error.problem,
+            Problem::Value(ValueKind::OptionValue),
+            "{table}"
+        );
+        assert_eq!(
+            error.key,
+            Some(format!("repositories.nas.{table}.endpoint"))
+        );
+        assert_eq!(error.at, Some(position_of(&long, &format!("\"{over}\""))));
+        assert_eq!(error.detail, "", "{table}");
+
+        let many = file(table, &options(MAX_OPTIONS + 1));
+        let error = invalid(parsed(&many));
+        assert_eq!(error.problem, Problem::Value(ValueKind::Options), "{table}");
+        assert_eq!(error.key, Some(format!("repositories.nas.{table}")));
+        assert_eq!(error.at, Some(position_of(&many, "{ o0")));
+    }
 }
 
 #[test]

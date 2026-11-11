@@ -566,8 +566,11 @@ async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
     api_post(agent, "/api/v1/repositories/_init", &body.to_string()).await;
 }
 
+/// The body may hold the placeholders `long_texts` knows, for a field too
+/// long to write in a step.
 #[when(regex = r#"^the client sends (.+) to "([^"]+)"$"#)]
 async fn api_sends(agent: &mut Agent, body: String, route: String) {
+    let body = super::config_steps::long_texts(&body);
     api_post(agent, &route, &body).await;
 }
 
