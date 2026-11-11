@@ -7,6 +7,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   agent_id TEXT NOT NULL,         -- 'local' on agents; registry id on hub
   kind TEXT NOT NULL,             -- backup|forget|prune|check|restore|stats|...
   plan_id TEXT, repo_uuid TEXT,   -- repo_uuid = rustic repository ID
+  repo_alias TEXT,                -- maintenance ops: the repository's alias when the run started (decision 52)
   trigger TEXT NOT NULL,          -- schedule|manual|catch-up|retry|hub|mcp
   status TEXT NOT NULL,           -- queued|running|succeeded|succeeded_with_warnings|failed|cancelled
   queued_at INTEGER, started_at INTEGER, finished_at INTEGER,
@@ -15,7 +16,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   attempt INTEGER DEFAULT 1,
   requested_by TEXT,              -- restores: local UI or hub (§10.4)
   snapshot_id TEXT,               -- for backups
-  summary_json TEXT,              -- OpResult (files new/changed, bytes added, duration, …)
+  summary_json TEXT,              -- OpResult (files new/changed/unmodified, bytes processed and added, duration, …)
   error_code TEXT, error_args TEXT, error_detail TEXT,   -- api::ErrorCode, stored arguments (§9), rustic's verbatim text (§8.4)
   warning_count INTEGER DEFAULT 0
 );
@@ -63,9 +64,11 @@ CREATE TABLE repo_claims (repo_uuid TEXT, agent_id TEXT, requested TEXT, status 
                           PRIMARY KEY (repo_uuid, agent_id));
 ```
 
-**The operation log (M1b).** `migrations/0001_operations.sql`, at the repository root and applied by `sqlx::migrate!` when the store opens (§8.3), creates the `operations` and `op_warnings` tables, and nothing else above; `0002_one_maintenance_per_repo.sql` adds `one_maintenance_per_repo` (I7, below). Later tables, columns and indexes arrive as migrations of the features that need them, among them the queue index. As of version 2:
+**The operation log (M1b).** `migrations/0001_operations.sql`, at the repository root and applied by `sqlx::migrate!` when the store opens (§8.3), creates the `operations` and `op_warnings` tables, and nothing else above; `0002_one_maintenance_per_repo.sql` adds `one_maintenance_per_repo` (I7, below), and `0004_operation_repository_alias.sql` adds `repo_alias`. Later tables, columns and indexes arrive as migrations of the features that need them, among them the queue index. As of version 4:
 
-- `operations` has the columns the log writes: `id`, `agent_id` (always `local` for now), `kind`, `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`, `started_at`, `finished_at`, `snapshot_id` (a backup's), `summary_json` (what the engine reported), `error_code`, `error_args`, `error_detail`, `warning_count`. `queued_at` and `warning_count` are `NOT NULL`. `kind` is `fake|identify|backup|forget|adopt|prune|check|ls`: `fake` and `identify` are the diagnostic and repository-opening jobs, `forget`/`adopt`/`prune`/`check` the maintenance ones (I7), `ls` a read that is never logged. `trigger`, `status` and the other columns take the values listed above.
+- `operations` has the columns the log writes: `id`, `agent_id` (always `local` for now), `kind`, `plan_id`, `repo_uuid`, `repo_alias` (below), `trigger`, `status`, `queued_at`, `started_at`, `finished_at`, `snapshot_id` (a backup's), `summary_json` (what the engine reported), `error_code`, `error_args`, `error_detail`, `warning_count`. `queued_at` and `warning_count` are `NOT NULL`. `kind` is `fake|identify|backup|forget|adopt|prune|check|ls`: `fake` and `identify` are the diagnostic and repository-opening jobs, `forget`/`adopt`/`prune`/`check` the maintenance ones (I7), `ls` a read that is never logged. `trigger`, `status` and the other columns take the values listed above.
+- `repo_alias` (migration `0004_operation_repository_alias.sql`, decision 52) is the alias of the repository a maintenance operation (forget, adopt, prune, check) ran on, as this agent named the repository when the run started; the Operations page names the row by it, and a later rename of the alias leaves the row as it was. It is NULL for every other kind and for every row an earlier build wrote, which the page then names by what ran alone; adding the nullable column rewrote no row. It is read back as strictly as an ID: one that isn't a valid alias is corrupt.
+- A backup's `summary_json` keeps `bytes_processed`, the bytes of the source the backup went through, changed or not, only when the engine reported them: the key is left out otherwise, so a summary an earlier build wrote reads back as it was, with none.
 - Times are Unix **milliseconds**, UTC, cut to the millisecond and never rounded.
 - `ops_by_plan` is `(plan_id, id DESC)`, not `started_at`: history pages by operation ID, which is time-ordered (UUIDv7), and a queued operation has no start yet.
 - The cap on warnings is the `Operation` aggregate's: it keeps the first 10,000 and counts the rest, so `op_warnings` holds at most 10,000 rows per operation and `warning_count` the total. Warnings are read back in the order they were recorded. The aggregate also caps each text field of a warning it keeps, `item`, `during` and `detail`, at 4,096 bytes, so one operation's warnings take about 120 MB at the most: longer text is cut at a character boundary and ends in `…`, and text of exactly 4,096 bytes is kept whole.

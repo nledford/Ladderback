@@ -110,6 +110,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [49](decisions/49-one-name-per-repository.md) | One name per repository |
 | [50](decisions/50-a-cancelled-backup-keeps-its-packs-indexed.md) | A cancelled backup keeps its packs indexed |
 | [51](decisions/51-what-a-checks-findings-are.md) | What a check's findings are |
+| [52](decisions/52-the-operation-log-keeps-the-repositorys-alias.md) | The operation log keeps the repository's alias |
 | [54](decisions/54-early-release-builds.md) | Early release builds |
 | [55](decisions/55-a-backup-stopped-at-its-deadline-winds-down.md) | A backup stopped at its deadline winds down |
 
