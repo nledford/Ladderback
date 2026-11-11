@@ -13,10 +13,12 @@ use std::sync::Arc;
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
 use app::event_bus::BroadcastEventBus;
-use app::execution::RunOperation;
+use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
-use app::maintenance::{Adoption, AdoptionSource, MaintenanceKind, RunMaintenance};
+use app::maintenance::{
+    Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, RunMaintenance,
+};
 use app::ports::Retention;
 use app::ports::SecretResolver as _;
 use app::ports::{
@@ -498,11 +500,7 @@ impl Operations for PlanRunner {
             // Nothing waits on the run: it reports through the event bus.
             let finished = use_case.run_queued(queued, cancel).await;
             registry.finish(&operation);
-            log::info!(
-                "operation {} ended: {:?}",
-                finished.operation.id().as_uuid().hyphenated(),
-                finished.operation.status()
-            );
+            log_ended(&finished);
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
@@ -547,54 +545,46 @@ impl Operations for PlanRunner {
         .with_events(Arc::clone(&self.events));
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let id_text = operation.as_uuid().hyphenated().to_string();
-        let prepared = use_case.prepare(operation, &alias, kind).await;
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(app::maintenance::MaintenanceError::UnknownRepository) => {
-                return Err(http_adapter::MaintenanceStartError::UnknownRepository);
-            }
-            Err(app::maintenance::MaintenanceError::Busy { running }) => {
-                return Err(http_adapter::MaintenanceStartError::Busy {
-                    running: running.as_uuid().hyphenated().to_string(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::KeepsNothing { plan }) => {
-                return Err(http_adapter::MaintenanceStartError::KeepsNothing {
-                    plan: plan.as_str().to_owned(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::UnknownPlan { plan }) => {
-                return Err(http_adapter::MaintenanceStartError::UnknownPlan {
-                    plan: plan.as_str().to_owned(),
-                });
-            }
-            Err(app::maintenance::MaintenanceError::AdoptionNoMatch) => {
-                return Err(http_adapter::MaintenanceStartError::AdoptionNoMatch);
-            }
-            Err(app::maintenance::MaintenanceError::AdoptionAmbiguous { plans }) => {
-                return Err(http_adapter::MaintenanceStartError::AdoptionAmbiguous {
-                    plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
-                });
-            }
-            Err(_) => return Err(http_adapter::MaintenanceStartError::Unavailable),
-        };
-        // The slot is held; the run happens on a task of its own, and its
-        // cancel switch is parked before it starts (§4.2).
-        let cancel = self.registry.register(operation);
-        let cancel = async move {
-            let _ = cancel.await;
-        };
+        // The reads come first, on the request's own future: they store
+        // nothing and take no slot, so a client that hangs up meanwhile has
+        // left nothing behind.
+        let assessment = use_case
+            .assess(operation, &alias, kind)
+            .await
+            .map_err(maintenance_refusal)?;
+        // The start writes the log. A write dropped after SQLite committed
+        // it leaves a running row that holds the repository (I7) and that
+        // nothing in this process ends, so the start happens on a task of its
+        // own, which the client's hanging up can't drop, and the route waits
+        // for that task's answer.
+        let (started, wait_for_start) = futures::channel::oneshot::channel();
         let registry = Arc::clone(&self.registry);
         tokio::spawn(async move {
+            let prepared = match use_case.start(assessment).await {
+                Ok(prepared) => prepared,
+                Err(refused) => {
+                    let _ = started.send(Err(maintenance_refusal(refused)));
+                    return;
+                }
+            };
+            // The cancel switch is parked before the route answers, not
+            // lazily when the run first polls it, so a cancel that arrives
+            // the instant the route answers finds it (§4.2).
+            let cancel = registry.register(operation);
+            let cancel = async move {
+                let _ = cancel.await;
+            };
+            let _ = started.send(Ok(()));
             let finished = use_case.execute(prepared, cancel).await;
             registry.finish(&operation);
-            log::info!(
-                "operation {} ended: {:?}",
-                finished.operation.id().as_uuid().hyphenated(),
-                finished.operation.status()
-            );
+            log_ended(&finished);
         });
-        Ok(id_text)
+        // A task that ended without answering has not started anything the
+        // route could name.
+        match wait_for_start.await {
+            Ok(answer) => answer.map(|()| id_text),
+            Err(_) => Err(http_adapter::MaintenanceStartError::Unavailable),
+        }
     }
 
     async fn history(
@@ -694,6 +684,49 @@ impl Operations for PlanRunner {
         } else {
             Err(http_adapter::CancelError::NotRunning)
         }
+    }
+}
+
+/// Says in the log that an operation ended, and each write the operation log
+/// refused it (§9): a run goes on without a log that refuses its writes, so
+/// these lines are the only sign that the log has stopped taking them. A
+/// refused write is named by the code of its failure and never by the
+/// failure's own words, which nobody has checked for a value (I4).
+fn log_ended(finished: &Finished) {
+    let operation = finished.operation.id().as_uuid().hyphenated();
+    log::info!(
+        "operation {operation} ended: {:?}",
+        finished.operation.status()
+    );
+    for refused in &finished.recording_errors {
+        log::warn!(
+            "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
+            refused.code()
+        );
+    }
+}
+
+/// Why a maintenance run could not start, as the API answers it. A failure
+/// to read the configuration, the secrets, the repository or the operation
+/// log is `Unavailable`: none of them is the caller's to fix.
+fn maintenance_refusal(error: MaintenanceError) -> http_adapter::MaintenanceStartError {
+    use http_adapter::MaintenanceStartError as Answer;
+    match error {
+        MaintenanceError::UnknownRepository => Answer::UnknownRepository,
+        MaintenanceError::Busy { running } => Answer::Busy {
+            running: running.as_uuid().hyphenated().to_string(),
+        },
+        MaintenanceError::KeepsNothing { plan } => Answer::KeepsNothing {
+            plan: plan.as_str().to_owned(),
+        },
+        MaintenanceError::UnknownPlan { plan } => Answer::UnknownPlan {
+            plan: plan.as_str().to_owned(),
+        },
+        MaintenanceError::AdoptionNoMatch => Answer::AdoptionNoMatch,
+        MaintenanceError::AdoptionAmbiguous { plans } => Answer::AdoptionAmbiguous {
+            plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
+        },
+        _ => Answer::Unavailable,
     }
 }
 
@@ -1753,6 +1786,60 @@ impl CancelRegistry {
     }
 }
 
+/// What the daemon logs, for the tests that look at the log: the warnings it
+/// gives (`lines`) and what it says at info level (`infos`). `log` takes one
+/// logger for a process, so the tests of every module that reads the log
+/// share this one, and each reads only the lines about what it started.
+#[cfg(test)]
+mod captured_log {
+    use std::sync::{Mutex, PoisonError};
+
+    struct Captured;
+
+    static LOGGED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+
+    impl log::Log for Captured {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            LOGGED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((record.level(), record.args().to_string()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// Starts capturing, before the code that logs runs.
+    pub(super) fn capture() {
+        let _ = log::set_logger(&Captured);
+        log::set_max_level(log::LevelFilter::Info);
+    }
+
+    /// Every line logged so far at warning level or above, with its level.
+    pub(super) fn lines() -> Vec<(log::Level, String)> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(level, _)| *level <= log::Level::Warn)
+            .cloned()
+            .collect()
+    }
+
+    /// Every line logged so far at info level.
+    pub(super) fn infos() -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(level, _)| *level == log::Level::Info)
+            .map(|(_, line)| line.clone())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2446,6 +2533,12 @@ mod tests {
         }
     }
 
+    /// The demo repository's ID: what [`Completes`] reports for a read of it,
+    /// and what the tests that look at its slot in the log name.
+    fn demo_repository() -> domain::RepositoryId {
+        domain::RepositoryId::parse(&"ab".repeat(32)).expect("a repository ID")
+    }
+
     /// An engine whose jobs start and succeed at once, each with what its
     /// kind reports: the ID of the repository a read opens, the outcome of
     /// a check.
@@ -2454,8 +2547,7 @@ mod tests {
     #[async_trait]
     impl Engine for Completes {
         async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-            let repository =
-                domain::RepositoryId::parse(&"ab".repeat(32)).expect("a repository ID");
+            let repository = demo_repository();
             let result = match &job {
                 Job::Identify(_) => EngineResult::Repository { id: repository },
                 Job::Check(_) => EngineResult::Check(app::ports::CheckSummary {
@@ -2722,6 +2814,727 @@ mod tests {
                 "the page's news of {end:?}"
             );
         }
+    }
+
+    /// An operation log that refuses every save, in the words a database
+    /// uses for what it refuses, and counts them. Starts and reads go to the
+    /// log behind it.
+    struct RefusingSaves {
+        inner: Arc<dyn OperationStore>,
+        refused: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    /// What a refused save says for itself: none of it may reach the daemon's
+    /// log.
+    const REFUSAL: &str = "canary: the disk of /srv/secret-folder is full";
+
+    #[async_trait]
+    impl OperationStore for RefusingSaves {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            _operation: &domain::execution::Operation,
+            _result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.refused
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(app::ports::StoreError::Unavailable {
+                detail: REFUSAL.to_owned(),
+            })
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            self.inner.try_start(operation).await
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// An engine that answers the identify a maintenance run begins with and
+    /// parks the job itself, as a real check does while it works.
+    struct IdentifiesThenParks;
+
+    #[async_trait]
+    impl Engine for IdentifiesThenParks {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            match job {
+                Job::Identify(_) => Completes.run(op, job).await,
+                _ => ParkedEngine.run(op, job).await,
+            }
+        }
+    }
+
+    /// A client that cancels the instant it has the answer to a maintenance
+    /// start is not told the operation is unknown or not running: the run
+    /// starts on a task of its own, and that task parks the run's cancel
+    /// switch before the route answers (§4.2). The run it cancels ends
+    /// cancelled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_cancelled() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(IdentifiesThenParks);
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    /// The lines the daemon logged about `operation` once its run had said
+    /// what the log refused it: one for each of the `refused` writes, so the
+    /// wait ends when there are that many. A run that never says gives up
+    /// after a few seconds, and the lines as they stand tell what is missing.
+    async fn logged_about_the_run(
+        operation: &str,
+        refused: &std::sync::atomic::AtomicUsize,
+    ) -> Vec<(log::Level, String)> {
+        let about = || {
+            captured_log::lines()
+                .into_iter()
+                .filter(|(_, line)| line.contains(operation))
+                .collect::<Vec<_>>()
+        };
+        let said = async {
+            loop {
+                let lines = about();
+                let refused = refused.load(std::sync::atomic::Ordering::SeqCst);
+                if refused > 0 && lines.len() >= refused {
+                    return lines;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), said)
+            .await
+            .unwrap_or_else(|_| about())
+    }
+
+    /// Each refused write is said once, at warning level, with the code of
+    /// the failure and none of its words (I4).
+    fn assert_each_refusal_is_said(lines: &[(log::Level, String)], refused: usize) {
+        assert!(
+            refused > 0,
+            "the log refused nothing, so the test shows nothing"
+        );
+        assert_eq!(
+            lines.len(),
+            refused,
+            "one line for each refused write: {lines:?}"
+        );
+        for (level, line) in lines {
+            assert_eq!(*level, log::Level::Warn, "{line}");
+            assert!(line.contains("store-unavailable"), "{line}");
+        }
+        let everything = captured_log::lines();
+        assert!(
+            everything.iter().all(|(_, line)| !line.contains("canary")),
+            "a line repeats what the log said: {everything:?}"
+        );
+    }
+
+    /// A backup goes on without a log that refuses its writes, and the
+    /// daemon says so in its own log: a log that has stopped taking writes
+    /// is otherwise invisible to the person running it (#135).
+    #[tokio::test]
+    async fn a_write_the_log_refuses_during_a_backup_is_logged_once_with_its_code_and_never_its_words()
+     {
+        captured_log::capture();
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        runner.store = Arc::new(RefusingSaves {
+            inner: Arc::clone(&runner.store),
+            refused: Arc::clone(&refused),
+        });
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("a backup starts without a log that takes its writes");
+        // The engine parks the run, as a real one is parked while it works,
+        // so a cancel is what ends it.
+        let operation = operation_of(&id).expect("an operation ID");
+        assert!(
+            runner.registry.cancel(&operation),
+            "the run has a switch to fire"
+        );
+        let lines = logged_about_the_run(&id, &refused).await;
+        assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// The same for a maintenance run, whose last write is the one the log
+    /// refuses here: its start was taken, so the run goes on to the end.
+    #[tokio::test]
+    async fn a_write_the_log_refuses_during_maintenance_is_logged_once_with_its_code_and_never_its_words()
+     {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(Completes);
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        runner.store = Arc::new(RefusingSaves {
+            inner: Arc::clone(&runner.store),
+            refused: Arc::clone(&refused),
+        });
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("a check starts");
+        let lines = logged_about_the_run(&id, &refused).await;
+        assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// The lines `log_ended` logs about a run that `n` names, which ended
+    /// after the log refused it the `refused` writes.
+    fn logged_when_a_run_ends(
+        n: u128,
+        refused: Vec<app::ports::StoreError>,
+    ) -> Vec<(log::Level, String)> {
+        captured_log::capture();
+        let id = OperationId::from_uuid(Uuid::from_u128(n));
+        log_ended(&Finished {
+            operation: running_backup(id),
+            result: None,
+            recording_errors: refused,
+        });
+        let id = id.as_uuid().hyphenated().to_string();
+        captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains(&id))
+            .collect()
+    }
+
+    /// A log that took every write of a run has nothing to be warned of.
+    #[test]
+    fn a_run_the_log_took_in_full_logs_no_warning() {
+        assert_eq!(logged_when_a_run_ends(0x7001, Vec::new()), []);
+    }
+
+    /// Each refused write is one warning, named by the code of its kind of
+    /// failure, and none of the failure's words reaches the log (I4).
+    #[test]
+    fn each_write_the_log_refused_is_one_warning_with_the_code_of_its_failure() {
+        let words = "canary: the disk of /srv/secret-folder is full";
+        let lines = logged_when_a_run_ends(
+            0x7002,
+            vec![
+                app::ports::StoreError::Unavailable {
+                    detail: words.to_owned(),
+                },
+                app::ports::StoreError::Corrupt {
+                    detail: words.to_owned(),
+                },
+            ],
+        );
+        let [(first_level, first), (second_level, second)] = lines.as_slice() else {
+            panic!("one line for each refused write: {lines:?}");
+        };
+        assert_eq!(*first_level, log::Level::Warn, "{first}");
+        assert_eq!(*second_level, log::Level::Warn, "{second}");
+        assert!(first.contains("store-unavailable"), "{first}");
+        assert!(second.contains("store-corrupt"), "{second}");
+        assert!(
+            lines.iter().all(|(_, line)| !line.contains("canary")),
+            "a line repeats what the log said: {lines:?}"
+        );
+    }
+
+    /// A maintenance run that could not start is answered with the kind of
+    /// its refusal, and whatever is not the caller's to fix (the
+    /// configuration, a secret, the repository, the log) with `Unavailable`.
+    #[test]
+    fn a_maintenance_start_is_answered_with_the_kind_of_its_refusal() {
+        use http_adapter::MaintenanceStartError as Answer;
+        let plan = |slug: &str| PlanId::parse(slug).expect("a plan ID");
+        let answers = [
+            (
+                MaintenanceError::UnknownRepository,
+                Answer::UnknownRepository,
+            ),
+            (
+                MaintenanceError::Busy {
+                    running: OperationId::from_uuid(Uuid::from_u128(0x7003)),
+                },
+                Answer::Busy {
+                    running: "00000000-0000-0000-0000-000000007003".to_owned(),
+                },
+            ),
+            (
+                MaintenanceError::KeepsNothing { plan: plan("home") },
+                Answer::KeepsNothing {
+                    plan: "home".to_owned(),
+                },
+            ),
+            (
+                MaintenanceError::UnknownPlan { plan: plan("home") },
+                Answer::UnknownPlan {
+                    plan: "home".to_owned(),
+                },
+            ),
+            (MaintenanceError::AdoptionNoMatch, Answer::AdoptionNoMatch),
+            (
+                MaintenanceError::AdoptionAmbiguous {
+                    plans: vec![plan("home"), plan("mirror")],
+                },
+                Answer::AdoptionAmbiguous {
+                    plans: vec!["home".to_owned(), "mirror".to_owned()],
+                },
+            ),
+            (MaintenanceError::Unavailable, Answer::Unavailable),
+            (
+                MaintenanceError::Resolve(ResolveError {
+                    field: Field::Repository,
+                    cause: Cause::ReferenceInProcessArguments,
+                }),
+                Answer::Unavailable,
+            ),
+            (
+                MaintenanceError::Engine {
+                    detail: "no worker".to_owned(),
+                },
+                Answer::Unavailable,
+            ),
+            (
+                MaintenanceError::Failed(FailureReason::DeadlinePassed),
+                Answer::Unavailable,
+            ),
+            (MaintenanceError::TimedOut, Answer::Unavailable),
+            (
+                MaintenanceError::Store(app::ports::StoreError::Unavailable {
+                    detail: "disk full".to_owned(),
+                }),
+                Answer::Unavailable,
+            ),
+        ];
+        for (refused, answer) in answers {
+            let said = format!("{refused:?}");
+            assert_eq!(maintenance_refusal(refused), answer, "{said}");
+        }
+    }
+
+    /// An operation log whose starts take their time on both sides of the
+    /// write, so that a handler dropped on either side is dropped with the
+    /// start still going on or already stored.
+    struct SlowStarts {
+        inner: Arc<dyn OperationStore>,
+    }
+
+    /// How long [`SlowStarts`] waits before and after a start: two polls of
+    /// the sweep's 20 ms each.
+    const SLOW: std::time::Duration = std::time::Duration::from_millis(40);
+
+    #[async_trait]
+    impl OperationStore for SlowStarts {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            tokio::time::sleep(SLOW).await;
+            let decided = self.inner.try_start(operation).await;
+            tokio::time::sleep(SLOW).await;
+            decided
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// More polls than a start needs: a sweep that reaches it fails, rather
+    /// than runs for ever.
+    const MOST_POLLS: usize = 200;
+
+    /// A start that ends after fewer polls than this was not cut at the
+    /// points the sweep is about: its reads, and the two sides of the write
+    /// that records it.
+    const FEWEST_AWAIT_POINTS: usize = 5;
+
+    /// Polls `call` `polls` times, a moment apart so that the tasks and
+    /// connection threads it waits for can answer in between, then drops it:
+    /// the call is cut short at one of its await points, as a client that
+    /// hangs up cuts the handler that serves it. `Some` when the call ended
+    /// within `polls` polls. (The operation log's own cancellation tests use
+    /// the same sweep.)
+    async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option<T> {
+        let mut call = std::pin::pin!(call);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..polls {
+            if let std::task::Poll::Ready(done) = call.as_mut().poll(&mut cx) {
+                return Some(done);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        None
+    }
+
+    /// Within a few seconds the repository takes another maintenance
+    /// operation: whatever ran on it has ended, or was never recorded.
+    async fn assert_the_repository_takes_another_check(runner: &PlanRunner, what: &str) {
+        let now = domain::Timestamp::from_second(1_800_000_100).expect("a timestamp");
+        let mut check = domain::execution::Operation::queue(
+            OperationId::from_uuid(Uuid::now_v7()),
+            OperationKind::Check,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: Some(demo_repository()),
+            },
+            now,
+        );
+        check.start(now).expect("a queued operation starts");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match runner.store.try_start(&check).await {
+                Ok(app::ports::Start::Started) => return,
+                Ok(app::ports::Start::Refused { running }) => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "{what}: the repository is still held by {}, which nothing ends",
+                        running.as_uuid().hyphenated()
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("{what}: the log refused the check's start: {error}"),
+            }
+        }
+    }
+
+    /// A client that hangs up in the middle of its request drops the handler
+    /// wherever it is waiting. A maintenance start dropped there must not
+    /// leave the repository held by a row nothing ends (I7): once SQLite has
+    /// committed the start, only the run itself ends it, and a handler that
+    /// was dropped before it learned of the commit has no one left to run it
+    /// (#135). The sweep holds itself to what it is about: the start that
+    /// nothing cuts is answered with its run, and some cut came after the log
+    /// had stored the start.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_maintenance_start_cut_short_at_any_await_point_leaves_the_repository_free() {
+        let mut cut_after_the_write = 0;
+        for polls in 0..MOST_POLLS {
+            let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+            runner.engine = Arc::new(Completes);
+            runner.store = Arc::new(SlowStarts {
+                inner: Arc::clone(&runner.store),
+            });
+            let start =
+                runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+            let what = format!("after a start cut after {polls} polls");
+            if let Some(answer) = cut_after(start, polls).await {
+                assert!(
+                    answer.is_ok(),
+                    "the start that nothing cut was refused: {answer:?}"
+                );
+                assert!(
+                    polls >= FEWEST_AWAIT_POINTS,
+                    "the start ended in {polls} polls: nothing was cut"
+                );
+                assert!(
+                    cut_after_the_write > 0,
+                    "no cut came after the log had stored the start: the sweep never reached the point it is about"
+                );
+                assert_the_repository_takes_another_check(&runner, &what).await;
+                return;
+            }
+            let stored = runner
+                .store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if !stored.operations.is_empty() {
+                cut_after_the_write += 1;
+            }
+            assert_the_repository_takes_another_check(&runner, &what).await;
+        }
+        panic!("a start took more than {MOST_POLLS} polls");
+    }
+
+    /// An operation log that stores a start and then keeps its answer until
+    /// the test lets it through: the moment a client that hangs up cuts the
+    /// route, after the log has the start and before the route has learned
+    /// so.
+    struct HeldAnswer {
+        inner: Arc<dyn OperationStore>,
+        stored: tokio::sync::Notify,
+        open: tokio::sync::watch::Sender<bool>,
+    }
+
+    impl HeldAnswer {
+        fn over(inner: Arc<dyn OperationStore>) -> Self {
+            Self {
+                inner,
+                stored: tokio::sync::Notify::new(),
+                open: tokio::sync::watch::channel(false).0,
+            }
+        }
+
+        /// Waits until the log has stored a start.
+        async fn start_stored(&self) {
+            tokio::time::timeout(std::time::Duration::from_secs(10), self.stored.notified())
+                .await
+                .expect("the log stored the start");
+        }
+
+        fn let_the_answer_through(&self) {
+            self.open.send_replace(true);
+        }
+    }
+
+    #[async_trait]
+    impl OperationStore for HeldAnswer {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            let decided = self.inner.try_start(operation).await;
+            self.stored.notify_one();
+            let _ = self.open.subscribe().wait_for(|open| *open).await;
+            decided
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// How operations have ended as far as the page has heard, once the task
+    /// that runs them is done. That task holds a clone of the cancel registry
+    /// until it has told the pages and the log how the run ended, so all the
+    /// news is in when the clone is dropped.
+    async fn ends_heard_when_done(runner: &PlanRunner, heard: &mut Heard) -> Vec<UiEvent> {
+        let done = async {
+            while Arc::strong_count(&runner.registry) > 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), done)
+            .await
+            .expect("the run is done");
+        ends_heard(heard)
+    }
+
+    /// The daemon said once, at info level, that the run of `operation`
+    /// ended, and how. The run is done, so the line is in the log already.
+    fn assert_said_once_that_it_ended(operation: &str, how: &str) {
+        let said: Vec<String> = captured_log::infos()
+            .into_iter()
+            .filter(|line| line.contains(operation) && line.contains(" ended: "))
+            .collect();
+        let [line] = said.as_slice() else {
+            panic!("one line says the run ended: {said:?}");
+        };
+        assert!(line.ends_with(how), "{line}");
+    }
+
+    /// A maintenance run that ends is told to the pages once, by the run,
+    /// and said once in the daemon's log, by the task that ran it, however
+    /// fast the route answered.
+    #[tokio::test]
+    async fn a_maintenance_run_that_ends_is_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, Completes, log).await;
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        assert!(
+            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+            "the page hears one end, the run's: {ends:?}"
+        );
+        assert_said_once_that_it_ended(&id, "Succeeded");
+    }
+
+    /// The same for a backup, which the daemon runs on a task of its own too.
+    #[tokio::test]
+    async fn a_backup_that_ends_is_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, Completes, log).await;
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        assert!(
+            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+            "the page hears one end, the run's: {ends:?}"
+        );
+        assert_said_once_that_it_ended(&id, "Succeeded");
+    }
+
+    /// A maintenance run cancelled after its start is announced to no page
+    /// (the page that cancelled it reads the history until it settles), and
+    /// the daemon's log says once that it ended cancelled.
+    #[tokio::test]
+    async fn a_maintenance_run_cancelled_after_its_start_is_announced_to_no_page_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+
+        assert_eq!(
+            ends_heard_when_done(&runner, &mut heard).await,
+            [],
+            "the page was told how a cancelled run ended"
+        );
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+        assert_said_once_that_it_ended(&id, "Cancelled");
+    }
+
+    /// A maintenance start refused because a run holds the repository began
+    /// no operation, so no page is told how one ended; the run that holds
+    /// the repository goes on undisturbed, until its cancel.
+    #[tokio::test]
+    async fn a_maintenance_start_refused_for_a_busy_repository_is_announced_to_no_page() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
+        let running = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the first check starts");
+        let refused = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await;
+        assert_eq!(
+            refused,
+            Err(http_adapter::MaintenanceStartError::Busy {
+                running: running.clone()
+            })
+        );
+        assert_eq!(
+            ends_heard(&mut heard),
+            [],
+            "the refused start was announced, or the run it was refused for ended"
+        );
+        runner
+            .cancel(running)
+            .await
+            .expect("the run that holds the repository is cancelled");
+
+        assert_eq!(
+            ends_heard_when_done(&runner, &mut heard).await,
+            [],
+            "the page was told how a run ended: the refused one began none, and the one cancelled is no news"
+        );
+    }
+
+    /// A client that hangs up after the log has stored its maintenance start
+    /// has no ID to ask for the run by, but the run goes on, and the pages
+    /// are told how it ended, once, and the log says so: the task that
+    /// started it ends it, not the route that was dropped.
+    #[tokio::test]
+    async fn a_maintenance_run_whose_client_hung_up_is_still_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::new(HeldAnswer::over(Arc::clone(&runner.store)));
+        let mut heard = listen(&mut runner, Completes, log.clone()).await;
+        let route =
+            runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+        tokio::select! {
+            answered = route => panic!("the route answered before the log did: {answered:?}"),
+            () = log.start_stored() => {}
+        }
+        log.let_the_answer_through();
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        let [UiEvent::OperationSucceeded { operation, .. }] = ends.as_slice() else {
+            panic!("the page hears how the run ended, once: {ends:?}");
+        };
+        assert_eq!(
+            history_of(&runner, operation).await.record.status,
+            OperationStatus::Succeeded
+        );
+        assert_said_once_that_it_ended(operation, "Succeeded");
     }
 
     fn english() -> l10n::Localizer {
@@ -2995,6 +3808,7 @@ mod tests {
 
 #[cfg(test)]
 mod repository_service_tests {
+    use super::captured_log::{self, capture};
     use std::sync::{Mutex, PoisonError};
 
     use api::{ErrorCode, MsgArg, PasswordDto, RepositorySettingsDto};
@@ -3960,39 +4774,12 @@ mod repository_service_tests {
         assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
     }
 
-    /// Captures what the daemon logs at warning level, for the tests that
-    /// look at the log.
-    struct Captured;
-
-    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-    impl log::Log for Captured {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-            true
-        }
-        fn log(&self, record: &log::Record<'_>) {
-            LOGGED
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(record.args().to_string());
-        }
-        fn flush(&self) {}
-    }
-
-    /// Starts capturing, before the code that logs runs.
-    fn capture() {
-        let _ = log::set_logger(&Captured);
-        log::set_max_level(log::LevelFilter::Warn);
-    }
-
     /// The lines logged so far about the snapshots of `alias`.
     fn logged_about(alias: &str) -> Vec<String> {
-        LOGGED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
+        captured_log::lines()
+            .into_iter()
+            .map(|(_, line)| line)
             .filter(|line| line.contains(&format!("snapshots of {alias} ")))
-            .cloned()
             .collect()
     }
 

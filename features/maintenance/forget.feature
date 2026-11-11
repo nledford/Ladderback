@@ -129,6 +129,14 @@ Feature: Forget keeps each plan's history within its policy
     Then the forget is refused while the other operation runs
     And the engine was never asked to remove anything
 
+  Scenario: A forget that is only assessed holds the repository for no one
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner assesses a forget of the repository
+    Then the log holds no operation of this forget
+    And a prune of the repository can start
+    And the assessed forget is refused when it starts
+
   @e2e
   Scenario: A real forget keeps the newest snapshot and the untagged one
     Given a new repository

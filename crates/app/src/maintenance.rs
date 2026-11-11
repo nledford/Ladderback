@@ -9,6 +9,12 @@
 //! through the `Retention` port, a policy that would keep nothing refused
 //! before anything is removed, and the engine asked to remove exactly the
 //! selected snapshots. Untagged and orphaned history is never named.
+//!
+//! A run is assessed, then started. `assess` is the reads and the decisions,
+//! and stores nothing: a caller dropped there has left nothing behind. `start`
+//! is the write that takes the slot, and a `start` dropped while it waits for
+//! the log may have taken it already, so a caller that can be dropped runs
+//! `start` and `execute` on a task of its own (`RunMaintenance::start`).
 
 use std::future::Future;
 use std::pin::{Pin, pin};
@@ -50,7 +56,7 @@ pub fn default_keep_delete() -> KeepDelete {
         .expect("six days is never shorter than rustic's own minimum")
 }
 
-/// How long `prepare` waits for each of its reads (the repository's ID, its
+/// How long `assess` waits for each of its reads (the repository's ID, its
 /// snapshot list) before it gives up. A repository that never answers would
 /// otherwise hold the caller's request open for ever.
 pub const READ_TIMEOUT: SignedDuration = SignedDuration::from_mins(10);
@@ -158,6 +164,15 @@ impl PreparedMaintenance {
     }
 }
 
+/// A maintenance run with every decision made and nothing held: no row in
+/// the log and no engine job left running. [`RunMaintenance::start`] takes
+/// its repository's I7 slot.
+pub struct MaintenanceAssessment {
+    operation: OperationId,
+    job: Job,
+    partition: Option<Partition>,
+}
+
 /// Runs maintenance manually on the local owner.
 #[allow(dead_code, reason = "red test: the run fills them next")]
 pub struct RunMaintenance {
@@ -214,17 +229,20 @@ impl RunMaintenance {
         self
     }
 
-    /// Resolves the repository, decides what the run does, and takes the
-    /// repository's I7 slot. On success the operation is running and
-    /// recorded, and only `execute` talks to the engine; on any refusal or
-    /// error the engine was never started and nothing of this run is in the
-    /// log.
-    pub async fn prepare(
+    /// Decides what the run does, from reads alone: the configuration, the
+    /// repository's ID and, for a forget or an adoption, its snapshots. Nothing
+    /// is stored, no I7 slot is taken and no engine job is left running, so a
+    /// caller that is dropped here, because the client that asked went away,
+    /// has left nothing behind. Every refusal that doesn't need the slot (an
+    /// unknown repository, a policy that keeps nothing, an adoption that
+    /// matches no group) is made here, before the log is touched, and each
+    /// read gives up after [`READ_TIMEOUT`].
+    pub async fn assess(
         &self,
         op: OperationId,
         alias: &RepositoryAlias,
         kind: MaintenanceKind,
-    ) -> Result<PreparedMaintenance, MaintenanceError> {
+    ) -> Result<MaintenanceAssessment, MaintenanceError> {
         let config = self
             .config
             .load()
@@ -398,8 +416,36 @@ impl RunMaintenance {
             ),
         };
 
+        Ok(MaintenanceAssessment {
+            operation: op,
+            job,
+            partition,
+        })
+    }
+
+    /// Takes the assessed run's repository slot (I7): the operation is stored
+    /// as running in the one step that decides it, or refused, naming the
+    /// operation that holds the repository, with nothing stored. On success
+    /// the run's own job has not been started: only `execute` starts it.
+    ///
+    /// A call dropped while it waits for the log may already have stored the
+    /// operation as running, and the row then holds the repository until
+    /// something ends it, which only the run does: a start dropped there
+    /// leaves the repository held and nobody to run it. So a caller that can
+    /// be dropped, as a route's handler is when its client hangs up, never
+    /// awaits this on its own future. It assesses first, which is safe to drop,
+    /// then starts and runs on a task of its own.
+    pub async fn start(
+        &self,
+        assessment: MaintenanceAssessment,
+    ) -> Result<PreparedMaintenance, MaintenanceError> {
+        let MaintenanceAssessment {
+            operation: id,
+            job,
+            partition,
+        } = assessment;
         let mut operation = Operation::queue(
-            op,
+            id,
             job.kind(),
             Trigger::Manual,
             job.target(),

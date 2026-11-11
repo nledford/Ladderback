@@ -62,6 +62,11 @@ pub struct AppState {
 
 /// The operations the API asks of the daemon (technical design §4.2): the
 /// M1b start-by-plan route, and E2's cancel and history.
+///
+/// A call is dropped when its client hangs up before the answer, so a start
+/// writes the operation log, and takes a repository's slot (I7), on a task of
+/// its own: an operation it began goes on without the client, and one it did
+/// not begin has stored nothing.
 #[async_trait]
 pub trait Operations: Send + Sync {
     /// Starts a backup of the plan named in the request, returning the

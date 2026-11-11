@@ -171,10 +171,14 @@ async fn adopt(agent: &mut Agent, plan: String) {
         from: AdoptionSource::Unmanaged,
         into: domain::PlanId::try_from(plan).expect("a plan ID"),
     });
-    let prepared = use_case
-        .prepare(operation, &alias(), kind)
+    let assessment = use_case
+        .assess(operation, &alias(), kind)
         .await
         .expect("the history matches the plan");
+    let prepared = use_case
+        .start(assessment)
+        .await
+        .expect("the repository is free");
     // What the run replaces, read before anything is written.
     agent.adopt.originals = snapshots_of(agent)
         .await

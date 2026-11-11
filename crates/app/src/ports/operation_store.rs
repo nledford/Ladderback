@@ -48,6 +48,10 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 ///   of it, and the calls after it work as they would have: nothing the
 ///   dropped call began holds them up. The contract suite has no runtime to
 ///   cut a call with, so the SQLite store's `cancellation` tests check this.
+///   The caller is not told which of the two it got, so a caller that has no
+///   one to end what the call stored doesn't drop it: a cut
+///   [`try_start`](Self::try_start) may have stored a running maintenance
+///   operation, which holds its repository (I7) with no run to end it.
 /// - [`fail_unfinished`](Self::fail_unfinished) ends every queued or running
 ///   operation as failed, for startup recovery: all of them or none, nothing
 ///   ever as succeeded, finished operations untouched, and a running
@@ -73,7 +77,10 @@ pub trait OperationStore: Send + Sync {
     /// engine and fails closed: the engine starts on [`Start::Started`] only,
     /// not on a refusal and not on an error. An operation that names no
     /// repository holds none, so the use case must know the repository's ID
-    /// first (an identify reports it).
+    /// first (an identify reports it). It doesn't drop the call: one dropped
+    /// after the store committed it leaves the operation running with no run
+    /// to end it, holding the repository until the next start's recovery
+    /// ([`RunMaintenance::start`](crate::maintenance::RunMaintenance::start)).
     async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError>;
 
     /// The operation with its warnings, or `None` when no such operation was saved.
@@ -135,6 +142,18 @@ impl std::fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+impl StoreError {
+    /// A short code for the kind of failure, for a line of the daemon's log:
+    /// it says what went wrong without the failure's own words, which nobody
+    /// has checked for a value (I4).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable { .. } => "store-unavailable",
+            Self::Corrupt { .. } => "store-corrupt",
+        }
+    }
+}
 
 /// How many operations a page of history holds: always between 1 and
 /// [`MAX_PAGE_SIZE`], whatever a caller asks for.

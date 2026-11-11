@@ -9,6 +9,7 @@ use cucumber::{given, then, when};
 use domain::{AgentId, OperationId, PlanId, Uuid};
 
 use super::Agent;
+use super::forget_steps::assess_and_start;
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceError, MaintenanceKind};
 use app::ports::OperationStore;
 
@@ -95,17 +96,14 @@ async fn adopt_then_forget(agent: &mut Agent, from: String, into: String) {
         },
         &into,
     );
-    let prepared = use_case
-        .prepare(operation_id(0xce), &alias(), kind)
+    let prepared = assess_and_start(&use_case, operation_id(0xce), kind)
         .await
         .expect("the repository is free");
     let runner = std::sync::Arc::clone(&use_case);
     let running =
         tokio::spawn(async move { runner.execute(prepared, futures::future::pending()).await });
     wait_for_job(agent, "adopt").await;
-    let refused = use_case
-        .prepare(operation_id(0xcf), &alias(), MaintenanceKind::Forget)
-        .await;
+    let refused = assess_and_start(&use_case, operation_id(0xcf), MaintenanceKind::Forget).await;
     agent.forget.set_refused(refused.err());
     agent.forget.release().notify_waiters();
     agent.finished = Some(running.await.expect("the run ends"));
@@ -116,11 +114,11 @@ async fn adopt_unmanaged_into(agent: &mut Agent, into: String) {
     run_adoption(agent, AdoptionSource::Unmanaged, into).await;
 }
 
-/// Prepares and runs one adoption, as the route does.
+/// Assesses, starts and runs one adoption, as the route does.
 async fn run_adoption(agent: &mut Agent, from: AdoptionSource, into: String) {
     let use_case = super::forget_steps::use_case(agent);
     let kind = adopt_kind(from, &into);
-    let prepared = use_case.prepare(operation_id(0xce), &alias(), kind).await;
+    let prepared = assess_and_start(&use_case, operation_id(0xce), kind).await;
     match prepared {
         Ok(prepared) => {
             assert_eq!(

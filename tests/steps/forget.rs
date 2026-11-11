@@ -210,8 +210,12 @@ async fn forget(agent: &mut Agent) {
     );
     agent.runs += 1;
     let operation = OperationId::from_uuid(Uuid::from_u128(agent.runs));
+    let assessment = use_case
+        .assess(operation, &alias(), MaintenanceKind::Forget)
+        .await
+        .expect("the forget is assessed");
     let prepared = use_case
-        .prepare(operation, &alias(), MaintenanceKind::Forget)
+        .start(assessment)
         .await
         .expect("the repository is free");
     let plan = agent.backup.plan.clone().expect("a plan");
