@@ -19,6 +19,7 @@ futures.workspace = true
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 cucumber.workspace = true
+testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 uuid.workspace = true
 

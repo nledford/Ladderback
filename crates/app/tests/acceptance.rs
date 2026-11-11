@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use cucumber::{World, when};
 use domain::execution::{Operation, Trigger};
 use domain::{OperationId, SignedDuration, Timestamp, Uuid};
+use futures::FutureExt;
+use testkit::scenario_watch::ScenarioWatch;
 
 #[path = "steps/announcement.rs"]
 mod announcement_steps;
@@ -201,6 +203,14 @@ impl Engine for Unavailable {
     }
 }
 
+/// The longest a scenario may run before the run stops, naming it. The whole
+/// runner takes about 7 s on CI's macOS runner and 3 s on Linux, and its
+/// slowest scenario took 2.4 s on a ten-core Mac with every other scenario
+/// running beside it; the limit is many times that, so a scenario that waits
+/// for something that never comes (#246) fails within a minute, not when CI
+/// cancels the job.
+const SCENARIO_LIMIT: Duration = Duration::from_secs(60);
+
 #[allow(
     clippy::disallowed_methods,
     reason = "a test runner reads its own argv"
@@ -218,9 +228,20 @@ async fn main() {
     let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
     let name = cli.re_filter.take();
     let tags = cli.tags_filter.take();
+    let watch = ScenarioWatch::start("acceptance runner", SCENARIO_LIMIT);
+    let _report = watch.report_slowest();
+    let (begun, ended) = (watch.clone(), watch);
     Agent::cucumber()
         .with_cli(cli)
         .fail_on_skipped()
+        .before(move |feature, _, scenario, _| {
+            begun.began(feature, scenario);
+            futures::future::ready(()).boxed_local()
+        })
+        .after(move |_, _, scenario, _, _| {
+            ended.ended(scenario);
+            futures::future::ready(()).boxed_local()
+        })
         .filter_run_and_exit(features, move |feature, rule, scenario| {
             !operation_steps::tagged(feature, rule, scenario, "e2e")
                 && !operation_steps::tagged(feature, rule, scenario, "ui")

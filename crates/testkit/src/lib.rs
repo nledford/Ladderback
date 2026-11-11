@@ -7,8 +7,13 @@
 //!
 //! [`daemon::isolate`] is how a test that starts the daemon gives it folders
 //! of its own, never the platform's.
+//!
+//! [`scenario_watch::ScenarioWatch`] is how a cucumber runner stops at a
+//! scenario that runs too long, naming it, instead of hanging until CI
+//! cancels the job.
 
 pub mod daemon;
+pub mod scenario_watch;
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};

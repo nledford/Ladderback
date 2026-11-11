@@ -1,11 +1,14 @@
 [package]
 name = "testkit"
-description = "Test support shared by the workspace's tests: visible test skips"
+description = "Test support shared by the workspace's tests: visible test skips, a time limit on each cucumber scenario"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[dependencies]
+cucumber.workspace = true
 
 [lints]
 workspace = true
