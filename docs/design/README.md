@@ -58,6 +58,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [13.3 Test levels by ring](development.md#133-test-levels-by-ring)
   - [13.4 Definition of done](development.md#134-definition-of-done)
   - [13.5 Robustness rules](development.md#135-robustness-rules)
+  - [13.6 Dependency checks](development.md#136-dependency-checks)
 - [14. Milestones](roadmap.md#14-milestones)
 - [15. Risks](roadmap.md#15-risks)
 - [16. Decisions](roadmap.md#16-decisions)

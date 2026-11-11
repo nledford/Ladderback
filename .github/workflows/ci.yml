@@ -271,6 +271,54 @@ jobs:
         env:
           NEXTEST_PROFILE: ci
 
+  # The dependency tree against deny.toml: RustSec advisories, licences, banned
+  # crates and sources (technical design §13.6). It also runs on the nightly
+  # schedule, because an advisory can appear with no change to the code; a
+  # scheduled run notifies no one, so a failed one opens an issue, as
+  # `mutants-nightly` does. Not a required check: the maintainer may add it to
+  # the ruleset once it has proved stable. It fetches the advisory database,
+  # so a GitHub outage can fail it for a reason that isn't a dependency's.
+  deny:
+    name: Dependencies (cargo-deny)
+    needs: changes
+    # `changes` is skipped on a push, the nightly run and a manual run; with
+    # `!cancelled()` this job runs then, and only a docs-only pull request skips it.
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `issues: write` is for the nightly report below; a pull request from a
+    # fork gets a read-only token whatever this says.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # cargo-deny reads the tree through `cargo metadata`, which needs the
+      # toolchain rust-toolchain.toml names. Nothing is compiled, so no build cache.
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,cargo-deny
+      - run: just deny
+      # Only on the nightly run, and only on a failure of this job's own
+      # steps. The title is fixed, so a second failure finds the open issue.
+      - if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly dependency check failed"
+          body="The nightly dependency check (\`just deny\`) failed: $RUN_URL. A new RustSec advisory is the usual cause; the job's log names it."
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
+          fi
+
   mutants:
     name: Mutation testing (changed code)
     needs: changes

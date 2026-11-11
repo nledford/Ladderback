@@ -31,7 +31,7 @@ alias v := verify
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
-    cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz zizmor
+    cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
@@ -61,6 +61,7 @@ lint:
 # shell steps, zizmor for security (template injection, permissions, unpinned
 # actions). zizmor runs its online audits (known-vulnerable actions, impostor
 # commits) only when GH_TOKEN is set, as CI sets it; without it, offline.
+[doc('Lint the GitHub Actions workflows with actionlint and zizmor.')]
 [group('quality')]
 lint-workflows:
     actionlint
@@ -70,6 +71,17 @@ lint-workflows:
 [group('quality')]
 architecture:
     RELEASE_FLAGS='{{ release_flags }}' scripts/check-architecture.sh
+
+# Checks the dependency tree against deny.toml: RustSec advisories, licences,
+# banned crates and sources (technical design §13.6), for every workspace
+# package: `web` is not a dependency of the root package, so without
+# `--workspace` its tree would go unchecked. It fetches the advisory database,
+# so it needs the network, and a new advisory can fail it without any change
+# here: `verify` leaves it out, and CI runs it in its own job, nightly too.
+[doc('Check dependencies for advisories, licences, bans and sources (cargo-deny; needs the network).')]
+[group('quality')]
+deny:
+    cargo deny --locked --all-features --workspace check
 
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
@@ -253,11 +265,14 @@ red-first base='origin/main':
 
 # Check a pull request title (or a commit subject) as CI's "Pull request
 # title" check does: a Conventional Commit with a type release-plz knows.
+[doc('Check a pull request title against Conventional Commits, as CI does.')]
 [group('quality')]
 check-pr-title title:
     node scripts/check-pr-title.ts {{ quote(title) }}
 
-# Run every check CI runs, except mutation testing and the red-first check.
+# `deny` also checks what CI checks, but it needs the network, so it is left
+# out, as are mutation testing and the red-first check.
+[doc('Run every check CI runs, except mutation testing, red-first and deny (needs the network).')]
 [group('quality')]
 verify: fmt-check lint lint-workflows architecture test test-contrast test-release test-wasm test-ui
 

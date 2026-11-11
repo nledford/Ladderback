@@ -1,0 +1,99 @@
+# cargo-deny's policy for the dependency tree (technical design §13.6, §16
+# decision 43). `just deny` runs it, for every workspace package; the `Dependencies (cargo-deny)` job in
+# .github/workflows/ci.yml runs the same recipe, on pull requests and nightly.
+
+# What the graph is: every feature, on the targets Ladderback builds for. The
+# host targets are the ones the daemon runs on (Linux and macOS, both
+# architectures); `wasm32-unknown-unknown` is the web UI (`crates/web`).
+[graph]
+all-features = true
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+]
+
+# Known vulnerabilities, unmaintained crates and yanked releases, from the
+# RustSec database. It is fetched on every run, so a new advisory fails the
+# nightly run without a code change.
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A vulnerability always fails. Unmaintained and yanked crates fail too: a
+# daemon that runs unattended and holds repository passwords should not sit on
+# a crate nobody fixes.
+unmaintained = "all"
+yanked = "deny"
+# An ignored advisory names its ID and says why it doesn't reach Ladderback and
+# what ends the ignore. Never ignore without a reason; first try the fix the
+# advisory names (`cargo update -p <crate>`), which works only while it stays
+# inside the requirements of `Cargo.toml` and of the crates that depend on it.
+ignore = [
+    { id = "RUSTSEC-2026-0459", reason = "`libsqlite3-sys` 0.30.1 bundles SQLite before 3.54.0, which can return uninitialised memory when a database is opened with a sibling `-wal` file of another page size. Ladderback creates its own database and its `-wal` file in its data directory (`crates/adapters/store`), under the data-dir lock, and opens no database file that someone else wrote, so the crafted pair the advisory needs exists only for a person who can already write to that directory. The fix is `libsqlite3-sys` 0.39, but `sqlx-sqlite` 0.8.6 requires `^0.30`, so `cargo update` can't reach it. Remove this entry when `sqlx` moves to a patched `libsqlite3-sys`." },
+    { id = "RUSTSEC-2024-0436", reason = "`paste` 1.0.15 is unmaintained (archived by its author). It is a proc-macro that Leptos 0.8 (`either_of`, `reactive_graph`, `tachys`) expands when the `web` crate is compiled; it is not linked into any binary and takes no input at run time. Nothing to upgrade to: the latest Leptos 0.8 release still uses it, and `pastey`, the drop-in fork, is a swap for Leptos to make. Remove this entry when Leptos moves off `paste`." },
+    { id = "RUSTSEC-2023-0071", reason = "`rsa` 0.9.10, the Marvin timing side channel in RSA private-key operations. It reaches the build only through OpenDAL's `reqsign` crates (`rustic_backend`), which sign a JWT with the RSA key of a cloud credential (an Azure client certificate, a Google service account) the person has configured. Ladderback is the client there: it decrypts nothing and takes no RSA input from a peer, so nobody can observe or time its signing the way the attack needs. No patched 0.9 release exists, and `rsa` 0.10 needs a release of `reqsign` that moves to it, under the `rustic_core` revision the workspace pins. Remove this entry when the pin moves to one." },
+]
+
+# Ladderback is MIT OR Apache-2.0, so every dependency's licence must let a
+# binary under those terms ship. `cargo deny list` shows what the tree uses.
+# An expression with OR is satisfied by any one of its terms: `self_cell` is
+# `Apache-2.0 OR GPL-2.0-only`, and we use it under Apache-2.0, so GPL is not on
+# the list. A crate with only a copyleft licence fails, and a new
+# licence is a decision for the maintainer (§16, decision 43), not an edit made
+# to turn the check green.
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0", # webpki-root-certs: the Mozilla root store's data
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# The one dependency under file-level copyleft: MPL-2.0 asks only that changes
+# to the files of `option-ext` itself be shared, which we never make. It comes
+# in through `rustic_core` -> `dirs` -> `dirs-sys`. Listed by crate, so that a
+# second MPL-2.0 crate fails the check and gets looked at.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
+# The workspace crates are unpublished (`publish = false`) and carry the
+# workspace's own licence.
+[licenses.private]
+ignore = true
+
+[bans]
+# The tree has duplicates we don't control (two `base64`, two `cipher`, and the
+# like): a warning keeps them visible.
+multiple-versions = "warn"
+# A dependency with a `*` requirement accepts any release. Path dependencies
+# between workspace crates are allowed: they have no version to pin.
+wildcards = "deny"
+allow-wildcard-paths = true
+# Time goes through `jiff` (§16, decision 22). `chrono` reaches the build only
+# through `rustic_backend`'s OpenDAL FTP service: `suppaftp` depends on it, and
+# that service can't be turned off. `wrappers` names that one crate, so a
+# Ladderback crate, or any other dependency, that starts to use `chrono` fails.
+deny = [
+    { crate = "chrono", wrappers = ["suppaftp"], reason = "Time goes through jiff (§16, decision 22); chrono is allowed only as suppaftp's dependency, through rustic_backend's OpenDAL FTP service" },
+]
+
+[sources]
+# crates.io only, and no unknown git repository.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# `rustic_core` and `rustic_backend` come from the one commit the workspace
+# `Cargo.toml` pins, because `Progress::error` is not in a crates.io release
+# yet (§16, decision 7). The sources go back to crates.io alone when it is.
+allow-git = ["https://github.com/rustic-rs/rustic_core"]
