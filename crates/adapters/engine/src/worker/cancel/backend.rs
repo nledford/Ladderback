@@ -172,6 +172,18 @@ mod tests {
         assert!(inner.list(FileType::Snapshot).unwrap().is_empty());
     }
 
+    /// I3: from the deadline on, no snapshot write starts.
+    #[test]
+    fn once_the_deadline_passed_no_snapshot_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = local(dir.path());
+        let cancel = Cancel::default();
+        let backend = refusing(Arc::clone(&inner), &cancel);
+        cancel.pass_deadline();
+        assert!(write_snapshot(&backend).is_err());
+        assert!(inner.list(FileType::Snapshot).unwrap().is_empty());
+    }
+
     /// What a cancelled backup still writes as it winds down: its last
     /// packs, and the index of them all.
     #[test]

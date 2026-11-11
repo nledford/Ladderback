@@ -316,18 +316,20 @@ pub(crate) mod testing {
         (events, gave_up)
     }
 
-    /// A writer stuck on a full pipe: its first write blocks until the test
-    /// sends on the sender [`stuck`] returns.
+    /// A writer stuck on a full pipe: each write blocks until the test
+    /// sends on the sender [`stuck`] returns, or drops it, and then goes
+    /// to `written`.
     struct Stuck {
         entered: mpsc::Sender<()>,
         release: mpsc::Receiver<()>,
+        written: Capture,
     }
 
     impl Write for Stuck {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let _ = self.entered.send(());
             let _ = self.release.recv();
-            Ok(buf.len())
+            self.written.write(buf)
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -338,13 +340,21 @@ pub(crate) mod testing {
     /// A stream whose writer is stuck, the receiver that says it has entered
     /// its first write, and the sender that lets it go.
     pub(crate) fn stuck() -> (Events, mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (events, _, entered, release) = stuck_then_captured();
+        (events, entered, release)
+    }
+
+    /// [`stuck`], and a handle on what the stream received once let go.
+    pub(crate) fn stuck_then_captured() -> (Events, Capture, mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (entered_tx, entered) = mpsc::channel();
         let (release_tx, release) = mpsc::channel();
+        let written = Capture::default();
         let events = Events::new(Stuck {
             entered: entered_tx,
             release,
+            written: written.clone(),
         });
-        (events, entered, release_tx)
+        (events, written, entered, release_tx)
     }
 }
 

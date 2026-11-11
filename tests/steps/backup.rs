@@ -369,6 +369,20 @@ async fn backs_up_and_cancels_once_packs_saved(agent: &mut Agent, packs: usize) 
         .await;
 }
 
+#[when(
+    expr = "the agent backs up the plan and its deadline passes once the repository holds {int} packs"
+)]
+async fn backs_up_past_deadline_once_packs_saved(agent: &mut Agent, packs: usize) {
+    let data = agent.repository().cold.join("data");
+    agent
+        .run_backup_past_its_deadline_once(async move {
+            while packs_in(&data) < packs {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+}
+
 /// The packs in a local repository's `data` folder: its files, but for the
 /// temporary ones the local backend writes a pack to before renaming it.
 fn packs_in(data: &Path) -> usize {

@@ -20,6 +20,16 @@ pub(crate) enum AfterCancel {
     WindDown,
 }
 
+/// Why the cancel was asked for, which decides how the worker exits. The
+/// first cause stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cause {
+    /// The daemon's SIGTERM: the operation ends cancelled.
+    Cancel,
+    /// The job's deadline passed (I3): the operation ends `deadline-passed`.
+    Deadline,
+}
+
 /// The worker's cancel, shared by the SIGTERM handler, the job, its source
 /// and its backends.
 #[derive(Clone, Default)]
@@ -68,6 +78,27 @@ impl Cancel {
         (!self.is_requested()).then_some(saved)
     }
 
+    /// Asks for the cancel because the deadline passed (I3), and says what
+    /// the watchdog does next. The snapshot is refused from here on. A
+    /// backup that archives, or whose snapshot write began, winds down as a
+    /// cancelled one does; otherwise the worker exits at once.
+    pub(crate) fn pass_deadline(&self) -> AfterCancel {
+        todo!()
+    }
+
+    /// Why the cancel was asked for; `None` until it is.
+    pub(crate) fn cause(&self) -> Option<Cause> {
+        todo!()
+    }
+
+    /// Asks to write the snapshot: `false` once the cancel is asked for,
+    /// and the snapshot must not be written. Taken under the same lock as
+    /// the cancel, so a snapshot write either starts before the cancel or
+    /// not at all.
+    pub(crate) fn admit_snapshot(&self) -> bool {
+        todo!()
+    }
+
     fn lock_saving(&self) -> MutexGuard<'_, bool> {
         self.0.saving.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -112,5 +143,72 @@ mod tests {
         let cancel = Cancel::default();
         assert_eq!(cancel.saving(|| "saved"), Some("saved"));
         assert_eq!(cancel.request(), AfterCancel::ExitNow);
+    }
+
+    #[test]
+    fn a_deadline_while_a_backup_archives_lets_it_wind_down_and_ends_the_job() {
+        let cancel = Cancel::default();
+        let saved = cancel.saving(|| {
+            assert_eq!(cancel.pass_deadline(), AfterCancel::WindDown);
+            "saved"
+        });
+        assert_eq!(saved, None);
+        assert!(cancel.is_requested());
+        assert_eq!(cancel.cause(), Some(Cause::Deadline));
+    }
+
+    #[test]
+    fn a_deadline_while_nothing_is_archived_exits_at_once() {
+        let cancel = Cancel::default();
+        assert_eq!(cancel.pass_deadline(), AfterCancel::ExitNow);
+        assert!(cancel.is_requested());
+        assert_eq!(cancel.cause(), Some(Cause::Deadline));
+    }
+
+    /// A deadline waits for a snapshot write that began, as a cancel does:
+    /// the margin covers it (I3), and rustic makes it to the cold half once
+    /// the hot half has it (decision 50).
+    #[test]
+    fn a_deadline_once_the_snapshot_write_began_lets_it_finish() {
+        let cancel = Cancel::default();
+        cancel.saving(|| {
+            assert!(cancel.admit_snapshot());
+            assert_eq!(cancel.pass_deadline(), AfterCancel::WindDown);
+        });
+    }
+
+    /// A cancel waits for a snapshot write that began, which rustic makes
+    /// to the cold half once the hot half has it (decision 50).
+    #[test]
+    fn a_cancel_once_the_snapshot_write_began_still_winds_down() {
+        let cancel = Cancel::default();
+        cancel.saving(|| {
+            assert!(cancel.admit_snapshot());
+            assert_eq!(cancel.request(), AfterCancel::WindDown);
+        });
+    }
+
+    #[test]
+    fn no_snapshot_write_is_admitted_once_the_cancel_or_the_deadline_came() {
+        let cancelled = Cancel::default();
+        assert!(cancelled.admit_snapshot());
+        cancelled.request();
+        assert!(!cancelled.admit_snapshot());
+        let past = Cancel::default();
+        past.pass_deadline();
+        assert!(!past.admit_snapshot());
+    }
+
+    #[test]
+    fn the_first_cause_stands() {
+        let cancel = Cancel::default();
+        assert_eq!(cancel.cause(), None);
+        cancel.request();
+        cancel.pass_deadline();
+        assert_eq!(cancel.cause(), Some(Cause::Cancel));
+        let past = Cancel::default();
+        past.pass_deadline();
+        past.request();
+        assert_eq!(past.cause(), Some(Cause::Deadline));
     }
 }

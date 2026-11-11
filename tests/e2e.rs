@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use app::execution::{Finished, RunOperation};
+use app::fakes::FakeClock;
 use app::ports::{
-    Engine, EngineError, EngineEvent, FakeEnd, FakeJob, Job, OperationStore, RunningJob,
+    Clock, Engine, EngineError, EngineEvent, FakeEnd, FakeJob, Job, OperationStore, RunningJob,
 };
 use async_trait::async_trait;
 use cucumber::World;
@@ -176,23 +177,54 @@ impl Agent {
             }
         };
         let job = self.backup_job();
-        self.run_on(engine, job, cancel).await;
+        self.run_on(engine, Arc::new(SystemClock), job, cancel)
+            .await;
+    }
+
+    /// Runs the backup on a daemon clock that jumps past the backup's
+    /// deadline once `ready` has resolved, polled from the moment its worker
+    /// reported `Started`. The worker's own clock never gets there, so it
+    /// is the daemon's deadline that stops the backup.
+    async fn run_backup_past_its_deadline_once(&mut self, ready: impl Future<Output = ()> + Send) {
+        let (started, on_start) = oneshot::channel();
+        let engine = Arc::new(Watched {
+            inner: self.engine.clone(),
+            started: Mutex::new(Some(started)),
+        });
+        let job = self.backup_job();
+        let budget = job.deadline_budget().expect("a backup has a deadline");
+        let clock = Arc::new(FakeClock::new(SystemClock.now()));
+        // The jump rides on the cancel, which the run polls for as long as
+        // it runs: a backup that ends first leaves it behind, never hangs.
+        let jump = {
+            let clock = clock.clone();
+            async move {
+                if on_start.await.is_ok() {
+                    ready.await;
+                    clock.advance(budget.saturating_add(domain::SignedDuration::from_hours(24)));
+                }
+                futures::future::pending::<()>().await;
+            }
+        };
+        self.run_on(engine, clock, job, jump).await;
     }
 
     async fn run(&mut self, job: Job, cancel: impl Future<Output = ()> + Send) {
-        self.run_on(self.engine.clone(), job, cancel).await;
+        self.run_on(self.engine.clone(), Arc::new(SystemClock), job, cancel)
+            .await;
     }
 
     async fn run_on(
         &mut self,
         engine: Arc<dyn Engine>,
+        clock: Arc<dyn Clock>,
         job: Job,
         cancel: impl Future<Output = ()> + Send,
     ) {
         let store = self.store().await;
         self.runs += 1;
         let id = OperationId::from_uuid(Uuid::from_u128(self.runs));
-        let mut use_case = RunOperation::new(engine, Arc::new(SystemClock), store);
+        let mut use_case = RunOperation::new(engine, clock, store);
         if !self.hooks.setup.is_empty() {
             use_case = use_case.with_hooks(self.hooks.runner.clone(), self.hooks.setup.clone());
         }
