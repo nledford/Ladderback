@@ -117,8 +117,7 @@ impl Plan {
     /// agent's `hostname`. `None` when neither names one, and the engine
     /// then records the machine's own name, as rustic does.
     pub fn snapshot_host<'a>(&'a self, agent: &'a AgentSettings) -> Option<&'a Hostname> {
-        let _ = agent;
-        todo!()
+        self.host.as_ref().or(agent.hostname.as_ref())
     }
 }
 
