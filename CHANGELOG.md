@@ -14,6 +14,10 @@ All notable changes to Ladderback are listed here. The format follows
 - Apply a plan's source filter and host to its backups ([#197](https://github.com/nledford/Ladderback/pull/197))
 - Name each plan's start backup button with its plan ([#203](https://github.com/nledford/Ladderback/pull/203))
 
+### Changed
+
+- Building Ladderback from source needs Rust 1.94 or newer ([#196](https://github.com/nledford/Ladderback/pull/196))
+
 ## [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0) - 2026-11-11
 
 The first release: Ladderback on a single machine. Connect or initialize repositories, plan backups in `config.toml`, import and export rustic profiles, and run backups by hand with live progress in the web UI. Snapshots, unmanaged and orphaned groups (with adoption) and the operation history are listed. Forget, prune and check run by hand on this machine, the repository's one maintenance owner, and prune never deletes instantly. Secrets come from a command, the keyring, a file or the environment, and are masked wherever output appears, even where a cap cuts it. A second daemon on the same data folder is refused. Scheduling and notifications come in 0.2, restore in 0.3.
