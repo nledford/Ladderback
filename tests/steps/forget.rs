@@ -10,8 +10,8 @@ use std::sync::Arc;
 use config_adapter::FileConfigStore;
 use cucumber::{given, then, when};
 use domain::planning::{
-    AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, Plan, RepositoryConfig,
-    RepositorySettings,
+    AgentConfig, AgentSettings, GroupBy, Hooks, KeepCount, Maintenance, Plan, RepositoryConfig,
+    RepositorySettings, RetentionPolicy,
 };
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, SnapshotId, Timestamp, Uuid};
@@ -35,6 +35,9 @@ pub struct ForgetE2e {
     unmanaged: Option<SnapshotId>,
     /// How many snapshots the plan had, read before the run.
     of_plan: usize,
+    /// Each snapshot the scenario wrote at a time of its choosing: the time
+    /// as the scenario wrote it, and the snapshot's ID.
+    taken: Vec<(String, SnapshotId)>,
 }
 
 fn alias() -> RepositoryAlias {
@@ -97,7 +100,7 @@ pub async fn snapshots_of(agent: &Agent) -> Vec<(SnapshotId, Timestamp, Vec<Stri
 
 /// Saves the configuration the run loads: the scenario's repository under
 /// `demo`, and the plan with its retention policy.
-async fn save_config(agent: &mut Agent, keep_last: Option<i64>) {
+async fn save_config(agent: &mut Agent, retention: RetentionPolicy) {
     let cold = agent.backup.repository.clone().expect("a repository");
     let source = agent.backup.source.clone().expect("a plan source");
     let mut plan = Plan::new(
@@ -108,9 +111,7 @@ async fn save_config(agent: &mut Agent, keep_last: Option<i64>) {
                 .expect("a source"),
         ],
     );
-    if let Some(keep) = keep_last {
-        plan.retention.keep_last = Some(domain::planning::KeepCount::new(keep).expect("a count"));
-    }
+    plan.retention = retention;
     let mut repositories = BTreeMap::new();
     repositories.insert(
         alias(),
@@ -161,7 +162,79 @@ async fn snapshots_tagged(agent: &Agent, plan: &str) -> Vec<SnapshotId> {
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s)")]
 async fn plan_keeping_last(agent: &mut Agent, plan: String, keep: i64) {
     crate::backup_steps::source_with_files(agent, &plan, 3);
-    save_config(agent, Some(keep)).await;
+    let retention = RetentionPolicy {
+        keep_last: Some(KeepCount::new(keep).expect("a count")),
+        ..RetentionPolicy::default()
+    };
+    save_config(agent, retention).await;
+}
+
+#[given(expr = "a plan {string} keeping {int} daily snapshot(s)")]
+async fn plan_keeping_daily(agent: &mut Agent, plan: String, keep: i64) {
+    crate::backup_steps::source_with_files(agent, &plan, 1);
+    let retention = RetentionPolicy {
+        keep_daily: Some(KeepCount::new(keep).expect("a count")),
+        ..RetentionPolicy::default()
+    };
+    save_config(agent, retention).await;
+}
+
+/// A backup of the plan's folder with the plan's tags, as the plan's own
+/// backup would tag it, recorded at `time`: a date, a time of day and the
+/// offset of the clock that took it, read as rustic reads the time of a
+/// snapshot file.
+#[given(expr = "the plan has a snapshot taken at {string}")]
+async fn snapshot_taken_at(agent: &mut Agent, time: String) {
+    let source = agent.backup.source.clone().expect("a plan source");
+    let plan = agent.backup.plan.clone().expect("a plan");
+    let tags = [
+        format!("ladderback-agent:{}", agent.agent_id.as_uuid().hyphenated()),
+        format!("ladderback-plan:{}", plan.as_str()),
+    ];
+    // Distinct contents, so each backup is its own snapshot.
+    fs::write(source.join("file-1.txt"), format!("taken at {time}\n")).expect("writes");
+    let when = rustic_core::repofile::RusticTime::parse_utc(&time).expect("a time");
+    let snapshot = with_repository(agent, move |repository| {
+        let paths = rustic_core::PathList::from_iter([source])
+            .sanitize()
+            .expect("the folder's path");
+        let mut options = rustic_core::SnapshotOptions::default().time(Some(when));
+        for tag in &tags {
+            options = options.add_tags(tag).expect("a tag");
+        }
+        let snapshot = options.to_snapshot().expect("a snapshot");
+        repository
+            .backup(&rustic_core::BackupOptions::default(), &paths, snapshot)
+            .expect("a rustic backup")
+    })
+    .await;
+    let id = SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID");
+    agent.forget.taken.push((time, id));
+}
+
+#[then(expr = "the plan keeps only its snapshots taken at {string} and {string}")]
+async fn keeps_only_taken_at(agent: &mut Agent, first: String, second: String) {
+    let plan = agent.backup.plan.clone().expect("a plan");
+    let remaining = snapshots_tagged(agent, plan.as_str()).await;
+    // Each remaining snapshot by the time the scenario took it at.
+    let mut kept: Vec<&str> = remaining
+        .iter()
+        .map(|id| {
+            agent
+                .forget
+                .taken
+                .iter()
+                .find(|(_, each)| each == id)
+                .map_or(id.as_str(), |(time, _)| time.as_str())
+        })
+        .collect();
+    kept.sort_unstable();
+    let mut expected = [first.as_str(), second.as_str()];
+    expected.sort_unstable();
+    assert_eq!(
+        kept, expected,
+        "the plan keeps the snapshots taken at these times"
+    );
 }
 
 #[given(expr = "the plan has been backed up {int} times")]
