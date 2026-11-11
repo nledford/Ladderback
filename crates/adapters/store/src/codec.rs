@@ -98,7 +98,8 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::SourceUnreadable => "source-unreadable",
         WarningKind::Hook => "hook-warning",
         WarningKind::MaintenancePartial => "maintenance-partial",
-        WarningKind::CheckWarning | WarningKind::CheckError => todo!(),
+        WarningKind::CheckWarning => "check-warning",
+        WarningKind::CheckError => "check-error",
         WarningKind::Other => "unknown",
     }
 }
@@ -110,6 +111,8 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
         "source-unreadable" => WarningKind::SourceUnreadable,
         "hook-warning" => WarningKind::Hook,
         "maintenance-partial" => WarningKind::MaintenancePartial,
+        "check-warning" => WarningKind::CheckWarning,
+        "check-error" => WarningKind::CheckError,
         _ => WarningKind::Other,
     }
 }

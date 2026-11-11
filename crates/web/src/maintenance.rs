@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use api::{
     AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg,
-    OperationDetailDto, OperationSummaryDto, OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto,
-    UnmanagedGroupDto, WarningCode,
+    OperationDetailDto, OperationResultDto, OperationSummaryDto, OrphanedGroupDto, SnapshotDto,
+    SnapshotGroupsDto, UnmanagedGroupDto, WarningCode,
 };
 
 use crate::announcer::Politeness;
@@ -449,16 +449,7 @@ impl End {
             "cancelled" => Outcome::Cancelled,
             _ => Outcome::Finished,
         };
-        let politeness = match outcome {
-            Outcome::Failed => Politeness::Assertive,
-            Outcome::Cancelled | Outcome::Finished => Politeness::Polite,
-            Outcome::Found { .. } => todo!(),
-        };
-        End {
-            kind,
-            outcome,
-            politeness,
-        }
+        End::told(kind, outcome)
     }
 
     /// The end of a `kind` run as its ended `operation` reads: by its status,
@@ -466,8 +457,31 @@ impl End {
     /// told by how much of each it found, and assertively when any of it is
     /// damage.
     pub(crate) fn read(kind: Kind, operation: &OperationSummaryDto) -> End {
-        let _ = (kind, operation);
-        todo!()
+        let end = End::of(kind, &operation.status);
+        match (end.outcome, operation.result) {
+            (
+                Outcome::Finished,
+                Some(OperationResultDto::Check {
+                    errors, warnings, ..
+                }),
+            ) if errors > 0 || warnings > 0 => End::told(kind, Outcome::Found { errors, warnings }),
+            _ => end,
+        }
+    }
+
+    /// How an `outcome` is announced: a failure and damage a check found are
+    /// assertive, the rest polite.
+    fn told(kind: Kind, outcome: Outcome) -> End {
+        let politeness = match outcome {
+            Outcome::Failed => Politeness::Assertive,
+            Outcome::Found { errors, .. } if errors > 0 => Politeness::Assertive,
+            Outcome::Found { .. } | Outcome::Cancelled | Outcome::Finished => Politeness::Polite,
+        };
+        End {
+            kind,
+            outcome,
+            politeness,
+        }
     }
 }
 
@@ -495,8 +509,29 @@ impl Findings {
     /// [`MAX_LISTED_FINDINGS`]; `more` is how many more its result counts.
     /// Nothing for a run that is not a check.
     pub(crate) fn of(detail: &OperationDetailDto) -> Findings {
-        let _ = detail;
-        todo!()
+        let Some(OperationResultDto::Check {
+            errors, warnings, ..
+        }) = detail.operation.result
+        else {
+            return Findings::default();
+        };
+        let of_code = |code: WarningCode| {
+            detail
+                .warnings
+                .iter()
+                .filter(move |warning| warning.code == code)
+        };
+        let listed: Vec<Finding> = of_code(WarningCode::CheckError)
+            .chain(of_code(WarningCode::CheckWarning))
+            .take(MAX_LISTED_FINDINGS)
+            .map(|warning| Finding {
+                code: warning.code,
+                detail: warning.detail.clone(),
+            })
+            .collect();
+        let found = errors.saturating_add(warnings);
+        let more = found.saturating_sub(u64::try_from(listed.len()).unwrap_or(u64::MAX));
+        Findings { listed, more }
     }
 }
 
@@ -557,10 +592,11 @@ impl Watch {
     /// What comes after a read of the run's operation: `None` is a read that
     /// got no answer.
     pub(crate) fn after(&mut self, read: Option<&OperationDetailDto>) -> Next {
-        match read.map(|detail| detail.operation.status.as_str()) {
-            Some(status) if ended(status) => {
-                Next::Ended(End::of(self.kind, status), Findings::default())
-            }
+        match read {
+            Some(detail) if ended(&detail.operation.status) => Next::Ended(
+                End::read(self.kind, &detail.operation),
+                Findings::of(detail),
+            ),
             Some(_) => {
                 self.misses = 0;
                 self.reads = self.reads.saturating_add(1);
@@ -695,6 +731,7 @@ impl Panel {
         }
         self.step = Some(step);
         self.ended = None;
+        self.findings = Findings::default();
         self.refusal = None;
         Some(match step {
             Step::Preparing => vec![Effect::Say(Told::Preparing)],
@@ -721,6 +758,7 @@ impl Panel {
         let stale = rereads(refusal.code);
         self.step = None;
         self.ended = None;
+        self.findings = Findings::default();
         self.refusal = Some(refusal);
         vec![
             Effect::CloseReview,
@@ -748,6 +786,7 @@ impl Panel {
     pub(crate) fn started(&mut self, kind: Kind, operation: String) -> Vec<Effect> {
         self.step = None;
         self.ended = None;
+        self.findings = Findings::default();
         self.refusal = None;
         self.run = Some(Run { kind, operation });
         vec![
@@ -764,11 +803,13 @@ impl Panel {
         let Some(run) = self.run.as_ref() else {
             return Vec::new();
         };
-        let (told, ended) = match how {
-            Watched::Ended(end, _) => (Told::Ended(end), true),
-            Watched::GaveUp => (Told::Unwatched(run.kind), false),
+        let (told, findings) = match how {
+            Watched::Ended(end, findings) => (Told::Ended(end), Some(findings)),
+            Watched::GaveUp => (Told::Unwatched(run.kind), None),
             Watched::Gone => return Vec::new(),
         };
+        let ended = findings.is_some();
+        self.findings = findings.unwrap_or_default();
         self.run = None;
         self.ended = Some(told);
         let mut effects = vec![Effect::Say(told), Effect::RecoverFocus];

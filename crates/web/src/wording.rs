@@ -204,7 +204,18 @@ fn running(kind: Kind) -> Words {
 fn end(end: &End) -> Words {
     let id = match end.outcome {
         Outcome::Finished => msg::UI_MAINTENANCE_FINISHED,
-        Outcome::Found { .. } => todo!(),
+        Outcome::Found { errors, .. } if errors > 0 => {
+            return words(
+                msg::UI_MAINTENANCE_CHECK_DAMAGED,
+                vec![("errors", number(errors))],
+            );
+        }
+        Outcome::Found { warnings, .. } => {
+            return words(
+                msg::UI_MAINTENANCE_CHECK_UNTIDY,
+                vec![("warnings", number(warnings))],
+            );
+        }
         Outcome::Cancelled => msg::UI_MAINTENANCE_CANCELLED,
         Outcome::Failed => msg::UI_MAINTENANCE_FAILED,
     };
@@ -214,8 +225,12 @@ fn end(end: &End) -> Words {
 /// What follows the list of what a check found when it leaves `count` out;
 /// nothing when it leaves none out.
 pub(crate) fn check_more(count: u64) -> Option<Words> {
-    let _ = count;
-    todo!()
+    (count > 0).then(|| {
+        words(
+            msg::UI_MAINTENANCE_CHECK_MORE,
+            vec![("count", number(count))],
+        )
+    })
 }
 
 /// What the page tells a person of a run, or of the request that comes before

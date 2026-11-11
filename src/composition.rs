@@ -358,13 +358,7 @@ impl Publish {
             E::Progress(progress) => self.progress_ui(progress),
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
-                code: match warning.kind {
-                    WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
-                    WarningKind::Hook => WarningCode::HookWarning,
-                    WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
-                    WarningKind::CheckWarning | WarningKind::CheckError => todo!(),
-                    WarningKind::Other => WarningCode::Unknown,
-                },
+                code: warning_code(warning.kind),
                 args: warning
                     .item
                     .as_ref()
@@ -762,7 +756,8 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
         WarningKind::Hook => WarningCode::HookWarning,
         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
-        WarningKind::CheckWarning | WarningKind::CheckError => todo!(),
+        WarningKind::CheckWarning => WarningCode::CheckWarning,
+        WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::Other => WarningCode::Unknown,
     }
 }

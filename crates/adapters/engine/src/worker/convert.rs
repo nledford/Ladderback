@@ -3,7 +3,7 @@
 
 use std::io;
 
-use api::ErrorCode;
+use api::{ErrorCode, WarningCode};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::Hostname;
@@ -215,13 +215,24 @@ pub(crate) fn prune_plan_result(repository: RepositoryId, stats: &PruneStats) ->
     }
 }
 
-/// What a finished check found. `CheckErrorLevel` isn't exported, so the
-/// level is read from its `Debug` form: `Warn` is a warning, anything else
-/// an error.
+/// The warning code of a check's finding at `level`. `CheckErrorLevel`
+/// isn't exported, so the level is read from its `Debug` form: `Warn` is a
+/// warning, anything else an error, so a level a newer rustic adds is told
+/// as damage rather than passed over.
+pub(crate) fn finding_code(level: &impl std::fmt::Debug) -> WarningCode {
+    if format!("{level:?}") == "Warn" {
+        WarningCode::CheckWarning
+    } else {
+        WarningCode::CheckError
+    }
+}
+
+/// What a finished check found, counted by level as [`finding_code`] tells
+/// them.
 pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> CheckResult {
     let (mut errors, mut warnings) = (0_u64, 0_u64);
     for (level, _) in &results.0 {
-        if format!("{level:?}") == "Warn" {
+        if finding_code(level) == WarningCode::CheckWarning {
             warnings = warnings.saturating_add(1);
         } else {
             errors = errors.saturating_add(1);
