@@ -2,7 +2,6 @@
 //! out of logs, warnings and errors (invariant I4, technical design §10.2).
 
 use std::collections::BTreeMap;
-use std::ops::Range;
 
 mod command;
 mod inline;
@@ -117,11 +116,84 @@ pub struct RepositorySecrets<'a> {
 /// lower-cased, as a host is; and in pieces, where a parser splits it at
 /// `@`, `#`, `?`, `/` or `:`; see `url_needles`), with [`REDACTED`]; and what
 /// else of it shows in text on its own (see `partial_needles`). Secrets that
-/// overlap or touch are replaced as one span.
+/// overlap or touch are replaced as one span. Masking a text compares each of
+/// its bytes at most twice per needle, whatever the needles and the text are.
 #[derive(Clone, Default)]
 pub struct Redactor {
-    /// Longest first, so a secret containing another is replaced whole.
-    needles: Vec<String>,
+    needles: Vec<Needle>,
+    /// A needle was longer than one can be (`Needle::new`): every text is
+    /// masked whole, which masks more than a secret, never less (I4).
+    whole: bool,
+}
+
+/// A `u32` widens to a `usize` without loss, so a length or a place in a
+/// needle kept as a `u32` reads back as it was.
+const _: () = assert!(usize::BITS >= u32::BITS);
+
+/// A text a redactor looks for, and where a search for it goes on from when
+/// a byte of the text doesn't match the next byte of it, so that no byte of
+/// the text is looked at again (Knuth, Morris and Pratt): `borders[i]` is the
+/// length of the longest start of `text[..=i]` that is also its end and is
+/// shorter than it. A needle is at most `u32::MAX` bytes long, so each
+/// border, and each length of it matched, is a `u32`: four bytes per byte
+/// of the needle, not eight.
+#[derive(Clone)]
+struct Needle {
+    text: String,
+    borders: Vec<u32>,
+}
+
+impl Needle {
+    /// `None` for a text longer than `u32::MAX` bytes, whose borders a `u32`
+    /// couldn't hold.
+    fn new(text: String) -> Option<Self> {
+        let bytes = text.as_bytes();
+        u32::try_from(bytes.len()).ok()?;
+        let mut borders = Vec::with_capacity(bytes.len());
+        if let Some((_, rest)) = bytes.split_first() {
+            // The first byte has no start shorter than itself.
+            borders.push(0);
+            let mut matched = 0;
+            for &byte in rest {
+                matched = advance(bytes, &borders, matched, byte);
+                borders.push(matched);
+            }
+        }
+        Some(Self { text, borders })
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many bytes of a needle masking compared with a byte of a text,
+    /// on this thread: the tests bound the work with it.
+    static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How much of the start of `needle` ends at `byte`, when the `matched`
+/// bytes before it were the longest start of it that ended there. `borders`
+/// holds at least the first `matched` borders of `needle`, which is at most
+/// `u32::MAX` bytes long. A whole needle matched goes on as the longest
+/// shorter start, so occurrences that overlap are all found (`abab` twice in
+/// `ababab`).
+fn advance(needle: &[u8], borders: &[u32], mut matched: u32, byte: u8) -> u32 {
+    loop {
+        #[cfg(test)]
+        COMPARED.with(|count| count.set(count.get() + 1));
+        if needle.get(matched as usize) == Some(&byte) {
+            // `matched` is the place of a byte of the needle, so one more is
+            // at most its length, which a `u32` holds.
+            return matched.saturating_add(1);
+        }
+        // A border is shorter than what it is the border of, so this ends.
+        match matched
+            .checked_sub(1)
+            .and_then(|last| borders.get(last as usize))
+        {
+            Some(&shorter) => matched = shorter,
+            None => return 0,
+        }
+    }
 }
 
 /// What a redactor hides is what it holds, so its `Debug` form counts the
@@ -142,9 +214,18 @@ impl Redactor {
             .filter(|value| !value.is_empty())
             .flat_map(|value| url_needles(value).into_iter().chain(partial_needles(value)))
             .collect();
-        needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        needles.sort_unstable();
         needles.dedup();
-        Self { needles }
+        let mut whole = false;
+        let needles = needles
+            .into_iter()
+            .filter_map(|text| {
+                let needle = Needle::new(text);
+                whole |= needle.is_none();
+                needle
+            })
+            .collect();
+        Self { needles, whole }
     }
 
     /// A redactor for everything that gives access to a repository: its
@@ -222,8 +303,7 @@ impl Redactor {
                 text.push(char::REPLACEMENT_CHARACTER);
             }
         }
-        let cut = self.cut_secret(&text).map(|start| start..text.len());
-        self.mask(&text, cut)
+        self.mask(&text, Some(text.len()))
     }
 
     /// `text` masked as [`Redactor::redact`] masks it, unless it ends in
@@ -232,46 +312,46 @@ impl Redactor {
     /// [`Redactor::redact_cut`] masks it, and the mark stays, unless it is
     /// the end of a whole secret, which is masked with it.
     pub fn redact_clipped(&self, text: &str, mark: &str) -> String {
-        let cut = text
-            .strip_suffix(mark)
-            .and_then(|kept| self.cut_secret(kept).map(|start| start..kept.len()));
-        self.mask(text, cut)
+        self.mask(text, text.strip_suffix(mark).map(str::len))
     }
 
-    /// Where the end of `text` is the beginning of a needle: the earliest
-    /// start of a secret that a cut at its end could have gone through.
-    fn cut_secret(&self, text: &str) -> Option<usize> {
-        text.char_indices().map(|(at, _)| at).find(|&at| {
-            text.get(at..)
-                .is_some_and(|end| self.needles.iter().any(|needle| needle.starts_with(end)))
-        })
-    }
-
-    /// `text` with every needle in it replaced, and the bytes of `cut`, if
-    /// given, as part of the same spans.
-    fn mask(&self, text: &str, cut: Option<Range<usize>>) -> String {
-        let mut covered = vec![false; text.len()];
-        let mut any = false;
-        if let Some(span) = cut.and_then(|cut| covered.get_mut(cut)) {
-            span.fill(true);
-            any = true;
+    /// `text` with every needle in it replaced. When `cut` is given, the
+    /// text was cut after its first `cut` bytes, and the end of those from
+    /// where it is the start of a needle on (the earliest start of a secret
+    /// the cut could have gone through) is part of the same spans.
+    ///
+    /// One pass over the text per needle: each byte of the text is compared
+    /// at most twice with a byte of the needle, however long and repetitive
+    /// both are. A needle and a valid text are UTF-8, so what matches starts
+    /// and ends between characters.
+    fn mask(&self, text: &str, cut: Option<usize>) -> String {
+        if self.whole && !text.is_empty() {
+            return REDACTED.to_owned();
         }
+        let bytes = text.as_bytes();
+        // The longest span, of a needle or of the cut, that ends at each byte:
+        // at most a needle's length, which a `u32` holds.
+        let mut spans = vec![0_u32; bytes.len()];
         for needle in &self.needles {
-            // Every occurrence, those that overlap another of the same
-            // needle included (`abab` in `ababab`), which `match_indices`
-            // skips.
-            for (start, _) in text.char_indices() {
-                let found = text
-                    .get(start..)
-                    .is_some_and(|rest| rest.starts_with(needle.as_str()));
-                if !found {
-                    continue;
-                }
-                if let Some(span) = covered.get_mut(start..start.saturating_add(needle.len())) {
-                    span.fill(true);
-                    any = true;
+            let whole = needle.text.as_bytes();
+            let mut matched = 0;
+            for (at, (&byte, span)) in bytes.iter().zip(spans.iter_mut()).enumerate() {
+                matched = advance(whole, &needle.borders, matched, byte);
+                if matched as usize == whole.len() || cut == Some(at + 1) {
+                    *span = (*span).max(matched);
                 }
             }
+        }
+        // From the end: a byte is covered when a span that ends at it or
+        // after it starts at it or before it. A byte no span ends at gives
+        // the byte after it, which covers nothing.
+        let mut first = usize::MAX;
+        let mut any = false;
+        for (at, span) in spans.iter_mut().enumerate().rev() {
+            first = first.min((at + 1).saturating_sub(*span as usize));
+            let covered = first <= at;
+            any |= covered;
+            *span = u32::from(covered);
         }
         if !any {
             return text.to_owned();
@@ -279,7 +359,7 @@ impl Redactor {
         let mut out = String::with_capacity(text.len());
         let mut in_span = false;
         for (at, c) in text.char_indices() {
-            if covered.get(at).copied().unwrap_or(false) {
+            if spans.get(at) == Some(&1) {
                 if !in_span {
                     out.push_str(REDACTED);
                     in_span = true;
@@ -1821,8 +1901,9 @@ mod tests {
     /// What `work` gives, and how many bytes of a needle and the text a
     /// redactor compared while doing it, on this thread.
     fn compared<T>(work: impl FnOnce() -> T) -> (T, usize) {
-        let _ = work;
-        todo!()
+        let before = COMPARED.with(std::cell::Cell::get);
+        let done = work();
+        (done, COMPARED.with(std::cell::Cell::get) - before)
     }
 
     /// Masking compares each byte of the text at least once and at most
@@ -1867,5 +1948,20 @@ mod tests {
                 "{what}: {work} comparisons for {length} bytes and {needles} needles"
             );
         }
+    }
+
+    /// A needle longer than a `u32` holds can't be built in a test (4 GiB),
+    /// so this builds the redactor such a needle leaves: it masks every text
+    /// that isn't empty whole, cut or not.
+    #[test]
+    fn a_redactor_with_a_needle_too_long_to_search_masks_every_text_whole() {
+        let redactor = Redactor {
+            needles: Vec::new(),
+            whole: true,
+        };
+        assert_eq!(redactor.redact(""), "");
+        assert_eq!(redactor.redact("x"), REDACTED);
+        assert_eq!(redactor.redact_cut(b"x"), REDACTED);
+        assert_eq!(redactor.redact_clipped("x…", "…"), REDACTED);
     }
 }
