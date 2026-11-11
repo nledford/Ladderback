@@ -423,12 +423,39 @@ fn prune_waits(agent: &mut Agent) {
     assert_eq!(prune_preview(agent).keep_delete, default_keep_delete());
 }
 
-#[then("the engine was only asked to plan a prune")]
+#[then("the engine was only asked to identify the repository and plan a prune")]
 fn only_a_plan(agent: &mut Agent) {
     assert_eq!(
         agent.forget.jobs(),
-        ["prune-plan"],
-        "the engine was asked for more than a plan"
+        ["identify", "prune-plan"],
+        "the engine was asked for more than the reads a prune starts with"
+    );
+}
+
+#[then("the prune plan opened the repository by its repository ID, as the prune did")]
+fn planned_as_pruned(agent: &mut Agent) {
+    let planned = agent
+        .forget
+        .plan_access()
+        .expect("the engine was asked to plan a prune");
+    let pruned = agent
+        .forget
+        .prune_access()
+        .expect("the engine was asked to prune");
+    // The engine gives a job its repository's cache by the ID it names: a
+    // plan without one reads the whole repository uncached.
+    assert_eq!(planned.id.as_ref(), Some(agent.forget.repository_id()));
+    assert!(
+        planned == pruned,
+        "the plan opened the repository otherwise"
+    );
+}
+
+#[then("the engine was never asked to plan a prune")]
+fn never_planned(agent: &mut Agent) {
+    assert!(
+        !agent.forget.jobs().contains(&"prune-plan"),
+        "the engine was asked to plan a prune"
     );
 }
 
