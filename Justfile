@@ -67,15 +67,17 @@ lint: _ui-deps clippy
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
 
-# Lint the GitHub Actions workflows: actionlint for syntax, expressions and
-# shell steps, zizmor for security (template injection, permissions, unpinned
-# actions). zizmor runs its online audits (known-vulnerable actions, impostor
-# commits) only when GH_TOKEN is set, as CI sets it; without it, offline.
-[doc('Lint the GitHub Actions workflows with actionlint and zizmor.')]
+# Lint the GitHub Actions workflows and the repository's own actions:
+# actionlint for the workflows' syntax, expressions and shell steps, zizmor for
+# security (template injection, permissions, unpinned actions) in both.
+# actionlint reads workflows only. zizmor runs its online audits
+# (known-vulnerable actions, impostor commits) only when GH_TOKEN is set, as CI
+# sets it; without it, offline.
+[doc('Lint the GitHub Actions workflows and actions with actionlint and zizmor.')]
 [group('quality')]
 lint-workflows:
     actionlint
-    zizmor --no-progress .github/workflows
+    zizmor --no-progress .github/workflows .github/actions
 
 # Check the dependency rule: banned crates in domain and app, domain on wasm32.
 [group('quality')]

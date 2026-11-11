@@ -191,15 +191,7 @@ jobs:
           tool: just,trunk
       - run: npm ci
         working-directory: ui-tests
-      # Playwright's browsers live outside node_modules; keyed on the lockfile,
-      # which pins the Playwright version. `--with-deps` still installs the
-      # system packages on every run, and a cache miss downloads as before.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('ui-tests/package-lock.json') }}
-      - run: npx playwright install --with-deps chromium
-        working-directory: ui-tests
+      - uses: ./.github/actions/chromium
       - run: just test-ui
       # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
       - if: github.event_name == 'push'

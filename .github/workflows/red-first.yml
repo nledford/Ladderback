@@ -87,13 +87,9 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
-      # Playwright's browsers, as in ci.yml's `ui` job.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('ui-tests/package-lock.json') }}
-      - run: npm ci && npx playwright install --with-deps chromium
+      - run: npm ci
         working-directory: ui-tests
+      - uses: ./.github/actions/chromium
       # The parts of the cache key that aren't a file hash. rust-toolchain.toml
       # names a channel, not a version, so the toolchain is identified by what
       # rustc reports about itself.
