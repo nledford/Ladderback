@@ -367,7 +367,10 @@ Then(
       const found: string[] = [];
       for (const letters of words) {
         const wide = letters.reduce((sum, { box }) => sum + box.width, 0);
-        if (longWordsMayBreak && wide > line) continue;
+        // The characters' boxes leave out kerning and the sub-pixel layout of
+        // the whole run, so a word within a pixel of the line can need it all
+        // and more: count it as longer than the line.
+        if (longWordsMayBreak && wide > line - 1) continue;
         letters.forEach(({ box }, at) => {
           const before = letters[at - 1];
           if (before !== undefined && Math.round(box.top) > Math.round(before.box.top)) {

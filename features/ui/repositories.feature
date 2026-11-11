@@ -354,7 +354,7 @@ Feature: Repositories page
     Examples:
       | alias                                                            | breaks                                           |
       | demo                                                             | only at a space or a hyphen                      |
-      | offsite-copies-of-the-family-photo-library-kept-on-the-attic-nas | only at a space or a hyphen                      |
+      | offsite-copies-of-the-family-photo-library-kept-on-the-attic-nas | a word only where the word is longer than a line |
       | offsitecopiesofthefamilyphotolibrarykeptontheatticnasandthecloud | a word only where the word is longer than a line |
 
   Scenario: The repositories page reflows with larger text, a long name offered Create
