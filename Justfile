@@ -356,11 +356,20 @@ release-pr version='':
             --json databaseId -q "[.[] | select(.databaseId > $before)][0].databaseId // empty")
     done
     [ -n "$run" ] || { echo "error: the Release run didn't appear within a minute" >&2; exit 1; }
-    gh run watch "$run" --interval 10 >/dev/null || true
-    case $(gh run view "$run" --json conclusion -q .conclusion) in
-        success) ;;
-        cancelled) echo "error: the Release run was cancelled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
-        *) echo "error: the Release run failed: gh run view $run --log-failed" >&2; exit 1 ;;
+    # Poll until the run completes: right after a dispatch the API can answer
+    # with an error, and an unfinished run has no conclusion yet. 45 minutes
+    # covers the job's 30-minute limit and a wait in the queue.
+    state=''
+    for _ in $(seq 1 270); do
+        state=$(gh run view "$run" --json status,conclusion -q '"\(.status) \(.conclusion)"' 2>/dev/null || true)
+        [[ $state == "completed "* ]] && break
+        sleep 10
+    done
+    case $state in
+        "completed success") ;;
+        "completed cancelled") echo "error: the Release run was cancelled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
+        "completed "*) echo "error: the Release run failed: gh run view $run --log-failed" >&2; exit 1 ;;
+        *) echo "error: the Release run hasn't finished after 45 minutes: gh run view $run" >&2; exit 1 ;;
     esac
     # The release PR as release-plz finds it: open, into main, from a
     # `release-plz-` branch. A plain listing, not search (`--label`), which can
