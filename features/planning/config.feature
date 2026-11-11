@@ -292,3 +292,57 @@ Feature: An agent's configuration
       Then the agent's hostname is "demo-host"
       And the history of the config file holds the old file exactly as it was written
       And the config file now says it is in version 2
+
+  @e2e
+  Rule: A secret written in the file is pointed out when the daemon starts, by its setting and never its value
+
+    Scenario: A password in a repository's location is pointed out by the setting that holds it
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rest:https://demo:CANARY-location-password@backup.example.com/nas"
+        repo-hot = "rest:https://demo:CANARY-hot-password@hot.example.com/nas"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the location in "repository" of the repository "nas" holds a password
+      And the daemon warns that the location in "repo-hot" of the repository "nas" holds a password
+      And the daemon's log never shows "CANARY-location-password"
+      And the daemon's log never shows "CANARY-hot-password"
+
+    Scenario: A credential in an rclone location is pointed out with rclone's own configuration as its place
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rclone::sftp,host=nas.example.com,pass=CANARY-rclone-pass:/backups"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the location in "repository" of the repository "nas" holds a credential that belongs in rclone's own configuration
+      And the daemon's log never shows "CANARY-rclone-pass"
+
+    Scenario Outline: A location with no password written in it is not pointed out
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "<location>"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon gives no warning about the repository "nas"
+
+      Examples:
+        | location                                                            |
+        | rest:https://backup.example.com/nas                                 |
+        | rest:https://demo@backup.example.com/nas                            |
+        | rest:https://demo:${DEMO_REST_PASSWORD}@backup.example.com/nas      |
+        | rest:https://demo:${file:/run/demo/password}@backup.example.com/nas |
+        | rest:https://backup.example.com:8000/nas@2026                       |
+        | rclone:demo-remote:backups/token=2024                               |
+        | rclone::sftp,host=nas.example.com,bypass_cache=true:/backups        |

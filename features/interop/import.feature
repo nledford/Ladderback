@@ -816,6 +816,59 @@ Feature: Import a rustic profile
       And the import warns that the secret "repository.password" is written in the config
       And the import never shows "CANARY-inline-password"
 
+    Scenario: A password in the repository's location is kept with a warning that names the key, and never shown
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "rest:https://demo:CANARY-location-password@backup.example.com/nas"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import succeeds
+      And the import warns that the location in "repository.repository" holds a password written in the config
+      And the import never shows "CANARY-location-password"
+
+    Scenario: A credential in an rclone location is kept with a warning that sends it to rclone's own configuration
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "rclone::sftp,host=nas.example.com,pass=CANARY-rclone-pass:/backups"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import succeeds
+      And the import warns that the location in "repository.repository" holds a credential that belongs in rclone's own configuration
+      And the import never shows "CANARY-rclone-pass"
+
+    Scenario Outline: A location with no password written in it gets no warning
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "<location>"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import succeeds
+      And the import gives no warning about "repository.repository"
+
+      Examples:
+        | location                                 |
+        | rest:https://backup.example.com/nas      |
+        | rest:https://demo@backup.example.com/nas |
+        | rclone:demo-remote:backups/token=2024    |
+
     Scenario: A profile with nowhere to read the password from is refused
       Given a rustic profile "nas.toml" holding:
         """

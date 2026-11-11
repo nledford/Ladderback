@@ -402,6 +402,15 @@ warning-inline-secret = The profile holds a secret in { $field }, which { -brand
 # `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
 warning-config-inline-secret = The { $field } of this repository is written as text in the configuration file. Keep the secret outside the file and refer to it: a password can come from a keyring, a file, a command or an environment variable, and an option from a { "${VAR}" } or { "${file:/path}" } reference.
 
+# A repository's location holds a credential written as text: a password in a URL, as in user:password@host, or a credential in an rclone connection string.
+# $field (text): the setting that holds the location, as the profile or the configuration names it, such as repository.repository or repo-hot. Keep it as it is.
+# $kind (text): what the location is: rclone, for an rclone connection string, which rclone is started with in its arguments, or url for any other.
+# `${VAR}`, `${file:/path}` and `rclone:remote:path` are typed as they are: keep them string literals.
+warning-location-secret = { $kind ->
+    [rclone] The location in { $field } holds a credential as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer can see it. Set up the remote in rclone's own configuration file, with the credential there, and name it in the location instead, as in { "rclone:remote:path" }.
+   *[other] The location in { $field } holds a password as text, so the configuration file keeps it as text too. Put a { "${VAR}" } or { "${file:/path}" } reference where the password is, or give the password in the backend's own option instead.
+  }
+
 # One of the program's own tags was found on a snapshot entry and dropped.
 # $tag (text): the tag.
 warning-profile-tag-dropped = { -brand-name } dropped the tag { $tag } from a plan, because tags that start like that are its own. It adds them itself.

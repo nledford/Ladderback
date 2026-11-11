@@ -249,6 +249,16 @@ pub enum WarningCode {
     /// argument `field` names where it is, as the configuration names it.
     /// Never the secret itself (I4).
     ConfigInlineSecret,
+    /// A repository's location holds a credential as text: a password in the
+    /// userinfo of its URL, or a credential of its rclone connection string.
+    /// Said by the import, when the configuration loads and on the
+    /// repository's row of the list. The argument `field` names the setting
+    /// that holds the location, as the profile or the configuration names it
+    /// (`repository.repository`, `repo-hot`); `kind` is `rclone` for an rclone
+    /// location, whose credential belongs in rclone's own configuration, and
+    /// `url` for any other, where a `${…}` reference keeps it out. Never the
+    /// credential, nor the location it is in (I4).
+    LocationSecret,
     /// A tag of Ladderback's own, found on a snapshot entry, was dropped. The
     /// argument `tag` is the tag.
     ProfileTagDropped,
@@ -733,6 +743,18 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::LocationSecret => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "kind",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::ProfileTagDropped => &[ArgSpec {
                 name: "tag",
                 kind: ArgKind::Text,
@@ -1368,6 +1390,10 @@ mod tests {
         assert_eq!(
             WarningCode::ConfigInlineSecret.args(),
             &[text("field", false)]
+        );
+        assert_eq!(
+            WarningCode::LocationSecret.args(),
+            &[text("field", false), text("kind", false)]
         );
         for code in [
             WarningCode::ProfilePrune,

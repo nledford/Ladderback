@@ -11,7 +11,10 @@ use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
 };
-use domain::secrets::{CommandLine, FileRead, SecretRef, SecretValue, Template, is_secret_option};
+use domain::secrets::{
+    CommandLine, FileRead, SecretRef, SecretValue, Template, is_secret_option,
+    location_secret_written, rclone_location, url_password_written,
+};
 use domain::{PlanId, RepositoryAlias};
 
 use crate::MAX_ITEMS;
@@ -160,6 +163,20 @@ fn repository(
         .as_deref()
         .map(|hot| fits(escape::text(hot), "repository.repo-hot", file))
         .transpose()?;
+    // A location the profile wrote is escaped, so a `${…}` in it is text: a
+    // password there is kept as text, whatever it looks like. One from
+    // rustic's variable is a reference, which keeps nothing as text.
+    for (key, written) in [
+        ("repository.repository", Some(&location)),
+        ("repository.repo-hot", repo_hot.as_ref()),
+    ] {
+        if let Some(written) = written.filter(|written| location_secret_written(written)) {
+            notices.push(ProfileNotice::LocationSecret {
+                field: key.to_owned(),
+                rclone: rclone_location(written),
+            });
+        }
+    }
     let password = password(own, variables, file, notices)?;
     let settings = RepositorySettings {
         repository: location,
@@ -317,7 +334,8 @@ fn from_variables(
 
 /// The options of one table, with a reference for each of rustic's variables
 /// whose option the profile leaves out. An option that holds a credential and
-/// is written in the profile is noted: it is kept as text.
+/// is written in the profile is noted: it is kept as text. So is one whose
+/// value is a URL with a password in it.
 fn options(
     own: &BTreeMap<String, String>,
     table: &str,
@@ -329,10 +347,11 @@ fn options(
     let mut options = BTreeMap::new();
     for (name, value) in own {
         let key = format!("repository.{table}.{}", plain(name));
-        if is_secret_option(name) {
-            notices.push(ProfileNotice::InlineSecret { field: key.clone() });
+        let value = fits(escape::text(value), &key, file)?;
+        if is_secret_option(name) || url_password_written(&value) {
+            notices.push(ProfileNotice::InlineSecret { field: key });
         }
-        options.insert(name.clone(), fits(escape::text(value), &key, file)?);
+        options.insert(name.clone(), value);
     }
     for (variable, value) in variables {
         let Some(rest) = variable.strip_prefix(prefix) else {

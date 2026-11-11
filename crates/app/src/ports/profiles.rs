@@ -71,6 +71,11 @@ pub enum ProfileNotice {
     UsedProfileMissing { name: String },
     /// A secret written in the profile was kept as text in the config.
     InlineSecret { field: String },
+    /// A location written in the profile holds a password, which was kept
+    /// as text in the config; `field` is the key the location is at.
+    /// `rclone` says the location is an rclone one, whose credentials belong
+    /// in rclone's own configuration rather than in a reference.
+    LocationSecret { field: String, rclone: bool },
     /// One of Ladderback's reserved tags was dropped from a plan.
     TagDropped { tag: String },
     /// An export left an option out because it is a reference; `variable` is

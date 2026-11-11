@@ -1080,6 +1080,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileUsedMissing
                 | WarningCode::InlineSecret
                 | WarningCode::ConfigInlineSecret
+                | WarningCode::LocationSecret
                 | WarningCode::ProfileTagDropped
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty

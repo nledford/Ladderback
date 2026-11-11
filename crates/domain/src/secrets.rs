@@ -12,7 +12,7 @@ mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
-pub use inline::InlineSecret;
+pub use inline::{InlineSecret, location_secret_written, rclone_location, url_password_written};
 pub use options::is_secret_option;
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
