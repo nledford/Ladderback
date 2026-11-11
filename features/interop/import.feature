@@ -472,6 +472,22 @@ Feature: Import a rustic profile
       Then the import is refused naming "sources"
       And no config file was written
 
+    Scenario: A glob file must be an absolute path, as rustic reads it from wherever it was started
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        iglob-files = ["excludes.txt"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "backup.snapshots[0].iglob-files[0]"
+      And no config file was written
+
     Scenario: Tags Ladderback keeps for itself are dropped
       Given a rustic profile "nas.toml" holding:
         """

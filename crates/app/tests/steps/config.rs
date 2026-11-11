@@ -9,8 +9,8 @@ use app::fakes::InMemoryConfigStore;
 use app::ports::ConfigStore;
 use cucumber::{given, then, when};
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
-    InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
+    AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
+    Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
     RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, Source, ValueKind, Violation,
     parse_duration,
 };
@@ -61,6 +61,7 @@ impl From<InvalidValue> for Refusal {
         let kind = match error.kind {
             ValueKind::Hostname => "hostname",
             ValueKind::Source => "source",
+            ValueKind::GlobFile => "glob-file",
             ValueKind::Locale => "locale",
             ValueKind::Concurrency => "concurrency",
             ValueKind::Nice => "nice",
@@ -192,6 +193,7 @@ fn read(kind: &str, text: &str) -> Result<Option<HookEntry>, Refusal> {
     match kind {
         "hostname" => value(Hostname::parse(text)),
         "source" => value(Source::parse(text)),
+        "glob-file" => value(GlobFile::parse(text)),
         "locale" => value(Locale::parse(text)),
         "repository-alias" => RepositoryAlias::parse(text)
             .map(|_| None)

@@ -593,6 +593,41 @@ async fn a_source_that_is_not_an_absolute_path_is_refused_at_the_source() {
     }
 }
 
+// rustic reads a glob file from the folder it was started in, which an import
+// can't know; the profile's own folder would be a guess rustic doesn't make.
+#[tokio::test]
+async fn a_glob_file_that_is_not_an_absolute_path_is_refused_at_the_file() {
+    for file in [".excludes", "globs/home.txt", "./globs", "../globs", "~/.excludes"] {
+        for (table, key) in [
+            (
+                format!("[backup]\nglob-files = [\"/etc/demo/globs\", \"{file}\"]\n"),
+                "backup.glob-files[1]",
+            ),
+            (
+                format!("[backup]\niglob-files = [\"{file}\"]\n"),
+                "backup.iglob-files[0]",
+            ),
+            // Written over several lines, the refusal names the file's own
+            // line, not the key's.
+            (
+                format!("[backup]\nglob-files = [\n  \"/etc/demo/globs\",\n  \"{file}\",\n]\n"),
+                "backup.glob-files[1]",
+            ),
+        ] {
+            let text = profile_text(&table);
+            let (found, line) = unsupported(read_err(&text).await);
+            assert_eq!(found, key, "{file}");
+            assert_eq!(line, Some(line_of(&text, &format!("\"{file}\""))), "{file}");
+        }
+        let text = format!(
+            "{REPOSITORY}\n[[backup.snapshots]]\nname = \"home\"\nsources = [\"/home/demo\"]\nglob-files = [\"{file}\"]\n"
+        );
+        let (found, line) = unsupported(read_err(&text).await);
+        assert_eq!(found, "backup.snapshots[0].glob-files[0]", "{file}");
+        assert_eq!(line, Some(line_of(&text, "glob-files")), "{file}");
+    }
+}
+
 #[tokio::test]
 async fn a_host_that_is_not_a_host_name_is_refused() {
     let text = profile_text("[backup]\nhost = \"\"\n");

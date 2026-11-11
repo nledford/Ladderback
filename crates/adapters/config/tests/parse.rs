@@ -533,6 +533,11 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "\"colour\"",
         ),
     ];
+    assert_refused_where_written(rows);
+}
+
+/// Each row is refused as its kind, at its key and its value's place.
+fn assert_refused_where_written(rows: impl IntoIterator<Item = Refused>) {
     for row in rows {
         let error = invalid(parsed(&row.file));
         assert_eq!(error.problem, Problem::Value(row.kind), "{}", row.key);
@@ -546,6 +551,26 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
         assert_eq!(error.detail, "", "{}: the problem says it all", row.key);
         assert_eq!(error.file, FILE);
     }
+}
+
+// rustic reads a glob file from the worker's working directory, the daemon's,
+// so a relative one would mean whatever folder the daemon was started in.
+#[test]
+fn a_glob_file_that_is_not_an_absolute_path_is_refused_at_its_plan_and_key() {
+    assert_refused_where_written([
+        refused(
+            base_with("glob-files = [\"/home/demo/.g\", \".excludes\"]\n"),
+            "plans[0].glob-files[1]",
+            ValueKind::GlobFile,
+            "\".excludes\"",
+        ),
+        refused(
+            base_with("iglob-files = [\"globs/home.txt\"]\n"),
+            "plans[0].iglob-files[0]",
+            ValueKind::GlobFile,
+            "\"globs/home.txt\"",
+        ),
+    ]);
 }
 
 #[test]

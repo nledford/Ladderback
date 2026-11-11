@@ -1,5 +1,5 @@
 //! The small named values of a configuration: a host name, a path to back up,
-//! a locale.
+//! a file of glob patterns, a locale.
 
 use super::{InvalidValue, ValueKind};
 
@@ -54,6 +54,28 @@ impl Source {
         } else {
             Err(InvalidValue::new(ValueKind::Source, text))
         }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A file of glob patterns a plan's source filter reads (`glob-files`,
+/// `iglob-files`). The path is absolute, as a source's is: rustic reads the
+/// file when the backup starts, from the worker's working directory, which is
+/// the daemon's and says nothing of where the configuration or a profile is.
+/// At most 4096 bytes and without a NUL.
+///
+/// It is the path as written, not checked against the disk: a glob file that
+/// doesn't exist is a failure when the plan runs, not a refusal here.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GlobFile(String);
+
+impl GlobFile {
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        let _ = text;
+        todo!()
     }
 
     pub fn as_str(&self) -> &str {
@@ -170,6 +192,36 @@ mod tests {
             &too_long,
         ] {
             assert_eq!(Source::parse(text), Err(refused(ValueKind::Source, text)));
+        }
+    }
+
+    #[test]
+    fn a_glob_file_is_an_absolute_path_of_at_most_4096_bytes() {
+        let longest = format!("/{}", "a".repeat(4095));
+        for text in ["/home/demo/.excludes", "/etc/rustic/globs list", &longest] {
+            assert_eq!(GlobFile::parse(text).unwrap().as_str(), text);
+        }
+    }
+
+    #[test]
+    fn a_relative_or_oversized_path_is_not_a_glob_file() {
+        let too_long = format!("/{}", "a".repeat(4096));
+        for text in [
+            "",
+            ".excludes",
+            "globs/home.txt",
+            "./globs",
+            "../globs",
+            "~/.excludes",
+            "C:\\globs",
+            "/with\0nul",
+            &too_long,
+        ] {
+            assert_eq!(
+                GlobFile::parse(text),
+                Err(refused(ValueKind::GlobFile, text)),
+                "{text:?}"
+            );
         }
     }
 

@@ -22,7 +22,7 @@ pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, Violation};
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
-pub use names::{Hostname, Locale, Source};
+pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Plan, RetryPolicy};
 pub use repository::{GroupBy, Maintenance, RepositoryConfig, RepositorySettings, masked_options};
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
@@ -33,6 +33,7 @@ pub use schedule::{CronExpression, Schedule};
 pub enum ValueKind {
     Hostname,
     Source,
+    GlobFile,
     Locale,
     Concurrency,
     Nice,
