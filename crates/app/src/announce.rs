@@ -77,7 +77,7 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
         F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
-        F::RepositoryNotFound => todo!(),
+        F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
         F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
     }
 }

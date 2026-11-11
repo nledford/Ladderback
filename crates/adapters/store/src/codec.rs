@@ -177,7 +177,7 @@ pub(crate) fn encode_failure(
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
-        FailureReason::RepositoryNotFound => todo!(),
+        FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -236,6 +236,7 @@ pub(crate) fn decode_failure(
         "deadline-passed" => Ok(FailureReason::DeadlinePassed),
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
+        "repository-not-found" => Ok(FailureReason::RepositoryNotFound),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),

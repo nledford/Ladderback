@@ -70,15 +70,22 @@ fn on_backends(ctx: &Context, backends: &RepositoryBackends) -> Result<Repositor
 /// read past its config or written. After it opens, each half that is a
 /// local folder is cleaned up after killed workers.
 ///
-/// When it doesn't open, and only then, the backend is asked whether a
-/// repository config file is at the location at all: a definite no fails
-/// the job with `repository-not-found` (decision 53), and anything else
-/// fails it with the error opening gave, as it always did. A repository
-/// that opens costs no extra request.
+/// A half on OpenDAL's `fs` whose root folder isn't there fails the job
+/// before its backend is set up, which would make that folder (decision 53).
+/// When the repository doesn't open, and only then, the backend is asked
+/// whether a repository config file is at the location at all: a definite
+/// no fails the job with `repository-not-found`, and anything else fails it
+/// with the error opening gave, as it always did. A repository that opens
+/// costs no extra request.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
+    if let Some(root) = missing_fs_root(spec) {
+        return Err(JobError::failed(format!(
+            "the repository's root folder {root} is not there"
+        )));
+    }
     let backends = backends(spec)?;
     let credentials = Credentials::password(spec.password.expose());
     let repository = match on_backends(ctx, &backends)?.open(&credentials) {
@@ -113,11 +120,63 @@ pub(crate) fn open(
     Ok(repository)
 }
 
+/// The root folder of a half on OpenDAL's `fs` that isn't there, or isn't a
+/// folder: the root as rustic sets the half up, `options_cold` over
+/// `options` for the cold half and `options_hot` over `options` for the hot
+/// one. Setting that backend up makes a missing root folder, and on an
+/// unplugged drive that is an empty folder at the mount point, on the
+/// system disk: the next job would find no repository in it and the row
+/// would offer to create one there (decision 53). A half with no root
+/// option is left to rustic, which refuses it.
+fn missing_fs_root(spec: &RepositorySpec) -> Option<&str> {
+    let cold = Some((spec.repository.as_str(), &spec.options_cold));
+    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
+    cold.into_iter()
+        .chain(hot)
+        .find_map(|(location, half_options)| {
+            let Ok((SupportedBackend::OpenDAL, service)) = location_to_type_and_path(location)
+            else {
+                return None;
+            };
+            let scheme = service.as_str().split(':').next().unwrap_or_default();
+            let root = half_options
+                .get("root")
+                .or_else(|| spec.options.get("root"))?;
+            (scheme.eq_ignore_ascii_case("fs") && !is_folder(Path::new(root)))
+                .then_some(root.as_str())
+        })
+}
+
 /// Whether the backend says, definitely, that no repository config file is
-/// at the repository's location (decision 53).
+/// at the repository's location (decision 53). Only two backends can say so:
+/// a local folder that is there, is a folder, and where `config` doesn't
+/// exist, as the file system tells it (a folder that can't be read is no
+/// answer), and an OpenDAL location whose listing finds no config file,
+/// which it tells apart from a listing that failed. A local folder that
+/// isn't there is what an unplugged drive looks like, and a repository made
+/// there would be a new, empty one in the old one's place, so it is no
+/// answer either; rustic's local backend makes no folder when it opens.
+/// rustic's REST and rclone backends list no config file for any answer but
+/// success, a refused password included, so they never do.
 fn no_repository_there(spec: &RepositorySpec, backends: &RepositoryBackends) -> bool {
-    let _ = (spec, backends);
-    todo!()
+    match location_to_type_and_path(&spec.repository) {
+        Ok((SupportedBackend::Local, path)) => {
+            let folder = Path::new(path.as_str());
+            is_folder(folder) && matches!(folder.join("config").try_exists(), Ok(false))
+        }
+        Ok((SupportedBackend::OpenDAL, _)) => matches!(
+            Repository::new(&RepositoryOptions::default().no_cache(true), backends)
+                .and_then(|repository| repository.config_id()),
+            Ok(None)
+        ),
+        _ => false,
+    }
+}
+
+/// Whether a folder is at `path`, through any symbolic links; anything that
+/// can't be looked at is not one.
+fn is_folder(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
 }
 
 /// The cache directory the job may use: the one it was given, if no other

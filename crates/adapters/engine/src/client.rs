@@ -1164,16 +1164,17 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
                 // A repository that already exists where one was to be
-                // initialised is the one failure the agent reports as a
-                // code of its own: `InitRepository` refuses with it, and
-                // nothing was written. The worker's `location` argument
-                // says where; the job's spec already does.
+                // initialised, and a location with no repository at all
+                // (decision 53), are the failures the agent reports as codes
+                // of their own: `InitRepository` refuses with the first, and
+                // a saved repository's row offers Create on the second.
+                // Nothing was written. The job's spec already says where.
                 ErrorCode::RepositoryExists => FailureReason::RepositoryExists,
                 // The location holds another repository than the one the
                 // spec named (§7.3): nothing there was read or written. As
                 // with `RepositoryExists`, the code says it all.
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
-                ErrorCode::RepositoryNotFound => todo!(),
+                ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes
