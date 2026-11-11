@@ -47,14 +47,14 @@ Not part of the contract: UI layout and wording, log text, the CLI's sentences (
 - from 1.0.0: breaking bumps the major, a feature the minor, a fix the patch;
 - every breaking change gets an entry under **Breaking** in `CHANGELOG.md`, with the upgrade step.
 
-**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version ladderback@<version>`.
+**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version <version>`, which moves `[workspace.package] version`. The `ladderback@<version>` form would give that one package its own version and break the inheritance every crate shares.
 
 **Tags.** `vX.Y.Z` on `main`, created only by the release workflow. A tag is never moved or deleted; a bad release is fixed by the next patch, and its GitHub release is marked as such.
 
 **Process.** [release-plz](https://release-plz.dev) in git-only mode (`release-plz.toml`, `.github/workflows/release.yml`):
 
-1. Running the Release workflow by hand opens or updates a draft **release PR**. It bumps `[workspace.package] version` from the Conventional Commits since the last tag (`feat` → minor; `fix` → patch; `!` or a `BREAKING CHANGE:` footer → breaking) and writes the `CHANGELOG.md` entry.
-2. The maintainer checks the bump against the contract table, since labels only navigate, and edits the notes. `just release-preview` shows the same result locally.
+1. Running the Release workflow by hand opens or updates a draft **release PR**. It bumps `[workspace.package] version` from the Conventional Commits since the last tag (`feat` → minor; `fix` → patch; `!` or a `BREAKING CHANGE:` footer → breaking) and writes the `CHANGELOG.md` entry. `just release-preview` shows the same result locally, changing nothing.
+2. The maintainer checks the bump against the contract table, since labels only navigate, and edits the notes. `just release-pr [version]` does steps 1 and 2: it runs the workflow, waits for the PR, sets the version if given, opens `CHANGELOG.md` in `$EDITOR`, then pushes to the PR's branch and retitles the PR. A later run of the workflow, the recipe's included, closes a release PR that carries such a commit and opens a new one from the commits alone, so a rerun needs the same version again and the notes redone.
 3. Merging the PR to `main` triggers the tag and a GitHub release with that entry as its notes.
 
 Until M5's release packaging, a release is source only. M5 adds cargo-dist builds that attach binaries, the signed macOS build and the Docker image to the same tag.
