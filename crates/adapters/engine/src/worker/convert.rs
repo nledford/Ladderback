@@ -87,7 +87,7 @@ pub(crate) fn backup_result(
         files_new: summary.files_new,
         files_changed: summary.files_changed,
         files_unmodified: summary.files_unmodified,
-        bytes_processed: 0,
+        bytes_processed: summary.total_bytes_processed,
         data_added: summary.data_added,
         data_added_packed: summary.data_added_packed,
         error_count: summary.error_count,
