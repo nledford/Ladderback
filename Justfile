@@ -311,6 +311,9 @@ _ui-deps:
 # are mutated in the diff only.
 # Further arguments go to cargo mutants, e.g. `just mutants origin/main --jobs 3`
 # when several agents share the machine.
+# cargo mutants runs with CARGO_TARGET_DIR and CARGO_BUILD_TARGET_DIR unset, so
+# each job builds in its own copy of the tree, not in one folder shared with the
+# other jobs and with the worktree (technical design §13.5, item 4).
 [doc("Mutation-test the gated crates' code changed since `base`, and the whole of any crate the branch adds to the gate.")]
 [group('test')]
 [positional-arguments]
@@ -333,18 +336,19 @@ mutants base='origin/main' *args:
     done
     if [ -n "$joined" ]; then
         echo "Joining the gate, so mutated whole:$joined"
-        cargo mutants $joined "$@"
+        env -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR cargo mutants $joined "$@"
     fi
     if [ -n "$in_diff" ]; then
-        cargo mutants --in-diff "$diff" $in_diff "$@"
+        env -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR cargo mutants --in-diff "$diff" $in_diff "$@"
     fi
 
-# Further arguments go to cargo mutants, as for `mutants`.
+# Further arguments go to cargo mutants, as for `mutants`, which says why
+# CARGO_TARGET_DIR and CARGO_BUILD_TARGET_DIR are unset.
 [doc('Mutation-test all of the gated crates (slow; CI runs it nightly).')]
 [group('test')]
 [positional-arguments]
 mutants-all *args:
-    cargo mutants {{ mutants_packages }} "$@"
+    env -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR cargo mutants {{ mutants_packages }} "$@"
 
 # Check that the branch's first commit is a failing test: commit (§13.1).
 [group('test')]
