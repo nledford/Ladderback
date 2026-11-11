@@ -222,7 +222,7 @@ fn cannot_open(agent: &mut super::Agent) {
     });
 }
 
-/// A location with a folder and no repository config file in it: the
+/// A location with a folder that holds nothing of a repository: the
 /// engine finds no repository there, and initialises one.
 #[given("a location the engine finds empty")]
 fn finds_empty(agent: &mut super::Agent) {

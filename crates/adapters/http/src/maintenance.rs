@@ -60,8 +60,8 @@ pub enum MaintenanceRefusal {
     /// setting with a reference isn't valid: the refusal says which, as the
     /// repository routes and the snapshot listing tell it.
     SecretRefused(SecretRefusal),
-    /// No repository is at the location: the backend says definitely that
-    /// no repository config file is there (decision 53).
+    /// No repository is at the location: it is a folder on this machine
+    /// holding nothing of a repository (decision 53).
     RepositoryNotFound,
     /// The engine ran the read and it failed: the wrong password, no
     /// repository at the location. `detail` is the engine's own words.

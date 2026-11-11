@@ -230,8 +230,8 @@ impl InitRepository {
     }
 }
 
-/// Whether the engine, looking at the location now, finds a folder there with
-/// no repository config file in it: the only place Create may make one. The
+/// Whether the engine, looking at the location now, finds a folder there
+/// holding nothing of a repository: the only place Create may make one. The
 /// row's offer comes from the log, which doesn't say where its jobs ran, so
 /// the entry may since name another location, or the drive be unplugged; an
 /// initialisation there would make the folder (decision 53). A repository
@@ -1567,7 +1567,7 @@ mod tests {
     /// jobs ran: a backup found no repository at one location, and the entry
     /// now names another, whose folder isn't there, as on a drive that isn't
     /// plugged in. The engine looks at the entry's location first, and
-    /// anything but no repository config file in a folder that is there is
+    /// anything but a folder that is there and holds nothing of a repository is
     /// refused before anything is created: no folder and nothing at all as
     /// not offered, a repository it opens as one already there (decision 53).
     #[tokio::test]

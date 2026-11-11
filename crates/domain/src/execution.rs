@@ -82,8 +82,8 @@ pub enum FailureReason {
     /// the one the configuration recorded for it (§7.3): the location now
     /// holds a different repository, so nothing was read or written.
     RepositoryReplaced,
-    /// No repository is at the location: it holds no repository config
-    /// file, so nothing was opened and nothing was written. A saved
+    /// No repository is at the location: it is an empty folder on this
+    /// machine, so nothing was opened and nothing was written. A saved
     /// repository whose latest operation failed this way is one to create
     /// (decision 53).
     RepositoryNotFound,

@@ -8,7 +8,7 @@ use api::ErrorCode;
 use domain::RepositoryId;
 use rustic_backend::util::location_to_type_and_path;
 use rustic_backend::{BackendOptions, SupportedBackend};
-use rustic_core::{Credentials, OpenStatus, Repository, RepositoryBackends, RepositoryOptions};
+use rustic_core::{Credentials, OpenStatus, Repository, RepositoryOptions};
 
 use super::Context;
 use super::cancel::refusing_snapshots_once_cancelled;
@@ -25,12 +25,6 @@ pub(crate) fn new_repository(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<()>, JobError> {
-    on_backends(ctx, &backends(spec)?)
-}
-
-/// The backends of the repository's halves, as rustic sets them up from the
-/// spec's locations and options. Setting one up reaches nothing yet.
-fn backends(spec: &RepositorySpec) -> Result<RepositoryBackends, JobError> {
     // rustic gives the cold half `options` and `options_cold`, the hot half
     // `options` and `options_hot`.
     let backend_options = BackendOptions::default()
@@ -38,18 +32,12 @@ fn backends(spec: &RepositorySpec) -> Result<RepositoryBackends, JobError> {
         .options(spec.options.clone())
         .options_hot(spec.options_hot.clone())
         .options_cold(spec.options_cold.clone());
-    Ok(match &spec.repo_hot {
+    let backends = match &spec.repo_hot {
         Some(hot) => backend_options.repo_hot(hot.clone()),
         None => backend_options,
     }
-    .to_backends()?)
-}
-
-/// The repository handle on `backends`, with the cache this worker may use,
-/// its snapshot writes refused once the job is cancelled, and its progress
-/// reported through `Context::events`.
-fn on_backends(ctx: &Context, backends: &RepositoryBackends) -> Result<Repository<()>, JobError> {
-    let backends = refusing_snapshots_once_cancelled(backends, ctx.cancel());
+    .to_backends()?;
+    let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
         Some(dir) => options.cache_dir(dir),
@@ -72,25 +60,25 @@ fn on_backends(ctx: &Context, backends: &RepositoryBackends) -> Result<Repositor
 ///
 /// A half on OpenDAL's `fs` whose root folder isn't there fails the job
 /// before its backend is set up, which would make that folder (decision 53).
-/// When the repository doesn't open, and only then, the backend is asked
-/// whether a repository config file is at the location at all: a definite
-/// no fails the job with `repository-not-found`, and anything else fails it
+/// When the repository doesn't open, and only then, its folders are looked
+/// at: when each half is a folder on this machine holding nothing of a
+/// repository, the job fails with `repository-not-found`, and otherwise
 /// with the error opening gave, as it always did. A repository that opens
-/// costs no extra request.
+/// costs no extra look.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
     if let Some(root) = missing_fs_root(spec) {
         return Err(JobError::failed(format!(
-            "the repository's root folder {root} is not there"
+            "the repository's root folder {} is not there",
+            root.display()
         )));
     }
-    let backends = backends(spec)?;
     let credentials = Credentials::password(spec.password.expose());
-    let repository = match on_backends(ctx, &backends)?.open(&credentials) {
+    let repository = match new_repository(ctx, spec)?.open(&credentials) {
         Ok(repository) => repository,
-        Err(_) if no_repository_there(spec, &backends) => {
+        Err(_) if no_repository_there(spec) => {
             return Err(JobError::Failed {
                 code: ErrorCode::RepositoryNotFound,
                 detail: "no repository config file is at the location".to_owned(),
@@ -120,57 +108,86 @@ pub(crate) fn open(
     Ok(repository)
 }
 
-/// The root folder of a half on OpenDAL's `fs` that isn't there, or isn't a
-/// folder: the root as rustic sets the half up, `options_cold` over
-/// `options` for the cold half and `options_hot` over `options` for the hot
-/// one. Setting that backend up makes a missing root folder, and on an
-/// unplugged drive that is an empty folder at the mount point, on the
-/// system disk: the next job would find no repository in it and the row
-/// would offer to create one there (decision 53). A half with no root
-/// option is left to rustic, which refuses it.
-fn missing_fs_root(spec: &RepositorySpec) -> Option<&str> {
-    let cold = Some((spec.repository.as_str(), &spec.options_cold));
-    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
-    cold.into_iter()
-        .chain(hot)
-        .find_map(|(location, half_options)| {
-            let Ok((SupportedBackend::OpenDAL, service)) = location_to_type_and_path(location)
-            else {
-                return None;
-            };
-            let scheme = service.as_str().split(':').next().unwrap_or_default();
-            let root = half_options
-                .get("root")
-                .or_else(|| spec.options.get("root"))?;
-            (scheme.eq_ignore_ascii_case("fs") && !is_folder(Path::new(root)))
-                .then_some(root.as_str())
-        })
+/// Where a half of the repository is, as far as telling "no repository"
+/// goes (decision 53).
+enum Half {
+    /// A local folder. rustic's local backend makes no folder when it opens.
+    Local(PathBuf),
+    /// The root folder of OpenDAL's `fs`, the root as rustic sets the half
+    /// up: `options_cold` over `options` for the cold half, `options_hot`
+    /// over `options` for the hot one. Setting that backend up makes a
+    /// missing root folder.
+    Fs(PathBuf),
+    /// Anywhere else: a server or a store elsewhere (REST, rclone, and every
+    /// other OpenDAL service), or a location rustic refuses, such as `fs`
+    /// with no root.
+    Elsewhere,
 }
 
-/// Whether the backend says, definitely, that no repository config file is
-/// at the repository's location (decision 53). Only two backends can say so:
-/// a local folder that is there, is a folder, and where `config` doesn't
-/// exist, as the file system tells it (a folder that can't be read is no
-/// answer), and an OpenDAL location whose listing finds no config file,
-/// which it tells apart from a listing that failed. A local folder that
-/// isn't there is what an unplugged drive looks like, and a repository made
-/// there would be a new, empty one in the old one's place, so it is no
-/// answer either; rustic's local backend makes no folder when it opens.
-/// rustic's REST and rclone backends list no config file for any answer but
-/// success, a refused password included, so they never do.
-fn no_repository_there(spec: &RepositorySpec, backends: &RepositoryBackends) -> bool {
-    match location_to_type_and_path(&spec.repository) {
-        Ok((SupportedBackend::Local, path)) => {
-            let folder = Path::new(path.as_str());
-            is_folder(folder) && matches!(folder.join("config").try_exists(), Ok(false))
-        }
-        Ok((SupportedBackend::OpenDAL, _)) => matches!(
-            Repository::new(&RepositoryOptions::default().no_cache(true), backends)
-                .and_then(|repository| repository.config_id()),
-            Ok(None)
-        ),
-        _ => false,
-    }
+/// The repository's halves, the cold one first.
+fn halves(spec: &RepositorySpec) -> impl Iterator<Item = Half> + '_ {
+    let cold = (spec.repository.as_str(), &spec.options_cold);
+    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
+    std::iter::once(cold).chain(hot).map(
+        |(location, half_options)| match location_to_type_and_path(location) {
+            Ok((SupportedBackend::Local, path)) => Half::Local(PathBuf::from(path.as_str())),
+            Ok((SupportedBackend::OpenDAL, service))
+                if service
+                    .as_str()
+                    .split(':')
+                    .next()
+                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("fs")) =>
+            {
+                half_options
+                    .get("root")
+                    .or_else(|| spec.options.get("root"))
+                    .map_or(Half::Elsewhere, |root| Half::Fs(PathBuf::from(root)))
+            }
+            _ => Half::Elsewhere,
+        },
+    )
+}
+
+/// The root folder of a half on OpenDAL's `fs` that isn't there, or isn't a
+/// folder. Setting that backend up would make it, and on an unplugged drive
+/// that is an empty folder at the mount point, on the system disk: the next
+/// job would find no repository in it and the row would offer to create one
+/// there (decision 53).
+fn missing_fs_root(spec: &RepositorySpec) -> Option<PathBuf> {
+    halves(spec).find_map(|half| match half {
+        Half::Fs(root) if !is_folder(&root) => Some(root),
+        _ => None,
+    })
+}
+
+/// Whether the repository is, definitely, not there (decision 53): every
+/// half is a folder on this machine that holds nothing of a repository.
+/// A half anywhere else is no answer: a server's or a store's missing root
+/// is the remote form of an unplugged drive, and rustic's backends there
+/// list no config file for one, or for a refused password.
+fn no_repository_there(spec: &RepositorySpec) -> bool {
+    halves(spec).all(|half| match half {
+        Half::Local(folder) | Half::Fs(folder) => holds_nothing_of_a_repository(&folder),
+        Half::Elsewhere => false,
+    })
+}
+
+/// What a repository holds at the top of its folder: its config file, and
+/// the folders of its keys, packs, index and snapshots.
+const REPOSITORY_ENTRIES: [&str; 5] = ["config", "keys", "data", "index", "snapshots"];
+
+/// Whether `folder` is there, is a folder, and holds none of
+/// [`REPOSITORY_ENTRIES`], as the file system tells it. A folder that isn't
+/// there is what an unplugged drive looks like, and a repository made there
+/// would be a new, empty one in the old one's place; a folder that can't be
+/// read is no answer; and a folder holding a repository's other entries
+/// without its config file is an initialisation cut short or a repository
+/// that lost its config, which a new repository would be mixed into.
+fn holds_nothing_of_a_repository(folder: &Path) -> bool {
+    is_folder(folder)
+        && REPOSITORY_ENTRIES
+            .iter()
+            .all(|entry| matches!(folder.join(entry).try_exists(), Ok(false)))
 }
 
 /// Whether a folder is at `path`, through any symbolic links; anything that

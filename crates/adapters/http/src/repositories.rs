@@ -80,8 +80,8 @@ pub enum RepositoriesError {
     /// The saved repository's row doesn't offer to create it: no job found
     /// its location empty since nothing reached it (decision 53).
     CreateNotOffered,
-    /// No repository is at the location: the backend says definitely that
-    /// no repository config file is there (decision 53).
+    /// No repository is at the location: it is a folder on this machine
+    /// holding nothing of a repository (decision 53).
     NotFound,
     /// A secret couldn't be resolved, or a setting with a reference isn't
     /// valid: the refusal says which, with the setting it is about.

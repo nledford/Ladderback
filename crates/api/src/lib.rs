@@ -75,8 +75,8 @@ pub enum ErrorCode {
     /// A repository already exists where one was to be initialised, so
     /// nothing was written. The argument `location` is where it is.
     RepositoryExists,
-    /// No repository is at the location: the engine found no repository
-    /// config file there, so nothing was opened or written.
+    /// No repository is at the location: the engine found an empty folder
+    /// on this machine there, so nothing was opened or written.
     RepositoryNotFound,
     /// A saved repository's Create was refused because its row doesn't offer
     /// it: no job found its location empty since nothing reached it, so
