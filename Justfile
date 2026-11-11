@@ -12,10 +12,12 @@ mutants_packages := "--package domain --package app --package api --package l10n
 
 # The cargo flags a release build is made with (technical design §12.1): the
 # development pseudolocales and the component gallery stay out. `architecture`
-# checks a build with them, and release packaging (cargo-dist, the image, `trunk
-# build --release` for the web UI) must pass them too: `just --evaluate
-# release_flags` prints them. A feature a release needs joins this string, so
-# the checks and the artifacts change together.
+# checks a build with them, and release packaging must pass them too: `trunk
+# build --release` for the web UI (`web-release`), cargo-dist, which can't read
+# this file, so `dist-workspace.toml` says the same and `architecture` checks
+# that the two agree, and the image. `just --evaluate release_flags` prints
+# them. A feature a release needs joins this string, so the checks and the
+# artifacts change together.
 release_flags := "--no-default-features"
 
 # List available workflows.
