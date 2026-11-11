@@ -67,6 +67,9 @@ axum = { version = "0.8.9", features = ["ws"] }
 # The hash of the entry page's inline script, in its content security policy
 # (technical design §10.1).
 base64 = "0.22.1"
+# The bytes rustic_core's backend trait hands over; `adapters/engine` wraps
+# a backend (technical design §4.1).
+bytes = { version = "1", default-features = false }
 clap = { version = "4.6.7", features = ["derive"] }
 console_error_panic_hook = "0.1.7"
 # Time goes through `jiff` alone (decision 22): `croner`'s default `chrono`

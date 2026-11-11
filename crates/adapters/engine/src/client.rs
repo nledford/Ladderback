@@ -59,13 +59,14 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CACHE_SLOTS: u32 = 64;
 
 /// Runs each operation in a new worker process: `program args…`, normally
-/// `ladderback worker`. A worker leads a process group of its own, and what is
-/// done to the worker is done to the group, so the programs it started (an
-/// rclone, say) end with it.
+/// `ladderback worker`. A worker leads a process group of its own, and every
+/// kill is the group's, so the programs it started (an rclone, say) end with
+/// it.
 ///
-/// Stopping a job sends SIGTERM and, after a grace period, SIGKILL. Dropping
-/// a [`RunningJob`] before its result kills the worker at once; after the
-/// result, the worker gets a grace period to finish its cleanup.
+/// Stopping a job sends SIGTERM to the worker alone and, after a grace
+/// period, SIGKILL to the group. Dropping a [`RunningJob`] before its result
+/// kills the worker at once; after the result, the worker gets a grace
+/// period to finish its cleanup.
 ///
 /// A worker that hangs doesn't hold the daemon. One that doesn't take its
 /// job within the start timeout, and one that closes its output but is still
@@ -424,15 +425,17 @@ fn kill_now(child: &mut Child) {
     }
 }
 
-/// SIGTERM to the worker and everything it started, then SIGKILL once `grace`
-/// has passed without the worker exiting. What of the group is left when the
-/// worker has gone, a process that ignored the SIGTERM say, is killed then.
+/// SIGTERM to the worker, then SIGKILL to it and everything it started once
+/// `grace` has passed without the worker exiting. The SIGTERM goes to the
+/// worker alone: a backup winding down on it (§4.1) still saves through the
+/// rclone or ssh its backend started. What of the group is left when the
+/// worker has gone is killed then.
 async fn terminate(
     child: &mut Child,
     grace: Duration,
 ) -> std::io::Result<std::process::ExitStatus> {
     let leader = child.id();
-    if !signal_group(leader, Signal::Terminate) {
+    if !signal_worker(leader, Signal::Terminate) {
         return kill(child).await;
     }
     let over = deadline_after(tokio::time::Instant::now(), grace);
@@ -547,6 +550,16 @@ enum Signal {
     Kill,
 }
 
+#[cfg(unix)]
+impl Signal {
+    fn nix(self) -> nix::sys::signal::Signal {
+        match self {
+            Self::Terminate => nix::sys::signal::Signal::SIGTERM,
+            Self::Kill => nix::sys::signal::Signal::SIGKILL,
+        }
+    }
+}
+
 /// Signals the process group the worker leads: the worker and every process
 /// it started that didn't leave the group. `leader` is the worker's process
 /// id, `None` once the worker was reaped, and nothing is signaled then: the
@@ -554,20 +567,33 @@ enum Signal {
 /// off Unix there are no process groups.
 #[cfg(unix)]
 fn signal_group(leader: Option<u32>, signal: Signal) -> bool {
-    use nix::sys::signal::{Signal as Sig, killpg};
+    use nix::sys::signal::killpg;
     use nix::unistd::Pid;
 
-    let signal = match signal {
-        Signal::Terminate => Sig::SIGTERM,
-        Signal::Kill => Sig::SIGKILL,
-    };
     leader
         .and_then(|pid| i32::try_from(pid).ok())
-        .is_some_and(|pid| killpg(Pid::from_raw(pid), signal).is_ok())
+        .is_some_and(|pid| killpg(Pid::from_raw(pid), signal.nix()).is_ok())
 }
 
 #[cfg(not(unix))]
 fn signal_group(_leader: Option<u32>, _signal: Signal) -> bool {
+    false
+}
+
+/// Signals the worker alone, not what it started, on the terms of
+/// [`signal_group`].
+#[cfg(unix)]
+fn signal_worker(leader: Option<u32>, signal: Signal) -> bool {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    leader
+        .and_then(|pid| i32::try_from(pid).ok())
+        .is_some_and(|pid| kill(Pid::from_raw(pid), signal.nix()).is_ok())
+}
+
+#[cfg(not(unix))]
+fn signal_worker(_leader: Option<u32>, _signal: Signal) -> bool {
     false
 }
 
@@ -2032,6 +2058,48 @@ mod tests {
         assert!(
             gone_soon(child).await,
             "the worker's child survived the kill"
+        );
+    }
+
+    /// A stop's SIGTERM goes to the worker alone: a cancelled backup winds
+    /// down through the rclone or ssh its backend started (§4.1), which the
+    /// signal must not end first. What the worker started is killed once the
+    /// worker has exited.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stop_leaves_what_the_worker_started_running_until_the_worker_has_wound_down() {
+        let dir = tempfile::tempdir().unwrap();
+        let terminated = dir.path().join("child-terminated");
+        let child_script = dir.path().join("child.sh");
+        // The child writes its id once a SIGTERM would leave a mark.
+        std::fs::write(
+            &child_script,
+            "trap 'touch \"$1\"; exit' TERM; echo $$ >\"$2.new\"; mv \"$2.new\" \"$2\"; \
+             while :; do sleep 0.05; done",
+        )
+        .unwrap();
+        let pid_file = dir.path().join("child.pid");
+        // The worker takes a while to end, as a backup winding down does.
+        let script = format!(
+            "trap 'sleep 0.3; exit 143' TERM; cat >/dev/null; sh '{}' '{}' '{}' & wait",
+            child_script.display(),
+            terminated.display(),
+            pid_file.display()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let RunningJob {
+            events: _events,
+            mut control,
+        } = run(&engine).await;
+        let child = pid_from(&pid_file).await;
+        control.stop().await;
+        assert!(
+            !terminated.exists(),
+            "the stop's SIGTERM reached a process the worker started"
+        );
+        assert!(
+            gone_soon(child).await,
+            "the worker's child outlived the worker"
         );
     }
 

@@ -1658,6 +1658,7 @@ dependencies = [
  "api",
  "app",
  "async-trait",
+ "bytes",
  "domain",
  "futures",
  "jiff",

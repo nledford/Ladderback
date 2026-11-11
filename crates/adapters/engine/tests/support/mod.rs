@@ -107,6 +107,10 @@ impl Location {
     }
 
     pub fn init(&self) -> Repository<OpenStatus> {
+        self.init_with(&ConfigOptions::default())
+    }
+
+    pub fn init_with(&self, config: &ConfigOptions) -> Repository<OpenStatus> {
         Repository::new(
             &RepositoryOptions::default().no_cache(true),
             &self.backends(),
@@ -115,7 +119,7 @@ impl Location {
         .init(
             &Credentials::password(PASSWORD),
             &KeyOptions::default(),
-            &ConfigOptions::default(),
+            config,
         )
         .unwrap()
     }

@@ -7,10 +7,11 @@ use std::path::PathBuf;
 
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
-    CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList, SnapshotOptions,
-    StringList,
+    CheckOptions, ConfigOptions, Credentials, KeyOptions, LocalSource, ParentOptions, PathList,
+    SnapshotOptions, StringList,
 };
 
+use super::cancel::CancellableSource;
 use super::convert::{
     JobError, backup_options, backup_result, check_result, prune_options, prune_plan_result,
     prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
@@ -231,16 +232,33 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     let snapshot = SnapshotFile::from_options(&snapshot_options)?;
     let paths = PathList::from_iter(job.sources.iter().map(PathBuf::from))
         .sanitize()
-        .map_err(|error| JobError::failed(error.to_string()))?;
+        .map_err(|error| JobError::failed(error.to_string()))?
+        .paths();
+    let options = backup_options(&job.filter).parent_opts(parent_options);
+    // What `Repository::backup` does for folders, with a source a cancel
+    // cuts short: the backup then winds down through rustic's own end,
+    // which saves the index of the packs written, and the backends refuse
+    // its snapshot (§4.1).
+    let source = CancellableSource::new(
+        LocalSource::new(
+            options.ignore_save_opts,
+            &options.excludes,
+            &options.ignore_filter_opts,
+            &paths,
+        )?,
+        ctx.cancel().clone(),
+    );
 
     // The deadline counts from here: the index read is what comes next.
     ctx.start(Some(job.deadline_budget))?;
     let repository = repository.to_indexed_ids()?;
-    let snapshot = repository.backup(
-        &backup_options(&job.filter).parent_opts(parent_options),
-        &paths,
-        snapshot,
-    )?;
+    let Some(snapshot) = ctx
+        .cancel()
+        .saving(|| repository.archive(&options, &source, snapshot, &paths))
+    else {
+        return Ok(Done::Cancelled);
+    };
+    let snapshot = snapshot?;
     // The snapshot is saved: nothing is left that the deadline guards. The
     // result goes out before the repository, and its index, is dropped,
     // which a deadline passing meanwhile must not turn into a failure.

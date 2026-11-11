@@ -10,6 +10,7 @@ use rustic_backend::{BackendOptions, SupportedBackend};
 use rustic_core::{Credentials, OpenStatus, Repository, RepositoryOptions};
 
 use super::Context;
+use super::cancel::refusing_snapshots_once_cancelled;
 use super::convert::JobError;
 use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
@@ -35,6 +36,7 @@ pub(crate) fn new_repository(
         None => backend_options,
     }
     .to_backends()?;
+    let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
         Some(dir) => options.cache_dir(dir),

@@ -11,6 +11,7 @@
 //! the passwords in URLs, in every text it writes. What the programs it
 //! starts write to stderr, it can't mask; the daemon does that.
 
+mod cancel;
 mod convert;
 mod events;
 mod fake;
@@ -40,6 +41,7 @@ use crate::job::{
     JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
     WorkerEvent, exit_code,
 };
+use cancel::{AfterCancel, Cancel};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -49,6 +51,8 @@ use watchdog::{Terminate, WallClock, Watchdog};
 pub enum Exit {
     /// The job ran and its result or failure was reported.
     Reported { failed: bool },
+    /// A cancel ended the job, which reports nothing more.
+    Cancelled,
     /// Stop at once with this code, reporting nothing more: a fake job
     /// imitating a crashed engine.
     Abrupt(u8),
@@ -59,6 +63,7 @@ impl Exit {
         match self {
             Self::Reported { failed: false } => 0,
             Self::Reported { failed: true } => 1,
+            Self::Cancelled => exit_code::TERMINATED,
             Self::Abrupt(code) => i32::from(code),
         }
     }
@@ -89,16 +94,12 @@ pub fn main() -> ExitCode {
     if let Err(error) = logging::install(events.clone()) {
         say(&format!("cannot route logs into events: {error}"));
     }
+    let process = Process::real();
     #[cfg(unix)]
-    if let Err(error) = exit_on_sigterm(events.clone()) {
+    if let Err(error) = exit_on_sigterm(events.clone(), process.cancel.clone()) {
         say(&format!("cannot handle SIGTERM: {error}"));
     }
-    match run_events(
-        io::stdin().lock(),
-        events,
-        std::process::id(),
-        Process::real(),
-    ) {
+    match run_events(io::stdin().lock(), events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
         Ok(exit) => std::process::exit(exit.code()),
         Err(error) => {
@@ -149,6 +150,7 @@ pub fn run(input: impl Read, output: impl Write + Send + 'static, pid: u32) -> i
 pub(crate) struct Process {
     clock: WallClock,
     terminate: Terminate,
+    cancel: Cancel,
 }
 
 impl Process {
@@ -158,6 +160,7 @@ impl Process {
             terminate: Arc::new(|code| {
                 std::process::exit(code);
             }),
+            cancel: Cancel::default(),
         }
     }
 }
@@ -168,6 +171,8 @@ pub(crate) enum Done {
     /// The job wrote its result itself, with [`Context::report`], and has
     /// nothing more to say.
     Reported,
+    /// A cancel ended the job: exit as SIGTERM's, reporting nothing more.
+    Cancelled,
     /// Exit at once with this code and report nothing more.
     Abrupt(u8),
 }
@@ -248,6 +253,11 @@ impl Context {
     pub(crate) fn log(&self, level: Level, message: String) -> io::Result<()> {
         self.events.emit(&WorkerEvent::Log { level, message })
     }
+
+    /// The worker's cancel: what a SIGTERM asks for.
+    pub(crate) fn cancel(&self) -> &Cancel {
+        &self.process.cancel
+    }
 }
 
 fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> io::Result<Exit> {
@@ -305,6 +315,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             Ok(Exit::Reported { failed: false })
         }
         Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
+        Ok(Done::Cancelled) => Ok(Exit::Cancelled),
         Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
         Err(JobError::Failed { code, detail }) => {
             events.emit(&WorkerEvent::Failed {
@@ -332,12 +343,19 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
     }
 }
 
+/// How long a backup cancelled by SIGTERM may wind down before the worker
+/// exits anyway. The daemon's grace period (10 s by default) ends it sooner;
+/// this bounds a worker whose daemon is gone.
+const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
 /// On SIGTERM the worker waits for the line it is writing, writes nothing
 /// more and exits. Nothing in rustic needs a clean shutdown: its writes are
 /// safe to interrupt anywhere (§4.1), which the kill-at-random-points test
-/// proves.
+/// proves. A backup that is saving data winds down instead (`Cancel`): it
+/// lets rustic save the index of the packs it wrote, writes no snapshot,
+/// and ends the worker itself, with the same code.
 #[cfg(unix)]
-fn exit_on_sigterm(events: Events) -> io::Result<()> {
+fn exit_on_sigterm(events: Events, cancel: Cancel) -> io::Result<()> {
     use signal_hook::consts::SIGTERM;
     use signal_hook::iterator::Signals;
 
@@ -346,7 +364,11 @@ fn exit_on_sigterm(events: Events) -> io::Result<()> {
         .name("sigterm".to_owned())
         .spawn(move || {
             if signals.forever().next().is_some() {
+                let after = cancel.request();
                 events.end(None, Duration::from_millis(250));
+                if after == AfterCancel::WindDown {
+                    std::thread::sleep(WIND_DOWN_LIMIT);
+                }
                 std::process::exit(crate::job::exit_code::TERMINATED);
             }
         })?;
@@ -474,6 +496,64 @@ mod tests {
         );
     }
 
+    /// A backup the cancel ended reports nothing more, neither a result nor
+    /// a failure, and the worker exits as a SIGTERM's, so that the daemon
+    /// tells it from a crash when the SIGTERM wasn't its own.
+    #[test]
+    fn a_cancelled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("notes.txt"), b"demo").unwrap();
+        let repo = RepositorySpec {
+            repository: dir.path().join("repo").to_string_lossy().into_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo-password"),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+            secrets: Vec::new(),
+        };
+        let run = |job, process| {
+            let spec = JobSpec {
+                op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+                cache_dir: None,
+                watchdog_interval_ms: 10,
+                job,
+            };
+            let (events, capture) = capture();
+            let input = serde_json::to_vec(&spec).unwrap();
+            let exit = run_events(input.as_slice(), events, 1, process).unwrap();
+            (exit, capture.parsed())
+        };
+        let (exit, _) = run(JobKind::Init(repo.clone()), Process::real());
+        assert_eq!(exit, Exit::Reported { failed: false });
+
+        let process = Process::real();
+        process.cancel.request();
+        let backup = crate::job::BackupJobSpec {
+            repo,
+            sources: vec![source.to_string_lossy().into_owned()],
+            plan: domain::PlanId::parse("home").unwrap(),
+            agent: domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            extra_tags: Vec::new(),
+            label: None,
+            host: None,
+            filter: Default::default(),
+            deadline_budget: SignedDuration::from_hours(1),
+        };
+        let (exit, events) = run(JobKind::Backup(backup), process);
+        assert_eq!(exit.code(), crate::job::exit_code::TERMINATED);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, WorkerEvent::Result(_) | WorkerEvent::Failed { .. })),
+            "{events:?}"
+        );
+        let snapshots = std::fs::read_dir(dir.path().join("repo/snapshots")).unwrap();
+        assert_eq!(snapshots.count(), 0, "a cancelled backup wrote a snapshot");
+    }
+
     #[test]
     fn a_job_with_a_budget_counts_it_from_the_started_event_and_is_stopped_when_it_ends() {
         let at = Timestamp::from_second(1_800_000_000).unwrap();
@@ -484,6 +564,7 @@ mod tests {
             terminate: Arc::new(move |code| {
                 let _ = tx.lock().unwrap().send(code);
             }),
+            cancel: Cancel::default(),
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
@@ -525,6 +606,7 @@ mod tests {
             terminate: Arc::new(move |code| {
                 let _ = tx.lock().unwrap().send(code);
             }),
+            cancel: Cancel::default(),
         };
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);
