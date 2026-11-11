@@ -36,8 +36,9 @@ pub struct InteropWorld {
     agent_hooks: Hooks,
     repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
     plans: Vec<Plan>,
-    /// What the scripted profile holds: its plans, global hooks and notices,
-    /// or that it can't be read.
+    /// What the scripted profile holds: its repository, when not the demo
+    /// one, its plans, global hooks and notices, or that it can't be read.
+    profile_repository: Option<RepositoryConfig>,
     profile_plans: Vec<Plan>,
     profile_hooks: Hooks,
     profile_notices: Vec<ProfileNotice>,
@@ -60,6 +61,7 @@ impl Default for InteropWorld {
             agent_hooks: Hooks::default(),
             repositories: BTreeMap::new(),
             plans: Vec::new(),
+            profile_repository: None,
             profile_plans: Vec::new(),
             profile_hooks: Hooks::default(),
             profile_notices: Vec::new(),
@@ -246,6 +248,41 @@ fn holds_profile_repository_with_option(
     agent.interop.repositories.insert(alias(&name), repository);
 }
 
+/// The demo repository moved to `location`, with one option more: on a
+/// drive the credential names the account, so it is part of the location.
+fn at_with_option(location: String, option: String, value: String) -> RepositoryConfig {
+    let mut repository = demo_repository();
+    repository.settings.repository = location;
+    repository.settings.options.insert(option, value);
+    repository
+}
+
+#[given(
+    expr = "the configuration holds the repository {string} at {string} with the option {string} set to {string}"
+)]
+fn holds_repository_at_with_option(
+    agent: &mut Agent,
+    name: String,
+    location: String,
+    option: String,
+    value: String,
+) {
+    agent
+        .interop
+        .repositories
+        .insert(alias(&name), at_with_option(location, option, value));
+}
+
+#[given(expr = "the profile's repository is at {string} with the option {string} set to {string}")]
+fn profile_repository_at_with_option(
+    agent: &mut Agent,
+    location: String,
+    option: String,
+    value: String,
+) {
+    agent.interop.profile_repository = Some(at_with_option(location, option, value));
+}
+
 #[given(expr = "the configuration holds the repositories {string} and {string}")]
 fn holds_repositories(agent: &mut Agent, one: String, other: String) {
     for name in [one, other] {
@@ -308,7 +345,10 @@ async fn imports(agent: &mut Agent, name: String) {
         })
     } else {
         Ok(ImportedProfile {
-            repository: demo_repository(),
+            repository: world
+                .profile_repository
+                .clone()
+                .unwrap_or_else(demo_repository),
             plans,
             hooks: world.profile_hooks.clone(),
             notices: world.profile_notices.clone(),

@@ -87,6 +87,25 @@ Feature: Import a rustic profile
       Then the import is refused because the repository is configured as "nas"
       And the configuration is unchanged
 
+    # On a drive (Dropbox, Google Drive, OneDrive, Yandex Disk) only a
+    # credential names the account, so it is part of where the repository is.
+    Scenario: A profile for a drive under a name the configuration has, with another credential, is refused
+      Given the configuration holds the repository "nas" at "opendal:dropbox" with the option "access_token" set to "${DROPBOX_TOKEN}"
+      And the profile's repository is at "opendal:dropbox" with the option "access_token" set to "not-a-real-token"
+      And a profile holding the plan "home"
+      When the owner imports the profile as the repository "nas"
+      Then the import is refused because the repository "nas" is already taken
+      And the configuration is unchanged
+
+    Scenario: A profile for a drive the configuration has with another credential is added under a new name
+      Given the configuration holds the repository "nas" at "opendal:dropbox" with the option "access_token" set to "${DROPBOX_TOKEN}"
+      And the profile's repository is at "opendal:dropbox" with the option "access_token" set to "not-a-real-token"
+      And a profile holding the plan "home"
+      When the owner imports the profile as the repository "work"
+      Then the import succeeds
+      And the configuration now holds the repository "work"
+      And the configuration now holds the plan "home" for the repository "work"
+
     Scenario: A profile that cannot be read changes nothing
       Given the configuration holds the repository "cloud"
       And a profile that cannot be read

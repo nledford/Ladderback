@@ -777,6 +777,42 @@ mod tests {
         assert!(saved.plans().is_empty());
     }
 
+    /// A Dropbox account at `root`: on a drive only the credential names
+    /// the account, so it is part of the location.
+    fn on_dropbox(token: &str) -> RepositoryConfig {
+        let mut repository = repository();
+        repository.settings.repository = "opendal:dropbox".to_owned();
+        let options = &mut repository.settings.options;
+        options.insert("root".to_owned(), "/ladderback".to_owned());
+        options.insert("access_token".to_owned(), token.to_owned());
+        repository
+    }
+
+    /// Another account's drive at the same `root` is another repository:
+    /// under the alias of the first it is refused as taken, never added to
+    /// it, and under a new alias it is added beside it.
+    #[tokio::test]
+    async fn a_profile_for_another_account_on_a_drive_is_another_repository() {
+        let home = on_dropbox("${DROPBOX_TOKEN}");
+        let config = holding(vec![("nas", home.clone())]).await;
+        let refused = import_as(&config, on_dropbox("not-a-real-token"), "nas").await;
+        assert_eq!(refused, Err(ImportError::AliasTaken(alias("nas"))));
+        let unchanged = saved(&config).await;
+        assert_eq!(unchanged.repository(&alias("nas")), Some(&home));
+        assert!(unchanged.plans().is_empty());
+
+        import_as(&config, on_dropbox("not-a-real-token"), "work")
+            .await
+            .expect("another repository");
+        let saved = saved(&config).await;
+        assert_eq!(saved.repository(&alias("nas")), Some(&home));
+        assert_eq!(
+            saved.repository(&alias("work")),
+            Some(&on_dropbox("not-a-real-token"))
+        );
+        assert_eq!(saved.plans().len(), 1);
+    }
+
     /// The same password, written as text in both: the profile's is still
     /// not the one saved, and nothing is said of it. The configuration's
     /// own is said when it loads (`config-inline-secret`).

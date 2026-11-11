@@ -678,6 +678,91 @@ mod tests {
         }
     }
 
+    /// On a drive (opendal's Dropbox, Google Drive, OneDrive and Yandex
+    /// Disk) only a credential names the account, so two accounts can hold
+    /// one `root`: there the credentials are part of the location, lest one
+    /// account's plans back up into the other's. The service is opendal's
+    /// scheme, which opendal reads without case and up to a `:`.
+    #[test]
+    fn a_drives_credentials_are_part_of_its_location() {
+        let drives = [
+            "opendal:dropbox",
+            "opendal:gdrive",
+            "opendal:onedrive",
+            "opendal:yandex-disk",
+            "opendal:Dropbox",
+            "opendal:gdrive:",
+        ];
+        for drive in drives {
+            let account = |token: &str| {
+                let mut entry = at(drive, None);
+                let options = &mut entry.settings.options;
+                options.insert("root".to_owned(), "/ladderback".to_owned());
+                options.insert("access_token".to_owned(), token.to_owned());
+                entry
+            };
+            let two = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("work"), account("not-a-real-token-work")),
+            ]);
+            assert!(config(two, Vec::new()).is_ok(), "{drive}");
+            let one = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("home-2"), account("not-a-real-token-home")),
+            ]);
+            assert_eq!(
+                config(one, Vec::new()),
+                Err(Violation::SameRepository {
+                    first: alias("home"),
+                    second: alias("home-2"),
+                }),
+                "{drive}"
+            );
+        }
+    }
+
+    /// `options` reach both halves of a hot/cold repository, `options-hot`
+    /// only `repo-hot` and `options-cold` only `repository`: a credential
+    /// counts in the sets that reach a drive, and nowhere else.
+    #[test]
+    fn a_drives_credentials_count_only_in_the_options_that_reach_it() {
+        type Set = fn(&mut RepositorySettings) -> &mut BTreeMap<String, String>;
+        let options: Set = |s| &mut s.options;
+        let hot: Set = |s| &mut s.options_hot;
+        let cold: Set = |s| &mut s.options_cold;
+        let cases: [(&str, &str, Set, &str, bool); 6] = [
+            ("opendal:s3", "opendal:dropbox", options, "options", false),
+            ("opendal:s3", "opendal:dropbox", hot, "options-hot", false),
+            ("opendal:s3", "opendal:dropbox", cold, "options-cold", true),
+            ("opendal:onedrive", "opendal:s3", options, "options", false),
+            ("opendal:onedrive", "opendal:s3", hot, "options-hot", true),
+            (
+                "opendal:onedrive",
+                "opendal:s3",
+                cold,
+                "options-cold",
+                false,
+            ),
+        ];
+        for (cold_half, hot_half, set, name, same) in cases {
+            let account = |token: &str| {
+                let mut entry = at(cold_half, None);
+                entry.settings.repo_hot = Some(hot_half.to_owned());
+                set(&mut entry.settings).insert("refresh_token".to_owned(), token.to_owned());
+                entry
+            };
+            let entries = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("work"), account("not-a-real-token-work")),
+            ]);
+            assert_eq!(
+                config(entries, Vec::new()).is_err(),
+                same,
+                "{name} of {cold_half} with {hot_half}"
+            );
+        }
+    }
+
     /// The location now holds another repository than one of the two
     /// recorded: they are two repositories, and the stale entry's jobs are
     /// refused when they open it.
