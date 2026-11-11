@@ -287,14 +287,16 @@ impl Operation {
 
     /// The operation, named with the alias of the repository it runs on.
     pub fn with_repository_alias(self, alias: RepositoryAlias) -> Self {
-        let _ = alias;
-        todo!()
+        Self {
+            repository_alias: Some(alias),
+            ..self
+        }
     }
 
     /// The alias the repository had when the operation was queued, when one
     /// was given ([`Self::with_repository_alias`]).
     pub fn repository_alias(&self) -> Option<&RepositoryAlias> {
-        todo!()
+        self.repository_alias.as_ref()
     }
 
     pub fn id(&self) -> OperationId {
