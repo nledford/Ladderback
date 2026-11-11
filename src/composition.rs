@@ -773,7 +773,10 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .result
             .as_ref()
             .and_then(|result| result_dto(result, record)),
-        None,
+        record
+            .repository_alias
+            .as_ref()
+            .map(|alias| alias.as_str().to_owned()),
     )
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
@@ -792,8 +795,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             files: backup.files_new + backup.files_changed + backup.files_unmodified,
             bytes: backup.data_added,
             duration_ms,
-            snapshot: None,
-            bytes_processed: None,
+            snapshot: Some(backup.snapshot.as_str().to_owned()),
+            bytes_processed: backup.bytes_processed,
         }),
         EngineResult::Prune(prune) => Some(api::OperationResultDto::Prune {
             packs_deleted: prune.packs_deleted,
@@ -1928,9 +1931,8 @@ mod tests {
         result: Option<EngineResult>,
         alias: Option<&str>,
     ) -> OperationRecord {
-        let at = |second: i64| {
-            domain::Timestamp::from_second(1_800_000_000 + second).expect("a time")
-        };
+        let at =
+            |second: i64| domain::Timestamp::from_second(1_800_000_000 + second).expect("a time");
         OperationRecord {
             id: OperationId::from_uuid(Uuid::from_u128(0x0192)),
             kind,
