@@ -111,6 +111,7 @@ fn op() -> OperationId {
 /// leave it.
 fn config_with(name: &str, settings: &RepositorySettings) -> AgentConfig {
     let repository = RepositoryConfig {
+        id: None,
         settings: settings.clone(),
         maintenance: Default::default(),
         group_by: Default::default(),
@@ -245,6 +246,22 @@ async fn connect(agent: &mut super::Agent, name: String, maintenance: Maintenanc
     .await;
 }
 
+#[given(expr = "the agent connected it as {string}")]
+async fn connected(agent: &mut super::Agent, name: String) {
+    connects(agent, name).await;
+    if let Some(Outcome::Refused(error)) = &agent.repositories.outcome {
+        panic!("the first connect was refused: {error:?}");
+    }
+}
+
+/// The same repository, reached by another location: the engine identifies
+/// it by the same ID.
+#[when(expr = "the agent connects it at another location as {string}")]
+async fn connects_elsewhere(agent: &mut super::Agent, name: String) {
+    agent.repositories.settings.repository = "/Volumes/demo/scratch/cold".to_owned();
+    connects(agent, name).await;
+}
+
 #[when("the agent initialises the repository")]
 async fn initialises(agent: &mut super::Agent) {
     initialise(agent, None).await;
@@ -342,6 +359,25 @@ fn alias_taken(agent: &mut super::Agent) {
         Some(Outcome::Refused(RepositoryError::AliasTaken(_))) => {}
         other => panic!("the connect was not refused for a taken alias: {other:?}"),
     }
+}
+
+#[then(expr = "the request is refused because the repository is configured as {string}")]
+fn already_configured_as(agent: &mut super::Agent, name: String) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::AlreadyConfigured(configured))) => {
+            assert_eq!(configured, &alias(&name));
+        }
+        other => panic!("the request was not refused for the repository: {other:?}"),
+    }
+}
+
+#[then(expr = "the agent has the repository {string} configured with the repository's ID")]
+async fn configured_with_id(agent: &mut super::Agent, name: String) {
+    let config = saved(agent).await;
+    let repository = config
+        .repository(&alias(&name))
+        .unwrap_or_else(|| panic!("no repository {name} was saved"));
+    assert_eq!(repository.id.as_ref(), Some(&agent.repositories.id));
 }
 
 #[then("the connection fails")]

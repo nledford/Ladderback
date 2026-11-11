@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
+use crate::RepositoryId;
 use crate::secrets::{
     InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
     is_secret_option,
@@ -50,6 +51,63 @@ impl RepositorySettings {
         credentials(&self.options_cold, InlineSecret::OptionCold);
         found
     }
+
+    /// Whether `other` points at the same place: the same `repository`,
+    /// `repo-hot` and the three option sets, where an `opendal:` backend
+    /// keeps its bucket or root. The password and the options that hold a
+    /// credential ([`is_secret_option`], as the `inline-secret` warning
+    /// takes them) are how to open it, not where it is: one moved from text
+    /// to `${VAR}`, added or removed leaves the same location. On a drive
+    /// (opendal's Dropbox, Google Drive, OneDrive and Yandex Disk) a
+    /// credential is the one thing that names the account,
+    /// so the sets that reach it keep theirs: `options` reach both halves,
+    /// `options-hot` the `repo-hot` one and `options-cold` the other.
+    pub fn same_location(&self, other: &Self) -> bool {
+        let cold = is_drive(&self.repository);
+        let hot = self.repo_hot.as_deref().is_some_and(is_drive);
+        self.repository == other.repository
+            && self.repo_hot == other.repo_hot
+            && same_places(&self.options, &other.options, cold || hot)
+            && same_places(&self.options_hot, &other.options_hot, hot)
+            && same_places(&self.options_cold, &other.options_cold, cold)
+    }
+}
+
+/// The opendal services, by opendal's own scheme name, where only a
+/// credential (`access_token`, `refresh_token`) names the account: two
+/// accounts can hold one `root`, so their credentials are part of the
+/// location. Every other backend names its account or bucket in an option
+/// that is not a credential (`bucket`, `account_name`, `endpoint`, `user`).
+const DRIVES: [&str; 4] = ["dropbox", "gdrive", "onedrive", "yandex-disk"];
+
+/// Whether a `repository` string opens one of the [`DRIVES`]: rustic reads
+/// `opendal:<scheme>`, and opendal the scheme up to a `:`, without case.
+fn is_drive(location: &str) -> bool {
+    location.strip_prefix("opendal:").is_some_and(|path| {
+        let scheme = path.split_once(':').map_or(path, |(scheme, _)| scheme);
+        DRIVES
+            .iter()
+            .any(|drive| drive.eq_ignore_ascii_case(scheme))
+    })
+}
+
+/// Whether two option sets are equal, their credentials left out unless
+/// `credentials` says they name the account.
+fn same_places(
+    one: &BTreeMap<String, String>,
+    other: &BTreeMap<String, String>,
+    credentials: bool,
+) -> bool {
+    places(one, credentials).eq(places(other, credentials))
+}
+
+/// The options of `set` that say where the repository is, by name.
+fn places(
+    set: &BTreeMap<String, String>,
+    credentials: bool,
+) -> impl Iterator<Item = (&String, &String)> {
+    set.iter()
+        .filter(move |(name, _)| credentials || !is_secret_option(name))
 }
 
 /// An option written in the config can be a secret as it stands, so what the
@@ -199,11 +257,30 @@ impl fmt::Display for GroupBy {
 pub struct RepositoryConfig {
     /// Where it is and how to open it.
     pub settings: RepositorySettings,
+    /// The rustic repository ID Ladderback read when it connected or created
+    /// the repository (§7.3). None for an entry written by hand or imported
+    /// from a profile: Ladderback never opened those.
+    pub id: Option<RepositoryId>,
     /// Who is asked to maintain it.
     pub maintenance: Maintenance,
     pub group_by: GroupBy,
     /// Wraps every job on the repository, forget, prune and check included.
     pub hooks: Hooks,
+}
+
+impl RepositoryConfig {
+    /// Whether this entry is the repository `settings` describe, whose
+    /// repository ID is `id` when it is known. When both this entry and the
+    /// request know their ID, the ID decides alone: one location may come
+    /// to hold another repository, and one repository may be reached at two
+    /// locations. Otherwise one location is one repository (§7.3), and a
+    /// location is the whole of it: [`RepositorySettings::same_location`].
+    pub fn is(&self, settings: &RepositorySettings, id: Option<&RepositoryId>) -> bool {
+        match (self.id.as_ref(), id) {
+            (Some(own), Some(id)) => own == id,
+            _ => self.settings.same_location(settings),
+        }
+    }
 }
 
 #[cfg(test)]

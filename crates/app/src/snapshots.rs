@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
-use domain::OperationId;
 use domain::execution::FailureReason;
 use domain::planning::RepositorySettings;
+use domain::{OperationId, RepositoryId};
 use futures::StreamExt;
 
 use crate::ports::{
@@ -37,13 +37,18 @@ impl ListSnapshots {
         Self { engine, resolve }
     }
 
-    /// Lists the repository's snapshots, newest first.
+    /// Lists the repository's snapshots, newest first. `recorded` is the
+    /// repository ID the configuration holds for it, when it holds one: the
+    /// engine then lists that repository or none (§7.3).
     pub async fn list(
         &self,
         op: OperationId,
         settings: &RepositorySettings,
+        recorded: Option<&RepositoryId>,
     ) -> Result<Vec<SnapshotSummary>, SnapshotError> {
-        let job = Job::Ls(access(&self.resolve, settings).await?);
+        let mut access = access(&self.resolve, settings).await?;
+        access.id = recorded.cloned();
+        let job = Job::Ls(access);
         let mut snapshots = run(self.engine.as_ref(), op, job).await?;
         snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
         Ok(snapshots)
@@ -193,7 +198,7 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
         );
         let listed = use_case
-            .list(op(), &settings())
+            .list(op(), &settings(), Some(&repository()))
             .await
             .unwrap_or_else(|e| panic!("the listing: {e:?}"));
         assert_eq!(
@@ -206,6 +211,11 @@ mod tests {
                 panic!("listing runs Job::Ls, got {:?}", seen[0]);
             };
             assert_eq!(access.repository, "/home/demo/scratch/repo");
+            assert_eq!(
+                access.id,
+                Some(repository()),
+                "the recorded ID goes with it"
+            );
         }
     }
 
@@ -221,9 +231,8 @@ mod tests {
         let use_case =
             ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())));
         assert_eq!(
-            use_case.list(op(), &settings()).await,
+            use_case.list(op(), &settings(), None).await,
             Err(SnapshotError::Failed(reason))
         );
-        let _ = repository();
     }
 }

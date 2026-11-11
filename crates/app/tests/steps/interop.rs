@@ -18,7 +18,7 @@ use app::ports::{
 use cucumber::{given, then, when};
 use domain::execution::plan_tags::PlanTags;
 use domain::planning::{
-    AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Plan, RepositoryConfig,
+    AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
     RepositorySettings, Source,
 };
 use domain::secrets::{FileRead, SecretRef};
@@ -36,8 +36,9 @@ pub struct InteropWorld {
     agent_hooks: Hooks,
     repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
     plans: Vec<Plan>,
-    /// What the scripted profile holds: its plans, global hooks and notices,
-    /// or that it can't be read.
+    /// What the scripted profile holds: its repository, when not the demo
+    /// one, its plans, global hooks and notices, or that it can't be read.
+    profile_repository: Option<RepositoryConfig>,
     profile_plans: Vec<Plan>,
     profile_hooks: Hooks,
     profile_notices: Vec<ProfileNotice>,
@@ -60,6 +61,7 @@ impl Default for InteropWorld {
             agent_hooks: Hooks::default(),
             repositories: BTreeMap::new(),
             plans: Vec::new(),
+            profile_repository: None,
             profile_plans: Vec::new(),
             profile_hooks: Hooks::default(),
             profile_notices: Vec::new(),
@@ -90,6 +92,7 @@ fn hostname(name: &str) -> Hostname {
 
 fn demo_repository() -> RepositoryConfig {
     RepositoryConfig {
+        id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),
             repo_hot: None,
@@ -196,12 +199,88 @@ fn profile_hooks(agent: &mut Agent, program: String) {
     agent.interop.profile_hooks = hooks_before(&[&program]);
 }
 
+/// A repository the configuration holds, at a location of its own: not the
+/// profile's, which is another repository.
+fn configured_repository(name: &str) -> RepositoryConfig {
+    let mut repository = demo_repository();
+    repository.settings.repository = format!("/srv/{name}");
+    repository
+}
+
 #[given(expr = "the configuration holds the repository {string}")]
 fn holds_repository(agent: &mut Agent, name: String) {
     agent
         .interop
         .repositories
+        .insert(alias(&name), configured_repository(&name));
+}
+
+#[given(expr = "the configuration holds the repository {string} at the profile's location")]
+fn holds_profile_repository(agent: &mut Agent, name: String) {
+    agent
+        .interop
+        .repositories
         .insert(alias(&name), demo_repository());
+}
+
+#[given(
+    expr = "the configuration holds the repository {string} at the profile's location, maintained by the hub"
+)]
+fn holds_profile_repository_for_hub(agent: &mut Agent, name: String) {
+    let mut repository = demo_repository();
+    repository.maintenance = Maintenance::Hub;
+    agent.interop.repositories.insert(alias(&name), repository);
+}
+
+/// One option more is another location (an `opendal:` backend keeps its
+/// bucket in one), unless it is a credential, which is how to open it.
+#[given(
+    expr = "the configuration holds the repository {string} at the profile's location with the option {string} set to {string}"
+)]
+fn holds_profile_repository_with_option(
+    agent: &mut Agent,
+    name: String,
+    option: String,
+    value: String,
+) {
+    let mut repository = demo_repository();
+    repository.settings.options.insert(option, value);
+    agent.interop.repositories.insert(alias(&name), repository);
+}
+
+/// The demo repository moved to `location`, with one option more: on a
+/// drive the credential names the account, so it is part of the location.
+fn at_with_option(location: String, option: String, value: String) -> RepositoryConfig {
+    let mut repository = demo_repository();
+    repository.settings.repository = location;
+    repository.settings.options.insert(option, value);
+    repository
+}
+
+#[given(
+    expr = "the configuration holds the repository {string} at {string} with the option {string} set to {string}"
+)]
+fn holds_repository_at_with_option(
+    agent: &mut Agent,
+    name: String,
+    location: String,
+    option: String,
+    value: String,
+) {
+    agent
+        .interop
+        .repositories
+        .insert(alias(&name), at_with_option(location, option, value));
+}
+
+#[given(expr = "the profile's repository is at {string} with the option {string} set to {string}")]
+fn profile_repository_at_with_option(
+    agent: &mut Agent,
+    location: String,
+    option: String,
+    value: String,
+) {
+    agent.interop.profile_repository = Some(at_with_option(location, option, value));
 }
 
 #[given(expr = "the configuration holds the repositories {string} and {string}")]
@@ -210,7 +289,7 @@ fn holds_repositories(agent: &mut Agent, one: String, other: String) {
         agent
             .interop
             .repositories
-            .insert(alias(&name), demo_repository());
+            .insert(alias(&name), configured_repository(&name));
     }
 }
 
@@ -266,7 +345,10 @@ async fn imports(agent: &mut Agent, name: String) {
         })
     } else {
         Ok(ImportedProfile {
-            repository: demo_repository(),
+            repository: world
+                .profile_repository
+                .clone()
+                .unwrap_or_else(demo_repository),
             plans,
             hooks: world.profile_hooks.clone(),
             notices: world.profile_notices.clone(),
@@ -340,6 +422,28 @@ fn refused_unreadable(agent: &mut Agent) {
     }
 }
 
+#[then(expr = "the import is refused because the repository is configured as {string}")]
+fn refused_already_configured(agent: &mut Agent, name: String) {
+    match agent.interop.imported() {
+        Err(ImportError::AlreadyConfigured(configured)) => assert_eq!(configured, &alias(&name)),
+        other => panic!("the import should be refused for the repository, got {other:?}"),
+    }
+}
+
+#[then(expr = "the configuration now holds the plan {string} for the repository {string}")]
+async fn now_holds_plan_for(agent: &mut Agent, id: String, repository: String) {
+    let config = agent.interop.now().await;
+    let plan = config
+        .plan(&plan_id(&id))
+        .unwrap_or_else(|| panic!("no plan {id:?}"));
+    assert_eq!(plan.repository, alias(&repository));
+}
+
+#[then(expr = "the configuration now holds {int} repository/repositories")]
+async fn now_holds_repositories(agent: &mut Agent, count: usize) {
+    assert_eq!(agent.interop.now().await.repositories().len(), count);
+}
+
 #[then("the configuration is unchanged")]
 async fn unchanged(agent: &mut Agent) {
     let now = agent.interop.now().await;
@@ -356,6 +460,29 @@ fn notes_key(agent: &mut Agent, key: String) {
         notices.contains(&ProfileNotice::KeyIgnored { key: key.clone() }),
         "no notice for {key:?} in {notices:?}"
     );
+}
+
+#[then(expr = "the configuration's repository {string} is as it was")]
+async fn repository_as_it_was(agent: &mut Agent, name: String) {
+    let name = alias(&name);
+    let before = agent.interop.before.as_ref().expect("the command ran");
+    assert_eq!(
+        agent.interop.now().await.repository(&name),
+        before.repository(&name)
+    );
+}
+
+#[then(expr = "the import notes that the repository {string} kept its own {string}")]
+fn notes_kept(agent: &mut Agent, repository: String, setting: String) {
+    let notices = match agent.interop.imported() {
+        Ok(imported) => &imported.notices,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    let kept = ProfileNotice::RepositorySettingKept {
+        repository,
+        setting,
+    };
+    assert!(notices.contains(&kept), "no {kept:?} in {notices:?}");
 }
 
 #[then(expr = "the agent's hostname is now {string}")]

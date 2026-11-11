@@ -690,6 +690,9 @@ mod tests {
         for code in [
             ErrorCode::OperationFailed,
             ErrorCode::RepositoryExists,
+            // The repository is configured under another name: no name typed
+            // here makes it another repository, so the name field is not it.
+            ErrorCode::RepositoryAlreadyConfigured,
             ErrorCode::EngineUnavailable,
             ErrorCode::ConfigUnavailable,
             ErrorCode::InvalidBody,

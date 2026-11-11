@@ -63,6 +63,9 @@ pub enum RepositoriesError {
     AliasInvalid,
     /// The configuration already holds a repository under the alias.
     AliasTaken { alias: String },
+    /// The configuration already holds the repository under another alias,
+    /// `alias`: a repository has one alias (§7.3).
+    AlreadyConfigured { alias: String },
     /// A repository already exists at `location`, which is redacted.
     Exists { location: String },
     /// A secret couldn't be resolved, or a setting with a reference isn't
@@ -156,6 +159,12 @@ fn refusal(error: &RepositoriesError) -> Response {
         RepositoriesError::AliasTaken { alias } => refused(
             StatusCode::CONFLICT,
             ErrorCode::RepositoryAliasTaken,
+            text("alias", alias),
+            None,
+        ),
+        RepositoriesError::AlreadyConfigured { alias } => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryAlreadyConfigured,
             text("alias", alias),
             None,
         ),

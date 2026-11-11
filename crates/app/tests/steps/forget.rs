@@ -203,6 +203,7 @@ impl ForgetWorld {
         self.repositories.insert(
             alias(),
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,

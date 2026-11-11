@@ -216,8 +216,9 @@ fn a_repository(agent: &mut Agent, name: String) {
     agent.config.repositories.insert(
         alias(&name),
         RepositoryConfig {
+            id: None,
             settings: RepositorySettings {
-                repository: "/srv/demo-repo".to_owned(),
+                repository: format!("/srv/{name}"),
                 repo_hot: None,
                 password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
                 options: BTreeMap::new(),
@@ -229,6 +230,18 @@ fn a_repository(agent: &mut Agent, name: String) {
             hooks: Hooks::default(),
         },
     );
+}
+
+#[given(expr = "a repository {string} at the location of {string}")]
+fn a_repository_at(agent: &mut Agent, name: String, other: String) {
+    let mut repository = agent
+        .config
+        .repositories
+        .get(&alias(&other))
+        .unwrap_or_else(|| panic!("no repository {other:?}"))
+        .clone();
+    repository.settings.password = SecretRef::Env("OTHER_PASSWORD".to_owned());
+    agent.config.repositories.insert(alias(&name), repository);
 }
 
 #[given(expr = "a plan {string} backing up {string} into {string}")]
@@ -352,6 +365,17 @@ fn refused_for_a_repeat(agent: &mut Agent, number: usize, plan: String) {
         &Violation::DuplicatePlan {
             index: number - 1,
             plan: plan_id(&plan),
+        }
+    );
+}
+
+#[then(expr = "the configuration is refused because {string} and {string} are one repository")]
+fn refused_for_one_repository(agent: &mut Agent, first: String, second: String) {
+    assert_eq!(
+        agent.config.violation(),
+        &Violation::SameRepository {
+            first: alias(&first),
+            second: alias(&second),
         }
     );
 }

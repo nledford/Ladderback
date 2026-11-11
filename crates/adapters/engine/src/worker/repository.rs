@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use api::ErrorCode;
 use domain::RepositoryId;
 use rustic_backend::util::location_to_type_and_path;
 use rustic_backend::{BackendOptions, SupportedBackend};
@@ -51,16 +52,33 @@ pub(crate) fn new_repository(
 }
 
 /// Opens the repository: [`new_repository`] and the password, which is what
-/// tells a repository from a folder of files. After it opens, each half
-/// that is a local folder is cleaned up after killed workers.
+/// tells a repository from a folder of files. A spec that names the
+/// repository's ID opens only that repository: one with another ID is
+/// refused at once (`repository-replaced`, §7.3), before anything in it is
+/// read past its config or written. After it opens, each half that is a
+/// local folder is cleaned up after killed workers.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
     let repository =
         new_repository(ctx, spec)?.open(&Credentials::password(spec.password.expose()))?;
-    // Only a repository that opened is known to be one, so only then is what
-    // looks like its leftovers ours to remove.
+    if let Some(expected) = &spec.id {
+        let found = repository_id(&repository)?;
+        if found != *expected {
+            return Err(JobError::Failed {
+                code: ErrorCode::RepositoryReplaced,
+                detail: format!(
+                    "the location holds the repository {}, not {}",
+                    found.as_str(),
+                    expected.as_str()
+                ),
+            });
+        }
+    }
+    // Only a repository that opened is known to be one, and the one the
+    // configuration means, so only then is what looks like its leftovers ours
+    // to remove.
     for half in std::iter::once(spec.repository.as_str()).chain(spec.repo_hot.as_deref()) {
         remove_leftovers(ctx, half)?;
     }
@@ -170,6 +188,7 @@ mod tests {
             options_hot: Default::default(),
             options_cold: Default::default(),
             secrets: Vec::new(),
+            id: None,
         }
     }
 
@@ -403,6 +422,49 @@ mod tests {
                 .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
             "{id:?}"
         );
+    }
+
+    /// A spec that names the repository's ID opens that repository and no
+    /// other (§7.3): a location that now holds another repository is refused
+    /// as replaced, and its leftovers are not touched.
+    #[test]
+    fn a_location_that_holds_another_repository_than_the_one_named_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let old = leftover(&repository);
+        let (ctx, capture) = context(None);
+        let other = RepositoryId::parse(&"0a".repeat(32)).unwrap();
+        let spec = RepositorySpec {
+            id: Some(other.clone()),
+            ..spec_at(&repository.to_string_lossy())
+        };
+        let Err(JobError::Failed { code, detail }) = open(&ctx, &spec) else {
+            panic!("a repository with another ID must be refused");
+        };
+        assert_eq!(code, ErrorCode::RepositoryReplaced);
+        assert!(detail.contains(other.as_str()), "{detail}");
+        assert!(
+            old.exists(),
+            "a leftover of the other repository was removed"
+        );
+        assert_eq!(logged(&capture), []);
+    }
+
+    #[test]
+    fn a_location_that_holds_the_repository_named_opens() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let (ctx, _capture) = context(None);
+        let location = repository.to_string_lossy();
+        let id = repository_id(&open(&ctx, &spec_at(&location)).unwrap()).unwrap();
+        let spec = RepositorySpec {
+            id: Some(id.clone()),
+            ..spec_at(&location)
+        };
+        let opened = open(&ctx, &spec).expect("the repository named opens");
+        assert_eq!(repository_id(&opened).unwrap(), id);
     }
 
     // Leftovers.

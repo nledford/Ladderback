@@ -5,9 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
-use crate::{PlanId, RepositoryAlias};
+use crate::{PlanId, RepositoryAlias, RepositoryId};
 
-use super::{Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, ValueKind};
+use super::{
+    Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+};
 
 /// How many operations an agent runs at once: from 1 to
 /// [`MAX`](Self::MAX). The default is 1, so that a laptop does not run two
@@ -88,6 +90,13 @@ pub enum Violation {
     },
     /// A plan backs up nothing.
     NoSources { index: usize, plan: PlanId },
+    /// Two entries are one repository: the same location, or the same
+    /// repository ID (§7.3). A repository has one alias, so the history of
+    /// its plans is one history; `first` is the earlier alias in alias order.
+    SameRepository {
+        first: RepositoryAlias,
+        second: RepositoryAlias,
+    },
 }
 
 impl std::fmt::Display for Violation {
@@ -110,9 +119,11 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-    /// Checks the plans one by one, in order; the first one to break a rule is
-    /// reported. For each plan the rules are checked in this order: its ID is
-    /// not one an earlier plan has, its repository is one of
+    /// Checks the repositories first, in alias order: no two of them are one
+    /// repository ([`RepositoryConfig::is`]), and the first pair found is
+    /// reported. Then the plans one by one, in order; the first one to break
+    /// a rule is reported. For each plan the rules are checked in this order:
+    /// its ID is not one an earlier plan has, its repository is one of
     /// `repositories`, and it has at least one source.
     pub fn new(
         agent: AgentSettings,
@@ -120,6 +131,18 @@ impl AgentConfig {
         repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
         plans: Vec<Plan>,
     ) -> Result<Self, Violation> {
+        for (n, (first, entry)) in repositories.iter().enumerate() {
+            let same = repositories
+                .iter()
+                .skip(n.saturating_add(1))
+                .find(|(_, other)| other.is(&entry.settings, entry.id.as_ref()));
+            if let Some((second, _)) = same {
+                return Err(Violation::SameRepository {
+                    first: first.clone(),
+                    second: second.clone(),
+                });
+            }
+        }
         let mut taken = BTreeSet::new();
         for (index, plan) in plans.iter().enumerate() {
             if !taken.insert(&plan.id) {
@@ -176,6 +199,20 @@ impl AgentConfig {
     pub fn plan(&self, id: &PlanId) -> Option<&Plan> {
         self.plans.iter().find(|plan| &plan.id == id)
     }
+
+    /// The alias the repository `settings` describe, with the ID `id` when it
+    /// is known, is already configured under (§7.3: one alias per
+    /// repository; [`RepositoryConfig::is`] says which entry is it).
+    pub fn alias_of(
+        &self,
+        settings: &RepositorySettings,
+        id: Option<&RepositoryId>,
+    ) -> Option<&RepositoryAlias> {
+        self.repositories
+            .iter()
+            .find(|(_, entry)| entry.is(settings, id))
+            .map(|(alias, _)| alias)
+    }
 }
 
 #[cfg(test)]
@@ -194,6 +231,7 @@ mod tests {
 
     fn repository(maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),
                 repo_hot: None,
@@ -208,11 +246,24 @@ mod tests {
         }
     }
 
+    /// One entry per alias, each at a location of its own.
     fn repositories(aliases: &[&str]) -> BTreeMap<RepositoryAlias, RepositoryConfig> {
         aliases
             .iter()
-            .map(|name| (alias(name), repository(Maintenance::None)))
+            .map(|name| (alias(name), at(&format!("/srv/{name}"), None)))
             .collect()
+    }
+
+    /// An entry at `location`, with the repository ID `id` when given.
+    fn at(location: &str, id: Option<&str>) -> RepositoryConfig {
+        let mut entry = repository(Maintenance::None);
+        entry.settings.repository = location.to_owned();
+        entry.id = id.map(repository_id);
+        entry
+    }
+
+    fn repository_id(hex: &str) -> RepositoryId {
+        RepositoryId::parse(&hex.repeat(32)).unwrap()
     }
 
     fn plan(plan: &str, repository: &str) -> Plan {
@@ -451,5 +502,295 @@ mod tests {
                 plan: id("first")
             })
         );
+    }
+
+    #[test]
+    fn two_entries_at_one_location_are_one_repository_and_refused() {
+        let entries = BTreeMap::from([
+            (alias("nas"), at("/srv/demo-repo", None)),
+            (alias("cloud"), at("/srv/other", None)),
+            (alias("nas-2"), at("/srv/demo-repo", None)),
+        ]);
+        assert_eq!(
+            config(entries, vec![plan("home", "nas")]),
+            Err(Violation::SameRepository {
+                first: alias("nas"),
+                second: alias("nas-2"),
+            })
+        );
+    }
+
+    #[test]
+    fn two_entries_with_one_repository_id_are_one_repository_and_refused() {
+        let entries = BTreeMap::from([
+            (alias("laptop"), at("sftp:demo@nas:/srv/repo", Some("07"))),
+            (alias("mounted"), at("/Volumes/nas/repo", Some("07"))),
+        ]);
+        assert_eq!(
+            config(entries, Vec::new()),
+            Err(Violation::SameRepository {
+                first: alias("laptop"),
+                second: alias("mounted"),
+            })
+        );
+    }
+
+    #[test]
+    fn entries_at_other_locations_without_one_shared_id_are_other_repositories() {
+        let entries = BTreeMap::from([
+            (alias("a"), at("/srv/a", Some("07"))),
+            (alias("b"), at("/srv/b", Some("08"))),
+            (alias("c"), at("/srv/c", None)),
+            (alias("d"), at("/srv/d", None)),
+        ]);
+        let config = config(entries, Vec::new()).unwrap();
+        // A request that knows no ID matches no entry that knows none either.
+        assert_eq!(config.alias_of(&location("/srv/e"), None), None);
+        assert_eq!(
+            config.alias_of(&location("/srv/d"), None),
+            Some(&alias("d"))
+        );
+    }
+
+    #[test]
+    fn the_repository_a_location_or_an_id_names_is_found_under_its_alias() {
+        let entries = BTreeMap::from([
+            (alias("cloud"), at("/srv/cloud", None)),
+            (alias("nas"), at("/srv/nas", Some("07"))),
+        ]);
+        let config = config(entries, Vec::new()).unwrap();
+        let seven = repository_id("07");
+        let eight = repository_id("08");
+        assert_eq!(
+            config.alias_of(&location("/srv/nas"), None),
+            Some(&alias("nas"))
+        );
+        assert_eq!(
+            config.alias_of(&location("/srv/cloud"), Some(&eight)),
+            Some(&alias("cloud"))
+        );
+        assert_eq!(
+            config.alias_of(&location("/Volumes/nas"), Some(&seven)),
+            Some(&alias("nas"))
+        );
+        // Two known IDs decide alone: the location now holds another one.
+        assert_eq!(config.alias_of(&location("/srv/nas"), Some(&eight)), None);
+        assert_eq!(
+            config.alias_of(&location("/srv/elsewhere"), Some(&eight)),
+            None
+        );
+        assert_eq!(config.alias_of(&location("/srv/elsewhere"), None), None);
+    }
+
+    /// An `opendal:` repository's bucket or root is in its options, and a
+    /// hot/cold one has two halves: a location is all of them, so a change
+    /// to any one, a credential aside (below), is another repository.
+    #[test]
+    fn entries_that_differ_in_any_part_of_the_location_are_other_repositories() {
+        type Change = (&'static str, fn(&mut RepositorySettings));
+        let base = || at("opendal:b2", None);
+        let changes: [Change; 5] = [
+            ("repository", |s| s.repository = "opendal:s3".to_owned()),
+            ("repo-hot", |s| s.repo_hot = Some("/srv/hot".to_owned())),
+            ("options", |s| {
+                s.options.insert("bucket".to_owned(), "docs".to_owned());
+            }),
+            ("options-hot", |s| {
+                s.options_hot.insert("bucket".to_owned(), "docs".to_owned());
+            }),
+            ("options-cold", |s| {
+                s.options_cold
+                    .insert("bucket".to_owned(), "docs".to_owned());
+            }),
+        ];
+        for (part, change) in changes {
+            let mut other = base();
+            change(&mut other.settings);
+            let entries = BTreeMap::from([(alias("photos"), base()), (alias("docs"), other)]);
+            assert!(config(entries, Vec::new()).is_ok(), "{part}");
+        }
+    }
+
+    #[test]
+    fn the_password_is_not_part_of_the_location() {
+        let mut other = at("/srv/demo-repo", None);
+        other.settings.password = SecretRef::Env("OTHER_PASSWORD".to_owned());
+        let entries = BTreeMap::from([
+            (alias("nas"), at("/srv/demo-repo", None)),
+            (alias("nas-2"), other),
+        ]);
+        assert_eq!(
+            config(entries, Vec::new()),
+            Err(Violation::SameRepository {
+                first: alias("nas"),
+                second: alias("nas-2"),
+            })
+        );
+    }
+
+    /// A credential is how to open the repository, as the password is: an
+    /// option whose name the inline-secret warning takes for one is left
+    /// out of the location, so moving it from text to `${VAR}`, adding one
+    /// or removing one leaves the same repository. Every other option still
+    /// counts (the test above).
+    #[test]
+    fn credential_options_are_not_part_of_the_location() {
+        type Change = (&'static str, fn(&mut RepositorySettings));
+        let base = || {
+            let mut entry = at("opendal:s3", None);
+            entry
+                .settings
+                .options
+                .insert("secret_access_key".to_owned(), "not-a-real-key".to_owned());
+            entry
+        };
+        let changes: [Change; 4] = [
+            ("moved to a variable", |s| {
+                s.options.insert(
+                    "secret_access_key".to_owned(),
+                    "${AWS_SECRET_ACCESS_KEY}".to_owned(),
+                );
+            }),
+            ("removed", |s| {
+                s.options.remove("secret_access_key");
+            }),
+            ("added to options-hot", |s| {
+                s.options_hot
+                    .insert("Session-Token".to_owned(), "not-a-real-token".to_owned());
+            }),
+            ("added to options-cold", |s| {
+                s.options_cold
+                    .insert("sas_token".to_owned(), "not-a-real-token".to_owned());
+            }),
+        ];
+        for (part, change) in changes {
+            let mut other = base();
+            change(&mut other.settings);
+            let entries = BTreeMap::from([(alias("nas"), base()), (alias("nas-2"), other)]);
+            assert_eq!(
+                config(entries, Vec::new()),
+                Err(Violation::SameRepository {
+                    first: alias("nas"),
+                    second: alias("nas-2"),
+                }),
+                "{part}"
+            );
+        }
+    }
+
+    /// On a drive (opendal's Dropbox, Google Drive, OneDrive and Yandex
+    /// Disk) only a credential names the account, so two accounts can hold
+    /// one `root`: there the credentials are part of the location, lest one
+    /// account's plans back up into the other's. The service is opendal's
+    /// scheme, which opendal reads without case and up to a `:`.
+    #[test]
+    fn a_drives_credentials_are_part_of_its_location() {
+        let drives = [
+            "opendal:dropbox",
+            "opendal:gdrive",
+            "opendal:onedrive",
+            "opendal:yandex-disk",
+            "opendal:Dropbox",
+            "opendal:gdrive:",
+        ];
+        for drive in drives {
+            let account = |token: &str| {
+                let mut entry = at(drive, None);
+                let options = &mut entry.settings.options;
+                options.insert("root".to_owned(), "/ladderback".to_owned());
+                options.insert("access_token".to_owned(), token.to_owned());
+                entry
+            };
+            let two = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("work"), account("not-a-real-token-work")),
+            ]);
+            assert!(config(two, Vec::new()).is_ok(), "{drive}");
+            let one = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("home-2"), account("not-a-real-token-home")),
+            ]);
+            assert_eq!(
+                config(one, Vec::new()),
+                Err(Violation::SameRepository {
+                    first: alias("home"),
+                    second: alias("home-2"),
+                }),
+                "{drive}"
+            );
+        }
+    }
+
+    /// `options` reach both halves of a hot/cold repository, `options-hot`
+    /// only `repo-hot` and `options-cold` only `repository`: a credential
+    /// counts in the sets that reach a drive, and nowhere else.
+    #[test]
+    fn a_drives_credentials_count_only_in_the_options_that_reach_it() {
+        type Set = fn(&mut RepositorySettings) -> &mut BTreeMap<String, String>;
+        let options: Set = |s| &mut s.options;
+        let hot: Set = |s| &mut s.options_hot;
+        let cold: Set = |s| &mut s.options_cold;
+        let cases: [(&str, &str, Set, &str, bool); 6] = [
+            ("opendal:s3", "opendal:dropbox", options, "options", false),
+            ("opendal:s3", "opendal:dropbox", hot, "options-hot", false),
+            ("opendal:s3", "opendal:dropbox", cold, "options-cold", true),
+            ("opendal:onedrive", "opendal:s3", options, "options", false),
+            ("opendal:onedrive", "opendal:s3", hot, "options-hot", true),
+            (
+                "opendal:onedrive",
+                "opendal:s3",
+                cold,
+                "options-cold",
+                false,
+            ),
+        ];
+        for (cold_half, hot_half, set, name, same) in cases {
+            let account = |token: &str| {
+                let mut entry = at(cold_half, None);
+                entry.settings.repo_hot = Some(hot_half.to_owned());
+                set(&mut entry.settings).insert("refresh_token".to_owned(), token.to_owned());
+                entry
+            };
+            let entries = BTreeMap::from([
+                (alias("home"), account("not-a-real-token-home")),
+                (alias("work"), account("not-a-real-token-work")),
+            ]);
+            assert_eq!(
+                config(entries, Vec::new()).is_err(),
+                same,
+                "{name} of {cold_half} with {hot_half}"
+            );
+        }
+    }
+
+    /// The location now holds another repository than one of the two
+    /// recorded: they are two repositories, and the stale entry's jobs are
+    /// refused when they open it.
+    #[test]
+    fn entries_at_one_location_with_other_ids_are_other_repositories() {
+        let entries = BTreeMap::from([
+            (alias("old"), at("/srv/demo-repo", Some("07"))),
+            (alias("new"), at("/srv/demo-repo", Some("08"))),
+        ]);
+        assert!(config(entries, Vec::new()).is_ok());
+    }
+
+    #[test]
+    fn the_repositories_are_checked_before_the_plans() {
+        let entries = BTreeMap::from([
+            (alias("nas"), at("/srv/demo-repo", None)),
+            (alias("nas-2"), at("/srv/demo-repo", None)),
+        ]);
+        assert_eq!(
+            config(entries, vec![plan("home", "cloud")]),
+            Err(Violation::SameRepository {
+                first: alias("nas"),
+                second: alias("nas-2"),
+            })
+        );
+    }
+
+    fn location(text: &str) -> RepositorySettings {
+        at(text, None).settings
     }
 }

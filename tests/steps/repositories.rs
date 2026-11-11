@@ -80,6 +80,8 @@ fn contents(dir: &Path) -> Vec<(String, Vec<u8>)> {
 pub struct RepositoriesSetup {
     cold: Option<PathBuf>,
     hot: Option<PathBuf>,
+    /// A second repository's location, beside the scenario's own.
+    other: Option<PathBuf>,
     settings: Option<RepositorySettings>,
     init: Option<Result<InitOutcome, RepositoryError>>,
     test: Option<Result<RepositoryId, RepositoryError>>,
@@ -164,6 +166,24 @@ async fn initialised_repository(agent: &mut Agent) {
                 &rustic_core::ConfigOptions::default(),
             )
             .expect("the scratch repository initialises");
+    })
+    .await;
+}
+
+#[given("two initialised repositories")]
+async fn two_initialised_repositories(agent: &mut Agent) {
+    initialised_repository(agent).await;
+    let other = agent.scratch().join("other-repo");
+    fs::create_dir_all(&other).expect("the second repository's folder");
+    agent.repositories.other = Some(other.clone());
+    blocking(move || {
+        repository(&other, None)
+            .init(
+                &credentials(),
+                &rustic_core::KeyOptions::default(),
+                &rustic_core::ConfigOptions::default(),
+            )
+            .expect("the second scratch repository initialises");
     })
     .await;
 }
@@ -498,14 +518,24 @@ async fn api_connects(agent: &mut Agent, alias: String) {
     api_connect(agent, &alias).await;
 }
 
-#[when(expr = "the client connects it as {string} and as {string} at the same moment")]
+#[when(expr = "the client connects one as {string} and the other as {string} at the same moment")]
 async fn api_connects_at_once(agent: &mut Agent, first: String, second: String) {
     let addr = agent.events.addr();
-    let settings = api_settings(agent);
-    let requests = [first, second].into_iter().map(|alias| {
-        let body = serde_json::json!({"alias": alias, "settings": settings}).to_string();
-        blocking(move || exchange_at(addr, "POST", "/api/v1/repositories", &body))
-    });
+    let one = api_settings(agent);
+    let mut other = one.clone();
+    other["repository"] = serde_json::json!(text(
+        agent
+            .repositories
+            .other
+            .as_ref()
+            .expect("the scenario set a second location")
+    ));
+    let requests = [(first, one), (second, other)]
+        .into_iter()
+        .map(|(alias, settings)| {
+            let body = serde_json::json!({"alias": alias, "settings": settings}).to_string();
+            blocking(move || exchange_at(addr, "POST", "/api/v1/repositories", &body))
+        });
     for (status, body) in futures::future::join_all(requests).await {
         assert_eq!(status, 201, "a connection made at the same moment: {body}");
         agent.repositories.api_answers.push(body);

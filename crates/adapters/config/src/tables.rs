@@ -67,6 +67,7 @@ table! {
     /// One repository. Exactly one of the five `password` keys is set.
     RepositoryTable {
         repository: String,
+        repository_id: String,
         repo_hot: String,
         password: String,
         password_command: String,

@@ -329,6 +329,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
         std::collections::BTreeMap::from([(
             alias,
             domain::planning::RepositoryConfig {
+                id: None,
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
                     repo_hot: None,

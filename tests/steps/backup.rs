@@ -13,7 +13,7 @@ use cucumber::{given, then, when};
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, Trigger};
-use domain::{SignedDuration, SnapshotId};
+use domain::{RepositoryId, SignedDuration, SnapshotId};
 use rustic_backend::BackendOptions;
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{
@@ -311,6 +311,40 @@ fn no_time_left(agent: &mut Agent) {
     agent.backup.deadline_budget = Some(SignedDuration::ZERO);
 }
 
+#[given("the repository's ID is known")]
+async fn id_known(agent: &mut Agent) {
+    let folders = agent.repository();
+    let id = blocking(move || {
+        let opened = repository(&folders)
+            .open(&credentials())
+            .expect("the scratch repository opens");
+        RepositoryId::parse(opened.config().id.to_hex().as_str())
+            .expect("rustic's IDs are 64 hex digits")
+    })
+    .await;
+    agent.backup.id = Some(id);
+}
+
+/// The folder is emptied and a new repository is created in it: the same
+/// location, with the same password, holds a repository with another ID.
+#[given("another repository has replaced it at its location")]
+async fn replaced(agent: &mut Agent) {
+    let folders = agent.repository();
+    fs::remove_dir_all(&folders.cold).expect("the old repository goes");
+    init(&folders).await;
+}
+
+#[then("the operation ends as failed because its location holds another repository")]
+fn failed_as_replaced(agent: &mut Agent) {
+    let status = agent.operation().status().clone();
+    assert_eq!(
+        status,
+        domain::execution::OperationStatus::Failed {
+            reason: domain::execution::FailureReason::RepositoryReplaced,
+        }
+    );
+}
+
 #[when("the agent backs up the plan")]
 async fn backs_up(agent: &mut Agent) {
     agent.run_backup().await;
@@ -491,6 +525,9 @@ pub struct BackupSetup {
     pub agent_hostname: Option<domain::planning::Hostname>,
     /// The plan's source filter, written to the daemon's configuration.
     pub filter: domain::planning::SourceFilter,
+    /// The repository ID the job names as the one it must open (§7.3):
+    /// what the configuration recorded when the repository was connected.
+    pub id: Option<RepositoryId>,
 }
 
 impl Agent {
@@ -521,7 +558,7 @@ impl Agent {
                 options_hot: Default::default(),
                 options_cold: Default::default(),
                 secrets: Vec::new(),
-                id: None,
+                id: self.backup.id.clone(),
             },
             sources: vec![self.source().to_str().unwrap().to_owned()],
             tags: self.plan_tags(),

@@ -79,6 +79,12 @@ pub enum ProfileNotice {
     /// An export wrote a plan that keeps everything: the profile has no
     /// `keep-*` option, and rustic's `forget` refuses to run on one.
     RetentionEmpty,
+    /// An import added its plans to the entry `repository` the configuration
+    /// held at the profile's location, which kept its own `setting`: the
+    /// profile set it otherwise. `setting` is the entry's setting as the
+    /// configuration names it: `password`, `maintenance`, `group-by`,
+    /// `options`, `options-hot`, `options-cold` or `hooks`.
+    RepositorySettingKept { repository: String, setting: String },
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or

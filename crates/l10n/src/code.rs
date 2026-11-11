@@ -51,6 +51,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
     RepositoryTimedOut => msg::ERROR_REPOSITORY_TIMED_OUT,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
+    RepositoryAlreadyConfigured => msg::ERROR_REPOSITORY_ALREADY_CONFIGURED,
+    RepositoryReplaced => msg::ERROR_REPOSITORY_REPLACED,
     RepositoryAliasInvalid => msg::ERROR_REPOSITORY_ALIAS_INVALID,
     SecretMissing => msg::ERROR_SECRET_MISSING,
     SecretUnreadable => msg::ERROR_SECRET_UNREADABLE,
@@ -104,5 +106,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileTagDropped => msg::WARNING_PROFILE_TAG_DROPPED,
     ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
+    ProfileSettingKept => msg::WARNING_PROFILE_SETTING_KEPT,
     Unknown => msg::WARNING_UNKNOWN,
 });

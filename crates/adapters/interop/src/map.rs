@@ -184,6 +184,7 @@ fn repository(
         )?,
     };
     Ok(RepositoryConfig {
+        id: None,
         settings,
         maintenance: if part.forget.prune {
             Maintenance::Local

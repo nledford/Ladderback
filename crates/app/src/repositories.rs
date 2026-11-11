@@ -52,10 +52,12 @@ pub struct TestRepository {
 
 /// Connects a repository: validates the alias, resolves the settings, tests
 /// the repository, and only once the test passed saves it into the
-/// configuration through the [`ConfigStore`]. A second connect with an alias
-/// the configuration already holds is refused with
-/// [`RepositoryError::AliasTaken`]. The settings as written, references
-/// included, are what is saved.
+/// configuration through the [`ConfigStore`], with the repository ID the test
+/// read. A second connect with an alias the configuration already holds is
+/// refused with [`RepositoryError::AliasTaken`], and a repository the
+/// configuration already holds under another alias, by its location or its
+/// ID, with [`RepositoryError::AlreadyConfigured`] (§7.3). The settings as
+/// written, references included, are what is saved.
 pub struct ConnectRepository {
     clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
@@ -72,6 +74,9 @@ pub enum RepositoryError {
     Exists,
     /// The configuration already holds a repository under the alias.
     AliasTaken(RepositoryAlias),
+    /// The configuration already holds this repository, under the alias
+    /// given: a repository has one alias (§7.3).
+    AlreadyConfigured(RepositoryAlias),
     /// The repository's settings couldn't be resolved.
     Resolve(ResolveError),
     /// The engine couldn't be started or refused the job.
@@ -107,10 +112,11 @@ impl InitRepository {
 
     /// Initialises the repository the settings describe, and reports its ID.
     /// Saved only when `alias` is given, by the same rule
-    /// [`ConnectRepository`] saves one: an alias the configuration already
-    /// holds is refused, and before the job runs, so a refused request has
-    /// created no repository the person could not then find again. A
-    /// repository created here asks this agent to maintain it
+    /// [`ConnectRepository`] saves one, with the new repository's ID: an
+    /// alias the configuration already holds is refused, and so is a location
+    /// it already holds under another alias, both before the job runs, so a
+    /// refused request has created no repository the person could not then
+    /// find again. A repository created here asks this agent to maintain it
     /// (`maintenance = "local"`, §7.3): nothing else knows it yet, so no
     /// other party maintains it.
     pub async fn init(
@@ -120,13 +126,13 @@ impl InitRepository {
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
         if let Some(alias) = &alias {
-            unused(&*self.config, alias).await?;
+            unused(&*self.config, alias, settings, None).await?;
         }
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
         let saved = match alias {
             Some(alias) => {
-                save(&*self.config, &alias, settings, Maintenance::Local).await?;
+                save(&*self.config, &alias, settings, &id, Maintenance::Local).await?;
                 true
             }
             None => false,
@@ -174,9 +180,9 @@ impl ConnectRepository {
     }
 
     /// Tests the repository and, once the test passed, saves it under `alias`
-    /// with `maintenance`, the person's choice of who maintains it (§7.3): a
-    /// repository that exists may already be maintained by another party,
-    /// and only one may do it (I1).
+    /// with the ID the test read and with `maintenance`, the person's choice
+    /// of who maintains it (§7.3): a repository that exists may already be
+    /// maintained by another party, and only one may do it (I1).
     pub async fn connect(
         &self,
         op: OperationId,
@@ -186,7 +192,7 @@ impl ConnectRepository {
     ) -> Result<RepositoryId, RepositoryError> {
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Identify(access)).await?;
-        save(&*self.config, &alias, settings, maintenance).await?;
+        save(&*self.config, &alias, settings, &id, maintenance).await?;
         Ok(id)
     }
 }
@@ -304,44 +310,55 @@ fn failed(reason: FailureReason) -> RepositoryError {
     }
 }
 
-/// The configuration as it stands, when it holds no repository under `alias`:
-/// otherwise the alias is refused.
+/// The configuration as it stands, when it holds no repository under `alias`
+/// and holds the repository `settings` describe, with the ID `id` when it is
+/// known, under no alias ([`AgentConfig::alias_of`]): a taken alias is
+/// refused first, then a repository already configured, which has one alias
+/// (§7.3).
 #[allow(clippy::result_large_err)]
 async fn unused(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    id: Option<&RepositoryId>,
 ) -> Result<AgentConfig, RepositoryError> {
     let loaded = config.load().await.map_err(RepositoryError::Config)?;
     if loaded.repository(alias).is_some() {
         return Err(RepositoryError::AliasTaken(alias.clone()));
     }
+    if let Some(configured) = loaded.alias_of(settings, id) {
+        return Err(RepositoryError::AlreadyConfigured(configured.clone()));
+    }
     Ok(loaded)
 }
 
-/// Saves `settings` under `alias` with `maintenance` as its request of who
-/// maintains it, refusing an alias the configuration already holds. What is
-/// saved is the settings as written: a secret stays a reference.
+/// Saves `settings` under `alias`, with the repository's `id` and with
+/// `maintenance` as its request of who maintains it, refusing what [`unused`]
+/// refuses. What is saved is the settings as written: a secret stays a
+/// reference.
 #[allow(clippy::result_large_err)]
 async fn save(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
+    id: &RepositoryId,
     maintenance: Maintenance,
 ) -> Result<(), RepositoryError> {
-    let loaded = unused(config, alias).await?;
+    let loaded = unused(config, alias, settings, Some(id)).await?;
     let mut repositories = loaded.repositories().clone();
     repositories.insert(
         alias.clone(),
         RepositoryConfig {
+            id: Some(id.clone()),
             settings: settings.clone(),
             maintenance,
             group_by: Default::default(),
             hooks: Default::default(),
         },
     );
-    // Adding a repository can't break a rule that reaches across the parts
-    // (they are about plans, which don't change), so this refusal is not one
-    // the caller can reach; it is handled all the same, for nothing here
+    // [`unused`] has refused a second alias for the repository, and the
+    // other rules are about plans, which don't change, so this refusal is not
+    // one the caller can reach; it is handled all the same, for nothing here
     // panics.
     let saved = AgentConfig::new(
         loaded.agent().clone(),
