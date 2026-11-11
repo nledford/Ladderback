@@ -253,8 +253,14 @@ pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> 
 pub(crate) fn errors_first<L: std::fmt::Debug, F>(
     findings: &[(L, F)],
 ) -> impl Iterator<Item = (WarningCode, &F)> {
-    let _ = findings;
-    std::iter::from_fn(|| todo!())
+    let coded = findings
+        .iter()
+        .map(|(level, finding)| (finding_code(level), finding));
+    let errors = coded
+        .clone()
+        .filter(|(code, _)| *code == WarningCode::CheckError);
+    let rest = coded.filter(|(code, _)| *code != WarningCode::CheckError);
+    errors.chain(rest)
 }
 
 #[cfg(test)]
