@@ -164,7 +164,8 @@ fn repository(
         .map(|hot| fits(escape::text(hot), "repository.repo-hot", file))
         .transpose()?;
     // A location the profile wrote is escaped, so a `${…}` in it is text: a
-    // password there is kept as text, whatever it looks like.
+    // password there is kept as text, whatever it looks like. One from
+    // rustic's variable is a reference, which keeps nothing as text.
     for (key, written) in [
         ("repository.repository", Some(&location)),
         ("repository.repo-hot", repo_hot.as_ref()),

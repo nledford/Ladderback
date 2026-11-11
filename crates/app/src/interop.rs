@@ -143,7 +143,12 @@ impl ImportProfile {
             if differ.contains(&"maintenance") {
                 notices.retain(|notice| *notice != ProfileNotice::Prune);
             }
-            notices.retain(|notice| !matches!(notice, ProfileNotice::InlineSecret { .. }));
+            notices.retain(|notice| {
+                !matches!(
+                    notice,
+                    ProfileNotice::InlineSecret { .. } | ProfileNotice::LocationSecret { .. }
+                )
+            });
             notices.extend(differ.into_iter().map(|setting| {
                 ProfileNotice::RepositorySettingKept {
                     repository: repository.as_str().to_owned(),

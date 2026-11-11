@@ -84,14 +84,39 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     for (alias, repository) in config.repositories() {
         for secret in repository.settings.inline_secrets() {
-            let message = localizer.warning(
-                WarningCode::ConfigInlineSecret,
-                &[("field", MsgArg::Text(secret.field()))],
-                None,
-            );
+            let (code, args) = inline_secret_warning(&repository.settings, &secret);
+            let message = localizer.warning(code, &args, None);
             log::warn!("repository {}: {message}", alias.as_str());
         }
     }
+}
+
+/// The warning for a secret the configuration holds as text, with its
+/// arguments: one in a location is moved differently from a setting of its
+/// own, and one in an rclone location differently again (§10.2).
+fn inline_secret_warning(
+    settings: &RepositorySettings,
+    secret: &domain::secrets::InlineSecret,
+) -> (WarningCode, Vec<(&'static str, MsgArg)>) {
+    let field = ("field", MsgArg::Text(secret.field()));
+    match settings.location_of(secret) {
+        Some(location) => (
+            WarningCode::LocationSecret,
+            vec![
+                field,
+                (
+                    "kind",
+                    location_kind(domain::secrets::rclone_location(location)),
+                ),
+            ],
+        ),
+        None => (WarningCode::ConfigInlineSecret, vec![field]),
+    }
+}
+
+/// The `kind` argument of a `location-secret` warning.
+fn location_kind(rclone: bool) -> MsgArg {
+    text(if rclone { "rclone" } else { "url" })
 }
 
 /// What `serve` runs: the router's state, the operation log it writes, and
@@ -1079,7 +1104,10 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
         ProfileNotice::InlineSecret { field } => {
             (WarningCode::InlineSecret, vec![("field", text(field))])
         }
-        ProfileNotice::LocationSecret { .. } => todo!(),
+        ProfileNotice::LocationSecret { field, rclone } => (
+            WarningCode::LocationSecret,
+            vec![("field", text(field)), ("kind", location_kind(rclone))],
+        ),
         ProfileNotice::TagDropped { tag } => {
             (WarningCode::ProfileTagDropped, vec![("tag", text(tag))])
         }
@@ -1732,9 +1760,15 @@ fn repository_row(
         warnings: settings
             .inline_secrets()
             .iter()
-            .map(|secret| api::WarningDto {
-                code: WarningCode::ConfigInlineSecret,
-                args: [("field".to_owned(), MsgArg::Text(secret.field()))].into(),
+            .map(|secret| {
+                let (code, args) = inline_secret_warning(settings, secret);
+                api::WarningDto {
+                    code,
+                    args: args
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value))
+                        .collect(),
+                }
             })
             .collect(),
     }

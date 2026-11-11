@@ -17,13 +17,19 @@ const SECRET_WORDS: [&str; 7] = [
 /// rclone backend reads `use-password` as a switch.
 const NOT_SECRETS: [&str; 1] = ["use_password"];
 
+/// Names that hold a credential only as the whole name. rclone's SFTP, FTP
+/// and SMB backends keep their password in `pass`; `bypass_cache` and
+/// `passive` hold none.
+const SECRET_NAMES: [&str; 1] = ["pass"];
+
 /// Whether a backend option of this name holds a credential, whoever wrote
 /// it. The values of such options are secrets even when they are written
 /// inline in the config, so the redactor hides them (I4, §10.2).
 ///
-/// A name is a secret when it has a [`SECRET_WORDS`] word in it or ends in
-/// `_key` (`account_key`, `application_key`, `encryption_key`,
-/// `temp_url_key`); `-` and `_` are the same, and case doesn't matter.
+/// A name is a secret when it is one of [`SECRET_NAMES`], has a
+/// [`SECRET_WORDS`] word in it or ends in `_key` (`account_key`,
+/// `application_key`, `encryption_key`, `temp_url_key`); `-` and `_` are the
+/// same, and case doesn't matter.
 /// Names that only identify a credential (`access_key_id`,
 /// `application_key_id`) and `key`, which SFTP uses for the path of a key
 /// file, are not secrets. Anything whose value comes from a `${…}` reference
@@ -33,7 +39,9 @@ pub fn is_secret_option(name: &str) -> bool {
     if NOT_SECRETS.contains(&name.as_str()) {
         return false;
     }
-    SECRET_WORDS.iter().any(|word| name.contains(word)) || name.ends_with("_key")
+    SECRET_NAMES.contains(&name.as_str())
+        || SECRET_WORDS.iter().any(|word| name.contains(word))
+        || name.ends_with("_key")
 }
 
 #[cfg(test)]

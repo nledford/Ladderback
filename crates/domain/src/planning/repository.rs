@@ -73,8 +73,14 @@ impl RepositorySettings {
     /// its own. How to move it out depends on the location
     /// ([`rclone_location`](crate::secrets::rclone_location)).
     pub fn location_of(&self, secret: &InlineSecret) -> Option<&str> {
-        let _ = secret;
-        todo!()
+        match secret {
+            InlineSecret::Location => Some(&self.repository),
+            InlineSecret::LocationHot => self.repo_hot.as_deref(),
+            InlineSecret::Password
+            | InlineSecret::Option(_)
+            | InlineSecret::OptionHot(_)
+            | InlineSecret::OptionCold(_) => None,
+        }
     }
 
     /// Whether `other` points at the same place: the same `repository`,
