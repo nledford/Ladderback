@@ -5,12 +5,16 @@
 # requests only restore it. It keeps one build per OS and commit, under one
 # key, and the first job to finish saves it; before, that was `Wasm tests`, a
 # few hundred megabytes, and every other Linux job restored it and rebuilt
-# nearly every crate. So on Linux only `Check (ubuntu-latest)` saves: it builds
-# the most, and the other jobs' builds are subsets of it or close (red-first.yml
-# starts from it too). The others empty their target dir after their last step
-# on a push, and mbx skips the save of a job with no build to keep. A cache per
-# job doesn't fit: the repository's Actions cache holds 10 GB, and the macOS
-# build alone takes 4.7.
+# nearly every crate. So on Linux only `Check (ubuntu-latest)` saves under that
+# key: it builds the most, and `Release-build tests`, the host part of `UI
+# journeys` and red-first.yml start from its build. `UI journeys` and
+# `Release-build tests` empty their target dir after their last step on a
+# push, and mbx skips the save of a job with no build to keep. `Wasm tests`
+# builds wasm32 tests, which Check doesn't, so it keeps a cache of its own
+# (`cache-generation`), a few hundred megabytes. A cache per job doesn't fit:
+# the repository's Actions cache holds 10 GB, and the macOS build alone takes
+# 4.7. If Check fails on a push, that commit saves no Linux build, and pull
+# requests restore the one before.
 name: CI
 
 on:
@@ -214,9 +218,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it. Its
+      # own cache key, not Check's (top of this file).
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
+        with:
+          cache-generation: v1-wasm
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
@@ -229,9 +236,6 @@ jobs:
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: just test-wasm
-      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
-      - if: github.event_name == 'push'
-        run: rm -rf target
 
   # actionlint and zizmor on the workflows (`just lint-workflows`). zizmor's
   # online audits (known-vulnerable actions, impostor commits) read public
