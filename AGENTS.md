@@ -147,7 +147,7 @@ After implementing a non-trivial change, get one independent adversarial review 
 
 ## Parallel agents
 
-Several agents may work on the repository at once (§13.5). Each one:
+Several agents may work on the repository at once (§13.5). Whoever starts them starts with 3: at most 2 or 3 that edit code, 2 to 4 running builds, tests or Docker (on one machine, nearly every agent that edits code), and 5 to 8 doing read-only research, never more than 10. Ask each for a short, structured report. Lower the number when edits conflict, work is duplicated or requests fail with 429; the reasons are in §13.5, item 5. Each agent:
 
 - works in its own git worktree under `.worktrees/<slug>` (git ignores the folder): `git worktree add -b <branch> .worktrees/<slug> origin/main` from the main checkout. It uses its own `CARGO_TARGET_DIR` and deletes that target directory when done;
 - edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
