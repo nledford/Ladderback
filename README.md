@@ -6,7 +6,7 @@
 A self-hosted backup manager for [rustic](https://rustic.cli.rs): plans, schedules and one dashboard for every machine.
 
 > [!WARNING]
-> **Ladderback is early in development and can't make backups yet.** Don't use it for backups until the [roadmap](#roadmap) shows a usable release. Until then, use the `rustic` CLI directly or [Backrest](https://github.com/garethgeorge/backrest).
+> **Ladderback is early in development: 0.1.0 runs backups only by hand, with no scheduler and no restore.** Don't rely on it for backups until the [roadmap](#roadmap) shows a usable release. Until then, use the `rustic` CLI directly or [Backrest](https://github.com/garethgeorge/backrest); the `rustic` CLI also restores from a repository Ladderback backs up to.
 
 ## What it will do
 
@@ -37,7 +37,7 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 
 **Backrest is the better choice if you:**
 
-- need something that **works today**. Backrest is released; Ladderback is a design;
+- need something that **works today**. Backrest is mature; Ladderback is at 0.1.0, with no scheduler or restore yet;
 - use **Windows**;
 - use **restic** and want to keep restic maintaining your repositories. Restic must never prune a repository Ladderback manages;
 - need **multiple user accounts** or a way to run **arbitrary repository commands** from the UI. Ladderback has neither;
@@ -47,11 +47,11 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Roadmap
 
-The skeleton (M0) and the backup engine (M1a) are in place; there is no way to configure or run backups yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
+The skeleton (M0), the backup engine (M1a) and the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) are in place: backups run by hand, with no scheduler yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
 
 - [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
 - [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
-- [ ] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
+- [x] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
 - [ ] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications; systemd and launchd service install; optional login; signed macOS builds. **First usable release.**
 - [ ] **M3: Browse and restore.** Snapshot browser, restore into a new folder or in place, downloads as tar or zip, repository stats.
 - [ ] **M4a: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts.
