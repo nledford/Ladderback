@@ -72,14 +72,15 @@ architecture:
     RELEASE_FLAGS='{{ release_flags }}' scripts/check-architecture.sh
 
 # Checks the dependency tree against deny.toml: RustSec advisories, licences,
-# banned crates and sources (technical design §13.6). It fetches the advisory
-# database, so it needs the network, and a new advisory can fail it without any
-# change here: `verify` leaves it out, and CI runs it in its own job, nightly
-# too.
+# banned crates and sources (technical design §13.6), for every workspace
+# package: `web` is not a dependency of the root package, so without
+# `--workspace` its tree would go unchecked. It fetches the advisory database,
+# so it needs the network, and a new advisory can fail it without any change
+# here: `verify` leaves it out, and CI runs it in its own job, nightly too.
 [doc('Check dependencies for advisories, licences, bans and sources (cargo-deny; needs the network).')]
 [group('quality')]
 deny:
-    cargo deny --all-features check
+    cargo deny --locked --all-features --workspace check
 
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
@@ -267,8 +268,9 @@ red-first base='origin/main':
 check-pr-title title:
     node scripts/check-pr-title.ts {{ quote(title) }}
 
-# Run every check CI runs, except mutation testing, the red-first check and
-# `deny` (it needs the network).
+# `deny` also checks what CI checks, but it needs the network, so it is left
+# out, as are mutation testing and the red-first check.
+[doc('Run every check CI runs, except mutation testing, red-first and deny (needs the network).')]
 [group('quality')]
 verify: fmt-check lint lint-workflows architecture test test-contrast test-release test-wasm test-ui
 

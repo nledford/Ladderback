@@ -1,5 +1,5 @@
 # cargo-deny's policy for the dependency tree (technical design §13.6, §16
-# decision 42). `just deny` runs it; the `Dependencies (cargo-deny)` job in
+# decision 42). `just deny` runs it, for every workspace package; the `Dependencies (cargo-deny)` job in
 # .github/workflows/ci.yml runs the same recipe, on pull requests and nightly.
 
 # What the graph is: every feature, on the targets Ladderback builds for. The
@@ -31,15 +31,15 @@ yanked = "deny"
 # inside the requirements of `Cargo.toml` and of the crates that depend on it.
 ignore = [
     { id = "RUSTSEC-2026-0459", reason = "`libsqlite3-sys` 0.30.1 bundles SQLite before 3.54.0, which can return uninitialised memory when a database is opened with a sibling `-wal` file of another page size. Ladderback creates its own database and its `-wal` file in its data directory (`crates/adapters/store`), under the data-dir lock, and opens no database file that someone else wrote, so the crafted pair the advisory needs exists only for a person who can already write to that directory. The fix is `libsqlite3-sys` 0.39, but `sqlx-sqlite` 0.8.6 requires `^0.30`, so `cargo update` can't reach it. Remove this entry when `sqlx` moves to a patched `libsqlite3-sys`." },
+    { id = "RUSTSEC-2024-0436", reason = "`paste` 1.0.15 is unmaintained (archived by its author). It is a proc-macro that Leptos 0.8 (`either_of`, `reactive_graph`, `tachys`) expands when the `web` crate is compiled; it is not linked into any binary and takes no input at run time. Nothing to upgrade to: the latest Leptos 0.8 release still uses it, and `pastey`, the drop-in fork, is a swap for Leptos to make. Remove this entry when Leptos moves off `paste`." },
     { id = "RUSTSEC-2023-0071", reason = "`rsa` 0.9.10, the Marvin timing side channel in RSA private-key operations. It reaches the build only through OpenDAL's `reqsign` crates (`rustic_backend`), which sign a JWT with the RSA key of a cloud credential (an Azure client certificate, a Google service account) the person has configured. Ladderback is the client there: it decrypts nothing and takes no RSA input from a peer, so nobody can observe or time its signing the way the attack needs. No patched 0.9 release exists, and `rsa` 0.10 needs a release of `reqsign` that moves to it, under the `rustic_core` revision the workspace pins. Remove this entry when the pin moves to one." },
 ]
 
 # Ladderback is MIT OR Apache-2.0, so every dependency's licence must let a
 # binary under those terms ship. `cargo deny list` shows what the tree uses.
 # An expression with OR is satisfied by any one of its terms: `self_cell` is
-# `Apache-2.0 OR GPL-2.0-only` and `r-efi` is `MIT OR Apache-2.0 OR
-# LGPL-2.1-or-later`; we use them under Apache-2.0 and MIT, so GPL and LGPL are
-# not on the list. A crate with only a copyleft licence fails, and a new
+# `Apache-2.0 OR GPL-2.0-only`, and we use it under Apache-2.0, so GPL is not on
+# the list. A crate with only a copyleft licence fails, and a new
 # licence is a decision for the maintainer (§16, decision 42), not an edit made
 # to turn the check green.
 [licenses]
