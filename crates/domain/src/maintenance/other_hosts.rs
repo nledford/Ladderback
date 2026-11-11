@@ -6,7 +6,9 @@
 //! snapshot whose host is not one this agent records came from another
 //! machine, and that machine may maintain the repository too.
 
-use super::Snapshot;
+use std::collections::BTreeSet;
+
+use super::{Ownership, Snapshot};
 use crate::execution::{Warning, WarningKind};
 use crate::planning::AgentConfig;
 use crate::{AgentId, RepositoryAlias};
@@ -41,8 +43,36 @@ impl OtherHosts {
         machine: &str,
         snapshots: impl IntoIterator<Item = &'a Snapshot>,
     ) -> Self {
-        let _ = (config, alias, agent, machine, snapshots.into_iter().count());
-        todo!("the other hosts of a repository maintained here")
+        let maintained_here = config
+            .repository(alias)
+            .is_some_and(|repository| Ownership::owned_here(repository.maintenance));
+        if !maintained_here {
+            return Self::default();
+        }
+        let this_host: BTreeSet<&str> = std::iter::once(machine)
+            .chain(config.agent().hostname.as_ref().map(|host| host.as_str()))
+            .chain(
+                config
+                    .plans()
+                    .iter()
+                    .filter_map(|plan| plan.host.as_ref().map(|host| host.as_str())),
+            )
+            .collect();
+        let own = agent.as_uuid().hyphenated().to_string();
+        let others: BTreeSet<&str> = snapshots
+            .into_iter()
+            .filter(|snapshot| snapshot.agent() != Some(own.as_str()))
+            .map(|snapshot| snapshot.hostname.as_str())
+            .filter(|host| !this_host.contains(host))
+            .collect();
+        Self {
+            named: others
+                .iter()
+                .take(MAX_NAMED_OTHER_HOSTS)
+                .map(|host| (*host).to_owned())
+                .collect(),
+            count: others.len(),
+        }
     }
 
     /// The first [`MAX_NAMED_OTHER_HOSTS`] of them, in order.
@@ -64,8 +94,12 @@ impl OtherHosts {
     /// of them, as [`WarningKind::OtherHosts`] describes it: nothing when
     /// there are none.
     pub fn warning(&self, during: &str) -> Option<Warning> {
-        let _ = (during, WarningKind::OtherHosts);
-        todo!("the warning a run carries of the other hosts")
+        (!self.is_empty()).then(|| Warning {
+            kind: WarningKind::OtherHosts,
+            item: None,
+            during: during.to_owned(),
+            detail: format!("{}: {}", self.count, self.named.join(", ")),
+        })
     }
 }
 
