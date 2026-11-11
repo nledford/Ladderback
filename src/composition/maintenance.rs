@@ -14,7 +14,7 @@ use app::maintenance::{
 use app::ports::{ConfigStore, StoreError};
 use app::secrets::ResolveError;
 use domain::execution::FailureReason;
-use domain::maintenance::{SelectionToken, Snapshot, Tally};
+use domain::maintenance::{OtherHosts, SelectionToken, Snapshot, Tally};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use http_adapter::{MaintenanceRefusal, MaintenanceRequest};
 use platform::SystemClock;
@@ -107,6 +107,7 @@ pub(super) async fn start(
         None => use_case.assess(operation, &alias, kind).await,
     };
     let assessment = told(runner, &alias, assessed).await?;
+    log_other_hosts(&alias, assessment.other_hosts());
     let (started, wait_for_start) = futures::channel::oneshot::channel();
     let registry = Arc::clone(&runner.registry);
     let config = Arc::clone(&runner.config);
@@ -150,7 +151,7 @@ pub(super) async fn preview(
     let operation = OperationId::from_uuid(Uuid::now_v7());
     let preview = runner.maintenance().preview(operation, &alias, &kind).await;
     let preview = told(runner, &alias, preview).await?;
-    Ok(preview_dto(&alias, &preview))
+    Ok(preview_dto(&alias, &preview.preview).warned(other_hosts_warnings(&preview.other_hosts)))
 }
 
 /// `repository`'s snapshots grouped by who owns them, read live like a
@@ -241,7 +242,54 @@ fn groups_dto(alias: &RepositoryAlias, groups: &RepositoryGroups) -> api::Snapsh
                 )
             })
             .collect(),
+        warnings: other_hosts_warnings(&groups.other_hosts),
     }
+}
+
+/// What the page warns of the other hosts a repository maintained here
+/// holds snapshots from (§7.3): nothing when there are none.
+fn other_hosts_warnings(other_hosts: &OtherHosts) -> Vec<api::WarningDto> {
+    if other_hosts.is_empty() {
+        Vec::new()
+    } else {
+        vec![api::WarningDto::other_hosts(
+            other_hosts.count(),
+            other_hosts.hosts(),
+        )]
+    }
+}
+
+/// Says in the daemon's log, in the catalog's words, that a run of a
+/// repository maintained here goes ahead beside snapshots from other hosts,
+/// any of which may maintain it too (I1, §7.3).
+fn log_other_hosts(alias: &RepositoryAlias, other_hosts: &OtherHosts) {
+    if !other_hosts.is_empty() {
+        let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+        log::warn!("{}", other_hosts_line(alias, other_hosts, &localizer));
+    }
+}
+
+/// The line [`log_other_hosts`] writes. A host name is whatever a snapshot
+/// in the repository records, so it is escaped: a control character in one
+/// can't start a line of its own or forge another.
+fn other_hosts_line(
+    alias: &RepositoryAlias,
+    other_hosts: &OtherHosts,
+    localizer: &l10n::Localizer,
+) -> String {
+    let escaped: Vec<String> = other_hosts
+        .hosts()
+        .iter()
+        .map(|host| host.escape_debug().to_string())
+        .collect();
+    let warning = api::WarningDto::other_hosts(other_hosts.count(), &escaped);
+    let args: Vec<(&str, MsgArg)> = warning
+        .args
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.clone()))
+        .collect();
+    let message = localizer.warning(warning.code, &args, None);
+    format!("repository {}: {message}", alias.as_str())
 }
 
 /// A preview as the page reads it. The selection of a forget's and an
@@ -270,6 +318,7 @@ fn preview_dto(
                 unmanaged: tally_dto(forget.left_alone.unmanaged),
             },
             selection: forget.selection().as_str().to_owned(),
+            warnings: Vec::new(),
         },
         MaintenancePreview::Adopt(adopt) => api::MaintenancePreviewDto::adopt(
             adopt.into.as_str().to_owned(),
@@ -285,6 +334,7 @@ fn preview_dto(
             // A `keep-delete` is never shorter than rustic's own minimum, so
             // it is never negative.
             keep_delete_hours: u64::try_from(prune.keep_delete.get().as_hours()).unwrap_or(0),
+            warnings: Vec::new(),
         },
         MaintenancePreview::Check(check) => api::MaintenancePreviewDto::Check {
             read_data: check.read_data,
@@ -489,6 +539,52 @@ mod tests {
     }
 
     #[test]
+    fn a_host_name_in_the_log_is_escaped_so_it_cannot_forge_a_line() {
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: domain::secrets::SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let config = domain::planning::AgentConfig::new(
+            domain::planning::AgentSettings::default(),
+            domain::planning::Hooks::default(),
+            std::collections::BTreeMap::from([(
+                alias(),
+                domain::planning::RepositoryConfig {
+                    id: None,
+                    settings,
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            )]),
+            Vec::new(),
+        )
+        .expect("a valid configuration");
+        let forged = Snapshot {
+            hostname: "demo-nas\nrepository demo: all is well".to_owned(),
+            ..snapshot(1)
+        };
+        let other_hosts = OtherHosts::of(
+            &config,
+            &alias(),
+            &domain::AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-laptop",
+            [&forged],
+        );
+        let line = other_hosts_line(&alias(), &other_hosts, &l10n::Localizer::new(&[]));
+        assert!(line.starts_with("repository demo: "), "{line}");
+        assert!(!line.contains('\n'), "{line}");
+        assert!(
+            line.contains(r"demo-nas\nrepository demo: all is well"),
+            "{line}"
+        );
+    }
+
+    #[test]
     fn the_groups_are_told_by_owner_with_where_each_could_be_adopted() {
         let groups = RepositoryGroups {
             plans: vec![
@@ -518,6 +614,7 @@ mod tests {
                 },
                 adopt_into: vec![plan("home")],
             }],
+            other_hosts: Default::default(),
         };
         assert_eq!(
             groups_dto(&alias(), &groups),
@@ -549,6 +646,7 @@ mod tests {
                     snapshots: vec![shown(4)],
                     adopt_into: vec!["home".to_owned()],
                 }],
+                warnings: Vec::new(),
             }
         );
     }
@@ -633,6 +731,7 @@ mod tests {
                     },
                 },
                 selection: selection.as_str().to_owned(),
+                warnings: Vec::new(),
             }
         );
     }
@@ -653,6 +752,7 @@ mod tests {
                 count: 2,
                 listed: vec![shown(2), shown(1)],
                 selection: selection.as_str().to_owned(),
+                warnings: Vec::new(),
             }
         );
     }
@@ -683,6 +783,7 @@ mod tests {
                     packs_recovered: 1,
                     bytes_deleted: 4096,
                     keep_delete_hours: hours,
+                    warnings: Vec::new(),
                 }
             );
         }

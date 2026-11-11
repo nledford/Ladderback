@@ -6,6 +6,7 @@
 // found by role and accessible name.
 
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -13,7 +14,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { type BrowserWorld, startServer } from "../support/world.ts";
 import { serveDemoPlans } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
@@ -56,7 +57,7 @@ interface Answer {
 }
 
 /** One request to the scenario's daemon, as its own page would send it. */
-async function api(world: BrowserWorld, method: string, route: string, body?: unknown): Promise<Answer> {
+async function api(world: Pick<BrowserWorld, "baseUrl">, method: string, route: string, body?: unknown): Promise<Answer> {
   assert.ok(world.baseUrl, "this scenario's daemon was never started");
   const headers: Record<string, string> = { Origin: new URL(world.baseUrl).origin };
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -71,7 +72,7 @@ async function api(world: BrowserWorld, method: string, route: string, body?: un
 }
 
 /** Waits for the operation to end and asserts that it succeeded. */
-async function succeeds(world: BrowserWorld, started: Answer, what: string): Promise<void> {
+async function succeeds(world: Pick<BrowserWorld, "baseUrl">, started: Answer, what: string): Promise<void> {
   assert.equal(started.status, 202, `${what} was refused: ${JSON.stringify(started.json)}`);
   const id = started.json?.operation;
   assert.ok(typeof id === "string", `${what} was started with no operation id: ${JSON.stringify(started.json)}`);
@@ -86,7 +87,7 @@ async function succeeds(world: BrowserWorld, started: Answer, what: string): Pro
   assert.ok(status.startsWith("succeeded"), `${what} ended as ${status}`);
 }
 
-async function backUp(world: BrowserWorld, plan: string): Promise<void> {
+async function backUp(world: Pick<BrowserWorld, "baseUrl">, plan: string): Promise<void> {
   await succeeds(world, await api(world, "POST", "/api/v1/operations", { plan }), `the backup of ${plan}`);
 }
 
@@ -145,6 +146,41 @@ Given("the plan {string} has been backed up {int} times", async function (this: 
 Given("the plan {string} keeps the last {int} snapshots", async function (this: BrowserWorld, plan: string, count: number) {
   await keepLast(this, plan, count);
 });
+
+// Another machine's agent: a daemon of its own, whose own data folder gives it
+// its own agent ID, and whose plan of the same name, recording the host `host`
+// (§7.3), backs the same source up into the same repository. It maintains
+// nothing, and stops once its backup is done.
+Given(
+  "another machine called {string} has backed up the plan {string} once",
+  async function (this: BrowserWorld, host: string, plan: string) {
+    assert.ok(this.ownServer, "this scenario's daemon was never started");
+    const config = await readFile(configPath(this), "utf8");
+    const id = `id = ${JSON.stringify(plan)}`;
+    assert.ok(config.includes(id), `the config has no plan ${plan}`);
+    const local = 'maintenance = "local"';
+    assert.ok(config.includes(local), "the config's repository is not maintained here");
+    const machine = path.join(this.ownServer.scratch, "other-machine");
+    const configDir = path.join(machine, "config");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      path.join(configDir, "config.toml"),
+      config.replace(local, 'maintenance = "none"').replace(id, `${id}\nhost = ${JSON.stringify(host)}`),
+    );
+    const { child, url } = await startServer({
+      LADDERBACK_CONFIG_DIR: configDir,
+      LADDERBACK_DATA_DIR: path.join(machine, "data"),
+    });
+    try {
+      await backUp({ baseUrl: url }, plan);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+        await once(child, "exit");
+      }
+    }
+  },
+);
 
 // The history the plan made is now tagged with a plan this configuration
 // does not have: orphaned.
@@ -326,6 +362,24 @@ Then("the dialog {string} says {string}", async function (this: BrowserWorld, na
   );
 });
 
+// What a screen reader reads as the dialog opens, after its name: the text of
+// the elements its aria-describedby names, without bidi isolation marks.
+Then("the dialog {string} is described as saying {string}", async function (this: BrowserWorld, name: string, text: string) {
+  const dialog = dialogOf(this, name);
+  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  const described = await dialog.evaluate((el) =>
+    (el.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" "),
+  );
+  const read = described.replace(ISOLATION_MARKS, "").replace(/\s+/g, " ");
+  assert.ok(
+    read.includes(text),
+    `the dialog "${name}" is not described as saying "${text}" (its description reads ${JSON.stringify(read)})`,
+  );
+});
+
 Then("the dialog {string} offers the button {string}", async function (this: BrowserWorld, name: string, button: string) {
   await dialogOf(this, name)
     .getByRole("button", { name: namePattern(button) })
@@ -438,6 +492,16 @@ Then("the main content shows no line {string}", async function (this: BrowserWor
     .getByText(text, { exact: true })
     .first()
     .waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+});
+
+// A warning is a line of the main content, its data set apart by bidi
+// isolation marks.
+Then("the main content warns {string}", async function (this: BrowserWorld, text: string) {
+  await this.page
+    .getByRole("main")
+    .getByText(namePattern(text))
+    .first()
+    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
 });
 
 // Asked once the page has drawn what it waits for, such as a plan's rows: a

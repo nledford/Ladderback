@@ -281,6 +281,23 @@ async fn asks_for_groups(agent: &mut Agent) {
     api_get(agent, &format!("/api/v1/repositories/{ALIAS}/groups")).await;
 }
 
+#[then(expr = "the answer warns of snapshots from the other host {string}")]
+fn answer_warns_of_other_host(agent: &mut Agent, host: String) {
+    let (status, json) = super::repositories_steps::api_answer(agent);
+    assert_eq!(status, 200, "the answer: {json}");
+    assert_eq!(
+        json["warnings"],
+        serde_json::json!([{
+            "code": "maintenance-other-hosts",
+            "args": {
+                "count": {"type": "count", "value": 1},
+                "hosts": {"type": "text", "value": host},
+            },
+        }]),
+        "the answer: {json}"
+    );
+}
+
 #[when(expr = "the owner asks for the groups of the repository {string}")]
 async fn asks_for_groups_of(agent: &mut Agent, alias: String) {
     api_get(agent, &format!("/api/v1/repositories/{alias}/groups")).await;

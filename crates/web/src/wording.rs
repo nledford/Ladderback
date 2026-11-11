@@ -360,6 +360,7 @@ mod tests {
             listings: Vec::new(),
             confirm,
             selection: None,
+            warnings: Vec::new(),
         }
     }
 

@@ -1072,6 +1072,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 WarningCode::MaintenancePartial => WarningKind::MaintenancePartial,
                 WarningCode::CheckWarning => WarningKind::CheckWarning,
                 WarningCode::CheckError => WarningKind::CheckError,
+                WarningCode::MaintenanceOtherHosts => WarningKind::OtherHosts,
                 // The profile codes belong to the import and export, which
                 // run in the CLI; a worker that sent one is reported as the
                 // problem it claims, in its own words.
@@ -1348,6 +1349,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
                         WarningKind::CheckWarning => WarningCode::CheckWarning,
                         WarningKind::CheckError => WarningCode::CheckError,
+                        WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,

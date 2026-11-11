@@ -148,6 +148,13 @@ pub enum WarningKind {
     /// snapshot may not restore whole. What rustic reports at its error
     /// level, worded as [`Self::CheckWarning`].
     CheckError,
+    /// A forget, an adoption or a prune ran on a repository maintained here
+    /// that holds snapshots from other hosts, any of which may maintain it
+    /// too (I1, §7.3). `during` is the run (`forget`, `adopt` or `prune`)
+    /// and `detail` is `<count>: <hosts>`, how many other hosts there are and
+    /// the first five of them by name, separated by `, `
+    /// ([`OtherHosts`](crate::maintenance::OtherHosts)).
+    OtherHosts,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }

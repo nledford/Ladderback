@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use domain::maintenance::{
     AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
-    Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -47,7 +47,7 @@ use crate::ports::{
 use crate::secrets::{ResolveError, ResolveRepository};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{FailureReason, Operation, Trigger, Warning, WarningKind};
+use domain::execution::{FailureReason, Operation, OperationKind, Trigger, Warning, WarningKind};
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
 /// just under the weekly interval a prune is expected to run on (§7.3).
@@ -188,6 +188,16 @@ pub struct MaintenanceAssessment {
     operation: OperationId,
     job: Job,
     partition: Option<Partition>,
+    other_hosts: OtherHosts,
+}
+
+impl MaintenanceAssessment {
+    /// The other hosts the repository holds snapshots from, when it is
+    /// maintained here (§7.3): the run carries them as a warning. A check
+    /// only reads, so it has none.
+    pub fn other_hosts(&self) -> &OtherHosts {
+        &self.other_hosts
+    }
 }
 
 /// What a run would do, decided and not yet done (§7.3).
@@ -214,6 +224,15 @@ impl MaintenancePreview {
             Self::Prune(_) | Self::Check(_) => None,
         }
     }
+}
+
+/// A preview, and the other hosts the repository holds snapshots from when
+/// it is maintained here (§7.3), which the person reviewing the run is told
+/// of. A check only reads, so its preview names none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Previewed {
+    pub preview: MaintenancePreview,
+    pub other_hosts: OtherHosts,
 }
 
 /// The snapshots an adoption would rewrite with the tags of `into`, newest
@@ -292,6 +311,9 @@ pub struct RepositoryGroups {
     pub plans: Vec<PlanHistory>,
     pub orphaned: Vec<OrphanedHistory>,
     pub unmanaged: Vec<UnmanagedHistory>,
+    /// The hosts other than this one that the repository holds snapshots
+    /// from, when it is maintained here (§7.3).
+    pub other_hosts: OtherHosts,
 }
 
 /// Runs maintenance manually on the local owner.
@@ -354,13 +376,15 @@ impl RunMaintenance {
     const CHECK_READS_DATA: bool = false;
 
     /// Decides what the run does, from reads alone: the configuration, the
-    /// repository's ID and, for a forget or an adoption, its snapshots. Nothing
-    /// is stored, no I7 slot is taken and no engine job is left running, so a
-    /// caller that is dropped here, because the client that asked went away,
-    /// has left nothing behind. Every refusal that doesn't need the slot (an
-    /// unknown repository, one this agent doesn't maintain, a policy that
-    /// keeps nothing, an adoption that matches no group) is made here, before
-    /// the log is touched, and each read gives up after [`READ_TIMEOUT`].
+    /// repository's ID and, for a forget, an adoption or a prune, its
+    /// snapshots, which also tell the other hosts a run warns of (§7.3).
+    /// Nothing is stored, no I7 slot is taken and no engine job is left
+    /// running, so a caller that is dropped here, because the client that
+    /// asked went away, has left nothing behind. Every refusal that doesn't
+    /// need the slot (an unknown repository, one this agent doesn't maintain,
+    /// a policy that keeps nothing, an adoption that matches no group, a
+    /// listing that failed) is made here, before the log is touched, and each
+    /// read gives up after [`READ_TIMEOUT`].
     pub async fn assess(
         &self,
         op: OperationId,
@@ -397,11 +421,13 @@ impl RunMaintenance {
         let config = self.maintained(alias).await?;
         let access = self.identified(op, &config, alias).await?;
 
-        let (partition, job) = match kind {
+        let (other_hosts, partition, job) = match kind {
             MaintenanceKind::Forget => {
                 let (partition, forget) = self.forget_of(op, &config, alias, &access).await?;
                 held_to(held, || forget.selection())?;
                 (
+                    // The forget's own listing tells the hosts.
+                    self.other_hosts_in(&config, alias, &partition),
                     Some(partition),
                     Job::Forget(ForgetJob {
                         repository: access,
@@ -425,6 +451,7 @@ impl RunMaintenance {
                     .collect();
                 let tags = PlanTags::new(adoption.into, self.agent);
                 (
+                    self.other_hosts_in(&config, alias, &partition),
                     Some(partition),
                     Job::Rewrite(RewriteJob {
                         repository: access,
@@ -434,6 +461,7 @@ impl RunMaintenance {
                 )
             }
             MaintenanceKind::Prune => (
+                self.listed_other_hosts(op, &config, alias, &access).await?,
                 None,
                 Job::Prune(PruneJob {
                     repository: access,
@@ -441,6 +469,8 @@ impl RunMaintenance {
                 }),
             ),
             MaintenanceKind::Check => (
+                // A check only reads, so it lists nothing and warns of nothing.
+                OtherHosts::default(),
                 None,
                 Job::Check(CheckJob {
                     repository: access,
@@ -453,6 +483,7 @@ impl RunMaintenance {
             operation: op,
             job,
             partition,
+            other_hosts,
         })
     }
 
@@ -476,6 +507,7 @@ impl RunMaintenance {
             operation: id,
             job,
             partition,
+            other_hosts,
         } = assessment;
         let mut operation = Operation::queue(
             id,
@@ -491,6 +523,12 @@ impl RunMaintenance {
         operation
             .start(self.clock.now())
             .expect("a queued operation starts");
+        if let Some(warning) =
+            other_hosts_during(job.kind()).and_then(|during| other_hosts.warning(during))
+        {
+            // Stored with the running row, so the run says it from the start.
+            let _ = operation.record_warning(warning);
+        }
         match self.store.try_start(&operation).await {
             Ok(Start::Started) => Ok(PreparedMaintenance {
                 operation,
@@ -514,37 +552,48 @@ impl RunMaintenance {
         op: OperationId,
         alias: &RepositoryAlias,
         kind: &MaintenanceKind,
-    ) -> Result<MaintenancePreview, MaintenanceError> {
-        match kind {
+    ) -> Result<Previewed, MaintenanceError> {
+        let (preview, other_hosts) = match kind {
             MaintenanceKind::Check => {
                 // A check needs nothing of the repository to say what it
-                // does, only that this agent maintains it.
+                // does, only that this agent maintains it. It only reads, so
+                // it lists nothing and warns of nothing.
                 self.maintained(alias).await?;
-                Ok(MaintenancePreview::Check(CheckPreview {
-                    read_data: Self::CHECK_READS_DATA,
-                }))
+                Ok((
+                    MaintenancePreview::Check(CheckPreview {
+                        read_data: Self::CHECK_READS_DATA,
+                    }),
+                    OtherHosts::default(),
+                ))
             }
             MaintenanceKind::Forget => {
                 let config = self.maintained(alias).await?;
                 let access = self.open(&config, alias).await?;
-                let (_, forget) = self.forget_of(op, &config, alias, &access).await?;
-                Ok(MaintenancePreview::Forget(forget))
+                let (partition, forget) = self.forget_of(op, &config, alias, &access).await?;
+                Ok((
+                    MaintenancePreview::Forget(forget),
+                    self.other_hosts_in(&config, alias, &partition),
+                ))
             }
             MaintenanceKind::Adopt(adoption) => {
                 let config = self.maintained(alias).await?;
                 let access = self.open(&config, alias).await?;
-                let (_, snapshots) = self
+                let (partition, snapshots) = self
                     .adoption_of(op, &config, alias, &access, adoption)
                     .await?;
-                Ok(MaintenancePreview::Adopt(AdoptPreview {
-                    into: adoption.into.clone(),
-                    snapshots,
-                }))
+                Ok((
+                    MaintenancePreview::Adopt(AdoptPreview {
+                        into: adoption.into.clone(),
+                        snapshots,
+                    }),
+                    self.other_hosts_in(&config, alias, &partition),
+                ))
             }
             MaintenanceKind::Prune => {
                 // Opened as the prune opens it, so through the cache.
                 let config = self.maintained(alias).await?;
                 let access = self.identified(op, &config, alias).await?;
+                let other_hosts = self.listed_other_hosts(op, &config, alias, &access).await?;
                 let keep_delete = default_keep_delete();
                 let job = Job::PrunePlan(PruneJob {
                     repository: access,
@@ -557,15 +606,22 @@ impl RunMaintenance {
                         exit_code: None,
                     }));
                 };
-                Ok(MaintenancePreview::Prune(PrunePreview {
-                    packs_marked: plan.packs_marked,
-                    packs_deleted: plan.packs_deleted,
-                    packs_recovered: plan.packs_recovered,
-                    bytes_deleted: plan.bytes_deleted,
-                    keep_delete,
-                }))
+                Ok((
+                    MaintenancePreview::Prune(PrunePreview {
+                        packs_marked: plan.packs_marked,
+                        packs_deleted: plan.packs_deleted,
+                        packs_recovered: plan.packs_recovered,
+                        bytes_deleted: plan.bytes_deleted,
+                        keep_delete,
+                    }),
+                    other_hosts,
+                ))
             }
-        }
+        }?;
+        Ok(Previewed {
+            preview,
+            other_hosts,
+        })
     }
 
     /// The repository's snapshots grouped by who owns them (§7.3), as a
@@ -595,6 +651,7 @@ impl RunMaintenance {
                 .collect()
         };
         let hostname = self.host_of(&config);
+        let other_hosts = self.other_hosts_in(&config, alias, &partition);
         // Which plan takes orphaned history is the person's choice, so every
         // plan of the repository is offered, to a group an adoption can name:
         // it names both tags, so a group missing one can't be adopted.
@@ -631,6 +688,7 @@ impl RunMaintenance {
                 .zip(claimants)
                 .map(|(group, adopt_into)| UnmanagedHistory { group, adopt_into })
                 .collect(),
+            other_hosts,
         })
     }
 
@@ -839,6 +897,57 @@ impl RunMaintenance {
             (plan.id.clone(), normalized)
         }))
         .await
+    }
+
+    /// The other hosts of the repository `alias` among the snapshots one
+    /// listing of it was partitioned from (§7.3).
+    fn other_hosts_in(
+        &self,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+        partition: &Partition,
+    ) -> OtherHosts {
+        let snapshots = partition
+            .managed
+            .iter()
+            .flat_map(|group| &group.snapshots)
+            .chain(partition.orphaned.iter().flat_map(|group| &group.snapshots))
+            .chain(
+                partition
+                    .unmanaged
+                    .iter()
+                    .flat_map(|group| &group.snapshots),
+            );
+        OtherHosts::of(config, alias, &self.agent, &self.hostname, snapshots)
+    }
+
+    /// The other hosts of the repository `alias`, for a run that lists
+    /// nothing of its own (a prune): a listing of it. Only a repository this
+    /// agent maintains gets this far.
+    async fn listed_other_hosts(
+        &self,
+        op: OperationId,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+        access: &RepositoryAccess,
+    ) -> Result<OtherHosts, MaintenanceError> {
+        let snapshots: Vec<Snapshot> = list(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            access.clone(),
+        )
+        .await?
+        .iter()
+        .map(selected)
+        .collect();
+        Ok(OtherHosts::of(
+            config,
+            alias,
+            &self.agent,
+            &self.hostname,
+            &snapshots,
+        ))
     }
 
     /// The host name a plan that names none matches an unmanaged group by:
@@ -1093,6 +1202,17 @@ fn names(job: &Job) -> usize {
         Job::Forget(job) => job.ids.len(),
         Job::Rewrite(job) => job.ids.len(),
         _ => 0,
+    }
+}
+
+/// The run an other-hosts warning names, as `WarningKind::OtherHosts` says:
+/// a forget, an adoption or a prune. A check only reads, so it warns of none.
+fn other_hosts_during(kind: OperationKind) -> Option<&'static str> {
+    match kind {
+        OperationKind::Forget => Some("forget"),
+        OperationKind::Adopt => Some("adopt"),
+        OperationKind::Prune => Some("prune"),
+        _ => None,
     }
 }
 

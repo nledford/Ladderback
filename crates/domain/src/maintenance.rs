@@ -19,6 +19,10 @@ use crate::execution::plan_tags;
 use crate::planning::{Maintenance, Plan, RetentionPolicy};
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
 
+mod other_hosts;
+
+pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
+
 /// One snapshot as the owner sees it: what a listing reports, minus what
 /// only the engine needs.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -98,6 +98,7 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     MaintenancePartial => msg::WARNING_MAINTENANCE_PARTIAL,
     CheckWarning => msg::WARNING_CHECK_WARNING,
     CheckError => msg::WARNING_CHECK_ERROR,
+    MaintenanceOtherHosts => msg::WARNING_MAINTENANCE_OTHER_HOSTS,
     ProfileKeyIgnored => msg::WARNING_PROFILE_KEY_IGNORED,
     ProfilePrune => msg::WARNING_PROFILE_PRUNE,
     ProfileEnvIgnored => msg::WARNING_PROFILE_ENV_IGNORED,

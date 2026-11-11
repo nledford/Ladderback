@@ -289,6 +289,12 @@ pub enum WarningCode {
     /// so a snapshot may not restore whole. The warning's detail is rustic's
     /// own words.
     CheckError,
+    /// A repository maintained here holds snapshots from other hosts, any of
+    /// which may maintain it too, which can't be detected without a hub (I1,
+    /// §7.3). Said on its groups and the review of a forget, an adoption or
+    /// a prune. The argument `count` is how many other hosts there are and
+    /// `hosts` names the first five of them, separated by `, `.
+    MaintenanceOtherHosts,
     #[serde(other)]
     Unknown,
 }
@@ -711,6 +717,18 @@ impl WarningCode {
                     optional: true,
                 },
             ],
+            Self::MaintenanceOtherHosts => &[
+                ArgSpec {
+                    name: "count",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "hosts",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::MaintenancePartial => &[
                 ArgSpec {
                     name: "what",
@@ -848,6 +866,22 @@ impl WarningDto {
             code,
             args: named(args),
         }
+    }
+
+    /// The warning that a repository maintained here holds snapshots from
+    /// `count` other hosts, of which it names `hosts`, in order: the first
+    /// five (§7.3).
+    pub fn other_hosts(count: usize, hosts: &[String]) -> Self {
+        Self::new(
+            WarningCode::MaintenanceOtherHosts,
+            [
+                (
+                    "count",
+                    MsgArg::Count(u64::try_from(count).unwrap_or(u64::MAX)),
+                ),
+                ("hosts", MsgArg::Text(hosts.join(", "))),
+            ],
+        )
     }
 }
 
@@ -1058,6 +1092,36 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WarningCode::SourceUnreadable).unwrap(),
             r#""source-unreadable""#
+        );
+    }
+
+    #[test]
+    fn other_hosts_have_their_own_code_counted_and_named() {
+        assert_eq!(
+            serde_json::to_string(&WarningCode::MaintenanceOtherHosts).unwrap(),
+            r#""maintenance-other-hosts""#
+        );
+        let spec = |name, kind| ArgSpec {
+            name,
+            kind,
+            optional: false,
+        };
+        assert_eq!(
+            WarningCode::MaintenanceOtherHosts.args(),
+            &[spec("count", ArgKind::Count), spec("hosts", ArgKind::Text)]
+        );
+        let named = ["demo-desktop".to_owned(), "demo-nas".to_owned()];
+        let warning = WarningDto::other_hosts(7, &named);
+        assert_eq!(warning.code, WarningCode::MaintenanceOtherHosts);
+        assert_eq!(
+            warning.args,
+            BTreeMap::from([
+                ("count".to_owned(), MsgArg::Count(7)),
+                (
+                    "hosts".to_owned(),
+                    MsgArg::Text("demo-desktop, demo-nas".to_owned())
+                ),
+            ])
         );
     }
 
@@ -2192,6 +2256,11 @@ pub struct SnapshotGroupsDto {
     pub plans: Vec<PlanGroupDto>,
     pub orphaned: Vec<OrphanedGroupDto>,
     pub unmanaged: Vec<UnmanagedGroupDto>,
+    /// What the page warns of the repository: the other hosts it holds
+    /// snapshots from, when it is maintained here (§7.3). Left out when
+    /// there is nothing to warn of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningDto>,
 }
 
 /// How many of a list's snapshots are shown, and which: how many `snapshots`
@@ -2344,6 +2413,11 @@ pub enum MaintenancePreviewDto {
         plans: Vec<ForgetPlanDto>,
         left_alone: LeftAloneDto,
         selection: String,
+        /// What the review warns of: the other hosts the repository holds
+        /// snapshots from, when it is maintained here (§7.3). Left out when
+        /// there is nothing to warn of.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningDto>,
     },
     /// The snapshots an adoption would rewrite into the plan `into`.
     Adopt {
@@ -2354,6 +2428,9 @@ pub enum MaintenancePreviewDto {
         /// [`MAX_PREVIEW_SNAPSHOTS`].
         listed: Vec<SnapshotDto>,
         selection: String,
+        /// As a forget's.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningDto>,
     },
     /// What a prune would do, from a dry run of the engine's own plan. Its
     /// figures are estimates: the plan is computed again when the prune
@@ -2366,6 +2443,9 @@ pub enum MaintenancePreviewDto {
         /// How long a pack stays marked before a later prune deletes it
         /// (I2).
         keep_delete_hours: u64,
+        /// As a forget's.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningDto>,
     },
     /// A check changes nothing; it holds the repository while it runs.
     Check { read_data: bool },
@@ -2375,7 +2455,7 @@ impl MaintenancePreviewDto {
     /// The preview of an adoption into `into` of `snapshots`, newest first:
     /// `count` is all of them and at most [`MAX_PREVIEW_SNAPSHOTS`] are
     /// listed. `dto` shows one snapshot, or `None` for one the wire can't
-    /// carry.
+    /// carry. It warns of nothing until [`warned`](Self::warned) says.
     pub fn adopt<T>(
         into: String,
         snapshots: &[T],
@@ -2388,6 +2468,30 @@ impl MaintenancePreviewDto {
             count,
             listed,
             selection,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// The same preview, warning of `warnings`. A check's warns of nothing:
+    /// it only reads.
+    #[must_use]
+    pub fn warned(mut self, warned: Vec<WarningDto>) -> Self {
+        match &mut self {
+            Self::Forget { warnings, .. }
+            | Self::Adopt { warnings, .. }
+            | Self::Prune { warnings, .. } => *warnings = warned,
+            Self::Check { .. } => {}
+        }
+        self
+    }
+
+    /// What the review warns of.
+    pub fn warnings(&self) -> &[WarningDto] {
+        match self {
+            Self::Forget { warnings, .. }
+            | Self::Adopt { warnings, .. }
+            | Self::Prune { warnings, .. } => warnings,
+            Self::Check { .. } => &[],
         }
     }
 }
@@ -2985,7 +3089,7 @@ mod maintenance_dto_tests {
     use super::{
         AdoptionFromDto, ErrorCode, ForgetPlanDto, LeftAloneDto, MAX_GROUP_SNAPSHOTS,
         MAX_PREVIEW_SNAPSHOTS, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto,
-        PlanGroupDto, SnapshotDto, SnapshotGroupsDto, TallyDto, UnmanagedGroupDto,
+        PlanGroupDto, SnapshotDto, SnapshotGroupsDto, TallyDto, UnmanagedGroupDto, WarningDto,
     };
 
     fn snapshot() -> SnapshotDto {
@@ -3018,12 +3122,14 @@ mod maintenance_dto_tests {
                     unmanaged: TallyDto::default(),
                 },
                 selection: "68497038cf038672".to_owned(),
+                warnings: Vec::new(),
             },
             MaintenancePreviewDto::Adopt {
                 into: "demo-home".to_owned(),
                 count: 1,
                 listed: vec![snapshot()],
                 selection: "68497038cf038672".to_owned(),
+                warnings: Vec::new(),
             },
             MaintenancePreviewDto::Prune {
                 packs_marked: 2,
@@ -3031,6 +3137,7 @@ mod maintenance_dto_tests {
                 packs_recovered: 0,
                 bytes_deleted: 4096,
                 keep_delete_hours: 144,
+                warnings: Vec::new(),
             },
             MaintenancePreviewDto::Check { read_data: false },
         ]
@@ -3078,6 +3185,38 @@ mod maintenance_dto_tests {
                 "keep-delete-hours": 144,
             })
         );
+        assert_eq!(
+            to_value(&check).unwrap(),
+            json!({"kind": "check", "read-data": false})
+        );
+    }
+
+    #[test]
+    fn a_preview_warns_of_what_it_is_given_and_a_check_of_nothing() {
+        let warned = vec![WarningDto::other_hosts(1, &["demo-desktop".to_owned()])];
+        let [forget, adopt, prune, check] = previews();
+        for preview in [forget, adopt, prune] {
+            assert!(preview.warnings().is_empty(), "{preview:?}");
+            let preview = preview.warned(warned.clone());
+            assert_eq!(preview.warnings(), warned.as_slice());
+            let wire = to_value(&preview).unwrap();
+            assert_eq!(
+                wire["warnings"],
+                json!([{
+                    "code": "maintenance-other-hosts",
+                    "args": {
+                        "count": {"type": "count", "value": 1},
+                        "hosts": {"type": "text", "value": "demo-desktop"},
+                    },
+                }])
+            );
+            assert_eq!(
+                from_str::<MaintenancePreviewDto>(&wire.to_string()).unwrap(),
+                preview
+            );
+        }
+        let check = check.warned(warned);
+        assert!(check.warnings().is_empty(), "{check:?}");
         assert_eq!(
             to_value(&check).unwrap(),
             json!({"kind": "check", "read-data": false})
@@ -3172,6 +3311,7 @@ mod maintenance_dto_tests {
                 snapshots: vec![snapshot()],
                 adopt_into: vec![],
             }],
+            warnings: Vec::new(),
         };
         let wire = to_value(&groups).unwrap();
         assert_eq!(wire["orphaned"][0]["adopt-into"], json!(["demo-home"]));
@@ -3293,6 +3433,7 @@ mod maintenance_dto_tests {
             count,
             listed,
             selection,
+            ..
         } = adopt
         else {
             panic!("an adoption preview");
