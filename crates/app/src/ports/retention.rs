@@ -24,6 +24,9 @@ pub enum RetentionError {
 /// Applies a plan's retention policy to the plan's own snapshots, and names
 /// the ones the policy lets go. The real adapter is rustic's own
 /// `ForgetGroups`, in-process (§3.2); a fake serves the acceptance runner.
+/// A calendar rule (`keep-daily` and the rest) counts each snapshot on the
+/// calendar of its own snapshot time, the offset the clock that took it
+/// recorded, never this machine's zone (§16, decision 56).
 #[async_trait]
 pub trait Retention: Send + Sync {
     /// Which of `group`'s snapshots `policy` removes. `group` is one
