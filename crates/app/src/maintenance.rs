@@ -102,6 +102,9 @@ pub enum AdoptionSource {
 pub enum MaintenanceError {
     /// The configuration holds no repository under the alias asked for.
     UnknownRepository,
+    /// This agent doesn't maintain the repository: its entry doesn't ask for
+    /// `local` (I1, §7.3). Refused before the engine is asked anything.
+    NotOwner,
     /// The configuration couldn't be read.
     Unavailable,
     Resolve(ResolveError),

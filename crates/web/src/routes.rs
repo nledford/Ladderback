@@ -608,13 +608,15 @@ pub(crate) fn refusal(
     localizer.error(code, &args, detail).into_text()
 }
 
-/// What a person has typed into the Repositories form, one signal per field.
+/// What a person has typed into the Repositories form, one signal per field,
+/// and whether they asked this agent to maintain the repository.
 #[derive(Clone, Copy)]
 struct Inputs {
     name: RwSignal<String>,
     location: RwSignal<String>,
     hot_storage: RwSignal<String>,
     password: RwSignal<String>,
+    maintain_here: RwSignal<bool>,
 }
 
 impl Inputs {
@@ -624,6 +626,7 @@ impl Inputs {
             location: RwSignal::new(String::new()),
             hot_storage: RwSignal::new(String::new()),
             password: RwSignal::new(String::new()),
+            maintain_here: RwSignal::new(false),
         }
     }
 
@@ -642,6 +645,7 @@ impl Inputs {
             location: self.location.get_untracked(),
             hot_storage: self.hot_storage.get_untracked(),
             password: self.password.get_untracked(),
+            maintain_here: false,
         }
     }
 
@@ -1092,6 +1096,8 @@ mod tests {
             );
             inputs.of(field).set(value.to_owned());
         }
+        assert!(!inputs.maintain_here.get_untracked(), "the checkbox starts off");
+        inputs.maintain_here.set(true);
         // `Form` has no `Debug`, so that nothing can print a password: compare.
         assert!(
             inputs.read()
@@ -1100,6 +1106,7 @@ mod tests {
                     location: "/srv/main".to_owned(),
                     hot_storage: "/srv/hot".to_owned(),
                     password: "typed".to_owned(),
+                    maintain_here: true,
                 }
         );
         for field in FIELDS {
@@ -1108,13 +1115,15 @@ mod tests {
     }
 
     #[test]
-    fn clearing_the_form_empties_every_input() {
+    fn clearing_the_form_empties_every_input_and_turns_the_checkbox_off() {
         let inputs = Inputs::new();
         for field in FIELDS {
             inputs.of(field).set("typed".to_owned());
         }
+        inputs.maintain_here.set(true);
         inputs.clear();
         assert!(inputs.read() == Form::default());
+        assert!(!inputs.maintain_here.get_untracked());
     }
 
     #[test]

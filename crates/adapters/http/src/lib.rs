@@ -718,6 +718,7 @@ mod tests {
         let text = |value: &str| value.to_owned();
         Some(match repository {
             "missing" => MaintenanceRefusal::UnknownRepository,
+            "not-owner" => MaintenanceRefusal::NotOwner,
             "busy" => MaintenanceRefusal::Busy {
                 running: text("018f0000-0000-7000-8000-000000000003"),
             },
@@ -1435,6 +1436,27 @@ mod tests {
                 let (actual, answer) = json_of(response).await;
                 assert_eq!(actual.as_u16(), status, "{alias} on {route}");
                 assert_eq!(answer, expected, "{alias} on {route}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_of_a_repository_this_agent_does_not_maintain_is_a_conflict_naming_it() {
+        use serde_json::json;
+        let expected = json!({
+            "code": "maintenance-not-owner",
+            "args": {"alias": {"type": "text", "value": "not-owner"}},
+        });
+        for route in [
+            "/api/v1/repositories/not-owner/maintenance/preview",
+            "/api/v1/repositories/not-owner/maintenance",
+        ] {
+            for kind in ["forget", "prune", "check"] {
+                let body = format!(r#"{{"kind":"{kind}"}}"#);
+                let response = request(ui(), Method::POST, route, &body).await;
+                let (status, answer) = json_of(response).await;
+                assert_eq!(status.as_u16(), 409, "{kind} on {route}");
+                assert_eq!(answer, expected, "{kind} on {route}");
             }
         }
     }

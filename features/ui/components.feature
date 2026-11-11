@@ -3,10 +3,10 @@ Feature: The shared components in the gallery
   The shared component set (technical design §4.5) is exercised in the
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a sortable data table, a form field with an announced
-  error, a progress bar whose changes are never announced, and a toast. Every
-  demo state a component can show (loading, empty, error, success) stays clear
-  of accessibility violations, and each component's structure is pinned by an
-  ARIA snapshot.
+  error, a checkbox, a progress bar whose changes are never announced, and a
+  toast. Every demo state a component can show (loading, empty, error,
+  success, on and off) stays clear of accessibility violations, and each
+  component's structure is pinned by an ARIA snapshot.
 
   Scenario: A dialog opens from a button, traps focus, closes on Escape and returns focus
     When I open the component gallery
@@ -39,6 +39,16 @@ Feature: The shared components in the gallery
     And the field "Repository name" is described only by "The name of the repository to check."
     And the field "Repository name" is not marked invalid
 
+  Scenario: A checkbox turns on and off by keyboard and is described by its hint
+    When I open the component gallery
+    And I press Tab until focus is on the checkbox "Send a demo notification"
+    Then the checkbox "Send a demo notification" is not checked
+    And the checkbox "Send a demo notification" is described by "A demo choice: turning it on changes nothing."
+    When I press Space
+    Then the checkbox "Send a demo notification" is checked
+    When I press Space
+    Then the checkbox "Send a demo notification" is not checked
+
   Scenario: The progress bar's value changes without any announcement
     When I open the component gallery
     And I press Tab until focus is on the button "Advance the demo progress"
@@ -65,6 +75,7 @@ Feature: The shared components in the gallery
       | Dialog      |
       | Data table  |
       | Form field  |
+      | Checkbox    |
       | Status badge |
       | Progress    |
       | Toast       |
@@ -79,6 +90,7 @@ Feature: The shared components in the gallery
       | Dialog      |
       | Data table  |
       | Form field  |
+      | Checkbox    |
       | Status badge |
       | Progress    |
       | Toast       |

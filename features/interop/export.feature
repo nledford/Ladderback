@@ -409,6 +409,7 @@ Feature: Export a plan as a rustic profile
         [repositories.demo]
         repository = "{scratch}/repo"
         password-file = "{scratch}/password"
+        maintenance = "local"
 
         [[plans]]
         id = "home"

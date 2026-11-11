@@ -1991,12 +1991,15 @@ pub struct TestRepositoryDto {
 }
 
 /// `POST /api/v1/repositories`: test the repository, and save it under
-/// `alias` once the test passed.
+/// `alias` once the test passed. `maintain-here` asks this agent to maintain
+/// it (`maintenance = "local"`, §7.3); left out or `false`, nobody is asked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ConnectRepositoryDto {
     pub alias: String,
     pub settings: RepositorySettingsDto,
+    #[serde(default)]
+    pub maintain_here: bool,
 }
 
 /// `POST /api/v1/repositories/_init`: create a repository where there is
@@ -2801,6 +2804,10 @@ mod repository_request_tests {
         let connect = json!({"alias": "demo", "settings": settings()});
         let connect: ConnectRepositoryDto = from_str(&connect.to_string()).unwrap();
         assert_eq!(connect.alias, "demo");
+        assert!(!connect.maintain_here, "left out, nobody is asked");
+        let maintained = json!({"alias": "demo", "settings": settings(), "maintain-here": true});
+        let maintained: ConnectRepositoryDto = from_str(&maintained.to_string()).unwrap();
+        assert!(maintained.maintain_here);
         assert!(
             from_str::<ConnectRepositoryDto>(&json!({"settings": settings()}).to_string()).is_err()
         );
@@ -2825,6 +2832,7 @@ mod repository_request_tests {
             ConnectRepositoryDto {
                 alias: "demo".into(),
                 settings: settings(),
+                maintain_here: false,
             }
         );
         for secret in [

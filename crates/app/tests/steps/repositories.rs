@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::FailureReason;
 use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
-use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
+use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
@@ -221,6 +221,15 @@ async fn tests(agent: &mut super::Agent) {
 
 #[when(expr = "the agent connects it as {string}")]
 async fn connects(agent: &mut super::Agent, name: String) {
+    connect(agent, name, Maintenance::None).await;
+}
+
+#[when(expr = "the agent connects it as {string} to maintain it from this agent")]
+async fn connects_to_maintain(agent: &mut super::Agent, name: String) {
+    connect(agent, name, Maintenance::Local).await;
+}
+
+async fn connect(agent: &mut super::Agent, name: String, maintenance: Maintenance) {
     let use_case = ConnectRepository::new(
         agent.clock.clone(),
         agent.repositories.engine.clone(),
@@ -230,7 +239,7 @@ async fn connects(agent: &mut super::Agent, name: String) {
     let settings = agent.repositories.settings.clone();
     within(
         agent,
-        use_case.connect(op(), alias(&name), &settings),
+        use_case.connect(op(), alias(&name), &settings, maintenance),
         Outcome::Id,
     )
     .await;
@@ -306,6 +315,25 @@ async fn configured_with_settings(agent: &mut super::Agent, name: String) {
         .repository(&alias(&name))
         .unwrap_or_else(|| panic!("no repository {name} was saved"));
     assert_eq!(repository.settings, agent.repositories.settings);
+}
+
+/// The maintenance the saved entry of `name` asks for.
+async fn maintenance_of(agent: &super::Agent, name: &str) -> Maintenance {
+    saved(agent)
+        .await
+        .repository(&alias(name))
+        .unwrap_or_else(|| panic!("no repository {name} was saved"))
+        .maintenance
+}
+
+#[then(expr = "the repository {string} asks this agent to maintain it")]
+async fn asks_this_agent(agent: &mut super::Agent, name: String) {
+    assert_eq!(maintenance_of(agent, &name).await, Maintenance::Local);
+}
+
+#[then(expr = "the repository {string} asks nobody to maintain it")]
+async fn asks_nobody(agent: &mut super::Agent, name: String) {
+    assert_eq!(maintenance_of(agent, &name).await, Maintenance::None);
 }
 
 #[then("the connection is refused because the alias is taken")]

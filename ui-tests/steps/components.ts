@@ -1,6 +1,7 @@
 // Journey steps for the shared component set in the gallery (technical design
-// §4.5): the dialog, the data table, the form field, the progress bar and the
-// toast. Keyboard only, role-and-name locators, as everywhere in steps/.
+// §4.5): the dialog, the data table, the form field, the checkbox, the
+// progress bar and the toast. Keyboard only, role-and-name locators, as
+// everywhere in steps/.
 
 import assert from "node:assert/strict";
 
@@ -141,6 +142,21 @@ Then("the field {string} is described only by {string}", async function (this: B
     `the field ${JSON.stringify(name)} is described by ${JSON.stringify(text)}, not only ${JSON.stringify(description)}`,
   );
 });
+
+Then("the checkbox {string} is checked", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("checkbox", { name, exact: true })).toBeChecked();
+});
+
+Then("the checkbox {string} is not checked", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("checkbox", { name, exact: true })).not.toBeChecked();
+});
+
+// What a screen reader reads after the name: the hint, wired with
+// aria-describedby.
+Then("the checkbox {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
+  await expect(this.page.getByRole("checkbox", { name, exact: true })).toHaveAccessibleDescription(description);
+});
+
 Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
   await expect(this.page.getByRole("progressbar", { name })).toHaveAttribute(
     "aria-valuenow",
@@ -209,6 +225,12 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: The name of the repository to check.
 - paragraph:
   - button "Check the repository name"`,
+  Checkbox: `- heading "Checkbox" [level=2]
+- checkbox "Send a demo notification"
+- text: Send a demo notification
+- paragraph: "A demo choice: turning it on changes nothing."
+- checkbox "Keep the demo log" [checked]
+- text: Keep the demo log`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Loading Empty Error Success`,
   Progress: `- heading "Progress" [level=2]

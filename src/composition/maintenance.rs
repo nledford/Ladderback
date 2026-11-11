@@ -331,6 +331,9 @@ async fn refusal(
 ) -> MaintenanceRefusal {
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
+        MaintenanceError::NotOwner => {
+            todo!("how the route tells a repository maintained elsewhere")
+        }
         // The use case reports a configuration it couldn't read without
         // naming the file, and so does this.
         MaintenanceError::Unavailable => {
@@ -790,6 +793,19 @@ mod tests {
             args,
             detail: detail.map(str::to_owned),
         }
+    }
+
+    #[tokio::test]
+    async fn a_repository_this_agent_does_not_maintain_is_told_as_the_route_answers_it() {
+        assert_eq!(
+            refusal(
+                &InMemoryConfigStore::new(),
+                &alias(),
+                MaintenanceError::NotOwner
+            )
+            .await,
+            MaintenanceRefusal::NotOwner
+        );
     }
 
     #[tokio::test]

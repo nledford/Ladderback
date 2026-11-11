@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use domain::execution::FailureReason;
 use domain::execution::deadline::{Deadline, REPOSITORY_JOB_BUDGET};
-use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
+use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
 use domain::{OperationId, RepositoryAlias, RepositoryId};
 use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
@@ -170,13 +170,16 @@ impl ConnectRepository {
         }
     }
 
-    /// Tests the repository and, once the test passed, saves it under `alias`.
+    /// Tests the repository and, once the test passed, saves it under `alias`
+    /// with `maintenance`, the person's choice of who maintains it (§7.3).
     pub async fn connect(
         &self,
         op: OperationId,
         alias: RepositoryAlias,
         settings: &RepositorySettings,
+        maintenance: Maintenance,
     ) -> Result<RepositoryId, RepositoryError> {
+        let _ = maintenance;
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Identify(access)).await?;
         save(&*self.config, &alias, settings).await?;
@@ -366,6 +369,7 @@ mod tests {
     use domain::Timestamp;
     use domain::execution::FailureReason;
     use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
+    use domain::planning::Maintenance;
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
     use futures::StreamExt;
@@ -680,7 +684,7 @@ mod tests {
             config.clone(),
         );
         assert_eq!(
-            within(use_case.connect(op(), alias(), &settings())).await,
+            within(use_case.connect(op(), alias(), &settings(), Maintenance::None)).await,
             Err(RepositoryError::TimedOut)
         );
         assert!(
@@ -760,7 +764,12 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
         );
-        assert_eq!(use_case.connect(op(), alias(), &settings()).await, Ok(id()));
+        assert_eq!(
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
+            Ok(id())
+        );
         let saved = config
             .load()
             .await
@@ -791,7 +800,9 @@ mod tests {
             config.clone(),
         );
         assert!(matches!(
-            use_case.connect(op(), alias(), &settings()).await,
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
             Err(RepositoryError::Failed(FailureReason::EngineFailed { .. }))
         ));
         let saved = config
@@ -815,11 +826,13 @@ mod tests {
             config.clone(),
         );
         use_case
-            .connect(op(), alias(), &settings())
+            .connect(op(), alias(), &settings(), Maintenance::None)
             .await
             .unwrap_or_else(|e| panic!("the first connect: {e:?}"));
         assert!(matches!(
-            use_case.connect(op(), alias(), &settings()).await,
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
             Err(RepositoryError::AliasTaken(_))
         ));
         let saved = config
@@ -857,6 +870,60 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_connection_saves_who_the_person_chose_to_maintain_it() {
+        for chosen in [Maintenance::Local, Maintenance::None] {
+            let engine = Arc::new(Scripted {
+                outcome: Mutex::new(Ok(id())),
+                seen: Mutex::new(Vec::new()),
+            });
+            let config = Arc::new(InMemoryConfigStore::new());
+            ConnectRepository::new(
+                clock(),
+                engine,
+                ResolveRepository::new(Arc::new(FakeSecrets::new())),
+                config.clone(),
+            )
+            .connect(op(), alias(), &settings(), chosen)
+            .await
+            .unwrap_or_else(|e| panic!("the connection: {e:?}"));
+            let saved = config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+            assert_eq!(
+                saved.repository(&alias()).map(|r| r.maintenance),
+                Some(chosen)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repository_created_under_a_name_is_maintained_here() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        InitRepository::new(
+            clock(),
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        )
+        .init(op(), &settings(), Some(alias()))
+        .await
+        .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            saved.repository(&alias()).map(|r| r.maintenance),
+            Some(Maintenance::Local)
+        );
     }
 
     #[tokio::test]

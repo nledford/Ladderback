@@ -14,7 +14,7 @@ use app::repositories::{InitOutcome, RepositoryError};
 use app::secrets::ResolveRepository;
 use config_adapter::FileConfigStore;
 use cucumber::{given, then, when};
-use domain::planning::RepositorySettings;
+use domain::planning::{Maintenance, RepositorySettings};
 use domain::secrets::{FileRead, SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
 use platform::SystemClock;
@@ -243,7 +243,7 @@ async fn connects(agent: &mut Agent, name: String) {
     );
     agent.repositories.connect = Some(
         use_case
-            .connect(agent.next_op(), alias, &settings(agent))
+            .connect(agent.next_op(), alias, &settings(agent), Maintenance::None)
             .await,
     );
 }

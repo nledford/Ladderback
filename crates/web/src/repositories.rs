@@ -69,14 +69,18 @@ impl Action {
     }
 }
 
-/// What a person has typed. It has no `Debug`, so nothing can print the
-/// password it holds (I4).
+/// What a person has typed and chosen. It has no `Debug`, so nothing can
+/// print the password it holds (I4).
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct Form {
     pub(crate) name: String,
     pub(crate) location: String,
     pub(crate) hot_storage: String,
     pub(crate) password: String,
+    /// Whether a connected repository is to be maintained by this agent.
+    /// Off unless the person turns it on: only one place may maintain a
+    /// repository, and another may already do it (I1).
+    pub(crate) maintain_here: bool,
 }
 
 impl Form {
@@ -133,6 +137,7 @@ impl Form {
         ConnectRepositoryDto {
             alias: self.alias().to_owned(),
             settings: self.settings(),
+            maintain_here: false,
         }
     }
 
@@ -400,6 +405,7 @@ mod tests {
             location: "/srv/backups/main".to_owned(),
             hot_storage: String::new(),
             password: "not-a-real-password".to_owned(),
+            maintain_here: false,
         }
     }
 
@@ -467,6 +473,7 @@ mod tests {
             location: " \t".to_owned(),
             hot_storage: " ".to_owned(),
             password: " ".to_owned(),
+            maintain_here: false,
         };
         assert_eq!(
             spaces.missing(Action::Connect),
@@ -591,6 +598,16 @@ mod tests {
         let request = padded.connect_request();
         assert_eq!(request.alias, "copy");
         assert_eq!(request.settings, form().settings());
+    }
+
+    #[test]
+    fn a_connection_asks_to_maintain_the_repository_here_only_when_the_form_does() {
+        assert!(!form().connect_request().maintain_here);
+        let chosen = Form {
+            maintain_here: true,
+            ..form()
+        };
+        assert!(chosen.connect_request().maintain_here);
     }
 
     #[test]

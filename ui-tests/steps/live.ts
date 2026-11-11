@@ -71,14 +71,15 @@ export async function serveDemoPlan(world: BrowserWorld, plan: string, size: key
   for (let n = 1; n <= SOURCE_FILES[size]; n += 1) {
     await writeFile(path.join(source, `demo-${n}.txt`), `${n}:` + "d".repeat(FILE_BYTES));
   }
-  // The shape of the e2e `serving_with_plan` step: one repository, one plan
-  // backing the source up into it, nothing else set.
+  // The shape of the e2e `serving_with_plan` step: one repository, which this
+  // agent maintains, and one plan backing the source up into it.
   const config = [
     "schema = 1",
     "",
     "[repositories.demo]",
     `repository = ${JSON.stringify(path.join(scratch, "repo"))}`,
     `password = ${JSON.stringify(PASSWORD)}`,
+    'maintenance = "local"',
     "",
     "[[plans]]",
     `id = ${JSON.stringify(plan)}`,

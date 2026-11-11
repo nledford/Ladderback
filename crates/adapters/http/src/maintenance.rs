@@ -34,6 +34,9 @@ pub enum MaintenanceRequest {
 pub enum MaintenanceRefusal {
     /// No repository by that alias is configured.
     UnknownRepository,
+    /// This agent doesn't maintain the repository (I1): nothing was read or
+    /// run.
+    NotOwner,
     /// The configuration holds no plan to adopt into. Names the plan.
     UnknownPlan { plan: String },
     /// Another maintenance operation holds the repository (I7). Names the
@@ -204,6 +207,9 @@ fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
             text("alias", alias.to_owned()),
             None,
         ),
+        MaintenanceRefusal::NotOwner => {
+            todo!("the code and status of a repository maintained elsewhere")
+        }
         MaintenanceRefusal::UnknownPlan { plan } => (
             StatusCode::NOT_FOUND,
             ErrorCode::PlanUnknown,

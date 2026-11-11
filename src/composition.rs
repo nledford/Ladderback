@@ -35,7 +35,7 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::RepositorySettings;
+use domain::planning::{Maintenance, RepositorySettings};
 use domain::secrets::{
     FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
     Template, TemplateError,
@@ -1214,7 +1214,7 @@ impl Repositories for RepositoryService {
             self.resolve.clone(),
             Arc::clone(&self.config),
         )
-        .connect(new_operation(), alias, &settings)
+        .connect(new_operation(), alias, &settings, Maintenance::None)
         .await
         {
             Ok(value) => value,
@@ -2229,7 +2229,9 @@ mod tests {
                 alias.clone(),
                 domain::planning::RepositoryConfig {
                     settings,
-                    maintenance: domain::planning::Maintenance::None,
+                    // This agent maintains it, so a preview and a run reach
+                    // the engine.
+                    maintenance: domain::planning::Maintenance::Local,
                     group_by: Default::default(),
                     hooks: Default::default(),
                 },
@@ -4012,6 +4014,7 @@ mod repository_service_tests {
         api::ConnectRepositoryDto {
             alias: alias.to_owned(),
             settings,
+            maintain_here: false,
         }
     }
 
@@ -4083,6 +4086,26 @@ mod repository_service_tests {
             settings.options_cold.get("c").map(String::as_str),
             Some("3")
         );
+    }
+
+    #[tokio::test]
+    async fn a_connection_asks_this_agent_to_maintain_the_repository_only_when_the_request_does() {
+        for (maintain_here, saved_as) in [(true, Maintenance::Local), (false, Maintenance::None)] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            service(&engine, config.clone())
+                .connect(api::ConnectRepositoryDto {
+                    maintain_here,
+                    ..connect("demo", settings_dto())
+                })
+                .await
+                .unwrap_or_else(|e| panic!("{maintain_here}: {e:?}"));
+            let config = saved(&*config).await;
+            assert_eq!(
+                config.repository(&alias("demo")).map(|r| r.maintenance),
+                Some(saved_as),
+                "maintain-here {maintain_here}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -18,6 +18,22 @@ Feature: Maintenance of a repository on the Snapshots page
     Then the page shows the section heading "Plan home"
     And the plan "home" shows 2 snapshot rows
 
+  Scenario: A repository this agent does not maintain shows its history and says why it offers no maintenance
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the plan "home" is now called "away"
+    And the repository "demo" has no maintenance setting
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows the section heading "Orphaned history"
+    And the page lists 2 snapshots
+    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans. To maintain it from this agent, set maintenance = \"local\" in the repository's entry in the configuration file."
+    And the page offers no button "Forget snapshots"
+    And the page offers no button "Prune unused data"
+    And the page offers no button "Check the repository"
+    And the page offers no adoption button into the plan "away"
+
   Scenario: A forget is reviewed before it runs and changes nothing until it is confirmed
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" keeps the last 1 snapshots
