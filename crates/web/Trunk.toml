@@ -1,12 +1,14 @@
 # Trunk's build for the web UI (technical design §4.4, §4.5): Tailwind runs as
 # a pre-build hook, compiling tailwind.css into tw-out.css before trunk
 # collects the stylesheets index.html names. The npm packages are pinned by
-# package-lock.json and installed only when missing.
+# package-lock.json and installed only when missing. The arguments key is
+# `command_arguments`: trunk ignores any other name without a word, and a
+# bare `sh` then waits for commands on the terminal.
 
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-args = [
+command_arguments = [
   "-c",
   "[ -d node_modules/@tailwindcss/cli ] || npm ci --no-audit --no-fund; npx --no-install tailwindcss -i tailwind.css -o tw-out.css --minify",
 ]
