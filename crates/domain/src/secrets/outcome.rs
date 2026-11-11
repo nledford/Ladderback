@@ -135,11 +135,14 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 
 /// The error of a command that ran and failed: its exit `status` and what it
 /// wrote to `stderr`, with what it printed on `stdout` masked in it.
+/// `stderr_cut`: `stderr` is only the start of what it wrote, so it may end
+/// in the start of what it printed, which is masked too.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
     stdout: &[u8],
     stderr: &[u8],
+    stderr_cut: bool,
 ) -> SecretError {
     // A helper that rejects a value may quote it on stderr: what it printed
     // (less the line ending its last line ends with, which isn't what it
@@ -148,7 +151,12 @@ pub fn command_failure(
     let output = String::from_utf8_lossy(stdout);
     let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
     let first = SecretValue::new(first_line(&output));
-    let said = Redactor::new([&printed, &first]).redact(&String::from_utf8_lossy(stderr));
+    let redactor = Redactor::new([&printed, &first]);
+    let said = if stderr_cut {
+        redactor.redact_cut(stderr)
+    } else {
+        redactor.redact(&String::from_utf8_lossy(stderr))
+    };
     SecretError {
         source: source.clone(),
         problem: Problem::command_failed(status, said.as_bytes()),
@@ -626,6 +634,7 @@ mod tests {
             Some(1),
             b"hunter2-canary\n",
             b"rejected hunter2-canary\nsecond line\n",
+            false,
         );
         assert_eq!(
             error,
@@ -643,12 +652,53 @@ mod tests {
             Some(2),
             b"hunter2\nsecond line\n",
             b"bad value hunter2\n",
+            false,
         );
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
                 status: Some(2),
                 detail: "bad value ***".to_owned(),
+            }
+        );
+    }
+
+    /// The kept stderr can end inside the secret a helper quotes, or hold
+    /// less than the whole of a long one: no part of it reaches the detail
+    /// (I4).
+    #[test]
+    fn a_secret_cut_off_with_the_kept_stderr_is_masked_in_the_detail() {
+        let source = command("pass");
+        let secret: String = ('a'..='z').cycle().take(10_000).collect();
+        let stdout = format!("{secret}\n");
+        // Longer than the kept stderr.
+        let kept = secret.as_bytes().get(..8192).unwrap();
+        let error = command_failure(&source, Some(1), stdout.as_bytes(), kept, true);
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: "***".to_owned(),
+            }
+        );
+        // Quoted, and cut inside it.
+        let stderr = format!("rejected {}", secret.get(..600).unwrap());
+        let error = command_failure(&source, Some(1), stdout.as_bytes(), stderr.as_bytes(), true);
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected ***".to_owned(),
+            }
+        );
+        // Not cut: what the helper wrote is all it said, and only what is
+        // whole is the secret.
+        let error = command_failure(&source, Some(1), stdout.as_bytes(), b"rejected abc", false);
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected abc".to_owned(),
             }
         );
     }

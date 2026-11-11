@@ -61,6 +61,7 @@ pub async fn run(harness: &dyn HooksHarness) {
     output_past_the_cap_is_cut(harness, &demo).await;
     a_secret_in_the_output_is_redacted(harness, &demo).await;
     a_secret_straddling_the_cap_leaks_nothing(harness, &demo).await;
+    a_whole_secret_just_before_the_cap_leaks_nothing(harness, &demo).await;
 }
 
 /// The suite's own demo identifiers, parsed once.
@@ -258,6 +259,28 @@ async fn a_secret_straddling_the_cap_leaks_nothing(harness: &dyn HooksHarness, d
             assert!(
                 !outcome.stdout.text.contains(&secret[..len]),
                 "a secret cut by the cap leaves no prefix behind (first {len} bytes): {:?}",
+                outcome.stdout
+            );
+        }
+    }
+}
+
+/// A whole secret that ends just before the cap, in output the cap cuts,
+/// leaks nothing either: what is kept is masked whole, and nothing of it is
+/// cut away to leave its start behind.
+async fn a_whole_secret_just_before_the_cap_leaks_nothing(harness: &dyn HooksHarness, demo: &Demo) {
+    let secret = harness.secret();
+    let before = "a".repeat(MAX_HOOK_OUTPUT_BYTES - secret.len() - 1);
+    let text = format!("{before}{secret}{}", "a".repeat(64));
+    let hook = harness.hook_prints(&text);
+    let outcome = run_hook(harness, demo, &hook).await;
+    assert!(outcome.succeeded());
+    assert!(outcome.stdout.truncated, "the output was cut");
+    for len in 1..=secret.len() {
+        if secret.is_char_boundary(len) {
+            assert!(
+                !outcome.stdout.text.contains(&secret[..len]),
+                "a secret before the cap leaves no prefix behind (first {len} bytes): {:?}",
                 outcome.stdout
             );
         }

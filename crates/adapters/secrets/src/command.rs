@@ -134,7 +134,16 @@ pub(crate) async fn run_with(
     if status.success() {
         command_secret(&source, &out)
     } else {
-        Err(command_failure(&source, status.code(), &out, &err))
+        // A stderr that fills what is kept may have been cut: it is masked
+        // as one that was (I4).
+        let stderr_cut = err.len() == STDERR_KEPT;
+        Err(command_failure(
+            &source,
+            status.code(),
+            &out,
+            &err,
+            stderr_cut,
+        ))
     }
 }
 

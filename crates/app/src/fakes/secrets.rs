@@ -210,7 +210,14 @@ impl SecretResolver for FakeSecrets {
                         stdout,
                         stderr,
                     }) if *status != 0 => {
-                        Err(command_failure(&source, Some(*status), stdout, stderr))
+                        // The fake keeps all of its scripted stderr.
+                        Err(command_failure(
+                            &source,
+                            Some(*status),
+                            stdout,
+                            stderr,
+                            false,
+                        ))
                     }
                     Some(Script::Exits { stdout, .. }) => {
                         let value = command_secret(&source, stdout)?;

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use domain::secrets::Redactor;
 
-use crate::job::WorkerEvent;
+use crate::job::{TRUNCATED, WorkerEvent};
 
 /// What [`Events::end`] found when it closed the stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,7 +172,8 @@ impl Events {
 
     /// The event with every secret removed from the text it carries, and
     /// each text then cut to [`MAX_TEXT_BYTES`]. Redacting first means a cut
-    /// can never keep the start of a secret.
+    /// can never keep the start of a secret the worker knows; the daemon
+    /// masks what it knows besides in a text marked as cut as a cut text.
     fn redacted(&self, event: &WorkerEvent) -> WorkerEvent {
         let redactor = self
             .0
@@ -227,9 +228,6 @@ fn clip(mut text: String) -> String {
 /// under [`crate::job::MAX_MESSAGE_BYTES`], so no event the worker writes is
 /// refused by the daemon.
 pub(crate) const MAX_TEXT_BYTES: usize = 64 * 1024;
-
-/// Marks text cut to [`MAX_TEXT_BYTES`].
-pub(crate) const TRUNCATED: &str = "…";
 
 impl std::fmt::Debug for Events {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

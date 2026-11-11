@@ -1408,22 +1408,11 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
 }
 
 /// What a command or a platform said, with the secrets of the repository
-/// masked. A line that was cut at its cap (it ends in `…`) first loses as
-/// many bytes of its end as the longest secret has, less one: a secret that
-/// straddles the cut can't leave its first characters behind, for the mask
-/// only finds what is whole.
+/// masked. A line that was cut at its cap (it ends in `…`) may end in the
+/// start of a secret that whoever cut it didn't know, which is masked as a
+/// whole one is ([`Redactor::redact_clipped`]).
 fn masked_detail(redactor: &Redactor, detail: &str) -> String {
-    let Some(cut) = detail.strip_suffix('…') else {
-        return redactor.redact(detail);
-    };
-    let kept = cut
-        .len()
-        .saturating_sub(redactor.longest_match().saturating_sub(1));
-    let end = (0..=kept)
-        .rev()
-        .find(|&at| cut.is_char_boundary(at))
-        .unwrap_or_default();
-    format!("{}…", redactor.redact(cut.get(..end).unwrap_or_default()))
+    redactor.redact_clipped(detail, "…")
 }
 
 /// Where in a setting a template goes wrong, when the fault has a place.
@@ -4922,6 +4911,30 @@ mod repository_service_tests {
             .expect("the words are kept");
         assert!(detail.ends_with('…'), "{detail}");
         assert!(!detail.contains("canary"), "{detail}");
+    }
+
+    /// A whole secret that ends just before the cap of a command's line is
+    /// masked whole: nothing is cut away to leave its start behind (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_command_show_no_start_of_a_secret_just_before_the_cap() {
+        use domain::secrets::{MAX_DETAIL_BYTES, Problem};
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [("secret_access_key".to_owned(), "canary-inline".to_owned())].into();
+        let before = "x".repeat(MAX_DETAIL_BYTES - "canary-inline".len() - 2);
+        let stderr = format!("{before}canary-inlineyyyyyyyy");
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::command_failed(Some(1), stderr.as_bytes()),
+        );
+        let detail = secret_refusal(&error, &settings)
+            .await
+            .detail
+            .expect("the words are kept");
+        assert!(detail.ends_with('…'), "{detail}");
+        assert!(!detail.contains("ca"), "{detail}");
     }
 
     /// A file or a keyring that doesn't answer in time is a source that
