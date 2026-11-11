@@ -40,8 +40,9 @@ pub trait Repositories: Send + Sync {
     ) -> Result<api::RepositoryInitDto, RepositoriesError>;
 
     /// Creates the repository the configuration holds under `alias`, where
-    /// its entry says it is and with the entry's own password reference.
-    /// Saves nothing: the entry is already there.
+    /// its entry says it is and with the entry's own password reference,
+    /// and records only its new ID in the entry. An entry that records an ID
+    /// is refused as a repository already there.
     async fn create_saved(&self, alias: String) -> Result<api::RepositoryIdDto, RepositoriesError>;
 }
 
@@ -147,8 +148,13 @@ pub(crate) async fn create_saved_repository(
     Path(alias): Path<String>,
     body: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Response {
-    let _ = (state, alias, body);
-    todo!()
+    if body.is_err() {
+        return refusal(&RepositoriesError::InvalidBody);
+    }
+    match state.repositories.create_saved(alias).await {
+        Ok(id) => (StatusCode::CREATED, Json(id)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// The refusal for a secret: 422, like a setting the daemon can't take.
@@ -177,7 +183,12 @@ fn refusal(error: &RepositoriesError) -> Response {
             Vec::new(),
             None,
         ),
-        RepositoriesError::Unknown { .. } => todo!(),
+        RepositoriesError::Unknown { alias } => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryUnknown,
+            text("alias", alias),
+            None,
+        ),
         RepositoriesError::AliasInvalid => refused(
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::RepositoryAliasInvalid,
@@ -202,8 +213,18 @@ fn refusal(error: &RepositoriesError) -> Response {
             text("location", location),
             None,
         ),
-        RepositoriesError::CreateNotOffered => todo!(),
-        RepositoriesError::NotFound => todo!(),
+        RepositoriesError::CreateNotOffered => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::CreateNotOffered,
+            Vec::new(),
+            None,
+        ),
+        RepositoriesError::NotFound => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryNotFound,
+            Vec::new(),
+            None,
+        ),
         RepositoriesError::SecretRefused(secret) => secret_refusal(secret),
         RepositoriesError::OperationFailed { detail } => refused(
             StatusCode::UNPROCESSABLE_ENTITY,

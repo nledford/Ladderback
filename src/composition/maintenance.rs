@@ -471,7 +471,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
             unavailable(ErrorCode::OperationFailed, Vec::new(), None)
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
-        F::RepositoryNotFound => todo!(),
+        F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
         // Only an operation of the log can be ended by a stopped daemon, and a
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.

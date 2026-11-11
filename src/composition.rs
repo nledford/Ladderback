@@ -25,7 +25,10 @@ use app::ports::{
     ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::recovery::RecoverOperations;
-use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
+use app::repositories::{
+    ConnectRepository, CreateOffers, InitRepository, RepositoryError, SavedEntryError,
+    TestRepository,
+};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
@@ -1278,8 +1281,19 @@ impl ConfigCatalog {
         &self,
         config: &domain::planning::AgentConfig,
     ) -> std::collections::BTreeSet<RepositoryAlias> {
-        let _ = (&self.operations, config);
-        todo!()
+        match CreateOffers::new(Arc::clone(&self.operations))
+            .offered(config)
+            .await
+        {
+            Ok(offered) => offered,
+            Err(error) => {
+                log::warn!(
+                    "the operation log could not be read, so no repository is offered to be created: {}",
+                    error.code()
+                );
+                std::collections::BTreeSet::new()
+            }
+        }
     }
 }
 
@@ -1426,8 +1440,52 @@ impl Repositories for RepositoryService {
     }
 
     async fn create_saved(&self, alias: String) -> Result<api::RepositoryIdDto, RepositoriesError> {
-        let _ = (alias, &self.operations);
-        todo!()
+        // A name that is no alias is one the configuration can't hold.
+        let Ok(parsed) = RepositoryAlias::parse(&alias) else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        // Create records the new repository's ID in its entry, and whether
+        // the row offers it is read under the same lock, so two Creates
+        // can't both find it offered.
+        let _writing = self.writes.lock().await;
+        let saved = match InitRepository::new(
+            Arc::clone(&self.clock),
+            Arc::clone(&self.engine),
+            self.resolve.clone(),
+            Arc::clone(&self.config),
+        )
+        .init_saved(
+            new_operation(),
+            &parsed,
+            &CreateOffers::new(Arc::clone(&self.operations)),
+        )
+        .await
+        {
+            Ok(saved) => saved,
+            // Before the entry is found and its row known to offer Create,
+            // nothing ran: the configuration can't be read, it doesn't hold
+            // the alias, or the operation log can't be read.
+            Err(SavedEntryError::Config(error)) => return Err(config_refusal(error)),
+            Err(SavedEntryError::Unknown(_)) => return Err(RepositoriesError::Unknown { alias }),
+            // The log's own words say what it couldn't do, as maintenance
+            // tells it.
+            Err(SavedEntryError::Log(
+                app::ports::StoreError::Unavailable { detail }
+                | app::ports::StoreError::Corrupt { detail },
+            )) => {
+                return Err(unavailable(
+                    ErrorCode::OperationFailed,
+                    Vec::new(),
+                    Some(detail),
+                ));
+            }
+        };
+        match saved.created {
+            Ok(id) => Ok(api::RepositoryIdDto {
+                id: id.as_str().to_owned(),
+            }),
+            Err(error) => Err(refusal_of(error, &saved.settings).await),
+        }
     }
 }
 
@@ -1731,7 +1789,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
-        F::RepositoryNotFound => todo!(),
+        F::RepositoryNotFound => RepositoriesError::NotFound,
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }

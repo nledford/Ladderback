@@ -264,7 +264,12 @@ fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
             secret.args,
             secret.detail,
         ),
-        MaintenanceRefusal::RepositoryNotFound => todo!(),
+        MaintenanceRefusal::RepositoryNotFound => (
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryNotFound,
+            Vec::new(),
+            None,
+        ),
         MaintenanceRefusal::OperationFailed { detail } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::OperationFailed,
