@@ -50,6 +50,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Snapshot | A rustic snapshot, read from the repository; never created or edited except through an operation |
 | Pack / index | rustic's terms: a pack is a file of the repository's data, written by a backup or a prune; the index lists what each pack holds. Data in a pack no index lists can't be reused by a backup, and a check warns about the pack until a prune removes it |
 | Snapshot host | The host name a snapshot records: its plan's `host`, else the agent's `hostname`, else the machine's own name, which rustic chooses |
+| Snapshot time | When a snapshot was taken, with the offset of the clock that took it (`2026-11-10 23:30:00-06:00`). A calendar retention rule counts the snapshot on that clock's hour, day, week, month and year, wherever the forget runs (§16, decision 56) |
 | Other host | A snapshot host in a repository this agent maintains that is none of this agent's: not the machine's own name, the agent's `hostname`, or any plan's `host`. A snapshot carrying this agent's own `ladderback-agent` tag is this host's whatever host it records, as one made before the machine was renamed. Its snapshots suggest that another machine writes to the repository and may maintain it too (§7.3) |
 | Source filter | What a plan leaves out of its backup: glob patterns, glob files, ignore files such as `.gitignore`, marker files, extended attributes and other file systems (`SourceFilter`, §6.1) |
 | Plan tags | `ladderback-plan:<id>` and `ladderback-agent:<id>`; they make a snapshot **managed** by a plan |
@@ -94,7 +95,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 
 The sync outbox (§7.2) persists the events the hub needs.
 
-**Retention evaluation stays in rustic.** `ForgetSelection` decides *which* snapshots each policy applies to; applying `keep-*` rules to a group is delegated to the `Retention` port, implemented with rustic's own `ForgetGroups`, so Ladderback never reimplements retention. The export golden test (§6.2) checks the two agree.
+**Retention evaluation stays in rustic.** `ForgetSelection` decides *which* snapshots each policy applies to; applying `keep-*` rules to a group is delegated to the `Retention` port, implemented with rustic's own `ForgetGroups`, so Ladderback never reimplements retention. The export golden test (§6.2) checks the two agree. A calendar rule counts each snapshot on the calendar of its own snapshot time, as rustic does, so the evaluation reads the repository's snapshot files, which carry the offset, never the listing's `Timestamp` (§16, decision 56).
 
 ### 3.2 Code architecture: hexagonal, with a DDD core
 

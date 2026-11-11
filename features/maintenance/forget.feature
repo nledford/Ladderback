@@ -155,6 +155,29 @@ Feature: Forget keeps each plan's history within its policy
     And the remaining snapshot of the plan is the newest of its 3
     And the snapshot made without Ladderback is still there
 
+  # A calendar rule (keep-daily, keep-weekly, keep-monthly and the rest)
+  # counts each snapshot on the calendar of the clock that took it: by the
+  # offset the snapshot recorded, never the zone of the machine that runs the
+  # forget, so a forget gives the same result wherever it runs, and the same
+  # as rustic's own forget (§16). The flight crosses the date line: no one
+  # zone puts its two snapshots on the same day.
+  @e2e
+  Scenario Outline: A day is the day on the clock that took the snapshot
+    Given a new repository
+    And a plan "home" keeping 2 daily snapshots
+    And the plan has a snapshot taken at "<oldest>"
+    And the plan has a snapshot taken at "<earlier>"
+    And the plan has a snapshot taken at "<later>"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the plan keeps only its snapshots taken at "<later>" and "<oldest>"
+
+    Examples:
+      | case                                   | oldest                    | earlier                   | later                     |
+      | late evening in Chicago                | 2026-10-01 12:00:00-05:00 | 2026-11-10 08:00:00-06:00 | 2026-11-10 23:30:00-06:00 |
+      | the night daylight saving time ends    | 2026-10-01 12:00:00-05:00 | 2026-11-01 00:30:00-05:00 | 2026-11-01 23:30:00-06:00 |
+      | a laptop flown from Auckland to Hawaii | 2026-10-01 12:00:00+13:00 | 2026-11-10 00:30:00+13:00 | 2026-11-10 23:30:00-10:00 |
+
   Scenario: A forget of more snapshots than one engine job can name runs as several jobs
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 12000 snapshots of the plan "home"
