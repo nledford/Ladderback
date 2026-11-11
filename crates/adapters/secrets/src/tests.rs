@@ -578,6 +578,68 @@ async fn a_secret_quoted_past_the_kept_stderr_leaves_nothing_of_itself_in_the_er
     }
 }
 
+/// A helper that rejects its secret, quotes it on stderr and exits, while a
+/// process it started holds stderr open: stderr is read for the grace and
+/// then left, so what was read can end partway through the secret (a write
+/// larger than the pipe takes at once reaches the reader in parts; the
+/// helper here writes the start and leaves the rest unsaid, which is where
+/// such a split leaves the reader). Nothing of it reaches the detail (I4).
+#[tokio::test]
+async fn a_secret_cut_off_in_stderr_a_daemon_holds_open_leaves_nothing_of_itself_in_the_error() {
+    let directory = TempDir::new().unwrap();
+    let pidfile = directory.path().join("pid");
+    let script = sh(
+        concat!(
+            r#"sleep 60 & echo $! > "$1"; "#,
+            "echo hunter2-canary; printf 'rejected hunter2-' >&2; exit 1"
+        ),
+        [pidfile.display().to_string()],
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
+    let _reaper = Reaper(recorded_pid(&pidfile).await);
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected ***".to_owned(),
+            },
+        })
+    );
+}
+
+/// Stderr read to its end is all the helper said, though it ends the way
+/// its secret begins: those are its own words and stay (#158). Only a
+/// stderr the read left partway, or that filled what is kept, is masked as
+/// cut.
+#[tokio::test]
+async fn stderr_read_to_its_end_that_only_ends_like_the_secret_begins_is_kept() {
+    let script = sh(
+        "echo hunter2-canary; printf 'rejected hunter2-' >&2; exit 1",
+        Vec::<String>::new(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected hunter2-".to_owned(),
+            },
+        })
+    );
+}
+
 #[tokio::test]
 async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() {
     let echo_both = CommandLine::new(

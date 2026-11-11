@@ -1001,7 +1001,8 @@ async fn next_log_line(
 /// Reads one line of the worker's stderr into `line`: the first
 /// [`MAX_LOG_LINE`] bytes of it. The rest of a longer line is read and
 /// dropped, never held. `Some(cut)` is a line, `cut` whether it was longer
-/// than that; `None` is the end of the stream.
+/// than that or ended without its newline, as a worker killed partway
+/// through a write leaves it; `None` is the end of the stream.
 async fn read_log_line(
     reader: &mut BufReader<ChildStderr>,
     line: &mut Vec<u8>,
@@ -1010,8 +1011,9 @@ async fn read_log_line(
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            // A last line without its newline counts.
-            return Ok((!line.is_empty() || cut).then_some(cut));
+            // A last line without its newline counts, as a cut one: the
+            // stream may have ended partway through a write.
+            return Ok((!line.is_empty() || cut).then_some(true));
         }
         let newline = available.iter().position(|&byte| byte == b'\n');
         let content = newline.unwrap_or(available.len());
@@ -2452,6 +2454,33 @@ mod tests {
             !line.contains("CA"),
             "the start of the secret is in the log: {line:?}"
         );
+    }
+
+    /// A worker killed partway through a write leaves its last stderr line
+    /// without its newline, cut by the kill rather than the cap: it can end
+    /// partway through a secret, and it is masked and marked as a cut line
+    /// (I4).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stderr_line_a_kill_cut_short_leaves_nothing_of_a_secret() {
+        capture_the_worker_log();
+        let script = "cat >/dev/null; printf 'killed mid-line: CANARY-kil' >&2; kill -KILL $$";
+        let engine = WorkerEngine::new("sh", ["-c", script]);
+        let job = identify("hunter2-demo", &["CANARY-killed"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let _ = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        let line = logged_soon(log::Level::Warn, |text| {
+            text.starts_with("killed mid-line:")
+        })
+        .await
+        .expect("the cut stderr line never reached the log");
+        assert_eq!(line, "killed mid-line: ***…");
     }
 
     fn line_of(event: &WorkerEvent) -> String {

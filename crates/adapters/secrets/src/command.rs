@@ -112,8 +112,11 @@ pub(crate) async fn run_with(
         &mut err,
     )
     .await;
-    let status = match outcome {
-        Ok(Outcome::Exited(status)) => status,
+    let (status, stderr_ended) = match outcome {
+        Ok(Outcome::Exited {
+            status,
+            stderr_ended,
+        }) => (status, stderr_ended),
         Ok(Outcome::TooLarge) => {
             running.kill_and_reap().await;
             return Err(fail(Problem::TooLarge {
@@ -136,9 +139,10 @@ pub(crate) async fn run_with(
     if status.success() {
         command_secret(&source, &out)
     } else {
-        // A stderr that fills what is kept may have been cut: it is masked
-        // as one that was (I4).
-        let stderr_cut = err.len() == STDERR_KEPT;
+        // A stderr that fills what is kept may have been cut, and one that
+        // was not read to its end may stop partway through a write: either
+        // is masked as one that was (I4).
+        let stderr_cut = err.len() == STDERR_KEPT || !stderr_ended;
         Err(command_failure(
             &source,
             status.code(),
@@ -269,7 +273,12 @@ async fn discard(mut reader: impl AsyncRead + Unpin) {
 }
 
 enum Outcome {
-    Exited(ExitStatus),
+    /// The command exited; `stderr_ended` is whether its stderr was read to
+    /// its end, rather than left when the grace was over or a read failed.
+    Exited {
+        status: ExitStatus,
+        stderr_ended: bool,
+    },
     /// Stdout went past the limit.
     TooLarge,
     /// The command was still running at its limit.
@@ -285,7 +294,9 @@ enum End {
 /// the pipes [`PIPE_GRACE`] to end. The limit is the command's: once it has
 /// exited and been reaped, what is left is a pipe a daemon may hold open,
 /// which the grace bounds, so a command that ended in time is never timed
-/// out, and the group is signalled only while its leader is not reaped.
+/// out, and the group is signalled only while its leader is not reaped. A
+/// stderr is read to its end only when its read gave the end, not an error,
+/// before the grace was over.
 async fn collect(
     child: &mut Child,
     stdout: &mut ChildStdout,
@@ -298,6 +309,9 @@ async fn collect(
     let mut out_read = pin!(read_capped(stdout, out, MAX_SECRET_BYTES + 1, true));
     let mut err_read = pin!(read_capped(stderr, err, STDERR_KEPT, false));
     let mut out_done = false;
+    // Set once stderr was read to its end, and only then.
+    let mut err_ended = false;
+    // Set once stderr's read gave its end or an error.
     let mut err_done = false;
     let running = async {
         loop {
@@ -307,7 +321,10 @@ async fn collect(
                     End::Eof => out_done = true,
                 },
                 // A stderr that can't be read is a stderr with nothing more in it.
-                _ = &mut err_read, if !err_done => err_done = true,
+                result = &mut err_read, if !err_done => {
+                    err_done = true;
+                    err_ended = result.is_ok();
+                }
                 status = child.wait() => return status.map(Some),
             }
         }
@@ -330,7 +347,7 @@ async fn collect(
             },
             async {
                 if !err_done {
-                    let _ = (&mut err_read).await;
+                    err_ended = (&mut err_read).await.is_ok();
                 }
             },
         );
@@ -340,7 +357,10 @@ async fn collect(
         Ok(Ok(End::Full)) => Ok(Outcome::TooLarge),
         Ok(Err(error)) => Err(error),
         // Ended, or kept open by a daemon: go on with what was read.
-        Ok(Ok(End::Eof)) | Err(_) => Ok(Outcome::Exited(status)),
+        Ok(Ok(End::Eof)) | Err(_) => Ok(Outcome::Exited {
+            status,
+            stderr_ended: err_ended,
+        }),
     }
 }
 

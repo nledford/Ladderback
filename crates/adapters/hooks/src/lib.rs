@@ -239,8 +239,18 @@ impl HookRunner for ProcessHookRunner {
     async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome {
         let (status, captured) = self.spawn_and_wait(entry, context).await;
         HookOutcome {
-            stdout: captured.stream(&captured.stdout, captured.stdout_truncated, &self.redactor),
-            stderr: captured.stream(&captured.stderr, captured.stderr_truncated, &self.redactor),
+            stdout: captured.stream(
+                &captured.stdout,
+                captured.stdout_truncated,
+                captured.stdout_ended,
+                &self.redactor,
+            ),
+            stderr: captured.stream(
+                &captured.stderr,
+                captured.stderr_truncated,
+                captured.stderr_ended,
+                &self.redactor,
+            ),
             status,
         }
     }
@@ -251,8 +261,12 @@ impl HookRunner for ProcessHookRunner {
 struct Captured {
     stdout: Vec<u8>,
     stdout_truncated: bool,
+    /// Stdout was read to its end: nothing stopped the read partway.
+    stdout_ended: bool,
     stderr: Vec<u8>,
     stderr_truncated: bool,
+    /// Stderr was read to its end.
+    stderr_ended: bool,
 }
 
 impl Captured {
@@ -267,8 +281,10 @@ impl Captured {
     /// may hold them open. The limit is the hook's own: the grace after its
     /// exit does not count against it, so a hook that ended in time is never
     /// timed out. A pipe that can't be read after the exit has nothing more
-    /// in it. `None` is a hook still running at `limit`; the pipes are then
-    /// still the caller's to read.
+    /// in it. A stream is marked ended only when it was read to its end: one
+    /// the timeout, the grace or a failed read stopped can end partway
+    /// through a write. `None` is a hook still running at `limit`; the pipes
+    /// are then still the caller's to read.
     async fn read(
         &mut self,
         child: &mut Child,
@@ -290,18 +306,19 @@ impl Captured {
             MAX_HOOK_OUTPUT_BYTES,
             cut_err
         ));
-        let mut out_done = false;
-        let mut err_done = false;
+        // Each is set once its stream was read to its end, and only then.
+        let mut out_ended = false;
+        let mut err_ended = false;
         let running = async {
             loop {
                 tokio::select! {
-                    result = &mut read_out, if !out_done => {
+                    result = &mut read_out, if !out_ended => {
                         result?;
-                        out_done = true;
+                        out_ended = true;
                     }
-                    result = &mut read_err, if !err_done => {
+                    result = &mut read_err, if !err_ended => {
                         result?;
-                        err_done = true;
+                        err_ended = true;
                     }
                     status = child.wait() => return status,
                 }
@@ -316,26 +333,29 @@ impl Captured {
         let drained = async {
             tokio::join!(
                 async {
-                    if !out_done {
-                        let _ = (&mut read_out).await;
+                    if !out_ended {
+                        out_ended = (&mut read_out).await.is_ok();
                     }
                 },
                 async {
-                    if !err_done {
-                        let _ = (&mut read_err).await;
+                    if !err_ended {
+                        err_ended = (&mut read_err).await.is_ok();
                     }
                 },
             );
         };
         let _ = tokio::time::timeout(PIPE_GRACE, drained).await;
+        self.stdout_ended = out_ended;
+        self.stderr_ended = err_ended;
         Ok(Some(status))
     }
 
-    /// The kept, redacted text of one stream. A stream that was cut may end
-    /// in the start of a secret, which is masked as a whole one is
-    /// ([`Redactor::redact_cut`]).
-    fn stream(&self, text: &[u8], truncated: bool, redactor: &Redactor) -> HookOutput {
-        let text = if truncated {
+    /// The kept, redacted text of one stream. A stream that was cut, by the
+    /// cap or by a read that stopped before its end, may end in the start of
+    /// a secret, which is masked as a whole one is
+    /// ([`Redactor::redact_cut`]). `truncated` stays the cap's alone.
+    fn stream(&self, text: &[u8], truncated: bool, ended: bool, redactor: &Redactor) -> HookOutput {
+        let text = if truncated || !ended {
             redactor.redact_cut(text)
         } else {
             redactor.redact(&String::from_utf8_lossy(text))
