@@ -61,6 +61,7 @@ lint:
 # shell steps, zizmor for security (template injection, permissions, unpinned
 # actions). zizmor runs its online audits (known-vulnerable actions, impostor
 # commits) only when GH_TOKEN is set, as CI sets it; without it, offline.
+[doc('Lint the GitHub Actions workflows with actionlint and zizmor.')]
 [group('quality')]
 lint-workflows:
     actionlint
@@ -264,6 +265,7 @@ red-first base='origin/main':
 
 # Check a pull request title (or a commit subject) as CI's "Pull request
 # title" check does: a Conventional Commit with a type release-plz knows.
+[doc('Check a pull request title against Conventional Commits, as CI does.')]
 [group('quality')]
 check-pr-title title:
     node scripts/check-pr-title.ts {{ quote(title) }}
