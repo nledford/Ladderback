@@ -29,7 +29,7 @@ use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
     JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
-    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, WorkerEvent, exit_code,
+    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, TRUNCATED, WorkerEvent, exit_code,
 };
 
 /// How long a worker may keep running after it reported its result, for
@@ -935,19 +935,15 @@ async fn forward_stderr(
 }
 
 /// One line of stderr with the job's secrets masked. A line cut at the cap
-/// first loses as many bytes of its end as the longest secret has, less
-/// one: a secret that straddles the cut can't leave its first characters
-/// behind, for the mask only finds what is whole. (The worker does the
-/// equivalent by masking before it cuts.)
+/// may end in the start of a secret, which is masked as a whole one is
+/// ([`Redactor::redact_cut`]). (The worker's own events are masked before
+/// they are cut; see [`translate`] for what it can't mask.)
 fn redacted_log_line(line: &[u8], cut: bool, redactor: &Redactor) -> String {
-    let kept = if cut {
-        line.len()
-            .saturating_sub(redactor.longest_match().saturating_sub(1))
+    if cut {
+        redactor.redact_cut(line)
     } else {
-        line.len()
-    };
-    let text = String::from_utf8_lossy(line.get(..kept).unwrap_or(line));
-    redactor.redact(&text)
+        redactor.redact(&String::from_utf8_lossy(line))
+    }
 }
 
 /// The next line of the worker's stderr: see [`read_log_line`]. Once the
@@ -1006,7 +1002,9 @@ async fn read_log_line(
 /// text of the worker's that reaches the daemon's log, the history or the
 /// user. The worker masks its own output with what it is given, but not what
 /// it can't know: the proxy credentials of its environment, and what it says
-/// of a spec before it has read it.
+/// of a spec before it has read it. And it cuts a long text after it has
+/// masked it, so a text it marked as cut ([`TRUNCATED`]) is masked as a cut
+/// text: one of those secrets the cut went through leaves nothing behind.
 fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
     Some(match event {
         WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started { index_read_at },
@@ -1018,7 +1016,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                     ProgressKind::Counter => AppProgressKind::Counter,
                     ProgressKind::Bytes => AppProgressKind::Bytes,
                 },
-                prefix: redactor.redact(&prefix),
+                prefix: redactor.redact_clipped(&prefix, TRUNCATED),
             })
         }
         WorkerEvent::ProgressLength { key, len } => {
@@ -1029,7 +1027,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         }
         WorkerEvent::ProgressTitle { key, title } => EngineEvent::Progress(ProgressEvent::Title {
             key,
-            title: redactor.redact(&title),
+            title: redactor.redact_clipped(&title, TRUNCATED),
         }),
         WorkerEvent::ProgressFinish { key } => EngineEvent::Progress(ProgressEvent::Finish { key }),
         WorkerEvent::Warning {
@@ -1057,9 +1055,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileRetentionEmpty
                 | WarningCode::Unknown => WarningKind::Other,
             },
-            item: item.map(|item| redactor.redact(&item)),
+            item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),
+            // A word of the worker's own, which it never cuts.
             during: redactor.redact(&during),
-            detail: redactor.redact(&detail),
+            detail: redactor.redact_clipped(&detail, TRUNCATED),
         }),
         // Logs are for the daemon's own log, which gets them under the target
         // `ladderback::worker`.
@@ -1070,7 +1069,12 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 Level::Info => log::Level::Info,
                 Level::Debug => log::Level::Debug,
             };
-            log::log!(target: "ladderback::worker", level, "{}", redactor.redact(&message));
+            log::log!(
+                target: "ladderback::worker",
+                level,
+                "{}",
+                redactor.redact_clipped(&message, TRUNCATED)
+            );
             return None;
         }
         WorkerEvent::Result(result) => EngineEvent::Succeeded(match result {
@@ -1119,7 +1123,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         }),
         WorkerEvent::Snapshots { .. } => return None,
         WorkerEvent::Failed { code, detail, .. } => {
-            let detail = redactor.redact(&detail.unwrap_or_default());
+            let detail = redactor.redact_clipped(&detail.unwrap_or_default(), TRUNCATED);
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,

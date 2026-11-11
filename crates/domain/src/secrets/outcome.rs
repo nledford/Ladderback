@@ -135,7 +135,8 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 
 /// The error of a command that ran and failed: its exit `status` and what it
 /// wrote to `stderr`, with what it printed on `stdout` masked in it.
-/// `stderr_cut`: `stderr` is only the start of what it wrote.
+/// `stderr_cut`: `stderr` is only the start of what it wrote, so it may end
+/// in the start of what it printed, which is masked too.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
@@ -143,7 +144,6 @@ pub fn command_failure(
     stderr: &[u8],
     stderr_cut: bool,
 ) -> SecretError {
-    let _ = stderr_cut;
     // A helper that rejects a value may quote it on stderr: what it printed
     // (less the line ending its last line ends with, which isn't what it
     // quotes), and its first line, which is what it would have given as its
@@ -151,7 +151,12 @@ pub fn command_failure(
     let output = String::from_utf8_lossy(stdout);
     let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
     let first = SecretValue::new(first_line(&output));
-    let said = Redactor::new([&printed, &first]).redact(&String::from_utf8_lossy(stderr));
+    let redactor = Redactor::new([&printed, &first]);
+    let said = if stderr_cut {
+        redactor.redact_cut(stderr)
+    } else {
+        redactor.redact(&String::from_utf8_lossy(stderr))
+    };
     SecretError {
         source: source.clone(),
         problem: Problem::command_failed(status, said.as_bytes()),
@@ -684,6 +689,16 @@ mod tests {
             Problem::CommandFailed {
                 status: Some(1),
                 detail: "rejected ***".to_owned(),
+            }
+        );
+        // Not cut: what the helper wrote is all it said, and only what is
+        // whole is the secret.
+        let error = command_failure(&source, Some(1), stdout.as_bytes(), b"rejected abc", false);
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected abc".to_owned(),
             }
         );
     }

@@ -1408,22 +1408,11 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
 }
 
 /// What a command or a platform said, with the secrets of the repository
-/// masked. A line that was cut at its cap (it ends in `…`) first loses as
-/// many bytes of its end as the longest secret has, less one: a secret that
-/// straddles the cut can't leave its first characters behind, for the mask
-/// only finds what is whole.
+/// masked. A line that was cut at its cap (it ends in `…`) may end in the
+/// start of a secret that whoever cut it didn't know, which is masked as a
+/// whole one is ([`Redactor::redact_clipped`]).
 fn masked_detail(redactor: &Redactor, detail: &str) -> String {
-    let Some(cut) = detail.strip_suffix('…') else {
-        return redactor.redact(detail);
-    };
-    let kept = cut
-        .len()
-        .saturating_sub(redactor.longest_match().saturating_sub(1));
-    let end = (0..=kept)
-        .rev()
-        .find(|&at| cut.is_char_boundary(at))
-        .unwrap_or_default();
-    format!("{}…", redactor.redact(cut.get(..end).unwrap_or_default()))
+    redactor.redact_clipped(detail, "…")
 }
 
 /// Where in a setting a template goes wrong, when the fault has a place.

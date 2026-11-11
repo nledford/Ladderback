@@ -63,6 +63,12 @@ pub(crate) const LISTING_BATCH_BYTES: usize = 512 * 1024;
 /// to six bytes at worst, one snapshot is under 800 KiB: inside the
 /// message cap alone.
 pub(crate) const MAX_LISTED_TEXT_BYTES: usize = 1024;
+
+/// Ends a text of an event that the worker cut short, at its cap for one
+/// field. The worker masks before it cuts, but only what it knows: the
+/// daemon masks the rest of such a text as a text that was cut.
+pub(crate) const TRUNCATED: &str = "…";
+
 /// The one job a worker runs, read from its stdin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {

@@ -2,6 +2,7 @@
 //! out of logs, warnings and errors (invariant I4, technical design §10.2).
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 mod command;
 mod inline;
@@ -169,8 +170,61 @@ impl Redactor {
     /// overlap or touch become one span, so nothing of one is left behind
     /// by the replacement of another.
     pub fn redact(&self, text: &str) -> String {
+        self.mask(text, None)
+    }
+
+    /// `kept`, the start of a text that was cut at a cap, with every needle
+    /// replaced as [`Redactor::redact`] replaces it, and its end too from
+    /// where it is the beginning of a needle on: a secret the cut went
+    /// through. A cut inside a character leaves bytes of it that are no
+    /// character, and they are left out. This masks more than a secret
+    /// where the end of `kept` only looks like the start of one, never
+    /// less (I4).
+    pub fn redact_cut(&self, kept: &[u8]) -> String {
+        let mut text = String::with_capacity(kept.len());
+        let mut chunks = kept.utf8_chunks().peekable();
+        while let Some(chunk) = chunks.next() {
+            text.push_str(chunk.valid());
+            // What is no character before the end is shown as one that
+            // can't be read, as `from_utf8_lossy` shows it.
+            if !chunk.invalid().is_empty() && chunks.peek().is_some() {
+                text.push(char::REPLACEMENT_CHARACTER);
+            }
+        }
+        let cut = self.cut_secret(&text).map(|start| start..text.len());
+        self.mask(&text, cut)
+    }
+
+    /// `text` masked as [`Redactor::redact`] masks it, unless it ends in
+    /// `mark`, which says that whoever cut it short knew fewer secrets than
+    /// this redactor: then what was kept is masked as
+    /// [`Redactor::redact_cut`] masks it, and the mark stays, unless it is
+    /// the end of a whole secret, which is masked with it.
+    pub fn redact_clipped(&self, text: &str, mark: &str) -> String {
+        let cut = text
+            .strip_suffix(mark)
+            .and_then(|kept| self.cut_secret(kept).map(|start| start..kept.len()));
+        self.mask(text, cut)
+    }
+
+    /// Where the end of `text` is the beginning of a needle: the earliest
+    /// start of a secret that a cut at its end could have gone through.
+    fn cut_secret(&self, text: &str) -> Option<usize> {
+        text.char_indices().map(|(at, _)| at).find(|&at| {
+            text.get(at..)
+                .is_some_and(|end| self.needles.iter().any(|needle| needle.starts_with(end)))
+        })
+    }
+
+    /// `text` with every needle in it replaced, and the bytes of `cut`, if
+    /// given, as part of the same spans.
+    fn mask(&self, text: &str, cut: Option<Range<usize>>) -> String {
         let mut covered = vec![false; text.len()];
         let mut any = false;
+        if let Some(span) = cut.and_then(|cut| covered.get_mut(cut)) {
+            span.fill(true);
+            any = true;
+        }
         for needle in &self.needles {
             // Every occurrence, those that overlap another of the same
             // needle included (`abab` in `ababab`), which `match_indices`
@@ -205,31 +259,6 @@ impl Redactor {
             }
         }
         out
-    }
-
-    /// The length in bytes of the longest text this redactor replaces. A text
-    /// that was cut off can end in the beginning of a secret only within this
-    /// many bytes, less one, of the cut: a reader that has to cut a line
-    /// drops that much first, so the cut can't leave half a secret.
-    pub fn longest_match(&self) -> usize {
-        self.needles.first().map_or(0, String::len)
-    }
-
-    /// `kept`, the start of a text that was cut at a cap, with every needle
-    /// replaced as [`Redactor::redact`] replaces it, and its end too where it
-    /// is the beginning of a needle: a secret the cut went through.
-    pub fn redact_cut(&self, kept: &[u8]) -> String {
-        let _ = kept;
-        todo!()
-    }
-
-    /// `text` masked as [`Redactor::redact`] masks it, unless it ends in
-    /// `mark`, which says that whoever cut it short knew fewer secrets than
-    /// this redactor: then what was kept is masked as
-    /// [`Redactor::redact_cut`] masks it, and the mark stays.
-    pub fn redact_clipped(&self, text: &str, mark: &str) -> String {
-        let _ = (text, mark);
-        todo!()
     }
 }
 
@@ -1384,15 +1413,6 @@ mod tests {
             ),
             "https://demo:***@hot.example:9000/config, https://demo:***@cold.example:9000/keys"
         );
-    }
-
-    #[test]
-    fn a_redactor_knows_how_long_the_longest_text_it_replaces_is() {
-        assert_eq!(redactor(&[]).longest_match(), 0);
-        assert_eq!(redactor(&[""]).longest_match(), 0);
-        assert_eq!(redactor(&["abc", "abcdef", "xy"]).longest_match(), 6);
-        // `p%40ss` is the longest form of `p@ss` that a URL can hold.
-        assert_eq!(redactor(&["p@ss"]).longest_match(), 6);
     }
 
     /// A text cut at a cap can end in the beginning of a secret, which no
