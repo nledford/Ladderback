@@ -392,18 +392,18 @@ ui-maintenance-finished =
        *[adopt] Adoption finished.
     }
 
-# Said politely, and shown, when a check ran to its end and found only things to tidy, which it lists below this line; no snapshot's data depends on them. $warnings (count): how many it found.
+# Said politely, and shown, when a check ran to its end and found only things to tidy, which it lists below this line; with no error found, no snapshot's data depends on them. $warnings (count): how many it found.
 ui-maintenance-check-untidy =
     { $warnings ->
-        [one] Check finished. It found one thing to tidy, listed below, and no damage.
-       *[other] Check finished. It found { $warnings } things to tidy, listed below, and no damage.
+        [one] Check finished. It found one thing to tidy, listed below, and no errors.
+       *[other] Check finished. It found { $warnings } things to tidy, listed below, and no errors.
     }
 
-# Said assertively, and shown, when a check ran to its end and found damage, which it lists below this line with what else it found. $errors (count): how many places it found damaged.
-ui-maintenance-check-damaged =
+# Said assertively, and shown, when a check ran to its end and found errors, which it lists below this line with what else it found. An error is damage in the repository, or a part of the repository, or of this agent's copy of it, that could not be read or did not match. $errors (count): how many errors it found.
+ui-maintenance-check-errors =
     { $errors ->
-        [one] Check finished. It found damage in the repository in one place, listed below.
-       *[other] Check finished. It found damage in the repository in { $errors } places, listed below.
+        [one] Check finished. It found an error, listed below.
+       *[other] Check finished. It found { $errors } errors, listed below.
     }
 
 # What follows the list of what a check found when the list leaves some out, a sentence of its own; $count is how many it leaves out.

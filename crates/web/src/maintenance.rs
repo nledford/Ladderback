@@ -422,8 +422,9 @@ pub(crate) fn unmanaged_stuck(group: &UnmanagedGroupDto) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
     Finished,
-    /// A check ran to its end and found something: `errors` places of
-    /// damage and `warnings` things to tidy, as its result counts them.
+    /// A check ran to its end and found something: `errors` errors (damage,
+    /// or a part it could not read) and `warnings` things to tidy, as its
+    /// result counts them.
     Found {
         errors: u64,
         warnings: u64,
@@ -454,8 +455,8 @@ impl End {
 
     /// The end of a `kind` run as its ended `operation` reads: by its status,
     /// but for a check that ran to its end and found something, which is
-    /// told by how much of each it found, and assertively when any of it is
-    /// damage.
+    /// told by how much of each it found, and assertively when any of it is an
+    /// error.
     pub(crate) fn read(kind: Kind, operation: &OperationSummaryDto) -> End {
         let end = End::of(kind, &operation.status);
         match (end.outcome, operation.result) {
@@ -469,7 +470,7 @@ impl End {
         }
     }
 
-    /// How an `outcome` is announced: a failure and damage a check found are
+    /// How an `outcome` is announced: a failure and errors a check found are
     /// assertive, the rest polite.
     fn told(kind: Kind, outcome: Outcome) -> End {
         let politeness = match outcome {
@@ -504,7 +505,7 @@ pub(crate) struct Findings {
 }
 
 impl Findings {
-    /// What an ended check's `detail` lists of what it found: the damage
+    /// What an ended check's `detail` lists of what it found: the errors
     /// first, then the things to tidy, each in the order found, at most
     /// [`MAX_LISTED_FINDINGS`]; `more` is how many more its result counts.
     /// Nothing for a run that is not a check.
@@ -661,7 +662,8 @@ impl From<Step> for Told {
 }
 
 impl Told {
-    /// How it is announced: only the end of a run that failed is assertive.
+    /// How it is announced: only the end of a run that failed, or of a check
+    /// that found errors, is assertive.
     pub(crate) fn politeness(self) -> Politeness {
         match self {
             Told::Ended(end) => end.politeness,

@@ -220,15 +220,15 @@ warning-maintenance-partial = { $what ->
    *[other] The forget stopped after { $done } of { $total } snapshots. Those stay forgotten. Run it again to forget the rest.
   }
 
-# A check found something in the repository to tidy that no snapshot's data depends on, such as a pack no index lists, which a backup killed before it saved its index leaves.
-# $detail (text): rustic's own words, which name what it found. It is shown as it came.
-warning-check-warning = The check found something in the repository to tidy. No snapshot's data depends on it, and the next prune tidies most of what a check finds like this.
-    .with-detail = The check found something in the repository to tidy ({ $detail }). No snapshot's data depends on it, and the next prune tidies most of what a check finds like this.
+# A check found something in the repository to tidy, such as a pack no index lists, which a backup killed before it saved its index leaves. Unless the check also found an error, no snapshot's data depends on it.
+# $detail (text): rustic's own words, which name what it found. It is shown as it came, at the end of the message.
+warning-check-warning = The check found something in the repository to tidy. Unless it also found an error, no snapshot's data depends on it, and the next prune tidies most of what a check finds like this.
+    .with-detail = The check found something in the repository to tidy. Unless it also found an error, no snapshot's data depends on it, and the next prune tidies most of what a check finds like this. What it found: { $detail }
 
-# A check found damage: something in the repository is not as its index or its snapshots say.
-# $detail (text): rustic's own words, which name what it found. It is shown as it came.
-warning-check-error = The check found damage in the repository, so a snapshot that needs the damaged part may not restore whole. Check the disk or the service the repository is on, then repair the repository with rustic and check it again.
-    .with-detail = The check found damage in the repository ({ $detail }), so a snapshot that needs the damaged part may not restore whole. Check the disk or the service the repository is on, then repair the repository with rustic and check it again.
+# A check found an error: damage in the repository, something in it that is not as its index or its snapshots say, or a part of the repository, or of this agent's copy of it, that could not be read or did not match.
+# $detail (text): rustic's own words, which name what it found. It is shown as it came, at the end of the message.
+warning-check-error = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again.
+    .with-detail = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again. What it found: { $detail }
 
 # A warning this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.

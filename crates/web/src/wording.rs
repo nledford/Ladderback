@@ -206,7 +206,7 @@ fn end(end: &End) -> Words {
         Outcome::Finished => msg::UI_MAINTENANCE_FINISHED,
         Outcome::Found { errors, .. } if errors > 0 => {
             return words(
-                msg::UI_MAINTENANCE_CHECK_DAMAGED,
+                msg::UI_MAINTENANCE_CHECK_ERRORS,
                 vec![("errors", number(errors))],
             );
         }
@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn a_check_that_found_damage_says_how_many_places() {
+    fn a_check_that_found_errors_says_how_many() {
         let ended = End {
             kind: Kind::Check,
             outcome: Outcome::Found {
@@ -701,7 +701,7 @@ mod tests {
         };
         assert_eq!(
             end(&ended),
-            said(msg::UI_MAINTENANCE_CHECK_DAMAGED, &[("errors", number(2))])
+            said(msg::UI_MAINTENANCE_CHECK_ERRORS, &[("errors", number(2))])
         );
     }
 

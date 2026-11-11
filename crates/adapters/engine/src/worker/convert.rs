@@ -218,7 +218,7 @@ pub(crate) fn prune_plan_result(repository: RepositoryId, stats: &PruneStats) ->
 /// The warning code of a check's finding at `level`. `CheckErrorLevel`
 /// isn't exported, so the level is read from its `Debug` form: `Warn` is a
 /// warning, anything else an error, so a level a newer rustic adds is told
-/// as damage rather than passed over.
+/// as an error rather than passed over.
 pub(crate) fn finding_code(level: &impl std::fmt::Debug) -> WarningCode {
     if format!("{level:?}") == "Warn" {
         WarningCode::CheckWarning
