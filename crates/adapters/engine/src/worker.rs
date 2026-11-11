@@ -41,6 +41,7 @@ use crate::job::{
     JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
     WorkerEvent, exit_code,
 };
+use cancel::{AfterCancel, Cancel};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -50,6 +51,8 @@ use watchdog::{Terminate, WallClock, Watchdog};
 pub enum Exit {
     /// The job ran and its result or failure was reported.
     Reported { failed: bool },
+    /// A cancel ended the job, which reports nothing more.
+    Cancelled,
     /// Stop at once with this code, reporting nothing more: a fake job
     /// imitating a crashed engine.
     Abrupt(u8),
@@ -60,6 +63,7 @@ impl Exit {
         match self {
             Self::Reported { failed: false } => 0,
             Self::Reported { failed: true } => 1,
+            Self::Cancelled => exit_code::TERMINATED,
             Self::Abrupt(code) => i32::from(code),
         }
     }
@@ -90,16 +94,12 @@ pub fn main() -> ExitCode {
     if let Err(error) = logging::install(events.clone()) {
         say(&format!("cannot route logs into events: {error}"));
     }
+    let process = Process::real();
     #[cfg(unix)]
-    if let Err(error) = exit_on_sigterm(events.clone()) {
+    if let Err(error) = exit_on_sigterm(events.clone(), process.cancel.clone()) {
         say(&format!("cannot handle SIGTERM: {error}"));
     }
-    match run_events(
-        io::stdin().lock(),
-        events,
-        std::process::id(),
-        Process::real(),
-    ) {
+    match run_events(io::stdin().lock(), events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
         Ok(exit) => std::process::exit(exit.code()),
         Err(error) => {
@@ -150,6 +150,7 @@ pub fn run(input: impl Read, output: impl Write + Send + 'static, pid: u32) -> i
 pub(crate) struct Process {
     clock: WallClock,
     terminate: Terminate,
+    cancel: Cancel,
 }
 
 impl Process {
@@ -159,6 +160,7 @@ impl Process {
             terminate: Arc::new(|code| {
                 std::process::exit(code);
             }),
+            cancel: Cancel::default(),
         }
     }
 }
@@ -169,6 +171,8 @@ pub(crate) enum Done {
     /// The job wrote its result itself, with [`Context::report`], and has
     /// nothing more to say.
     Reported,
+    /// A cancel ended the job: exit as SIGTERM's, reporting nothing more.
+    Cancelled,
     /// Exit at once with this code and report nothing more.
     Abrupt(u8),
 }
@@ -249,6 +253,11 @@ impl Context {
     pub(crate) fn log(&self, level: Level, message: String) -> io::Result<()> {
         self.events.emit(&WorkerEvent::Log { level, message })
     }
+
+    /// The worker's cancel: what a SIGTERM asks for.
+    pub(crate) fn cancel(&self) -> &Cancel {
+        &self.process.cancel
+    }
 }
 
 fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> io::Result<Exit> {
@@ -306,6 +315,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             Ok(Exit::Reported { failed: false })
         }
         Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
+        Ok(Done::Cancelled) => Ok(Exit::Cancelled),
         Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
         Err(JobError::Failed { code, detail }) => {
             events.emit(&WorkerEvent::Failed {
@@ -333,12 +343,19 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
     }
 }
 
+/// How long a backup cancelled by SIGTERM may wind down before the worker
+/// exits anyway. The daemon's grace period (10 s by default) ends it sooner;
+/// this bounds a worker whose daemon is gone.
+const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
 /// On SIGTERM the worker waits for the line it is writing, writes nothing
 /// more and exits. Nothing in rustic needs a clean shutdown: its writes are
 /// safe to interrupt anywhere (§4.1), which the kill-at-random-points test
-/// proves.
+/// proves. A backup that is saving data winds down instead (`Cancel`): it
+/// lets rustic save the index of the packs it wrote, writes no snapshot,
+/// and ends the worker itself, with the same code.
 #[cfg(unix)]
-fn exit_on_sigterm(events: Events) -> io::Result<()> {
+fn exit_on_sigterm(events: Events, cancel: Cancel) -> io::Result<()> {
     use signal_hook::consts::SIGTERM;
     use signal_hook::iterator::Signals;
 
@@ -347,7 +364,11 @@ fn exit_on_sigterm(events: Events) -> io::Result<()> {
         .name("sigterm".to_owned())
         .spawn(move || {
             if signals.forever().next().is_some() {
+                let after = cancel.request();
                 events.end(None, Duration::from_millis(250));
+                if after == AfterCancel::WindDown {
+                    std::thread::sleep(WIND_DOWN_LIMIT);
+                }
                 std::process::exit(crate::job::exit_code::TERMINATED);
             }
         })?;
@@ -485,6 +506,7 @@ mod tests {
             terminate: Arc::new(move |code| {
                 let _ = tx.lock().unwrap().send(code);
             }),
+            cancel: Cancel::default(),
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
@@ -526,6 +548,7 @@ mod tests {
             terminate: Arc::new(move |code| {
                 let _ = tx.lock().unwrap().send(code);
             }),
+            cancel: Cancel::default(),
         };
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);

@@ -8,6 +8,9 @@ mod source;
 pub(crate) use backend::refusing_snapshots_once_cancelled;
 pub(crate) use source::CancellableSource;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 /// What the SIGTERM handler does once it has asked for the cancel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AfterCancel {
@@ -20,24 +23,53 @@ pub(crate) enum AfterCancel {
 /// The worker's cancel, shared by the SIGTERM handler, the job, its source
 /// and its backends.
 #[derive(Clone, Default)]
-pub(crate) struct Cancel;
+pub(crate) struct Cancel(Arc<Shared>);
+
+#[derive(Default)]
+struct Shared {
+    requested: AtomicBool,
+    /// Whether a backup is archiving. Asking for the cancel and starting or
+    /// ending the archiving take this lock, so the handler and the job
+    /// agree on which of them ends the worker.
+    saving: Mutex<bool>,
+}
 
 impl Cancel {
     /// Whether the cancel was asked for. It is never taken back.
     pub(crate) fn is_requested(&self) -> bool {
-        todo!()
+        self.0.requested.load(Ordering::SeqCst)
     }
 
     /// Asks for the cancel, and says what the handler does next.
     pub(crate) fn request(&self) -> AfterCancel {
-        todo!()
+        let saving = self.lock_saving();
+        self.0.requested.store(true, Ordering::SeqCst);
+        if *saving {
+            AfterCancel::WindDown
+        } else {
+            AfterCancel::ExitNow
+        }
     }
 
     /// Runs `save`, a backup's archiving, as the part of the job a cancel
     /// winds down rather than cuts off. `None` when the cancel came before
     /// or during it: the job is cancelled, whatever `save` returned.
-    pub(crate) fn saving<T>(&self, _save: impl FnOnce() -> T) -> Option<T> {
-        todo!()
+    pub(crate) fn saving<T>(&self, save: impl FnOnce() -> T) -> Option<T> {
+        {
+            let mut saving = self.lock_saving();
+            if self.is_requested() {
+                return None;
+            }
+            *saving = true;
+        }
+        let saved = save();
+        let mut saving = self.lock_saving();
+        *saving = false;
+        (!self.is_requested()).then_some(saved)
+    }
+
+    fn lock_saving(&self) -> MutexGuard<'_, bool> {
+        self.0.saving.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

@@ -1,14 +1,25 @@
 //! A backup's source that a cancel cuts short.
 
+use std::io::{self, Read};
 use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
 
-use rustic_core::{ReadSource, RusticResult};
+use rustic_core::{
+    ErrorKind, ReadSource, ReadSourceEntry, ReadSourceOpen, RusticError, RusticResult,
+};
 
 use super::Cancel;
 
+/// How often a size scan still running looks for the cancel.
+const SIZE_POLL: Duration = Duration::from_millis(50);
+
+const CANCELLED: &str = "the backup was cancelled";
+
 /// A source that, once the cancel is asked for, lists nothing more, opens
 /// nothing more, reads nothing more from a file already open, and gives up
-/// the scan of its size.
+/// the scan of its size. rustic then ends the backup as it ends any: it
+/// saves the packs and the index of what it read.
 pub(crate) struct CancellableSource<S> {
     inner: Arc<S>,
     cancel: Cancel,
@@ -24,15 +35,103 @@ impl<S> CancellableSource<S> {
 }
 
 impl<S: ReadSource + 'static> ReadSource for CancellableSource<S> {
-    type Open = S::Open;
-    type Iter = S::Iter;
+    type Open = CancellableOpen<S::Open>;
+    type Iter = CancellableEntries<S::Iter>;
 
+    /// The inner source's size, scanned on a thread of its own: rustic
+    /// waits for the scan before it saves the index, and a scan of a large
+    /// source must not hold a cancelled backup's wind-down. A scan given up
+    /// is left to run until the worker exits; the size only feeds progress.
     fn size(&self) -> RusticResult<Option<u64>> {
-        todo!()
+        let inner = Arc::clone(&self.inner);
+        let (sender, size) = mpsc::channel();
+        let scan = std::thread::Builder::new()
+            .name("source-size".to_owned())
+            .spawn(move || {
+                let _ = sender.send(inner.size());
+            });
+        if scan.is_err() {
+            return Ok(None);
+        }
+        loop {
+            match size.recv_timeout(SIZE_POLL) {
+                Ok(size) => return size,
+                Err(RecvTimeoutError::Timeout) if !self.cancel.is_requested() => {}
+                Err(_) => return Ok(None),
+            }
+        }
     }
 
     fn entries(&self) -> Self::Iter {
-        todo!()
+        CancellableEntries {
+            inner: self.inner.entries(),
+            cancel: self.cancel.clone(),
+        }
+    }
+}
+
+/// The entries of a [`CancellableSource`]: none once the cancel is asked for.
+pub(crate) struct CancellableEntries<I> {
+    inner: I,
+    cancel: Cancel,
+}
+
+impl<I, O> Iterator for CancellableEntries<I>
+where
+    I: Iterator<Item = RusticResult<ReadSourceEntry<O>>>,
+{
+    type Item = RusticResult<ReadSourceEntry<CancellableOpen<O>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cancel.is_requested() {
+            return None;
+        }
+        let entry = self.inner.next()?;
+        Some(entry.map(|entry| ReadSourceEntry {
+            path: entry.path,
+            node: entry.node,
+            open: entry.open.map(|open| CancellableOpen {
+                inner: open,
+                cancel: self.cancel.clone(),
+            }),
+        }))
+    }
+}
+
+/// How to open a file of a [`CancellableSource`].
+pub(crate) struct CancellableOpen<O> {
+    inner: O,
+    cancel: Cancel,
+}
+
+impl<O: ReadSourceOpen> ReadSourceOpen for CancellableOpen<O> {
+    type Reader = CancellableReader<O::Reader>;
+
+    fn open(self) -> RusticResult<Self::Reader> {
+        if self.cancel.is_requested() {
+            return Err(RusticError::new(ErrorKind::InputOutput, CANCELLED));
+        }
+        Ok(CancellableReader {
+            inner: self.inner.open()?,
+            cancel: self.cancel,
+        })
+    }
+}
+
+/// A file of a [`CancellableSource`], which fails its next read once the
+/// cancel is asked for. rustic then drops the file from the backup; what
+/// it had chunked of it is saved and indexed with the rest.
+pub(crate) struct CancellableReader<R> {
+    inner: R,
+    cancel: Cancel,
+}
+
+impl<R: Read> Read for CancellableReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.cancel.is_requested() {
+            return Err(io::Error::other(CANCELLED));
+        }
+        self.inner.read(buf)
     }
 }
 
