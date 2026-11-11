@@ -49,27 +49,35 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
-# Lint: clippy on the host crates and on the web UI (wasm32), the type check of
-# the TypeScript tooling (tsconfig.json; its compiler is a ui-tests
+# Clippy on the host crates: the part of `lint` that can differ by OS
+# (`cfg(target_os)` code), and so the only part CI runs on macOS too.
+[doc('Clippy on the host crates only, the part of `lint` that can differ by OS.')]
+[group('quality')]
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Lint: `clippy`, clippy on the web UI (wasm32), the type check of the
+# TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), the journey lint, then the check that every path AGENTS.md
 # and CLAUDE.md name exists.
 [group('quality')]
-lint: _ui-deps
-    cargo clippy --workspace --all-targets -- -D warnings
+lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
 
-# Lint the GitHub Actions workflows: actionlint for syntax, expressions and
-# shell steps, zizmor for security (template injection, permissions, unpinned
-# actions). zizmor runs its online audits (known-vulnerable actions, impostor
-# commits) only when GH_TOKEN is set, as CI sets it; without it, offline.
-[doc('Lint the GitHub Actions workflows with actionlint and zizmor.')]
+# Lint the GitHub Actions workflows and the repository's own actions:
+# actionlint for the workflows' syntax, expressions and shell steps, zizmor for
+# security (template injection, permissions, unpinned actions) in both.
+# actionlint reads workflows only. zizmor runs its online audits
+# (known-vulnerable actions, impostor commits) only when GH_TOKEN is set, as CI
+# sets it; without it, offline.
+[doc('Lint the GitHub Actions workflows and actions with actionlint and zizmor.')]
 [group('quality')]
 lint-workflows:
     actionlint
-    zizmor --no-progress .github/workflows
+    zizmor --no-progress .github/workflows .github/actions
 
 # Check the dependency rule: banned crates in domain and app, domain on wasm32.
 [group('quality')]

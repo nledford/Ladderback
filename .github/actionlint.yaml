@@ -1,0 +1,8 @@
+# actionlint's settings (`just lint-workflows`).
+paths:
+  .github/workflows/*.yml:
+    ignore:
+      # actionlint 1.7.12 doesn't know GitHub's self-repository syntax
+      # (`uses: $/path`, July 2026), which zizmor's self-repository audit asks
+      # for. Remove once actionlint supports it: rhysd/actionlint#711.
+      - 'specifying action "\$/[^"]+" in invalid format because ref is missing'
