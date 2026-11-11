@@ -1,0 +1,23 @@
+# cargo-dist's configuration (technical design §12.1, §16 decision 54). Until
+# M5's release packaging it only builds: `.github/workflows/release-builds.yml`
+# runs `dist build` for each target and smoke-tests the archive, and nothing is
+# published. There is no `ci` key, so dist neither writes nor checks a workflow
+# of its own. M5 adds the hosting and the installers.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.34.0"
+# Only the daemon is distributed: the `ladderback` package says `dist = true`
+# in Cargo.toml, and every other package (the engine's test worker, `web`) is
+# left out.
+dist = false
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+installers = []
+# The Justfile's `release_flags`, which dist can't read: `just architecture`
+# checks that the two agree.
+default-features = false
+# `cargo build --package ladderback`, not `--workspace`: the features are the
+# daemon's alone, as `just architecture` checks them.
+precise-builds = true

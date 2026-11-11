@@ -1,0 +1,144 @@
+# Builds the release archives and smoke-tests them (technical design §12.1,
+# §16 decision 54). Nothing is published: each archive is a run artifact for a
+# few days, and M5's release packaging adds the hosting. `just release-build`
+# runs cargo-dist's `dist build` (dist-workspace.toml) for one target, and
+# `just smoke-release` checks the binary in it (scripts/smoke-release.ts): on
+# Linux in clean containers, Debian 12 and Ubuntu 22.04 among them, on macOS on
+# the runner.
+#
+# It runs every night, by hand, and on pull requests labelled `release`:
+# release-plz labels each release PR so (release-plz.toml), and a change that
+# could break a release build (dependencies, build settings, features) can be
+# labelled to try it before it merges. None of its jobs is a required check,
+# and their names must not match one (development.md §13.8).
+#
+# The Linux builds run on Ubuntu 22.04, so the binary needs no glibc newer
+# than 2.35, and the smoke test fails if it does. No build cache: a release
+# build starts clean, so nothing a pull request's run wrote can reach it.
+name: Release builds
+
+on:
+  schedule:
+    - cron: "43 4 * * *" # nightly, apart from ci.yml's 03:17
+  workflow_dispatch:
+  pull_request:
+    # Not `opened`: a pull request opened with the `release` label also gets
+    # a `labeled` event, and the two runs would cancel each other's builds.
+    types: [synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Release archive (${{ matrix.target }})
+    # On a pull request, only one labelled `release`; on `labeled`, only when
+    # that label is the one just added, so another label doesn't build again.
+    if: >-
+      github.event_name != 'pull_request'
+      || (contains(github.event.pull_request.labels.*.name, 'release')
+      && (github.event.action != 'labeled' || github.event.label.name == 'release'))
+    # One build of each target per pull request or branch: a push cancels the
+    # pull request's older build. On the job, not the workflow, so that a run
+    # whose builds are skipped (another label added) cancels nothing. Nightly
+    # and manual runs aren't cancelled: GitHub keeps one running and one
+    # waiting per group, and a newer waiting run replaces the older one.
+    concurrency:
+      group: release-builds-${{ github.event.pull_request.number || github.ref }}-${{ matrix.target }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          # arm64 only: dist can't build a universal binary yet (dist #77).
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The toolchain and the wasm32 target rust-toolchain.toml names.
+      - run: rustup toolchain install
+      # Trunk's pre-build hook installs Tailwind with npm (crates/web/Trunk.toml).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,trunk
+      # trunk runs the wasm-bindgen Cargo.lock pins, and downloads it unless
+      # that version is on the PATH. Its aarch64 Linux release is a gnu build
+      # that needs GLIBC_2.38, which Ubuntu 22.04 hasn't (install-action
+      # installs the same one), so on that runner it is built from source.
+      # The other targets' releases run here: musl on x86_64, and macOS.
+      - if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install --locked wasm-bindgen-cli --version "$(just _wasm-bindgen-version)"
+      # Not in install-action's list: the official release, checked against
+      # the SHA-256 the script pins.
+      - run: scripts/install-dist.sh
+      - run: just release-build "$TARGET"
+      # The archive's own checksum, then the binary out of it, as a person
+      # downloading it would.
+      - name: Unpack the archive
+        run: |
+          cd target/distrib
+          if command -v sha256sum >/dev/null; then sha256sum -c "ladderback-$TARGET.tar.xz.sha256"; else shasum -a 256 -c "ladderback-$TARGET.tar.xz.sha256"; fi
+          mkdir -p "$RUNNER_TEMP/release"
+          tar -xJf "ladderback-$TARGET.tar.xz" -C "$RUNNER_TEMP/release"
+      # Uploaded before the smoke test, so a failing build can be downloaded
+      # and looked at.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ladderback-${{ matrix.target }}
+          path: |
+            target/distrib/ladderback-${{ matrix.target }}.tar.xz
+            target/distrib/ladderback-${{ matrix.target }}.tar.xz.sha256
+            target/distrib/release-build-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      - if: runner.os == 'Linux'
+        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all
+      - if: runner.os == 'macOS'
+        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback"
+
+  # A scheduled run notifies no one, so a failed nightly build opens an issue,
+  # or comments on the open one, as ci.yml's nightly jobs do. A job of its own,
+  # so only it holds `issues: write`, and the builds, which run a pull
+  # request's code, don't.
+  report:
+    name: Report a failed nightly release build
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # One report at a time, so two failed runs don't both open an issue.
+    concurrency:
+      group: release-builds-report
+      cancel-in-progress: false
+    permissions:
+      issues: write # to open or comment on the issue; no checkout, so no contents
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly release build failed"
+          body="The nightly release build (\`just release-build\`, \`just smoke-release\`) failed: $RUN_URL. Each failed job's summary has the smoke test's table, and its archive is a run artifact."
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
+          fi

@@ -12,10 +12,12 @@ mutants_packages := "--package domain --package app --package api --package l10n
 
 # The cargo flags a release build is made with (technical design §12.1): the
 # development pseudolocales and the component gallery stay out. `architecture`
-# checks a build with them, and release packaging (cargo-dist, the image, `trunk
-# build --release` for the web UI) must pass them too: `just --evaluate
-# release_flags` prints them. A feature a release needs joins this string, so
-# the checks and the artifacts change together.
+# checks a build with them, and release packaging must pass them too: `trunk
+# build --release` for the web UI (`web-release`), cargo-dist, which can't read
+# this file, so `dist-workspace.toml` says the same and `architecture` checks
+# that the two agree, and the image. `just --evaluate release_flags` prints
+# them. A feature a release needs joins this string, so the checks and the
+# artifacts change together.
 release_flags := "--no-default-features"
 
 # List available workflows.
@@ -36,6 +38,7 @@ setup:
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
+    scripts/install-dist.sh
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium
 
@@ -374,6 +377,40 @@ release-preview:
     cd "$scratch/ladderback"
     release-plz update
     git --no-pager diff -- Cargo.toml CHANGELOG.md
+
+# The web UI a release embeds: built with `release_flags`, as the daemon is, so
+# it has no pseudolocales and no gallery (§12.1).
+[doc('Build the web UI into crates/web/dist as a release embeds it.')]
+[group('release')]
+web-release:
+    cd crates/web && trunk build --release {{ release_flags }}
+
+# Builds the release archive for `target` as the Release builds workflow does
+# (§12.1): the web UI with the release flags, which the binary embeds, then
+# cargo-dist's `dist build` (dist-workspace.toml), which builds the daemon with
+# the same flags and writes the archive, its checksum and the unpacked folder
+# to `target/distrib` (dist's folder, whatever CARGO_TARGET_DIR says), with
+# dist's manifest as `release-build-manifest.json` beside them. The binary's
+# dynamic libraries go to the log as a table. Needs dist
+# (scripts/install-dist.sh). It publishes nothing.
+[doc('Build the release archive for a target with cargo-dist; publishes nothing.')]
+[group('release')]
+release-build target: web-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p target/distrib
+    dist build --artifacts=local --target {{ quote(target) }} --print=linkage --output-format=json > target/distrib/release-build-manifest.json
+
+# Runs scripts/smoke-release.ts on a release binary: its version, no
+# pseudolocales and no gallery, its dynamic libraries and glibc floor, then
+# the daemon serving its UI and running one backup in scratch folders, on this
+# machine or, with `--container <name>`, in a clean Linux container (Docker).
+# `--help` lists the options.
+[doc('Smoke-test a release binary: version, flags, linkage, serve and one backup.')]
+[group('release')]
+[positional-arguments]
+smoke-release binary *args:
+    node scripts/smoke-release.ts "$@"
 
 # Runs the Release workflow, which opens or updates the draft release PR, and
 # waits for it (§12.1). Then, on that PR's branch: with a `version` (a version

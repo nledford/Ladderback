@@ -195,6 +195,12 @@ opt-level = 3
 [profile.dev.build-override]
 debug = false
 
+# The profile cargo-dist builds the release binaries with (dist-workspace.toml,
+# technical design §12.1): the release profile with thin LTO, dist's default.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 [package]
 name = "ladderback"
 description = "Self-hosted backup manager for rustic"
@@ -204,6 +210,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+# cargo-dist builds this package alone (dist-workspace.toml): `publish = false`
+# would otherwise leave it out, and `dist = false` there leaves out the rest.
+[package.metadata.dist]
+dist = true
 
 [[test]]
 name = "e2e"

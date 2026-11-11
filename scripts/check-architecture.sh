@@ -12,6 +12,8 @@
 #     when built with the release flags (`--no-default-features`, as a release is);
 #   - a release build leaves out the component gallery, the dev-only route
 #     `/_gallery` (the `web` feature `gallery`).
+#   - cargo-dist (`dist-workspace.toml`) builds the release archives with the
+#     release flags these checks use (technical design §12.1).
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
 # support) may be a dev-dependency only.
 set -euo pipefail
@@ -175,6 +177,56 @@ gallery() {
 gallery has --features gallery
 gallery lacks
 gallery lacks "${release_flags[@]}"
+
+# The release archives are built by cargo-dist (dist-workspace.toml, technical
+# design §12.1), which can't read the Justfile: its `[dist]` build keys must
+# say what `release_flags` says, or an archive would ship what the checks above
+# didn't look at. `precise-builds = true` makes dist build the `ladderback`
+# package alone, so its features are the ones checked here. A `features` list
+# is read from one line.
+dist_flags() {
+  local section value
+  section=$(awk '/^\[/ { in_dist = ($0 == "[dist]") } in_dist' dist-workspace.toml)
+  value=$(sed -nE 's/^default-features[[:space:]]*=[[:space:]]*([a-z]+).*/\1/p' <<<"$section")
+  if [[ $value == false ]]; then echo --no-default-features; fi
+  value=$(sed -nE 's/^all-features[[:space:]]*=[[:space:]]*([a-z]+).*/\1/p' <<<"$section")
+  if [[ $value == true ]]; then echo --all-features; fi
+  value=$(sed -nE 's/^features[[:space:]]*=[[:space:]]*\[(.*)\].*/\1/p' <<<"$section" | tr -d ' "')
+  if [[ -n $value ]]; then echo "--features=$value"; fi
+  value=$(sed -nE 's/^precise-builds[[:space:]]*=[[:space:]]*([a-z]+).*/\1/p' <<<"$section")
+  if [[ $value != true ]]; then echo "(precise-builds is not true)"; fi
+}
+# `release_flags` in the same form: one flag per line, `--features=a,b`.
+justfile_flags() {
+  local i=0 flag
+  while ((i < ${#release_flags[@]})); do
+    flag=${release_flags[i]}
+    if [[ $flag == --features ]]; then
+      i=$((i + 1))
+      flag="--features=${release_flags[i]:-}"
+    fi
+    echo "$flag"
+    i=$((i + 1))
+  done
+}
+dist=$(dist_flags | sort)
+justfile=$(justfile_flags | sort)
+if [[ $dist != "$justfile" ]]; then
+  echo "error: dist-workspace.toml builds with [$(tr '\n' ' ' <<<"$dist")], the Justfile's release_flags are [$(tr '\n' ' ' <<<"$justfile")]" >&2
+  status=1
+else
+  echo "ok: dist-workspace.toml builds with the release flags ($RELEASE_FLAGS)"
+fi
+
+# dist also reads those keys per package, from `[package.metadata.dist]` in
+# Cargo.toml, over the workspace's: there they would go unchecked, so they
+# stay out.
+package_keys=$(awk '/^\[/ { in_dist = ($0 == "[package.metadata.dist]") } in_dist' Cargo.toml |
+  grep -E '^(default-features|all-features|features|precise-builds)[[:space:]]*=' || true)
+if [[ -n $package_keys ]]; then
+  echo "error: Cargo.toml's [package.metadata.dist] sets $(tr '\n' ' ' <<<"$package_keys"); build keys belong in dist-workspace.toml's [dist], which is checked against release_flags" >&2
+  status=1
+fi
 
 if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   echo "error: crates/domain/clippy.toml and crates/app/clippy.toml differ" >&2

@@ -158,7 +158,7 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 
 ### 13.8 Pull requests and merging
 
-`AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass and the required check names.
+`AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass, the required check names and the `release` label.
 
 **Stacking.** Don't stack pull requests unless it's truly unavoidable, meaning a change that can't land in independent pieces off `main`. Then keep the stack to two pull requests, say "stacked on #N" in both titles and the first line of both descriptions, and use GitHub's stacked pull requests (`gh stack`). Each layer passes every check on its own; a layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`). A stack merges bottom-up with `gh stack merge`.
 
@@ -169,6 +169,8 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 **Break-glass.** Only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
 
 **Required check names.** The "Protect main" ruleset requires checks by job name (`Check (ubuntu-latest)`, `Check (macos-latest)`, `UI journeys (Chromium, axe-core, keyboard)`, `Release-build tests (no default features)`, `Mutation testing (changed code)`, `Red-first check`). Renaming one of those jobs blocks every merge, so don't, unless the maintainer updates the ruleset at the same time.
+
+**The `release` label and release builds.** The `Release builds` workflow (`.github/workflows/release-builds.yml`, §12.1, §16 decision 54) builds the release archives with cargo-dist and smoke-tests them every night and on demand. It also runs on each push to a pull request labelled `release`: release-plz puts the label on every release PR (`release-plz.toml`), so a release's binaries are built before it is tagged, and the label belongs on any pull request that could break a release build but not a development one: a dependency with C code or a system library, the release profile, `release_flags` or `dist-workspace.toml`, the embedded web UI's build, or the workflow itself. It is not a required check, and its job names (`Release archive (<target>)`, `Report a failed nightly release build`) match none of the required ones above; a job added to it keeps to that. A failed nightly run opens an issue titled "Nightly release build failed", or comments on the open one.
 
 ### 13.9 Dependencies, licence and fixtures
 
