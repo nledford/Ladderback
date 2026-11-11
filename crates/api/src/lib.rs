@@ -255,6 +255,13 @@ pub enum WarningCode {
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
     MaintenancePartial,
+    /// A check found something to tidy that no snapshot's data depends on,
+    /// such as a pack no index lists. The warning's detail is rustic's own
+    /// words, which name it.
+    CheckWarning,
+    /// A check found damage in the repository, so a snapshot may not
+    /// restore whole. The warning's detail is rustic's own words.
+    CheckError,
     #[serde(other)]
     Unknown,
 }
@@ -726,6 +733,8 @@ impl WarningCode {
                 },
             ],
             Self::SourceUnreadable
+            | Self::CheckWarning
+            | Self::CheckError
             | Self::ProfilePrune
             | Self::ProfileEnvIgnored
             | Self::ProfileHooksPerPlan

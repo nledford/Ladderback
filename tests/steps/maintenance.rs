@@ -13,7 +13,10 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use api::{MaintenancePreviewDto, SnapshotDto, SnapshotGroupsDto};
+use api::{
+    MaintenancePreviewDto, OperationDetailDto, OperationResultDto, SnapshotDto, SnapshotGroupsDto,
+    WarningCode,
+};
 use cucumber::{given, then, when};
 
 use super::events_steps::save_daemon_config;
@@ -24,6 +27,13 @@ use super::{Agent, blocking};
 
 /// The alias the serving step gives the scenario's repository.
 const ALIAS: &str = "demo";
+
+/// The ID the stray pack is given: one no index lists.
+const STRAY_PACK: &str = "5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e";
+
+/// How rustic names that pack in its words: by the first 8 hex digits of
+/// its ID, as its own `check` prints it.
+const STRAY_PACK_NAMED: &str = "5ca1ab1e";
 
 /// What the maintenance scenarios keep between steps.
 #[derive(Default)]
@@ -190,6 +200,25 @@ async fn operation_status(agent: &Agent, id: &str) -> String {
         .to_owned()
 }
 
+/// The daemon's operation `id`, as its detail route answers.
+async fn operation_detail(agent: &Agent, id: &str) -> OperationDetailDto {
+    let addr = agent.events.addr();
+    let path = format!("/api/v1/operations/{id}");
+    let (status, body) = blocking(move || exchange_at(addr, "GET", &path, "")).await;
+    assert_eq!(status, 200, "the operation is known: {body}");
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the operation is the documented JSON: {error}: {body}"))
+}
+
+/// The operation the last start was accepted as.
+fn started(agent: &Agent) -> String {
+    agent
+        .maintenance
+        .started
+        .clone()
+        .expect("the start named its operation")
+}
+
 #[given(expr = "the daemon holds {int} snapshot(s) of the plan {string}")]
 async fn daemon_holds(agent: &mut Agent, count: usize, plan: String) {
     // The folder changes before each backup, so no two snapshots share
@@ -221,6 +250,24 @@ async fn daemon_forgot(agent: &mut Agent, keep: i64) {
         .expect("the daemon accepted the forget");
     wait_ended(agent, &id).await;
     assert_eq!(operation_status(agent, &id).await, "succeeded");
+}
+
+/// A backup killed before it saved its index has written packs that no index
+/// lists. A copy of a pack of the repository, under an ID of its own, is one.
+#[given(
+    "a backup killed before it saved its index left a pack in the repository that no index lists"
+)]
+async fn killed_backup_left_a_pack(agent: &mut Agent) {
+    let root = agent.backup.repository.clone().expect("a repository");
+    blocking(move || {
+        let mut names = BTreeSet::new();
+        walk(&root.join("data"), "data", &mut names);
+        let pack = names.first().expect("the repository holds a pack to copy");
+        let folder = root.join("data").join(&STRAY_PACK[..2]);
+        std::fs::create_dir_all(&folder).expect("the pack's folder");
+        std::fs::copy(root.join(pack), folder.join(STRAY_PACK)).expect("the pack is copied");
+    })
+    .await;
 }
 
 #[given("the names of the files in the repository's index and data folders are noted")]
@@ -307,6 +354,12 @@ async fn starts_raw(agent: &mut Agent, alias: String, body: String) {
         &body,
     )
     .await;
+}
+
+#[when("the owner checks the repository and the check ends")]
+async fn checks_until_the_end(agent: &mut Agent) {
+    start_run(agent, r#"{"kind":"check"}"#).await;
+    wait_ended(agent, &started(agent)).await;
 }
 
 #[when(expr = "the daemon makes another snapshot of the plan {string}")]
@@ -516,6 +569,45 @@ fn check_preview_reads_structure_only(agent: &mut Agent) {
         panic!("the preview is a check preview");
     };
     assert!(!read_data, "a check preview reads no pack data");
+}
+
+#[then(
+    expr = "the check ended as succeeded with warnings, counting {int} warning(s) and no errors"
+)]
+async fn check_ended_with_warnings(agent: &mut Agent, warnings: u64) {
+    let detail = operation_detail(agent, &started(agent)).await;
+    assert_eq!(detail.operation.status, "succeeded-with-warnings");
+    assert!(
+        matches!(
+            detail.operation.result,
+            Some(OperationResultDto::Check { errors: 0, warnings: counted, .. }) if counted == warnings
+        ),
+        "the check's result: {:?}",
+        detail.operation.result
+    );
+}
+
+#[then("the check's warnings name the pack no index lists, in rustic's words")]
+async fn check_warnings_name_the_pack(agent: &mut Agent) {
+    let detail = operation_detail(agent, &started(agent)).await;
+    let naming: Vec<_> = detail
+        .warnings
+        .iter()
+        .filter(|warning| warning.detail.contains(STRAY_PACK_NAMED))
+        .collect();
+    assert_eq!(
+        naming.len(),
+        1,
+        "the check's warnings: {:?}",
+        detail.warnings
+    );
+    assert_eq!(naming[0].code, WarningCode::CheckWarning);
+    assert_eq!(naming[0].during, "check");
+    assert!(
+        naming[0].detail.contains("not referenced in index"),
+        "rustic's own words: {}",
+        naming[0].detail
+    );
 }
 
 #[then("the operation log holds no maintenance operation")]

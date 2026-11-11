@@ -6,7 +6,7 @@
 // found by role and accessible name.
 
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
@@ -18,6 +18,13 @@ import { serveDemoPlans } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
 const ALIAS = "demo";
+
+// The ID the stray pack is given: one no index lists.
+const STRAY_PACK = "5ca1ab1e".repeat(8);
+
+// How rustic names that pack in its words: by the first 8 hex digits of its
+// ID, as its own `check` prints it.
+const STRAY_PACK_NAMED = STRAY_PACK.slice(0, 8);
 
 // A backup, a forget or a prune of the tiny source ends in a moment, even in
 // a debug build; this is the room a slow machine gets.
@@ -170,6 +177,21 @@ Given("the repository has been removed", async function (this: BrowserWorld) {
   assert.ok(this.ownServer, "this scenario's daemon was never started");
   await rm(path.join(this.ownServer.scratch, "repo"), { recursive: true, force: true });
 });
+
+// A backup killed before it saved its index has written packs that no index
+// lists. A copy of a pack of the repository, under an ID of its own, is one.
+Given(
+  "a backup killed before it saved its index left a pack in the repository that no index lists",
+  async function (this: BrowserWorld) {
+    assert.ok(this.ownServer, "this scenario's daemon was never started");
+    const data = path.join(this.ownServer.scratch, "repo", "data");
+    const pack = (await readdir(data, { recursive: true, withFileTypes: true })).find((entry) => entry.isFile());
+    assert.ok(pack, "the repository holds no pack to copy");
+    const folder = path.join(data, STRAY_PACK.slice(0, 2));
+    await mkdir(folder, { recursive: true });
+    await copyFile(path.join(pack.parentPath, pack.name), path.join(folder, STRAY_PACK));
+  },
+);
 
 // The demo plan is the config's last table: cut it off, and the repository is
 // one no plan backs up to.
@@ -438,6 +460,29 @@ Then("the page offers the button {string}", async function (this: BrowserWorld, 
     .first()
     .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
 });
+
+// A line of the page that says more than the words a scenario names.
+Then("the main content shows a line containing {string}", async function (this: BrowserWorld, text: string) {
+  await this.page
+    .getByRole("main")
+    .getByText(text)
+    .first()
+    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+});
+
+// What the check found is in rustic's words, which name the pack; they are
+// English whatever the language of the page, and the page marks them so (§4.5).
+Then(
+  "the main content names the pack no index lists in the engine's words, marked as English",
+  async function (this: BrowserWorld) {
+    await this.page
+      .getByRole("main")
+      .locator('[lang="en"]')
+      .filter({ hasText: STRAY_PACK_NAMED })
+      .first()
+      .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  },
+);
 
 // What the engine says is English whatever the language of the page, and the
 // page marks it so (§4.5).

@@ -1068,6 +1068,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 WarningCode::SourceUnreadable => WarningKind::SourceUnreadable,
                 WarningCode::HookWarning => WarningKind::Hook,
                 WarningCode::MaintenancePartial => WarningKind::MaintenancePartial,
+                WarningCode::CheckWarning | WarningCode::CheckError => todo!(),
                 // The profile codes belong to the import and export, which
                 // run in the CLI; a worker that sent one is reported as the
                 // problem it claims, in its own words.
@@ -1334,6 +1335,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
                         WarningKind::Hook => WarningCode::HookWarning,
                         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
+                        WarningKind::CheckWarning | WarningKind::CheckError => todo!(),
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,
@@ -1620,6 +1622,51 @@ mod tests {
                 detail: "odd".to_owned(),
             }))
         );
+    }
+
+    /// What a check found comes back as the kind of its level, and a fake
+    /// job that plays one sends the code it came as.
+    #[test]
+    fn a_checks_findings_keep_their_level_both_ways() {
+        for (code, kind) in [
+            (WarningCode::CheckWarning, WarningKind::CheckWarning),
+            (WarningCode::CheckError, WarningKind::CheckError),
+        ] {
+            let found = WorkerEvent::Warning {
+                item: None,
+                during: "check".to_owned(),
+                code,
+                detail: "pack 5ca1ab1e not referenced in index".to_owned(),
+            };
+            assert_eq!(
+                translate(found, &redactor_of(&["hunter2-demo"])),
+                Some(EngineEvent::Warning(Warning {
+                    kind,
+                    item: None,
+                    during: "check".to_owned(),
+                    detail: "pack 5ca1ab1e not referenced in index".to_owned(),
+                }))
+            );
+            let played = job_kind(Job::Fake(FakeJob {
+                steps: 0,
+                step_delay: Duration::ZERO,
+                warnings: vec![Warning {
+                    kind,
+                    item: None,
+                    during: "check".to_owned(),
+                    detail: String::new(),
+                }],
+                end: FakeEnd::Succeed,
+                deadline_budget: None,
+            }));
+            let Ok(JobKind::Fake(spec)) = played else {
+                panic!("not a fake job: {played:?}");
+            };
+            assert_eq!(
+                spec.warnings.iter().map(|w| w.code).collect::<Vec<_>>(),
+                [code]
+            );
+        }
     }
 
     #[test]

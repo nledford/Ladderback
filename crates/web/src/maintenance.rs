@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use api::{
     AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg,
-    OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto,
+    OperationDetailDto, OperationSummaryDto, OrphanedGroupDto, SnapshotDto, SnapshotGroupsDto,
+    UnmanagedGroupDto, WarningCode,
 };
 
 use crate::announcer::Politeness;
@@ -421,6 +422,12 @@ pub(crate) fn unmanaged_stuck(group: &UnmanagedGroupDto) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
     Finished,
+    /// A check ran to its end and found something: `errors` places of
+    /// damage and `warnings` things to tidy, as its result counts them.
+    Found {
+        errors: u64,
+        warnings: u64,
+    },
     Cancelled,
     Failed,
 }
@@ -445,12 +452,51 @@ impl End {
         let politeness = match outcome {
             Outcome::Failed => Politeness::Assertive,
             Outcome::Cancelled | Outcome::Finished => Politeness::Polite,
+            Outcome::Found { .. } => todo!(),
         };
         End {
             kind,
             outcome,
             politeness,
         }
+    }
+
+    /// The end of a `kind` run as its ended `operation` reads: by its status,
+    /// but for a check that ran to its end and found something, which is
+    /// told by how much of each it found, and assertively when any of it is
+    /// damage.
+    pub(crate) fn read(kind: Kind, operation: &OperationSummaryDto) -> End {
+        let _ = (kind, operation);
+        todo!()
+    }
+}
+
+/// How many of what a check found the page lists; the rest is counted.
+pub(crate) const MAX_LISTED_FINDINGS: usize = 20;
+
+/// One thing a check found, as its operation recorded it: the code of its
+/// level and rustic's own words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Finding {
+    pub(crate) code: WarningCode,
+    pub(crate) detail: String,
+}
+
+/// What the page lists of what a check found, and how many more it found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Findings {
+    pub(crate) listed: Vec<Finding>,
+    pub(crate) more: u64,
+}
+
+impl Findings {
+    /// What an ended check's `detail` lists of what it found: the damage
+    /// first, then the things to tidy, each in the order found, at most
+    /// [`MAX_LISTED_FINDINGS`]; `more` is how many more its result counts.
+    /// Nothing for a run that is not a check.
+    pub(crate) fn of(detail: &OperationDetailDto) -> Findings {
+        let _ = detail;
+        todo!()
     }
 }
 
@@ -480,12 +526,12 @@ const SECOND_READS: u32 = 80;
 const MAX_MISSES: u32 = 7;
 
 /// What the wait for a run does next.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Next {
     /// Read again after this long.
     Again(Duration),
-    /// The run is over.
-    Ended(End),
+    /// The run is over, and what the page lists of what it found.
+    Ended(End, Findings),
     /// The daemon has not answered for too long to say how the run went.
     GaveUp,
 }
@@ -508,11 +554,13 @@ impl Watch {
         }
     }
 
-    /// What comes after a read of the run's status: `None` is a read that
+    /// What comes after a read of the run's operation: `None` is a read that
     /// got no answer.
-    pub(crate) fn after(&mut self, status: Option<&str>) -> Next {
-        match status {
-            Some(status) if ended(status) => Next::Ended(End::of(self.kind, status)),
+    pub(crate) fn after(&mut self, read: Option<&OperationDetailDto>) -> Next {
+        match read.map(|detail| detail.operation.status.as_str()) {
+            Some(status) if ended(status) => {
+                Next::Ended(End::of(self.kind, status), Findings::default())
+            }
             Some(_) => {
                 self.misses = 0;
                 self.reads = self.reads.saturating_add(1);
@@ -531,10 +579,10 @@ impl Watch {
 }
 
 /// What the wait for a run came to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Watched {
-    /// The run ended, and how.
-    Ended(End),
+    /// The run ended, how, and what the page lists of what it found.
+    Ended(End, Findings),
     /// The daemon stayed silent for too long to go on waiting.
     GaveUp,
     /// The page that waited is gone.
@@ -623,14 +671,16 @@ pub(crate) enum Effect {
 }
 
 /// What the page's maintenance holds besides the history it lists: the
-/// request that is out, the run that goes on, how the last one ended and the
-/// refusal to read. Each change returns what the page then does, so that what
-/// is shown, said and focused is decided here and not where the elements are.
+/// request that is out, the run that goes on, how the last one ended and what
+/// it found, and the refusal to read. Each change returns what the page then
+/// does, so that what is shown, said and focused is decided here and not
+/// where the elements are.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Panel {
     pub(crate) step: Option<Step>,
     pub(crate) run: Option<Run>,
     pub(crate) ended: Option<Told>,
+    pub(crate) findings: Findings,
     pub(crate) refusal: Option<Refusal>,
 }
 
@@ -714,15 +764,15 @@ impl Panel {
         let Some(run) = self.run.as_ref() else {
             return Vec::new();
         };
-        let told = match how {
-            Watched::Ended(end) => Told::Ended(end),
-            Watched::GaveUp => Told::Unwatched(run.kind),
+        let (told, ended) = match how {
+            Watched::Ended(end, _) => (Told::Ended(end), true),
+            Watched::GaveUp => (Told::Unwatched(run.kind), false),
             Watched::Gone => return Vec::new(),
         };
         self.run = None;
         self.ended = Some(told);
         let mut effects = vec![Effect::Say(told), Effect::RecoverFocus];
-        if matches!(how, Watched::Ended(_)) {
+        if ended {
             effects.push(Effect::Reload);
         }
         effects
@@ -772,7 +822,8 @@ pub(crate) fn unreachable_after(answered: bool) -> bool {
 mod tests {
     use super::*;
     use api::{
-        ForgetPlanDto, LeftAloneDto, PlanGroupDto, SnapshotDto, TallyDto, UnmanagedGroupDto,
+        ForgetPlanDto, LeftAloneDto, OperationResultDto, OperationWarningDto, PlanGroupDto,
+        SnapshotDto, TallyDto, UnmanagedGroupDto,
     };
 
     fn snapshot(n: u8) -> SnapshotDto {
@@ -1236,6 +1287,241 @@ mod tests {
         }
     }
 
+    /// An operation of `kind` that is `status`, with `result`.
+    fn summary(
+        kind: &str,
+        status: &str,
+        result: Option<OperationResultDto>,
+    ) -> OperationSummaryDto {
+        OperationSummaryDto {
+            id: "01a1c74a-2d40-7288-86c8-04ba8db8aa1a".to_owned(),
+            plan: "home".to_owned(),
+            kind: kind.to_owned(),
+            status: status.to_owned(),
+            queued_at: "2026-11-09T10:00:00Z".to_owned(),
+            started_at: None,
+            finished_at: None,
+            warning_codes: Vec::new(),
+            failure_code: None,
+            result,
+        }
+    }
+
+    /// A read of a check that is `status` and has no result yet.
+    fn read(status: &str) -> OperationDetailDto {
+        OperationDetailDto {
+            operation: summary("check", status, None),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// A check's result that counts `errors` and `warnings`.
+    fn checked(errors: u64, warnings: u64) -> Option<OperationResultDto> {
+        Some(OperationResultDto::Check {
+            errors,
+            warnings,
+            duration_ms: 1_000,
+        })
+    }
+
+    /// A warning with `code` and `detail`, as a check records one.
+    fn found(code: WarningCode, detail: &str) -> OperationWarningDto {
+        OperationWarningDto {
+            code,
+            item: None,
+            during: "check".to_owned(),
+            detail: detail.to_owned(),
+        }
+    }
+
+    /// An ended check whose result counts `errors` and `warnings`, and which
+    /// recorded `recorded`.
+    fn ended_check(
+        errors: u64,
+        warnings: u64,
+        recorded: Vec<OperationWarningDto>,
+    ) -> OperationDetailDto {
+        OperationDetailDto {
+            operation: summary(
+                "check",
+                "succeeded-with-warnings",
+                checked(errors, warnings),
+            ),
+            warnings: recorded,
+        }
+    }
+
+    #[test]
+    fn a_check_that_found_damage_ends_assertively_counting_both() {
+        let end = End::read(
+            Kind::Check,
+            &summary("check", "succeeded-with-warnings", checked(2, 3)),
+        );
+        assert_eq!(end.kind, Kind::Check);
+        assert_eq!(
+            end.outcome,
+            Outcome::Found {
+                errors: 2,
+                warnings: 3
+            }
+        );
+        assert_eq!(end.politeness, Politeness::Assertive);
+    }
+
+    #[test]
+    fn a_check_that_found_only_errors_ends_assertively() {
+        let end = End::read(
+            Kind::Check,
+            &summary("check", "succeeded-with-warnings", checked(1, 0)),
+        );
+        assert_eq!(
+            end.outcome,
+            Outcome::Found {
+                errors: 1,
+                warnings: 0
+            }
+        );
+        assert_eq!(end.politeness, Politeness::Assertive);
+    }
+
+    #[test]
+    fn a_check_that_found_only_things_to_tidy_ends_politely() {
+        let end = End::read(
+            Kind::Check,
+            &summary("check", "succeeded-with-warnings", checked(0, 1)),
+        );
+        assert_eq!(
+            end.outcome,
+            Outcome::Found {
+                errors: 0,
+                warnings: 1
+            }
+        );
+        assert_eq!(end.politeness, Politeness::Polite);
+    }
+
+    #[test]
+    fn a_run_that_found_nothing_ends_as_its_status_says() {
+        for (kind, operation) in [
+            (Kind::Check, summary("check", "succeeded", checked(0, 0))),
+            (Kind::Check, summary("check", "failed", None)),
+            (Kind::Check, summary("check", "cancelled", None)),
+            (
+                Kind::Forget,
+                summary(
+                    "forget",
+                    "succeeded-with-warnings",
+                    Some(OperationResultDto::Forget {
+                        removed: 2,
+                        duration_ms: 1_000,
+                    }),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                End::read(kind, &operation),
+                End::of(kind, &operation.status),
+                "{operation:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn what_a_check_found_is_listed_damage_first_then_in_the_order_found() {
+        let detail = ended_check(
+            1,
+            2,
+            vec![
+                found(
+                    WarningCode::CheckWarning,
+                    "pack 5ca1ab1e not referenced in index.",
+                ),
+                found(WarningCode::HookWarning, "a hook said something"),
+                found(WarningCode::CheckError, "pack 0dd0dd0d is missing"),
+                found(
+                    WarningCode::CheckWarning,
+                    "pack feedface not referenced in index.",
+                ),
+            ],
+        );
+        let findings = Findings::of(&detail);
+        assert_eq!(
+            findings.listed,
+            [
+                Finding {
+                    code: WarningCode::CheckError,
+                    detail: "pack 0dd0dd0d is missing".to_owned(),
+                },
+                Finding {
+                    code: WarningCode::CheckWarning,
+                    detail: "pack 5ca1ab1e not referenced in index.".to_owned(),
+                },
+                Finding {
+                    code: WarningCode::CheckWarning,
+                    detail: "pack feedface not referenced in index.".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(findings.more, 0);
+    }
+
+    #[test]
+    fn a_check_lists_at_most_its_cap_and_counts_the_rest_its_result_counted() {
+        let recorded = (0..=MAX_LISTED_FINDINGS)
+            .map(|n| {
+                found(
+                    WarningCode::CheckWarning,
+                    &format!("pack {n:08x} not referenced"),
+                )
+            })
+            .collect();
+        // The log kept fewer than the check found.
+        let findings = Findings::of(&ended_check(0, 30, recorded));
+        assert_eq!(findings.listed.len(), MAX_LISTED_FINDINGS);
+        assert_eq!(findings.listed[0].detail, "pack 00000000 not referenced");
+        assert_eq!(findings.more, 30 - MAX_LISTED_FINDINGS as u64);
+    }
+
+    #[test]
+    fn a_run_that_is_no_check_lists_nothing() {
+        let detail = OperationDetailDto {
+            operation: summary(
+                "forget",
+                "succeeded-with-warnings",
+                Some(OperationResultDto::Forget {
+                    removed: 2,
+                    duration_ms: 1_000,
+                }),
+            ),
+            warnings: vec![found(WarningCode::CheckWarning, "odd")],
+        };
+        assert_eq!(Findings::of(&detail), Findings::default());
+        assert_eq!(
+            Findings::of(&ended_check(0, 0, Vec::new())),
+            Findings::default()
+        );
+    }
+
+    #[test]
+    fn a_check_that_ended_is_announced_with_what_it_found() {
+        let detail = ended_check(
+            0,
+            1,
+            vec![found(
+                WarningCode::CheckWarning,
+                "pack 5ca1ab1e not referenced in index.",
+            )],
+        );
+        let mut watch = Watch::new(Kind::Check);
+        assert_eq!(
+            watch.after(Some(&detail)),
+            Next::Ended(
+                End::read(Kind::Check, &detail.operation),
+                Findings::of(&detail)
+            )
+        );
+    }
+
     // What a review names, who can be adopted, and how a run is awaited: the
     // decisions the Snapshots page adds to the ones above.
 
@@ -1454,7 +1740,7 @@ mod tests {
         let mut watch = Watch::new(Kind::Prune);
         for status in ["queued", "running"] {
             assert_eq!(
-                watch.after(Some(status)),
+                watch.after(Some(&read(status))),
                 Next::Again(Duration::from_millis(250)),
                 "{status}"
             );
@@ -1465,10 +1751,10 @@ mod tests {
     fn the_wait_slows_down_as_the_reads_pile_up() {
         let mut watch = Watch::new(Kind::Prune);
         for _ in 0..20 {
-            watch.after(Some("running"));
+            watch.after(Some(&read("running")));
         }
         assert_eq!(
-            watch.after(Some("running")),
+            watch.after(Some(&read("running"))),
             Next::Again(Duration::from_secs(1))
         );
     }
@@ -1487,12 +1773,15 @@ mod tests {
         ] {
             let mut watch = Watch::new(Kind::Check);
             assert_eq!(
-                watch.after(Some(status)),
-                Next::Ended(End {
-                    kind: Kind::Check,
-                    outcome,
-                    politeness
-                }),
+                watch.after(Some(&read(status))),
+                Next::Ended(
+                    End {
+                        kind: Kind::Check,
+                        outcome,
+                        politeness
+                    },
+                    Findings::default()
+                ),
                 "{status}"
             );
         }
@@ -1523,7 +1812,10 @@ mod tests {
         for _ in 0..6 {
             watch.after(None);
         }
-        assert!(matches!(watch.after(Some("running")), Next::Again(_)));
+        assert!(matches!(
+            watch.after(Some(&read("running"))),
+            Next::Again(_)
+        ));
         assert_eq!(
             watch.after(None),
             Next::Again(Duration::from_secs(1)),
@@ -1536,12 +1828,12 @@ mod tests {
         let mut watch = Watch::new(Kind::Forget);
         for _ in 0..10 {
             watch.after(None);
-            watch.after(Some("running"));
+            watch.after(Some(&read("running")));
         }
         // The eleventh answered read: still within the quarter-second pace,
         // as it would not be if the ten misses counted as reads.
         assert_eq!(
-            watch.after(Some("running")),
+            watch.after(Some(&read("running"))),
             Next::Again(Duration::from_millis(250))
         );
     }
@@ -1767,7 +2059,7 @@ mod tests {
         panel.started(Kind::Check, operation());
         let end = End::of(Kind::Check, "failed");
         assert_eq!(
-            panel.watched(Watched::Ended(end)),
+            panel.watched(Watched::Ended(end, Findings::default())),
             vec![
                 Effect::Say(Told::Ended(end)),
                 Effect::RecoverFocus,
@@ -1776,6 +2068,46 @@ mod tests {
         );
         assert_eq!(panel.run, None);
         assert_eq!(panel.ended, Some(Told::Ended(end)));
+    }
+
+    /// What a check found and a note of how many more.
+    fn some_findings() -> Findings {
+        Findings {
+            listed: vec![Finding {
+                code: WarningCode::CheckWarning,
+                detail: "pack 5ca1ab1e not referenced in index.".to_owned(),
+            }],
+            more: 3,
+        }
+    }
+
+    #[test]
+    fn a_check_that_ended_keeps_what_it_found_to_show() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Check, operation());
+        let end = End::of(Kind::Check, "succeeded-with-warnings");
+        panel.watched(Watched::Ended(end, some_findings()));
+        assert_eq!(panel.findings, some_findings());
+    }
+
+    #[test]
+    fn what_the_last_check_found_is_stale_once_anything_new_is_asked_or_refused() {
+        let shown = || Panel {
+            findings: some_findings(),
+            ..Panel::default()
+        };
+        let mut asked = shown();
+        asked.asks(Step::Preparing);
+        assert_eq!(asked.findings, Findings::default());
+        let mut confirmed = shown();
+        confirmed.asks(Step::Starting(Kind::Check));
+        assert_eq!(confirmed.findings, Findings::default());
+        let mut refused = shown();
+        refused.refused(refusal(ErrorCode::MaintenanceBusy));
+        assert_eq!(refused.findings, Findings::default());
+        let mut started = shown();
+        started.started(Kind::Check, operation());
+        assert_eq!(started.findings, Findings::default());
     }
 
     #[test]
@@ -1806,7 +2138,10 @@ mod tests {
     fn a_wait_that_ends_with_no_run_to_end_changes_nothing() {
         let mut panel = Panel::default();
         assert_eq!(
-            panel.watched(Watched::Ended(End::of(Kind::Check, "succeeded"))),
+            panel.watched(Watched::Ended(
+                End::of(Kind::Check, "succeeded"),
+                Findings::default()
+            )),
             Vec::new()
         );
         assert_eq!(panel.watched(Watched::GaveUp), Vec::new());

@@ -9,7 +9,8 @@ use std::time::{Duration, SystemTime};
 use app::ports::{Engine, EngineEvent, EngineResult, ForgetJob, Job, RunningJob};
 use domain::SignedDuration;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
-use domain::execution::{FailureReason, WarningKind};
+use domain::execution::{FailureReason, Warning, WarningKind};
+use domain::secrets::SecretValue;
 use futures::StreamExt;
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{BackupOptions, PathList, SnapshotOptions};
@@ -304,6 +305,124 @@ async fn a_check_counts_what_it_found_by_level() {
     };
     assert_eq!(summary.errors, 0, "{summary:?}");
     assert!(summary.warnings >= 1, "{summary:?}");
+}
+
+/// The warnings among a run's `events`.
+fn warnings(events: &[EngineEvent]) -> Vec<&Warning> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            EngineEvent::Warning(warning) => Some(warning),
+            _ => None,
+        })
+        .collect()
+}
+
+/// How many of `found` are of `kind`, as a result counts them.
+fn count(found: &[&Warning], kind: WarningKind) -> u64 {
+    found.iter().filter(|w| w.kind == kind).count() as u64
+}
+
+/// A repository with one snapshot and a pack file no index lists, as a
+/// backup killed before it saved its index leaves: its ID starts `abababab`.
+async fn with_a_stray_pack(scratch: &Scratch, location: &Location, engine: &engine::WorkerEngine) {
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    run_to_end(
+        engine,
+        backup_job(location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    let stray = scratch
+        .repo_dir()
+        .join("data")
+        .join("ab")
+        .join("ab".repeat(32));
+    write_file(&stray, b"not a pack");
+}
+
+#[tokio::test]
+async fn a_check_reports_each_thing_it_found_as_a_warning_in_rustics_words() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    let engine = engine();
+    with_a_stray_pack(&scratch, &location, &engine).await;
+    let events = run_to_end(&engine, check_job(&location, false)).await;
+    let EngineResult::Check(summary) = succeeded(&events) else {
+        panic!("not a check result: {events:?}");
+    };
+    let found = warnings(&events);
+    assert!(
+        found.iter().all(|w| w.kind == WarningKind::CheckWarning
+            && w.during == "check"
+            && w.item.is_none()),
+        "{found:?}"
+    );
+    assert_eq!(count(&found, WarningKind::CheckWarning), summary.warnings);
+    assert_eq!(summary.errors, 0, "{summary:?}");
+    assert!(
+        found
+            .iter()
+            .any(|w| w.detail.contains("abababab") && w.detail.contains("not referenced in index")),
+        "{found:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_check_that_finds_damage_reports_each_error_and_still_ends() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    let engine = engine();
+    run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    // Every pack the index names is gone.
+    for folder in fs::read_dir(scratch.repo_dir().join("data")).unwrap() {
+        for pack in fs::read_dir(folder.unwrap().path()).unwrap() {
+            fs::remove_file(pack.unwrap().path()).unwrap();
+        }
+    }
+    let events = run_to_end(&engine, check_job(&location, false)).await;
+    let EngineResult::Check(summary) = succeeded(&events) else {
+        panic!("a check that ran to its end must succeed: {events:?}");
+    };
+    assert!(summary.errors >= 1, "{summary:?}");
+    let found = warnings(&events);
+    assert_eq!(count(&found, WarningKind::CheckError), summary.errors);
+    assert_eq!(count(&found, WarningKind::CheckWarning), summary.warnings);
+    assert_eq!(
+        found.len() as u64,
+        summary.errors + summary.warnings,
+        "{found:?}"
+    );
+}
+
+#[tokio::test]
+async fn what_a_check_found_hides_the_jobs_secrets() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    let engine = engine();
+    with_a_stray_pack(&scratch, &location, &engine).await;
+    let mut job = check_job(&location, false);
+    let Job::Check(check) = &mut job else {
+        panic!("not a check job");
+    };
+    check.repository.secrets = vec![SecretValue::new("abababab")];
+    let events = run_to_end(&engine, job).await;
+    succeeded(&events);
+    let found = warnings(&events);
+    assert!(
+        found.iter().any(|w| w.detail.contains("pack ***")),
+        "{found:?}"
+    );
+    assert!(
+        !format!("{events:?}").contains("abababab"),
+        "a secret leaked: {events:?}"
+    );
 }
 
 #[tokio::test]

@@ -131,6 +131,15 @@ pub enum WarningKind {
     /// the last: the jobs that finished stay done. `during` says which
     /// (`forget` or `adopt`) and `detail` is `<done>/<total>` snapshots.
     MaintenancePartial,
+    /// A check found something to tidy that no snapshot's data depends on,
+    /// such as a pack no index lists, which a backup killed before it saved
+    /// its index leaves: what rustic reports at its warning level. `during`
+    /// is `check` and `detail` rustic's own words, which name what it found.
+    CheckWarning,
+    /// A check found damage: something in the repository is not as its
+    /// index or its snapshots say, so a snapshot may not restore whole. What
+    /// rustic reports at its error level, worded as [`Self::CheckWarning`].
+    CheckError,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }

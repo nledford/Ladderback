@@ -88,6 +88,13 @@ Feature: The Snapshots page asks the daemon for a repository's history and for a
     Then the check preview reads the repository's structure only
     And the operation log holds no maintenance operation
 
+  Scenario: In the running daemon, a check keeps what it found and names the pack no index lists
+    Given the daemon holds 1 snapshot of the plan "home"
+    And a backup killed before it saved its index left a pack in the repository that no index lists
+    When the owner checks the repository and the check ends
+    Then the check ended as succeeded with warnings, counting 1 warning and no errors
+    And the check's warnings name the pack no index lists, in rustic's words
+
   Scenario: In the running daemon, a forget confirmed with the preview's selection removes exactly what the preview listed
     Given the daemon holds 3 snapshots of the plan "home"
     And the daemon's plan keeps the last 1 snapshot
