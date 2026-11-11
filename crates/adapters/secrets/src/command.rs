@@ -134,7 +134,7 @@ pub(crate) async fn run_with(
     if status.success() {
         command_secret(&source, &out)
     } else {
-        Err(command_failure(&source, status.code(), &out, &err))
+        Err(command_failure(&source, status.code(), &out, &err, false))
     }
 }
 

@@ -459,6 +459,48 @@ async fn a_command_that_complains_at_length_is_cut_short_and_not_waited_for_in_v
     assert!(detail.len() < 600, "{} bytes", detail.len());
 }
 
+/// A helper that rejects its secret and quotes it on stderr, more of it than
+/// is kept: the kept stderr ends inside the secret, or holds less than the
+/// whole of it, and nothing of it reaches the detail (I4).
+#[tokio::test]
+async fn a_secret_quoted_past_the_kept_stderr_leaves_nothing_of_itself_in_the_error() {
+    let directory = TempDir::new().unwrap();
+    let long: String = ('a'..='z').cycle().take(10_000).collect();
+    let short: String = ('a'..='z').rev().cycle().take(600).collect();
+    for (secret, stderr) in [
+        // Longer than the kept stderr.
+        (long.clone(), long.clone()),
+        // Quoted again and again, so the cut goes through one.
+        (short.clone(), format!("rejected {}", short.repeat(14))),
+    ] {
+        let stdout_file = directory.path().join("stdout");
+        let stderr_file = directory.path().join("stderr");
+        fs::write(&stdout_file, format!("{secret}\n")).unwrap();
+        fs::write(&stderr_file, &stderr).unwrap();
+        let result = resolver(Duration::from_secs(30))
+            .resolve(&command(sh(
+                r#"cat "$1"; cat "$2" >&2; exit 1"#,
+                [
+                    stdout_file.display().to_string(),
+                    stderr_file.display().to_string(),
+                ],
+            )))
+            .await;
+        let Err(SecretError {
+            problem: Problem::CommandFailed { detail, .. },
+            ..
+        }) = result
+        else {
+            panic!("{result:?}");
+        };
+        let start = secret.get(..8).unwrap();
+        assert!(
+            !detail.contains(start),
+            "the secret's start is in {detail:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() {
     let echo_both = CommandLine::new(

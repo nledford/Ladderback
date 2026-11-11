@@ -214,6 +214,23 @@ impl Redactor {
     pub fn longest_match(&self) -> usize {
         self.needles.first().map_or(0, String::len)
     }
+
+    /// `kept`, the start of a text that was cut at a cap, with every needle
+    /// replaced as [`Redactor::redact`] replaces it, and its end too where it
+    /// is the beginning of a needle: a secret the cut went through.
+    pub fn redact_cut(&self, kept: &[u8]) -> String {
+        let _ = kept;
+        todo!()
+    }
+
+    /// `text` masked as [`Redactor::redact`] masks it, unless it ends in
+    /// `mark`, which says that whoever cut it short knew fewer secrets than
+    /// this redactor: then what was kept is masked as
+    /// [`Redactor::redact_cut`] masks it, and the mark stays.
+    pub fn redact_clipped(&self, text: &str, mark: &str) -> String {
+        let _ = (text, mark);
+        todo!()
+    }
 }
 
 /// What else of a secret shows in text without being the whole of it, apart
@@ -1376,6 +1393,69 @@ mod tests {
         assert_eq!(redactor(&["abc", "abcdef", "xy"]).longest_match(), 6);
         // `p%40ss` is the longest form of `p@ss` that a URL can hold.
         assert_eq!(redactor(&["p@ss"]).longest_match(), 6);
+    }
+
+    /// A text cut at a cap can end in the beginning of a secret, which no
+    /// needle matches whole: that end is masked as the secret would be, and
+    /// a whole secret just before the cut is masked whole (I4).
+    #[test]
+    fn a_secret_a_cut_went_through_is_masked_and_so_is_one_just_before_it() {
+        let masked = redactor(&["hunter2-canary"]);
+        // The cut went through it.
+        assert_eq!(masked.redact_cut(b"rejected hunter2-ca"), "rejected ***");
+        assert_eq!(masked.redact_cut(b"rejected h"), "rejected ***");
+        // Longer than what was kept.
+        assert_eq!(masked.redact_cut(b"hunter2"), "***");
+        // Whole, and ending just before the cut, and then cut again.
+        assert_eq!(masked.redact_cut(b"x hunter2-canary!"), "x ***!");
+        assert_eq!(masked.redact_cut(b"x hunter2-canary hunter"), "x *** ***");
+        // Nothing of a secret at the end: the text as it is.
+        assert_eq!(masked.redact_cut(b"nothing here"), "nothing here");
+        assert_eq!(redactor(&[]).redact_cut(b"nothing here"), "nothing here");
+    }
+
+    /// Bytes cut inside a character: the part of it that was kept is not
+    /// shown, and the secret it began is still masked.
+    #[test]
+    fn a_cut_inside_a_character_of_a_secret_still_masks_it() {
+        let masked = redactor(&["pässwort-canary"]);
+        assert_eq!(masked.redact_cut(b"key p\xC3"), "key ***");
+        assert_eq!(masked.redact_cut(b"key \xC3"), "key ");
+        assert_eq!(masked.redact_cut("key pä".as_bytes()), "key ***");
+        // A byte that is no character, before the end, is shown as one that
+        // can't be read, and the text goes on after it.
+        assert_eq!(
+            masked.redact_cut(b"bad \xFF here p\xC3"),
+            "bad \u{FFFD} here ***"
+        );
+    }
+
+    /// Someone who knew fewer secrets cut a text and marked the cut: what it
+    /// kept is masked as any cut text is, and the mark stays.
+    #[test]
+    fn a_text_marked_as_cut_is_masked_as_a_cut_text_and_keeps_its_mark() {
+        let masked = redactor(&["hunter2-canary"]);
+        assert_eq!(masked.redact_clipped("said hunter2-ca…", "…"), "said ***…");
+        // Not marked: only what is whole is a secret.
+        assert_eq!(
+            masked.redact_clipped("said hunter2-canary h", "…"),
+            "said *** h"
+        );
+    }
+
+    /// A secret that ends in what looks like the mark is a whole secret
+    /// there: it is masked with its last character, as `redact` masks it,
+    /// and no mark is put back after it (I4).
+    #[test]
+    fn a_secret_that_ends_in_the_mark_is_masked_whole_with_it() {
+        let masked = redactor(&["hunter2-canary…"]);
+        assert_eq!(
+            masked.redact_clipped("said hunter2-canary…", "…"),
+            "said ***"
+        );
+        // Cut in it and marked: what was kept of it is masked, and the mark
+        // stays.
+        assert_eq!(masked.redact_clipped("said hunter2-ca…", "…"), "said ***…");
     }
 
     /// A worker's stderr reaches the daemon a line at a time, so no needle

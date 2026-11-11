@@ -789,3 +789,15 @@ async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_c
         }
     }
 }
+
+/// Output that was not cut is all the hook said: an end that only begins
+/// like a secret is its own words and stays. Output that was cut is masked
+/// from where it begins a secret (I4).
+#[test]
+fn only_output_that_was_cut_is_masked_where_it_ends_like_a_secret_begins() {
+    let redactor =
+        domain::secrets::Redactor::new(&[domain::secrets::SecretValue::new("hunter2-demo")]);
+    let captured = crate::Captured::default();
+    assert_eq!(captured.stream(b"done h", false, &redactor).text, "done h");
+    assert_eq!(captured.stream(b"done h", true, &redactor).text, "done ***");
+}

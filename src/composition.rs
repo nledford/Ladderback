@@ -4924,6 +4924,30 @@ mod repository_service_tests {
         assert!(!detail.contains("canary"), "{detail}");
     }
 
+    /// A whole secret that ends just before the cap of a command's line is
+    /// masked whole: nothing is cut away to leave its start behind (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_command_show_no_start_of_a_secret_just_before_the_cap() {
+        use domain::secrets::{MAX_DETAIL_BYTES, Problem};
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [("secret_access_key".to_owned(), "canary-inline".to_owned())].into();
+        let before = "x".repeat(MAX_DETAIL_BYTES - "canary-inline".len() - 2);
+        let stderr = format!("{before}canary-inlineyyyyyyyy");
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::command_failed(Some(1), stderr.as_bytes()),
+        );
+        let detail = secret_refusal(&error, &settings)
+            .await
+            .detail
+            .expect("the words are kept");
+        assert!(detail.ends_with('…'), "{detail}");
+        assert!(!detail.contains("ca"), "{detail}");
+    }
+
     /// A file or a keyring that doesn't answer in time is a source that
     /// can't be read, not a command that ran for too long.
     #[tokio::test]

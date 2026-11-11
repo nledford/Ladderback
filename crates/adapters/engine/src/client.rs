@@ -1592,6 +1592,93 @@ mod tests {
         );
     }
 
+    /// A stderr line that was not cut is all the worker said: an end that
+    /// only begins like a secret stays. One that was cut is masked from
+    /// where it begins a secret (I4).
+    #[test]
+    fn only_a_cut_stderr_line_is_masked_where_it_ends_like_a_secret_begins() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        assert_eq!(redacted_log_line(b"said h", false, &redactor), "said h");
+        assert_eq!(redacted_log_line(b"said h", true, &redactor), "said ***");
+    }
+
+    /// The worker cuts a long text after masking it, but it can't mask the
+    /// proxy credentials of its environment, which only the daemon knows: a
+    /// credential its cut went through leaves nothing of itself (I4).
+    #[tokio::test]
+    async fn a_proxy_credential_the_worker_cut_through_leaves_nothing_of_itself() {
+        capture_the_worker_log();
+        let redactor = job_redactor(
+            &fake_job(),
+            environment::proxy_credentials(&[(
+                OsString::from("HTTPS_PROXY"),
+                OsString::from("http://demo:CANARY-proxy@proxy.demo:3128"),
+            )]),
+        );
+        let cut = "proxy said http://demo:CANARY-pr…";
+        let masked = "proxy said http://***…".to_owned();
+        assert_eq!(
+            translate(
+                WorkerEvent::ProgressStart {
+                    key: 1,
+                    kind: ProgressKind::Spinner,
+                    prefix: cut.to_owned(),
+                },
+                &redactor
+            ),
+            Some(EngineEvent::Progress(ProgressEvent::Begin {
+                key: 1,
+                kind: AppProgressKind::Spinner,
+                prefix: masked.clone(),
+            }))
+        );
+        assert_eq!(
+            translate(
+                WorkerEvent::ProgressTitle {
+                    key: 1,
+                    title: cut.to_owned(),
+                },
+                &redactor
+            ),
+            Some(EngineEvent::Progress(ProgressEvent::Title {
+                key: 1,
+                title: masked.clone(),
+            }))
+        );
+        assert_eq!(
+            translate(
+                WorkerEvent::Warning {
+                    item: Some(cut.to_owned()),
+                    during: "connecting".to_owned(),
+                    code: WarningCode::Unknown,
+                    detail: cut.to_owned(),
+                },
+                &redactor
+            ),
+            Some(EngineEvent::Warning(Warning {
+                kind: WarningKind::Other,
+                item: Some(masked.clone()),
+                during: "connecting".to_owned(),
+                detail: masked.clone(),
+            }))
+        );
+        assert_eq!(
+            translate(failed_saying(ErrorCode::OperationFailed, cut), &redactor),
+            Some(EngineEvent::Failed(FailureReason::EngineFailed {
+                detail: masked.clone(),
+            }))
+        );
+        let log_line = WorkerEvent::Log {
+            level: Level::Info,
+            message: format!("cut log: {cut}"),
+        };
+        assert_eq!(translate(log_line, &redactor), None);
+        let line = logged_soon(log::Level::Info, |text| text.starts_with("cut log:"))
+            .await
+            .expect("the worker's log line never reached the log");
+        assert_eq!(line, format!("cut log: {masked}"));
+    }
+
     fn repository(byte: &str) -> RepositoryId {
         RepositoryId::parse(&byte.repeat(32)).unwrap()
     }
@@ -2163,10 +2250,45 @@ mod tests {
             .await
             .expect("the long stderr line never reached the log");
         let kept = line.strip_suffix('…').expect("the line was not cut");
+        // The start of the secret is masked as the secret would be.
+        let before = kept.strip_suffix("***").expect("the cut secret is masked");
         assert!(
-            kept.chars().all(|c| c == 'x'),
+            before.chars().all(|c| c == 'x'),
             "the start of the secret is in the log: {:?}",
-            kept.chars().rev().take(8).collect::<String>()
+            before.chars().rev().take(8).collect::<String>()
+        );
+    }
+
+    /// A whole secret that ends just before the cut of a long stderr line is
+    /// masked whole: nothing is cut away to leave its start behind (I4).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_whole_secret_just_before_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {
+        capture_the_worker_log();
+        let secret = "CANARY-before-cut";
+        let script = format!(
+            "cat >/dev/null; head -c {} /dev/zero | tr '\\0' y >&2; \
+             printf '{secret}yyyyyyyyyy and more\\n' >&2; echo '{}'",
+            MAX_MESSAGE_BYTES - secret.len() - 1,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &[secret]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let _ = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        let line = logged_soon(log::Level::Warn, |text| text.starts_with("yyyy"))
+            .await
+            .expect("the long stderr line never reached the log");
+        assert!(line.ends_with('…'), "the line was not cut");
+        assert!(
+            !line.contains("CA"),
+            "the start of the secret is in the log: {line:?}"
         );
     }
 
