@@ -164,9 +164,6 @@ test-wasm *args:
         echo "error: wasm-bindgen-test-runner is ${have:-not installed}, Cargo.lock has wasm-bindgen $want; run: cargo binstall --no-confirm --version $want wasm-bindgen-cli" >&2
         exit 1
     fi
-    # The packages with a `wasm-bindgen-test` dependency, found as red-first
-    # finds them (one script for both), so a package's first wasm test needs
-    # no edit here.
     names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.ts)
     if [[ -z $names ]]; then
         echo "no package depends on wasm-bindgen-test: no wasm tests to run"
