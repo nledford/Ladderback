@@ -90,7 +90,8 @@ async fn run(
     }))
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod tests {
     use std::sync::{Arc, Mutex, PoisonError};
 

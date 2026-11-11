@@ -526,7 +526,8 @@ fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
     })
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, Ordering};
