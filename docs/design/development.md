@@ -119,3 +119,63 @@ Maintainer decision, 2026-11-08 (§16, decision 21). The daemon runs unattended 
 - **Sources.** crates.io only, plus the one git repository, `rustic-rs/rustic_core`, that the pinned engine crates come from (decision 7).
 
 **In CI.** The `Dependencies (cargo-deny)` job runs `just deny` on pull requests that touch more than docs, and every night: the RustSec database changes without any code change, so a new advisory first turns the nightly run red, before a pull request does; an open pull request's next run shows it too. A scheduled run notifies no one, so a failed nightly run opens an issue titled "Nightly dependency check failed", or comments on the open one. It is not a required check yet; the maintainer may add it to the ruleset once it has proved stable. `just verify` leaves it out because it needs the network.
+
+### 13.7 Changes that touch several places
+
+Each list is one change: leave out a step and something breaks later, often far from the edit.
+
+#### 13.7.1 An error or warning code
+
+A code isn't done until a person can read it in their own language (§8.4). Three steps, in the same change:
+
+1. Add the variant to `ErrorCode` or `WarningCode` in `crates/api/src/lib.rs`, with its arm in that enum's `args()`: the arguments the sender attaches (`&[]` for none). Mark an argument `optional` when the sender may leave it out. It must be text, and every text of the message, in every locale, reads it only through a select that has a `[none]` arm. Never put a secret in them (I4).
+2. Add one line to that enum's list in `crates/l10n/src/code.rs`. The lookup is a `match` without a wildcard, so a variant with no line doesn't compile.
+3. Write the message in `crates/l10n/locales/en-US/common.ftl`, named `error-<code>` or `warning-<code>` after the code's name on the wire (`InvalidJobSpec` is `error-invalid-job-spec`). It reads the variables `args()` lists and no others, with a translator comment above it when it reads any, and may have a `.with-detail` attribute that shows `{ $detail }`, the sender's own text. Voice follows PRODUCT.md: say what happened and what to do next.
+
+`just test` fails for a code with no message, a message with no code, a message that reads a variable its code doesn't declare, and a catalog message that no product code names.
+
+#### 13.7.2 A port
+
+1. The trait in `crates/app/src/ports/`, in the ubiquitous language, returning typed errors.
+2. The in-memory fake in `crates/app/src/fakes/`, behind the `fakes` feature.
+3. The contract suite in `crates/app/src/contract/`, run against the fake from `crates/app/tests/contracts.rs` and against the real adapter from that adapter's tests (`crates/adapters/store/tests/contract.rs` is one).
+4. The real adapter in its own crate under `crates/adapters/`, depending on no other adapter, and its wiring in `src/main.rs`.
+
+#### 13.7.3 A gated crate
+
+Add it to `mutants_packages` in the Justfile and to the list in §13.1, in the change that creates the crate.
+
+#### 13.7.4 A package's first `wasm_bindgen_test`
+
+Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.workspace = true`). `just test-wasm` and `just red-first` both find the package by that dependency, from `cargo metadata` (`scripts/wasm-test-packages.mjs`), so there is no list to edit.
+
+#### 13.7.5 A shared UI component
+
+1. The component in `crates/web/src/components.rs`, from native elements first (§4.5).
+2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show.
+3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.mjs`.
+4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone.
+
+### 13.8 Pull requests and merging
+
+`AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass and the required check names.
+
+**Stacking.** Don't stack pull requests unless it's truly unavoidable, meaning a change that can't land in independent pieces off `main`. Then keep the stack to two pull requests, say "stacked on #N" in both titles and the first line of both descriptions, and use GitHub's stacked pull requests (`gh stack`). Each layer passes every check on its own; a layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`). A stack merges bottom-up with `gh stack merge`.
+
+**Title and squash commit.** The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users: a type release-plz knows, no trailing full stop and no `(#N)`. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade. `just check-pr-title "<title>"` runs CI's check.
+
+**Hotfixes go through pull requests too.** Nobody pushes to `main` directly; the ruleset allows no direct push. A bad merge is first undone with a revert pull request, then fixed properly. A hotfix is an ordinary pull request with every required check.
+
+**Break-glass.** Only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
+
+**Required check names.** The "Protect main" ruleset requires checks by job name (`Check (ubuntu-latest)`, `Check (macos-latest)`, `UI journeys (Chromium, axe-core, keyboard)`, `Release-build tests (no default features)`, `Mutation testing (changed code)`, `Red-first check`). Renaming one of those jobs blocks every merge, so don't, unless the maintainer updates the ruleset at the same time.
+
+### 13.9 Dependencies, licence and fixtures
+
+- **Dependencies:** ask the maintainer before adding an external dependency (a crates.io crate, an npm package, a GitHub Action). Its license must be compatible with MIT OR Apache-2.0. A new workspace crate is not a dependency in this sense.
+- **License:** MIT OR Apache-2.0 ([LICENSE-MIT](../../LICENSE-MIT), [LICENSE-APACHE](../../LICENSE-APACHE)). Ladderback is inspired by Backrest and never derived from it: Backrest is GPL-3.0, so never copy, port or paraphrase its code ([design](README.md)).
+- **Screenshots and fixtures:** use neutral demo data and scratch repositories, never real backups, hostnames or paths. A secret in a test is a canary value, never a real repository password or key.
+
+### 13.10 Keeping AGENTS.md useful
+
+`AGENTS.md` is loaded whole into every agent and reviewer before any work, so every line costs tokens on every task. What only some tasks need goes in the design, behind a one-line pointer that says when to read it (§13.7 to §13.9 are such sections), and a fact stays in one place. Keep the file under 32 KiB, the size past which some agents silently cut project instructions. `just lint` runs `scripts/check-doc-paths.sh`, which fails when a path the file names doesn't exist. The rules for what a line must earn, and for adding and removing lines, are at the end of `AGENTS.md`.
