@@ -694,6 +694,12 @@ ui-repositories-password-label = Password
 # The hint under the password field. It says where the typed password goes: the configuration file, and the history of it that { -brand-name } keeps.
 ui-repositories-password-hint = { -brand-name } keeps it in its configuration file, and in the copies it keeps of that file's earlier versions. It never shows it again.
 
+# The label of the checkbox that asks this agent to maintain a repository it connects: run its forget, prune and check. Off unless the person turns it on.
+ui-repositories-maintain-label = Maintain this repository from this agent
+
+# The hint under that checkbox. It says what maintaining means, that a repository created here is always maintained from here, and why to leave it off: only one place may maintain a repository, and another agent or the hub may already do it.
+ui-repositories-maintain-hint = When this is on, this agent forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another agent or the hub already does. A repository you create here under a name is always maintained from here.
+
 # The button that opens the repository and saves nothing.
 ui-repositories-test = Test the repository
 

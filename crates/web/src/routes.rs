@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
-use crate::components::{ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
+use crate::components::{Checkbox, ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
 use crate::live::say;
 use crate::repositories::{
     Action, Field, Form, Outcome, Sentence, advises_retry, error_of, field_of, password_source,
@@ -645,7 +645,7 @@ impl Inputs {
             location: self.location.get_untracked(),
             hot_storage: self.hot_storage.get_untracked(),
             password: self.password.get_untracked(),
-            maintain_here: false,
+            maintain_here: self.maintain_here.get_untracked(),
         }
     }
 
@@ -653,6 +653,7 @@ impl Inputs {
         for field in FIELDS {
             self.of(field).set(String::new());
         }
+        self.maintain_here.set(false);
     }
 }
 
@@ -924,6 +925,12 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                     value=inputs.password
                     kind="password"
                 />
+                <Checkbox
+                    id="repository-maintain-here"
+                    label=field_text(msg::UI_REPOSITORIES_MAINTAIN_LABEL)
+                    description=field_text(msg::UI_REPOSITORIES_MAINTAIN_HINT)
+                    checked=inputs.maintain_here
+                />
                 <p class="actions">
                     <button type="submit">{test_label}</button>
                     <button type="button" on:click=move |_| submit.run(Action::Connect)>
@@ -1096,7 +1103,10 @@ mod tests {
             );
             inputs.of(field).set(value.to_owned());
         }
-        assert!(!inputs.maintain_here.get_untracked(), "the checkbox starts off");
+        assert!(
+            !inputs.maintain_here.get_untracked(),
+            "the checkbox starts off"
+        );
         inputs.maintain_here.set(true);
         // `Form` has no `Debug`, so that nothing can print a password: compare.
         assert!(

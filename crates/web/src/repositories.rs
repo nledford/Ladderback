@@ -137,7 +137,7 @@ impl Form {
         ConnectRepositoryDto {
             alias: self.alias().to_owned(),
             settings: self.settings(),
-            maintain_here: false,
+            maintain_here: self.maintain_here,
         }
     }
 
