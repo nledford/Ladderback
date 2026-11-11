@@ -191,7 +191,8 @@ pub(crate) fn rereads_list(answered: bool, phase: Phase) -> bool {
 }
 
 /// The field a refusal is about, when it is about one: a name the daemon will
-/// not take, or a secret it could not read.
+/// not take, a secret it could not read, or a path it would read from
+/// wherever it was started.
 pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Field> {
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
@@ -205,7 +206,8 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
         | ErrorCode::TemplateInvalid
-        | ErrorCode::LocationTooManyCredentials => {
+        | ErrorCode::LocationTooManyCredentials
+        | ErrorCode::RepositoryPathRelative => {
             let named = args.iter().find_map(|(name, value)| match value {
                 MsgArg::Text(field) if name == "field" => Some(field.as_str()),
                 _ => None,

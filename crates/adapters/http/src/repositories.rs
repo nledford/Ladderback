@@ -63,8 +63,9 @@ pub struct SecretRefusal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RepositoriesError {
     /// The request parsed as JSON of the right shape, but holds a value the
-    /// settings can't take: a relative password file, a keyring entry that
-    /// is not `service/name`.
+    /// settings can't take: an empty password or location, a keyring entry
+    /// that is not `service/name`, or settings over a cap (a location or an
+    /// option value over 64 KiB, more than 64 options).
     InvalidBody,
     /// The configuration holds no repository under `alias`.
     Unknown { alias: String },

@@ -38,7 +38,7 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::{Maintenance, RepositorySettings};
+use domain::planning::{Maintenance, RepositoryField, RepositorySettings};
 use domain::secrets::{
     FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
     Template, TemplateError,
@@ -1497,7 +1497,9 @@ fn new_operation() -> OperationId {
 /// A request's settings as domain values, read as the configuration reader
 /// reads the same keys: a password file is an absolute path, and a keyring
 /// entry is `service/name`. A typed password and a location (hot ones too)
-/// are not empty. What it can't take is an invalid body.
+/// are not empty. What it can't take is an invalid body, except a setting
+/// that names a path on this machine by a relative one, which is refused at
+/// that setting.
 fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, RepositoriesError> {
     let empty_password =
         matches!(&dto.password, api::PasswordDto::Inline { value } if value.is_empty());
@@ -1510,7 +1512,10 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
             path,
             read: FileRead::FirstLine,
         },
-        api::PasswordDto::File { .. } => return Err(RepositoriesError::InvalidBody),
+        api::PasswordDto::File { path } if path.is_empty() => {
+            return Err(RepositoriesError::InvalidBody);
+        }
+        api::PasswordDto::File { .. } => return Err(path_relative(Field::Password)),
         api::PasswordDto::Keyring { entry } => SecretRef::Keyring(
             KeyringEntry::parse(&entry).map_err(|_| RepositoriesError::InvalidBody)?,
         ),
@@ -1525,11 +1530,31 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
         options_cold: dto.options_cold,
     };
     // What the configuration would refuse when it loads next is not saved,
-    // nor tested: a request can't take more than a job does.
+    // nor tested: a request can't take more than a job does. A value over
+    // its cap is refused for that first, as the configuration refuses it.
     settings
         .check_sizes()
         .map_err(|_| RepositoriesError::InvalidBody)?;
-    Ok(settings)
+    match settings.relative_path() {
+        Some(field) => Err(path_relative(match field {
+            RepositoryField::Repository => Field::Repository,
+            RepositoryField::RepoHot => Field::RepoHot,
+            // A request has no password command; the field is the password.
+            RepositoryField::PasswordCommand => Field::Password,
+            RepositoryField::Option(name) => Field::Option(name),
+            RepositoryField::OptionHot(name) => Field::OptionHot(name),
+            RepositoryField::OptionCold(name) => Field::OptionCold(name),
+        })),
+        None => Ok(settings),
+    }
+}
+
+/// The refusal of a relative path at `field`, named as the configuration
+/// names it.
+fn path_relative(field: Field) -> RepositoriesError {
+    RepositoriesError::PathRelative {
+        field: field_name(&field),
+    }
 }
 
 /// Why a repository use case failed, as the typed refusal the route answers
@@ -5578,6 +5603,21 @@ mod repository_service_tests {
             ("table of options", with(&|s| s.options = many())),
             ("table of hot options", with(&|s| s.options_hot = many())),
             ("table of cold options", with(&|s| s.options_cold = many())),
+            // Refused for its length before it is found relative.
+            (
+                "relative location",
+                with(&|s| s.repository = format!("backups/{}", "r".repeat(MAX_LOCATION_BYTES))),
+            ),
+            (
+                "relative option",
+                with(&|s| {
+                    s.repository = "opendal:fs".to_owned();
+                    s.options = BTreeMap::from([(
+                        "root".to_owned(),
+                        format!("backups/{}", "r".repeat(MAX_OPTION_VALUE_BYTES)),
+                    )]);
+                }),
+            ),
         ] {
             let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
             let service = service(&engine, config.clone());
@@ -5618,6 +5658,14 @@ mod repository_service_tests {
         relative_file.password = PasswordDto::File {
             path: "password.txt".into(),
         };
+        // A relative password file is read before the caps are checked, so
+        // it is refused first, even beside a location over its cap.
+        let mut relative_file_long_location = settings_dto();
+        relative_file_long_location.password = PasswordDto::File {
+            path: "password.txt".into(),
+        };
+        relative_file_long_location.repository =
+            format!("/{}", "v".repeat(domain::secrets::MAX_LOCATION_BYTES));
         let mut relative_root = settings_dto();
         relative_root.repository = "opendal:fs".to_owned();
         relative_root.options = [("root".to_owned(), "backups".to_owned())].into();
@@ -5628,6 +5676,7 @@ mod repository_service_tests {
             (relative, "repository"),
             (relative_hot, "repo-hot"),
             (relative_file, "password"),
+            (relative_file_long_location, "password"),
             (relative_root, "options.root"),
             (relative_cert, "options-cold.http-cacert"),
         ] {
