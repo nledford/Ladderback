@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use domain::RepositoryId;
 use rustic_backend::util::location_to_type_and_path;
 use rustic_backend::{BackendOptions, SupportedBackend};
-use rustic_core::{Credentials, OpenStatus, Repository, RepositoryBackends, RepositoryOptions};
+use rustic_core::{Credentials, OpenStatus, Repository, RepositoryOptions};
 
 use super::Context;
 use super::cancel::refusing_snapshots_once_cancelled;
@@ -36,12 +36,7 @@ pub(crate) fn new_repository(
         None => backend_options,
     }
     .to_backends()?;
-    // Both halves: rustic writes a snapshot to the hot half first.
-    let guarded = |backend| refusing_snapshots_once_cancelled(backend, ctx.cancel().clone());
-    let backends = RepositoryBackends::new(
-        guarded(backends.repository()),
-        backends.repo_hot().map(guarded),
-    );
+    let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
         Some(dir) => options.cache_dir(dir),

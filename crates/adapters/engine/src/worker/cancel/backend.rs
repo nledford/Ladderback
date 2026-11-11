@@ -4,20 +4,34 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use rustic_core::{
-    BytesList, ErrorKind, FileType, Id, ReadBackend, RusticError, RusticResult, WriteBackend,
+    BytesList, ErrorKind, FileType, Id, ReadBackend, RepositoryBackends, RusticError, RusticResult,
+    WriteBackend,
 };
 
 use super::Cancel;
 
-/// `inner`, refusing to write a snapshot once the cancel is asked for. A
+/// `backends`, refusing to write a snapshot once the cancel is asked for. A
 /// cancelled backup winds down through rustic's own end of a backup, which
 /// saves the index of its packs and then the snapshot: this is what keeps
-/// the snapshot out. Everything else is `inner`'s.
+/// the snapshot out. rustic writes a snapshot to the hot half first and to
+/// the cold half only once the hot half has it, so only the half written
+/// first refuses it: a cancel between the two writes can't leave the
+/// snapshot in one half alone. Everything else is the halves' own.
 pub(crate) fn refusing_snapshots_once_cancelled(
-    inner: Arc<dyn WriteBackend>,
-    cancel: Cancel,
-) -> Arc<dyn WriteBackend> {
-    Arc::new(NoSnapshotOnceCancelled { inner, cancel })
+    backends: &RepositoryBackends,
+    cancel: &Cancel,
+) -> RepositoryBackends {
+    match backends.repo_hot() {
+        Some(hot) => RepositoryBackends::new(backends.repository(), Some(refusing(hot, cancel))),
+        None => RepositoryBackends::new(refusing(backends.repository(), cancel), None),
+    }
+}
+
+fn refusing(inner: Arc<dyn WriteBackend>, cancel: &Cancel) -> Arc<dyn WriteBackend> {
+    Arc::new(NoSnapshotOnceCancelled {
+        inner,
+        cancel: cancel.clone(),
+    })
 }
 
 struct NoSnapshotOnceCancelled {
@@ -113,11 +127,20 @@ mod tests {
         format!("{n:064x}").parse().unwrap()
     }
 
+    fn write_snapshot(backend: &Arc<dyn WriteBackend>) -> RusticResult<()> {
+        backend.write_bytes(
+            FileType::Snapshot,
+            &id(1),
+            false,
+            b"snapshot".to_vec().into(),
+        )
+    }
+
     #[test]
     fn a_snapshot_is_written_until_the_cancel() {
         let dir = tempfile::tempdir().unwrap();
         let inner = local(dir.path());
-        let backend = refusing_snapshots_once_cancelled(Arc::clone(&inner), Cancel::default());
+        let backend = refusing(Arc::clone(&inner), &Cancel::default());
         backend
             .write_bytes(
                 FileType::Snapshot,
@@ -134,7 +157,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let inner = local(dir.path());
         let cancel = Cancel::default();
-        let backend = refusing_snapshots_once_cancelled(Arc::clone(&inner), cancel.clone());
+        let backend = refusing(Arc::clone(&inner), &cancel);
         cancel.request();
         assert!(
             backend
@@ -156,7 +179,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let inner = local(dir.path());
         let cancel = Cancel::default();
-        let backend = refusing_snapshots_once_cancelled(Arc::clone(&inner), cancel.clone());
+        let backend = refusing(Arc::clone(&inner), &cancel);
         cancel.request();
         backend
             .write_bytes(FileType::Pack, &id(2), false, b"pack".to_vec().into())
@@ -170,5 +193,33 @@ mod tests {
             &backend.read_full(FileType::Pack, &id(2)).unwrap()[..],
             b"pack"
         );
+    }
+
+    /// rustic writes the cold half's copy only once the hot half has it: a
+    /// snapshot the hot half took before the cancel reaches the cold half
+    /// after it, and one the hot half refused never gets there.
+    #[test]
+    fn in_a_hot_cold_repository_only_the_hot_half_refuses_a_snapshot() {
+        let (cold, hot) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let cancel = Cancel::default();
+        let backends = refusing_snapshots_once_cancelled(
+            &RepositoryBackends::new(local(cold.path()), Some(local(hot.path()))),
+            &cancel,
+        );
+        cancel.request();
+        assert!(write_snapshot(&backends.repo_hot().unwrap()).is_err());
+        write_snapshot(&backends.repository()).unwrap();
+    }
+
+    #[test]
+    fn without_a_hot_half_the_repository_refuses_a_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = Cancel::default();
+        let backends = refusing_snapshots_once_cancelled(
+            &RepositoryBackends::new(local(dir.path()), None),
+            &cancel,
+        );
+        cancel.request();
+        assert!(write_snapshot(&backends.repository()).is_err());
     }
 }
