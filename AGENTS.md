@@ -151,7 +151,7 @@ Several agents may work on the repository at once (§13.5). Each one:
 
 - works in its own git worktree under `.worktrees/<slug>` (git ignores the folder): `git worktree add -b <branch> .worktrees/<slug> origin/main` from the main checkout. It uses its own `CARGO_TARGET_DIR` and deletes that target directory when done;
 - edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
-- passes `--jobs` to `just mutants` when several agents share the machine, uses its own ports (never `just serve`'s 9898) and its own scratch folder (`just try` gives a daemon both), and never runs `rm -rf` on a shared path;
+- passes `--jobs` to `just mutants` when several agents share the machine (the recipe unsets `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR`, so the jobs don't share one build folder), uses its own ports (never `just serve`'s 9898) and its own scratch folder (`just try` gives a daemon both), and never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
 - adds a new §16 decision as `docs/design/decisions/NN-<slug>.md` plus its index row in §16, and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
