@@ -10,14 +10,14 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use app::ports::{HookContext, HookPhase, HookRunner, HookStatus};
+use app::ports::{HookContext, HookPhase, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 use tempfile::TempDir;
 
-use crate::{ProcessHookRunner, Stop, signal_group};
+use crate::{ProcessHookRunner, READ_CHUNK, Stop, read_capped, signal_group};
 
 /// A stop's signals, sent for real, by the runner's own `signal_group`, and
 /// remembered, each with whether the leader of the group was there (not
@@ -605,4 +605,74 @@ async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
         "the hook was stopped before its timeout: {:?}",
         started.elapsed()
     );
+}
+
+/// What `read_capped` keeps of `input` when it keeps at most `keep` bytes,
+/// whether it marks the stream cut, and how much of `input` it left unread.
+async fn read_capped_from(mut input: &[u8], keep: usize) -> (Vec<u8>, bool, usize) {
+    let mut kept = Vec::new();
+    let mut truncated = false;
+    read_capped(&mut input, &mut kept, keep, &mut truncated)
+        .await
+        .unwrap();
+    (kept, truncated, input.len())
+}
+
+/// A stream that just fills the cap lost nothing, whatever the reads it came
+/// in: the last of them ends exactly at the cap.
+#[tokio::test]
+async fn a_stream_that_just_fills_the_cap_is_kept_whole_and_not_marked_cut() {
+    let keep = 2 * READ_CHUNK + 5;
+    let (kept, truncated, _) = read_capped_from(&vec![b'a'; keep], keep).await;
+    assert_eq!(kept.len(), keep);
+    assert!(!truncated);
+}
+
+/// A read that crosses the cap keeps what is under it, drops the rest and
+/// marks the stream cut.
+#[tokio::test]
+async fn a_read_that_crosses_the_cap_keeps_what_is_under_it_and_marks_the_stream_cut() {
+    let (kept, truncated, unread) = read_capped_from(b"abcdefghijk", 10).await;
+    assert_eq!(kept, b"abcdefghij");
+    assert!(truncated);
+    assert_eq!(unread, 0);
+}
+
+/// What comes after the cap is full is read to the end and dropped, so the
+/// writer is never blocked, and the stream is marked cut.
+#[tokio::test]
+async fn what_comes_after_the_cap_is_full_is_read_and_dropped() {
+    let (kept, truncated, unread) = read_capped_from(&vec![b'a'; 3 * READ_CHUNK + 7], 10).await;
+    assert_eq!(kept, [b'a'; 10]);
+    assert!(truncated);
+    assert_eq!(unread, 0);
+}
+
+/// Of each stream a hook writes, the cap is what is kept, and a stream is
+/// marked cut only when it lost something: one of exactly the cap is whole,
+/// and one byte more is cut.
+#[tokio::test]
+async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_cut() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(30));
+    for (written, cut) in [
+        (MAX_HOOK_OUTPUT_BYTES, false),
+        (MAX_HOOK_OUTPUT_BYTES + 1, true),
+    ] {
+        let entry = sh(
+            &format!("printf '%{written}s' ''\nprintf '%{written}s' '' >&2"),
+            &log,
+        );
+        let outcome = within(Duration::from_secs(25), runner.run(&entry, &context())).await;
+        assert_eq!(outcome.status, HookStatus::Succeeded);
+        for (name, stream) in [("stdout", &outcome.stdout), ("stderr", &outcome.stderr)] {
+            assert_eq!(
+                stream.text.len(),
+                MAX_HOOK_OUTPUT_BYTES,
+                "{name} of {written} bytes"
+            );
+            assert_eq!(stream.truncated, cut, "{name} of {written} bytes");
+        }
+    }
 }
