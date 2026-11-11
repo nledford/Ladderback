@@ -4,6 +4,8 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use app::ports::{BackupSummary, EngineResult, OperationDetail, OperationRecord, OperationStore};
@@ -50,6 +52,18 @@ impl Scratch {
     pub async fn raw(&self) -> SqliteConnection {
         raw_connection(&self.path()).await
     }
+
+    /// A connection of our own that never waits for the write lock: it
+    /// tells whether a call of the store's holds it, with
+    /// [`take_write_lock`].
+    pub async fn probe(&self) -> SqliteConnection {
+        SqliteConnectOptions::new()
+            .filename(self.path())
+            .busy_timeout(Duration::ZERO)
+            .connect()
+            .await
+            .expect("a probe connection to the scratch database")
+    }
 }
 
 pub async fn raw_connection(path: &Path) -> SqliteConnection {
@@ -77,10 +91,23 @@ pub async fn within<T>(seconds: u64, what: &str, work: impl Future<Output = T>) 
     }
 }
 
-/// Polls `call` `polls` times, a moment apart so the connection threads can
-/// answer in between, then drops it: the call is cut short at one of its
-/// await points, as a run cuts the write that would hold up a cancel or its
-/// deadline (§9). `Some` when the call ended within `polls` polls.
+/// More polls than any call of the store's needs: a loop that reaches it
+/// fails, rather than runs for ever.
+pub const MOST_POLLS: usize = 200;
+
+/// The moment between two polls of a call, so the connection threads can
+/// answer in between.
+const BETWEEN_POLLS: Duration = Duration::from_millis(20);
+
+/// Polls `call` `polls` times, a moment apart, then drops it: the call is
+/// cut short at one of its await points, as a run cuts the write that would
+/// hold up a cancel or its deadline (§9). `Some` when the call ended within
+/// `polls` polls.
+///
+/// Which await point that is depends on the threads: sqlx answers on the
+/// connection's own thread, and an answer that comes before the poll that
+/// asked for it has returned costs that call no poll. Only
+/// [`poll_to_transaction_check`] reaches a given point.
 pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option<T> {
     let mut call = std::pin::pin!(call);
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
@@ -88,9 +115,143 @@ pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option
         if let std::task::Poll::Ready(done) = call.as_mut().poll(&mut cx) {
             return Some(done);
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(BETWEEN_POLLS).await;
     }
     None
+}
+
+/// Polls `call` to the await point just after its `BEGIN IMMEDIATE` has
+/// run, and leaves it there, waiting to be polled again or dropped. There
+/// sqlx checks that the connection is in a transaction, before the
+/// `Transaction` that would roll it back exists: a call dropped there
+/// leaves its connection inside the transaction, holding the write lock,
+/// unless the store closes that connection.
+///
+/// The threads can't move the call past that point unseen. `probe` holds
+/// the write lock while the call is polled, so its `BEGIN IMMEDIATE` can't
+/// run during a poll, and lets go of it between polls. Once the call's
+/// connection has taken the lock between two polls, the call is waiting
+/// for the answer to its `BEGIN IMMEDIATE`, which the connection's thread
+/// sends a moment after it took the lock and which wakes the call. Once
+/// woken, one more poll takes that answer and stops at the check, which
+/// always waits once, because it queues for the connection before it asks
+/// the connection's thread to let go of it. A call that ends first, or
+/// never begins its transaction, fails the test.
+pub async fn poll_to_transaction_check<F: Future>(
+    mut call: std::pin::Pin<&mut F>,
+    probe: &mut SqliteConnection,
+) {
+    let woken = Arc::new(Woken::default());
+    let waker = std::task::Waker::from(Arc::clone(&woken));
+    let mut cx = std::task::Context::from_waker(&waker);
+    assert!(
+        take_write_lock(probe).await,
+        "the write lock is free before the call"
+    );
+    for _ in 0..MOST_POLLS {
+        woken.0.store(false, Ordering::SeqCst);
+        if call.as_mut().poll(&mut cx).is_ready() {
+            panic!("the call ended before its transaction began");
+        }
+        give_write_lock_back(probe).await;
+        tokio::time::sleep(BETWEEN_POLLS).await;
+        if !take_write_lock(probe).await {
+            let answered = tokio::time::Instant::now() + Duration::from_secs(3);
+            while !woken.0.load(Ordering::SeqCst) {
+                assert!(
+                    tokio::time::Instant::now() < answered,
+                    "the call's connection took the write lock but never answered"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            if call.as_mut().poll(&mut cx).is_ready() {
+                panic!("the call ended at the answer to its BEGIN IMMEDIATE");
+            }
+            return;
+        }
+    }
+    give_write_lock_back(probe).await;
+    panic!("the call didn't begin its transaction within {MOST_POLLS} polls");
+}
+
+/// Whether a call has been woken since the flag was last cleared.
+#[derive(Default)]
+struct Woken(AtomicBool);
+
+impl std::task::Wake for Woken {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Takes the database's write lock for `probe`, from [`Scratch::probe`],
+/// without waiting: `false` when another connection holds it.
+async fn take_write_lock(probe: &mut SqliteConnection) -> bool {
+    /// SQLite's `SQLITE_BUSY`: the lock is held by another connection.
+    const BUSY: &str = "5";
+    match sqlx::query("BEGIN IMMEDIATE").execute(&mut *probe).await {
+        Ok(_) => true,
+        Err(error)
+            if error
+                .as_database_error()
+                .and_then(|database| database.code())
+                .is_some_and(|code| code == BUSY) =>
+        {
+            false
+        }
+        Err(error) => panic!("the probe couldn't ask for the write lock: {error}"),
+    }
+}
+
+/// Lets go of the write lock [`take_write_lock`] took.
+async fn give_write_lock_back(probe: &mut SqliteConnection) {
+    sqlx::query("ROLLBACK")
+        .execute(&mut *probe)
+        .await
+        .expect("the probe gives the write lock back");
+}
+
+/// Where a test cuts a call short.
+#[derive(Clone, Copy, Debug)]
+pub enum Cut {
+    /// Just after its `BEGIN IMMEDIATE` has run, before the store's
+    /// transaction exists: the cut the store must clean up after, reached
+    /// whatever the threads do (see [`poll_to_transaction_check`]).
+    AtTransactionStart,
+    /// After this many polls, wherever the call then waits (see
+    /// [`cut_after`]).
+    AfterPolls(usize),
+}
+
+impl Cut {
+    /// The cut at the start of the transaction, then a cut after every
+    /// number of polls in turn, from none up: a test stops at the first that
+    /// lets the call end.
+    pub fn every() -> impl Iterator<Item = Cut> {
+        std::iter::once(Cut::AtTransactionStart).chain((0..MOST_POLLS).map(Cut::AfterPolls))
+    }
+
+    /// Makes this cut in `call`, a call on `scratch`'s database. `Some` when
+    /// the call ended before the cut.
+    pub async fn made<T>(self, call: impl Future<Output = T>, scratch: &Scratch) -> Option<T> {
+        match self {
+            Cut::AtTransactionStart => {
+                let mut probe = scratch.probe().await;
+                poll_to_transaction_check(std::pin::pin!(call), &mut probe).await;
+                None
+            }
+            Cut::AfterPolls(polls) => cut_after(call, polls).await,
+        }
+    }
+}
+
+impl std::fmt::Display for Cut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Cut::AtTransactionStart => write!(f, "at the start of its transaction"),
+            Cut::AfterPolls(polls) => write!(f, "after {polls} polls"),
+        }
+    }
 }
 
 pub fn id(n: u128) -> OperationId {
