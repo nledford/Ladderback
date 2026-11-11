@@ -51,6 +51,30 @@ impl RepositorySettings {
         credentials(&self.options_cold, InlineSecret::OptionCold);
         found
     }
+
+    /// Whether `other` points at the same place: the same `repository`,
+    /// `repo-hot` and the three option sets, where an `opendal:` backend
+    /// keeps its bucket or root. The password and the options that hold a
+    /// credential ([`is_secret_option`], as the `inline-secret` warning
+    /// takes them) are how to open it, not where it is: one moved from text
+    /// to `${VAR}`, added or removed leaves the same location.
+    pub fn same_location(&self, other: &Self) -> bool {
+        self.repository == other.repository
+            && self.repo_hot == other.repo_hot
+            && same_places(&self.options, &other.options)
+            && same_places(&self.options_hot, &other.options_hot)
+            && same_places(&self.options_cold, &other.options_cold)
+    }
+}
+
+/// Whether two option sets are equal once their credentials are left out.
+fn same_places(one: &BTreeMap<String, String>, other: &BTreeMap<String, String>) -> bool {
+    places(one).eq(places(other))
+}
+
+/// The options of `set` that are not credentials, by name.
+fn places(set: &BTreeMap<String, String>) -> impl Iterator<Item = (&String, &String)> {
+    set.iter().filter(|(name, _)| !is_secret_option(name))
 }
 
 /// An option written in the config can be a secret as it stands, so what the
@@ -212,12 +236,17 @@ pub struct RepositoryConfig {
 }
 
 impl RepositoryConfig {
-    /// Whether this entry is the repository at `location`, or the one whose
-    /// repository ID is `id`. One location is one repository, and so is one
-    /// ID (§7.3); an entry or a request that knows no ID matches by location
-    /// alone.
-    pub fn is(&self, location: &str, id: Option<&RepositoryId>) -> bool {
-        self.settings.repository == location || (id.is_some() && self.id.as_ref() == id)
+    /// Whether this entry is the repository `settings` describe, whose
+    /// repository ID is `id` when it is known. When both this entry and the
+    /// request know their ID, the ID decides alone: one location may come
+    /// to hold another repository, and one repository may be reached at two
+    /// locations. Otherwise one location is one repository (§7.3), and a
+    /// location is the whole of it: [`RepositorySettings::same_location`].
+    pub fn is(&self, settings: &RepositorySettings, id: Option<&RepositoryId>) -> bool {
+        match (self.id.as_ref(), id) {
+            (Some(own), Some(id)) => own == id,
+            _ => self.settings.same_location(settings),
+        }
     }
 }
 

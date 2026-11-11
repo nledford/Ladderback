@@ -118,8 +118,7 @@ impl ImportProfile {
             .map_err(ImportError::Profile)?;
         // A profile knows no repository ID, so its location alone tells
         // whether the configuration already holds its repository.
-        let location = &profile.repository.settings.repository;
-        let configured = loaded.alias_of(location, None);
+        let configured = loaded.alias_of(&profile.repository.settings, None);
         let add_repository = match (loaded.repository(&repository), configured) {
             (Some(_), Some(alias)) if *alias == repository => false,
             (Some(_), _) => return Err(ImportError::AliasTaken(repository)),
@@ -244,6 +243,7 @@ impl ExportProfile {
 mod tests {
     use std::collections::BTreeMap;
 
+    use domain::RepositoryId;
     use domain::planning::{
         AgentSettings, HookEntry, Hooks, RepositoryConfig, RepositorySettings, Source,
     };
@@ -452,6 +452,92 @@ mod tests {
         let after = saved(&config).await;
         assert_eq!(after.repositories(), &before, "the entry is kept as it was");
         assert_eq!(after.plans().len(), 2);
+    }
+
+    fn in_bucket(bucket: &str) -> RepositoryConfig {
+        let mut repository = repository();
+        repository.settings.repository = "opendal:b2".to_owned();
+        repository
+            .settings
+            .options
+            .insert("bucket".to_owned(), bucket.to_owned());
+        repository
+    }
+
+    async fn holding(entries: Vec<(&str, RepositoryConfig)>) -> Arc<InMemoryConfigStore> {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let entries = entries
+            .into_iter()
+            .map(|(name, entry)| (alias(name), entry))
+            .collect();
+        config
+            .save(
+                &AgentConfig::new(
+                    AgentSettings::default(),
+                    Hooks::default(),
+                    entries,
+                    Vec::new(),
+                )
+                .expect("a configuration"),
+            )
+            .await
+            .expect("saved");
+        config
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn import_as(
+        config: &Arc<InMemoryConfigStore>,
+        repository: RepositoryConfig,
+        name: &str,
+    ) -> Result<Imported, ImportError> {
+        let mut profile = profile(vec![plan("home", None)], Hooks::default());
+        profile.repository = repository;
+        profile.plans[0].repository = alias(name);
+        ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(profile))),
+            config.clone(),
+        )
+        .import(Path::new("nas.toml"), alias(name))
+        .await
+    }
+
+    /// An `opendal:` repository's bucket is part of where it is: the alias
+    /// holds another repository than the profile's.
+    #[tokio::test]
+    async fn a_profile_for_another_bucket_under_a_taken_alias_is_refused_and_nothing_is_saved() {
+        let config = holding(vec![("nas", in_bucket("photos"))]).await;
+        let refused = import_as(&config, in_bucket("docs"), "nas").await;
+        assert_eq!(refused, Err(ImportError::AliasTaken(alias("nas"))));
+        let saved = saved(&config).await;
+        assert_eq!(saved.repository(&alias("nas")), Some(&in_bucket("photos")));
+        assert!(saved.plans().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_profile_for_another_bucket_under_a_new_alias_is_added() {
+        let config = holding(vec![("photos", in_bucket("photos"))]).await;
+        import_as(&config, in_bucket("docs"), "docs")
+            .await
+            .expect("another repository");
+        let saved = saved(&config).await;
+        assert_eq!(saved.repository(&alias("docs")), Some(&in_bucket("docs")));
+        assert_eq!(saved.plans().len(), 1);
+    }
+
+    /// The profile knows no ID, so the entry that knows one is found by its
+    /// location, and keeps its ID.
+    #[tokio::test]
+    async fn a_profile_for_an_entry_with_an_id_adds_its_plans_to_it() {
+        let mut entry = repository();
+        entry.id = Some(RepositoryId::parse(&"07".repeat(32)).expect("an ID"));
+        let config = holding(vec![("nas", entry.clone())]).await;
+        import_as(&config, repository(), "nas")
+            .await
+            .expect("the plans are added");
+        let saved = saved(&config).await;
+        assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+        assert_eq!(saved.plans().len(), 1);
     }
 
     #[tokio::test]

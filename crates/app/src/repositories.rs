@@ -126,7 +126,7 @@ impl InitRepository {
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
         if let Some(alias) = &alias {
-            unused(&*self.config, alias, &settings.repository, None).await?;
+            unused(&*self.config, alias, settings, None).await?;
         }
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
@@ -311,21 +311,22 @@ fn failed(reason: FailureReason) -> RepositoryError {
 }
 
 /// The configuration as it stands, when it holds no repository under `alias`
-/// and holds the repository at `location`, or with the ID `id`, under no
-/// alias: a taken alias is refused first, then a repository already
-/// configured, which has one alias (§7.3).
+/// and holds the repository `settings` describe, with the ID `id` when it is
+/// known, under no alias ([`AgentConfig::alias_of`]): a taken alias is
+/// refused first, then a repository already configured, which has one alias
+/// (§7.3).
 #[allow(clippy::result_large_err)]
 async fn unused(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
-    location: &str,
+    settings: &RepositorySettings,
     id: Option<&RepositoryId>,
 ) -> Result<AgentConfig, RepositoryError> {
     let loaded = config.load().await.map_err(RepositoryError::Config)?;
     if loaded.repository(alias).is_some() {
         return Err(RepositoryError::AliasTaken(alias.clone()));
     }
-    if let Some(configured) = loaded.alias_of(location, id) {
+    if let Some(configured) = loaded.alias_of(settings, id) {
         return Err(RepositoryError::AlreadyConfigured(configured.clone()));
     }
     Ok(loaded)
@@ -343,7 +344,7 @@ async fn save(
     id: &RepositoryId,
     maintenance: Maintenance,
 ) -> Result<(), RepositoryError> {
-    let loaded = unused(config, alias, &settings.repository, Some(id)).await?;
+    let loaded = unused(config, alias, settings, Some(id)).await?;
     let mut repositories = loaded.repositories().clone();
     repositories.insert(
         alias.clone(),
