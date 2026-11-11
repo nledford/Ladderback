@@ -1,6 +1,16 @@
 # Every job runs the same `just` recipes developers and agents run locally.
-# mr boxington (mbx) caches Cargo builds: pushes to main save the cache,
-# pull requests only restore it. The red-first check is in red-first.yml.
+# The red-first check is in red-first.yml.
+#
+# mr boxington (mbx) caches Cargo builds: pushes to main save the cache, pull
+# requests only restore it. It keeps one build per OS and commit, under one
+# key, and the first job to finish saves it; before, that was `Wasm tests`, a
+# few hundred megabytes, and every other Linux job restored it and rebuilt
+# nearly every crate. So on Linux only `Check (ubuntu-latest)` saves: it builds
+# the most, and the other jobs' builds are subsets of it or close (red-first.yml
+# starts from it too). The others empty their target dir after their last step
+# on a push, and mbx skips the save of a job with no build to keep. A cache per
+# job doesn't fit: the repository's Actions cache holds 10 GB, and the macOS
+# build alone takes 4.7.
 name: CI
 
 on:
@@ -25,10 +35,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # CI builds are cached and thrown away, never debugged in place. Incremental
-  # compilation only adds files to the cache, and full debug info makes the
-  # target dir bigger without helping a test log: line tables keep the file and
-  # line numbers in backtraces. The mbx action sets neither of these.
+  # CI builds are cached and thrown away, never debugged in place. The restored
+  # target dir already makes a build incremental crate by crate; rustc's own
+  # incremental mode would only add its session files to every cache entry, and
+  # full debug info makes the target dir bigger without helping a test log:
+  # line tables keep the file and line numbers in backtraces. The mbx action
+  # sets neither of these.
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
@@ -189,6 +201,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: ui-tests
       - run: just test-ui
+      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
+      - if: github.event_name == 'push'
+        run: rm -rf target
 
   # The wasm-bindgen tests (`#[wasm_bindgen_test]`) under Node. Not a required
   # check: add it to the ruleset once it has proved stable. The wasm32 target
@@ -222,6 +237,9 @@ jobs:
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: just test-wasm
+      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
+      - if: github.event_name == 'push'
+        run: rm -rf target
 
   # actionlint and zizmor on the workflows (`just lint-workflows`). zizmor's
   # online audits (known-vulnerable actions, impostor commits) read public
@@ -276,6 +294,9 @@ jobs:
       - run: just test-release
         env:
           NEXTEST_PROFILE: ci
+      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
+      - if: github.event_name == 'push'
+        run: rm -rf target
 
   # The dependency tree against deny.toml: RustSec advisories, licences, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
