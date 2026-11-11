@@ -147,8 +147,8 @@ test-release *args:
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is
 # Cargo's runner for wasm32 in this recipe only, so no other command changes.
 # The packages are the ones with wasm-bindgen tests: those with a
-# `wasm-bindgen-test` dependency, which `scripts/wasm-test-packages.mjs` finds
-# from `cargo metadata`, the same way `scripts/red-first.mjs` does, so a
+# `wasm-bindgen-test` dependency, which `scripts/wasm-test-packages.ts` finds
+# from `cargo metadata`, the same way `scripts/red-first.ts` does, so a
 # package's first wasm test is picked up by both with no edit here. Selecting
 # several unifies their features, and `--all-features` turns on those that only
 # matter on wasm32 (`l10n`'s `browser-intl`). Zero tests is a pass.
@@ -167,7 +167,7 @@ test-wasm *args:
     # The packages with a `wasm-bindgen-test` dependency, found as red-first
     # finds them (one script for both), so a package's first wasm test needs
     # no edit here.
-    names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.mjs)
+    names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.ts)
     if [[ -z $names ]]; then
         echo "no package depends on wasm-bindgen-test: no wasm tests to run"
         exit 0
@@ -191,7 +191,7 @@ test-wasm *args:
 [doc('Check the style.css token pairs for WCAG 2.2 AA contrast.')]
 [group('test')]
 test-contrast:
-    node scripts/check-contrast.mjs crates/web/style.css
+    node scripts/check-contrast.ts crates/web/style.css
 
 # The version of wasm-bindgen that Cargo.lock pins.
 [private]
@@ -264,7 +264,7 @@ mutants-all *args:
 # Check that the branch's first commit is a failing test: commit (§13.1).
 [group('test')]
 red-first base='origin/main':
-    node scripts/red-first.mjs '{{ base }}'
+    node scripts/red-first.ts '{{ base }}'
 
 # Check a pull request title (or a commit subject) as CI's "Pull request
 # title" check does: a Conventional Commit with a type release-plz knows.

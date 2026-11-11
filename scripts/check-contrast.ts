@@ -4,7 +4,7 @@
 // 4.5:1 for text, 3:1 for UI parts like the focus ring. style.css stays the
 // source of truth; Tailwind maps the same tokens, so it needs no second table.
 //
-// Usage: node scripts/check-contrast.mjs crates/web/style.css
+// Usage: node scripts/check-contrast.ts crates/web/style.css
 // Exit status: 0 when every pair passes, 1 otherwise.
 
 import { readFile } from "node:fs/promises";
@@ -31,45 +31,48 @@ const SCHEMES = [
   { name: "dark", pick: tokensFromDark },
 ];
 
+type Tokens = Record<string, string>;
+type Rgb = [number, number, number];
+
 /** The declarations of the first `:root` block (light). */
-function tokensFromLight(css) {
+function tokensFromLight(css: string): Tokens {
   const match = css.match(/^:root\s*{([^}]*)}/m);
   return parseDeclarations(match?.[1] ?? "");
 }
 
 /** The declarations of the `:root` inside the dark-scheme media block. */
-function tokensFromDark(css) {
+function tokensFromDark(css: string): Tokens {
   const blocks = [...css.matchAll(/prefers-color-scheme:\s*dark\)\s*{\s*:root\s*{([^}]*)}/g)];
   return parseDeclarations(blocks.at(-1)?.[1] ?? "");
 }
 
-function parseDeclarations(block) {
-  const tokens = {};
+function parseDeclarations(block: string): Tokens {
+  const tokens: Tokens = {};
   for (const [, name, value] of block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    tokens[name] = value.trim();
+    if (name !== undefined && value !== undefined) tokens[name] = value.trim();
   }
   return tokens;
 }
 
-function parseHex(color) {
-  const match = /^#([\da-f]{6})$/i.exec(color);
-  if (!match) {
+function parseHex(color: string): Rgb {
+  const hex = /^#([\da-f]{6})$/i.exec(color)?.[1];
+  if (hex === undefined) {
     throw new Error(`not a 6-digit hex color: ${color}`);
   }
-  const n = Number.parseInt(match[1], 16);
+  const n = Number.parseInt(hex, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function luminance([r, g, b]) {
-  const [lr, lg, lb] = [r, g, b].map((c) => {
+function luminance(rgb: Rgb): number {
+  const [lr, lg, lb] = rgb.map((c) => {
     const srgb = c / 255;
     return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
-  });
+  }) as Rgb;
   return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
 }
 
-function contrastRatio(fg, bg) {
-  const [a, b] = [luminance(parseHex(fg)), luminance(parseHex(bg))].sort((x, y) => y - x);
+function contrastRatio(fg: string, bg: string): number {
+  const [a, b] = [luminance(parseHex(fg)), luminance(parseHex(bg))].sort((x, y) => y - x) as [number, number];
   return (a + 0.05) / (b + 0.05);
 }
 
@@ -80,17 +83,19 @@ for (const scheme of SCHEMES) {
   const tokens = scheme.pick(css);
   for (const pair of PAIRS) {
     const where = `${scheme.name}: ${pair.name}`;
-    const missing = [pair.fg, pair.bg].filter((t) => !(t in tokens));
-    if (missing.length > 0) {
+    const fg = tokens[pair.fg];
+    const bg = tokens[pair.bg];
+    if (fg === undefined || bg === undefined) {
       failed += 1;
+      const missing = [pair.fg, pair.bg].filter((t) => !(t in tokens));
       console.error(`FAIL ${where}: ${missing.join(", ")} not defined in style.css`);
       continue;
     }
-    const ratio = contrastRatio(tokens[pair.fg], tokens[pair.bg]);
+    const ratio = contrastRatio(fg, bg);
     const ok = ratio >= pair.min;
     if (!ok) failed += 1;
     console.log(
-      `${ok ? "pass" : "FAIL"} ${where}: ${ratio.toFixed(2)}:1 (needs ${pair.min}:1) — ${tokens[pair.fg]} on ${tokens[pair.bg]}`,
+      `${ok ? "pass" : "FAIL"} ${where}: ${ratio.toFixed(2)}:1 (needs ${pair.min}:1) — ${fg} on ${bg}`,
     );
   }
 }

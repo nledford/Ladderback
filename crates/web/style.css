@@ -158,7 +158,7 @@ main:focus {
 
 /*
  * Status badges (§4.5): a short labeled state on a colored pill, its text
- * token on its background token — the pairs scripts/check-contrast.mjs checks.
+ * token on its background token — the pairs scripts/check-contrast.ts checks.
  */
 .badge {
   display: inline-block;

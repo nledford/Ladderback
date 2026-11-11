@@ -147,7 +147,7 @@ Add it to `mutants_packages` in the Justfile and to the list in §13.1, in the c
 
 #### 13.7.4 A package's first `wasm_bindgen_test`
 
-Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.workspace = true`). `just test-wasm` and `just red-first` both find the package by that dependency, from `cargo metadata` (`scripts/wasm-test-packages.mjs`), so there is no list to edit.
+Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.workspace = true`). `just test-wasm` and `just red-first` both find the package by that dependency, from `cargo metadata` (`scripts/wasm-test-packages.ts`), so there is no list to edit.
 
 #### 13.7.5 A shared UI component
 
