@@ -1,0 +1,3 @@
+# Decision 21: Robustness rules
+
+**Four rules, enforced by tooling where a tool can, recorded 2026-11-08 (§13.5).** Never crash in non-test code (clippy `deny` at every production crate root). Input-derived numbers are hostile (caps and checked access; the worker protocol's messages are capped at 1 MiB, §4.1). A test that can't run says so with `testkit::skip!`, and `just test` lists the skips. Parallel agents each get their own worktree, target directory, ports and scratch folder. Why: the daemon runs unattended and owns the operation queue, so one panic silently stops backups; the inputs that reach it come from other processes, files and networks; a silent skip reads as a pass; and agents sharing a tree or a port break each other's builds.

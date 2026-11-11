@@ -1,0 +1,3 @@
+# Decision 22: One time library
+
+**Time goes through `jiff`, never `chrono`** (recorded 2026-11-08). `croner` is used with `default-features = false, features = ["jiff"]`, and `just architecture` bans `chrono` from `domain` and `app`. Why: Ladderback already models time with `jiff` (`Timestamp`, `SignedDuration`, the `Clock` port), and so does `rustic_core`; `jiff`'s time-zone handling and `Span`/DST arithmetic are what scheduling needs; `chrono` would add a second model of time and conversions between the two. `chrono` still reaches the build transitively through `rustic_backend`'s OpenDAL FTP service (`suppaftp`), which can't be turned off; no Ladderback crate depends on it.
