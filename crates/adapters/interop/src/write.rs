@@ -25,7 +25,9 @@
 //! or a secret is left out with the variable that rustic reads it from.
 
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
-use domain::planning::{HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings};
+use domain::planning::{
+    GlobFile, HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings,
+};
 use domain::secrets::{
     KeyringEntry, Part, SecretRef, Template, is_secret_option, rclone_secret, url_credentials,
     url_passwords,
@@ -87,13 +89,15 @@ pub(crate) fn render(export: &PlanExport) -> Result<RenderedProfile, ExportRefus
             .chain([plan_tag.as_str(), agent_tag.as_str()]),
     );
     let filter = &plan.filter;
-    for (name, values) in [
-        ("globs", &filter.globs),
-        ("iglobs", &filter.iglobs),
+    out.list_if_any("globs", &filter.globs);
+    out.list_if_any("iglobs", &filter.iglobs);
+    for (name, files) in [
         ("glob-files", &filter.glob_files),
         ("iglob-files", &filter.iglob_files),
     ] {
-        out.list_if_any(name, values);
+        if !files.is_empty() {
+            out.list(name, files.iter().map(GlobFile::as_str));
+        }
     }
     out.flag("git-ignore", filter.git_ignore);
     out.flag("no-require-git", filter.no_require_git);

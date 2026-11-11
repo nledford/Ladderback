@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
-    KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RepositoryConfig,
+    AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
+    Hostname, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RepositoryConfig,
     RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
@@ -256,8 +256,8 @@ fn rich() -> Option<AgentConfig> {
         filter: SourceFilter {
             globs: strings(&["*.tmp", "!keep.tmp", "# not a comment", "say \"hi\""]),
             iglobs: strings(&["*.LOG"]),
-            glob_files: strings(&["/home/demo/.excludes"]),
-            iglob_files: strings(&["/home/demo/.iexcludes"]),
+            glob_files: vec![GlobFile::parse("/home/demo/.excludes").ok()?],
+            iglob_files: vec![GlobFile::parse("/home/demo/.iexcludes").ok()?],
             git_ignore: true,
             no_require_git: true,
             custom_ignorefiles: strings(&[".resticignore", ".backupignore"]),

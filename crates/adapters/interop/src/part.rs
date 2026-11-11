@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use app::ports::Position;
-use domain::planning::{GroupBy, HookEntry, Hooks, Hostname, RetentionPolicy, Source};
+use domain::planning::{GlobFile, GroupBy, HookEntry, Hooks, Hostname, RetentionPolicy, Source};
 use domain::secrets::CommandLine;
 
 /// What one file gave: every setting of it, and what it left out.
@@ -75,8 +75,8 @@ pub(crate) struct Settings {
     pub tags: Vec<String>,
     pub globs: Vec<String>,
     pub iglobs: Vec<String>,
-    pub glob_files: Vec<String>,
-    pub iglob_files: Vec<String>,
+    pub glob_files: Vec<GlobFile>,
+    pub iglob_files: Vec<GlobFile>,
     pub git_ignore: bool,
     pub no_require_git: bool,
     pub custom_ignorefiles: Vec<String>,

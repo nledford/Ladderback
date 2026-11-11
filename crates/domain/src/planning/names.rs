@@ -1,5 +1,5 @@
 //! The small named values of a configuration: a host name, a path to back up,
-//! a locale.
+//! a file of glob patterns, a locale.
 
 use super::{InvalidValue, ValueKind};
 
@@ -7,7 +7,7 @@ use super::{InvalidValue, ValueKind};
 const MAX_HOSTNAME_BYTES: usize = 255;
 /// The most bytes a path takes: Linux's `PATH_MAX`. (macOS's is 1024, so a
 /// longer path can't exist there; the cap is for the file's sake.)
-const MAX_SOURCE_BYTES: usize = 4096;
+const MAX_PATH_BYTES: usize = 4096;
 /// The most bytes a BCP 47 language tag takes in practice (RFC 5646 §4.6).
 const MAX_LOCALE_BYTES: usize = 35;
 /// The most bytes one subtag of a language tag takes.
@@ -48,8 +48,7 @@ pub struct Source(String);
 
 impl Source {
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let valid = text.starts_with('/') && text.len() <= MAX_SOURCE_BYTES && !text.contains('\0');
-        if valid {
+        if is_absolute_path(text) {
             Ok(Self(text.to_owned()))
         } else {
             Err(InvalidValue::new(ValueKind::Source, text))
@@ -58,6 +57,41 @@ impl Source {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// An absolute path of at most [`MAX_PATH_BYTES`] without a NUL, as written:
+/// what the worker reads from the disk can't depend on where it was started.
+fn is_absolute_path(text: &str) -> bool {
+    text.starts_with('/') && text.len() <= MAX_PATH_BYTES && !text.contains('\0')
+}
+
+/// A file of glob patterns a plan's source filter reads (`glob-files`,
+/// `iglob-files`). The path is absolute, as a source's is: rustic reads the
+/// file when the backup starts, from the worker's working directory, which is
+/// the daemon's and says nothing of where the configuration or a profile is.
+/// At most 4096 bytes and without a NUL.
+///
+/// It is the path as written, not checked against the disk: a glob file that
+/// doesn't exist is a failure when the plan runs, not a refusal here.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GlobFile(String);
+
+impl GlobFile {
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        if is_absolute_path(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::GlobFile, text))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
@@ -170,6 +204,38 @@ mod tests {
             &too_long,
         ] {
             assert_eq!(Source::parse(text), Err(refused(ValueKind::Source, text)));
+        }
+    }
+
+    #[test]
+    fn a_glob_file_is_an_absolute_path_of_at_most_4096_bytes() {
+        let longest = format!("/{}", "a".repeat(4095));
+        for text in ["/home/demo/.excludes", "/etc/rustic/globs list", &longest] {
+            let file = GlobFile::parse(text).unwrap();
+            assert_eq!(file.as_str(), text);
+            assert_eq!(file.into_string(), text);
+        }
+    }
+
+    #[test]
+    fn a_relative_or_oversized_path_is_not_a_glob_file() {
+        let too_long = format!("/{}", "a".repeat(4096));
+        for text in [
+            "",
+            ".excludes",
+            "globs/home.txt",
+            "./globs",
+            "../globs",
+            "~/.excludes",
+            "C:\\globs",
+            "/with\0nul",
+            &too_long,
+        ] {
+            assert_eq!(
+                GlobFile::parse(text),
+                Err(refused(ValueKind::GlobFile, text)),
+                "{text:?}"
+            );
         }
     }
 

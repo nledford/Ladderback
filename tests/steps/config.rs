@@ -11,7 +11,7 @@ use config_adapter::{FileConfigStore, MigrationError, Schemas};
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use domain::PlanId;
-use domain::planning::AgentConfig;
+use domain::planning::{AgentConfig, ValueKind};
 use platform::SystemClock;
 
 use super::Agent;
@@ -145,6 +145,18 @@ fn refused_unknown_key(agent: &mut Agent, key: String) {
             ..
         } => assert_eq!(*found, key),
         other => panic!("the load should name the unknown key {key:?}, got {other:?}"),
+    }
+}
+
+#[then(expr = "the load is refused because the glob file {string} is not an absolute path")]
+fn refused_relative_glob_file(agent: &mut Agent, key: String) {
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Value(ValueKind::GlobFile),
+            key: Some(found),
+            ..
+        } => assert_eq!(*found, key),
+        other => panic!("the load should refuse the glob file at {key:?}, got {other:?}"),
     }
 }
 

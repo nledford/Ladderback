@@ -117,6 +117,7 @@ Feature: An agent's configuration
         | kind             | value                  |
         | hostname         |                        |
         | source           | home/demo              |
+        | glob-file        | .excludes              |
         | locale           | en_US                  |
         | repository-alias | Not A Slug             |
         | concurrency      | 0                      |
@@ -141,6 +142,7 @@ Feature: An agent's configuration
         | kind             | value                  |
         | hostname         | demo-host              |
         | source           | /home/demo             |
+        | glob-file        | /home/demo/.excludes   |
         | locale           | en-US                  |
         | repository-alias | nas                    |
         | concurrency      | 64                     |
@@ -204,6 +206,26 @@ Feature: An agent's configuration
       Then the load is refused because the key "repositories.nas.colour" is unknown
       And the refusal points at line 6 of the config file
       And the refusal never shows "CANARY-inline-password"
+
+    Scenario: A relative glob file is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        glob-files = ["/home/demo/.excludes"]
+        iglob-files = ["excludes.txt"]
+        """
+      When the agent loads the config file
+      Then the load is refused because the glob file "plans[0].iglob-files[0]" is not an absolute path
+      And the refusal points at line 12 of the config file
 
     Scenario: A file with two entries for one location is refused, naming both
       Given a config file holding:

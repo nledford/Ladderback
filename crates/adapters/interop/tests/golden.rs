@@ -47,8 +47,8 @@ fn export() -> PlanExport {
     plan.tags = vec![UserTag::new("laptop").expect("a tag")];
     plan.filter.globs = vec!["*.tmp".to_owned()];
     plan.filter.iglobs = vec!["*.BAK".to_owned()];
-    plan.filter.glob_files = vec!["/etc/globs".to_owned()];
-    plan.filter.iglob_files = vec!["/etc/iglobs".to_owned()];
+    plan.filter.glob_files = vec![domain::planning::GlobFile::parse("/etc/globs").unwrap()];
+    plan.filter.iglob_files = vec![domain::planning::GlobFile::parse("/etc/iglobs").unwrap()];
     plan.filter.git_ignore = true;
     plan.filter.no_require_git = true;
     plan.filter.custom_ignorefiles = vec![".ignore".to_owned()];

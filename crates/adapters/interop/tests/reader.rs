@@ -135,8 +135,14 @@ tags = [\"docs\"]
     );
     assert_eq!(home.filter.globs, ["!*.tmp"]);
     assert_eq!(home.filter.iglobs, ["!*.BAK"]);
-    assert_eq!(home.filter.glob_files, ["/etc/demo/globs"]);
-    assert_eq!(home.filter.iglob_files, ["/etc/demo/iglobs"]);
+    let paths = |files: &[domain::planning::GlobFile]| {
+        files
+            .iter()
+            .map(|file| file.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(paths(&home.filter.glob_files), ["/etc/demo/globs"]);
+    assert_eq!(paths(&home.filter.iglob_files), ["/etc/demo/iglobs"]);
     assert_eq!(home.filter.custom_ignorefiles, [".demoignore"]);
     assert_eq!(
         home.filter.exclude_if_present,
@@ -590,6 +596,47 @@ async fn a_source_that_is_not_an_absolute_path_is_refused_at_the_source() {
         let (key, line) = unsupported(read_err(&text).await);
         assert_eq!(key, "backup.snapshots[0].sources[1]", "{source}");
         assert_eq!(line, Some(line_of(&text, "sources")), "{source}");
+    }
+}
+
+// rustic reads a glob file from the folder it was started in, which an import
+// can't know; the profile's own folder would be a guess rustic doesn't make.
+#[tokio::test]
+async fn a_glob_file_that_is_not_an_absolute_path_is_refused_at_the_file() {
+    for file in [
+        ".excludes",
+        "globs/home.txt",
+        "./globs",
+        "../globs",
+        "~/.excludes",
+    ] {
+        for (table, key) in [
+            (
+                format!("[backup]\nglob-files = [\"/etc/demo/globs\", \"{file}\"]\n"),
+                "backup.glob-files[1]",
+            ),
+            (
+                format!("[backup]\niglob-files = [\"{file}\"]\n"),
+                "backup.iglob-files[0]",
+            ),
+            // Written over several lines, the refusal names the file's own
+            // line, not the key's.
+            (
+                format!("[backup]\nglob-files = [\n  \"/etc/demo/globs\",\n  \"{file}\",\n]\n"),
+                "backup.glob-files[1]",
+            ),
+        ] {
+            let text = profile_text(&table);
+            let (found, line) = unsupported(read_err(&text).await);
+            assert_eq!(found, key, "{file}");
+            assert_eq!(line, Some(line_of(&text, &format!("\"{file}\""))), "{file}");
+        }
+        let text = format!(
+            "{REPOSITORY}\n[[backup.snapshots]]\nname = \"home\"\nsources = [\"/home/demo\"]\nglob-files = [\"{file}\"]\n"
+        );
+        let (found, line) = unsupported(read_err(&text).await);
+        assert_eq!(found, "backup.snapshots[0].glob-files[0]", "{file}");
+        assert_eq!(line, Some(line_of(&text, "glob-files")), "{file}");
     }
 }
 
@@ -1388,19 +1435,24 @@ async fn the_items_the_plans_hold_in_all_are_bounded() {
 /// `count` items of it.
 fn lists(count: usize) -> Vec<(&'static str, String)> {
     let many = array(count, "x");
+    // A glob file is an absolute path, or the list is refused for that.
+    let files = array(count, "/x");
     let commands = array(count, "true");
     let mut lists: Vec<(&'static str, String)> = [
         "tags",
         "globs",
         "iglobs",
-        "glob-files",
-        "iglob-files",
         "custom-ignorefiles",
         "exclude-if-present",
         "exclude-if-xattr",
     ]
     .into_iter()
     .map(|key| ("", format!("{key} = {many}\n")))
+    .chain(
+        ["glob-files", "iglob-files"]
+            .into_iter()
+            .map(|key| ("", format!("{key} = {files}\n"))),
+    )
     .collect();
     for key in ["run-before", "run-after", "run-failed", "run-finally"] {
         lists.push((".hooks", format!("{key} = {commands}\n")));

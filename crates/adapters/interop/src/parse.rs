@@ -9,7 +9,7 @@ use std::ops::Range;
 use app::ports::{Position, ProfileError, ProfileProblem};
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::planning::{
-    GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
+    GlobFile, GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
     RetentionPolicy, Source,
 };
 use domain::secrets::CommandLine;
@@ -571,8 +571,8 @@ fn settings(reader: &Reader<'_, '_>, path: &Path, table: BackupTable) -> Read<Se
         tags: table.tags.unwrap_or_default(),
         globs: table.globs.unwrap_or_default(),
         iglobs: table.iglobs.unwrap_or_default(),
-        glob_files: table.glob_files.unwrap_or_default(),
-        iglob_files: table.iglob_files.unwrap_or_default(),
+        glob_files: glob_files(reader, &path.key("glob-files"), table.glob_files)?,
+        iglob_files: glob_files(reader, &path.key("iglob-files"), table.iglob_files)?,
         git_ignore: table.git_ignore.unwrap_or(false),
         no_require_git: table.no_require_git.unwrap_or(false),
         custom_ignorefiles: table.custom_ignorefiles.unwrap_or_default(),
@@ -581,6 +581,25 @@ fn settings(reader: &Reader<'_, '_>, path: &Path, table: BackupTable) -> Read<Se
         one_file_system: table.one_file_system.unwrap_or(false),
         hooks: hooks(reader, &path.key("hooks"), table.hooks.unwrap_or_default())?,
     })
+}
+
+/// The files of glob patterns listed at `path`. rustic reads a relative one
+/// from the folder it runs in, which a profile doesn't name: taking the
+/// profile's own folder instead would read a file rustic doesn't, so a
+/// relative one is refused at its index, as a relative source is.
+fn glob_files(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    files: Option<Vec<String>>,
+) -> Read<Vec<GlobFile>> {
+    files
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            GlobFile::parse(text).map_err(|_| reader.unsupported(&path.index(index), Spot::Value))
+        })
+        .collect()
 }
 
 fn forget(reader: &Reader<'_, '_>, path: &Path, table: ForgetTable) -> Read<Forget> {

@@ -32,7 +32,7 @@ use crate::job::{
     ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec, TRUNCATED,
     WorkerEvent, exit_code,
 };
-use domain::planning::SourceFilter;
+use domain::planning::{GlobFile, SourceFilter};
 
 /// How long a worker may keep running after it reported its result, for
 /// cleanup, before it is killed.
@@ -1304,8 +1304,8 @@ fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
     SourceFilterSpec {
         globs,
         iglobs,
-        glob_files,
-        iglob_files,
+        glob_files: glob_files.into_iter().map(GlobFile::into_string).collect(),
+        iglob_files: iglob_files.into_iter().map(GlobFile::into_string).collect(),
         git_ignore,
         no_require_git,
         custom_ignorefiles,

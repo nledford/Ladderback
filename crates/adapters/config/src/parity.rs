@@ -109,6 +109,7 @@ fn sample(key: &str) -> &'static str {
         "label" => "\"demo\"",
         "host" => "\"demo-host\"",
         key if key.starts_with("keep-within") => "\"1 day\"",
+        "glob-files" | "iglob-files" => "[\"/home/demo/.excludes\"]",
         _ => "[\"demo\"]",
     }
 }

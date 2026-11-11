@@ -61,8 +61,8 @@ async fn a_backup_leaves_out_everything_its_source_filter_excludes() {
     let filter = SourceFilter {
         globs: vec!["!*.tmp".to_owned()],
         iglobs: vec!["!node_modules".to_owned()],
-        glob_files: vec![globs.to_string_lossy().into_owned()],
-        iglob_files: vec![iglobs.to_string_lossy().into_owned()],
+        glob_files: vec![domain::planning::GlobFile::parse(&globs.to_string_lossy()).unwrap()],
+        iglob_files: vec![domain::planning::GlobFile::parse(&iglobs.to_string_lossy()).unwrap()],
         git_ignore: true,
         no_require_git: true,
         custom_ignorefiles: vec![".rusticignore".to_owned()],
