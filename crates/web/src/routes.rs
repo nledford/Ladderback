@@ -813,6 +813,8 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         }
         let form = inputs.read();
         result.set(None);
+        // What a row's Create came to is the page's last answer no more.
+        creates.created.set(None);
         if let Some(items) = problems_of(&form, action, |id| text(&submit_localizer, id)) {
             problems.show(items, None);
             return;
@@ -1069,8 +1071,9 @@ fn create_in_row(
     let url = format!("{base}{}", create_saved_path(alias));
     let alias = alias.to_owned();
     let localizer = Arc::clone(localizer);
-    // The last answer's refusal, as the row shows it, and whether a request
-    // is still on its way.
+    // The last answer's refusal, as the row shows it, and whether the button
+    // takes no press: from a press until the answer is a refusal, or, once the
+    // repository is created, until the list is read again and the row goes.
     let refused = RwSignal::<Option<String>>::new(None);
     let busy = RwSignal::new(false);
     let create = move |_| {
@@ -1092,11 +1095,10 @@ fn create_in_row(
             if creates.phase.try_get_untracked().is_none() {
                 return;
             }
-            // The list may have been drawn again while the engine worked,
-            // and the row's own signals went with the row.
-            busy.try_set(false);
             match posted {
                 Some(Posted::Done(answer)) => match RowCreated::of(&answer) {
+                    // The button stays busy: the list is read again, and
+                    // the row and its button go with it.
                     Some(created) => {
                         let (id, args) = RowCreated::confirmation(&alias);
                         let confirmation = text_with(&localizer, id, &args);
@@ -1110,6 +1112,9 @@ fn create_in_row(
                     None => creates.phase.set(Phase::Unreachable),
                 },
                 Some(Posted::Refused(code, args, detail)) => {
+                    // The list may have been drawn again while the engine
+                    // worked, and the row's own signals went with the row.
+                    busy.try_set(false);
                     let shown = match row_refusal(code, &alias) {
                         Some((id, args)) => text_with(&localizer, id, &args),
                         None => refusal(&localizer, code, &args, detail.as_deref()),
