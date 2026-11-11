@@ -65,7 +65,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [13.10 Keeping AGENTS.md useful](development.md#1310-keeping-agentsmd-useful)
 - [14. Milestones](roadmap.md#14-milestones)
 - [15. Risks](roadmap.md#15-risks)
-- [16. Decisions](roadmap.md#16-decisions)
+- [16. Decisions](roadmap.md#16-decisions): the index; each decision is its own file in [decisions/](decisions/README.md)
 - [17. Open questions](roadmap.md#17-open-questions)
 
 ---

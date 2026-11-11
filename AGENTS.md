@@ -152,7 +152,7 @@ Several agents may work on the repository at once (§13.5). Each one:
 - edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
 - passes `--jobs` to `just mutants` when several agents share the machine, uses its own ports (never `just serve`'s 9898) and its own scratch folder, and never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
-- numbers a new §16 decision only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
+- adds a new §16 decision as `docs/design/decisions/NN-<slug>.md` plus its index row in §16, and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
 ## Conventions
 
