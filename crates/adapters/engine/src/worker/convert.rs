@@ -6,13 +6,17 @@ use std::io;
 use api::ErrorCode;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
+use domain::planning::Hostname;
 use domain::snapshot::SnapshotRef;
 use domain::{RepositoryId, SignedDuration, SnapshotId};
 use jiff::Span;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId, StringList};
-use rustic_core::{CheckResults, PruneOptions, PruneStats, RusticError};
+use rustic_core::{
+    BackupOptions, CheckResults, Excludes, LocalSourceFilterOptions, PruneOptions, PruneStats,
+    RusticError,
+};
 
-use crate::job::{BackupResult, CheckResult, PrunePlanResult, PruneResult};
+use crate::job::{BackupResult, CheckResult, PrunePlanResult, PruneResult, SourceFilterSpec};
 
 /// How a job ended badly.
 #[derive(Debug)]
@@ -118,6 +122,54 @@ pub(crate) fn snapshot_tags(plan: &PlanTags, extra: &[String]) -> Result<StringL
         tags.add(tag.as_str().to_owned());
     }
     Ok(tags)
+}
+
+/// rustic's backup options with the plan's source filter: its globs and glob
+/// files as `Excludes`, the rest as `LocalSourceFilterOptions`, each field
+/// under its own name. What the filter doesn't set is rustic's default, and
+/// `exclude-larger-than`, which a plan never sets (§6.1), stays off. The
+/// filter is taken apart whole, so a field added to it fails to compile here
+/// until it is mapped.
+pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
+    let SourceFilterSpec {
+        globs,
+        iglobs,
+        glob_files,
+        iglob_files,
+        git_ignore,
+        no_require_git,
+        custom_ignorefiles,
+        exclude_if_present,
+        exclude_if_xattr,
+        one_file_system,
+    } = filter;
+    let excludes = Excludes::default()
+        .globs(globs.clone())
+        .iglobs(iglobs.clone())
+        .glob_files(glob_files.clone())
+        .iglob_files(iglob_files.clone());
+    let filter_options = LocalSourceFilterOptions::default()
+        .git_ignore(*git_ignore)
+        .no_require_git(*no_require_git)
+        .custom_ignorefiles(custom_ignorefiles.clone())
+        .exclude_if_present(exclude_if_present.clone())
+        .exclude_if_xattr(exclude_if_xattr.clone())
+        .one_file_system(*one_file_system);
+    BackupOptions::default()
+        .excludes(excludes)
+        .ignore_filter_opts(filter_options)
+}
+
+/// The host a snapshot records, checked as the daemon's [`Hostname`] checks
+/// it: one to 255 bytes, no control character. A host the daemon would
+/// refuse is an invalid spec, like a reserved extra tag.
+pub(crate) fn snapshot_host(host: Option<&str>) -> Result<Option<String>, JobError> {
+    host.map(|host| {
+        Hostname::parse(host)
+            .map(|host| host.as_str().to_owned())
+            .map_err(|error| invalid_spec(&error))
+    })
+    .transpose()
 }
 
 fn invalid_spec(error: &dyn std::error::Error) -> JobError {
@@ -377,5 +429,85 @@ mod tests {
                 bytes_deleted: 8192,
             }
         );
+    }
+
+    fn every_filter_field() -> SourceFilterSpec {
+        SourceFilterSpec {
+            globs: vec!["!*.tmp".to_owned()],
+            iglobs: vec!["!node_modules".to_owned()],
+            glob_files: vec!["/home/demo/.globs".to_owned()],
+            iglob_files: vec!["/home/demo/.iglobs".to_owned()],
+            git_ignore: true,
+            no_require_git: true,
+            custom_ignorefiles: vec![".rusticignore".to_owned()],
+            exclude_if_present: vec![".nobackup".to_owned()],
+            exclude_if_xattr: vec!["user.nobackup".to_owned()],
+            one_file_system: true,
+        }
+    }
+
+    /// rustic's options as a rustic profile would set them, under rustic's
+    /// own keys, so a field that lands on the wrong rustic field is caught.
+    fn as_rustic_reads(value: serde_json::Value) -> serde_json::Value {
+        let filter: rustic_core::LocalSourceFilterOptions = serde_json::from_value(value).unwrap();
+        serde_json::to_value(filter).unwrap()
+    }
+
+    #[test]
+    fn every_field_of_a_source_filter_reaches_rustic_under_its_own_name() {
+        let options = backup_options(&every_filter_field());
+        let excludes: rustic_core::Excludes = serde_json::from_value(serde_json::json!({
+            "globs": ["!*.tmp"],
+            "iglobs": ["!node_modules"],
+            "glob-files": ["/home/demo/.globs"],
+            "iglob-files": ["/home/demo/.iglobs"],
+        }))
+        .unwrap();
+        assert_eq!(options.excludes, excludes);
+        assert_eq!(
+            serde_json::to_value(&options.ignore_filter_opts).unwrap(),
+            as_rustic_reads(serde_json::json!({
+                "git-ignore": true,
+                "no-require-git": true,
+                "custom-ignorefiles": [".rusticignore"],
+                "exclude-if-present": [".nobackup"],
+                "exclude-if-xattr": ["user.nobackup"],
+                "one-file-system": true,
+            }))
+        );
+    }
+
+    #[test]
+    fn an_empty_source_filter_leaves_nothing_out() {
+        let options = backup_options(&SourceFilterSpec::default());
+        assert!(options.excludes.is_empty());
+        assert_eq!(
+            serde_json::to_value(&options.ignore_filter_opts).unwrap(),
+            as_rustic_reads(serde_json::json!({}))
+        );
+    }
+
+    #[test]
+    fn a_snapshot_host_is_kept_as_written_and_none_stays_none() {
+        for host in ["demo-laptop", "Demo's MacBook Pro", &"é".repeat(127)] {
+            assert_eq!(snapshot_host(Some(host)).unwrap().as_deref(), Some(host));
+        }
+        assert_eq!(snapshot_host(None).unwrap(), None);
+    }
+
+    #[test]
+    fn a_host_the_daemon_would_refuse_is_an_invalid_spec() {
+        for host in [String::new(), "a".repeat(256), "demo\nlaptop".to_owned()] {
+            assert!(
+                matches!(
+                    snapshot_host(Some(&host)),
+                    Err(JobError::Failed {
+                        code: ErrorCode::InvalidJobSpec,
+                        ..
+                    })
+                ),
+                "{host:?}"
+            );
+        }
     }
 }

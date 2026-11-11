@@ -455,6 +455,8 @@ impl Operations for PlanRunner {
             tags: PlanTags::new(plan.id.clone(), self.agent_id),
             extra_tags: plan.tags.clone(),
             label: plan.label.clone(),
+            host: plan.snapshot_host(config.agent()).cloned(),
+            filter: plan.filter.clone(),
             deadline_budget: backup_budget(None, None),
         });
         // A UUIDv7: the log orders by ID, so the newest run is the highest.

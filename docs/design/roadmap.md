@@ -105,6 +105,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [44](decisions/44-reviewing-maintenance-before-it-runs.md) | Reviewing maintenance before it runs |
 | [45](decisions/45-masking-a-text-cut-at-a.md) | Masking a text cut at a cap |
 | [46](decisions/46-the-toolings-language.md) | The tooling's language |
+| [47](decisions/47-msrv-1-94.md) | MSRV 1.94 |
 | [48](decisions/48-who-maintains-a-saved-repository.md) | Who maintains a saved repository |
 
 ## 17. Open questions

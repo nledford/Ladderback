@@ -48,6 +48,8 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Trigger | What started an operation: `schedule`, `manual`, `catch-up`, `retry`, `hub` or `mcp` |
 | Operation log (history) | The record of every operation: when it was queued, started and finished, how it ended, what the engine reported, and its first 10,000 warnings with the total. It is written as an operation runs and never needed to run one |
 | Snapshot | A rustic snapshot, read from the repository; never created or edited except through an operation |
+| Snapshot host | The host name a snapshot records: its plan's `host`, else the agent's `hostname`, else the machine's own name, which rustic chooses |
+| Source filter | What a plan leaves out of its backup: glob patterns, glob files, ignore files such as `.gitignore`, marker files, extended attributes and other file systems (`SourceFilter`, §6.1) |
 | Plan tags | `ladderback-plan:<id>` and `ladderback-agent:<id>`; they make a snapshot **managed** by a plan |
 | Unmanaged group | Untagged snapshots, grouped by the repository's `group-by` |
 | Orphaned group | Tagged snapshots whose plan or agent no longer exists |

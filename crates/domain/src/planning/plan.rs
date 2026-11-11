@@ -12,8 +12,8 @@ use crate::execution::plan_tags::UserTag;
 use crate::{PlanId, RepositoryAlias};
 
 use super::{
-    Hooks, Hostname, InvalidValue, RetentionPolicy, Schedule, Source, SourceFilter, ValueKind,
-    format_duration,
+    AgentSettings, Hooks, Hostname, InvalidValue, RetentionPolicy, Schedule, Source, SourceFilter,
+    ValueKind, format_duration,
 };
 
 /// How a failed backup is tried again (§5): up to `attempts` more times,
@@ -111,6 +111,13 @@ impl Plan {
             retention: RetentionPolicy::default(),
             hooks: Hooks::default(),
         }
+    }
+
+    /// The snapshot host (§3.1, §7.3): the plan's own `host`, else the
+    /// agent's `hostname`. `None` when neither names one, and the engine
+    /// then records the machine's own name, as rustic does.
+    pub fn snapshot_host<'a>(&'a self, agent: &'a AgentSettings) -> Option<&'a Hostname> {
+        self.host.as_ref().or(agent.hostname.as_ref())
     }
 }
 
@@ -215,5 +222,53 @@ mod tests {
         assert_eq!(plan.filter, SourceFilter::default());
         assert!(plan.retention.is_empty());
         assert!(plan.hooks.is_empty());
+    }
+
+    fn host(text: &str) -> Hostname {
+        Hostname::parse(text).unwrap()
+    }
+
+    fn plan_with_host(host: Option<&str>) -> Plan {
+        let mut plan = Plan::new(
+            id("home"),
+            alias("nas"),
+            vec![Source::parse("/home/demo").unwrap()],
+        );
+        plan.host = host.map(self::host);
+        plan
+    }
+
+    fn agent_with_hostname(hostname: Option<&str>) -> AgentSettings {
+        AgentSettings {
+            hostname: hostname.map(host),
+            ..AgentSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_plans_own_host_is_its_snapshot_host_whatever_the_agents() {
+        let plan = plan_with_host(Some("demo-laptop"));
+        for agent in [None, Some("demo-desktop")] {
+            assert_eq!(
+                plan.snapshot_host(&agent_with_hostname(agent)),
+                Some(&host("demo-laptop")),
+                "agent hostname {agent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plan_without_a_host_takes_the_agents_hostname() {
+        let plan = plan_with_host(None);
+        assert_eq!(
+            plan.snapshot_host(&agent_with_hostname(Some("demo-desktop"))),
+            Some(&host("demo-desktop"))
+        );
+    }
+
+    #[test]
+    fn without_either_there_is_no_snapshot_host_and_the_engine_chooses() {
+        let plan = plan_with_host(None);
+        assert_eq!(plan.snapshot_host(&agent_with_hostname(None)), None);
     }
 }

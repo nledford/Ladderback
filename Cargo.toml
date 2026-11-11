@@ -37,7 +37,7 @@ default-members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.94"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nledford/Ladderback"
 publish = false
@@ -131,7 +131,7 @@ serde_json = "1.0.154"
 sha2 = "0.10.9"
 shell-words = "1.1.1"
 signal-hook = "0.4.6"
-# 0.9 needs rustc 1.94; the workspace's MSRV is 1.91 (technical design §8.2).
+# 0.9 is within the MSRV (technical design §8.2); the move is #174.
 # No `any`, `json` or TLS: the store is SQLite only. `migrate!` is a macro.
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3.27.0"
