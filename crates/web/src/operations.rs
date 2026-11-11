@@ -4,10 +4,14 @@
 //! the run's end. Which message, and with which values, is decided here, on
 //! the host; `routes.rs` renders it.
 
-use api::OperationSummaryDto;
+use api::{MsgArg, OperationResultDto, OperationSummaryDto};
+use l10n::{MessageId, msg};
 
 use crate::announcer::Politeness;
 use crate::wording::Words;
+
+/// How many hex digits of a snapshot's ID name it, as rustic shows one.
+const SNAPSHOT_DIGITS: usize = 8;
 
 /// What a row's header names an operation by.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,15 +26,26 @@ pub(crate) enum Name {
 /// by what ran and the alias of its repository, or by what ran alone when the
 /// log has no alias for it (a run an earlier version logged).
 pub(crate) fn name(operation: &OperationSummaryDto) -> Name {
-    let _ = operation;
-    todo!()
+    match plan_of(operation) {
+        Some(plan) => Name::Plan(plan.to_owned()),
+        None => Name::Words(by_kind(operation, msg::UI_OPERATION_OF, msg::UI_OPERATION)),
+    }
 }
 
 /// The label of the button that cancels `operation`, named as its row is, so
 /// each Cancel on the page says which run it stops (WCAG 2.4.6).
 pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
-    let _ = operation;
-    todo!()
+    match plan_of(operation) {
+        Some(plan) => Words {
+            id: msg::UI_CANCEL_PLAN,
+            args: vec![("plan", text(plan))],
+        },
+        None => by_kind(
+            operation,
+            msg::UI_CANCEL_OPERATION_OF,
+            msg::UI_CANCEL_OPERATION,
+        ),
+    }
 }
 
 /// The facts of what `operation` produced, in the order the Result cell
@@ -38,8 +53,107 @@ pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
 /// keep, such as the bytes a backup an earlier version ran went through, is
 /// left out, never shown as zero.
 pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
-    let _ = operation;
-    todo!()
+    let Some(result) = &operation.result else {
+        return Vec::new();
+    };
+    let mut facts = Vec::new();
+    let duration_ms = match result {
+        OperationResultDto::Backup {
+            files,
+            bytes,
+            duration_ms,
+            snapshot,
+            bytes_processed,
+        } => {
+            // Cut at a character, never inside one: the wire could carry any
+            // text, and an empty one names nothing.
+            let short: String = snapshot
+                .as_deref()
+                .unwrap_or_default()
+                .chars()
+                .take(SNAPSHOT_DIGITS)
+                .collect();
+            if !short.is_empty() {
+                facts.push(fact(msg::UI_RESULT_SNAPSHOT, "snapshot", text(&short)));
+            }
+            facts.push(fact(msg::UI_RESULT_FILES, "files", MsgArg::Count(*files)));
+            if let Some(processed) = bytes_processed {
+                facts.push(fact(
+                    msg::UI_RESULT_PROCESSED,
+                    "bytes",
+                    MsgArg::Bytes(*processed),
+                ));
+            }
+            facts.push(fact(msg::UI_RESULT_ADDED, "bytes", MsgArg::Bytes(*bytes)));
+            duration_ms
+        }
+        OperationResultDto::Prune {
+            packs_deleted,
+            duration_ms,
+        } => {
+            facts.push(fact(
+                msg::UI_RESULT_PACKS_DELETED,
+                "packs",
+                MsgArg::Count(*packs_deleted),
+            ));
+            duration_ms
+        }
+        OperationResultDto::Check {
+            errors,
+            warnings,
+            duration_ms,
+        } => {
+            if *errors > 0 {
+                facts.push(fact(
+                    msg::UI_RESULT_CHECK_ERRORS,
+                    "errors",
+                    MsgArg::Count(*errors),
+                ));
+            }
+            if *warnings > 0 {
+                facts.push(fact(
+                    msg::UI_RESULT_CHECK_UNTIDY,
+                    "warnings",
+                    MsgArg::Count(*warnings),
+                ));
+            }
+            if facts.is_empty() {
+                facts.push(Words {
+                    id: msg::UI_RESULT_CHECK_CLEAN,
+                    args: Vec::new(),
+                });
+            }
+            duration_ms
+        }
+        OperationResultDto::Forget {
+            removed,
+            duration_ms,
+        } => {
+            facts.push(fact(
+                msg::UI_RESULT_REMOVED,
+                "removed",
+                MsgArg::Count(*removed),
+            ));
+            duration_ms
+        }
+        OperationResultDto::Adopt {
+            rewritten,
+            duration_ms,
+        } => {
+            facts.push(fact(
+                msg::UI_RESULT_ADOPTED,
+                "rewritten",
+                MsgArg::Count(*rewritten),
+            ));
+            duration_ms
+        }
+    };
+    facts.push(fact(
+        msg::UI_RESULT_TOOK,
+        "duration",
+        MsgArg::DurationMs(*duration_ms),
+    ));
+    facts
 }
 
 /// How the end of `operation`, which the page saw still going, is announced:
@@ -47,8 +161,46 @@ pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
 /// said assertively; a cancellation and a finish (warnings included: they are
 /// the row's own story) politely.
 pub(crate) fn end(operation: &OperationSummaryDto) -> (Politeness, Words) {
-    let _ = operation;
-    todo!()
+    let (politeness, id) = match operation.status.as_str() {
+        "failed" => (Politeness::Assertive, msg::UI_OPERATION_FAILED),
+        "cancelled" => (Politeness::Polite, msg::UI_OPERATION_CANCELLED),
+        _ => (Politeness::Polite, msg::UI_OPERATION_FINISHED),
+    };
+    (politeness, fact(id, "kind", text(&operation.kind)))
+}
+
+/// The plan a backup's row is named by; none for any other run, or for a
+/// backup with no plan to name it by.
+fn plan_of(operation: &OperationSummaryDto) -> Option<&str> {
+    (operation.kind == "backup" && !operation.plan.is_empty()).then_some(operation.plan.as_str())
+}
+
+/// Message `of` with what ran and the alias of its repository, or `alone`
+/// with what ran when the log keeps no alias for it.
+fn by_kind(operation: &OperationSummaryDto, of: MessageId, alone: MessageId) -> Words {
+    let kind = ("kind", text(&operation.kind));
+    match &operation.repository {
+        Some(repository) => Words {
+            id: of,
+            args: vec![kind, ("repository", text(repository))],
+        },
+        None => Words {
+            id: alone,
+            args: vec![kind],
+        },
+    }
+}
+
+/// Message `id` with its one variable.
+fn fact(id: MessageId, name: &'static str, value: MsgArg) -> Words {
+    Words {
+        id,
+        args: vec![(name, value)],
+    }
+}
+
+fn text(value: &str) -> MsgArg {
+    MsgArg::Text(value.to_owned())
 }
 
 #[cfg(test)]
@@ -69,12 +221,15 @@ mod tests {
             id: "018f0000-0000-7000-8000-000000000192".to_owned(),
             plan: plan.to_owned(),
             kind: kind.to_owned(),
-            status: if result.is_some() { "succeeded" } else { "running" }.to_owned(),
+            status: if result.is_some() {
+                "succeeded"
+            } else {
+                "running"
+            }
+            .to_owned(),
             queued_at: "2026-11-09T10:00:00Z".to_owned(),
             started_at: Some("2026-11-09T10:00:01Z".to_owned()),
-            finished_at: result
-                .is_some()
-                .then(|| "2026-11-09T10:01:06Z".to_owned()),
+            finished_at: result.is_some().then(|| "2026-11-09T10:01:06Z".to_owned()),
             warning_codes: Vec::new(),
             failure_code: None,
             result,
@@ -96,8 +251,7 @@ mod tests {
     /// What `words` read in English, without the isolation marks a reader
     /// never hears.
     fn english(words: &Words) -> String {
-        text_with(&Localizer::new(&[]), words.id, &words.args)
-            .replace(['\u{2068}', '\u{2069}'], "")
+        text_with(&Localizer::new(&[]), words.id, &words.args).replace(['\u{2068}', '\u{2069}'], "")
     }
 
     fn backed_up(snapshot: Option<&str>, bytes_processed: Option<u64>) -> OperationResultDto {
@@ -176,9 +330,15 @@ mod tests {
             [
                 said(msg::UI_RESULT_SNAPSHOT, &[("snapshot", text("1a2b3c4d"))]),
                 said(msg::UI_RESULT_FILES, &[("files", MsgArg::Count(3))]),
-                said(msg::UI_RESULT_PROCESSED, &[("bytes", MsgArg::Bytes(65_536))]),
+                said(
+                    msg::UI_RESULT_PROCESSED,
+                    &[("bytes", MsgArg::Bytes(65_536))]
+                ),
                 said(msg::UI_RESULT_ADDED, &[("bytes", MsgArg::Bytes(4096))]),
-                said(msg::UI_RESULT_TOOK, &[("duration", MsgArg::DurationMs(65_000))]),
+                said(
+                    msg::UI_RESULT_TOOK,
+                    &[("duration", MsgArg::DurationMs(65_000))]
+                ),
             ]
         );
         assert_eq!(
@@ -201,7 +361,10 @@ mod tests {
             [
                 said(msg::UI_RESULT_FILES, &[("files", MsgArg::Count(3))]),
                 said(msg::UI_RESULT_ADDED, &[("bytes", MsgArg::Bytes(4096))]),
-                said(msg::UI_RESULT_TOOK, &[("duration", MsgArg::DurationMs(65_000))]),
+                said(
+                    msg::UI_RESULT_TOOK,
+                    &[("duration", MsgArg::DurationMs(65_000))]
+                ),
             ]
         );
     }
@@ -218,13 +381,19 @@ mod tests {
         );
         assert_eq!(
             result(&odd).first(),
-            Some(&said(msg::UI_RESULT_SNAPSHOT, &[("snapshot", text("éééééééé"))]))
+            Some(&said(
+                msg::UI_RESULT_SNAPSHOT,
+                &[("snapshot", text("éééééééé"))]
+            ))
         );
         // Shorter than the cut, it is shown whole; empty, not at all.
         let short = summary("backup", "home", None, Some(backed_up(Some("1a2b"), None)));
         assert_eq!(
             result(&short).first(),
-            Some(&said(msg::UI_RESULT_SNAPSHOT, &[("snapshot", text("1a2b"))]))
+            Some(&said(
+                msg::UI_RESULT_SNAPSHOT,
+                &[("snapshot", text("1a2b"))]
+            ))
         );
         let empty = summary("backup", "home", None, Some(backed_up(Some(""), None)));
         assert_eq!(
@@ -250,7 +419,10 @@ mod tests {
             facts,
             [
                 said(msg::UI_RESULT_CHECK_CLEAN, &[]),
-                said(msg::UI_RESULT_TOOK, &[("duration", MsgArg::DurationMs(1_000))]),
+                said(
+                    msg::UI_RESULT_TOOK,
+                    &[("duration", MsgArg::DurationMs(1_000))]
+                ),
             ]
         );
         assert_eq!(english(&facts[0]), "The check found nothing wrong");
@@ -270,9 +442,17 @@ mod tests {
                 }),
             ))
         };
-        let took = said(msg::UI_RESULT_TOOK, &[("duration", MsgArg::DurationMs(1_000))]);
+        let took = said(
+            msg::UI_RESULT_TOOK,
+            &[("duration", MsgArg::DurationMs(1_000))],
+        );
         let errors = |n| said(msg::UI_RESULT_CHECK_ERRORS, &[("errors", MsgArg::Count(n))]);
-        let untidy = |n| said(msg::UI_RESULT_CHECK_UNTIDY, &[("warnings", MsgArg::Count(n))]);
+        let untidy = |n| {
+            said(
+                msg::UI_RESULT_CHECK_UNTIDY,
+                &[("warnings", MsgArg::Count(n))],
+            )
+        };
         assert_eq!(found(2, 0), [errors(2), took.clone()]);
         assert_eq!(found(0, 1), [untidy(1), took.clone()]);
         assert_eq!(found(1, 3), [errors(1), untidy(3), took]);
@@ -280,7 +460,10 @@ mod tests {
 
     #[test]
     fn a_prune_a_forget_and_an_adoption_count_what_they_did() {
-        let took = said(msg::UI_RESULT_TOOK, &[("duration", MsgArg::DurationMs(2_000))]);
+        let took = said(
+            msg::UI_RESULT_TOOK,
+            &[("duration", MsgArg::DurationMs(2_000))],
+        );
         for (kind, done, fact) in [
             (
                 "prune",

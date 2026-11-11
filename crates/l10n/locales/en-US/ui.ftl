@@ -234,13 +234,10 @@ ui-operations-title = Operations – { -brand-name }
 ui-operations-heading = Operations
 
 # The operations page's text, until its history loads.
-ui-operations-body = The history of every backup, live.
+ui-operations-body = The history of every operation, live.
 
 # The operations table's caption.
 ui-operations-caption = Operations
-
-# The operations table's column of plan names.
-ui-column-plan = Plan
 
 # The operations table's column of what each row is: a backup's plan, or the
 # maintenance run and its repository. Its cells are the rows' headers.
@@ -470,15 +467,6 @@ ui-status-cancelled = Cancelled
 
 # Announced politely when a backup has been asked for.
 ui-backup-started = Backup started.
-
-# Announced politely when a backup ends well.
-ui-backup-finished = Backup finished.
-
-# Announced politely when a backup is cancelled.
-ui-backup-cancelled = Backup cancelled.
-
-# Announced assertively when a backup ends badly.
-ui-backup-failed = Backup failed.
 
 # An instant, as the page's locale writes it.
 ui-instant = { DATETIME($when, dateStyle: "short", timeStyle: "medium") }

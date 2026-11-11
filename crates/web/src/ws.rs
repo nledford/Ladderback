@@ -5,9 +5,14 @@
 //! touches the browser's types, so a host run of mutants skips it and the
 //! browser journeys (`@ui`) cover it instead, the `live.rs` precedent.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
-use crate::backend::{OperationsState, ended, events_url, reconnect_backoff, succeeded};
+use crate::backend::{
+    OperationsState, REREAD_PATIENCE, Rereads, asks_for_a_reread, ended, events_url,
+    reconnect_backoff, succeeded,
+};
 use crate::maintenance::{self, Kind, Next, Watch, Watched};
 use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
 use futures::StreamExt;
@@ -83,6 +88,26 @@ pub(crate) async fn read<T: DeserializeOwned>(url: &str) -> Option<T> {
     response.json::<T>().await.ok()
 }
 
+/// Reads `url` as `read` does, but gives up on an answer that takes longer
+/// than `patience`: the fetch is aborted, and that is `None` too.
+async fn read_within<T: DeserializeOwned>(url: &str, patience: Duration) -> Option<T> {
+    let controller = web_sys::AbortController::new().ok()?;
+    let signal = controller.signal();
+    let millis = u32::try_from(patience.as_millis()).unwrap_or(u32::MAX);
+    // Dropping the timer cancels it, so it ends with the read: an answer in
+    // time is never aborted.
+    let _deadline = gloo_timers::callback::Timeout::new(millis, move || controller.abort());
+    let response = Request::get(url)
+        .abort_signal(Some(&signal))
+        .send()
+        .await
+        .ok()?;
+    if response.status() != 200 {
+        return None;
+    }
+    response.json::<T>().await.ok()
+}
+
 /// What a GET came back with: the typed answer, or a typed refusal, which
 /// the page renders as it renders a refused POST.
 pub(crate) enum Got<T> {
@@ -143,6 +168,9 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
         // back to the store's lagging write, and a live row the store has
         // not written yet stays.
         let mut first = true;
+        // Shared by every round, so a reconnect never runs a second re-read
+        // beside one still out.
+        let rereads = Rc::new(Cell::new(Rereads::default()));
         loop {
             match read::<OperationsPageDto>(&format!("{base}/api/v1/operations")).await {
                 Some(page) => {
@@ -154,7 +182,7 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
                     } else {
                         state.update(|state| state.merge(page));
                     }
-                    stream(&base, &state).await;
+                    stream(&base, &state, &rereads).await;
                     // The stream ended: a closed socket is a failure like any
                     // other, and the next round waits for it.
                     attempt += 1;
@@ -172,8 +200,9 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
 
 /// Applies the events stream to `state` until it ends. A `UiEvent` the state
 /// holds no operation for is ignored here too: the reconnect's re-fetch is
-/// what brings the whole story, never a half-invented row.
-async fn stream(base: &str, state: &RwSignal<OperationsState>) {
+/// what brings the whole story, never a half-invented row. The end of a run
+/// is read again from the history, which has what the run produced.
+async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell<Rereads>>) {
     let Ok(mut socket) = WebSocket::open(&events_url(base)) else {
         return;
     };
@@ -182,8 +211,45 @@ async fn stream(base: &str, state: &RwSignal<OperationsState>) {
             && let Ok(event) = serde_json::from_str::<UiEvent>(&text)
         {
             state.update(|state| state.apply(&event));
+            if asks_for_a_reread(&event) {
+                reread(base, *state, Rc::clone(rereads));
+            }
         }
     }
+}
+
+/// Reads the history into `state` again after a run's end, as
+/// `backend::Rereads` paces it: one read out at a time, one more after it
+/// when another end arrived meanwhile, and a few tries again, later each
+/// time, when a read gets no history in `REREAD_PATIENCE`. `rereads` is the
+/// one `watch` keeps across its reconnects.
+fn reread(base: &str, state: RwSignal<OperationsState>, rereads: Rc<Cell<Rereads>>) {
+    if !turn(&rereads, Rereads::ask) {
+        return;
+    }
+    let url = format!("{base}/api/v1/operations");
+    spawn_local(async move {
+        loop {
+            let page = read_within::<OperationsPageDto>(&url, REREAD_PATIENCE).await;
+            let answered = page.is_some();
+            if let Some(page) = page {
+                state.update(|state| state.merge(page));
+            }
+            match turn(&rereads, |now| now.finish(answered)) {
+                None => break,
+                Some(wait) if wait.is_zero() => {}
+                Some(wait) => sleep(wait).await,
+            }
+        }
+    });
+}
+
+/// Turns the shared `rereads` by `step` and says what the step answered.
+fn turn<T>(rereads: &Cell<Rereads>, step: impl FnOnce(&mut Rereads) -> T) -> T {
+    let mut now = rereads.get();
+    let answer = step(&mut now);
+    rereads.set(now);
+    answer
 }
 
 /// After a start or a cancel, polls the history into `state` until

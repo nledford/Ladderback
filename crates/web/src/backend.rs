@@ -125,11 +125,12 @@ impl OperationsState {
     }
 
     /// Merges a page the page just re-read: the settle-poll after a cancel
-    /// (a cancelled run emits no `UiEvent`) and the refetch a reconnect
-    /// starts from. The page is the source of truth for what it holds, but
-    /// it never regresses a status an event advanced — a `Started` event can
-    /// beat the store's own write — and a live row the page doesn't hold yet
-    /// stays, newest: dropping it would unshow a run the reader is watching.
+    /// (a cancelled run emits no `UiEvent`), the re-read a run's end asks for
+    /// and the refetch a reconnect starts from. The page is the source of
+    /// truth for what it holds, but it never regresses a status an event
+    /// advanced — a `Started` event can beat the store's own write — and a
+    /// live row the page doesn't hold yet stays, newest: dropping it would
+    /// unshow a run the reader is watching.
     pub(crate) fn merge(&mut self, page: OperationsPageDto) {
         let mut held: HashMap<String, OperationRow> = self
             .rows
@@ -141,8 +142,12 @@ impl OperationsState {
             let live = held.remove(&summary.id);
             rows.push(match live {
                 // The held row is at least as far along as the page says:
-                // what the events said wins, progress included.
-                Some(row) if rank(&row.summary.status) >= rank(&summary.status) => row,
+                // what the events said wins, progress included. An end that
+                // came by an event carries no result, so the page's is kept.
+                Some(mut row) if rank(&row.summary.status) >= rank(&summary.status) => {
+                    row.summary.result = row.summary.result.take().or(summary.result);
+                    row
+                }
                 _ => OperationRow {
                     summary,
                     progress: None,
@@ -231,9 +236,19 @@ pub(crate) fn succeeded(status: u16) -> bool {
 /// what the run produced, and the row's Result shows without a reload. A run
 /// started elsewhere, which the page did not hold, comes in with it.
 pub(crate) fn asks_for_a_reread(event: &UiEvent) -> bool {
-    let _ = event;
-    todo!()
+    matches!(
+        event,
+        UiEvent::OperationSucceeded { .. } | UiEvent::OperationFailed { .. }
+    )
 }
+
+/// How long a re-read waits for the history before it counts as no answer: a
+/// fetch that hangs would otherwise keep the one re-read out for good.
+pub(crate) const REREAD_PATIENCE: Duration = Duration::from_secs(10);
+
+/// How many times a re-read that got no history is tried again before the
+/// page waits for the next end, or the stream's re-fetch, to read it.
+const REREAD_RETRIES: u32 = 3;
 
 /// The page's re-reads of its operations, one at a time. An end that arrives
 /// while one is out may be newer than what that one reads, so it is owed one
@@ -255,7 +270,12 @@ impl Rereads {
     /// An end arrived: whether to start a re-read now. With one out, the
     /// answer is no, and one more is owed after it.
     pub(crate) fn ask(&mut self) -> bool {
-        todo!()
+        if self.reading {
+            self.owed = true;
+            return false;
+        }
+        self.reading = true;
+        true
     }
 
     /// The re-read that was out is done, `answered` with the history or not:
@@ -263,8 +283,17 @@ impl Rereads {
     /// again after no answer reads every end told before it, so it is the one
     /// owed too; once the tries run out, only an end owed meanwhile reads again.
     pub(crate) fn finish(&mut self, answered: bool) -> Option<Duration> {
-        let _ = answered;
-        todo!()
+        if answered {
+            self.failed = 0;
+        } else if self.failed < REREAD_RETRIES {
+            self.failed += 1;
+            self.owed = false;
+            return Some(Duration::from_secs(1 << (self.failed - 1)));
+        } else {
+            self.failed = 0;
+        }
+        self.reading = std::mem::take(&mut self.owed);
+        self.reading.then_some(Duration::ZERO)
     }
 }
 
