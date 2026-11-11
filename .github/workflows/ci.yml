@@ -104,7 +104,11 @@ jobs:
       - if: needs.changes.outputs.docs-only != 'true'
         uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
-      - if: needs.changes.outputs.docs-only != 'true'
+      # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
+      # code). Formatting, the wasm32 clippy, the journey and doc-path lints,
+      # the architecture checks and the contrast gate give one answer
+      # anywhere, so they run on Linux alone; macOS needs no Node then.
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
@@ -118,16 +122,18 @@ jobs:
       # official release, checked against the SHA-256 the script pins.
       - if: needs.changes.outputs.docs-only != 'true'
         run: scripts/install-rustic.sh
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: npm ci
         working-directory: ui-tests
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just fmt-check
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just lint
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os != 'Linux'
+        run: just clippy
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just architecture
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just test-contrast
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
       # writes the JUnit report.
