@@ -133,19 +133,18 @@ impl SqliteStore {
 
     /// Closes the pool once the calls in flight, reads and writes, have
     /// ended: a write that was in flight has committed or failed by the time
-    /// it returns. A call made after it, or while it waits, is
-    /// [`StoreError::Unavailable`].
+    /// it returns, and no connection to the file is left open, short of one
+    /// sqlx gave up on closing: a close that took over five seconds, or a
+    /// connection it found broken. A call made after it, or while it waits,
+    /// is [`StoreError::Unavailable`].
     ///
-    /// The store waits for its calls itself rather than leave it to the
-    /// pool: sqlx 0.8's `Pool::close` gives the pool a permit back for each
-    /// idle connection it closes, permits those connections had already
-    /// returned, so with idle connections beside a busy one it can stop
-    /// waiting before that one is back (#168; sqlx 0.9 fixes it). Until then
-    /// a connection sqlx is still handing back to the pool when a call has
-    /// ended can outlive `close`: one whose call succeeded stays open, idle,
-    /// until the store is dropped, and one closed because its write was cut
-    /// short or failed (see [`Checkout`]) may still be rolling that write
-    /// back, so a writer after it waits on SQLite's busy timeout.
+    /// sqlx hands a connection back to the pool, or closes one (see
+    /// [`Checkout`]), in a task of its own once its call has ended, and its
+    /// `Pool::close` waits for those tasks too, so neither outlives `close`
+    /// (#174). The store still waits for its calls itself rather than leave
+    /// that to the pool: a call made before `close` that is still waiting
+    /// for a free connection ends as it would have, where the pool alone
+    /// would refuse it once closing began.
     pub async fn close(&self) {
         let _alone = self.calls.write().await;
         self.pool.close().await;
@@ -272,15 +271,15 @@ async fn write(
 ///
 /// A write is cut short when its future is dropped before it ends: a run does
 /// that to the write that says an operation is running when a cancel or the
-/// deadline comes first (§9). sqlx starts a transaction on the connection's
-/// own thread, and a future dropped after the thread has acknowledged the
-/// start but before the `Transaction` that would roll it back exists leaves
-/// the connection inside the transaction, holding the database's write lock,
-/// and returns it to the pool that way: the next write waits out the busy
-/// timeout and fails, or is given the connection and fails at once, and so
-/// does every write after it until the connection is closed. A connection
-/// whose write was cut short, or ended in an error, is closed instead, which
-/// rolls back what it began and frees the lock.
+/// deadline comes first (§9). sqlx 0.9 rolls back what such a write began:
+/// the connection's own thread rolls back a `BEGIN` whose answer nobody
+/// took, and a dropped `Transaction` queues its rollback, which runs before
+/// the pool takes the connection back. sqlx 0.8 left a write dropped between
+/// those two points inside its transaction, holding the database's write
+/// lock, and every write after it failed (#123). The store closes a
+/// connection whose write was cut short, or ended in an error, rather than
+/// return it: with sqlx 0.9 that is defence in depth, which no test tells
+/// apart from returning it.
 struct Checkout {
     conn: PoolConnection<Sqlite>,
     ended: bool,

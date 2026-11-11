@@ -50,7 +50,7 @@ async fn a_new_database_is_created_and_uses_write_ahead_logging() {
 
 /// A database this build wrote, with an operation in it, that another program
 /// then damaged with `damage`; `open` must refuse it and change nothing.
-async fn refusal_of_a_damaged_database(damage: &str) -> OpenError {
+async fn refusal_of_a_damaged_database(damage: &'static str) -> OpenError {
     let scratch = Scratch::new();
     let store = scratch.open().await;
     save(
@@ -388,10 +388,10 @@ async fn closing_waits_for_a_write_in_flight() {
     closing_waits_for(Write::Save, &scratch, store).await;
 }
 
-/// sqlx 0.8's `Pool::close` gives the pool a permit back for every idle
-/// connection it closes, permits those connections had already returned, so
-/// with two idle connections it stops waiting for the one a write still has
-/// (#168).
+/// sqlx 0.8's `Pool::close` gave the pool a permit back for every idle
+/// connection it closed, permits those connections had already returned, so
+/// with two idle connections it stopped waiting for the one a write still
+/// had (#168).
 async fn closing_waits_beside_idle_connections_for(write: Write) {
     let scratch = Scratch::new();
     // Both connections are idle again by the time the write is in flight.
@@ -574,7 +574,7 @@ async fn closing_right_after_a_write_cut_short_lets_go_of_the_file() {
     let op = queued_backup(0x10);
     let mut probe = scratch.probe().await;
     let mut saving = Box::pin(store.save(&op, None));
-    poll_to_transaction_check(saving.as_mut(), &mut probe).await;
+    poll_to_transaction_start(saving.as_mut(), &mut probe).await;
     {
         let _held = hand_back.enter();
         drop(saving);
