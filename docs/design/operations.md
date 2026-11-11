@@ -47,7 +47,7 @@ Not part of the contract: UI layout and wording, log text, the CLI's sentences (
 - from 1.0.0: breaking bumps the major, a feature the minor, a fix the patch;
 - every breaking change gets an entry under **Breaking** in `CHANGELOG.md`, with the upgrade step.
 
-**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version ladderback@<version>`.
+**Release line.** Nothing is released before M1b; the workspace version stays `0.0.0` until then. The end of M1b releases `0.1.0`, and each later milestone a minor version. `1.0.0` follows M5, once the contract above is declared stable. Release candidates (`X.Y.Z-rc.N`) are tagged before a release that bumps the config `schema` or the sync `protocol`, and run on real machines first. The first release, release candidates and `1.0.0` are versions the commits can't imply, so the maintainer sets them on the release PR's branch with `release-plz set-version <version>`, which moves `[workspace.package] version`. The `ladderback@<version>` form would give that one package its own version and break the inheritance every crate shares.
 
 **Tags.** `vX.Y.Z` on `main`, created only by the release workflow. A tag is never moved or deleted; a bad release is fixed by the next patch, and its GitHub release is marked as such.
 
