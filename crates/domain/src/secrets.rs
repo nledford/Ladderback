@@ -1434,6 +1434,17 @@ mod tests {
         );
     }
 
+    /// Only what rclone reads as a location is read as one: a quoted value
+    /// with no `:` outside quotes in it is a local path to rclone.
+    #[test]
+    fn a_value_that_is_no_location_hides_no_credential() {
+        let location = "rclone::crypt,remote='demo,pass=visible':path";
+        assert_eq!(
+            for_repository(location, "hunter2").redact(location),
+            location
+        );
+    }
+
     #[test]
     fn rclones_own_credential_names_are_masked() {
         for name in [
@@ -1447,6 +1458,38 @@ mod tests {
             assert_eq!(
                 for_repository(&location, "hunter2").redact(&location),
                 format!("rclone::demo,{name}=***:bucket")
+            );
+        }
+    }
+
+    /// rustic's OpenDAL SFTP backend reads its option `key` as the path of
+    /// a key file: it stays readable, where an rclone setting `key` doesn't.
+    #[test]
+    fn a_rustic_sftp_key_option_is_not_masked() {
+        let mut settings = Settings::new("opendal:sftp");
+        settings.options = options(&[("key", "/home/demo/.ssh/id_demo")]);
+        assert_eq!(
+            settings
+                .redactor()
+                .redact("no key at /home/demo/.ssh/id_demo"),
+            "no key at /home/demo/.ssh/id_demo"
+        );
+    }
+
+    #[test]
+    fn what_is_no_rclone_credential_is_not_masked() {
+        for location in [
+            "rclone::sftp,host=nas.example.com,key_file=/home/demo/.ssh/id,bypass_cache=true:/backups",
+            // What follows the first `:` outside quotes is the path.
+            "rclone:demo-remote:backups/pass=visible",
+            "rclone::sftp,pass='':/backups",
+            "rclone::sftp,pass=:/backups",
+            "/srv/pass=visible",
+            "local:rclone::sftp,pass=visible",
+        ] {
+            assert_eq!(
+                for_repository(location, "hunter2").redact(location),
+                location
             );
         }
     }
@@ -1472,6 +1515,46 @@ mod tests {
             for_repository(&seventeen, "hunter2").redact(&seventeen),
             REDACTED
         );
+    }
+
+    #[test]
+    fn hostile_rclone_locations_end_without_a_panic() {
+        // One pass over each is milliseconds; a reading quadratic in the
+        // length, or a needle for every one of thousands of settings, would
+        // run past the test runner's time limit.
+        let many: String = (0..20_000).map(|n| format!(",pass=v{n}")).collect();
+        let long = [
+            format!("rclone::demo{many}:/backups"),
+            format!("rclone::demo{}", ",secret=x".repeat(100_000)),
+            format!("rclone::sftp,pass='{}", "'',".repeat(100_000)),
+            format!("rclone::sftp,pass={}", "${A}".repeat(50_000)),
+            format!("rclone::sftp,pass=\"{}\":/b", "é".repeat(100_000)),
+            format!("rclone:{}", "$${".repeat(100_000)),
+            format!("rclone::crypt{}:/b", ",remote=':a,pass=v:b'".repeat(20_000)),
+            format!("rclone::crypt,remote='{}':/b", "''".repeat(100_000)),
+            format!("rclone::crypt,remote=':a,x={}':/b", "''''".repeat(50_000)),
+        ];
+        let short = [
+            "rclone:",
+            "rclone::",
+            "rclone:,",
+            "rclone:=",
+            "rclone:,=,",
+            "rclone::pass='",
+            "rclone::pass=''",
+            "rclone::pass='''",
+            "rclone::pass=\"'\"",
+            "rclone::pass=${A}",
+            "rclone::pass=$${",
+            "rclone::${A}=x",
+            "rclone::pass=é€",
+        ];
+        for location in long.iter().map(String::as_str) {
+            let _ = for_repository(location, "hunter2").redact("a short text");
+        }
+        for location in short {
+            let _ = for_repository(location, "hunter2").redact(location);
+        }
     }
 
     fn options(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
