@@ -81,6 +81,14 @@ pub enum ErrorCode {
     /// The configuration already holds a repository under the alias. The
     /// argument `alias` names it.
     RepositoryAliasTaken,
+    /// The configuration already holds the repository, by its location or
+    /// its repository ID, under another alias: a repository has one alias
+    /// (§7.3). The argument `alias` names the one it has.
+    RepositoryAlreadyConfigured,
+    /// The location of a configured repository now holds another repository
+    /// than the one whose ID the configuration recorded (§7.3), so the job
+    /// read and wrote nothing there.
+    RepositoryReplaced,
     /// A repository was to be saved under a name that is not an alias: a
     /// name is up to 64 lower-case letters, digits and hyphens, starting
     /// with a letter or a digit.
@@ -438,7 +446,7 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::RepositoryAliasTaken => &[ArgSpec {
+            Self::RepositoryAliasTaken | Self::RepositoryAlreadyConfigured => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
                 optional: false,
@@ -648,6 +656,7 @@ impl ErrorCode {
             | Self::EngineStartTimedOut
             | Self::EngineExitTimedOut
             | Self::RepositoryTimedOut
+            | Self::RepositoryReplaced
             | Self::DaemonStopped
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
@@ -1188,6 +1197,16 @@ mod tests {
             ErrorCode::SecretCommandTimedOut.args(),
             &[named[0], named[1], spec("seconds", ArgKind::Count, false)]
         );
+        for code in [
+            ErrorCode::RepositoryAliasTaken,
+            ErrorCode::RepositoryAlreadyConfigured,
+        ] {
+            assert_eq!(
+                code.args(),
+                &[spec("alias", ArgKind::Text, false)],
+                "{code:?}"
+            );
+        }
         assert_eq!(ErrorCode::SecretInProcessArguments.args(), &[named[0]]);
         assert_eq!(
             ErrorCode::SecretExpansionTooLong.args(),
@@ -1205,6 +1224,7 @@ mod tests {
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
             ErrorCode::RepositoryTimedOut,
+            ErrorCode::RepositoryReplaced,
             ErrorCode::DaemonStopped,
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,

@@ -170,7 +170,7 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
-        FailureReason::RepositoryReplaced => todo!(),
+        FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -228,6 +228,7 @@ pub(crate) fn decode_failure(
         }),
         "deadline-passed" => Ok(FailureReason::DeadlinePassed),
         "repository-exists" => Ok(FailureReason::RepositoryExists),
+        "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
@@ -322,6 +323,22 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryExists);
+    }
+
+    /// A persisted `repository-replaced` failure reads back as the typed
+    /// reason: no arguments, no detail.
+    #[test]
+    fn repository_replaced_round_trips() {
+        let columns = encode_failure(&FailureReason::RepositoryReplaced)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "repository-replaced");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::RepositoryReplaced);
     }
 
     /// A persisted `daemon-stopped` failure reads back as the typed reason:

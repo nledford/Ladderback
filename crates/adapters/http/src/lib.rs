@@ -1841,6 +1841,9 @@ mod tests {
                 "/alias-taken" => Err(RepositoriesError::AliasTaken {
                     alias: "demo".to_owned(),
                 }),
+                "/already-configured" => Err(RepositoriesError::AlreadyConfigured {
+                    alias: "demo".to_owned(),
+                }),
                 "/exists" => Err(RepositoriesError::Exists {
                     location: "/exists".to_owned(),
                 }),
@@ -2008,6 +2011,11 @@ mod tests {
                 "/alias-taken",
                 409,
                 json!({"code": "repository-alias-taken", "args": {"alias": text("demo")}}),
+            ),
+            (
+                "/already-configured",
+                409,
+                json!({"code": "repository-already-configured", "args": {"alias": text("demo")}}),
             ),
             (
                 "/exists",

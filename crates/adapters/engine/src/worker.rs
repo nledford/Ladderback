@@ -452,6 +452,7 @@ mod tests {
                 options_hot: Default::default(),
                 options_cold: Default::default(),
                 secrets: Vec::new(),
+                id: None,
             }),
         };
         let (events, capture) = capture();
@@ -513,6 +514,7 @@ mod tests {
             options_hot: Default::default(),
             options_cold: Default::default(),
             secrets: Vec::new(),
+            id: None,
         };
         let run = |job, process| {
             let spec = JobSpec {
@@ -654,6 +656,7 @@ mod tests {
             options_hot: Default::default(),
             options_cold: Default::default(),
             secrets: Vec::new(),
+            id: None,
         }
     }
 

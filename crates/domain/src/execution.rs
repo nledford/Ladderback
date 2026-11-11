@@ -104,7 +104,7 @@ impl FailureReason {
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
-            Self::RepositoryReplaced => todo!(),
+            Self::RepositoryReplaced => "repository-replaced",
             Self::DaemonStopped => "daemon-stopped",
         }
     }

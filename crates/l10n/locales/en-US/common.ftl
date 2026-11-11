@@ -236,6 +236,13 @@ error-repository-timed-out = The repository did not answer in time, so { -brand-
 # $alias (text): the alias the configuration already uses.
 error-repository-alias-taken = { -brand-name } already has a repository called { $alias }. Choose another name.
 
+# The configuration already holds this repository, by its location or its ID, under another alias.
+# $alias (text): the alias the repository already has.
+error-repository-already-configured = { -brand-name } already has this repository, called { $alias }, and a repository has one name. Use { $alias } instead.
+
+# The location of a configured repository now holds another repository than the one the configuration recorded.
+error-repository-replaced = The repository's location now holds a different repository, so { -brand-name } read and wrote nothing there. Change the location to where the repository is now, or, if the new repository is meant to take its place, remove { "repository-id" } from its entry in the configuration file.
+
 # A repository was to be saved under a name that is not an alias.
 error-repository-alias-invalid = { -brand-name } cannot use that name for a repository. Use up to 64 lower-case letters, digits and hyphens, and start with a letter or a digit.
 

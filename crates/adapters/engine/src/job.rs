@@ -134,6 +134,11 @@ pub struct RepositorySpec {
     /// whatever the option they sit in is called.
     #[serde(with = "secrets")]
     pub secrets: Vec<SecretValue>,
+    /// The repository ID the configuration recorded for the repository
+    /// (§7.3), when it recorded one: the job opens only a repository with
+    /// this ID and refuses any other (`repository-replaced`) before it reads
+    /// or writes anything.
+    pub id: Option<RepositoryId>,
 }
 
 impl RepositorySpec {
@@ -171,6 +176,7 @@ impl fmt::Debug for RepositorySpec {
             .field("options_hot", &masked_options(&self.options_hot))
             .field("options_cold", &masked_options(&self.options_cold))
             .field("secrets", &secrets)
+            .field("id", &self.id)
             .finish()
     }
 }
@@ -501,6 +507,7 @@ mod tests {
             options_hot: BTreeMap::new(),
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
+            id: Some(RepositoryId::parse(&"cd".repeat(32)).unwrap()),
         }
     }
 
@@ -649,6 +656,7 @@ mod tests {
                 options_hot: BTreeMap::new(),
                 options_cold: BTreeMap::new(),
                 secrets: Vec::new(),
+                id: None,
             },
             sources: vec!["/home/demo".to_owned()],
             plan: PlanId::parse("home").unwrap(),

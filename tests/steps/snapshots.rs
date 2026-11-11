@@ -183,7 +183,11 @@ async fn lists(agent: &mut Agent) {
         agent.engine.clone(),
         ResolveRepository::new(Arc::new(SystemSecrets::new())),
     );
-    agent.snapshots.listed = Some(use_case.list(agent.next_snapshot_op(), &settings).await);
+    agent.snapshots.listed = Some(
+        use_case
+            .list(agent.next_snapshot_op(), &settings, None)
+            .await,
+    );
 }
 
 #[then("the listing shows the three snapshots newest first with id, time, host and label")]

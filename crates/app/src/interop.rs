@@ -4,8 +4,15 @@
 //!
 //! The adapter translates rustic's format to and from Ladderback's types;
 //! what the translation means for the configuration is decided here: a plan
-//! ID or repository alias the configuration already has is refused before
-//! anything is saved, and the hostname rule below.
+//! ID the configuration already has is refused before anything is saved, and
+//! so is a second alias for a repository it already holds (§7.3); the
+//! hostname rule below.
+//!
+//! **Repository.** A profile whose repository the configuration already
+//! holds, at the same location under the alias given, adds its plans and
+//! hooks to that entry, which keeps its settings, ID and maintenance. Under
+//! another alias it is refused, naming the alias it has; an alias the
+//! configuration holds for another location is refused as taken.
 //!
 //! **Hostname.** When every imported plan names the same host `H`, the
 //! configuration has no plan yet and the agent has no hostname of its own,
@@ -27,7 +34,8 @@ use crate::ports::{
 };
 
 /// Imports a rustic profile: reads it through the [`ProfileReader`], checks
-/// it against the configuration, and saves the repository, the plans and the
+/// it against the configuration, and saves the repository (unless the
+/// configuration already holds it under that alias), the plans and the
 /// profile's global hooks in one save, or saves nothing.
 pub struct ImportProfile {
     reader: Arc<dyn ProfileReader>,
@@ -103,14 +111,21 @@ impl ImportProfile {
         repository: RepositoryAlias,
     ) -> Result<Imported, ImportError> {
         let loaded = self.config.load().await.map_err(ImportError::Config)?;
-        if loaded.repository(&repository).is_some() {
-            return Err(ImportError::AliasTaken(repository));
-        }
         let profile = self
             .reader
             .read(file, &repository)
             .await
             .map_err(ImportError::Profile)?;
+        // A profile knows no repository ID, so its location alone tells
+        // whether the configuration already holds its repository.
+        let location = &profile.repository.settings.repository;
+        let configured = loaded.alias_of(location, None);
+        let add_repository = match (loaded.repository(&repository), configured) {
+            (Some(_), Some(alias)) if *alias == repository => false,
+            (Some(_), _) => return Err(ImportError::AliasTaken(repository)),
+            (None, Some(alias)) => return Err(ImportError::AlreadyConfigured(alias.clone())),
+            (None, None) => true,
+        };
 
         let mut agent = loaded.agent().clone();
         let mut plans = loaded.plans().to_vec();
@@ -126,7 +141,9 @@ impl ImportProfile {
         hooks.run_finally.extend(profile.hooks.run_finally);
 
         let mut repositories = loaded.repositories().clone();
-        repositories.insert(repository.clone(), profile.repository);
+        if add_repository {
+            repositories.insert(repository.clone(), profile.repository);
+        }
 
         let saved =
             AgentConfig::new(agent, hooks, repositories, plans).map_err(
@@ -414,21 +431,27 @@ mod tests {
         assert!(saved(&config).await.repositories().is_empty());
     }
 
+    /// The alias holds the profile's repository (the same location), so the
+    /// import adds its plans to that entry instead of a second one (§7.3).
     #[tokio::test]
-    async fn a_taken_alias_is_refused_before_the_profile_is_read() {
+    async fn a_profile_for_the_repository_its_alias_holds_adds_its_plans_to_it() {
         let config = Arc::new(InMemoryConfigStore::new());
         import(&config, profile(vec![plan("home", None)], Hooks::default()))
             .await
             .expect("imported");
+        let before = saved(&config).await.repositories().clone();
         let reader = Arc::new(FakeProfileReader::new(Ok(profile(
             vec![plan("docs", None)],
             Hooks::default(),
         ))));
-        let refused = ImportProfile::new(reader.clone(), config.clone())
+        let imported = ImportProfile::new(reader, config.clone())
             .import(Path::new("nas.toml"), alias("nas"))
-            .await;
-        assert_eq!(refused, Err(ImportError::AliasTaken(alias("nas"))));
-        assert!(reader.asked().is_empty());
+            .await
+            .expect("the plans are added");
+        assert_eq!(imported.plans, vec![PlanId::parse("docs").unwrap()]);
+        let after = saved(&config).await;
+        assert_eq!(after.repositories(), &before, "the entry is kept as it was");
+        assert_eq!(after.plans().len(), 2);
     }
 
     #[tokio::test]

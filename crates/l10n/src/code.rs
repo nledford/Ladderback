@@ -51,6 +51,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
     RepositoryTimedOut => msg::ERROR_REPOSITORY_TIMED_OUT,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
+    RepositoryAlreadyConfigured => msg::ERROR_REPOSITORY_ALREADY_CONFIGURED,
+    RepositoryReplaced => msg::ERROR_REPOSITORY_REPLACED,
     RepositoryAliasInvalid => msg::ERROR_REPOSITORY_ALIAS_INVALID,
     SecretMissing => msg::ERROR_SECRET_MISSING,
     SecretUnreadable => msg::ERROR_SECRET_UNREADABLE,

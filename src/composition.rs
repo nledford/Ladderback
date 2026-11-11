@@ -444,11 +444,14 @@ impl Operations for PlanRunner {
         let repository = config
             .repository(&plan.repository)
             .ok_or(StartError::UnknownPlan)?;
-        let resolved = self
+        let mut resolved = self
             .resolve
             .resolve(&repository.settings)
             .await
             .map_err(|_| StartError::Unavailable)?;
+        // The engine opens only the repository the configuration recorded,
+        // when it recorded one (§7.3).
+        resolved.access.id = repository.id.clone();
         let job = Job::Backup(BackupJob {
             repository: resolved.access,
             sources: plan.sources.iter().map(|s| s.as_str().to_owned()).collect(),
@@ -797,7 +800,11 @@ pub(crate) fn import_refusal(error: ImportError, config_file: &std::path::Path) 
             args: vec![("alias", text(alias.as_str()))],
             detail: None,
         },
-        ImportError::AlreadyConfigured(_) => todo!(),
+        ImportError::AlreadyConfigured(alias) => Refusal {
+            code: ErrorCode::RepositoryAlreadyConfigured,
+            args: vec![("alias", text(alias.as_str()))],
+            detail: None,
+        },
         ImportError::PlanTaken(plan) => Refusal {
             code: ErrorCode::PlanIdTaken,
             args: vec![("plan", text(plan.as_str()))],
@@ -1087,7 +1094,11 @@ impl Catalog for ConfigCatalog {
             Arc::clone(&self.engine),
             ResolveRepository::new(Arc::new(SystemSecrets::default())),
         )
-        .list(OperationId::from_uuid(Uuid::now_v7()), &repository.settings)
+        .list(
+            OperationId::from_uuid(Uuid::now_v7()),
+            &repository.settings,
+            repository.id.as_ref(),
+        )
         .await;
         let listed = match listing {
             Ok(listed) => listed,
@@ -1320,7 +1331,9 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::AliasTaken(alias) => RepositoriesError::AliasTaken {
             alias: alias.as_str().to_owned(),
         },
-        RepositoryError::AlreadyConfigured(_) => todo!(),
+        RepositoryError::AlreadyConfigured(alias) => RepositoriesError::AlreadyConfigured {
+            alias: alias.as_str().to_owned(),
+        },
         RepositoryError::Resolve(error) => {
             RepositoriesError::SecretRefused(secret_refusal(&error, settings).await)
         }
@@ -1558,7 +1571,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         // runs no hooks. It is still a failure, in the catalog's plainest words.
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
-        F::RepositoryReplaced => todo!(),
+        F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }
@@ -3883,6 +3896,12 @@ mod tests {
         );
         assert_eq!(alias.code, ErrorCode::RepositoryAliasTaken);
         assert!(said(&alias).contains("nas"));
+        let configured = import_refusal(
+            ImportError::AlreadyConfigured(RepositoryAlias::parse("nas").expect("a slug")),
+            path,
+        );
+        assert_eq!(configured.code, ErrorCode::RepositoryAlreadyConfigured);
+        assert!(said(&configured).contains("nas"));
         let plan = import_refusal(
             ImportError::PlanTaken(PlanId::parse("home").expect("a slug")),
             path,
@@ -4011,19 +4030,23 @@ mod tests {
 #[cfg(test)]
 mod repository_service_tests {
     use super::captured_log::{self, capture};
+    use std::collections::BTreeMap;
     use std::sync::{Mutex, PoisonError};
 
     use api::{ErrorCode, MsgArg, PasswordDto, RepositorySettingsDto};
     use app::fakes::{FakeSecrets, InMemoryConfigStore};
     use app::ports::JobControl;
+
     use domain::RepositoryId;
 
     use super::*;
 
     /// An engine that answers every job with the scripted outcome, and keeps
-    /// the jobs it was given.
+    /// the jobs it was given. A location in `ids` is a repository of its
+    /// own: a success there names that ID instead of the scripted one.
     struct Scripted {
         outcome: Mutex<Result<RepositoryId, FailureReason>>,
+        ids: Mutex<BTreeMap<String, RepositoryId>>,
         refuses: Mutex<Option<EngineError>>,
         /// How many of the next jobs never answer.
         hangs: Mutex<usize>,
@@ -4040,6 +4063,15 @@ mod repository_service_tests {
     #[async_trait]
     impl Engine for Scripted {
         async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let own = match &job {
+                Job::Identify(access) | Job::Init(access) => self
+                    .ids
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&access.repository)
+                    .cloned(),
+                _ => None,
+            };
             self.seen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -4068,7 +4100,9 @@ mod repository_service_tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone()
             {
-                Ok(id) => EngineEvent::Succeeded(EngineResult::Repository { id }),
+                Ok(id) => EngineEvent::Succeeded(EngineResult::Repository {
+                    id: own.unwrap_or(id),
+                }),
                 Err(reason) => EngineEvent::Failed(reason),
             };
             Ok(RunningJob {
@@ -4116,6 +4150,7 @@ mod repository_service_tests {
     fn engine() -> Arc<Scripted> {
         Arc::new(Scripted {
             outcome: Mutex::new(Ok(repository_id())),
+            ids: Mutex::new(BTreeMap::new()),
             refuses: Mutex::new(None),
             hangs: Mutex::new(0),
             seen: Mutex::new(Vec::new()),
@@ -4507,11 +4542,21 @@ mod repository_service_tests {
     #[tokio::test]
     async fn two_connections_made_at_the_same_moment_are_both_kept() {
         let engine = engine();
+        let mut other = settings_dto();
+        other.repository = "/srv/other/repo".to_owned();
+        engine
+            .ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                other.repository.clone(),
+                RepositoryId::parse(&"b".repeat(64)).expect("a repository ID"),
+            );
         let config = Arc::new(Yielding(InMemoryConfigStore::new()));
         let service = service(&engine, config.clone());
         let (first, second) = tokio::join!(
             service.connect(connect("first", settings_dto())),
-            service.connect(connect("second", settings_dto())),
+            service.connect(connect("second", other)),
         );
         first.expect("the first connection");
         second.expect("the second connection");
@@ -4661,6 +4706,10 @@ mod repository_service_tests {
             (
                 F::DaemonStopped,
                 unavailable(ErrorCode::DaemonStopped, vec![], None),
+            ),
+            (
+                F::RepositoryReplaced,
+                unavailable(ErrorCode::RepositoryReplaced, vec![], None),
             ),
             (
                 F::RepositoryExists,
@@ -5344,7 +5393,9 @@ mod repository_service_tests {
                 domain::planning::RepositoryConfig {
                     id: None,
                     settings: RepositorySettings {
-                        repository: "rest:https://u:hunter2@nas.example/repo".to_owned(),
+                        // One location each: two entries at one location
+                        // are one repository under two names (§7.3).
+                        repository: format!("rest:https://u:hunter2@nas.example/repo/{name}"),
                         repo_hot: Some("rest:https://u:hunter3@hot.example/repo".to_owned()),
                         password: password.clone(),
                         options: Default::default(),

@@ -1161,6 +1161,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // nothing was written. The worker's `location` argument
                 // says where; the job's spec already does.
                 ErrorCode::RepositoryExists => FailureReason::RepositoryExists,
+                // The location holds another repository than the one the
+                // spec named (§7.3): nothing there was read or written. As
+                // with `RepositoryExists`, the code says it all.
+                ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes
@@ -1171,6 +1175,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 ErrorCode::OperationFailed
                 | ErrorCode::EngineUnavailable
                 | ErrorCode::RepositoryAliasTaken
+                | ErrorCode::RepositoryAlreadyConfigured
                 | ErrorCode::RepositoryAliasInvalid
                 | ErrorCode::SecretMissing
                 | ErrorCode::SecretUnreadable
@@ -1269,6 +1274,7 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
         options_hot: access.options_hot,
         options_cold: access.options_cold,
         secrets: access.secrets,
+        id: access.id,
     }
 }
 

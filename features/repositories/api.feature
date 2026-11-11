@@ -74,8 +74,8 @@ Feature: Repositories over HTTP
     And the daemon lists no repositories
 
   Scenario: Two repositories connected at the same moment are both kept
-    Given an initialised repository
-    When the client connects it as "first" and as "second" at the same moment
+    Given two initialised repositories
+    When the client connects one as "first" and the other as "second" at the same moment
     Then the daemon lists 2 repositories
 
   Scenario: A password file stays a reference, in the saved config and in the list
