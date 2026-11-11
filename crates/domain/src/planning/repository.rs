@@ -217,7 +217,7 @@ impl RepositoryConfig {
     /// ID (§7.3); an entry or a request that knows no ID matches by location
     /// alone.
     pub fn is(&self, location: &str, id: Option<&RepositoryId>) -> bool {
-        todo!("{location} {id:?}")
+        self.settings.repository == location || (id.is_some() && self.id.as_ref() == id)
     }
 }
 

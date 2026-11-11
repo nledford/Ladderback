@@ -77,12 +77,15 @@ Feature: Connecting a repository
     When the agent initialises the repository as "demo"
     Then the repository "demo" asks this agent to maintain it
 
-  Scenario: Connecting a repository asks this agent to maintain it only when the person chose so
+  Scenario: Connecting a repository asks nobody to maintain it unless the person chose so
     Given a repository the engine identifies
     When the agent connects it as "demo"
     Then the repository "demo" asks nobody to maintain it
-    When the agent connects it as "other" to maintain it from this agent
-    Then the repository "other" asks this agent to maintain it
+
+  Scenario: Connecting a repository the person chose to maintain from this agent asks this agent to maintain it
+    Given a repository the engine identifies
+    When the agent connects it as "demo" to maintain it from this agent
+    Then the repository "demo" asks this agent to maintain it
 
   Scenario: Testing a repository that never answers is refused once its time is up
     Given a repository the engine never answers

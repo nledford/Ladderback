@@ -129,6 +129,18 @@ impl AgentConfig {
         repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
         plans: Vec<Plan>,
     ) -> Result<Self, Violation> {
+        for (n, (first, entry)) in repositories.iter().enumerate() {
+            let same = repositories
+                .iter()
+                .skip(n.saturating_add(1))
+                .find(|(_, other)| other.is(&entry.settings.repository, entry.id.as_ref()));
+            if let Some((second, _)) = same {
+                return Err(Violation::SameRepository {
+                    first: first.clone(),
+                    second: second.clone(),
+                });
+            }
+        }
         let mut taken = BTreeSet::new();
         for (index, plan) in plans.iter().enumerate() {
             if !taken.insert(&plan.id) {
@@ -189,7 +201,10 @@ impl AgentConfig {
     /// The alias the repository at `location`, or with the ID `id`, is
     /// already configured under (§7.3: one alias per repository).
     pub fn alias_of(&self, location: &str, id: Option<&RepositoryId>) -> Option<&RepositoryAlias> {
-        todo!("{location} {id:?}")
+        self.repositories
+            .iter()
+            .find(|(_, entry)| entry.is(location, id))
+            .map(|(alias, _)| alias)
     }
 }
 
