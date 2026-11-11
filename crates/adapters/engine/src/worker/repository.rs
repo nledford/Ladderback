@@ -570,10 +570,10 @@ mod tests {
         );
     }
 
-    /// An HTTP server on a free local port that answers every request
-    /// `401 Unauthorized`, as a REST server refusing the credentials does.
-    /// It serves until the test process ends.
-    fn refusing_rest_server() -> String {
+    /// An HTTP server on a free local port that answers every request with
+    /// `status` (`401 Unauthorized`, say) and an empty body. It serves until
+    /// the test process ends.
+    fn server_answering(status: &'static str) -> std::net::SocketAddr {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -581,15 +581,28 @@ mod tests {
             for stream in listener.incoming().flatten() {
                 let mut reader = BufReader::new(&stream);
                 let mut line = String::new();
+                let mut length = 0;
                 while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
                     line.clear();
                 }
+                let _ = io::copy(&mut io::Read::take(&mut reader, length), &mut io::sink());
                 let _ = (&stream).write_all(
-                    b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                        .as_bytes(),
                 );
             }
         });
-        format!("rest:http://{address}/")
+        address
+    }
+
+    /// A REST server that refuses the credentials, as `401 Unauthorized`.
+    fn refusing_rest_server() -> String {
+        format!("rest:http://{}/", server_answering("401 Unauthorized"))
     }
 
     /// rustic's REST backend lists no config file when the server answers
@@ -620,14 +633,14 @@ mod tests {
         assert_eq!(failed_code(&spec), api::ErrorCode::OperationFailed);
     }
 
-    /// rustic's OpenDAL backend tells a config file that isn't there from a
-    /// look that failed: an empty folder holds no repository, and one that
-    /// can't be read is the backend's error, which fails the job as before.
-    /// A root folder of `fs` that isn't there is no definite answer either,
-    /// as with a local folder: it fails the job as before, and before the
-    /// backend is set up, which would make it.
+    /// OpenDAL's `fs` is a folder on this machine, looked at as a local one:
+    /// an empty root folder holds no repository, and one that can't be read
+    /// is no answer, which fails the job as before. A root folder that isn't
+    /// there is no definite answer either, as with a local folder: it fails
+    /// the job as before, and before the backend is set up, which would
+    /// make it.
     #[test]
-    fn an_opendal_location_is_no_repository_only_when_it_says_the_config_is_not_there() {
+    fn an_opendal_fs_root_is_no_repository_only_when_it_is_an_empty_folder() {
         let root = tempfile::tempdir().unwrap();
         let at = |folder: &Path| RepositorySpec {
             options: [("root".to_owned(), folder.to_string_lossy().into_owned())].into(),
@@ -679,6 +692,97 @@ mod tests {
             failed_code(&at(&repository)),
             api::ErrorCode::OperationFailed
         );
+    }
+
+    /// Only OpenDAL's `fs` is a folder on this machine. Every other service
+    /// is a server or a store elsewhere, where a missing root is the remote
+    /// form of an unplugged drive: rustic lists no config file for one that
+    /// isn't there, and creating a repository would make it (decision 53).
+    /// So the job fails as it would have, never as `repository-not-found`,
+    /// like REST's. Here a WebDAV server that answers `404 Not Found` to
+    /// everything and an empty in-memory store.
+    #[test]
+    fn an_opendal_service_other_than_fs_is_never_said_to_hold_no_repository() {
+        let webdav = RepositorySpec {
+            options: [
+                (
+                    "endpoint".to_owned(),
+                    format!("http://{}", server_answering("404 Not Found")),
+                ),
+                ("retry".to_owned(), "off".to_owned()),
+            ]
+            .into(),
+            ..spec_at("opendal:webdav")
+        };
+        for spec in [webdav, spec_at("opendal:memory")] {
+            assert_eq!(
+                failed_code(&spec),
+                api::ErrorCode::OperationFailed,
+                "{}",
+                spec.repository
+            );
+        }
+    }
+
+    /// A folder holding what a repository holds beside its config file (a
+    /// `keys`, `data`, `index` or `snapshots` folder) is no empty location:
+    /// an initialisation cut short, or a repository whose config file was
+    /// lost. Creating one there would mix a new repository into what is left
+    /// of another, so the job fails as it would have, never as
+    /// `repository-not-found` (decision 53), on either half and through
+    /// OpenDAL's `fs` as well.
+    #[test]
+    fn a_folder_holding_repository_content_but_no_config_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let lost_config = root.path().join("lost-config");
+        init(&lost_config);
+        fs::remove_file(lost_config.join("config")).unwrap();
+        assert_eq!(
+            failed_code(&spec_at(&lost_config.to_string_lossy())),
+            api::ErrorCode::OperationFailed
+        );
+        let empty = root.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        for content in ["keys", "data", "index", "snapshots"] {
+            let folder = root.path().join(content);
+            fs::create_dir_all(folder.join(content)).unwrap();
+            let location = folder.to_string_lossy().into_owned();
+            let through_fs = RepositorySpec {
+                options: [("root".to_owned(), location.clone())].into(),
+                ..spec_at("opendal:fs")
+            };
+            let as_hot_half = RepositorySpec {
+                repo_hot: Some(location.clone()),
+                ..spec_at(&empty.to_string_lossy())
+            };
+            for spec in [spec_at(&location), through_fs, as_hot_half] {
+                assert_eq!(
+                    failed_code(&spec),
+                    api::ErrorCode::OperationFailed,
+                    "{content}: {spec:?}"
+                );
+            }
+        }
+    }
+
+    /// A repository with a hot half is no repository only when both halves
+    /// are empty folders: a hot half on a local folder that isn't there is
+    /// what an unplugged drive looks like, as with the cold half, and
+    /// creating the repository would make that folder (decision 53).
+    #[test]
+    fn a_local_hot_half_that_is_not_there_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        let hot = root.path().join("hot");
+        fs::create_dir(&cold).unwrap();
+        let with_hot = RepositorySpec {
+            repo_hot: Some(hot.to_string_lossy().into_owned()),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        assert_eq!(failed_code(&with_hot), api::ErrorCode::OperationFailed);
+        assert!(!hot.exists(), "opening made the hot folder");
+        fs::create_dir(&hot).unwrap();
+        assert_eq!(failed_code(&with_hot), api::ErrorCode::RepositoryNotFound);
     }
 
     #[test]
