@@ -9,17 +9,23 @@ use std::sync::Arc;
 use domain::RepositoryAlias;
 use domain::planning::AgentConfig;
 
-use crate::ports::{OperationStore, StoreError};
+use crate::ports::{HistoryQuery, OperationRecord, OperationStore, PageSize, StoreError};
 
 /// Decides, for each repository the configuration holds, whether its row
-/// offers to create it: when no operation of the repository is on record, or
-/// when its latest one failed because no repository is at the location.
+/// offers to create it: only when its entry records no repository ID, its
+/// latest operation failed because no repository is at the location, and
+/// none of its operations ever succeeded. An entry that records an ID names
+/// a repository Ladderback has opened, so it was there. A repository with no
+/// operation on record is not offered: a folder that isn't there, as on a
+/// drive that isn't plugged in, never fails `repository-not-found`, so that
+/// failure is the evidence that the location is reachable and holds none. A
+/// repository a backup once reached and that is gone now is more likely on a
+/// drive that isn't plugged in than never made, and creating one would put a
+/// new, empty repository where the old one should be.
 ///
 /// A repository's operations are those of the plans that back up to it, its
 /// backups and adoptions; the latest is the newest by ID across those plans.
-/// Maintenance names only the repository's ID, which a saved entry doesn't
-/// record (#186), so a repository with only maintenance on record is still
-/// offered; creating one that is there is refused, with nothing changed.
+/// A connection test is not one: it writes no operation.
 pub struct CreateOffers {
     operations: Arc<dyn OperationStore>,
 }
@@ -35,8 +41,13 @@ impl CreateOffers {
         &self,
         config: &AgentConfig,
     ) -> Result<BTreeSet<RepositoryAlias>, StoreError> {
-        let _ = (&self.operations, config);
-        todo!()
+        let mut offered = BTreeSet::new();
+        for alias in config.repositories().keys() {
+            if self.offers(config, alias).await? {
+                offered.insert(alias.clone());
+            }
+        }
+        Ok(offered)
     }
 
     /// Whether the row of the repository `config` holds under `alias` offers
@@ -48,8 +59,62 @@ impl CreateOffers {
         config: &AgentConfig,
         alias: &RepositoryAlias,
     ) -> Result<bool, StoreError> {
-        let _ = (&self.operations, config, alias);
-        todo!()
+        if config
+            .repository(alias)
+            .is_none_or(|entry| entry.id.is_some())
+        {
+            return Ok(false);
+        }
+        // The newest operation of the repository, from the newest of each
+        // of its plans.
+        let mut latest: Option<OperationRecord> = None;
+        for plan in config
+            .plans()
+            .iter()
+            .filter(|plan| &plan.repository == alias)
+        {
+            let page = self
+                .operations
+                .list(&HistoryQuery {
+                    plan: Some(plan.id.clone()),
+                    after: None,
+                    limit: PageSize::new(1),
+                })
+                .await?;
+            let Some(newest) = page.operations.into_iter().next() else {
+                continue;
+            };
+            match &latest {
+                Some(known) if known.id >= newest.id => {}
+                _ => latest = Some(newest),
+            }
+        }
+        match latest {
+            Some(operation) if operation.status.found_no_repository() => {
+                Ok(!self.ever_succeeded(config, alias).await?)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Whether any operation of a plan that backs up to `alias` succeeded,
+    /// with warnings or without: one indexed lookup per plan, asked only of
+    /// a repository whose latest operation found none there.
+    async fn ever_succeeded(
+        &self,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+    ) -> Result<bool, StoreError> {
+        for plan in config
+            .plans()
+            .iter()
+            .filter(|plan| &plan.repository == alias)
+        {
+            if self.operations.ever_succeeded(&plan.id).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

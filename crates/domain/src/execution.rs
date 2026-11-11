@@ -44,7 +44,12 @@ impl OperationStatus {
     /// location ([`FailureReason::RepositoryNotFound`]): a saved repository
     /// whose latest operation did is one to create (decision 53).
     pub fn found_no_repository(&self) -> bool {
-        todo!()
+        matches!(
+            self,
+            Self::Failed {
+                reason: FailureReason::RepositoryNotFound
+            }
+        )
     }
 }
 
@@ -117,7 +122,7 @@ impl FailureReason {
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
-            Self::RepositoryNotFound => todo!(),
+            Self::RepositoryNotFound => "repository-not-found",
             Self::DaemonStopped => "daemon-stopped",
         }
     }

@@ -31,7 +31,7 @@ use crate::secrets::{ResolveError, ResolveRepository};
 /// after the initialisation succeeded, as [`ConnectRepository`](crate::repositories::ConnectRepository)
 /// saves one. A repository the configuration already holds, such as one an
 /// imported profile added, is initialised from its own entry by
-/// [`InitRepository::init_saved`], which saves nothing.
+/// [`InitRepository::init_saved`], which records only the new ID in it.
 pub struct InitRepository {
     clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
@@ -101,9 +101,10 @@ pub enum RepositoryError {
     /// initialised, and nothing there was changed.
     Exists,
     /// The repository's row doesn't offer to create it: its entry records
-    /// no ID, and no job found the location empty since nothing reached it
-    /// (decision 53). Nothing says a repository is there, nor that the
-    /// location is reachable, so nothing was run.
+    /// no ID, and no job found the location empty since nothing reached it;
+    /// or the engine, looking just before Create, found no folder with no
+    /// repository in it where the entry says (decision 53). Nothing says
+    /// the location is reachable and empty, so nothing was created.
     CreateNotOffered,
     /// The configuration already holds a repository under the alias.
     AliasTaken(RepositoryAlias),
@@ -176,18 +177,79 @@ impl InitRepository {
     /// Initialises the repository the configuration holds under `alias`,
     /// where its entry says it is and with the entry's own references, so a
     /// password the configuration already names is never asked for again.
-    /// The entry is left as it was, `maintenance` included: who maintains a
-    /// saved repository was decided when it was saved (§7.3, decision NN).
-    /// An alias the configuration doesn't hold is refused with
-    /// [`SavedEntryError::Unknown`] before anything runs.
+    /// Only the new repository's ID is recorded in the entry, as [`init`]
+    /// records it; the rest stays as it was, `maintenance` included: who
+    /// maintains a saved repository was decided when it was saved (§7.3,
+    /// decision 53). An entry that records an ID names a repository
+    /// Ladderback has opened, so it is refused with [`RepositoryError::Exists`];
+    /// any other whose row `offers` doesn't offer Create, with
+    /// [`RepositoryError::CreateNotOffered`]: the request may come from a page
+    /// shown before the log changed, or from no page at all. Both are refused
+    /// before anything runs. An alias the configuration doesn't hold is
+    /// refused with [`SavedEntryError::Unknown`], and a log that can't be
+    /// read with [`SavedEntryError::Log`], before anything runs.
+    ///
+    /// [`init`]: Self::init
     pub async fn init_saved(
         &self,
         op: OperationId,
         alias: &RepositoryAlias,
         offers: &CreateOffers,
     ) -> Result<SavedInit, SavedEntryError> {
-        let _ = (op, alias, offers);
-        todo!()
+        let loaded = self.config.load().await.map_err(SavedEntryError::Config)?;
+        let Some(entry) = loaded.repository(alias) else {
+            return Err(SavedEntryError::Unknown(alias.clone()));
+        };
+        let settings = entry.settings.clone();
+        let refused = if entry.id.is_some() {
+            Some(RepositoryError::Exists)
+        } else if offers
+            .offers(&loaded, alias)
+            .await
+            .map_err(SavedEntryError::Log)?
+        {
+            None
+        } else {
+            Some(RepositoryError::CreateNotOffered)
+        };
+        if let Some(refused) = refused {
+            return Ok(SavedInit {
+                settings,
+                created: Err(refused),
+            });
+        }
+        let created = async {
+            let access = access(&self.resolve, &settings).await?;
+            found_empty(&*self.clock, &*self.engine, op, &access).await?;
+            let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
+            record(&*self.config, alias, &settings, &id).await?;
+            Ok(id)
+        }
+        .await;
+        Ok(SavedInit { settings, created })
+    }
+}
+
+/// Whether the engine, looking at the location now, finds a folder there with
+/// no repository config file in it: the only place Create may make one. The
+/// row's offer comes from the log, which doesn't say where its jobs ran, so
+/// the entry may since name another location, or the drive be unplugged; an
+/// initialisation there would make the folder (decision 53). A repository
+/// that opens is refused as one already there, and any other failure to find
+/// one as not offered; a refusal of the look itself (a timeout, an engine
+/// that didn't start) is its own.
+#[allow(clippy::result_large_err)]
+async fn found_empty(
+    clock: &dyn Clock,
+    engine: &dyn Engine,
+    op: OperationId,
+    access: &RepositoryAccess,
+) -> Result<(), RepositoryError> {
+    match run(clock, engine, op, Job::Identify(access.clone())).await {
+        Err(RepositoryError::Failed(FailureReason::RepositoryNotFound)) => Ok(()),
+        Ok(_) => Err(RepositoryError::Exists),
+        Err(RepositoryError::Failed(_)) => Err(RepositoryError::CreateNotOffered),
+        Err(other) => Err(other),
     }
 }
 
@@ -418,6 +480,38 @@ async fn save(
     )
     .map_err(unwritable)?;
     config.save(&saved).await.map_err(RepositoryError::Config)
+}
+
+/// Records `id` as the ID of the repository saved under `alias`, the rest of
+/// the configuration as it is now, while that entry still names the location
+/// `settings` describe, the one the repository was created at. An entry
+/// removed or moved meanwhile, by a hand edit or the CLI's import, which
+/// don't take the daemon's lock, records nothing: the ID is not its
+/// repository's (decision 53).
+#[allow(clippy::result_large_err)]
+async fn record(
+    config: &dyn ConfigStore,
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    id: &RepositoryId,
+) -> Result<(), RepositoryError> {
+    let loaded = config.load().await.map_err(RepositoryError::Config)?;
+    let mut repositories = loaded.repositories().clone();
+    match repositories.get_mut(alias) {
+        Some(entry) if entry.settings.same_location(settings) => entry.id = Some(id.clone()),
+        _ => return Ok(()),
+    }
+    let recorded = AgentConfig::new(
+        loaded.agent().clone(),
+        loaded.hooks().clone(),
+        repositories,
+        loaded.plans().to_vec(),
+    )
+    .map_err(unwritable)?;
+    config
+        .save(&recorded)
+        .await
+        .map_err(RepositoryError::Config)
 }
 
 /// A configuration that can't be, as a configuration error: only reachable

@@ -114,8 +114,13 @@ impl OperationStore for InMemoryOperationStore {
     }
 
     async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError> {
-        let _ = plan;
-        todo!()
+        Ok(self.stored().values().any(|detail| {
+            detail.record.target.plan.as_ref() == Some(plan)
+                && matches!(
+                    detail.record.status,
+                    OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings
+                )
+        }))
     }
 
     async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {

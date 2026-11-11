@@ -442,8 +442,12 @@ impl OperationStore for SqliteStore {
     }
 
     async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError> {
-        let _ = (plan, sql::EVER_SUCCEEDED);
-        todo!()
+        let _call = self.call().await;
+        sqlx::query_scalar::<_, bool>(sql::EVER_SUCCEEDED)
+            .bind(plan.as_str())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(unavailable)
     }
 
     async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
