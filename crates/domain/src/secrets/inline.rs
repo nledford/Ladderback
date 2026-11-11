@@ -1,7 +1,7 @@
 //! Secrets written in the configuration itself, where a reference, a file, a
 //! command or the keyring would keep them out of it (technical design §10.2).
 
-use super::is_secret_option;
+use super::is_rclone_secret_option;
 use super::template::{Part, Template};
 
 /// Where in a repository's settings a secret is written as text.
@@ -98,7 +98,7 @@ pub fn url_password_written(text: &str) -> bool {
 /// Whether an rclone connection string keeps a credential as text: one of
 /// its settings (`rclone::s3,secret_access_key=…:bucket`,
 /// `rclone:remote,pass=…:path`) whose key names a credential
-/// ([`is_secret_option`]) and whose value, quotes aside, is not empty and
+/// ([`is_rclone_secret_option`]) and whose value, quotes aside, is not empty and
 /// holds no `${…}` reference. What follows the settings is the path, which
 /// holds none.
 fn rclone_credential_written(location: &str) -> bool {
@@ -122,7 +122,7 @@ fn rclone_credential_written(location: &str) -> bool {
                 Piece::Reference => None,
             })
             .collect();
-        name.is_some_and(|name| is_secret_option(&name))
+        name.is_some_and(|name| is_rclone_secret_option(&name))
             && !value.is_empty()
             && !value.contains(&Piece::Reference)
     })

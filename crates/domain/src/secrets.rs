@@ -16,6 +16,7 @@ pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
 };
+use options::is_rclone_secret_option;
 pub use options::is_secret_option;
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
@@ -314,13 +315,15 @@ pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
 /// Whether a repository string is an rclone connection string that carries a
 /// secret: `rclone::s3,provider=AWS,secret_access_key=…:bucket` holds the
 /// settings of its backend as `key=value` pieces between commas and colons,
-/// and a piece whose key names a credential ([`is_secret_option`]) is one.
-/// Any other string is not, whatever it holds.
+/// and a piece whose key names a credential in a connection string
+/// ([`is_rclone_secret_option`]) is one. Any other string is not, whatever it
+/// holds. Every piece is read, the path's too, so this finds every setting
+/// the redactor masks and more.
 pub fn rclone_secret(location: &str) -> bool {
     location.strip_prefix("rclone:").is_some_and(|rest| {
         rest.split([',', ':'])
             .filter_map(|piece| piece.split_once('='))
-            .any(|(key, _)| is_secret_option(key))
+            .any(|(key, _)| is_rclone_secret_option(key))
     })
 }
 
