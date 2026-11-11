@@ -792,7 +792,10 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         .unwrap_or(0);
     match result {
         EngineResult::Backup(backup) => Some(api::OperationResultDto::Backup {
-            files: backup.files_new + backup.files_changed + backup.files_unmodified,
+            files: backup
+                .files_new
+                .saturating_add(backup.files_changed)
+                .saturating_add(backup.files_unmodified),
             bytes: backup.data_added,
             duration_ms,
             snapshot: Some(backup.snapshot.as_str().to_owned()),
@@ -1999,6 +2002,27 @@ mod tests {
             panic!("a backup's result");
         };
         assert_eq!(bytes_processed, None);
+    }
+
+    #[test]
+    fn a_backups_file_count_stops_at_the_largest_number_it_can_hold() {
+        // The engine's counts are its own: three that overflow when added
+        // are shown as the most a count holds, never a panic of the read.
+        let EngineResult::Backup(mut huge) = backed_up(None) else {
+            panic!("a backup's result");
+        };
+        huge.files_new = u64::MAX;
+        let backup = logged(
+            OperationKind::Backup,
+            Some(EngineResult::Backup(huge)),
+            None,
+        );
+        let Some(api::OperationResultDto::Backup { files, .. }) =
+            summary(&backup).expect("a row").result
+        else {
+            panic!("a backup's result");
+        };
+        assert_eq!(files, u64::MAX);
     }
 
     fn demo_settings(password: SecretRef) -> RepositorySettings {
