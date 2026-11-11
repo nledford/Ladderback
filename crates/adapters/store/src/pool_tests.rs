@@ -1,10 +1,18 @@
 //! What only a test inside the crate can reach: the store's own connections.
 
-use app::ports::OperationStore;
-use domain::execution::{Operation, OperationKind, Target, Trigger, Warning, WarningKind};
-use domain::{OperationId, Timestamp, Uuid};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::task::{Context, Waker};
+use std::time::Duration;
 
-use super::SqliteStore;
+use app::ports::{OperationDetail, OperationRecord, OperationStore, Start};
+use domain::execution::{
+    Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
+};
+use domain::{OperationId, RepositoryId, Timestamp, Uuid};
+use tokio::time::Instant;
+
+use super::{MAX_CONNECTIONS, SqliteStore};
 
 async fn scratch_store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("a scratch directory");
@@ -87,4 +95,163 @@ async fn deleting_an_operation_deletes_its_warnings_and_only_its_own() {
     );
     let found = store.get(kept.id()).await.expect("reading works");
     assert_eq!(found.map(|detail| detail.warnings.len()), Some(2));
+}
+
+/// The demo repository, which one maintenance operation at a time holds.
+fn demo_repository() -> RepositoryId {
+    RepositoryId::parse(&"ab".repeat(32)).expect("a valid repository ID")
+}
+
+/// A queued manual operation of `kind` on the demo repository.
+fn queued_on_the_repository(n: u128, kind: OperationKind) -> Operation {
+    Operation::queue(
+        OperationId::from_uuid(Uuid::from_u128(n)),
+        kind,
+        Trigger::Manual,
+        Target {
+            plan: None,
+            repository: Some(demo_repository()),
+        },
+        Timestamp::constant(1_800_000_000, 0),
+    )
+}
+
+fn started(mut op: Operation) -> Operation {
+    op.start(Timestamp::constant(1_800_000_010, 0))
+        .expect("a queued operation starts");
+    op
+}
+
+/// More polls than any call of the store's needs, a moment apart.
+const MOST_POLLS: usize = 200;
+const BETWEEN_POLLS: Duration = Duration::from_millis(20);
+
+/// Holds the next commit on any of the store's connections, once armed,
+/// until the test lets it through. SQLite runs the commit hook inside the
+/// `COMMIT`, on the connection's own thread, so the call that sent the
+/// `COMMIT` can't hear its answer while the hook waits.
+struct CommitGate {
+    armed: Arc<AtomicBool>,
+    reached: mpsc::Receiver<()>,
+    open: mpsc::Sender<()>,
+}
+
+impl CommitGate {
+    /// Hooks every connection the store's pool can hand out: it takes all
+    /// of them at once, so the pool opens each, and gives them back.
+    async fn on_every_connection_of(store: &SqliteStore) -> Self {
+        let armed = Arc::new(AtomicBool::new(false));
+        let (reached_by_hook, reached) = mpsc::channel();
+        let (open, opened) = mpsc::channel();
+        let opened = Arc::new(Mutex::new(opened));
+        let mut taken = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            let mut conn = store.pool.acquire().await.expect("a connection");
+            let armed = Arc::clone(&armed);
+            let reached = reached_by_hook.clone();
+            let opened = Arc::clone(&opened);
+            conn.lock_handle()
+                .await
+                .expect("the connection's handle")
+                .set_commit_hook(move || {
+                    if armed.swap(false, Ordering::SeqCst) {
+                        // A test that gave up has dropped both ends: the
+                        // commit goes ahead.
+                        let _ = reached.send(());
+                        let _ = opened.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                    }
+                    true
+                });
+            taken.push(conn);
+        }
+        Self {
+            armed,
+            reached,
+            open,
+        }
+    }
+
+    fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether a commit waits at the gate.
+    fn reached(&self) -> bool {
+        self.reached.try_recv().is_ok()
+    }
+
+    fn let_the_commit_through(&self) {
+        self.open.send(()).expect("the commit waits at the gate");
+    }
+}
+
+/// A start cut after SQLite committed it, before the call heard so, as a
+/// run's caller cuts the call that would hold it up: the start is stored
+/// whole, and its operation holds the repository (I7), with no one to run it
+/// unless its caller never drops a start (§16, decision 42; #135).
+///
+/// The store's integration tests cut a start at its transaction's start and
+/// after each number of polls, but where those cuts land depends on the
+/// threads, and in WAL mode no lock another connection holds keeps a commit
+/// back. Only a hook on the store's own connection holds the commit, so this
+/// test is here, where it reaches them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_cut_after_its_commit_holds_the_repository() {
+    let (_dir, store) = scratch_store().await;
+    let queued = queued_on_the_repository(1, OperationKind::Prune);
+    assert_eq!(store.save(&queued, None).await, Ok(()));
+    let gate = CommitGate::on_every_connection_of(&store).await;
+
+    let running = started(queued);
+    let mut start = Box::pin(store.try_start(&running));
+    let mut cx = Context::from_waker(Waker::noop());
+    gate.arm();
+    let mut polls = 0;
+    while !gate.reached() {
+        assert!(
+            start.as_mut().poll(&mut cx).is_pending(),
+            "the start ended before its commit"
+        );
+        polls += 1;
+        assert!(
+            polls < MOST_POLLS,
+            "the start didn't commit within {MOST_POLLS} polls"
+        );
+        tokio::time::sleep(BETWEEN_POLLS).await;
+    }
+
+    // The commit runs, and the call, not polled since, can't have heard it:
+    // once another connection sees the start, the cut comes after the commit.
+    gate.let_the_commit_through();
+    let committed = Instant::now() + Duration::from_secs(3);
+    loop {
+        let seen = store.get(running.id()).await.expect("the log reads");
+        if seen.is_some_and(|detail| detail.record.status == OperationStatus::Running) {
+            break;
+        }
+        assert!(Instant::now() < committed, "the start never committed");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(start);
+
+    let rival = started(queued_on_the_repository(2, OperationKind::Check));
+    let answer = tokio::time::timeout(Duration::from_secs(3), store.try_start(&rival))
+        .await
+        .expect("the rival's start lands without waiting for the write lock");
+    assert_eq!(
+        answer,
+        Ok(Start::Refused {
+            running: running.id()
+        }),
+        "the cut start holds the repository"
+    );
+    let kept = store.get(running.id()).await.expect("the log reads");
+    assert_eq!(
+        kept,
+        Some(OperationDetail {
+            record: OperationRecord::of(&running, None),
+            warnings: Vec::new(),
+        }),
+        "the cut start is stored whole"
+    );
 }
