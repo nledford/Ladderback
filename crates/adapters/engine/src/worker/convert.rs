@@ -3,7 +3,7 @@
 
 use std::io;
 
-use api::ErrorCode;
+use api::{ErrorCode, WarningCode};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::Hostname;
@@ -215,13 +215,24 @@ pub(crate) fn prune_plan_result(repository: RepositoryId, stats: &PruneStats) ->
     }
 }
 
-/// What a finished check found. `CheckErrorLevel` isn't exported, so the
-/// level is read from its `Debug` form: `Warn` is a warning, anything else
-/// an error.
+/// The warning code of a check's finding at `level`. `CheckErrorLevel`
+/// isn't exported, so the level is read from its `Debug` form: `Warn` is a
+/// warning, anything else an error, so a level a newer rustic adds is told
+/// as an error rather than passed over.
+pub(crate) fn finding_code(level: &impl std::fmt::Debug) -> WarningCode {
+    if format!("{level:?}") == "Warn" {
+        WarningCode::CheckWarning
+    } else {
+        WarningCode::CheckError
+    }
+}
+
+/// What a finished check found, counted by level as [`finding_code`] tells
+/// them.
 pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> CheckResult {
     let (mut errors, mut warnings) = (0_u64, 0_u64);
     for (level, _) in &results.0 {
-        if format!("{level:?}") == "Warn" {
+        if finding_code(level) == WarningCode::CheckWarning {
             warnings = warnings.saturating_add(1);
         } else {
             errors = errors.saturating_add(1);
@@ -234,6 +245,24 @@ pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> 
     }
 }
 
+/// A check's findings, each with its warning code: the errors first, then the
+/// rest, each in the order rustic found them. An operation keeps only its
+/// first warnings (§4.1), and rustic finds the packs to tidy before the damage
+/// in the trees, so a check that found more than that would otherwise keep
+/// none of the errors it counts.
+pub(crate) fn errors_first<L: std::fmt::Debug, F>(
+    findings: &[(L, F)],
+) -> impl Iterator<Item = (WarningCode, &F)> {
+    let coded = findings
+        .iter()
+        .map(|(level, finding)| (finding_code(level), finding));
+    let errors = coded
+        .clone()
+        .filter(|(code, _)| *code == WarningCode::CheckError);
+    let rest = coded.filter(|(code, _)| *code != WarningCode::CheckError);
+    errors.chain(rest)
+}
+
 #[cfg(test)]
 mod tests {
     use domain::Timestamp;
@@ -241,6 +270,34 @@ mod tests {
     use rustic_core::repofile::{SnapshotId as RusticSnapshotId, SnapshotSummary, StringList};
 
     use super::*;
+
+    #[derive(Debug)]
+    enum Level {
+        Warn,
+        Error,
+    }
+
+    #[test]
+    fn a_checks_errors_come_before_what_it_found_to_tidy_each_in_the_order_found() {
+        let found = [
+            (Level::Warn, "a"),
+            (Level::Error, "b"),
+            (Level::Warn, "c"),
+            (Level::Error, "d"),
+        ];
+        let sent: Vec<_> = errors_first(&found)
+            .map(|(code, finding)| (code, *finding))
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                (WarningCode::CheckError, "b"),
+                (WarningCode::CheckError, "d"),
+                (WarningCode::CheckWarning, "a"),
+                (WarningCode::CheckWarning, "c"),
+            ]
+        );
+    }
 
     fn repository() -> RepositoryId {
         RepositoryId::parse(&"cd".repeat(32)).unwrap()

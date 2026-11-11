@@ -487,6 +487,7 @@ fn Repository(
     let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
     let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
     let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
+    let findings = Memo::new(move |_| page.panel.with(|panel| panel.findings.clone()));
     let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
     let area = Memo::new(move |_| {
         let reading = page.reading.get();
@@ -530,6 +531,28 @@ fn Repository(
                 ended
                     .get()
                     .map(|told| view! { <p>{page.words(&wording::told(told))}</p> })
+            }}
+            {move || {
+                let findings = findings.get();
+                let localizer = page.localizer.get_value();
+                let listed = (!findings.listed.is_empty())
+                    .then(|| {
+                        let items = findings
+                            .listed
+                            .into_iter()
+                            .map(|found| {
+                                let shown = localizer
+                                    .warning(found.code, &[], Some(&found.detail))
+                                    .into_text();
+                                let sentence = Sentence::new(&shown, Some(&found.detail));
+                                view! { <li>{sentence_view(sentence)}</li> }
+                            })
+                            .collect::<Vec<_>>();
+                        view! { <ul>{items}</ul> }
+                    });
+                let more = wording::check_more(findings.more)
+                    .map(|more| view! { <p>{page.words(&more)}</p> });
+                (listed, more)
             }}
         </section>
         {move || match area.get() {

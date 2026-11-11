@@ -358,12 +358,7 @@ impl Publish {
             E::Progress(progress) => self.progress_ui(progress),
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
-                code: match warning.kind {
-                    WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
-                    WarningKind::Hook => WarningCode::HookWarning,
-                    WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
-                    WarningKind::Other => WarningCode::Unknown,
-                },
+                code: warning_code(warning.kind),
                 args: warning
                     .item
                     .as_ref()
@@ -764,6 +759,8 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::SourceUnreadable => WarningCode::SourceUnreadable,
         WarningKind::Hook => WarningCode::HookWarning,
         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
+        WarningKind::CheckWarning => WarningCode::CheckWarning,
+        WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -4037,6 +4034,37 @@ mod tests {
             let shown = english().warning(notice.code, &notice.args, None);
             assert!(shown.problems().is_empty(), "{:?}", shown.problems());
             assert!(shown.text().contains(expected), "{expected}: {shown}");
+        }
+    }
+
+    /// What a check found reaches the page and the operation's detail under
+    /// the code of its level, not as a warning this version can't describe.
+    #[test]
+    fn a_checks_findings_reach_the_page_under_the_codes_of_their_levels() {
+        for (kind, code) in [
+            (WarningKind::CheckWarning, WarningCode::CheckWarning),
+            (WarningKind::CheckError, WarningCode::CheckError),
+        ] {
+            assert_eq!(warning_code(kind), code);
+            let mut publish = Publish {
+                operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+                repository: None,
+                progress: HashMap::new(),
+            };
+            let found = EngineEvent::Warning(domain::execution::Warning {
+                kind,
+                item: None,
+                during: "check".to_owned(),
+                detail: "pack 5ca1ab1e not referenced in index".to_owned(),
+            });
+            assert_eq!(
+                publish.ui(&found),
+                Some(UiEvent::OperationWarning {
+                    operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+                    code,
+                    args: Vec::new(),
+                })
+            );
         }
     }
 }

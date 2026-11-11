@@ -13,8 +13,8 @@ use rustic_core::{
 
 use super::cancel::CancellableSource;
 use super::convert::{
-    JobError, backup_options, backup_result, check_result, prune_options, prune_plan_result,
-    prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
+    JobError, backup_options, backup_result, check_result, errors_first, prune_options,
+    prune_plan_result, prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
 };
 use super::listing;
 use super::repository::{new_repository, open, repository_id};
@@ -292,12 +292,22 @@ pub(crate) fn prune_plan(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobE
     ))))
 }
 
+/// Checks the repository. A check that ran to its end succeeded, whatever it
+/// found: each finding goes to the daemon as a warning of its level in
+/// rustic's own words (`emit` masks the job's secrets in them and cuts a long
+/// one), the errors first, and the result counts them by level.
 pub(crate) fn check(ctx: &Context, job: &CheckJobSpec) -> Result<Done, JobError> {
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
     ctx.start(None)?;
-    // A check that ran to its end succeeded, whatever it found: the findings
-    // are the result.
     let results = repository.check(CheckOptions::default().read_data(job.read_data))?;
+    for (code, finding) in errors_first(&results.0) {
+        ctx.events.emit(&WorkerEvent::Warning {
+            item: None,
+            during: "check".to_owned(),
+            code,
+            detail: finding.to_string(),
+        })?;
+    }
     Ok(Done::Result(OpResult::Check(check_result(id, &results))))
 }

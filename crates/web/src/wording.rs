@@ -204,10 +204,33 @@ fn running(kind: Kind) -> Words {
 fn end(end: &End) -> Words {
     let id = match end.outcome {
         Outcome::Finished => msg::UI_MAINTENANCE_FINISHED,
+        Outcome::Found { errors, .. } if errors > 0 => {
+            return words(
+                msg::UI_MAINTENANCE_CHECK_ERRORS,
+                vec![("errors", number(errors))],
+            );
+        }
+        Outcome::Found { warnings, .. } => {
+            return words(
+                msg::UI_MAINTENANCE_CHECK_UNTIDY,
+                vec![("warnings", number(warnings))],
+            );
+        }
         Outcome::Cancelled => msg::UI_MAINTENANCE_CANCELLED,
         Outcome::Failed => msg::UI_MAINTENANCE_FAILED,
     };
     words(id, vec![("kind", text(end.kind.wire()))])
+}
+
+/// What follows the list of what a check found when it leaves `count` out;
+/// nothing when it leaves none out.
+pub(crate) fn check_more(count: u64) -> Option<Words> {
+    (count > 0).then(|| {
+        words(
+            msg::UI_MAINTENANCE_CHECK_MORE,
+            vec![("count", number(count))],
+        )
+    })
 }
 
 /// What the page tells a person of a run, or of the request that comes before
@@ -664,6 +687,50 @@ mod tests {
                 "{outcome:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_check_that_found_errors_says_how_many() {
+        let ended = End {
+            kind: Kind::Check,
+            outcome: Outcome::Found {
+                errors: 2,
+                warnings: 5,
+            },
+            politeness: Politeness::Assertive,
+        };
+        assert_eq!(
+            end(&ended),
+            said(msg::UI_MAINTENANCE_CHECK_ERRORS, &[("errors", number(2))])
+        );
+    }
+
+    #[test]
+    fn a_check_that_found_only_things_to_tidy_says_how_many() {
+        let ended = End {
+            kind: Kind::Check,
+            outcome: Outcome::Found {
+                errors: 0,
+                warnings: 3,
+            },
+            politeness: Politeness::Polite,
+        };
+        assert_eq!(
+            end(&ended),
+            said(msg::UI_MAINTENANCE_CHECK_UNTIDY, &[("warnings", number(3))])
+        );
+    }
+
+    #[test]
+    fn a_list_of_findings_that_leaves_some_out_says_how_many() {
+        assert_eq!(check_more(0), None);
+        assert_eq!(
+            check_more(4),
+            Some(said(
+                msg::UI_MAINTENANCE_CHECK_MORE,
+                &[("count", number(4))]
+            ))
+        );
     }
 
     #[test]

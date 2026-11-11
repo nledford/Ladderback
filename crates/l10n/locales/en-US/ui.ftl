@@ -383,13 +383,34 @@ ui-maintenance-running =
 # The button that asks the run that goes on to stop.
 ui-maintenance-cancel = Cancel the run
 
-# Said politely, and shown, when a run finished. $kind is the wire text of what ran: forget, prune, check or adopt.
+# Said politely, and shown, when a run finished. $kind is the wire text of what ran: forget, prune, check or adopt. A check that says this found nothing.
 ui-maintenance-finished =
     { $kind ->
         [forget] Forget finished.
         [prune] Prune finished.
-        [check] Check finished.
+        [check] Check finished. It found nothing wrong.
        *[adopt] Adoption finished.
+    }
+
+# Said politely, and shown, when a check ran to its end and found only things to tidy, which it lists below this line; with no error found, no snapshot's data depends on them. $warnings (count): how many it found.
+ui-maintenance-check-untidy =
+    { $warnings ->
+        [one] Check finished. It found one thing to tidy, listed below, and no errors.
+       *[other] Check finished. It found { $warnings } things to tidy, listed below, and no errors.
+    }
+
+# Said assertively, and shown, when a check ran to its end and found errors, which it lists below this line with what else it found. An error is damage in the repository, or a part of the repository, or of this agent's copy of it, that could not be read or did not match. $errors (count): how many errors it found.
+ui-maintenance-check-errors =
+    { $errors ->
+        [one] Check finished. It found an error, listed below.
+       *[other] Check finished. It found { $errors } errors, listed below.
+    }
+
+# What follows the list of what a check found when the list leaves some out, a sentence of its own; $count is how many it leaves out.
+ui-maintenance-check-more =
+    { $count ->
+        [one] The check found 1 more that is not listed.
+       *[other] The check found { $count } more that are not listed.
     }
 
 # Said politely, and shown, when a run was cancelled. $kind is the wire text of what ran: forget, prune, check or adopt.

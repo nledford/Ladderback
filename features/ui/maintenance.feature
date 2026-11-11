@@ -161,7 +161,24 @@ Feature: Maintenance of a repository on the Snapshots page
     When I press Tab until focus is on the button "Start check"
     And I press Enter
     Then the dialog "Check demo" is closed
-    And the polite region comes to contain "Check finished."
+    And the polite region comes to contain "Check finished. It found nothing wrong."
+
+  Scenario: A check that finds a pack no index lists names it and says what to do
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    And a backup killed before it saved its index left a pack in the repository that no index lists
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Check the repository"
+    And I press Enter
+    Then the dialog "Check demo" opens with focus inside it
+    When I press Tab until focus is on the button "Start check"
+    And I press Enter
+    Then the dialog "Check demo" is closed
+    And the polite region comes to contain "It found one thing to tidy"
+    And the main content names the pack no index lists in the engine's words, marked as English
+    And the main content shows a line containing "the next prune tidies"
 
   Scenario: A forget whose plan would keep nothing is refused when it is reviewed
     Given a demo plan "home" with a tiny scratch repository

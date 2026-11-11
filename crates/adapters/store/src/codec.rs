@@ -98,6 +98,8 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::SourceUnreadable => "source-unreadable",
         WarningKind::Hook => "hook-warning",
         WarningKind::MaintenancePartial => "maintenance-partial",
+        WarningKind::CheckWarning => "check-warning",
+        WarningKind::CheckError => "check-error",
         WarningKind::Other => "unknown",
     }
 }
@@ -109,6 +111,8 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
         "source-unreadable" => WarningKind::SourceUnreadable,
         "hook-warning" => WarningKind::Hook,
         "maintenance-partial" => WarningKind::MaintenancePartial,
+        "check-warning" => WarningKind::CheckWarning,
+        "check-error" => WarningKind::CheckError,
         _ => WarningKind::Other,
     }
 }
@@ -306,6 +310,19 @@ mod tests {
             WarningKind::Other,
         ] {
             let text = warning_code_text(kind);
+            assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
+        }
+    }
+
+    /// A check's findings are kept under the codes the wire names them by,
+    /// so a log written by this version reads back as what the check found.
+    #[test]
+    fn a_checks_findings_round_trip_under_their_wire_codes() {
+        for (kind, text) in [
+            (WarningKind::CheckWarning, "check-warning"),
+            (WarningKind::CheckError, "check-error"),
+        ] {
+            assert_eq!(warning_code_text(kind), text);
             assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
         }
     }

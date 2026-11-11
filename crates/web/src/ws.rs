@@ -223,12 +223,10 @@ pub(crate) async fn await_end(
     let url = format!("{base}{}", maintenance::operation_path(operation));
     let mut watch = Watch::new(kind);
     while alive() {
-        let status = read::<OperationDetailDto>(&url)
-            .await
-            .map(|detail| detail.operation.status);
-        match watch.after(status.as_deref()) {
+        let answer = read::<OperationDetailDto>(&url).await;
+        match watch.after(answer.as_ref()) {
             Next::Again(delay) => sleep(delay).await,
-            Next::Ended(end) => return Watched::Ended(end),
+            Next::Ended(end, findings) => return Watched::Ended(end, findings),
             Next::GaveUp => return Watched::GaveUp,
         }
     }
