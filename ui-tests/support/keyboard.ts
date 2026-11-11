@@ -4,12 +4,14 @@
 
 import assert from "node:assert/strict";
 
+import type { Locator, Page } from "playwright";
+
 // A name the page built from fetched text carries bidi isolation marks
 // around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
 // journey's "Cancel demo-home". The marks are optional wherever they may
 // stand, and the anchors keep the match whole.
 export const ISOLATION = "[\\u2066-\\u2069]*";
-export const namePattern = (name) =>
+export const namePattern = (name: string): RegExp =>
   new RegExp(
     `^${[...name]
       .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
@@ -17,9 +19,9 @@ export const namePattern = (name) =>
   );
 
 
-export function journey(page) {
+export function journey(page: Page) {
   return {
-    async press(key) {
+    async press(key: string): Promise<void> {
       await page.keyboard.press(key);
       if (key === "Tab" || key === "Shift+Tab") {
         await assertFocusVisibleAndUnobscured(page, key);
@@ -27,16 +29,18 @@ export function journey(page) {
     },
 
     /** Types `text` into the focused element, key by key. */
-    async type(text) {
+    async type(text: string): Promise<void> {
       await page.keyboard.type(text);
     },
 
-    byRole(role, options) {
-      return page.getByRole(role, options);
+    /** The elements with ARIA role `role`. A step's role comes from the
+     *  scenario's text, and Playwright refuses a role it doesn't know. */
+    byRole(role: string, options?: Parameters<Page["getByRole"]>[1]): Locator {
+      return page.getByRole(role as Parameters<Page["getByRole"]>[0], options);
     },
 
     /** Asserts that `locator` resolves to the focused element. */
-    async assertFocused(locator, description) {
+    async assertFocused(locator: Locator, description: string): Promise<void> {
       const focused = await locator.evaluate((el) => el === document.activeElement);
       assert.ok(focused, `expected focus on ${description}`);
     },
@@ -47,9 +51,11 @@ export function journey(page) {
 // least 2 px thick, differs from the unfocused look and has 3:1 contrast
 // against what it sits on (1.4.11). WCAG 2.4.11: nothing else covers it,
 // checked at its center.
-async function assertFocusVisibleAndUnobscured(page, key) {
+async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise<void> {
   const state = await page.evaluate(() => {
-    const el = document.activeElement;
+    // HTML, SVG and MathML elements, the ones that take focus, can all blur
+    // and focus again (the HTMLOrSVGElement mixin).
+    const el = document.activeElement as (Element & HTMLOrSVGElement) | null;
     if (!el || el === document.body || el === document.documentElement) {
       return { focused: false };
     }
@@ -65,8 +71,8 @@ async function assertFocusVisibleAndUnobscured(page, key) {
     };
     // Layers a ring can sit on, nearest first. A ring outside the element
     // sits on the parent's background; one drawn inward sits on the element.
-    const backgrounds = (from) => {
-      const layers = [];
+    const backgrounds = (from: Element | null) => {
+      const layers: string[] = [];
       for (let node = from; node; node = node.parentElement) {
         layers.push(getComputedStyle(node).backgroundColor);
       }
@@ -102,7 +108,7 @@ async function assertFocusVisibleAndUnobscured(page, key) {
   assert.ok(state.unobscured, `focused element is covered: ${state.name}`);
 
   const { focusedLook: now, unfocusedLook: before } = state;
-  const indicators = [];
+  const indicators: { kind: string; color: Color }[] = [];
   const outlineColor = parseColor(now.outlineColor);
   if (now.outlineStyle !== "none" && parseFloat(now.outlineWidth) >= 2 && outlineColor.a > 0) {
     indicators.push({ kind: "outline", color: outlineColor });
@@ -136,29 +142,38 @@ async function assertFocusVisibleAndUnobscured(page, key) {
 
 const COLOR = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/g;
 
-function toColor(match) {
-  const alpha = match[4] === undefined ? 1 : match[4].endsWith("%") ? parseFloat(match[4]) / 100 : parseFloat(match[4]);
-  return { r: +match[1], g: +match[2], b: +match[3], a: alpha };
+interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+interface Color extends Rgb {
+  a: number;
 }
 
-function parseColor(text) {
+function toColor(match: RegExpMatchArray): Color {
+  const alpha = match[4] === undefined ? 1 : match[4].endsWith("%") ? parseFloat(match[4]) / 100 : parseFloat(match[4]);
+  return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]), a: alpha };
+}
+
+function parseColor(text: string): Color {
   const match = [...text.matchAll(COLOR)][0];
   assert.ok(match, `cannot read the color "${text}"; the focus check understands rgb() and rgba()`);
   return toColor(match);
 }
 
 /** The first color in a box-shadow list that isn't fully transparent. */
-function firstVisibleColor(boxShadow) {
+function firstVisibleColor(boxShadow: string): Color | undefined {
   return [...boxShadow.matchAll(COLOR)].map(toColor).find((c) => c.a > 0);
 }
 
-function cssRgba({ r, g, b, a }) {
+function cssRgba({ r, g, b, a }: Color): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
 /** Blends CSS colors, nearest layer first, over an opaque white canvas. */
-function composite(layers) {
-  let out = { r: 255, g: 255, b: 255 };
+function composite(layers: string[]): Rgb {
+  let out: Rgb = { r: 255, g: 255, b: 255 };
   for (const text of [...layers].reverse()) {
     const c = parseColor(text);
     out = {
@@ -170,15 +185,15 @@ function composite(layers) {
   return out;
 }
 
-function luminance({ r, g, b }) {
+function luminance({ r, g, b }: Rgb): number {
   const [lr, lg, lb] = [r, g, b].map((v) => {
     const s = v / 255;
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  });
+  }) as [number, number, number];
   return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
 }
 
-function contrastRatio(a, b) {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }

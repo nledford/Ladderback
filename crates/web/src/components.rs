@@ -502,7 +502,7 @@ pub(crate) fn recover_focus(id: &str) {
 /// A status badge: a short labeled state on a colored pill, one of
 /// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose
 /// text token on its background token is pair-checked by
-/// `scripts/check-contrast.mjs`. The state and the label may be signals: the
+/// `scripts/check-contrast.ts`. The state and the label may be signals: the
 /// pill follows them in place, as a live row's does.
 #[component]
 pub fn StatusBadge(

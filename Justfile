@@ -49,12 +49,15 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
-# Lint: clippy on the host crates and on the web UI (wasm32), the journey lint,
-# then the check that every path AGENTS.md and CLAUDE.md name exists.
+# Lint: clippy on the host crates and on the web UI (wasm32), the type check of
+# the TypeScript tooling (tsconfig.json; its compiler is a ui-tests
+# dev-dependency), the journey lint, then the check that every path AGENTS.md
+# and CLAUDE.md name exists.
 [group('quality')]
-lint:
+lint: _ui-deps
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
+    ui-tests/node_modules/.bin/tsc --project tsconfig.json
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
 
@@ -145,8 +148,8 @@ test-release *args:
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is
 # Cargo's runner for wasm32 in this recipe only, so no other command changes.
 # The packages are the ones with wasm-bindgen tests: those with a
-# `wasm-bindgen-test` dependency, which `scripts/wasm-test-packages.mjs` finds
-# from `cargo metadata`, the same way `scripts/red-first.mjs` does, so a
+# `wasm-bindgen-test` dependency, which `scripts/wasm-test-packages.ts` finds
+# from `cargo metadata`, the same way `scripts/red-first.ts` does, so a
 # package's first wasm test is picked up by both with no edit here. Selecting
 # several unifies their features, and `--all-features` turns on those that only
 # matter on wasm32 (`l10n`'s `browser-intl`). Zero tests is a pass.
@@ -162,10 +165,7 @@ test-wasm *args:
         echo "error: wasm-bindgen-test-runner is ${have:-not installed}, Cargo.lock has wasm-bindgen $want; run: cargo binstall --no-confirm --version $want wasm-bindgen-cli" >&2
         exit 1
     fi
-    # The packages with a `wasm-bindgen-test` dependency, found as red-first
-    # finds them (one script for both), so a package's first wasm test needs
-    # no edit here.
-    names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.mjs)
+    names=$(cargo metadata --no-deps --format-version 1 | node scripts/wasm-test-packages.ts)
     if [[ -z $names ]]; then
         echo "no package depends on wasm-bindgen-test: no wasm tests to run"
         exit 0
@@ -189,7 +189,7 @@ test-wasm *args:
 [doc('Check the style.css token pairs for WCAG 2.2 AA contrast.')]
 [group('test')]
 test-contrast:
-    node scripts/check-contrast.mjs crates/web/style.css
+    node scripts/check-contrast.ts crates/web/style.css
 
 # The version of wasm-bindgen that Cargo.lock pins.
 [private]
@@ -220,17 +220,19 @@ serve: build
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
-# copy of it, when the local one is missing, and that package exits 0. The
+# copy of it, when the local one is missing, and that package exits 0. Its
+# config is TypeScript, which it doesn't look for by itself, so it is named. The
 # binary is built here, after `web-test`, so that it embeds the web UI with the
 # gallery, not the release one `build` makes. The scenarios run the binary
 # cargo just built, wherever its target directory is (`CARGO_TARGET_DIR`, as
-# each worktree sets its own), unless `LADDERBACK_BIN` names another.
+# each worktree sets its own; `ui-tests/support/world.ts` asks cargo), unless
+# `LADDERBACK_BIN` names another.
 [doc('Run the @ui scenarios in Chromium against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    target="$(cargo metadata --format-version 1 --no-deps | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s).target_directory))')" && cd ui-tests && LADDERBACK_BIN="${LADDERBACK_BIN:-$target/debug/ladderback}" node_modules/.bin/cucumber-js "$@"
+    cd ui-tests && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.
@@ -285,7 +287,7 @@ mutants-all *args:
 # Check that the branch's first commit is a failing test: commit (§13.1).
 [group('test')]
 red-first base='origin/main':
-    node scripts/red-first.mjs '{{ base }}'
+    node scripts/red-first.ts '{{ base }}'
 
 # Check a pull request title (or a commit subject) as CI's "Pull request
 # title" check does: a Conventional Commit with a type release-plz knows.

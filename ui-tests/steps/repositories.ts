@@ -12,8 +12,8 @@ import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 
-import { journey, namePattern } from "../support/keyboard.mjs";
-import { fixtureRepo, startServer } from "../support/world.mjs";
+import { journey, namePattern } from "../support/keyboard.ts";
+import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 
 // A test, a connection or a creation takes the engine a moment, in a debug
 // build more than one.
@@ -24,12 +24,12 @@ const ANSWER_SETTLES_MS = 6_000;
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A daemon of the scenario's own, its config naming no repository, and a
 // scratch copy of the `demo-repo` fixture beside it. The After hook of
-// live.mjs stops the daemon and removes the folder.
-Given("a daemon with a scratch demo repository and no repositories", async function () {
+// live.ts stops the daemon and removes the folder.
+Given("a daemon with a scratch demo repository and no repositories", async function (this: BrowserWorld) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-repos-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const configDir = path.join(scratch, "config");
@@ -44,9 +44,9 @@ Given("a daemon with a scratch demo repository and no repositories", async funct
 
 // {repo} is the scenario's scratch copy of the demo repository; {empty} and
 // {hot} are empty scratch folders, made when a step first names them.
-async function expand(world, text) {
+async function expand(world: BrowserWorld, text: string): Promise<string> {
   const places = /\{(repo|empty|hot)\}/g;
-  const named = [...text.matchAll(places)].map((match) => match[1]);
+  const named = [...text.matchAll(places)].map((match) => match[1] ?? "");
   if (named.length === 0) {
     return text;
   }
@@ -55,18 +55,20 @@ async function expand(world, text) {
   for (const name of named.filter((name) => name !== "repo")) {
     await mkdir(path.join(own.scratch, name), { recursive: true });
   }
-  return text.replace(places, (_, name) => path.join(own.scratch, name));
+  return text.replace(places, (_, name: string) => path.join(own.scratch, name));
 }
 
-When("I type {string}", async function (text) {
+When("I type {string}", async function (this: BrowserWorld, text: string) {
   await journey(this.page).type(await expand(this, text));
 });
 
 // Waits until the main content's text, as a reader gets it, matches `pattern`.
-function mainTextMatches(world, pattern) {
+function mainTextMatches(world: BrowserWorld, pattern: string) {
   return world.page.waitForFunction(
     (source) => {
-      const text = document.querySelector("main").innerText.replace(/[\u2066-\u2069]/g, "");
+      const main = document.querySelector("main");
+      if (main === null) throw new Error("the page has no main content");
+      const text = main.innerText.replace(/[\u2066-\u2069]/g, "");
       return new RegExp(source).test(text);
     },
     pattern,
@@ -74,17 +76,17 @@ function mainTextMatches(world, pattern) {
   );
 }
 
-Then("the page shows a message containing {string}", async function (needle) {
+Then("the page shows a message containing {string}", async function (this: BrowserWorld, needle: string) {
   await mainTextMatches(this, escape(needle));
 });
 
-Then("the page shows a repository ID", async function () {
+Then("the page shows a repository ID", async function (this: BrowserWorld) {
   await mainTextMatches(this, "Its ID is [0-9a-f]{64}\\b");
 });
 
 // I4: nothing a person typed into the password field comes back on the page,
 // announcements included.
-Then("the page doesn't show {string}", async function (text) {
+Then("the page doesn't show {string}", async function (this: BrowserWorld, text: string) {
   const shown = await this.page.evaluate(() => document.body.innerText);
   assert.ok(
     !shown.replace(ISOLATION_MARKS, "").includes(text),
@@ -93,7 +95,7 @@ Then("the page doesn't show {string}", async function (text) {
 });
 
 // The form's fields, whatever language the page is in.
-Then("the page has {int} text boxes", async function (count) {
+Then("the page has {int} text boxes", async function (this: BrowserWorld, count: number) {
   const boxes = journey(this.page).byRole("textbox");
   await boxes
     .first()
@@ -103,7 +105,7 @@ Then("the page has {int} text boxes", async function (count) {
 });
 
 // Focus moves once the answer is in, a moment after the element exists.
-async function focusComesTo(world, role, name, description) {
+async function focusComesTo(world: BrowserWorld, role: string, name: string, description: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   const deadline = Date.now() + ANSWER_PATIENCE_MS;
@@ -121,15 +123,15 @@ async function focusComesTo(world, role, name, description) {
 
 // A page that is left while a request is on its way gets the answer after it
 // is gone. The engine takes a moment, so the step waits long enough for it.
-Then("the page raises no script error while the daemon answers", async function () {
+Then("the page raises no script error while the daemon answers", async function (this: BrowserWorld) {
   await new Promise((done) => setTimeout(done, ANSWER_SETTLES_MS));
   assert.deepEqual(this.scriptErrors, [], "the page's scripts threw");
 });
 
-Then("focus is on the heading {string}", async function (name) {
+Then("focus is on the heading {string}", async function (this: BrowserWorld, name: string) {
   await focusComesTo(this, "heading", name, `the heading "${name}"`);
 });
 
-Then("focus is on the textbox {string}", async function (name) {
+Then("focus is on the textbox {string}", async function (this: BrowserWorld, name: string) {
   await focusComesTo(this, "textbox", name, `the textbox "${name}"`);
 });

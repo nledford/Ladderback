@@ -3,7 +3,7 @@
 # this check alone, not every job in ci.yml.
 #
 # Each run builds the base tree and then the test: commit's tree, which starts
-# from a copy of the base tree's build (scripts/red-first.mjs). The base tree's
+# from a copy of the base tree's build (scripts/red-first.ts). The base tree's
 # build is cached per merge base, so a later run of the same pull request
 # restores it and builds the workspace crates again but not the dependencies
 # (the trees are checked out afresh, so their sources are always newer). Pull
@@ -63,7 +63,7 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,trunk
-      # The wasm lane of the check (scripts/red-first.mjs) runs a test: commit's
+      # The wasm lane of the check (scripts/red-first.ts) runs a test: commit's
       # new wasm-bindgen tests under Node. The runner must be the version of
       # `wasm-bindgen` that Cargo.lock pins; the wasm32 target comes with the
       # toolchain (rust-toolchain.toml). The binaries are a download of a few

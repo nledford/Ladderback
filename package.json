@@ -1,0 +1,9 @@
+{
+  "name": "ladderback-tooling",
+  "private": true,
+  "type": "module",
+  "description": "Marks the tooling's .ts files (scripts/, the l10n expectations generator) as ES modules, for Node and for tsc (§16, decision 46). No dependencies: the compiler and the Node types are ui-tests' dev-dependencies",
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

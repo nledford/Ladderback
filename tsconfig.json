@@ -1,0 +1,27 @@
+// Type-checks the tooling (§16, decision 46): the scripts, the l10n
+// expectations generator and the UI tests. Node runs the .ts files as they
+// are, by stripping the types, so nothing is emitted and only erasable syntax
+// is allowed. `just lint` runs `tsc`; the compiler and the Node types are
+// ui-tests' dev-dependencies, so the types are found there.
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "module": "nodenext",
+    // ES2024 is what Node 22.18, the minimum, has in full; a newer built-in
+    // (`RegExp.escape`) fails here rather than on that Node.
+    "target": "es2024",
+    // The UI tests' `page.evaluate` callbacks run in the browser. The DOM
+    // types are visible to every file: one check, not one per tree.
+    "lib": ["es2024", "dom"],
+    "typeRoots": ["./ui-tests/node_modules/@types"],
+    "types": ["node"],
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true
+  },
+  "include": ["scripts/**/*.ts", "crates/l10n/tests/expectations/*.ts", "ui-tests/**/*.ts"],
+  "exclude": ["ui-tests/node_modules"]
+}

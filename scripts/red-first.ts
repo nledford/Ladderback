@@ -5,7 +5,7 @@
 // error doesn't count, and a test that already passes specifies nothing new.
 // The commit may carry `todo!()` stubs in src so the tests compile; the check
 // doesn't constrain which files it touches. Each red scenario prints its first
-// failing step and message under its `red` line (scripts/failure-reason.mjs).
+// failing step and message under its `red` line (scripts/failure-reason.ts).
 //
 // The two trees (the merge base and the test: commit) are checked out at fixed
 // paths, target/red-first/trees/base and trees/first, each with its own target
@@ -13,7 +13,7 @@
 // run let a target dir outlive its run: CI caches the base tree's, and the
 // first tree starts from a copy of it. Run one at a time per checkout.
 //
-// Usage: node scripts/red-first.mjs <base-ref>
+// Usage: node scripts/red-first.ts <base-ref>
 // Exit status: 0 when every new test fails at run time, 1 otherwise.
 // Needs git, cargo, and, for @ui scenarios, trunk and npm.
 //
@@ -26,9 +26,9 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
-import { failureReason } from "./failure-reason.mjs";
+import { failureReason } from "./failure-reason.ts";
 import path from "node:path";
-import { parseMetadata, wasmTestPackages } from "./wasm-test-packages.mjs";
+import { parseMetadata, wasmTestPackages } from "./wasm-test-packages.ts";
 
 const WASM_TARGET = "wasm32-unknown-unknown";
 const WASM_RUNNER = "wasm-bindgen-test-runner";
@@ -43,23 +43,60 @@ const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const redFirst = path.join(repo, "target", "red-first");
 // The worktrees' parent directory, canonical; set once the arguments check out.
-let treesRoot;
+let treesRoot: string;
 // One target dir per worktree: with a shared one, Cargo kept the base tree's
 // test binaries as fresh for the test: commit, so its new tests went unseen.
-function targetDir(tree) {
+function targetDir(tree: string): string {
   return path.join(redFirst, tree);
 }
 
-function git(...args) {
+function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+}
+
+type Env = Record<string, string>;
+
+/** A test a test binary lists, and how to run it alone. */
+interface Test {
+  exe: string;
+  name: string;
+  cwd: string;
+  env: Env;
+}
+
+/** A tree's tests keyed by source file and name, or why they didn't build. */
+type Tests = { ok: true; tests: Map<string, Test> } | { ok: false; output: string };
+
+/** The part of a `cargo --message-format=json` line this reads. */
+interface CargoMessage {
+  reason: string;
+  profile?: { test: boolean };
+  executable?: string | null;
+  target: { src_path: string };
+  manifest_path: string;
+  package_id: string;
+}
+
+/** A test binary built for a test target, from one line of cargo's JSON output. */
+function testArtifact(line: string): (CargoMessage & { executable: string }) | null {
+  if (!line.startsWith("{")) return null;
+  // Cargo's own JSON, trusted to have the shape `CargoMessage` reads.
+  const message = JSON.parse(line) as CargoMessage;
+  if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable) return null;
+  return { ...message, executable: message.executable };
 }
 
 /**
  * Runs a command in one of the worktrees, with that worktree's target dir. A
  * timeout or a command that can't start is an error, never a red result.
  */
-function run(command, args, cwd, { env = {}, timeout = BUILD_TIMEOUT_MS } = {}) {
-  const tree = path.relative(treesRoot, cwd).split(path.sep)[0];
+function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  { env = {}, timeout = BUILD_TIMEOUT_MS }: { env?: Env; timeout?: number } = {},
+): { status: number | null; output: string } {
+  const tree = path.relative(treesRoot, cwd).split(path.sep)[0] ?? "";
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -68,7 +105,7 @@ function run(command, args, cwd, { env = {}, timeout = BUILD_TIMEOUT_MS } = {}) 
     timeout,
     killSignal: "SIGKILL",
   });
-  if (result.error?.code === "ETIMEDOUT") {
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
     throw new Error(`${command} ${args.join(" ")} timed out after ${timeout / 60000} minutes`);
   }
   if (result.error) {
@@ -78,13 +115,13 @@ function run(command, args, cwd, { env = {}, timeout = BUILD_TIMEOUT_MS } = {}) 
 }
 
 /** The package name in a cargo `package_id`, in either of cargo's id formats. */
-function packageName(id) {
-  const [source, fragment] = id.split("#");
-  if (fragment === undefined) return id.split(" ")[0];
-  return fragment.includes("@") ? fragment.split("@")[0] : source.split("/").at(-1);
+function packageName(id: string): string {
+  const [source = "", fragment] = id.split("#");
+  if (fragment === undefined) return id.split(" ")[0] ?? id;
+  return (fragment.includes("@") ? fragment.split("@")[0] : source.split("/").at(-1)) ?? id;
 }
 
-function fail(message) {
+function fail(message: string): void {
   console.error(`red-first: ${message}`);
   process.exitCode = 1;
 }
@@ -96,7 +133,7 @@ function fail(message) {
  * the registration, the checkout, or both. The path is fixed, so a leftover
  * would make the next `git worktree add` fail.
  */
-function removeTree(dir) {
+function removeTree(dir: string): void {
   const registered = git("worktree", "list", "--porcelain").split("\n").includes(`worktree ${dir}`);
   if (registered) git("worktree", "remove", "--force", dir);
   rmSync(dir, { recursive: true, force: true });
@@ -115,7 +152,7 @@ function removeTree(dir) {
  * very failure that separate target dirs exist to prevent. `cp -a` keeps the
  * outputs' own times, and the checkout that follows is newer than all of them.
  */
-function seedFirstTarget() {
+function seedFirstTarget(): void {
   const from = targetDir("base");
   const to = targetDir("first");
   if (existsSync(to) || !existsSync(from)) return;
@@ -131,7 +168,7 @@ function seedFirstTarget() {
 // --- Rust tests ------------------------------------------------------------
 
 /** Builds every test target and lists its tests, keyed by source file and name. */
-function rustTests(dir) {
+function rustTests(dir: string): Tests {
   if (!existsSync(path.join(dir, "Cargo.toml"))) {
     return { ok: true, tests: new Map() };
   }
@@ -141,13 +178,10 @@ function rustTests(dir) {
   if (build.status !== 0) {
     return { ok: false, output: build.output };
   }
-  const tests = new Map();
+  const tests = new Map<string, Test>();
   for (const line of build.output.split("\n")) {
-    if (!line.startsWith("{")) continue;
-    const message = JSON.parse(line);
-    if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable) {
-      continue;
-    }
+    const message = testArtifact(line);
+    if (message === null) continue;
     const source = path.relative(dir, message.target.src_path);
     // Run test binaries the way `cargo test` does: from the package's
     // directory, with the env vars it sets, so a test that reads fixtures or
@@ -158,9 +192,9 @@ function rustTests(dir) {
     // found from the feature files instead.
     const listed = run(message.executable, ["--list", "--format", "terse"], cwd, { env, timeout: TEST_TIMEOUT_MS });
     for (const entry of listed.output.split("\n")) {
-      const match = entry.match(/^(.+): test$/);
-      if (match) {
-        tests.set(`${source}::${match[1]}`, { exe: message.executable, name: match[1], cwd, env });
+      const name = entry.match(/^(.+): test$/)?.[1];
+      if (name !== undefined) {
+        tests.set(`${source}::${name}`, { exe: message.executable, name, cwd, env });
       }
     }
   }
@@ -174,7 +208,7 @@ function rustTests(dir) {
  * builds, so it runs only for a commit that shows one in its added lines. A
  * test that this misses shows up in the host or scenario count, or not at all.
  */
-function addsWasmTests(mergeBase, first) {
+function addsWasmTests(mergeBase: string, first: string): boolean {
   const diff = spawnSync("git", ["diff", "-U0", "--no-color", mergeBase, first, "--", "*.rs"], {
     cwd: repo,
     encoding: "utf8",
@@ -186,12 +220,12 @@ function addsWasmTests(mergeBase, first) {
 
 /**
  * Builds the wasm-bindgen test binaries of the packages that depend on
- * `wasm-bindgen-test` (`scripts/wasm-test-packages.mjs`, which `just test-wasm`
+ * `wasm-bindgen-test` (`scripts/wasm-test-packages.ts`, which `just test-wasm`
  * asks too) and lists their tests, as `rustTests` does. A package
  * gets everything the Justfile's `test-wasm` gives it: all its features, and
  * the runner as Cargo's for the target (set per call, no `.cargo/config.toml`).
  */
-function wasmTests(dir) {
+function wasmTests(dir: string): Tests {
   if (!existsSync(path.join(dir, "Cargo.toml"))) {
     return { ok: true, tests: new Map() };
   }
@@ -213,13 +247,10 @@ function wasmTests(dir) {
   if (build.status !== 0) {
     return { ok: false, output: build.output };
   }
-  const tests = new Map();
+  const tests = new Map<string, Test>();
   for (const line of build.output.split("\n")) {
-    if (!line.startsWith("{")) continue;
-    const message = JSON.parse(line);
-    if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable) {
-      continue;
-    }
+    const message = testArtifact(line);
+    if (message === null) continue;
     const source = path.relative(dir, message.target.src_path);
     const cwd = path.dirname(message.manifest_path);
     const env = { CARGO_MANIFEST_DIR: cwd, CARGO_PKG_NAME: packageName(message.package_id) };
@@ -233,9 +264,9 @@ function wasmTests(dir) {
       throw new Error(`${WASM_RUNNER} --list ${message.executable} failed:\n${listed.output}`);
     }
     for (const entry of listed.output.split("\n")) {
-      const match = entry.match(/^(.+): test$/);
-      if (match) {
-        tests.set(`${source}::${match[1]}`, { exe: message.executable, name: match[1], cwd, env });
+      const name = entry.match(/^(.+): test$/)?.[1];
+      if (name !== undefined) {
+        tests.set(`${source}::${name}`, { exe: message.executable, name, cwd, env });
       }
     }
   }
@@ -244,21 +275,28 @@ function wasmTests(dir) {
 
 // --- Scenarios -------------------------------------------------------------
 
-function featureFiles(dir) {
+function featureFiles(dir: string): string[] {
   const root = path.join(dir, "features");
   if (!existsSync(root)) return [];
-  return readdirSync(root, { recursive: true })
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
     .filter((entry) => entry.endsWith(".feature"))
     .map((entry) => path.join(root, entry));
 }
 
+type Runner = "ui" | "e2e" | "acceptance";
+
+interface Scenario {
+  name: string;
+  runner: Runner;
+}
+
 /** Scenarios keyed by file and name, with the runner their tags select. */
-function scenarios(dir) {
-  const found = new Map();
+function scenarios(dir: string): Map<string, Scenario> {
+  const found = new Map<string, Scenario>();
   for (const file of featureFiles(dir)) {
-    let pending = [];
-    let featureTags = [];
-    let ruleTags = [];
+    let pending: string[] = [];
+    let featureTags: string[] = [];
+    let ruleTags: string[] = [];
     for (const raw of readFileSync(file, "utf8").split("\n")) {
       const line = raw.trim();
       if (line.startsWith("@")) {
@@ -270,11 +308,10 @@ function scenarios(dir) {
         ruleTags = pending;
         pending = [];
       } else {
-        const match = line.match(/^(Scenario Outline|Scenario Template|Scenario|Example):\s*(.+)$/);
-        if (match) {
+        const name = line.match(/^(Scenario Outline|Scenario Template|Scenario|Example):\s*(.+)$/)?.[2];
+        if (name !== undefined) {
           const tags = [...featureTags, ...ruleTags, ...pending];
           const runner = tags.includes("@ui") ? "ui" : tags.includes("@e2e") ? "e2e" : "acceptance";
-          const name = match[2];
           found.set(`${path.relative(dir, file)}::${name}`, { name, runner });
           pending = [];
         }
@@ -285,14 +322,14 @@ function scenarios(dir) {
 }
 
 /** An anchored regex for a scenario name; outline placeholders match anything. */
-function nameRegex(name) {
+function nameRegex(name: string): string {
   return `^${name
     .split(/<[^>]+>/)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join(".*")}$`;
 }
 
-function scenarioFails(dir, scenario, uiReady) {
+function scenarioFails(dir: string, scenario: Scenario, uiReady: () => void): { failed: boolean; output: string } {
   const regex = nameRegex(scenario.name);
   let result;
   if (scenario.runner === "acceptance") {
@@ -303,8 +340,12 @@ function scenarioFails(dir, scenario, uiReady) {
     result = run("cargo", ["test", "--test", "e2e", "--", "--name", regex], dir, { timeout: TEST_TIMEOUT_MS });
   } else {
     uiReady();
-    // The local binary by path, never `npx`: see the Justfile's test-ui.
-    result = run("node_modules/.bin/cucumber-js", ["--name", regex], path.join(dir, "ui-tests"), {
+    // The local binary by path, never `npx`: see the Justfile's test-ui. A
+    // tree whose cucumber config is TypeScript names it: cucumber-js finds
+    // only a .js, .cjs, .mjs, .json or YAML config by itself.
+    const ui = path.join(dir, "ui-tests");
+    const config = existsSync(path.join(ui, "cucumber.ts")) ? ["--config", "cucumber.ts"] : [];
+    result = run("node_modules/.bin/cucumber-js", [...config, "--name", regex], ui, {
       env: { LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback") },
       timeout: TEST_TIMEOUT_MS,
     });
@@ -314,7 +355,7 @@ function scenarioFails(dir, scenario, uiReady) {
   const summaries = [...result.output.matchAll(/(\d+) scenarios? \(([^)]*)\)/g)];
   const summary = summaries.at(-1);
   const total = summary ? Number(summary[1]) : 0;
-  const failedCount = Number(summary?.[2].match(/(\d+) failed/)?.[1] ?? 0);
+  const failedCount = Number(summary?.[2]?.match(/(\d+) failed/)?.[1] ?? 0);
   return { failed: result.status !== 0 && total > 0 && failedCount === total, output: result.output };
 }
 
@@ -322,7 +363,7 @@ function scenarioFails(dir, scenario, uiReady) {
 
 const base = process.argv[2];
 if (!base) {
-  console.error("usage: node scripts/red-first.mjs <base-ref>");
+  console.error("usage: node scripts/red-first.ts <base-ref>");
   process.exit(2);
 }
 const first = git("rev-list", "--reverse", "--first-parent", `${base}..HEAD`).split("\n")[0];
@@ -353,7 +394,7 @@ try {
   // that other pull requests don't pay for two more builds. It goes before the
   // seed, which copies the base tree's target dir.
   const wasm = addsWasmTests(mergeBase, first);
-  const beforeWasm = wasm ? wasmTests(trees.base) : { ok: true, tests: new Map() };
+  const beforeWasm: Tests = wasm ? wasmTests(trees.base) : { ok: true, tests: new Map() };
   if (!beforeWasm.ok) {
     throw new Error(`the base doesn't build for ${WASM_TARGET}:\n${beforeWasm.output}`);
   }
@@ -363,7 +404,7 @@ try {
   if (!after.ok) {
     throw new Error(`the test: commit doesn't compile; a compile error doesn't count as red:\n${after.output}`);
   }
-  const afterWasm = wasm ? wasmTests(trees.first) : { ok: true, tests: new Map() };
+  const afterWasm: Tests = wasm ? wasmTests(trees.first) : { ok: true, tests: new Map() };
   if (!afterWasm.ok) {
     throw new Error(
       `the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`,
@@ -402,13 +443,14 @@ try {
     // leaves out). A tree without one gets the plain release build.
     const webTest =
       existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
-    for (const [command, args, cwd] of [
+    const steps: [string, string[], string][] = [
       webTest
         ? ["just", ["web-test"], trees.first]
         : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
       ["cargo", ["build"], trees.first],
       ["npm", ["ci"], path.join(trees.first, "ui-tests")],
-    ]) {
+    ];
+    for (const [command, args, cwd] of steps) {
       const step = run(command, args, cwd);
       if (step.status !== 0) throw new Error(`${command} ${args.join(" ")} failed:\n${step.output}`);
     }
@@ -427,7 +469,7 @@ try {
     }
   }
 } catch (error) {
-  fail(error.message);
+  fail(error instanceof Error ? error.message : String(error));
 } finally {
   for (const dir of Object.values(trees)) removeTree(dir);
 }

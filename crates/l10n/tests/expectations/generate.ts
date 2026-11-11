@@ -2,8 +2,8 @@
 // Writes formatting.json, the expectations every host that formats numbers and
 // instants has to meet (see mod.rs). The strings are the ones Node's own `Intl`
 // writes, an oracle independent of ICU4X, apart from the one place CLDR and V8
-// differ (below). Run it from anywhere: `node generate.mjs`. Node 20 or later;
-// the table was made with Node 26.13 (V8 14.6, ICU 78.3, CLDR 48).
+// differ (below). Run it from anywhere: `node generate.ts`. Node 22.18 or later
+// (it strips the types); the table was made with Node 26.13 (V8 14.6, ICU 78.3, CLDR 48).
 //
 // What it mirrors of the daemon:
 //   - A number literal's decimals are its minimum fraction digits, and a
@@ -36,7 +36,17 @@ const LOCALES = ["en-US", "de", "ja", "ar", "bn", "hi", "fa", "th"];
 //   - th: the short date, whose year V8 writes with two digits and ICU4X with four.
 //   - hi: the long date, which ICU4X writes with a comma after the month.
 const READ_AS_UTC = [undefined, "UTC", "Europe/Atlantis"];
-const UNSETTLED = [
+
+// The options a case passes, as the catalog's NUMBER and DATETIME take them.
+interface NumberOptions {
+  minimumFractionDigits?: number;
+  maximumFractionDigits?: number;
+  minimumIntegerDigits?: number;
+  useGrouping?: "false";
+}
+type InstantOptions = Pick<Intl.DateTimeFormatOptions, "dateStyle" | "timeStyle"> & { timeZoneName?: "short" };
+
+const UNSETTLED: ((locale: string, options: InstantOptions, zone: string | undefined) => boolean)[] = [
   (locale, options) => locale === "ar" && options.timeZoneName === "short",
   (locale, options, zone) =>
     locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
@@ -66,11 +76,11 @@ const METLAKATLA = "America/Metlakatla"; // Its short name changed with its meta
 
 // --- The oracle -------------------------------------------------------------
 
-function number(locale, literal, options = {}) {
+function number(locale: string, literal: string, options: NumberOptions = {}): string {
   const decimals = (literal.split(".")[1] ?? "").length;
   const maximum = options.maximumFractionDigits ?? 100;
   const minimum = Math.min(options.minimumFractionDigits ?? decimals, maximum);
-  const format = {
+  const format: Intl.NumberFormatOptions = {
     minimumFractionDigits: minimum,
     maximumFractionDigits: maximum,
     roundingMode: "halfExpand",
@@ -80,9 +90,9 @@ function number(locale, literal, options = {}) {
   return new Intl.NumberFormat(locale, format).format(Number(literal));
 }
 
-function instant(locale, utcMs, zone, options = {}) {
+function instant(locale: string, utcMs: number, zone: string | undefined, options: InstantOptions = {}): string {
   let timeZone = zone ?? UTC;
-  const make = (extra) => {
+  const make = (extra: Intl.DateTimeFormatOptions) => {
     try {
       return new Intl.DateTimeFormat(locale, { timeZone, ...extra });
     } catch {
@@ -92,9 +102,11 @@ function instant(locale, utcMs, zone, options = {}) {
   };
   if (options.timeZoneName === "short") {
     const parts = make({ timeZoneName: "short" }).formatToParts(utcMs);
-    return parts.find((part) => part.type === "timeZoneName").value;
+    const name = parts.find((part) => part.type === "timeZoneName");
+    if (name === undefined) throw new Error(`${locale} wrote no zone name for ${timeZone}`);
+    return name.value;
   }
-  const styles =
+  const styles: Intl.DateTimeFormatOptions =
     options.dateStyle || options.timeStyle
       ? { dateStyle: options.dateStyle, timeStyle: options.timeStyle }
       : { dateStyle: "medium", timeStyle: "short" };
@@ -108,26 +120,26 @@ const UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
 
 // What `size_parts` makes of a byte count: the largest unit that keeps it at 1
 // or more, in tenths, and up a unit when the tenths reach 1024.
-function sizeParts(bytes) {
-  const tenth = (value) => Math.round(value * 10) / 10;
+function sizeParts(bytes: string): [number, string] {
+  const tenth = (value: number) => Math.round(value * 10) / 10;
   let value = Number(bytes);
   let unit = 0;
   while (unit + 1 < UNITS.length && tenth(value) >= 1024) {
     value /= 1024;
     unit += 1;
   }
-  return [unit === 0 ? value : tenth(value), UNITS[unit]];
+  return [unit === 0 ? value : tenth(value), UNITS[unit] ?? ""];
 }
 
-function size(locale, bytes) {
+function size(locale: string, bytes: string): string {
   const [value, unit] = sizeParts(bytes);
   return `${number(locale, String(value), { minimumFractionDigits: 0, maximumFractionDigits: 1 })} ${unit}`;
 }
 
 // What `duration_parts` makes of a millisecond count: its two largest units.
-function duration(locale, milliseconds) {
+function duration(locale: string, milliseconds: string): string {
   const ms = BigInt(milliseconds);
-  const n = (value) => number(locale, String(value), { minimumFractionDigits: 0 });
+  const n = (value: bigint) => number(locale, String(value), { minimumFractionDigits: 0 });
   const [second, minute, hour, day] = [1000n, 60_000n, 3_600_000n, 86_400_000n];
   if (ms < second) return `${n(ms)} ms`;
   if (ms < minute) return `${n(ms / second)} s`;
@@ -137,13 +149,13 @@ function duration(locale, milliseconds) {
 }
 
 // A count above 2^53 reaches a message as its digits, not as a number.
-function count(locale, digits) {
+function count(locale: string, digits: string): string {
   return BigInt(digits) > 2n ** 53n ? digits : number(locale, digits, { minimumFractionDigits: 0 });
 }
 
 // --- The cases --------------------------------------------------------------
 
-const numbers = [
+const numbers: [string, NumberOptions?][] = [
   ["0"],
   ["7"],
   ["999"],
@@ -193,7 +205,7 @@ const sizes = ["0", "1023", "1536", "1048575", "5905580032", "184467440737095516
 
 const durations = ["500", "61000", "3900000", "90000000", "100000000000", "18446744073709551615"];
 
-const instants = [
+const instants: [number, string | undefined, InstantOptions][] = [
   // Every style of the vocabulary, in Berlin in winter.
   [WINTER, BERLIN, {}],
   [WINTER, BERLIN, { dateStyle: "short" }],
@@ -250,7 +262,7 @@ const instants = [
 
 // --- The table --------------------------------------------------------------
 
-const cases = [];
+const cases: Record<string, unknown>[] = [];
 for (const locale of LOCALES) {
   for (const [literal, options] of numbers) {
     cases.push({ locale, number: literal, ...(options && { options }), expect: number(locale, literal, options) });
@@ -269,13 +281,13 @@ for (const locale of LOCALES) {
 }
 
 // Spaces that look alike are written as escapes, so a reviewer can tell them apart.
-const escape = (json) =>
-  json.replace(/[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g, (c) => `\\u${c.codePointAt(0).toString(16).padStart(4, "0")}`);
+const escape = (json: string) =>
+  json.replace(/[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g, (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`);
 
 const about =
   "What every host that formats numbers and instants writes, for tests/expectations/mod.rs to run through the " +
   "public Localizer: the ICU4X host of the daemon (tests/lanes/icu.rs) and, later, the browser's Intl. " +
-  "Made by generate.mjs from Node's Intl as an oracle. Differences from V8: en-US writes U+202F before AM and PM, " +
+  "Made by generate.ts from Node's Intl as an oracle. Differences from V8: en-US writes U+202F before AM and PM, " +
   "as CLDR does, where V8 writes U+0020, so a host running on V8 folds U+202F and U+00A0 to U+0020 before comparing. " +
   "A number literal's decimals are its minimum fraction digits, and the maximum wins over a larger minimum; " +
   "a count above 2^53 is its digits. A size and a duration are the en-US catalog's helpers around numbers " +

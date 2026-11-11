@@ -7,27 +7,29 @@ import assert from "node:assert/strict";
 import AxeBuilder from "@axe-core/playwright";
 import { Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
+import type { Locator, Page } from "playwright";
 
-import { journey } from "../support/keyboard.mjs";
+import { journey } from "../support/keyboard.ts";
+import type { BrowserWorld } from "../support/world.ts";
 
-// WCAG 2.2 A and AA, as in steps/start_page.mjs.
+// WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 /** The gallery section of a component, found by its heading, not by a test id. */
-function demoSection(page, component) {
+function demoSection(page: Page, component: string): Locator {
   return page.locator("section", {
     has: page.getByRole("heading", { level: 2, name: component, exact: true }),
   });
 }
 
-Then("focus is on the button {string}", async function (name) {
+Then("focus is on the button {string}", async function (this: BrowserWorld, name: string) {
   await journey(this.page).assertFocused(
     journey(this.page).byRole("button", { name }),
     `the button ${JSON.stringify(name)}`,
   );
 });
 
-Then("the table {string} is sorted by repository ascending", async function (name) {
+Then("the table {string} is sorted by repository ascending", async function (this: BrowserWorld, name: string) {
   const cells = await this.page
     .getByRole("table", { name })
     .getByRole("cell")
@@ -43,7 +45,7 @@ Then("the table {string} is sorted by repository ascending", async function (nam
 // its first, not just anywhere inside.
 Then(
   "focus is on the first control of the dialog {string}",
-  async function (name) {
+  async function (this: BrowserWorld, name: string) {
     const first = this.page
       .getByRole("dialog", { name })
       .locator(
@@ -56,7 +58,7 @@ Then(
     );
   },
 );
-Then("the field {string} shows the error {string}", async function (name, error) {
+Then("the field {string} shows the error {string}", async function (this: BrowserWorld, name: string, error: string) {
   await expect(this.page.getByText(error)).toBeVisible();
   const input = this.page.getByRole("textbox", { name });
   const describedBy = await input.getAttribute("aria-describedby");
@@ -74,7 +76,7 @@ Then("the field {string} shows the error {string}", async function (name, error)
   );
 });
 
-Then("the field {string} is described by {string}", async function (name, description) {
+Then("the field {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
   const describedBy = await this.page
     .getByRole("textbox", { name })
     .getAttribute("aria-describedby");
@@ -92,21 +94,21 @@ Then("the field {string} is described by {string}", async function (name, descri
   );
 });
 
-Then("the field {string} is marked invalid", async function (name) {
+Then("the field {string} is marked invalid", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("textbox", { name })).toHaveAttribute(
     "aria-invalid",
     "true",
   );
 });
 
-Then("the field {string} is not marked invalid", async function (name) {
+Then("the field {string} is not marked invalid", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("textbox", { name })).not.toHaveAttribute(
     "aria-invalid",
     "true",
   );
 });
 
-Then("the field {string} shows no error", async function (name) {
+Then("the field {string} shows no error", async function (this: BrowserWorld, name: string) {
   const describedBy = await this.page
     .getByRole("textbox", { name })
     .getAttribute("aria-describedby");
@@ -122,7 +124,7 @@ Then("the field {string} shows no error", async function (name) {
   );
 });
 
-Then("the field {string} is described only by {string}", async function (name, description) {
+Then("the field {string} is described only by {string}", async function (this: BrowserWorld, name: string, description: string) {
   const describedBy = await this.page
     .getByRole("textbox", { name })
     .getAttribute("aria-describedby");
@@ -139,40 +141,42 @@ Then("the field {string} is described only by {string}", async function (name, d
     `the field ${JSON.stringify(name)} is described by ${JSON.stringify(text)}, not only ${JSON.stringify(description)}`,
   );
 });
-Then("the progress bar {string} shows {int} percent", async function (name, percent) {
+Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
   await expect(this.page.getByRole("progressbar", { name })).toHaveAttribute(
     "aria-valuenow",
     String(percent),
   );
 });
 
-Then("a toast reads {string}", async function (text) {
+Then("a toast reads {string}", async function (this: BrowserWorld, text: string) {
   await expect(this.page.locator("main").getByText(text)).toBeVisible();
 });
 
 // A toast is transient; ten seconds is generous for however long it shows.
 // Scoped to main: the polite live region carries the same text.
-When("the toast {string} is gone", async function (text) {
+When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
   await expect(this.page.locator("main").getByText(text)).toBeHidden({
     timeout: 10_000,
   });
 });
 
-Then("the {string} demo has no accessibility violations", async function (component) {
+Then("the {string} demo has no accessibility violations", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
   await section.waitFor({ timeout: 5_000 });
-  const { violations } = await new AxeBuilder({ page: this.page })
-    .withTags(WCAG_TAGS)
-    .analyze(section);
+  // `analyze` takes no argument: this scans the whole gallery page, the demo
+  // among it, as it always has.
+  const { violations } = await new AxeBuilder({ page: this.page }).withTags(WCAG_TAGS).analyze();
   const summary = violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length} nodes)`);
   assert.deepEqual(summary, [], `${component} demo violations: ${summary.join("; ")}`);
 });
 
-Then("the {string} demo matches its ARIA snapshot", async function (component) {
+Then("the {string} demo matches its ARIA snapshot", async function (this: BrowserWorld, component: string) {
+  const pinned = SNAPSHOTS[component];
+  assert.ok(pinned !== undefined, `no ARIA snapshot is pinned for the ${component} demo`);
   const snapshot = await demoSection(this.page, component).ariaSnapshot();
   assert.equal(
     snapshot.trim(),
-    SNAPSHOTS[component].trim(),
+    pinned.trim(),
     `the ${component} demo's ARIA snapshot`,
   );
 });
@@ -181,7 +185,7 @@ Then("the {string} demo matches its ARIA snapshot", async function (component) {
 // with locator.ariaSnapshot(): toMatchAriaSnapshot() only works inside a
 // Playwright test, and these run under Cucumber. Regenerate a snapshot by
 // logging demoSection(page, name).ariaSnapshot() and pasting it here.
-const SNAPSHOTS = {
+const SNAPSHOTS: Record<string, string> = {
   Dialog: `- heading "Dialog" [level=2]
 - button "Open the demo dialog"`,
   "Data table": `- heading "Data table" [level=2]

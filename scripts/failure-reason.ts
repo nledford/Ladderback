@@ -1,4 +1,4 @@
-// Why a red scenario failed, in one line (scripts/red-first.mjs, #68): its first
+// Why a red scenario failed, in one line (scripts/red-first.ts, #68): its first
 // failing step and the error's message, read from the runner's own report. A
 // scenario that can't load its page and one whose assertion fails are both red,
 // and the CI log should show which.
@@ -12,10 +12,10 @@ const MAX_LENGTH = 200;
 // Colour and cursor sequences: cucumber-rs colours its report on a terminal.
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
-const indentOf = (line) => line.length - line.trimStart().length;
+const indentOf = (line: string): number => line.length - line.trimStart().length;
 
 /** `parts` joined into one line of at most `MAX_LENGTH` characters. */
-function oneLine(parts) {
+function oneLine(parts: string[]): string {
   const text = parts
     .map((part) => part.trim())
     .filter((part) => part !== "")
@@ -33,22 +33,23 @@ function oneLine(parts) {
  * is reported as undefined, not failed, so red-first counts it as not red and
  * never asks for its reason.
  */
-function fromCucumberJs(lines) {
+function fromCucumberJs(lines: string[]): string | null {
   const section = lines.findIndex((line) => /^(Failed scenarios|Failed hooks):$/.test(line));
   if (section < 0) return null;
   const header = lines.findIndex((line, i) => i > section && /^\s+\d+\) .+/.test(line));
   if (header < 0) return null;
-  const body = [];
+  const body: string[] = [];
   for (const line of lines.slice(header + 1)) {
     // The next scenario's header (two spaces) or the totals (none) end it.
     if (line.trim() !== "" && indentOf(line) < 5) break;
     body.push(line);
   }
   const first = body.findIndex((line) => line.trim() !== "");
-  if (first < 0) return null;
-  const step = body[first].match(/^\s+(.+?) # \S+:\d+$/)?.[1];
-  const stepIndent = indentOf(body[first]);
-  const error = [];
+  const firstLine = body[first];
+  if (firstLine === undefined) return null;
+  const step = firstLine.match(/^\s+(.+?) # \S+:\d+$/)?.[1];
+  const stepIndent = indentOf(firstLine);
+  const error: string[] = [];
   for (const line of body.slice(step ? first + 1 : first)) {
     // A stack frame ends the message, and so does the next reported step or
     // hook, which is as shallow as this one.
@@ -68,12 +69,13 @@ function fromCucumberJs(lines) {
  * details, indented: where it is defined and matched, then the panic's
  * message, or that no function matches the step.
  */
-function fromCucumberRs(lines) {
-  const at = lines.findIndex((line) => /^\s*✘>?\s/.test(line));
-  if (at < 0) return null;
-  const step = lines[at].replace(/^\s*✘>?\s+/, "").trim();
-  const indent = indentOf(lines[at]);
-  const details = [];
+function fromCucumberRs(lines: string[]): string | null {
+  const line = lines.find((line) => /^\s*✘>?\s/.test(line));
+  if (line === undefined) return null;
+  const at = lines.indexOf(line);
+  const step = line.replace(/^\s*✘>?\s+/, "").trim();
+  const indent = indentOf(line);
+  const details: string[] = [];
   for (const line of lines.slice(at + 1)) {
     // The next step, scenario or the summary is indented no deeper than this one.
     if (line.trim() !== "" && indentOf(line) <= indent) break;
@@ -94,7 +96,7 @@ function fromCucumberRs(lines) {
  * has no failing step to read. `runner` is the scenario's runner: `ui`,
  * `e2e` or `acceptance`.
  */
-export function failureReason(runner, output) {
+export function failureReason(runner: string, output: string): string | null {
   const lines = output.replace(ANSI, "").split("\n").map((line) => line.replace(/\r$/, ""));
   const reason = runner === "ui" ? fromCucumberJs(lines) : fromCucumberRs(lines);
   return reason === "" ? null : reason;
