@@ -207,9 +207,12 @@ fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
             text("alias", alias.to_owned()),
             None,
         ),
-        MaintenanceRefusal::NotOwner => {
-            todo!("the code and status of a repository maintained elsewhere")
-        }
+        MaintenanceRefusal::NotOwner => (
+            StatusCode::CONFLICT,
+            ErrorCode::MaintenanceNotOwner,
+            text("alias", alias.to_owned()),
+            None,
+        ),
         MaintenanceRefusal::UnknownPlan { plan } => (
             StatusCode::NOT_FOUND,
             ErrorCode::PlanUnknown,

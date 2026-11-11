@@ -922,6 +922,7 @@ mod tests {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,
                     password: api::PasswordSourceDto::Inline,
+                    maintained_here: true,
                     warnings: Vec::new(),
                 }],
             })
@@ -1797,7 +1798,7 @@ mod tests {
         assert_eq!(repositories.status(), StatusCode::OK);
         assert_eq!(
             body(repositories).await,
-            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"}}]}"#
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true}]}"#
         );
     }
 

@@ -1,5 +1,8 @@
 //! The maintenance use case: forget, prune and check, run manually by the
-//! repository's local owner (technical design §7.3). A maintenance
+//! repository's local owner (technical design §7.3). Only a repository whose
+//! entry asks for `local` is maintained here (I1): any other is refused with
+//! [`MaintenanceError::NotOwner`] before the engine or the log is reached,
+//! previews included, though its history can still be listed. A maintenance
 //! operation takes its repository's I7 slot — `try_start` decides and
 //! stores atomically — *before* the engine is started, and fails closed on
 //! a refusal; nothing runs and nothing is stored then.
@@ -22,7 +25,7 @@ use std::sync::Arc;
 
 use domain::maintenance::{
     AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
-    Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -355,9 +358,9 @@ impl RunMaintenance {
     /// is stored, no I7 slot is taken and no engine job is left running, so a
     /// caller that is dropped here, because the client that asked went away,
     /// has left nothing behind. Every refusal that doesn't need the slot (an
-    /// unknown repository, a policy that keeps nothing, an adoption that
-    /// matches no group) is made here, before the log is touched, and each
-    /// read gives up after [`READ_TIMEOUT`].
+    /// unknown repository, one this agent doesn't maintain, a policy that
+    /// keeps nothing, an adoption that matches no group) is made here, before
+    /// the log is touched, and each read gives up after [`READ_TIMEOUT`].
     pub async fn assess(
         &self,
         op: OperationId,
@@ -389,8 +392,10 @@ impl RunMaintenance {
         kind: MaintenanceKind,
         held: Option<&SelectionToken>,
     ) -> Result<MaintenanceAssessment, MaintenanceError> {
-        // Only reads run before the slot is taken.
-        let (config, access) = self.identified(op, alias).await?;
+        // Only reads run before the slot is taken, and none before this
+        // agent is found to maintain the repository.
+        let config = self.maintained(alias).await?;
+        let access = self.identified(op, &config, alias).await?;
 
         let (partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -513,26 +518,21 @@ impl RunMaintenance {
         match kind {
             MaintenanceKind::Check => {
                 // A check needs nothing of the repository to say what it
-                // does, only that the repository is configured.
-                let config = self
-                    .config
-                    .load()
-                    .await
-                    .map_err(|_| MaintenanceError::Unavailable)?;
-                config
-                    .repository(alias)
-                    .ok_or(MaintenanceError::UnknownRepository)?;
+                // does, only that this agent maintains it.
+                self.maintained(alias).await?;
                 Ok(MaintenancePreview::Check(CheckPreview {
                     read_data: Self::CHECK_READS_DATA,
                 }))
             }
             MaintenanceKind::Forget => {
-                let (config, access) = self.open(alias).await?;
+                let config = self.maintained(alias).await?;
+                let access = self.open(&config, alias).await?;
                 let (_, forget) = self.forget_of(op, &config, alias, &access).await?;
                 Ok(MaintenancePreview::Forget(forget))
             }
             MaintenanceKind::Adopt(adoption) => {
-                let (config, access) = self.open(alias).await?;
+                let config = self.maintained(alias).await?;
+                let access = self.open(&config, alias).await?;
                 let (_, snapshots) = self
                     .adoption_of(op, &config, alias, &access, adoption)
                     .await?;
@@ -543,7 +543,8 @@ impl RunMaintenance {
             }
             MaintenanceKind::Prune => {
                 // Opened as the prune opens it, so through the cache.
-                let (_, access) = self.identified(op, alias).await?;
+                let config = self.maintained(alias).await?;
+                let access = self.identified(op, &config, alias).await?;
                 let keep_delete = default_keep_delete();
                 let job = Job::PrunePlan(PruneJob {
                     repository: access,
@@ -570,13 +571,14 @@ impl RunMaintenance {
     /// The repository's snapshots grouped by who owns them (§7.3), as a
     /// read: every plan of this agent on the repository, the history no plan
     /// of this agent owns, and for each group of it the plans that could
-    /// take it.
+    /// take it. A read, so it is answered whoever maintains the repository.
     pub async fn groups(
         &self,
         op: OperationId,
         alias: &RepositoryAlias,
     ) -> Result<RepositoryGroups, MaintenanceError> {
-        let (config, access) = self.open(alias).await?;
+        let config = self.load().await?;
+        let access = self.open(&config, alias).await?;
         let managed = plans_of(&config, alias);
         let partition = self.partitioned(op, access, &managed).await?;
         let plans = repository_plans(&config, alias);
@@ -632,26 +634,44 @@ impl RunMaintenance {
         })
     }
 
-    /// The configuration, and the access to the repository `alias` names.
-    async fn open(
-        &self,
-        alias: &RepositoryAlias,
-    ) -> Result<(AgentConfig, RepositoryAccess), MaintenanceError> {
-        let config = self
-            .config
+    /// The configuration, as it is now.
+    async fn load(&self) -> Result<AgentConfig, MaintenanceError> {
+        self.config
             .load()
             .await
-            .map_err(|_| MaintenanceError::Unavailable)?;
+            .map_err(|_| MaintenanceError::Unavailable)
+    }
+
+    /// The configuration, once it shows that this agent maintains the
+    /// repository `alias` (I1, §7.3): refused with
+    /// [`MaintenanceError::NotOwner`] otherwise, before anything else is
+    /// asked of the repository.
+    async fn maintained(&self, alias: &RepositoryAlias) -> Result<AgentConfig, MaintenanceError> {
+        let config = self.load().await?;
         let repository = config
             .repository(alias)
             .ok_or(MaintenanceError::UnknownRepository)?;
-        let access = self
+        if !Ownership::owned_here(repository.maintenance) {
+            return Err(MaintenanceError::NotOwner);
+        }
+        Ok(config)
+    }
+
+    /// The access to the repository `alias` names in `config`.
+    async fn open(
+        &self,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+    ) -> Result<RepositoryAccess, MaintenanceError> {
+        let repository = config
+            .repository(alias)
+            .ok_or(MaintenanceError::UnknownRepository)?;
+        Ok(self
             .resolve
             .resolve(&repository.settings)
             .await
             .map_err(MaintenanceError::Resolve)?
-            .access;
-        Ok((config, access))
+            .access)
     }
 
     /// As [`open`](Self::open), with the access naming the repository's ID,
@@ -661,9 +681,10 @@ impl RunMaintenance {
     async fn identified(
         &self,
         op: OperationId,
+        config: &AgentConfig,
         alias: &RepositoryAlias,
-    ) -> Result<(AgentConfig, RepositoryAccess), MaintenanceError> {
-        let (config, mut access) = self.open(alias).await?;
+    ) -> Result<RepositoryAccess, MaintenanceError> {
+        let mut access = self.open(config, alias).await?;
         let id = identify(
             self.engine.as_ref(),
             self.clock.as_ref(),
@@ -672,7 +693,7 @@ impl RunMaintenance {
         )
         .await?;
         access.id = Some(id);
-        Ok((config, access))
+        Ok(access)
     }
 
     /// The repository's snapshots partitioned by who owns them, from one

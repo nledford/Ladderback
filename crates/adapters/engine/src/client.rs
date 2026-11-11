@@ -1170,6 +1170,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::PlanUnknown
                 | ErrorCode::RepositoryUnknown
                 | ErrorCode::MaintenanceBusy
+                | ErrorCode::MaintenanceNotOwner
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch

@@ -141,6 +141,10 @@ pub enum ErrorCode {
     /// Another maintenance operation already runs on the repository (I7):
     /// nothing ran. The argument `operation` names the one that holds it.
     MaintenanceBusy,
+    /// This agent doesn't maintain the repository: its entry doesn't ask for
+    /// `local` (I1, §7.3), so nothing was asked of it. The argument `alias`
+    /// names it.
+    MaintenanceNotOwner,
     /// The plan's retention policy is set and would keep nothing, so the
     /// forget was refused before anything was removed. The argument `plan`
     /// names it.
@@ -540,6 +544,11 @@ impl ErrorCode {
             }],
             Self::MaintenanceBusy => &[ArgSpec {
                 name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::MaintenanceNotOwner => &[ArgSpec {
+                name: "alias",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -1050,6 +1059,7 @@ mod tests {
             repository: "/srv/demo/repo".to_owned(),
             repo_hot: None,
             password: PasswordSourceDto::Inline,
+            maintained_here: true,
             warnings: vec![WarningDto {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
@@ -1058,7 +1068,7 @@ mod tests {
         let json = serde_json::to_string(&row).unwrap();
         assert_eq!(
             json,
-            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
+            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true,"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
         );
         assert_eq!(serde_json::from_str::<RepositoryDto>(&json).unwrap(), row);
         let bare = r#"{"alias":"demo","repository":"/x","password":{"source":"inline"}}"#;
@@ -1892,6 +1902,11 @@ pub struct RepositoryDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_hot: Option<String>,
     pub password: PasswordSourceDto,
+    /// Whether this agent maintains the repository: forgets, prunes and
+    /// checks it (I1, §7.3). A row that doesn't say is maintained elsewhere,
+    /// so a client offers no maintenance for it.
+    #[serde(default)]
+    pub maintained_here: bool,
     /// What the configuration holds that the user should know about this
     /// repository, one per secret written inline. Left out when there is
     /// none.
@@ -2608,12 +2623,13 @@ mod catalog_dto_tests {
                 repository: "/srv/demo/repo".to_owned(),
                 repo_hot: None,
                 password: PasswordSourceDto::Inline,
+                maintained_here: false,
                 warnings: Vec::new(),
             }],
         };
         assert_eq!(
             to_string(&repositories).unwrap(),
-            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"}}]}"#
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":false}]}"#
         );
         assert_eq!(
             from_str::<RepositoriesDto>(&to_string(&repositories).unwrap()).unwrap(),
@@ -2658,11 +2674,12 @@ mod catalog_dto_tests {
             repository: "rest:https://u:***@nas.example/repo".to_owned(),
             repo_hot: Some("/mnt/hot".to_owned()),
             password: PasswordSourceDto::Inline,
+            maintained_here: false,
             warnings: Vec::new(),
         };
         assert_eq!(
             to_string(&row).unwrap(),
-            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"}}"#
+            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"},"maintained-here":false}"#
         );
     }
 

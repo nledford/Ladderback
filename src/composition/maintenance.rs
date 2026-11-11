@@ -331,9 +331,7 @@ async fn refusal(
 ) -> MaintenanceRefusal {
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
-        MaintenanceError::NotOwner => {
-            todo!("how the route tells a repository maintained elsewhere")
-        }
+        MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
         // The use case reports a configuration it couldn't read without
         // naming the file, and so does this.
         MaintenanceError::Unavailable => {

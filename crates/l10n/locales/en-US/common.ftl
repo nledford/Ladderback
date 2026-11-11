@@ -156,6 +156,12 @@ error-operation-not-running = Operation { $operation } has already ended, so the
 # $operation (text): the running operation's ID.
 error-maintenance-busy = Operation { $operation } is already maintaining this repository, and one repository runs one maintenance operation at a time. Wait for it to end, then ask again.
 
+# This agent doesn't maintain the repository: its entry doesn't set
+# maintenance to local, so a forget, a prune, a check or an adoption, or the
+# preview of one, was refused and nothing was asked of the repository.
+# $alias (text): the repository's alias, such as demo.
+error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing was asked of it. To maintain it from this agent, set { "maintenance = \"local\"" } in its entry in the configuration file.
+
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
 # $plan (text): the plan's ID, such as home.

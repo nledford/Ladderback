@@ -1063,7 +1063,9 @@ impl Catalog for ConfigCatalog {
             repositories: config
                 .repositories()
                 .iter()
-                .map(|(alias, repository)| repository_row(alias, &repository.settings))
+                .map(|(alias, repository)| {
+                    repository_row(alias, &repository.settings, repository.maintenance)
+                })
                 .collect(),
         })
     }
@@ -1606,9 +1608,14 @@ fn config_refusal(error: ConfigError) -> RepositoriesError {
 
 /// One configured repository as a list shows it: its locations masked, and
 /// where its password comes from, never the password (I4).
-fn repository_row(alias: &RepositoryAlias, settings: &RepositorySettings) -> api::RepositoryDto {
+fn repository_row(
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    maintenance: domain::planning::Maintenance,
+) -> api::RepositoryDto {
     api::RepositoryDto {
         alias: alias.as_str().to_owned(),
+        maintained_here: domain::maintenance::Ownership::owned_here(maintenance),
         repository: redacted_location(settings, &settings.repository),
         repo_hot: settings
             .repo_hot
@@ -1807,7 +1814,7 @@ mod tests {
             .options_cold
             .insert("secret_access_key".to_owned(), key.to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings);
+        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
         assert_eq!(
             row.warnings,
             [
@@ -1829,7 +1836,30 @@ mod tests {
             .options
             .insert("secret_access_key".to_owned(), "${DEMO_KEY}".to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        assert_eq!(repository_row(&alias, &settings).warnings, []);
+        assert_eq!(
+            repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
+            []
+        );
+    }
+
+    #[test]
+    fn a_listed_repository_says_whether_this_agent_maintains_it() {
+        let settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        for (maintenance, here) in [
+            (domain::planning::Maintenance::Local, true),
+            (domain::planning::Maintenance::Hub, false),
+            (domain::planning::Maintenance::None, false),
+        ] {
+            let row = repository_row(&alias, &settings, maintenance);
+            assert_eq!(row.maintained_here, here, "{maintenance:?}");
+            let wire = serde_json::to_value(&row).expect("a row is JSON");
+            assert_eq!(
+                wire["maintained-here"],
+                serde_json::Value::Bool(here),
+                "{maintenance:?}"
+            );
+        }
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
