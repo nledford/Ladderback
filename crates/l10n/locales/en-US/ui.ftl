@@ -239,8 +239,10 @@ ui-column-started = Started
 # The operations table's column of what a row offers to do.
 ui-column-actions = Actions
 
-# The button that starts a plan's backup.
-ui-start-backup = Start backup
+# The button that starts a plan's backup, named with its plan, so each of the
+# page's start buttons says which plan it runs.
+# $plan (text): the plan's ID, as config.toml names it. It is shown as it came.
+ui-start-plan = Start backup of { $plan }
 
 # The button that cancels a plan's running or queued backup, named with its
 # row's plan.
