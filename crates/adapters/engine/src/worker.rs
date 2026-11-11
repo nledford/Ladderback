@@ -41,7 +41,7 @@ use crate::job::{
     JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
     WorkerEvent, exit_code,
 };
-use cancel::{AfterCancel, Cancel};
+use cancel::{AfterCancel, Cancel, Cause};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -53,6 +53,9 @@ pub enum Exit {
     Reported { failed: bool },
     /// A cancel ended the job, which reports nothing more.
     Cancelled,
+    /// The deadline ended a backup that wound down. Its failure is the
+    /// stream's last line, written by the watchdog or else at the exit.
+    DeadlinePassed,
     /// Stop at once with this code, reporting nothing more: a fake job
     /// imitating a crashed engine.
     Abrupt(u8),
@@ -64,6 +67,7 @@ impl Exit {
             Self::Reported { failed: false } => 0,
             Self::Reported { failed: true } => 1,
             Self::Cancelled => exit_code::TERMINATED,
+            Self::DeadlinePassed => exit_code::DEADLINE_PASSED,
             Self::Abrupt(code) => i32::from(code),
         }
     }
@@ -175,7 +179,8 @@ pub(crate) enum Done {
     /// The job wrote its result itself, with [`Context::report`], and has
     /// nothing more to say.
     Reported,
-    /// A cancel ended the job: exit as SIGTERM's, reporting nothing more.
+    /// A cancel, or the deadline, ended the job: exit as its cause says,
+    /// reporting nothing more.
     Cancelled,
     /// Exit at once with this code and report nothing more.
     Abrupt(u8),
@@ -318,7 +323,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             Ok(Exit::Reported { failed: false })
         }
         Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
-        Ok(Done::Cancelled) => Ok(Exit::Cancelled),
+        Ok(Done::Cancelled) => Ok(exit_of_cancelled(&events, ctx.cancel())),
         Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
         Err(JobError::Failed { code, detail }) => {
             events.emit(&WorkerEvent::Failed {
@@ -336,7 +341,15 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
 /// deadline's failure the watchdog couldn't write, because another line
 /// was being written then, goes out now as the stream's last line.
 fn exit_of_cancelled(events: &Events, cancel: &Cancel) -> Exit {
-    todo!()
+    match cancel.cause() {
+        Some(Cause::Deadline) => {
+            // Nothing happens when the watchdog wrote it, or a SIGTERM
+            // ended the stream since.
+            events.end(Some(&watchdog::deadline_failure()), LAST_LINE_PATIENCE);
+            Exit::DeadlinePassed
+        }
+        Some(Cause::Cancel) | None => Exit::Cancelled,
+    }
 }
 
 fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
@@ -353,10 +366,15 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
     }
 }
 
-/// How long a backup cancelled by SIGTERM may wind down before the worker
-/// exits anyway. The daemon's grace period (10 s by default) ends it sooner;
-/// this bounds a worker whose daemon is gone.
+/// How long a backup stopped while it archives, by SIGTERM or by its
+/// deadline, may wind down before the worker exits anyway. The daemon's
+/// grace period (10 s by default) ends it sooner; this bounds a worker whose
+/// daemon is gone.
 const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long the worker waits for a line being written before it ends the
+/// stream: a writer stuck on a full pipe must not hold its exit back.
+const LAST_LINE_PATIENCE: Duration = Duration::from_millis(250);
 
 /// On SIGTERM the worker waits for the line it is writing, writes nothing
 /// more and exits. Nothing in rustic needs a clean shutdown: its writes are
@@ -375,7 +393,7 @@ fn exit_on_sigterm(events: Events, cancel: Cancel) -> io::Result<()> {
         .spawn(move || {
             if signals.forever().next().is_some() {
                 let after = cancel.request();
-                events.end(None, Duration::from_millis(250));
+                events.end(None, LAST_LINE_PATIENCE);
                 if after == AfterCancel::WindDown {
                     std::thread::sleep(WIND_DOWN_LIMIT);
                 }

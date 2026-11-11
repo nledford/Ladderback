@@ -3,7 +3,9 @@
 //! `rustic_core`'s `backup()` writes the snapshot itself and offers no hook
 //! before that write, and nothing in it can be cancelled. So the worker
 //! watches the wall clock from a thread of its own, and once the deadline has
-//! passed it reports the failure and exits the process.
+//! passed it refuses the snapshot, reports the failure and ends the process:
+//! at once, or, for a backup that archives, once it has wound down as a
+//! cancelled one does (decisions 50 and 55).
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -15,6 +17,7 @@ use domain::Timestamp;
 use domain::execution::deadline::Deadline;
 
 use super::Process;
+use super::cancel::AfterCancel;
 use super::events::{Ending, Events};
 use crate::job::{WorkerEvent, exit_code};
 
@@ -52,7 +55,7 @@ impl Watchdog {
         // The first look is here, so a deadline that has passed already
         // stops the job before it does anything.
         if deadline.has_passed((process.clock)()) {
-            expire(&events, process);
+            expire(&events, process, None);
             return Self {
                 stop: None,
                 thread: None,
@@ -102,7 +105,7 @@ fn watch(
     loop {
         let now = (process.clock)();
         if deadline.has_passed(now) {
-            expire(events, process);
+            expire(events, process, Some(stopped));
             return;
         }
         // Wake at the deadline or after `interval`, whichever comes first.
@@ -116,19 +119,41 @@ fn watch(
     }
 }
 
-/// The deadline passed: report it as the last line and exit.
-fn expire(events: &Events, process: &Process) {
-    let failed = WorkerEvent::Failed {
+/// The deadline passed. The snapshot is refused first, so no snapshot write
+/// starts from here on (I3); then the failure goes out as the last line and
+/// the worker ends, at once unless a backup is archiving. That backup winds
+/// down as a cancelled one does (decision 55), finishing a snapshot write
+/// that began before the deadline, and the job ends the worker once rustic
+/// returns; the watchdog waits for it, on `stopped`, for the wind-down limit
+/// and no longer, which bounds a worker whose daemon is gone. The daemon's
+/// grace period ends it sooner.
+fn expire(events: &Events, process: &Process, stopped: Option<&mpsc::Receiver<()>>) {
+    let after = process.cancel.pass_deadline();
+    let failed = deadline_failure();
+    match (after, stopped) {
+        (AfterCancel::WindDown, Some(stopped)) => {
+            events.end(Some(&failed), WRITE_PATIENCE);
+            // The job's end drops the watchdog, which ends this wait.
+            if stopped.recv_timeout(process.wind_down_limit) == Err(RecvTimeoutError::Timeout) {
+                (process.terminate)(exit_code::DEADLINE_PASSED);
+            }
+        }
+        _ => end_process(
+            events,
+            &process.terminate,
+            &failed,
+            exit_code::DEADLINE_PASSED,
+        ),
+    }
+}
+
+/// The failure the deadline ends a job with.
+pub(super) fn deadline_failure() -> WorkerEvent {
+    WorkerEvent::Failed {
         code: ErrorCode::DeadlinePassed,
         args: Vec::new(),
         detail: None,
-    };
-    end_process(
-        events,
-        &process.terminate,
-        &failed,
-        exit_code::DEADLINE_PASSED,
-    );
+    }
 }
 
 /// Writes `last` as the stream's last line and exits with `code`. When a

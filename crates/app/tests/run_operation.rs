@@ -776,6 +776,20 @@ async fn an_engine_that_reports_its_deadline_is_given_its_grace_to_wind_down() {
     );
 }
 
+/// Any other failure ends a worker that is ending anyway: nothing is left
+/// to wind down, and the job is dropped.
+#[tokio::test]
+async fn an_engine_that_reports_another_failure_is_not_stopped() {
+    let engine = Arc::new(Scripted::new(vec![
+        started(),
+        EngineEvent::Failed(FailureReason::EngineExited { exit_code: Some(1) }),
+    ]));
+    RunOperation::new(engine.clone(), Arc::new(FakeClock::new(t(0))), log())
+        .run(id(), Trigger::Manual, fake_job(None), future::pending())
+        .await;
+    assert_eq!(engine.stops.load(Ordering::SeqCst), 0);
+}
+
 #[tokio::test]
 async fn a_result_before_the_deadline_stands() {
     let budget = Some(SignedDuration::from_secs(60));

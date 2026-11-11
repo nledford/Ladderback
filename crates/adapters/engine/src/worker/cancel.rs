@@ -1,6 +1,8 @@
-//! A cancel: the daemon's SIGTERM (§4.1). A backup that is saving data
-//! winds down on it rather than being cut off: it stops reading its source,
-//! lets rustic save the index of the packs it wrote, and writes no snapshot.
+//! A cancel: the daemon's SIGTERM, or the job's deadline (§4.1). A backup
+//! that is saving data winds down on it rather than being cut off: it stops
+//! reading its source, lets rustic save the index of the packs it wrote, and
+//! starts no snapshot write. One that had begun finishes, in both halves of
+//! a hot/cold repository.
 
 mod backend;
 mod source;
@@ -8,10 +10,11 @@ mod source;
 pub(crate) use backend::refusing_snapshots_once_cancelled;
 pub(crate) use source::CancellableSource;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-/// What the SIGTERM handler does once it has asked for the cancel.
+/// What the SIGTERM handler, or the deadline watchdog, does once it has
+/// asked for the cancel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AfterCancel {
     /// Nothing is being saved: the worker exits at once.
@@ -30,30 +33,74 @@ pub(crate) enum Cause {
     Deadline,
 }
 
-/// The worker's cancel, shared by the SIGTERM handler, the job, its source
-/// and its backends.
+impl Cause {
+    fn code(self) -> u8 {
+        match self {
+            Self::Cancel => 1,
+            Self::Deadline => 2,
+        }
+    }
+
+    fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::Cancel),
+            2 => Some(Self::Deadline),
+            _ => None,
+        }
+    }
+}
+
+/// The worker's cancel, shared by the SIGTERM handler, the deadline
+/// watchdog, the job, its source and its backends.
 #[derive(Clone, Default)]
 pub(crate) struct Cancel(Arc<Shared>);
 
 #[derive(Default)]
 struct Shared {
-    requested: AtomicBool,
-    /// Whether a backup is archiving. Asking for the cancel and starting or
-    /// ending the archiving take this lock, so the handler and the job
-    /// agree on which of them ends the worker.
+    /// 0 until the cancel is asked for, then the code of its [`Cause`].
+    cause: AtomicU8,
+    /// Whether a backup is archiving, its snapshot write included. Asking
+    /// for the cancel and starting or ending the archiving take this lock,
+    /// so the handler, the watchdog and the job agree on which of them ends
+    /// the worker.
     saving: Mutex<bool>,
 }
 
 impl Cancel {
     /// Whether the cancel was asked for. It is never taken back.
     pub(crate) fn is_requested(&self) -> bool {
-        self.0.requested.load(Ordering::SeqCst)
+        self.cause().is_some()
+    }
+
+    /// Why the cancel was asked for; `None` until it is.
+    pub(crate) fn cause(&self) -> Option<Cause> {
+        Cause::from_code(self.0.cause.load(Ordering::SeqCst))
     }
 
     /// Asks for the cancel, and says what the handler does next.
     pub(crate) fn request(&self) -> AfterCancel {
+        self.ask(Cause::Cancel)
+    }
+
+    /// Asks for the cancel because the deadline passed (I3), and says what
+    /// the watchdog does next. The snapshot is refused from here on. A
+    /// backup that archives, or whose snapshot write began, winds down as a
+    /// cancelled one does; otherwise the worker exits at once.
+    pub(crate) fn pass_deadline(&self) -> AfterCancel {
+        self.ask(Cause::Deadline)
+    }
+
+    /// Records `cause` unless another came first, and says what comes
+    /// next. A backup that archives winds down, and that includes a
+    /// snapshot write that began: rustic makes it to the cold half once the
+    /// hot half has it, so ending the worker during it could leave the
+    /// snapshot in one half alone (decision 50).
+    fn ask(&self, cause: Cause) -> AfterCancel {
         let saving = self.lock_saving();
-        self.0.requested.store(true, Ordering::SeqCst);
+        let _ = self
+            .0
+            .cause
+            .compare_exchange(0, cause.code(), Ordering::SeqCst, Ordering::SeqCst);
         if *saving {
             AfterCancel::WindDown
         } else {
@@ -78,25 +125,11 @@ impl Cancel {
         (!self.is_requested()).then_some(saved)
     }
 
-    /// Asks for the cancel because the deadline passed (I3), and says what
-    /// the watchdog does next. The snapshot is refused from here on. A
-    /// backup that archives, or whose snapshot write began, winds down as a
-    /// cancelled one does; otherwise the worker exits at once.
-    pub(crate) fn pass_deadline(&self) -> AfterCancel {
-        todo!()
-    }
-
-    /// Why the cancel was asked for; `None` until it is.
-    pub(crate) fn cause(&self) -> Option<Cause> {
-        todo!()
-    }
-
-    /// Asks to write the snapshot: `false` once the cancel is asked for,
-    /// and the snapshot must not be written. Taken under the same lock as
-    /// the cancel, so a snapshot write either starts before the cancel or
-    /// not at all.
+    /// Whether the snapshot may be written: not once the cancel is asked
+    /// for. A snapshot write admitted before it runs to its end, within
+    /// the archiving the cancel winds down.
     pub(crate) fn admit_snapshot(&self) -> bool {
-        todo!()
+        !self.is_requested()
     }
 
     fn lock_saving(&self) -> MutexGuard<'_, bool> {
