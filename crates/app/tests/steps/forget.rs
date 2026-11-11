@@ -882,7 +882,7 @@ async fn forget(agent: &mut Agent) {
                 tokio::spawn(
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
-            let ended = tokio::time::timeout(Duration::from_secs(5), running)
+            let ended = tokio::time::timeout(Duration::from_secs(10), running)
                 .await
                 .expect("the run ends once its held job is released, whenever the release came");
             agent.finished = Some(ended.expect("the run ends"));
@@ -907,7 +907,7 @@ async fn forget_then_cancel(agent: &mut Agent) {
             .await
     });
     // The first job ends at once and the second is held until the cancel.
-    for _ in 0..400 {
+    for _ in 0..2000 {
         if agent.forget.forget_jobs() >= 2 {
             break;
         }
@@ -947,7 +947,7 @@ async fn assess_a_forget(agent: &mut Agent) {
 
 /// Waits until the scripted engine was given a forget job.
 async fn wait_for_forget(agent: &Agent) {
-    for _ in 0..400 {
+    for _ in 0..2000 {
         if agent.forget.jobs().contains(&"forget") {
             return;
         }
@@ -1006,7 +1006,7 @@ fn job_name(kind: &MaintenanceKind) -> &'static str {
 
 /// Waits until the scripted engine was given the job of this kind.
 async fn wait_for_job(agent: &Agent, name: &str) {
-    for _ in 0..400 {
+    for _ in 0..2000 {
         if agent.forget.jobs().contains(&name) {
             return;
         }

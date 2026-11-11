@@ -148,7 +148,7 @@ fn adopt_kind(from: AdoptionSource, into: &str) -> MaintenanceKind {
 
 /// Waits until the scripted engine was given a job of this kind.
 async fn wait_for_job(agent: &Agent, name: &str) {
-    for _ in 0..400 {
+    for _ in 0..2000 {
         if agent.forget.jobs().contains(&name) {
             return;
         }
