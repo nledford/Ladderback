@@ -270,11 +270,14 @@ async fn a_secret_may_be_as_large_as_the_limit_and_no_larger(harness: &dyn Secre
         resolve(harness, &SecretRef::Command(command)).await,
         gives(&at_the_limit)
     );
-    let command = harness.printing(long.as_bytes());
-    assert_eq!(
-        resolve(harness, &SecretRef::Command(command.clone())).await,
-        too_large(command_source(&command))
-    );
+    // One byte over is too large, as is a short first line in too much.
+    for printed in [&over, &long] {
+        let command = harness.printing(printed.as_bytes());
+        assert_eq!(
+            resolve(harness, &SecretRef::Command(command.clone())).await,
+            too_large(command_source(&command))
+        );
+    }
 }
 
 async fn a_file_others_can_read_comes_with_a_warning(harness: &dyn SecretsHarness) {

@@ -797,6 +797,29 @@ async fn a_helper_whose_daemon_holds_its_output_before_its_secret_s_line_ended_g
     );
 }
 
+/// A helper that prints part of its secret, quotes all of it on stderr and
+/// then outlives its limit: it is timed out, which gives neither what it
+/// printed nor what it said (I4, #237).
+#[tokio::test]
+async fn a_helper_timed_out_after_printing_part_of_its_secret_gives_none_of_it() {
+    let script = sh(
+        "printf hunter2-ca; echo 'rejected hunter2-canary' >&2; sleep 60",
+        Vec::<String>::new(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_millis(300)).resolve(&command(script)),
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+}
+
 #[tokio::test]
 async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() {
     let echo_both = CommandLine::new(
