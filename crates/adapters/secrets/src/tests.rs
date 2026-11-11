@@ -1,6 +1,10 @@
 //! The app's secrets contract against the real adapter, and what the
 //! contract can't state: process groups, limits, literal arguments, special
 //! files and the OS keyring.
+//!
+//! A test whose code under test fails to stop or cut short a command must
+//! fail, not hang the run: each call that waits on a limit, a stop or a pipe
+//! has a bound of its own (`within`), a few times what the call takes.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -57,11 +61,13 @@ impl RealHarness {
 impl SecretsHarness for RealHarness {
     fn resolver(&self) -> Arc<dyn SecretResolver> {
         let environment = self.environment.lock().unwrap().clone();
+        // The keyring last: a mutant that makes a builder method give a new
+        // resolver must not leave it reading the session's own store.
         Arc::new(
             SystemSecrets::new()
                 .with_environment(environment)
-                .with_keyring(self.keyring.clone())
-                .with_command_timeout(Duration::from_millis(500)),
+                .with_command_timeout(Duration::from_millis(500))
+                .with_keyring(self.keyring.clone()),
         )
     }
 
@@ -146,12 +152,12 @@ fn sh<S: AsRef<str>>(script: &str, args: impl IntoIterator<Item = S>) -> Command
 }
 
 /// A resolver that reads no variables, keeps its keyring in memory and gives
-/// commands `limit`.
+/// commands `limit`. The keyring is set last, as in `RealHarness`.
 fn resolver(limit: Duration) -> SystemSecrets {
     SystemSecrets::new()
         .with_environment(Vec::<(String, String)>::new())
-        .with_keyring(Arc::new(Memory::default()))
         .with_command_timeout(limit)
+        .with_keyring(Arc::new(Memory::default()))
 }
 
 fn command(command: CommandLine) -> SecretRef {
@@ -233,11 +239,23 @@ async fn is_gone_soon(pid: i32) -> bool {
     true
 }
 
+/// Awaits `call` for at most `bound` and fails the test when it is still
+/// running then.
+async fn within<T>(bound: Duration, call: impl Future<Output = T>) -> T {
+    tokio::time::timeout(bound, call)
+        .await
+        .unwrap_or_else(|_| panic!("the call was still running after {bound:?}"))
+}
+
 // --------------------------------------------------------------- contract
 
 #[tokio::test]
 async fn the_system_resolver_meets_the_secrets_contract() {
-    app::contract::secrets::run(&RealHarness::new()).await;
+    within(
+        Duration::from_secs(10),
+        app::contract::secrets::run(&RealHarness::new()),
+    )
+    .await;
 }
 
 // --------------------------------------------------------------- commands
@@ -250,9 +268,11 @@ async fn a_timed_out_command_takes_a_helper_of_its_group_with_it() {
         r#"sleep 60 & echo $! > "$1"; wait"#,
         [pidfile.display().to_string()],
     );
-    let result = resolver(Duration::from_secs(1))
-        .resolve(&command(script))
-        .await;
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(1)).resolve(&command(script)),
+    )
+    .await;
     assert_eq!(
         result,
         Err(SecretError {
@@ -271,9 +291,11 @@ async fn the_time_limit_is_reported_in_whole_seconds_rounded_up() {
         (Duration::from_millis(300), 1),
         (Duration::from_millis(1_100), 2),
     ] {
-        let result = resolver(limit)
-            .resolve(&command(sh("sleep 60", Vec::<String>::new())))
-            .await;
+        let result = within(
+            limit + Duration::from_secs(5),
+            resolver(limit).resolve(&command(sh("sleep 60", Vec::<String>::new()))),
+        )
+        .await;
         assert_eq!(
             result,
             Err(SecretError {
@@ -293,11 +315,12 @@ async fn a_command_that_prints_without_end_is_stopped_at_the_limit_and_killed() 
         r#"echo $$ > "$1"; exec yes"#,
         [pidfile.display().to_string()],
     );
-    let started = Instant::now();
     // A minute is far more than this test waits for: the size ends it.
-    let result = resolver(Duration::from_secs(60))
-        .resolve(&command(script))
-        .await;
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(60)).resolve(&command(script)),
+    )
+    .await;
     assert_eq!(
         result,
         Err(SecretError {
@@ -307,7 +330,6 @@ async fn a_command_that_prints_without_end_is_stopped_at_the_limit_and_killed() 
             },
         })
     );
-    assert!(started.elapsed() < Duration::from_secs(10));
     let pid = recorded_pid(&pidfile).await;
     let _reaper = Reaper(pid);
     assert!(is_gone_soon(pid).await, "process {pid} is still running");
@@ -324,9 +346,11 @@ async fn a_helper_that_leaves_a_daemon_holding_its_output_still_gives_its_secret
         [pidfile.display().to_string()],
     );
     let started = Instant::now();
-    let result = resolver(Duration::from_secs(30))
-        .resolve(&command(script))
-        .await;
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
     let pid = recorded_pid(&pidfile).await;
     let _reaper = Reaper(pid);
     assert_eq!(result, gives("hunter2"));
@@ -358,7 +382,11 @@ async fn a_command_that_exited_in_time_is_not_timed_out_by_a_daemon_of_its() {
         r#"sleep 60 & echo $! > "$1"; echo hunter2"#,
         [pidfile.display().to_string()],
     );
-    let result = run_with(&script, Duration::from_millis(300), &stop).await;
+    let result = within(
+        Duration::from_secs(5),
+        run_with(&script, Duration::from_millis(300), &stop),
+    )
+    .await;
     let pid = recorded_pid(&pidfile).await;
     let _reaper = Reaper(pid);
     assert_eq!(result, Ok(SecretValue::new("hunter2")));
@@ -400,9 +428,12 @@ async fn arguments_are_text_and_no_shell_reads_them() {
         "$HOME".to_owned(),
         "a b".to_owned(),
     ] {
-        let result = resolver(Duration::from_secs(30))
-            .resolve(&command(sh(r#"printf %s "$1""#, [&argument])))
-            .await;
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30))
+                .resolve(&command(sh(r#"printf %s "$1""#, [&argument]))),
+        )
+        .await;
         assert_eq!(result, gives(&argument));
     }
     assert!(!marker.exists());
@@ -412,20 +443,24 @@ async fn arguments_are_text_and_no_shell_reads_them() {
 async fn a_command_gets_no_input() {
     let started = Instant::now();
     // `cat` with no arguments copies its input until it ends.
-    let result = resolver(Duration::from_secs(30))
-        .resolve(&command(
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(
             CommandLine::new("cat", Vec::<String>::new()).unwrap(),
-        ))
-        .await;
+        )),
+    )
+    .await;
     assert_eq!(result, Err(SecretError::missing(program("cat"))));
     assert!(started.elapsed() < Duration::from_secs(5));
 }
 
 #[tokio::test]
 async fn a_command_that_is_killed_by_a_signal_has_no_status() {
-    let result = resolver(Duration::from_secs(30))
-        .resolve(&command(sh("kill -9 $$", Vec::<String>::new())))
-        .await;
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(sh("kill -9 $$", Vec::<String>::new()))),
+    )
+    .await;
     assert_eq!(
         result,
         Err(SecretError {
@@ -441,12 +476,14 @@ async fn a_command_that_is_killed_by_a_signal_has_no_status() {
 #[tokio::test]
 async fn a_command_that_complains_at_length_is_cut_short_and_not_waited_for_in_vain() {
     // More than a pipe holds: nobody reading stderr would block it forever.
-    let result = resolver(Duration::from_secs(30))
-        .resolve(&command(sh(
+    let result = within(
+        Duration::from_secs(10),
+        resolver(Duration::from_secs(30)).resolve(&command(sh(
             r#"head -c 1048576 /dev/zero | tr '\0' x >&2; exit 2"#,
             Vec::<String>::new(),
-        )))
-        .await;
+        ))),
+    )
+    .await;
     let Err(SecretError {
         problem: Problem::CommandFailed { status, detail },
         ..
@@ -457,6 +494,38 @@ async fn a_command_that_complains_at_length_is_cut_short_and_not_waited_for_in_v
     assert_eq!(status, Some(2));
     assert!(detail.starts_with("xxxx"), "{detail}");
     assert!(detail.len() < 600, "{} bytes", detail.len());
+}
+
+/// The detail is the first line of stderr with something on it, looked for in
+/// the first 8 KiB the command wrote, which is all that is kept of it: a line
+/// that starts within them is found, and one that starts after them is not.
+#[tokio::test]
+async fn the_detail_is_looked_for_in_the_first_8_kib_of_stderr() {
+    let directory = TempDir::new().unwrap();
+    let stderr_file = directory.path().join("stderr");
+    for (blank_lines, detail) in [(4 * 1024, "access denied"), (9 * 1024, "")] {
+        let stderr = format!("{}access denied\n", "\n".repeat(blank_lines));
+        fs::write(&stderr_file, stderr).unwrap();
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30)).resolve(&command(sh(
+                r#"cat "$1" >&2; exit 1"#,
+                [stderr_file.display().to_string()],
+            ))),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Err(SecretError {
+                source: program("sh"),
+                problem: Problem::CommandFailed {
+                    status: Some(1),
+                    detail: detail.to_owned(),
+                },
+            }),
+            "after {blank_lines} blank lines"
+        );
+    }
 }
 
 /// A helper that rejects its secret and quotes it on stderr, more of it than
@@ -477,15 +546,17 @@ async fn a_secret_quoted_past_the_kept_stderr_leaves_nothing_of_itself_in_the_er
         let stderr_file = directory.path().join("stderr");
         fs::write(&stdout_file, format!("{secret}\n")).unwrap();
         fs::write(&stderr_file, &stderr).unwrap();
-        let result = resolver(Duration::from_secs(30))
-            .resolve(&command(sh(
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30)).resolve(&command(sh(
                 r#"cat "$1"; cat "$2" >&2; exit 1"#,
                 [
                     stdout_file.display().to_string(),
                     stderr_file.display().to_string(),
                 ],
-            )))
-            .await;
+            ))),
+        )
+        .await;
         let Err(SecretError {
             problem: Problem::CommandFailed { detail, .. },
             ..
@@ -540,9 +611,11 @@ async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() 
         ),
     ];
     for line in commands {
-        let result = resolver(Duration::from_secs(30))
-            .resolve(&command(line))
-            .await;
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30)).resolve(&command(line)),
+        )
+        .await;
         let Err(error) = result else {
             panic!("the command failed, and this succeeded");
         };
@@ -561,21 +634,27 @@ async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() 
 
 // ------------------------------------------------------------------ files
 
-#[tokio::test]
-async fn a_fifo_is_not_read_and_does_not_block() {
+/// The read runs on a thread of its own: an open that blocks can't be cut
+/// short, and a test that waited for it, or a runtime that shut down after
+/// it, would hang with it.
+#[test]
+fn a_fifo_is_not_read_and_does_not_block() {
     use nix::sys::stat::Mode;
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("pipe");
     nix::unistd::mkfifo(&path, Mode::S_IRWXU).unwrap();
-    let result = tokio::time::timeout(
-        Duration::from_secs(5),
-        resolver(Duration::from_secs(1)).resolve(&file(&path)),
-    )
-    .await
-    .expect("opening a FIFO blocked");
+    let path = path.display().to_string();
+    let (sent, received) = std::sync::mpsc::channel();
+    let opened = path.clone();
+    std::thread::spawn(move || {
+        let _ = sent.send(crate::file::read(&opened, FileRead::Whole, None));
+    });
+    let result = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("opening a FIFO blocked");
     assert!(
         matches!(&result, Err(SecretError { problem: Problem::Unreachable { .. }, source })
-            if *source == SourceName::File { path: path.display().to_string() }),
+            if *source == SourceName::File { path }),
         "{result:?}"
     );
 }
@@ -826,6 +905,23 @@ fn the_os_keyring_is_used_only_when_it_is_asked_for() {
     assert!(os_keyring_enabled(Some(OsStr::new("1"))));
 }
 
+/// What the OS store's errors become. A value that is not text comes back
+/// with its bytes, which are a secret: they are dropped (I4).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn an_os_keyring_error_says_why_and_holds_no_secret() {
+    use crate::keyring_store::failure;
+    assert_eq!(failure(keyring::Error::NoEntry), Failure::NoEntry);
+    assert_eq!(
+        failure(keyring::Error::BadEncoding(b"hunter2\xff".to_vec())),
+        Failure::NotUnicode
+    );
+    let refused = || keyring::Error::NoStorageAccess("the keychain is locked".into());
+    let said = refused().to_string();
+    assert!(said.contains("the keychain is locked"), "{said}");
+    assert_eq!(failure(refused()), Failure::Unreachable(said));
+}
+
 /// The real store of the session. It needs one (an unlocked keychain, a
 /// Secret Service), so it runs only when `LADDERBACK_TEST_OS_KEYRING=1`, and
 /// touches nothing before that is checked.
@@ -884,11 +980,13 @@ async fn a_file_that_cannot_be_read_in_time_is_timed_out() {
             path: path.to_owned(),
         }))
     });
-    let started = Instant::now();
-    let result = resolver(Duration::from_millis(300))
-        .with_file_reader(hung)
-        .resolve(&file("/mnt/nas/secret"))
-        .await;
+    let result = within(
+        Duration::from_secs(2),
+        resolver(Duration::from_millis(300))
+            .with_file_reader(hung)
+            .resolve(&file("/mnt/nas/secret")),
+    )
+    .await;
     release.send(()).unwrap();
     assert_eq!(
         result,
@@ -898,11 +996,6 @@ async fn a_file_that_cannot_be_read_in_time_is_timed_out() {
             },
             problem: Problem::TimedOut { seconds: 1 },
         })
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "it waited {:?}",
-        started.elapsed()
     );
 }
 
@@ -918,23 +1011,18 @@ async fn a_command_that_will_not_die_does_not_hold_the_resolver_up() {
         reap_limit: Duration::from_millis(300),
         signal: &lost,
     };
-    let started = Instant::now();
     let sleeping = sh("exec sleep 60", Vec::<String>::new());
-    let running = run_with(&sleeping, Duration::from_millis(300), &stop);
-    let result = tokio::time::timeout(Duration::from_secs(10), running)
-        .await
-        .expect("the call waited for a command that cannot be killed");
+    let result = within(
+        Duration::from_secs(5),
+        run_with(&sleeping, Duration::from_millis(300), &stop),
+    )
+    .await;
     assert_eq!(
         result,
         Err(SecretError {
             source: program("sh"),
             problem: Problem::TimedOut { seconds: 1 },
         })
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "it waited {:?}",
-        started.elapsed()
     );
 }
 
@@ -976,12 +1064,12 @@ impl Signals {
 }
 
 /// Runs `script` (`$1` is its log) until `limit` and stops it with the real
-/// signals and a SIGKILL `grace` after the SIGTERM. A command that is still
-/// starting when the limit fires is ended by the TERM before it has trapped
-/// anything, which reads as a clean stop with nothing written: only a run
-/// whose script said `ready` once its trap was in place proves anything, so
-/// the others are tried again.
-async fn run_trapping(script: &str, limit: Duration, grace: Duration) -> Trapped {
+/// signals and a SIGKILL `grace` after the SIGTERM; a run still going after
+/// `bound` fails the test. A command that is still starting when the limit
+/// fires is ended by the TERM before it has trapped anything, which reads as
+/// a clean stop with nothing written: only a run whose script said `ready`
+/// once its trap was in place proves anything, so the others are tried again.
+async fn run_trapping(script: &str, limit: Duration, grace: Duration, bound: Duration) -> Trapped {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
     let command = sh(script, [log.display().to_string()]);
@@ -995,7 +1083,7 @@ async fn run_trapping(script: &str, limit: Duration, grace: Duration) -> Trapped
             signal: &|group, signal| signals.send(group, signal),
         };
         let started = Instant::now();
-        let result = run_with(&command, limit, &stop).await;
+        let result = within(bound, run_with(&command, limit, &stop)).await;
         let elapsed = started.elapsed();
         written = fs::read_to_string(&log)
             .unwrap_or_default()
@@ -1042,6 +1130,8 @@ async fn a_timed_out_command_gets_sigterm_before_anything_else() {
         ),
         limit,
         Duration::from_secs(20),
+        // Far less than the grace: the call does not wait it out.
+        limit + Duration::from_secs(5),
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1051,11 +1141,6 @@ async fn a_timed_out_command_gets_sigterm_before_anything_else() {
         trapped.lines
     );
     assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
-    assert!(
-        trapped.elapsed < limit + Duration::from_secs(10),
-        "the call waited {:?}",
-        trapped.elapsed
-    );
 }
 
 /// What a command says on its way out, it can say: a handler that writes to
@@ -1073,6 +1158,7 @@ async fn a_command_can_still_write_to_its_output_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1101,6 +1187,7 @@ async fn a_command_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(5),
+        Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1131,6 +1218,8 @@ async fn a_command_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         ),
         limit,
         grace,
+        // The reap after the SIGKILL is bounded by five seconds; one more is slack.
+        limit + grace + Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1146,12 +1235,6 @@ async fn a_command_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
     assert!(
         trapped.elapsed >= limit + grace,
         "the grace was not given: {:?}",
-        trapped.elapsed
-    );
-    // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
-    assert!(
-        trapped.elapsed < limit + grace + Duration::from_secs(15),
-        "the call waited {:?}",
         trapped.elapsed
     );
     let pid = trapped
@@ -1249,12 +1332,14 @@ async fn a_command_that_prints_without_end_gets_no_grace() {
         reap_limit: Duration::from_secs(5),
         signal: &|group, signal| signals.send(group, signal),
     };
-    let started = Instant::now();
     // `yes` takes the ignored SIGTERM of the shell that executes it.
-    let result = run_with(
-        &sh("trap '' TERM; exec yes", Vec::<String>::new()),
-        Duration::from_secs(60),
-        &stop,
+    let result = within(
+        Duration::from_secs(5),
+        run_with(
+            &sh("trap '' TERM; exec yes", Vec::<String>::new()),
+            Duration::from_secs(60),
+            &stop,
+        ),
     )
     .await;
     assert_eq!(
@@ -1267,11 +1352,6 @@ async fn a_command_that_prints_without_end_gets_no_grace() {
         })
     );
     assert_eq!(signals.sent(), [(Signal::SIGKILL, true)]);
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "took {:?}",
-        started.elapsed()
-    );
 }
 
 /// What the grace can't do: a command that ends on the SIGTERM is reaped, and
@@ -1293,6 +1373,7 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_command_that_ended_on_it()
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        Duration::from_secs(6),
     )
     .await;
     let descendant = trapped
@@ -1330,14 +1411,17 @@ async fn the_call_waits_for_a_killed_command_to_be_reaped() {
         signal: &late,
     };
     let started = Instant::now();
-    let result = run_with(&sh("sleep 60", Vec::<String>::new()), limit, &stop).await;
+    let result = within(
+        Duration::from_secs(5),
+        run_with(&sh("sleep 60", Vec::<String>::new()), limit, &stop),
+    )
+    .await;
     let elapsed = started.elapsed();
     assert_eq!(result, timed_out());
     assert!(
         elapsed >= limit + grace + delay,
         "the call did not wait for the command: {elapsed:?}"
     );
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 /// A command that ended by itself is reaped: nothing is signalled, as the
@@ -1351,17 +1435,23 @@ async fn a_command_that_ends_by_itself_is_never_signalled() {
         reap_limit: Duration::from_secs(5),
         signal: &signal,
     };
-    let result = run_with(
-        &sh("echo hunter2", Vec::<String>::new()),
+    let result = within(
         Duration::from_secs(5),
-        &stop,
+        run_with(
+            &sh("echo hunter2", Vec::<String>::new()),
+            Duration::from_secs(5),
+            &stop,
+        ),
     )
     .await;
     assert_eq!(result, Ok(SecretValue::new("hunter2")));
-    let failed = run_with(
-        &sh("exit 3", Vec::<String>::new()),
+    let failed = within(
         Duration::from_secs(5),
-        &stop,
+        run_with(
+            &sh("exit 3", Vec::<String>::new()),
+            Duration::from_secs(5),
+            &stop,
+        ),
     )
     .await;
     assert!(failed.is_err());
