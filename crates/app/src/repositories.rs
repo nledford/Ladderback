@@ -184,7 +184,9 @@ impl ConnectRepository {
     }
 }
 
-/// The settings with every reference resolved, ready for a job. The resolved
+/// The settings with every reference resolved, ready for a job. The resolver's
+/// warnings about how each secret was read are dropped: like progress, they
+/// belong to the operation log, which these requests don't write (see `run`).
 #[allow(clippy::result_large_err)]
 async fn access(
     resolve: &ResolveRepository,
