@@ -1,0 +1,36 @@
+# Dependabot. Every action in the workflows is pinned to a commit SHA, and a
+# pin never moves on its own: this keeps them current. Dependabot updates the
+# SHA and its `# vX.Y.Z` comment together.
+version: 2
+updates:
+  # The workflows' actions: one grouped pull request a week. A release must
+  # be a week old before it is proposed, so a compromised release that is
+  # pulled within days never reaches a pull request. These pull requests edit
+  # `.github/workflows/`, so the maintainer merges them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  # Cargo: security updates only. `open-pull-requests-limit: 0` turns off
+  # version updates, which stay a choice someone makes, but Dependabot still
+  # opens a pull request for a RustSec advisory that affects the lockfile,
+  # under this entry's commit prefix. The cooldown doesn't delay a security
+  # update; it applies if version updates are ever turned on.
+  - package-ecosystem: cargo
+    directory: /
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: fix
+      include: scope
