@@ -49,13 +49,19 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
-# Lint: clippy on the host crates and on the web UI (wasm32), the type check of
-# the TypeScript tooling (tsconfig.json; its compiler is a ui-tests
+# Clippy on the host crates: the part of `lint` that can differ by OS
+# (`cfg(target_os)` code), and so the only part CI runs on macOS too.
+[doc('Clippy on the host crates only, the part of `lint` that can differ by OS.')]
+[group('quality')]
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Lint: `clippy`, clippy on the web UI (wasm32), the type check of the
+# TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), the journey lint, then the check that every path AGENTS.md
 # and CLAUDE.md name exists.
 [group('quality')]
-lint: _ui-deps
-    cargo clippy --workspace --all-targets -- -D warnings
+lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
     cd ui-tests && npm run --silent lint
