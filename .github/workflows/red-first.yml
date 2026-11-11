@@ -89,17 +89,10 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: npm ci
         working-directory: ui-tests
-      # The Chromium action and its script from the merge commit, like this
-      # workflow: the pull request's head, checked out above, may predate them.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          path: .ci-tools
-          sparse-checkout: |
-            .github/actions
-            scripts/install-chromium.sh
-          sparse-checkout-cone-mode: false
-      - uses: ./.ci-tools/.github/actions/chromium
+      # `$/`: the action and its script from the commit this workflow runs,
+      # the merge commit, not from the pull request's head checked out above,
+      # which may predate them.
+      - uses: $/.github/actions/chromium
       - run: just red-first "origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}

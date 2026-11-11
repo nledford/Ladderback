@@ -1,8 +1,9 @@
 # Playwright's Chromium and the system packages it needs, for the @ui scenarios
 # of ci.yml's `ui` job and of red-first.yml. Use it after `npm ci` in ui-tests,
-# on a GitHub-hosted Linux runner. It runs scripts/install-chromium.sh from the
-# tree it was taken from, which red-first.yml takes from the merge commit: a
-# pull request's own head may predate both files.
+# on a GitHub-hosted Linux runner, as `uses: $/.github/actions/chromium`: GitHub
+# then fetches the action from the commit the workflow runs, with the script
+# beside it, whatever the job checked out (red-first.yml checks out a pull
+# request's head, which may predate both files).
 #
 # Two caches, both keyed on ui-tests/package-lock.json, which pins the
 # Playwright version:

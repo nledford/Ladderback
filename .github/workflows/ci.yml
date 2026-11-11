@@ -195,7 +195,7 @@ jobs:
           tool: just,trunk
       - run: npm ci
         working-directory: ui-tests
-      - uses: ./.github/actions/chromium
+      - uses: $/.github/actions/chromium
       - run: just test-ui
       # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
       - if: github.event_name == 'push'
