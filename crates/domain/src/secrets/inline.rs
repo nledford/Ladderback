@@ -99,25 +99,23 @@ pub fn url_password_written(text: &str) -> bool {
 }
 
 /// Whether an rclone connection string keeps a credential as text: one of
-/// its settings (`rclone::s3,secret_access_key=…:bucket`,
-/// `rclone:remote,pass=…:path`) whose key names a credential
-/// ([`is_rclone_secret_option`]) and whose value, quotes aside, is not empty
-/// and holds no `${…}` reference. What follows the settings is the path,
-/// which holds none.
+/// its credentials ([`Walk::of`]: `rclone::s3,secret_access_key=…:bucket`,
+/// `rclone:remote,pass=…:path`, or one of a location written in a setting)
+/// that holds no `${…}` reference.
 fn rclone_credential_written(location: &str) -> bool {
     let Some(remote) = rclone_remote(location) else {
         return false;
     };
-    let pieces = written_pieces(remote).0;
-    rclone_settings(&pieces)
-        .into_iter()
-        .filter_map(|setting| credential(&pieces, setting))
-        .any(|value| {
-            let value = pieces
-                .get(unquoted(&pieces, value))
-                .unwrap_or_default();
-            !value.is_empty() && !value.contains(&Piece::Reference)
+    let walk = Walk::of(written_pieces(remote).0);
+    walk.found.iter().any(|found| {
+        walk.levels.get(found.level).is_some_and(|level| {
+            !level
+                .pieces
+                .get(unquoted(&level.pieces, found.value.clone()))
+                .unwrap_or_default()
+                .contains(&Piece::Reference)
         })
+    })
 }
 
 /// The most credentials one rclone location may hold. Each is a secret a
@@ -127,33 +125,17 @@ fn rclone_credential_written(location: &str) -> bool {
 pub const MAX_RCLONE_CREDENTIALS: usize = 16;
 
 /// Whether an rclone location holds more than [`MAX_RCLONE_CREDENTIALS`]
-/// credentials: settings whose key names one ([`is_rclone_secret_option`])
-/// and whose value, quotes aside, is not empty. False for any other
-/// location.
+/// credentials, as [`Walk::of`] finds them, at every level. False for any
+/// other location.
 pub fn too_many_rclone_credentials(location: &str) -> bool {
     rclone_remote(location).is_some_and(|remote| {
-        credential_values(&written_pieces(remote).0).len() > MAX_RCLONE_CREDENTIALS
+        Walk::of(written_pieces(remote).0).found.len() > MAX_RCLONE_CREDENTIALS
     })
 }
 
-/// The value of each setting of an rclone remote, read as `pieces`, whose
-/// key names a credential ([`is_rclone_secret_option`]) and that is not
-/// empty, quotes aside.
-fn credential_values(pieces: &[Piece]) -> Vec<Range<usize>> {
-    rclone_settings(pieces)
-        .into_iter()
-        .filter_map(|setting| credential(pieces, setting))
-        .filter(|value| !unquoted(pieces, value.clone()).is_empty())
-        .collect()
-}
-
 /// What of an rclone location must not show wherever the location is echoed
-/// (I4): the value of each of its settings whose key names a credential
-/// ([`is_rclone_secret_option`]) and that is not empty, quotes aside. Each is
-/// given as `location` writes it, quotes and `$${` included, and as rclone
-/// reads it: with `$${` as `${`, without the quotes around it, and with a
-/// quote written twice inside them as one. A value with a `${…}` reference
-/// in it is given only as written. A location with more than
+/// (I4): each of its credentials ([`Walk::of`]) in every form a text may
+/// show it in ([`Walk::forms`]). A location with more than
 /// [`MAX_RCLONE_CREDENTIALS`] of them, which a job refuses, is one secret
 /// whole. Empty for any other location.
 pub(super) fn rclone_credentials(location: &str) -> Vec<SecretValue> {
@@ -161,45 +143,13 @@ pub(super) fn rclone_credentials(location: &str) -> Vec<SecretValue> {
         return Vec::new();
     };
     let (pieces, starts) = written_pieces(remote);
-    let values = credential_values(&pieces);
-    if values.len() > MAX_RCLONE_CREDENTIALS {
+    let walk = Walk::of(pieces);
+    if walk.found.len() > MAX_RCLONE_CREDENTIALS {
         return vec![SecretValue::new(location)];
     }
-    let written = |range: &Range<usize>| -> String {
-        starts
-            .get(range.start)
-            .zip(starts.get(range.end))
-            .and_then(|(&from, &to)| remote.get(from..to))
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let text = |range: &Range<usize>| -> Option<String> {
-        pieces
-            .get(range.clone())
-            .unwrap_or_default()
-            .iter()
-            .map(|piece| match piece {
-                Piece::Char(c) => Some(*c),
-                Piece::Reference => None,
-            })
-            .collect()
-    };
     let mut found: Vec<String> = Vec::new();
-    for value in values {
-        let inner = unquoted(&pieces, value.clone());
-        let inner_forms: Vec<String> = std::iter::once(written(&inner))
-            .chain(text(&inner))
-            .collect();
-        let mut forms: Vec<String> = std::iter::once(written(&value))
-            .chain(text(&value))
-            .collect();
-        if let Some(Piece::Char(quote)) = pieces.get(value.start).filter(|_| inner != value) {
-            let twice: String = [*quote, *quote].iter().collect();
-            let once = quote.to_string();
-            forms.extend(inner_forms.iter().map(|form| form.replace(&twice, &once)));
-        }
-        forms.extend(inner_forms);
-        for form in forms {
+    for credential in &walk.found {
+        for form in walk.forms(credential, remote, &starts) {
             if !found.contains(&form) {
                 found.push(form);
             }
@@ -216,36 +166,235 @@ fn rclone_remote(location: &str) -> Option<&str> {
     Some(rest.strip_prefix(':').unwrap_or(rest))
 }
 
-/// The value of `setting`, the pieces after its first `=`, when its key
-/// names a credential in a connection string ([`is_rclone_secret_option`]).
-/// A key that holds a reference names nothing in the file.
-fn credential(pieces: &[Piece], setting: Range<usize>) -> Option<Range<usize>> {
-    let equals = pieces
-        .get(setting.clone())?
-        .iter()
-        .position(|piece| *piece == Piece::Char('='))?;
-    let value_start = setting.start.saturating_add(equals);
-    let name: String = pieces
-        .get(setting.start..value_start)?
+/// How many levels deep an rclone location is read for credentials: the
+/// location itself is the first, and a location written in the value of
+/// one of its settings (crypt's `remote=':s3,…:bucket'`) the next.
+const MAX_RCLONE_DEPTH: usize = 4;
+
+/// One location of an rclone location: the location itself, or one written
+/// in the value of a setting of another.
+struct Level {
+    /// The location as rclone reads it, its remote's or backend's name first.
+    pieces: Vec<Piece>,
+    /// For each of `pieces`, the first and the last piece of the location
+    /// itself it is read from (a quote written twice is read as one);
+    /// `None` for the location itself.
+    at: Option<Vec<(usize, usize)>>,
+    /// The level in a setting of which this one is written.
+    parent: Option<usize>,
+}
+
+impl Level {
+    /// The first and the last piece of the location itself that piece
+    /// `index` is read from.
+    fn span(&self, index: usize) -> Option<(usize, usize)> {
+        match &self.at {
+            None => Some((index, index)),
+            Some(at) => at.get(index).copied(),
+        }
+    }
+
+    /// The pieces read from pieces `first..=last` of the location itself.
+    fn within(&self, first: usize, last: usize) -> &[Piece] {
+        let range = match &self.at {
+            None => first..last.saturating_add(1),
+            Some(at) => {
+                at.partition_point(|&(from, _)| from < first)
+                    ..at.partition_point(|&(_, to)| to <= last)
+            }
+        };
+        self.pieces.get(range).unwrap_or_default()
+    }
+}
+
+/// A credential: its value, quotes included, as a range of the pieces of
+/// the level it is in.
+struct Found {
+    level: usize,
+    value: Range<usize>,
+}
+
+/// The credentials of an rclone location, and the levels they are in.
+struct Walk {
+    levels: Vec<Level>,
+    found: Vec<Found>,
+}
+
+impl Walk {
+    /// The credentials of an rclone location, `pieces` what follows
+    /// `rclone:` ([`rclone_remote`]): the value of each setting whose key
+    /// names a credential ([`is_rclone_secret_option`]) and that is not
+    /// empty, quotes aside. The value of any other setting that is a location
+    /// of its own ([`nested_location`]) is read the same way, to
+    /// [`MAX_RCLONE_DEPTH`] levels; one deeper is a credential whole.
+    fn of(pieces: Vec<Piece>) -> Self {
+        let mut walk = Self {
+            levels: vec![Level {
+                pieces,
+                at: None,
+                parent: None,
+            }],
+            found: Vec::new(),
+        };
+        walk.read(0, 1);
+        walk
+    }
+
+    /// Reads level `index`, `depth` levels deep.
+    fn read(&mut self, index: usize, depth: usize) {
+        let Some(level) = self.levels.get(index) else {
+            return;
+        };
+        let mut nested = Vec::new();
+        for setting in rclone_settings(&level.pieces).0 {
+            let Some((secret, value)) = setting_value(&level.pieces, setting) else {
+                continue;
+            };
+            if unquoted(&level.pieces, value.clone()).is_empty() {
+                continue;
+            }
+            if secret {
+                self.found.push(Found {
+                    level: index,
+                    value,
+                });
+            } else if let Some(location) = nested_location(level, index, value.clone()) {
+                if depth < MAX_RCLONE_DEPTH {
+                    nested.push(location);
+                } else {
+                    self.found.push(Found {
+                        level: index,
+                        value,
+                    });
+                }
+            }
+        }
+        for location in nested {
+            self.levels.push(location);
+            self.read(self.levels.len().saturating_sub(1), depth.saturating_add(1));
+        }
+    }
+
+    /// Each form of `found` a text may show: its value, and its value without
+    /// the quotes around it, as `remote` writes them (`starts`: where each
+    /// piece is written, [`written_pieces`]) and as each level reads them,
+    /// from the location itself to the level it is in; and without its
+    /// quotes with a quote written twice as one, as rclone reads it last. A
+    /// form with a `${…}` reference in it is given only as written.
+    fn forms(&self, found: &Found, remote: &str, starts: &[usize]) -> Vec<String> {
+        let Some(level) = self.levels.get(found.level) else {
+            return Vec::new();
+        };
+        let inner = unquoted(&level.pieces, found.value.clone());
+        let quote = match level.pieces.get(found.value.start) {
+            Some(Piece::Char(quote)) if inner != found.value => Some(*quote),
+            _ => None,
+        };
+        let mut forms = Vec::new();
+        for (range, quote) in [(found.value.clone(), None), (inner, quote)] {
+            let Some((first, last)) = level
+                .span(range.start)
+                .zip(range.end.checked_sub(1).and_then(|last| level.span(last)))
+            else {
+                continue;
+            };
+            let (first, last) = (first.0, last.1);
+            let mut region: Vec<String> = starts
+                .get(first)
+                .zip(starts.get(last.saturating_add(1)))
+                .and_then(|(&from, &to)| remote.get(from..to))
+                .map(str::to_owned)
+                .into_iter()
+                .collect();
+            let mut at = Some(found.level);
+            while let Some(reader) = at.and_then(|index| self.levels.get(index)) {
+                region.extend(text(reader.within(first, last)));
+                at = reader.parent;
+            }
+            if let Some(quote) = quote {
+                let twice: String = [quote, quote].iter().collect();
+                let once = quote.to_string();
+                let read: Vec<String> = region
+                    .iter()
+                    .map(|form| form.replace(&twice, &once))
+                    .collect();
+                forms.extend(read);
+            }
+            forms.extend(region);
+        }
+        forms
+    }
+}
+
+/// `pieces` as text, `None` when a `${…}` reference is among them.
+fn text(pieces: &[Piece]) -> Option<String> {
+    pieces
         .iter()
         .map(|piece| match piece {
             Piece::Char(c) => Some(*c),
             Piece::Reference => None,
         })
-        .collect::<Option<String>>()?;
-    is_rclone_secret_option(&name).then(|| value_start.saturating_add(1)..setting.end)
+        .collect()
+}
+
+/// The location written in `value`, a setting's value at `level` (whose
+/// index is `index`), as rclone reads it: without the quotes around the
+/// value, with a quote written twice as one, and without the `:` that starts
+/// a backend's name. `None` when the value is not quoted, which leaves no
+/// room for a `,` or a `:`, or when it is no location to rclone: one that
+/// names no backend and has no `:` outside quotes is a local path.
+fn nested_location(level: &Level, index: usize, value: Range<usize>) -> Option<Level> {
+    let inner = unquoted(&level.pieces, value.clone());
+    let &quote = level.pieces.get(value.start).filter(|_| inner != value)?;
+    let backend = level.pieces.get(inner.start) == Some(&Piece::Char(':'));
+    let mut pieces = Vec::with_capacity(inner.len());
+    let mut at = Vec::with_capacity(inner.len());
+    let mut next = inner.start.saturating_add(usize::from(backend));
+    while next < inner.end {
+        let piece = *level.pieces.get(next)?;
+        pieces.push(piece);
+        let twice = piece == quote && level.pieces.get(next.saturating_add(1)) == Some(&quote);
+        let last = next.saturating_add(usize::from(twice));
+        at.push((level.span(next)?.0, level.span(last)?.1));
+        next = last.saturating_add(1);
+    }
+    let location = backend || rclone_settings(&pieces).1;
+    location.then_some(Level {
+        pieces,
+        at: Some(at),
+        parent: Some(index),
+    })
+}
+
+/// The value of `setting`, the pieces after its first `=`, and whether its
+/// key names a credential in a connection string
+/// ([`is_rclone_secret_option`]). A key that holds a reference names nothing
+/// in the file. `None` for a setting with no `=`.
+fn setting_value(pieces: &[Piece], setting: Range<usize>) -> Option<(bool, Range<usize>)> {
+    let equals = pieces
+        .get(setting.clone())?
+        .iter()
+        .position(|piece| *piece == Piece::Char('='))?;
+    let value_start = setting.start.saturating_add(equals);
+    let secret = text(pieces.get(setting.start..value_start)?)
+        .is_some_and(|name| is_rclone_secret_option(&name));
+    Some((secret, value_start.saturating_add(1)..setting.end))
 }
 
 /// The settings of an rclone remote, as rclone reads them: the pieces between
 /// commas up to the `:` that starts the path, the remote's name first, each
-/// as the range of `pieces` it covers. A value may be quoted with `'` or `"`,
-/// where a quote written twice stands for itself, so a `,` or `:` inside the
-/// quotes ends nothing.
-fn rclone_settings(pieces: &[Piece]) -> Vec<Range<usize>> {
+/// as the range of `pieces` it covers; and whether such a `:` ends them. A
+/// value that starts with `'` or `"` is quoted, where a quote written twice
+/// stands for itself, so a `,` or `:` inside the quotes ends nothing; a
+/// quote anywhere else is text.
+fn rclone_settings(pieces: &[Piece]) -> (Vec<Range<usize>>, bool) {
     let mut settings = Vec::new();
     let mut start = 0;
     let mut at = 0;
+    // Where the value of the setting read starts, once its first `=` is.
+    let mut value_start = None;
     let mut quote = None;
+    let mut path = false;
     while let Some(piece) = pieces.get(at) {
         let next = at.saturating_add(1);
         match (quote, *piece) {
@@ -257,23 +406,25 @@ fn rclone_settings(pieces: &[Piece]) -> Vec<Range<usize>> {
                 }
             }
             (Some(_), _) => {}
-            (None, Piece::Char(c @ ('\'' | '"')))
-                if at.checked_sub(1).and_then(|before| pieces.get(before))
-                    == Some(&Piece::Char('=')) =>
-            {
+            (None, Piece::Char(c @ ('\'' | '"'))) if value_start == Some(at) => {
                 quote = Some(c);
             }
+            (None, Piece::Char('=')) if value_start.is_none() => value_start = Some(next),
             (None, Piece::Char(',')) => {
                 settings.push(start..at);
                 start = next;
+                value_start = None;
             }
-            (None, Piece::Char(':')) => break,
+            (None, Piece::Char(':')) => {
+                path = true;
+                break;
+            }
             (None, _) => {}
         }
         at = at.saturating_add(1);
     }
     settings.push(start..at);
-    settings
+    (settings, path)
 }
 
 /// The range of a setting's value, `value`, without the quotes around it.
@@ -401,12 +552,8 @@ mod tests {
         // A quoted `,` ends no setting; another key, an empty value and the
         // path after the settings hold no credential.
         let others = ",pass='demo,pass=x',host=nas,pass=,pass='',pass=\"\"";
-        let location = |count: usize| {
-            format!(
-                "rclone::sftp{}{others}:/pass=x,key=y",
-                credentials(count)
-            )
-        };
+        let location =
+            |count: usize| format!("rclone::sftp{}{others}:/pass=x,key=y", credentials(count));
         assert!(!too_many_rclone_credentials(&location(15)));
         assert!(too_many_rclone_credentials(&location(16)));
         assert!(too_many_rclone_credentials(&format!(
