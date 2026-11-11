@@ -1,10 +1,13 @@
-//! Which snapshots a forget run may remove (technical design §7.3). The
-//! partition into managed, orphaned and unmanaged groups is the maintenance
-//! owner's own decision, and it is the whole of invariant I6: forget only
-//! ever removes snapshots a plan of this agent owns, by tag. Untagged
-//! snapshots are never touched, and a tagged group whose plan or agent this
-//! configuration doesn't know is left alone and listed as orphaned, for the
-//! user to adopt, give a policy, or delete explicitly.
+//! Which snapshots a forget run may remove, and who may run maintenance at
+//! all (technical design §7.3). [`Ownership`] is invariant I1 on an agent
+//! with no hub: only a repository whose entry asks for `local` is forgotten,
+//! pruned, checked or adopted from here. The partition into managed,
+//! orphaned and unmanaged groups is the maintenance owner's own decision,
+//! and it is the whole of invariant I6: forget only ever removes snapshots a
+//! plan of this agent owns, by tag. Untagged snapshots are never touched,
+//! and a tagged group whose plan or agent this configuration doesn't know is
+//! left alone and listed as orphaned, for the user to adopt, give a policy,
+//! or delete explicitly.
 //!
 //! Which of a managed group's snapshots the plan's policy lets go is not
 //! decided here: retention is evaluated with rustic's own rules, through the
@@ -522,8 +525,7 @@ impl Ownership {
     /// leaves the repository to something outside Ladderback, such as a
     /// cron job: neither runs anything here.
     pub fn owned_here(request: Maintenance) -> bool {
-        let _ = request;
-        todo!("which requests make this agent the owner")
+        matches!(request, Maintenance::Local)
     }
 }
 
