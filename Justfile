@@ -222,17 +222,19 @@ serve: build
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
-# copy of it, when the local one is missing, and that package exits 0. The
+# copy of it, when the local one is missing, and that package exits 0. Its
+# config is TypeScript, which it doesn't look for by itself, so it is named. The
 # binary is built here, after `web-test`, so that it embeds the web UI with the
 # gallery, not the release one `build` makes. The scenarios run the binary
 # cargo just built, wherever its target directory is (`CARGO_TARGET_DIR`, as
-# each worktree sets its own), unless `LADDERBACK_BIN` names another.
+# each worktree sets its own; `ui-tests/support/world.ts` asks cargo), unless
+# `LADDERBACK_BIN` names another.
 [doc('Run the @ui scenarios in Chromium against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    target="$(cargo metadata --format-version 1 --no-deps | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s).target_directory))')" && cd ui-tests && LADDERBACK_BIN="${LADDERBACK_BIN:-$target/debug/ladderback}" node_modules/.bin/cucumber-js "$@"
+    cd ui-tests && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.

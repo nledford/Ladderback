@@ -18,7 +18,7 @@
 //! toolchain's own wrappers rebuilds and writes to that folder as well.
 //!
 //! The `@ui` journeys start the daemon from Node, with scratch folders of
-//! their own (`ui-tests/support/world.mjs`); they are not run here.
+//! their own (`ui-tests/support/world.ts`); they are not run here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

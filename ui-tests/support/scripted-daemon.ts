@@ -12,22 +12,46 @@
 // run's own daemon, and a request this does not answer, such as a start or a
 // cancel, goes on to that daemon.
 
+import type { BrowserContext, WebSocketRoute } from "playwright";
+
 // The page opens its events stream once it has read the history.
 const STREAM_PATIENCE_MS = 10_000;
 
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/** An operation as the daemon's wire has it, in the history the page reads. */
+interface Operation {
+  id: string;
+  plan: string;
+  kind: "backup";
+  status: string;
+  "queued-at": string;
+  "started-at": string | null;
+  "finished-at": string | null;
+  "warning-codes": string[];
+  "failure-code": string | null;
+  result: null;
+}
 
 export class ScriptedDaemon {
   /** The history the page reads: the operations as the daemon's wire has
    *  them, newest first. */
-  #operations = [];
+  #operations: Operation[] = [];
   /** The events stream the page last opened, once it has opened one. */
-  #stream = null;
+  #stream: WebSocketRoute | null = null;
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
    *  left out. */
-  addBackup(plan, status, { queuedAt, startedAt = null, finishedAt = null }) {
+  addBackup(
+    plan: string,
+    status: string,
+    {
+      queuedAt,
+      startedAt = null,
+      finishedAt = null,
+    }: { queuedAt: string; startedAt?: string | null; finishedAt?: string | null },
+  ): void {
     this.#operations.unshift({
       id: `018f0000-0000-7000-8000-${String(this.#operations.length + 1).padStart(12, "0")}`,
       plan,
@@ -43,14 +67,14 @@ export class ScriptedDaemon {
   }
 
   /** The newest backup of `plan` in the history. */
-  #backupOf(plan) {
+  #backupOf(plan: string): Operation {
     const found = this.#operations.find((operation) => operation.plan === plan);
     if (found === undefined) throw new Error(`the scripted daemon has no backup of ${plan}`);
     return found;
   }
 
   /** Answers a context's reads of the daemon with this script. */
-  async install(context) {
+  async install(context: BrowserContext): Promise<void> {
     await context.route("**/api/v1/operations", (route) =>
       route.request().method() === "GET"
         ? route.fulfill({ json: { operations: this.#operations, next: null } })
@@ -72,7 +96,7 @@ export class ScriptedDaemon {
   }
 
   /** Tells the page `event` over its events stream, once it has one open. */
-  async #tell(event) {
+  async #tell(event: Record<string, unknown>): Promise<void> {
     const end = Date.now() + STREAM_PATIENCE_MS;
     while (this.#stream === null) {
       if (Date.now() > end) throw new Error("the page never opened its events stream");
@@ -82,7 +106,7 @@ export class ScriptedDaemon {
   }
 
   /** The backup of `plan` begins. */
-  async starts(plan, startedAt) {
+  async starts(plan: string, startedAt: string): Promise<void> {
     await this.#tell({
       type: "operation-started",
       operation: this.#backupOf(plan).id,
@@ -93,7 +117,7 @@ export class ScriptedDaemon {
 
   /** The backup of `plan` reports `steps` steps of progress, the last one its
    *  whole total, one event each. */
-  async progresses(plan, steps) {
+  async progresses(plan: string, steps: number): Promise<void> {
     const operation = this.#backupOf(plan).id;
     for (let current = 1; current <= steps; current += 1) {
       await this.#tell({ type: "operation-progress", operation, current, total: steps });

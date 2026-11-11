@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
+import type { Locator, Page } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.mjs";
+import { journey, namePattern } from "../support/keyboard.ts";
+import type { BrowserWorld } from "../support/world.ts";
 
 // More Tab presses than any page has stops: the gallery's, the longest, and
 // the skip link and the navigation's three links before it.
@@ -15,25 +17,25 @@ const REGION_PATIENCE_MS = 5_000;
 // The time a region stays silent: past the merge window and the set delay.
 const SILENCE_MS = 2_500;
 
-const REGIONS = {
+const REGIONS: Record<string, string> = {
   polite: "status",
   assertive: "alert",
 };
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-When("I open the component gallery", async function () {
+When("I open the component gallery", async function (this: BrowserWorld) {
   await this.open("/_gallery");
 });
 
-When("I open the address {string}", async function (address) {
+When("I open the address {string}", async function (this: BrowserWorld, address: string) {
   await this.open(address);
 });
 
 /** Presses `key` until focus is on the one element with this role and name. */
-async function pressUntilFocusIsOn(world, key, role, name) {
+async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role: string, name: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   const focused = async () =>
@@ -44,15 +46,15 @@ async function pressUntilFocusIsOn(world, key, role, name) {
   assert.ok(await focused(), `focus did not reach the ${role} "${name}" within ${MAX_TABS} ${key} presses`);
 }
 
-When("I press Tab until focus is on the {word} {string}", async function (role, name) {
+When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Tab", role, name);
 });
 
-When("I press Shift+Tab until focus is on the {word} {string}", async function (role, name) {
+When("I press Shift+Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Shift+Tab", role, name);
 });
 
-Then("focus is on the main heading {string}", async function (name) {
+Then("focus is on the main heading {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
   await keys.assertFocused(
     keys.byRole("heading", { level: 1, name }),
@@ -60,13 +62,13 @@ Then("focus is on the main heading {string}", async function (name) {
   );
 });
 
-Then("focus is on the main heading", async function () {
+Then("focus is on the main heading", async function (this: BrowserWorld) {
   const keys = journey(this.page);
   await keys.assertFocused(keys.byRole("heading", { level: 1 }), "the main heading");
 });
 
 /** Where focus is, as the end of a sentence. */
-function whereFocusIs(page) {
+function whereFocusIs(page: Page): Promise<string> {
   return page.evaluate(() => {
     const el = document.activeElement;
     return el === null || el === document.body
@@ -78,14 +80,14 @@ function whereFocusIs(page) {
 // Focus an update did not take away (WCAG 2.4.3): the reader reached the
 // control before the update, and what the update changed was not hers to
 // notice. A control the update replaced is a new element, and has no focus.
-Then("focus stays on the {word} {string}", async function (role, name) {
+Then("focus stays on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   const target = journey(this.page).byRole(role, { name: namePattern(name) });
   assert.equal(await target.count(), 1, `the ${role} "${name}" is no longer on the page`);
   const stays = await target.evaluate((el) => el === document.activeElement);
   assert.ok(stays, `focus left the ${role} "${name}": it is ${await whereFocusIs(this.page)}`);
 });
 
-Then("focus is inside the dialog {string}", async function (name) {
+Then("focus is inside the dialog {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
   const dialog = keys.byRole("dialog", { name });
   assert.equal(await dialog.count(), 1, `the dialog "${name}" is not open`);
@@ -94,22 +96,24 @@ Then("focus is inside the dialog {string}", async function (name) {
 });
 
 /** The one live region of this politeness, found by its role. */
-async function region(world, politeness) {
-  const found = journey(world.page).byRole(REGIONS[politeness]);
+async function region(world: BrowserWorld, politeness: string): Promise<Locator> {
+  const role = REGIONS[politeness];
+  assert.ok(role !== undefined, `no live region is polite "${politeness}": say polite or assertive`);
+  const found = journey(world.page).byRole(role);
   assert.equal(
     await found.count(),
     1,
-    `the page needs exactly one ${politeness} region (role="${REGIONS[politeness]}")`,
+    `the page needs exactly one ${politeness} region (role="${role}")`,
   );
   return found;
 }
 
-const textOf = async (found) => (await found.textContent()).trim();
+const textOf = async (found: Locator) => ((await found.textContent()) ?? "").trim();
 
 // The text is read until it matches or the patience runs out, so that the
 // two seconds a polite message waits don't fail the step. What it reports
 // when it never matches is the last text read.
-Then("the {word} region reads {string}", async function (politeness, expected) {
+Then("the {word} region reads {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
   const found = await region(this, politeness);
   const deadline = Date.now() + REGION_PATIENCE_MS;
   let actual = await textOf(found);
@@ -124,7 +128,7 @@ Then("the {word} region reads {string}", async function (politeness, expected) {
 // page's announcement shares the region with the ones before it, and a run
 // that ends quickly may finish before the journey reads the start: what a
 // journey checks is that the region comes to contain the message it expects.
-Then("the {word} region comes to contain {string}", async function (politeness, expected) {
+Then("the {word} region comes to contain {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
   const found = await region(this, politeness);
   const deadline = Date.now() + REGION_PATIENCE_MS;
   // What a reader hears has no bidi isolation marks (§4.5).
@@ -140,12 +144,12 @@ Then("the {word} region comes to contain {string}", async function (politeness, 
   );
 });
 
-Then("the {word} region is empty", async function (politeness) {
+Then("the {word} region is empty", async function (this: BrowserWorld, politeness: string) {
   assert.equal(await textOf(await region(this, politeness)), "", `the ${politeness} region`);
 });
 
 // Silence is shown by waiting: a region that fills in later is not silent.
-Then("the {word} region stays empty", async function (politeness) {
+Then("the {word} region stays empty", async function (this: BrowserWorld, politeness: string) {
   const found = await region(this, politeness);
   const until = Date.now() + SILENCE_MS;
   do {
@@ -154,7 +158,7 @@ Then("the {word} region stays empty", async function (politeness) {
   } while (Date.now() < until);
 });
 
-Then("the live regions stay silent", async function () {
+Then("the live regions stay silent", async function (this: BrowserWorld) {
   const regions = [await region(this, "polite"), await region(this, "assertive")];
   const until = Date.now() + SILENCE_MS;
   do {

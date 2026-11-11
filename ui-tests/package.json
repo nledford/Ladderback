@@ -4,8 +4,8 @@
   "type": "module",
   "description": "Runs Ladderback's @ui scenarios in a real browser: Playwright, axe-core and keyboard-only journeys (technical design §4.5, §13.2)",
   "scripts": {
-    "test": "cucumber-js",
-    "lint": "node scripts/lint-journeys.mjs"
+    "test": "cucumber-js --config cucumber.ts",
+    "lint": "node scripts/lint-journeys.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

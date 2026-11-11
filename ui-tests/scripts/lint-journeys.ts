@@ -1,5 +1,5 @@
 // Fails if a step file uses a pointer action. Journeys must work by
-// keyboard alone (A1), so they may only use support/keyboard.mjs.
+// keyboard alone (A1), so they may only use support/keyboard.ts.
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,7 +12,7 @@ const banned =
 
 let failures = 0;
 for (const entry of await readdir(stepsDir, { recursive: true })) {
-  if (!entry.endsWith(".mjs")) continue;
+  if (!entry.endsWith(".ts")) continue;
   const file = path.join(stepsDir, entry);
   const lines = (await readFile(file, "utf8")).split("\n");
   lines.forEach((line, index) => {
@@ -23,6 +23,6 @@ for (const entry of await readdir(stepsDir, { recursive: true })) {
   });
 }
 if (failures > 0) {
-  console.error(`${failures} pointer action(s); use support/keyboard.mjs instead.`);
+  console.error(`${failures} pointer action(s); use support/keyboard.ts instead.`);
   process.exit(1);
 }

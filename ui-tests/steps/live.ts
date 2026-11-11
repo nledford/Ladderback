@@ -11,11 +11,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { After, Given, Then, When } from "@cucumber/cucumber";
+import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
-import { namePattern } from "../support/keyboard.mjs";
-import { ScriptedDaemon } from "../support/scripted-daemon.mjs";
-import { fixtureRepo, startServer } from "../support/world.mjs";
+import { namePattern } from "../support/keyboard.ts";
+import { ScriptedDaemon } from "../support/scripted-daemon.ts";
+import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
 // initialized with. Not a real secret.
@@ -38,14 +39,14 @@ const UPDATE_PATIENCE_MS = 5_000;
 const SOURCE_FILES = { tiny: 3, small: 10_000, big: 50_000 };
 const FILE_BYTES = 2048;
 
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Polls `read` until it returns a string, or fails with what it last saw. */
-async function until(read, ms, what) {
+/** Polls `read` until it returns a value, or fails with what it last saw. */
+async function until<T>(read: () => Promise<T | null>, ms: number, what: string): Promise<T> {
   const end = Date.now() + ms;
-  let last;
+  let last: T | null = null;
   while (Date.now() < end) {
     last = await read();
     if (last !== null) return last;
@@ -56,13 +57,13 @@ async function until(read, ms, what) {
 
 /** The table a page shows, by its whole caption. A value in the caption is
  *  wrapped in bidi isolation marks, which a reader never hears (§4.5). */
-function table(world, name) {
+function table(world: BrowserWorld, name: string): Locator {
   return world.page.getByRole("table", { name: namePattern(name) });
 }
 
 /** Writes a demo plan's config and repository into a scratch folder, starts
  *  a daemon on it, and points the scenario's pages at that daemon. */
-export async function serveDemoPlan(world, plan, size) {
+export async function serveDemoPlan(world: BrowserWorld, plan: string, size: keyof typeof SOURCE_FILES): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");
@@ -96,7 +97,7 @@ export async function serveDemoPlan(world, plan, size) {
   world.baseUrl = url;
 }
 
-After(async function () {
+After(async function (this: BrowserWorld) {
   const own = this.ownServer;
   if (own && own.child.exitCode === null) {
     own.child.kill("SIGTERM");
@@ -107,31 +108,33 @@ After(async function () {
   }
 });
 
-Given("a demo plan {string} with a scratch repository", async function (plan) {
+Given("a demo plan {string} with a scratch repository", async function (this: BrowserWorld, plan: string) {
   await serveDemoPlan(this, plan, "small");
 });
 
-Given("a demo plan {string} with a big scratch repository", async function (plan) {
+Given("a demo plan {string} with a big scratch repository", async function (this: BrowserWorld, plan: string) {
   await serveDemoPlan(this, plan, "big");
 });
 
-// The scripted daemon (support/scripted-daemon.mjs): a Given says what its
+// The scripted daemon (support/scripted-daemon.ts): a Given says what its
 // history holds, and its Whens say what its events stream tells the page and
 // when.
-function scripted(world) {
+function scripted(world: BrowserWorld): ScriptedDaemon {
   assert.ok(world.scriptedDaemon, "this scenario's daemon is not scripted: a Given must say so");
   return world.scriptedDaemon;
 }
 
-Given("the daemon reports a queued backup of {string}", function (plan) {
-  this.scriptedDaemon = new ScriptedDaemon();
-  this.scriptedDaemon.addBackup(plan, "queued", { queuedAt: "2026-11-09T10:00:00Z" });
+Given("the daemon reports a queued backup of {string}", function (this: BrowserWorld, plan: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addBackup(plan, "queued", { queuedAt: "2026-11-09T10:00:00Z" });
+  this.scriptedDaemon = daemon;
 });
 
-Given("the daemon reports two finished backups of {string}", function (plan) {
-  this.scriptedDaemon = new ScriptedDaemon();
+Given("the daemon reports two finished backups of {string}", function (this: BrowserWorld, plan: string) {
+  const daemon = new ScriptedDaemon();
+  this.scriptedDaemon = daemon;
   for (const second of ["01", "02"]) {
-    this.scriptedDaemon.addBackup(plan, "succeeded", {
+    daemon.addBackup(plan, "succeeded", {
       queuedAt: `2026-11-09T10:00:${second}Z`,
       startedAt: `2026-11-09T10:00:${second}Z`,
       finishedAt: `2026-11-09T10:01:${second}Z`,
@@ -139,15 +142,15 @@ Given("the daemon reports two finished backups of {string}", function (plan) {
   }
 });
 
-When("the daemon reports that the backup of {string} has started", async function (plan) {
+When("the daemon reports that the backup of {string} has started", async function (this: BrowserWorld, plan: string) {
   await scripted(this).starts(plan, "2026-11-09T10:00:05Z");
 });
 
-When("the daemon reports {int} steps of progress of the backup of {string}", async function (steps, plan) {
+When("the daemon reports {int} steps of progress of the backup of {string}", async function (this: BrowserWorld, steps: number, plan: string) {
   await scripted(this).progresses(plan, steps);
 });
 
-When("the daemon has stopped", async function () {
+When("the daemon has stopped", async function (this: BrowserWorld) {
   const own = this.ownServer;
   assert.ok(own, "this scenario's daemon was never started");
   own.child.kill("SIGTERM");
@@ -156,24 +159,24 @@ When("the daemon has stopped", async function () {
 
 // The page's own loading state (§4.4): every answer the daemon owes the UI
 // arrives late, so the page opens on "Loading…" alone.
-When("the daemon's answers to the UI are delayed", function () {
+When("the daemon's answers to the UI are delayed", function (this: BrowserWorld) {
   this.answerDelayMs = 10_000;
 });
 
 // A shorter wait, for a journey that has to read a wait and then act within
 // it: every answer arrives this many seconds late.
-When("the daemon's answers to the UI are delayed by {int} seconds", function (seconds) {
+When("the daemon's answers to the UI are delayed by {int} seconds", function (this: BrowserWorld, seconds: number) {
   this.answerDelayMs = seconds * 1_000;
 });
 
-When("I reload the page", async function () {
+When("I reload the page", async function (this: BrowserWorld) {
   await this.page.reload();
   await this.page.getByRole("heading", { level: 1 }).waitFor();
 });
 
 // A row is named by its plan; what it shows is its life so far, which a
 // backup changes as it runs, so the step waits for the row to say it.
-Then("the table {string} has a row {string} that shows {string}", async function (name, row, status) {
+Then("the table {string} has a row {string} that shows {string}", async function (this: BrowserWorld, name: string, row: string, status: string) {
   const rows = table(this, name).getByRole("row", { name: new RegExp(escape(row)) });
   await until(
     async () => {
@@ -185,7 +188,7 @@ Then("the table {string} has a row {string} that shows {string}", async function
   );
 });
 
-Then("the table {string} has {int} rows", async function (name, count) {
+Then("the table {string} has {int} rows", async function (this: BrowserWorld, name: string, count: number) {
   const rows = table(this, name).locator("tbody tr");
   await until(
     async () => {
@@ -199,22 +202,30 @@ Then("the table {string} has {int} rows", async function (name, count) {
 
 // The cells of the named column each carry the instant they show, so the
 // order is read from those, not from localized text.
-async function instants(world, name, column) {
+async function instants(world: BrowserWorld, name: string, column: string): Promise<string[]> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
-  const index = await header.evaluate((cell) => cell.cellIndex);
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   return table(world, name)
     .locator("tbody tr")
-    .evaluateAll((rows, at) => rows.map((row) => row.cells[at].title), index);
+    .evaluateAll(
+      (rows: HTMLTableRowElement[], at) =>
+        rows.map((row) => {
+          const cell = row.cells[at];
+          if (cell === undefined) throw new Error(`a row has no cell ${at}`);
+          return cell.title;
+        }),
+      index,
+    );
 }
 
-Then("the table {string} shows its {string} column newest first", async function (name, column) {
+Then("the table {string} shows its {string} column newest first", async function (this: BrowserWorld, name: string, column: string) {
   const values = await instants(this, name, column);
   assert.ok(values.length > 0, `the table ${name} has no rows to be newest first`);
   const sorted = [...values].sort((a, b) => b.localeCompare(a));
   assert.deepEqual(values, sorted, `the ${column} column of ${name} is not newest first`);
 });
 
-Given("the browser is in the time zone {string}", function (zone) {
+Given("the browser is in the time zone {string}", function (this: BrowserWorld, zone: string) {
   this.contextOptions.timezoneId = zone;
 });
 
@@ -222,14 +233,22 @@ Given("the browser is in the time zone {string}", function (zone) {
 // is that instant read in the browser's own zone, as the browser's `Intl`
 // writes it: the default of the formatter is UTC, so a page that didn't pass
 // the zone would show the title's own hours.
-Then("the table {string} shows its {string} column in the time zone {string}", async function (name, column, zone) {
+Then("the table {string} shows its {string} column in the time zone {string}", async function (this: BrowserWorld, name: string, column: string, zone: string) {
   const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
-  const index = await header.evaluate((cell) => cell.cellIndex);
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const cells = await table(this, name)
     .locator("tbody tr")
-    .evaluateAll((rows, at) => rows.map((row) => [row.cells[at].title, row.cells[at].textContent]), index);
+    .evaluateAll(
+      (rows: HTMLTableRowElement[], at) =>
+        rows.map((row) => {
+          const cell = row.cells[at];
+          if (cell === undefined) throw new Error(`a row has no cell ${at}`);
+          return [cell.title, cell.textContent ?? ""] as const;
+        }),
+      index,
+    );
   assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
-  const fold = (text) => text.replace(/[\u202f\u00a0]/g, " ");
+  const fold = (text: string) => text.replace(/[\u202f\u00a0]/g, " ");
   const written = new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "medium", timeZone: zone });
   for (const [raw, shown] of cells) {
     assert.equal(fold(shown), fold(written.format(new Date(raw))), `the ${column} cell of ${raw} is not in ${zone}`);
@@ -238,8 +257,8 @@ Then("the table {string} shows its {string} column in the time zone {string}", a
 
 // The table answers a press of its sort button by reordering the rows, so the
 // step waits for the order as it waits for any update.
-Then("the table {string} shows its {string} column oldest first", async function (name, column) {
-  const oldestFirst = (values) => [...values].sort((a, b) => a.localeCompare(b));
+Then("the table {string} shows its {string} column oldest first", async function (this: BrowserWorld, name: string, column: string) {
+  const oldestFirst = (values: string[]) => [...values].sort((a, b) => a.localeCompare(b));
   const end = Date.now() + UPDATE_PATIENCE_MS;
   let values = await instants(this, name, column);
   while (Date.now() < end && values.join() !== oldestFirst(values).join()) {
@@ -253,16 +272,16 @@ Then("the table {string} shows its {string} column oldest first", async function
 // What the header says of the sort is what a screen reader tells (WCAG 1.3.1).
 Then(
   "the table {string} announces its {string} column as sorted {word}",
-  async function (name, column, direction) {
+  async function (this: BrowserWorld, name: string, column: string, direction: string) {
     const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
     await expect(header).toHaveAttribute("aria-sort", direction);
   },
 );
-Then("the page shows the paragraph {string}", async function (text) {
+Then("the page shows the paragraph {string}", async function (this: BrowserWorld, text: string) {
   await this.page.getByText(text, { exact: true }).first().waitFor({ state: "visible" });
 });
 
-Then("the page shows the heading {string}", async function (name) {
+Then("the page shows the heading {string}", async function (this: BrowserWorld, name: string) {
   await this.page
     .getByRole("heading", { level: 1, name, exact: true })
     .waitFor({ state: "visible", timeout: 25_000 });

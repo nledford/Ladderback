@@ -13,7 +13,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | Command | Does |
 |---|---|
 | `just verify` | Everything CI checks except mutants, red-first and `deny` |
-| `just lint` | Clippy `-D warnings`, the journey lint, then `scripts/check-doc-paths.sh`: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full (CI runs it on docs-only pull requests too) |
+| `just lint` | Clippy `-D warnings`, `tsc` over the TypeScript tooling (`tsconfig.json`), the journey lint, then `scripts/check-doc-paths.sh`: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full (CI runs it on docs-only pull requests too) |
 | `just architecture` | Dependency and build rules: banned crates in `domain` and `app`, pseudolocales in a default build and out of a release build, the `gallery` feature in neither, the no-panic settings, `testkit` only as a dev-dependency |
 | `just deny` | `cargo deny` (§13.6). Needs the network; a new advisory can fail it with no change of yours. Not a required check |
 | `just test [args]` | Unit and contract tests (nextest; `args` go to it), doc tests, the acceptance and `@e2e` runners, then the skipped-test list. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |

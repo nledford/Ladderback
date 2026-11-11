@@ -153,7 +153,7 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 
 1. The component in `crates/web/src/components.rs`, from native elements first (§4.5).
 2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show.
-3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.mjs`.
+3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`.
 4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone.
 
 ### 13.8 Pull requests and merging
