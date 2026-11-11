@@ -35,7 +35,13 @@ mod components;
 // around it) runs in a browser via the gallery's @ui scenarios.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod focus;
-#[cfg(all(test, target_arch = "wasm32"))]
+// The wasm32-only test modules (`just test-wasm` runs them under Node) are
+// declared with `cfg(test)` and `cfg(target_arch)` as two attributes, not as
+// `cfg(all(test, ...))`: cargo-mutants skips a module under a plain
+// `cfg(test)` and does not look inside `all(...)`, so it would mutate tests
+// no host can run, and every one of those mutants would "survive".
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
 mod formatting;
 #[cfg(feature = "gallery")]
 mod gallery;
@@ -50,7 +56,9 @@ mod backend;
 mod page;
 mod repositories;
 mod routes;
-#[cfg(all(test, target_arch = "wasm32"))]
+// Declared as `formatting` is, for the same reason.
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
 mod time_zones;
 mod ws;
 
