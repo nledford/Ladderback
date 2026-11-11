@@ -765,6 +765,49 @@ fn a_relative_path_on_this_machine_is_refused_at_its_repository_and_key() {
     }
 }
 
+// A value both over its cap and relative is refused for its length, which
+// is checked as the table is read, before the settings are whole (#236).
+#[test]
+fn a_relative_path_over_its_cap_is_refused_for_its_length() {
+    let long = |cap: usize| format!("backups/{}", "r".repeat(cap));
+    for (text, key, kind) in [
+        (
+            located(&long(MAX_LOCATION_BYTES), ""),
+            "repositories.nas.repository",
+            ValueKind::Location,
+        ),
+        (
+            located(
+                "opendal:fs",
+                &format!(
+                    "options = {{ root = \"{}\" }}\n",
+                    long(MAX_OPTION_VALUE_BYTES)
+                ),
+            ),
+            "repositories.nas.options.root",
+            ValueKind::OptionValue,
+        ),
+    ] {
+        let error = invalid(parsed(&text));
+        assert_eq!(error.problem, Problem::Value(kind), "{key}");
+        assert_eq!(error.key.as_deref(), Some(key));
+    }
+}
+
+// Two different settings are refused in the order the reader reads them: the
+// caps as the table is read, the password sources after it.
+#[test]
+fn a_location_over_its_cap_is_refused_before_a_relative_password_file() {
+    let long = format!("/{}", "r".repeat(MAX_LOCATION_BYTES));
+    let text = format!(
+        "schema = 1\n\n[repositories.nas]\nrepository = \"{long}\"\n\
+         password-file = \"relative/pw\"\n"
+    );
+    let error = invalid(parsed(&text));
+    assert_eq!(error.problem, Problem::Value(ValueKind::Location));
+    assert_eq!(error.key.as_deref(), Some("repositories.nas.repository"));
+}
+
 // A hook runs in the daemon's working directory too.
 #[test]
 fn a_hook_that_starts_a_program_by_a_relative_path_is_refused_where_it_is_written() {
