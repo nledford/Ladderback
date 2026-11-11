@@ -46,6 +46,36 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 
 The [technical design](docs/design/README.md#relationship-to-backrest) has the full comparison, with sources.
 
+## Installation
+
+Install it to try it out, not to rely on it: the warning at the top still holds. Releases don't come with binaries yet, so you build one from source, on Linux or macOS.
+
+You need:
+
+- **Rust**, through [rustup](https://rustup.rs), with a current stable toolchain (`rustup update stable`). In the checkout, `rust-toolchain.toml` has rustup use stable and add the `wasm32-unknown-unknown` target on the first build. Without rustup, use a Rust no older than the [MSRV](Cargo.toml) (on macOS, a newer one: [decision 47](docs/design/decisions/47-msrv-1-94.md)) with that target, and take trunk and just from their prebuilt releases.
+- **git and a C compiler**: Xcode's Command Line Tools on macOS, `git` and `build-essential` or your distribution's equivalents on Linux.
+- **Node.js** 20 or newer, with npm: the web UI's build runs Tailwind's CLI.
+- **[trunk](https://trunkrs.dev)**, which builds the web UI, and **[just](https://just.systems)** 1.40 or newer: `cargo +stable install --locked trunk just`, or your package manager's. trunk's newest release needs a newer Rust than the MSRV, hence `+stable`. Building trunk from source needs more than about 2 GB of memory; on a smaller machine, take trunk's [prebuilt release](https://github.com/trunk-rs/trunk/releases) instead. trunk downloads the `wasm-bindgen` and `wasm-opt` the build needs.
+
+On 64-bit ARM Linux with a glibc older than 2.38 (Debian 12, Ubuntu 22.04), the `wasm-bindgen` trunk downloads doesn't run. There, between the `git checkout` and `just install` below, and again after each update, build the version the checkout pins, which trunk then finds on the `PATH`: `cargo install --locked wasm-bindgen-cli --version "$(just _wasm-bindgen-version)"`.
+
+Clone the repository, check out the newest release, and install it:
+
+```sh
+git clone https://github.com/nledford/Ladderback.git
+cd Ladderback
+# The newest release tag, leaving out release candidates (vX.Y.Z-rc.N).
+git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1)" && just install
+```
+
+`just install` builds the web UI, then `ladderback` with the UI built in, as the release archives are built (the `dist` profile, with thin LTO), and installs it with `cargo install` into `~/.cargo/bin`. Arguments go to `cargo install`: `just install --root ~/.local` installs into `~/.local/bin`. If `just` answers that there is no recipe `install`, that release predates it; run this instead, which builds with the `release` profile (older releases have no `dist` profile):
+
+```sh
+(cd crates/web && trunk build --release --no-default-features) && cargo install --locked --path . --no-default-features
+```
+
+Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another loopback address or port. Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run `git fetch --tags`, the same `git checkout` line, and `just install` again, which replaces the installed binary.
+
 ## Roadmap
 
 The skeleton (M0), the backup engine (M1a) and the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) are in place: backups run by hand, with no scheduler yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
