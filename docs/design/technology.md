@@ -27,7 +27,7 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 | Localization | `fluent-bundle`, `fluent-langneg`, `unic-langid`; `icu` (ICU4X) for dates and numbers in daemon-rendered text (§8.4) |
 | CLI | `clap` |
 
-The minimum supported Rust version (MSRV) is **1.94**, the workspace's `rust-version`. Every crate inherits it (§16 decision 50).
+The minimum supported Rust version (MSRV) is **1.94**, the workspace's `rust-version`. Every crate inherits it (§16 decision 47).
 
 The git dependency means Ladderback can't be published to crates.io until it moves to a release. Distribution doesn't depend on crates.io (§12).
 
