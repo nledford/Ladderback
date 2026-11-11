@@ -12,6 +12,7 @@ api.workspace = true
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 futures.workspace = true
 jiff.workspace = true
 log.workspace = true
