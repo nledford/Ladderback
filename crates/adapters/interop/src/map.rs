@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use app::ports::{ImportedProfile, ProfileError, ProfileNotice, ProfileProblem};
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
-    Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
-    check_options,
+    Hooks, Maintenance, Plan, RepositoryConfig, RepositoryField, RepositorySettings, Source,
+    SourceFilter, check_options,
 };
 use domain::secrets::{
     CommandLine, FileRead, SecretRef, SecretValue, Template, is_secret_option,
@@ -21,7 +21,7 @@ use domain::{PlanId, RepositoryAlias};
 use crate::MAX_ITEMS;
 use crate::escape;
 use crate::locate::plain;
-use crate::part::{Entry, Part, Repository, Settings};
+use crate::part::{Entry, Part, Places, Repository, Settings};
 use crate::resolve::Resolved;
 
 /// The variables of rustic's environment the import reads, and how they are
@@ -201,6 +201,9 @@ fn repository(
             notices,
         )?,
     };
+    if let Some(field) = settings.relative_path() {
+        return Err(relative(&own.places, &field, file));
+    }
     Ok(RepositoryConfig {
         id: None,
         settings,
@@ -216,6 +219,35 @@ fn repository(
             .unwrap_or_default(),
         hooks: own.hooks.clone(),
     })
+}
+
+/// The refusal of `field`, which names a path on this machine by a relative
+/// one: rustic reads it from the folder it was started in, which a profile
+/// doesn't record. It is at the key that writes it, in the file that does,
+/// since whether it is a path may depend on a location another file sets.
+fn relative(places: &Places, field: &RepositoryField, file: &str) -> ProfileError {
+    let place = match field {
+        RepositoryField::Repository => places.repository.as_ref(),
+        RepositoryField::RepoHot => places.repo_hot.as_ref(),
+        RepositoryField::PasswordCommand => places.password_command.as_ref(),
+        RepositoryField::Option(name) => places.options.get(name),
+        RepositoryField::OptionHot(name) => places.options_hot.get(name),
+        RepositoryField::OptionCold(name) => places.options_cold.get(name),
+    };
+    match place {
+        Some(place) => ProfileError::Unsupported {
+            file: place.file.clone(),
+            key: place.key.clone(),
+            at: place.at,
+        },
+        // Not written in any file: what rustic's variables give is kept as
+        // a reference, except the password command, which is read here.
+        None => ProfileError::Unsupported {
+            file: file.to_owned(),
+            key: PASSWORD_COMMAND.to_owned(),
+            at: None,
+        },
+    }
 }
 
 /// `value`, an escaped value of the profile at `key`, if the config will

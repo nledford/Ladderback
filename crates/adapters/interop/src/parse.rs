@@ -4,13 +4,14 @@
 //! and the key and, when it can, the place; none of them holds a value of the
 //! file, which may hold a secret.
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use app::ports::{Position, ProfileError, ProfileProblem};
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::planning::{
     GlobFile, GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
-    RetentionPolicy, Source, check_location, check_option_value, check_options,
+    RetentionPolicy, Source, ValueKind, check_location, check_option_value, check_options,
 };
 use domain::secrets::CommandLine;
 use serde::Deserialize;
@@ -22,7 +23,7 @@ use crate::locate::{
     texts_at, value_span,
 };
 use crate::part::{
-    Entry, Forget, Global, Located, Part, Repository, Settings, Use, sort_and_dedup,
+    Entry, Forget, Global, Located, Part, Places, Repository, Settings, Use, sort_and_dedup,
 };
 use crate::tables::{
     BackupTable, CommandTable, CommandValue, FileTable, ForgetTable, GlobalTable, HooksTable,
@@ -464,7 +465,7 @@ fn hooks(reader: &Reader<'_, '_>, path: &Path, table: HooksTable) -> Read<Hooks>
 
 fn hook(reader: &Reader<'_, '_>, path: &Path, entry: CommandValue) -> Read<HookEntry> {
     match entry {
-        CommandValue::Text(text) => reader.value(path, HookEntry::parse(&text)),
+        CommandValue::Text(text) => hook_entry(reader, path, HookEntry::parse(&text)),
         CommandValue::Table(CommandTable {
             command,
             args,
@@ -475,12 +476,27 @@ fn hook(reader: &Reader<'_, '_>, path: &Path, entry: CommandValue) -> Read<HookE
                 Some(text) => reader.value(&path.key("on-failure"), OnFailure::parse(&text))?,
                 None => OnFailure::default(),
             };
-            reader.value(
+            hook_entry(
+                reader,
                 &path.key("command"),
                 HookEntry::new(&command, args.unwrap_or_default(), on_failure),
             )
         }
     }
+}
+
+/// A hook, at `path`. One that starts its program by a relative path is
+/// rustic's to run from the folder it was started in, which the profile
+/// doesn't record: unsupported, not wrong.
+fn hook_entry(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    entry: Result<HookEntry, InvalidValue>,
+) -> Read<HookEntry> {
+    entry.map_err(|invalid| match invalid.kind {
+        ValueKind::HookProgram => reader.unsupported(path, Spot::Value),
+        _ => reader.refuse(path, ProfileProblem::BadValue),
+    })
 }
 
 /// A command as a program and its arguments, for `password-command`.
@@ -504,6 +520,7 @@ fn repository(reader: &Reader<'_, '_>, path: &Path, table: RepositoryTable) -> R
     {
         return Err(reader.unsupported(&password_file, Spot::Value));
     }
+    let places = places(reader, path, &table);
     let password_command = table
         .password_command
         .map(|command| command_line(reader, &path.key("password-command"), command))
@@ -541,7 +558,43 @@ fn repository(reader: &Reader<'_, '_>, path: &Path, table: RepositoryTable) -> R
         password_file: table.password_file,
         password_command,
         hooks: hooks(reader, &path.key("hooks"), table.hooks.unwrap_or_default())?,
+        places,
     })
+}
+
+/// Where the settings of `[repository]` that may name a path are written.
+fn places(reader: &Reader<'_, '_>, path: &Path, table: &RepositoryTable) -> Places {
+    let place = |at: &Path| Located {
+        file: reader.file.to_owned(),
+        key: at.text().unwrap_or_default(),
+        at: reader.at(at, Spot::Value),
+    };
+    let options = |key: &str, options: &Option<BTreeMap<String, String>>| {
+        let table = path.key(key);
+        options
+            .iter()
+            .flatten()
+            .map(|(name, _)| (name.clone(), place(&table.key(name))))
+            .collect()
+    };
+    let command = path.key("password-command");
+    Places {
+        repository: table
+            .repository
+            .as_ref()
+            .map(|_| place(&path.key("repository"))),
+        repo_hot: table
+            .repo_hot
+            .as_ref()
+            .map(|_| place(&path.key("repo-hot"))),
+        password_command: table.password_command.as_ref().map(|value| match value {
+            CommandValue::Text(_) => place(&command),
+            CommandValue::Table(_) => place(&command.key("command")),
+        }),
+        options: options("options", &table.options),
+        options_hot: options("options-hot", &table.options_hot),
+        options_cold: options("options-cold", &table.options_cold),
+    }
 }
 
 /// `[backup]`, and the entries under it.

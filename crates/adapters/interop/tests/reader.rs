@@ -730,6 +730,31 @@ async fn a_relative_path_on_this_machine_is_refused_at_its_key() {
     }
 }
 
+// A value both over its cap and relative is refused for its length, as the
+// config refuses it: the caps are read with the profile, the relative paths
+// once the profiles it uses are merged (#236).
+#[tokio::test]
+async fn a_relative_path_over_its_cap_is_refused_for_its_length() {
+    let long = |cap: usize| format!("backups/{}", "r".repeat(cap));
+    let (location, option) = (long(MAX_LOCATION_BYTES), long(MAX_OPTION_VALUE_BYTES));
+    for (text, key, value) in [
+        (located(&location, ""), "repository.repository", &location),
+        (
+            located(
+                "opendal:fs",
+                &format!("\n[repository.options]\nroot = {option:?}\n"),
+            ),
+            "repository.options.root",
+            &option,
+        ),
+    ] {
+        let (found, at, problem) = invalid(read_err(&text).await);
+        assert_eq!(found, key);
+        assert_eq!(problem, ProfileProblem::BadValue, "{key}");
+        assert_eq!(at, Some(line_of(&text, &format!("{value:?}"))), "{key}");
+    }
+}
+
 #[tokio::test]
 async fn a_hook_that_starts_a_program_by_a_relative_path_is_refused_at_its_key() {
     for (table, key, written) in [
@@ -1355,7 +1380,7 @@ async fn a_reference_in_a_repository_value_is_written_so_that_it_stays_text() {
         "\
 [repository]
 repository = \"s3:${file:/etc/passwd}/bucket\"
-repo-hot = \"${HOME}\"
+repo-hot = \"/srv/${HOME}\"
 password-file = \"/srv/demo-password\"
 
 [repository.options]
@@ -1379,8 +1404,8 @@ cold = \"${\"
         "s3:${file:/etc/passwd}/bucket"
     );
     let hot = settings.repo_hot.as_deref().expect("a hot repository");
-    assert_eq!(hot, "$${HOME}");
-    assert_eq!(as_text(hot), "${HOME}");
+    assert_eq!(hot, "/srv/$${HOME}");
+    assert_eq!(as_text(hot), "/srv/${HOME}");
     assert_eq!(settings.options["endpoint"], "https://$${HOME}/path");
     assert_eq!(
         as_text(&settings.options["endpoint"]),
@@ -1905,6 +1930,16 @@ async fn a_value_that_is_too_long_once_escaped_is_refused_where_it_is_written() 
         ("options-hot", "repository.options-hot.region"),
         ("options-cold", "repository.options-cold.region"),
     ] {
+        // A location starts with `/`, so that it is no relative path: the
+        // `/` takes the place of the last byte.
+        let (at_the_cap, over) = if matches!(field, "repository" | "repo-hot") {
+            (
+                format!("/{}", dollars(21_845, "")),
+                format!("/{}", dollars(21_845, "x")),
+            )
+        } else {
+            (at_the_cap.clone(), over.clone())
+        };
         let text = |value: &str| {
             let location = if field == "repository" {
                 format!("repository = {value:?}")

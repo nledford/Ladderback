@@ -655,7 +655,7 @@ async fn what_a_used_profile_leaves_out_is_noted_and_its_text_stays_text() {
     let scratch = Scratch::new();
     scratch.profile(
         "base.toml",
-        "[global]\ndry-run = true\n\n[repository]\nrepository = \"${HOME}/repo\"\n",
+        "[global]\ndry-run = true\n\n[repository]\nrepository = \"/srv/${HOME}/repo\"\n",
     );
     let profile = scratch
         .read(&uses(
@@ -665,7 +665,7 @@ async fn what_a_used_profile_leaves_out_is_noted_and_its_text_stays_text() {
         .await
         .expect("a profile");
     assert!(profile.notices.contains(&ignored("global.dry-run")));
-    assert_eq!(profile.repository.settings.repository, "$${HOME}/repo");
+    assert_eq!(profile.repository.settings.repository, "/srv/$${HOME}/repo");
 }
 
 #[tokio::test]
