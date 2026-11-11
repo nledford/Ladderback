@@ -213,10 +213,13 @@ web-test:
 build: web
     cargo build
 
-# Run the agent locally on the default address.
+# Runs the daemon locally on the default address. The package is named because
+# the default members hold a second binary (the engine's `engine-worker`), and
+# a bare `cargo run` refuses to choose; the daemon runs its own workers.
+[doc('Run the daemon locally on the default address.')]
 [group('dev')]
 serve: build
-    cargo run -- serve
+    cargo run --package ladderback -- serve
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached
