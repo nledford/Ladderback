@@ -41,7 +41,7 @@ use crate::job::{
     JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
     WorkerEvent, exit_code,
 };
-use cancel::{AfterCancel, Cancel};
+use cancel::{AfterCancel, Cancel, Cause};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -53,6 +53,9 @@ pub enum Exit {
     Reported { failed: bool },
     /// A cancel ended the job, which reports nothing more.
     Cancelled,
+    /// The deadline ended a backup that wound down. Its failure is the
+    /// stream's last line, written by the watchdog or else at the exit.
+    DeadlinePassed,
     /// Stop at once with this code, reporting nothing more: a fake job
     /// imitating a crashed engine.
     Abrupt(u8),
@@ -64,6 +67,7 @@ impl Exit {
             Self::Reported { failed: false } => 0,
             Self::Reported { failed: true } => 1,
             Self::Cancelled => exit_code::TERMINATED,
+            Self::DeadlinePassed => exit_code::DEADLINE_PASSED,
             Self::Abrupt(code) => i32::from(code),
         }
     }
@@ -151,6 +155,9 @@ pub(crate) struct Process {
     clock: WallClock,
     terminate: Terminate,
     cancel: Cancel,
+    /// How long a backup stopped while it archives may wind down before the
+    /// worker exits anyway: [`WIND_DOWN_LIMIT`] but in tests.
+    wind_down_limit: Duration,
 }
 
 impl Process {
@@ -161,6 +168,7 @@ impl Process {
                 std::process::exit(code);
             }),
             cancel: Cancel::default(),
+            wind_down_limit: WIND_DOWN_LIMIT,
         }
     }
 }
@@ -171,7 +179,8 @@ pub(crate) enum Done {
     /// The job wrote its result itself, with [`Context::report`], and has
     /// nothing more to say.
     Reported,
-    /// A cancel ended the job: exit as SIGTERM's, reporting nothing more.
+    /// A cancel, or the deadline, ended the job: exit as its cause says,
+    /// reporting nothing more.
     Cancelled,
     /// Exit at once with this code and report nothing more.
     Abrupt(u8),
@@ -229,8 +238,7 @@ impl Context {
                 Deadline::after_index_read(index_read_at, budget),
                 self.watchdog_interval,
                 self.events.clone(),
-                Arc::clone(&self.process.clock),
-                Arc::clone(&self.process.terminate),
+                &self.process,
             );
             *self.watchdog.borrow_mut() = Some(watchdog);
         }
@@ -315,7 +323,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             Ok(Exit::Reported { failed: false })
         }
         Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
-        Ok(Done::Cancelled) => Ok(Exit::Cancelled),
+        Ok(Done::Cancelled) => Ok(exit_of_cancelled(&events, ctx.cancel())),
         Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
         Err(JobError::Failed { code, detail }) => {
             events.emit(&WorkerEvent::Failed {
@@ -326,6 +334,21 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             Ok(Exit::Reported { failed: true })
         }
         Err(JobError::Events(error)) => Err(error),
+    }
+}
+
+/// How a job the cancel ended exits: as the cancel's first cause says. A
+/// deadline's failure the watchdog couldn't write, because another line
+/// was being written then, goes out now as the stream's last line.
+fn exit_of_cancelled(events: &Events, cancel: &Cancel) -> Exit {
+    match cancel.cause() {
+        Some(Cause::Deadline) => {
+            // Nothing happens when the watchdog wrote it, or a SIGTERM
+            // ended the stream since.
+            events.end(Some(&watchdog::deadline_failure()), LAST_LINE_PATIENCE);
+            Exit::DeadlinePassed
+        }
+        Some(Cause::Cancel) | None => Exit::Cancelled,
     }
 }
 
@@ -343,10 +366,15 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
     }
 }
 
-/// How long a backup cancelled by SIGTERM may wind down before the worker
-/// exits anyway. The daemon's grace period (10 s by default) ends it sooner;
-/// this bounds a worker whose daemon is gone.
+/// How long a backup stopped while it archives, by SIGTERM or by its
+/// deadline, may wind down before the worker exits anyway. The daemon's
+/// grace period (10 s by default) ends it sooner; this bounds a worker whose
+/// daemon is gone.
 const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long the worker waits for a line being written before it ends the
+/// stream: a writer stuck on a full pipe must not hold its exit back.
+const LAST_LINE_PATIENCE: Duration = Duration::from_millis(250);
 
 /// On SIGTERM the worker waits for the line it is writing, writes nothing
 /// more and exits. Nothing in rustic needs a clean shutdown: its writes are
@@ -365,7 +393,7 @@ fn exit_on_sigterm(events: Events, cancel: Cancel) -> io::Result<()> {
         .spawn(move || {
             if signals.forever().next().is_some() {
                 let after = cancel.request();
-                events.end(None, Duration::from_millis(250));
+                events.end(None, LAST_LINE_PATIENCE);
                 if after == AfterCancel::WindDown {
                     std::thread::sleep(WIND_DOWN_LIMIT);
                 }
@@ -567,6 +595,7 @@ mod tests {
                 let _ = tx.lock().unwrap().send(code);
             }),
             cancel: Cancel::default(),
+            wind_down_limit: WIND_DOWN_LIMIT,
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
@@ -609,6 +638,7 @@ mod tests {
                 let _ = tx.lock().unwrap().send(code);
             }),
             cancel: Cancel::default(),
+            wind_down_limit: WIND_DOWN_LIMIT,
         };
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);
@@ -627,6 +657,284 @@ mod tests {
             "{:?}",
             capture.parsed()
         );
+    }
+
+    /// A process whose wall clock reads `seconds`, and whose "exit" only
+    /// sends its code on the receiver.
+    fn process_on(seconds: &Arc<std::sync::atomic::AtomicI64>) -> (Process, mpsc::Receiver<i32>) {
+        let (tx, terminated) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let process = Process {
+            clock: {
+                let seconds = Arc::clone(seconds);
+                Arc::new(move || {
+                    Timestamp::from_second(seconds.load(std::sync::atomic::Ordering::SeqCst))
+                        .unwrap()
+                })
+            },
+            terminate: Arc::new(move |code| {
+                let _ = tx.lock().unwrap().send(code);
+            }),
+            cancel: Cancel::default(),
+            wind_down_limit: WIND_DOWN_LIMIT,
+        };
+        (process, terminated)
+    }
+
+    /// The watchdog tries the stream once at the deadline, so a line that
+    /// is being written then keeps its failure off the stream. A backup that
+    /// wound down writes it as the worker ends, before the exit with 75, and
+    /// the daemon reads why the operation failed.
+    #[test]
+    fn a_deadline_failure_the_watchdog_could_not_write_goes_out_as_the_worker_ends() {
+        let seconds = Arc::new(std::sync::atomic::AtomicI64::new(1_800_000_000));
+        let (process, terminated) = process_on(&seconds);
+        let cancel = process.cancel.clone();
+        let (events, written, entered, release) = events::testing::stuck_then_captured();
+        let watchdog = Watchdog::start(
+            Deadline::after_index_read((process.clock)(), SignedDuration::from_secs(60)),
+            Duration::from_millis(10),
+            events.clone(),
+            &process,
+        );
+        let progress = WorkerEvent::Log {
+            level: Level::Info,
+            message: "progress".to_owned(),
+        };
+        let saved = cancel.saving(|| {
+            // A line stuck on a full pipe as the deadline passes.
+            let writer = std::thread::spawn({
+                let (events, progress) = (events.clone(), progress.clone());
+                move || events.emit(&progress)
+            });
+            entered.recv().unwrap();
+            seconds.fetch_add(60, std::sync::atomic::Ordering::SeqCst);
+            let passed = std::time::Instant::now();
+            while !cancel.is_requested() {
+                assert!(
+                    passed.elapsed() < Duration::from_secs(10),
+                    "the deadline was not noticed"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // The watchdog tries the stream right after it asks for the
+            // cancel, and found it taken.
+            std::thread::sleep(Duration::from_millis(100));
+            drop(release);
+            writer.join().unwrap().unwrap();
+        });
+        assert_eq!(saved, None);
+        let exit = exit_of_cancelled(&events, &cancel);
+        drop(watchdog);
+        assert_eq!(exit.code(), exit_code::DEADLINE_PASSED);
+        assert!(
+            terminated.try_recv().is_err(),
+            "the watchdog ended the worker under its backup"
+        );
+        assert_eq!(
+            written.parsed(),
+            [
+                progress,
+                WorkerEvent::Failed {
+                    code: ErrorCode::DeadlinePassed,
+                    args: Vec::new(),
+                    detail: None,
+                },
+            ]
+        );
+    }
+
+    /// The first cause stands: a backup winding down on a SIGTERM is not
+    /// ended by its deadline passing meanwhile, and ends as a cancelled one,
+    /// with 143 and nothing more on the stream.
+    #[test]
+    fn a_backup_winding_down_on_a_sigterm_ends_cancelled_when_its_deadline_passes_meanwhile() {
+        let seconds = Arc::new(std::sync::atomic::AtomicI64::new(1_800_000_000));
+        let (process, terminated) = process_on(&seconds);
+        let cancel = process.cancel.clone();
+        let (events, capture) = capture();
+        let watchdog = Watchdog::start(
+            Deadline::after_index_read((process.clock)(), SignedDuration::from_secs(60)),
+            Duration::from_millis(10),
+            events.clone(),
+            &process,
+        );
+        let saved = cancel.saving(|| {
+            // What the SIGTERM handler does.
+            assert_eq!(cancel.request(), AfterCancel::WindDown);
+            events.end(None, Duration::from_millis(250));
+            seconds.fetch_add(60, std::sync::atomic::Ordering::SeqCst);
+            // Many watchdog intervals.
+            assert!(
+                terminated.recv_timeout(Duration::from_millis(200)).is_err(),
+                "the deadline ended a worker winding down on a SIGTERM"
+            );
+        });
+        assert_eq!(saved, None);
+        let exit = exit_of_cancelled(&events, &cancel);
+        drop(watchdog);
+        assert_eq!(exit.code(), exit_code::TERMINATED);
+        assert!(
+            terminated.try_recv().is_err(),
+            "the watchdog ended the worker after its backup had wound down"
+        );
+        assert_eq!(capture.text(), "");
+    }
+
+    /// The data packs in a local repository: the files under `data`, but
+    /// for the temporary ones the local backend writes before renaming.
+    fn packs_in(repository: &Path) -> usize {
+        let Ok(folders) = std::fs::read_dir(repository.join("data")) else {
+            return 0;
+        };
+        folders
+            .flatten()
+            .filter_map(|folder| std::fs::read_dir(folder.path()).ok())
+            .flatten()
+            .flatten()
+            .filter(|file| !file.file_name().to_string_lossy().contains("-tmp-"))
+            .count()
+    }
+
+    /// A backup whose deadline passes while it archives winds down as a
+    /// cancelled one does (decision 50): the worker reports the deadline,
+    /// the packs it saved are in the index, no snapshot is written (I3),
+    /// and the job, not the watchdog, ends the worker with the deadline's
+    /// code once rustic has returned.
+    #[test]
+    fn a_backup_whose_deadline_passes_mid_archive_keeps_its_packs_indexed_and_writes_no_snapshot() {
+        use rustic_core::{
+            CheckOptions, ConfigOptions, Credentials, KeyOptions, Repository, RepositoryOptions,
+        };
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let (source, repo) = (dir.path().join("source"), dir.path().join("repo"));
+        std::fs::create_dir(&source).unwrap();
+        // 64 MiB that neither compresses nor deduplicates, saved in packs of
+        // 1 MiB: whole packs are in the repository long before the end.
+        let mut state = 0x5EED_u64;
+        let mut next = move || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        for n in 0..16 {
+            let bytes: Vec<u8> = (0..(4 << 20) / 8)
+                .flat_map(|_| next().to_le_bytes())
+                .collect();
+            std::fs::write(source.join(format!("file{n}.bin")), bytes).unwrap();
+        }
+        let backends = rustic_backend::BackendOptions::default()
+            .repository(repo.to_string_lossy().into_owned())
+            .to_backends()
+            .unwrap();
+        let repository =
+            || Repository::new(&RepositoryOptions::default().no_cache(true), &backends).unwrap();
+        let small_packs: ConfigOptions = serde_json::from_value(serde_json::json!({
+            "set-datapack-size": "1 MiB",
+            "set-datapack-growfactor": 0,
+        }))
+        .unwrap();
+        repository()
+            .init(
+                &Credentials::password("demo-password"),
+                &KeyOptions::default(),
+                &small_packs,
+            )
+            .unwrap();
+
+        let seconds = Arc::new(AtomicI64::new(1_800_000_000));
+        let (tx, terminated) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let process = Process {
+            clock: {
+                let seconds = Arc::clone(&seconds);
+                Arc::new(move || Timestamp::from_second(seconds.load(Ordering::SeqCst)).unwrap())
+            },
+            terminate: Arc::new(move |code| {
+                let _ = tx.lock().unwrap().send(code);
+            }),
+            cancel: Cancel::default(),
+            wind_down_limit: WIND_DOWN_LIMIT,
+        };
+        let spec = JobSpec {
+            op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+            cache_dir: None,
+            watchdog_interval_ms: 10,
+            job: JobKind::Backup(crate::job::BackupJobSpec {
+                repo: RepositorySpec {
+                    password: SecretValue::new("demo-password"),
+                    ..repository_at(&repo.to_string_lossy())
+                },
+                sources: vec![source.to_string_lossy().into_owned()],
+                plan: domain::PlanId::parse("home").unwrap(),
+                agent: domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+                extra_tags: Vec::new(),
+                label: None,
+                host: None,
+                filter: Default::default(),
+                deadline_budget: SignedDuration::from_secs(60),
+            }),
+        };
+        let (events, capture) = capture();
+        let input = serde_json::to_vec(&spec).unwrap();
+        let running =
+            std::thread::spawn(move || run_events(input.as_slice(), events, 1, process).unwrap());
+        while packs_in(&repo) < 2 {
+            assert!(
+                !running.is_finished(),
+                "the backup ended before its deadline"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        seconds.fetch_add(120, Ordering::SeqCst);
+        let exit = running.join().unwrap();
+
+        assert_eq!(exit.code(), crate::job::exit_code::DEADLINE_PASSED);
+        assert!(
+            terminated.try_recv().is_err(),
+            "the watchdog ended the worker under its backup"
+        );
+        let events = capture.parsed();
+        assert_eq!(
+            events.last(),
+            Some(&WorkerEvent::Failed {
+                code: ErrorCode::DeadlinePassed,
+                args: Vec::new(),
+                detail: None,
+            }),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, WorkerEvent::Result(_))),
+            "{events:?}"
+        );
+        let snapshots = std::fs::read_dir(repo.join("snapshots")).unwrap();
+        assert_eq!(
+            snapshots.count(),
+            0,
+            "a snapshot was written past the deadline"
+        );
+        assert!(
+            packs_in(&repo) >= 2,
+            "the deadline came after packs were saved"
+        );
+        let findings = repository()
+            .open(&Credentials::password("demo-password"))
+            .unwrap()
+            .check(CheckOptions::default().read_data(true))
+            .unwrap();
+        let findings: Vec<String> = findings
+            .0
+            .iter()
+            .map(|(level, finding)| format!("{level:?}: {finding}"))
+            .collect();
+        assert!(findings.is_empty(), "{findings:#?}");
     }
 
     /// An Identify job for `repository`, which must fail: what the worker

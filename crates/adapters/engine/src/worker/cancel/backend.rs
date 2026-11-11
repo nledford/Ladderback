@@ -1,4 +1,5 @@
-//! A repository backend that refuses a snapshot once the job is cancelled.
+//! A repository backend that refuses a snapshot once the job is cancelled,
+//! by the daemon or by its deadline.
 
 use std::sync::Arc;
 
@@ -11,12 +12,13 @@ use rustic_core::{
 use super::Cancel;
 
 /// `backends`, refusing to write a snapshot once the cancel is asked for. A
-/// cancelled backup winds down through rustic's own end of a backup, which
-/// saves the index of its packs and then the snapshot: this is what keeps
-/// the snapshot out. rustic writes a snapshot to the hot half first and to
-/// the cold half only once the hot half has it, so only the half written
-/// first refuses it: a cancel between the two writes can't leave the
-/// snapshot in one half alone. Everything else is the halves' own.
+/// backup cancelled, or past its deadline, winds down through rustic's own
+/// end of a backup, which saves the index of its packs and then the
+/// snapshot: this is what keeps the snapshot out. rustic writes a snapshot
+/// to the hot half first and to the cold half only once the hot half has
+/// it, so only the half written first refuses it: a cancel between the two
+/// writes can't leave the snapshot in one half alone. Everything else is
+/// the halves' own.
 pub(crate) fn refusing_snapshots_once_cancelled(
     backends: &RepositoryBackends,
     cancel: &Cancel,
@@ -92,10 +94,10 @@ impl WriteBackend for NoSnapshotOnceCancelled {
         cacheable: bool,
         content: BytesList,
     ) -> RusticResult<()> {
-        if tpe == FileType::Snapshot && self.cancel.is_requested() {
+        if tpe == FileType::Snapshot && !self.cancel.admit_snapshot() {
             return Err(RusticError::new(
                 ErrorKind::Other,
-                "the backup was cancelled: its snapshot is not written",
+                "the backup was stopped: its snapshot is not written",
             ));
         }
         self.inner.write_bytes(tpe, id, cacheable, content)
@@ -169,6 +171,18 @@ mod tests {
                 )
                 .is_err()
         );
+        assert!(inner.list(FileType::Snapshot).unwrap().is_empty());
+    }
+
+    /// I3: from the deadline on, no snapshot write starts.
+    #[test]
+    fn once_the_deadline_passed_no_snapshot_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = local(dir.path());
+        let cancel = Cancel::default();
+        let backend = refusing(Arc::clone(&inner), &cancel);
+        cancel.pass_deadline();
+        assert!(write_snapshot(&backend).is_err());
         assert!(inner.list(FileType::Snapshot).unwrap().is_empty());
     }
 

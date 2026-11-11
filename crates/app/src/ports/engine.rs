@@ -19,8 +19,11 @@ use futures::stream::BoxStream;
 ///   [`EngineEvent::Failed`], after which it yields nothing. An engine that
 ///   fails before it starts yields only the `Failed` event.
 /// - A job with a deadline ([`Job::deadline_budget`]) that is still running
-///   at it stops without writing anything and ends with
-///   `Failed(FailureReason::DeadlinePassed)`.
+///   at it starts no snapshot write and ends with
+///   `Failed(FailureReason::DeadlinePassed)`. A backup that was archiving may
+///   still be saving the index of what it wrote after that event, or
+///   finishing a snapshot write it began before the deadline, until it ends
+///   or [`JobControl::stop`] ends it.
 /// - [`JobControl::stop`] stops the job: once it returns, the stream never
 ///   yields `Succeeded`, and it ends.
 /// - Dropping the [`RunningJob`] stops the job at once, without a grace period.

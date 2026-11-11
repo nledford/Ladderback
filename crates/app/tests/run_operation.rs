@@ -647,7 +647,7 @@ async fn a_queued_operation_is_in_the_log_before_anything_runs() {
 }
 
 #[tokio::test]
-async fn an_operation_running_at_its_deadline_is_killed_and_fails() {
+async fn an_operation_running_at_its_deadline_is_stopped_with_its_grace_and_fails() {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
     let use_case = RunOperation::new(engine.clone(), clock.clone(), log());
@@ -671,14 +671,15 @@ async fn an_operation_running_at_its_deadline_is_killed_and_fails() {
         }
     );
     assert_eq!(op.finished_at(), Some(t(60)));
-    // Past the deadline there is no time for a graceful stop (§4.1).
-    assert_eq!((engine.stops(), engine.kills()), (0, 1));
+    // A backup still archiving winds down within the engine's grace period,
+    // which a stop gives and a kill doesn't (§4.1).
+    assert_eq!((engine.stops(), engine.kills()), (1, 0));
 }
 
 /// Events that keep arriving can't hold off the deadline: it is checked on
 /// every one, not only when the timer gets a turn.
 #[tokio::test]
-async fn events_arriving_past_the_deadline_fail_it_before_a_later_result() {
+async fn events_arriving_past_the_deadline_fail_it_and_stop_the_engine_before_a_later_result() {
     let budget = Some(SignedDuration::from_secs(60));
     let mut events = vec![EngineEvent::Started {
         index_read_at: t(-120),
@@ -698,7 +699,8 @@ async fn events_arriving_past_the_deadline_fail_it_before_a_later_result() {
             reason: FailureReason::DeadlinePassed
         }
     );
-    assert_eq!(engine.kills.load(Ordering::SeqCst), 1);
+    assert_eq!(engine.stops.load(Ordering::SeqCst), 1);
+    assert_eq!(engine.kills.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -743,6 +745,49 @@ async fn an_engine_that_stops_itself_after_its_deadline_failed_the_deadline() {
             reason: FailureReason::DeadlinePassed
         }
     );
+}
+
+/// The worker's own watchdog may report the deadline first. The backup it
+/// stopped may still be saving the index of its packs, so the engine is
+/// given its grace period to end rather than killed (§4.1).
+#[tokio::test]
+async fn an_engine_that_reports_its_deadline_is_given_its_grace_to_wind_down() {
+    let budget = Some(SignedDuration::from_secs(60));
+    let engine = Arc::new(Scripted::new(vec![
+        started(),
+        EngineEvent::Failed(FailureReason::DeadlinePassed),
+    ]));
+    let op = RunOperation::new(engine.clone(), Arc::new(FakeClock::new(t(60))), log())
+        .run(id(), Trigger::Manual, fake_job(budget), future::pending())
+        .await
+        .operation;
+    assert_eq!(
+        op.status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::DeadlinePassed
+        }
+    );
+    assert_eq!(
+        (
+            engine.stops.load(Ordering::SeqCst),
+            engine.kills.load(Ordering::SeqCst)
+        ),
+        (1, 0)
+    );
+}
+
+/// Any other failure ends a worker that is ending anyway: nothing is left
+/// to wind down, and the job is dropped.
+#[tokio::test]
+async fn an_engine_that_reports_another_failure_is_not_stopped() {
+    let engine = Arc::new(Scripted::new(vec![
+        started(),
+        EngineEvent::Failed(FailureReason::EngineExited { exit_code: Some(1) }),
+    ]));
+    RunOperation::new(engine.clone(), Arc::new(FakeClock::new(t(0))), log())
+        .run(id(), Trigger::Manual, fake_job(None), future::pending())
+        .await;
+    assert_eq!(engine.stops.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -1322,4 +1367,5 @@ async fn a_stalled_write_does_not_hold_the_deadline() {
         }
     );
     assert_eq!(ended.operation.finished_at(), Some(t(5)));
+    assert_eq!((engine.stops(), engine.kills()), (1, 0));
 }

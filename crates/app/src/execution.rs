@@ -24,9 +24,13 @@ use crate::ports::{
 ///
 /// - Cancelling stops the engine and records the operation as cancelled.
 /// - A job with a deadline budget gets a deadline once the engine reports
-///   when it read the index; still running then, the engine is stopped and
-///   the operation fails with `DeadlinePassed` (I3). The engine enforces the
-///   same deadline itself, so either side may notice first.
+///   when it read the index; still running then, the engine is stopped, with
+///   its grace period, and the operation fails with `DeadlinePassed` (I3). The
+///   engine enforces the same deadline itself, so either side may notice
+///   first; an engine that reports it is given the grace period too. A backup
+///   that archives winds down in it, saving the index of what it wrote, and
+///   starts no snapshot write; one already writing its snapshot finishes it
+///   (§4.1).
 /// - An engine that breaks the [`Engine`] contract fails the operation rather
 ///   than leaving it running: a stream that ends without a result counts as an
 ///   engine exit, and an event out of order as a protocol failure.
@@ -231,7 +235,18 @@ impl RunOperation {
                     if run.operation.status().is_finished() {
                         // A result stands even past the deadline: the snapshot
                         // it reports was written already. Dropping the job
-                        // stops whatever the engine still runs.
+                        // stops whatever the engine still runs, but for a
+                        // backup the engine stopped at its deadline, which may
+                        // still be saving the index of its packs or finishing
+                        // a snapshot write it began before the deadline.
+                        if matches!(
+                            run.operation.status(),
+                            OperationStatus::Failed {
+                                reason: FailureReason::DeadlinePassed
+                            }
+                        ) {
+                            control.stop().await;
+                        }
                         return;
                     }
                     if is_start {
@@ -263,6 +278,7 @@ impl RunOperation {
                                 return;
                             }
                             Written::DeadlinePassed => {
+                                control.stop().await;
                                 self.fail(run, FailureReason::DeadlinePassed);
                                 return;
                             }
@@ -271,6 +287,7 @@ impl RunOperation {
                     // Checked on every event, so a stream that never pauses
                     // can't keep the timer from its turn.
                     if deadline.is_some_and(|d| d.has_passed(self.clock.now())) {
+                        control.stop().await;
                         self.fail(run, FailureReason::DeadlinePassed);
                         return;
                     }
@@ -281,8 +298,11 @@ impl RunOperation {
                     return;
                 }
                 () = timer => {
-                    // No grace past the deadline: dropping the job on return
-                    // kills it at once (§4.1).
+                    // The engine's grace period lets a backup that archives
+                    // wind down: it saves the index of what it wrote and
+                    // starts no snapshot write, but finishes one it began
+                    // (§4.1).
+                    control.stop().await;
                     self.fail(run, FailureReason::DeadlinePassed);
                     return;
                 }
