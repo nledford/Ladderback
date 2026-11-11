@@ -139,7 +139,7 @@ A code isn't done until a person can read it in their own language (§8.4). Thre
 1. The trait in `crates/app/src/ports/`, in the ubiquitous language, returning typed errors.
 2. The in-memory fake in `crates/app/src/fakes/`, behind the `fakes` feature.
 3. The contract suite in `crates/app/src/contract/`, run against the fake from `crates/app/tests/contracts.rs` and against the real adapter from that adapter's tests (`crates/adapters/store/tests/contract.rs` is one).
-4. The real adapter in its own crate under `crates/adapters/`, depending on no other adapter, and its wiring in `src/main.rs`.
+4. The real adapter in its own crate under `crates/adapters/`, depending on no other adapter, and its wiring in the composition root (`src/main.rs` and its `composition` module).
 
 #### 13.7.3 A gated crate
 
