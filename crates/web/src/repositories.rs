@@ -656,6 +656,18 @@ mod tests {
     }
 
     #[test]
+    fn a_location_with_too_many_credentials_belongs_to_the_location_it_is() {
+        let field = |name: &str| {
+            field_of(
+                ErrorCode::LocationTooManyCredentials,
+                &[("field".into(), text(name))],
+            )
+        };
+        assert_eq!(field("repository"), Some(Field::Location));
+        assert_eq!(field("repo-hot"), Some(Field::HotStorage));
+    }
+
+    #[test]
     fn an_unreadable_secret_belongs_to_the_field_that_holds_it() {
         let field =
             |name: &str| field_of(ErrorCode::SecretMissing, &[("field".into(), text(name))]);

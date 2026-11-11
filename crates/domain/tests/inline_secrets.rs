@@ -350,6 +350,55 @@ fn a_credential_in_an_rclone_connection_string_is_an_inline_secret() {
 }
 
 #[test]
+fn a_credential_under_a_name_of_rclones_own_is_an_inline_secret() {
+    for location in [
+        "rclone::sftp,host=nas.example.com,key_file_pass=not-real:/backups",
+        "rclone::sftp,host=nas.example.com,key_pem='not-real':/backups",
+        "rclone::azureblob,account=demo,sas_url='https://demo.example.com/?sig=not-real':demo",
+        "rclone::azureblob,connection_string='AccountKey=not-real':demo",
+        "rclone::s3,sse_customer_key_base64=not-real:demo-bucket",
+        // B2's application key, Swift's API key, Azure Blob's shared key.
+        "rclone::b2,account=demo,key=not-real:demo-bucket",
+        "rclone::storj,access_grant=not-real:demo-bucket",
+        "rclone::filen,email=demo@example.com,master_keys=not-real:/backups",
+        "rclone::sugarsync,authorization=not-real:/backups",
+        "rclone::webdav,url='https://dav.example.com',headers='Authorization,Bearer not-real':/b",
+        "rclone::protondrive,username=demo,2fa=123456:/backups",
+    ] {
+        assert_eq!(
+            located(location).inline_secrets(),
+            [InlineSecret::Location],
+            "{location}"
+        );
+    }
+}
+
+/// A setting's value may be a location of its own, whose credentials are
+/// written in the configuration as much as the location's own are.
+#[test]
+fn a_credential_of_a_location_in_an_rclone_setting_is_an_inline_secret() {
+    for location in [
+        "rclone::crypt,remote=':s3,secret_access_key=not-real:bucket':path",
+        "rclone::crypt,remote='demo,pass=not-real:bucket':path",
+        "rclone::crypt,remote=':crypt,remote='':s3,secret_access_key=not-real:b'':p':path",
+    ] {
+        assert_eq!(
+            located(location).inline_secrets(),
+            [InlineSecret::Location],
+            "{location}"
+        );
+    }
+    for location in [
+        "rclone::crypt,remote=':s3,secret_access_key=${DEMO_KEY}:bucket':path",
+        "rclone::crypt,remote=':s3,access_key_id=AKIADEMO:bucket':path",
+        // No `:` outside quotes: rclone reads a local path.
+        "rclone::crypt,remote='demo,pass=not-real':path",
+    ] {
+        assert_eq!(located(location).inline_secrets(), [], "{location}");
+    }
+}
+
+#[test]
 fn an_option_whose_value_is_a_url_with_a_password_is_an_inline_secret() {
     let mut demo = settings(env());
     demo.options = options(&[

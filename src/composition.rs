@@ -18,7 +18,7 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 
 use app::ports::Retention;
-use app::ports::SecretResolver as _;
+use app::ports::SecretResolver;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
@@ -1206,7 +1206,8 @@ impl Catalog for ConfigCatalog {
             // gave, masked of every secret of the repository, in the log
             // as in the answer (I4).
             Err(SnapshotError::Resolve(error)) => {
-                let refusal = secret_refusal(&error, &repository.settings).await;
+                let refusal =
+                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await;
                 log::warn!(
                     "the snapshots of {} could not be listed: {:?}{}",
                     alias.as_str(),
@@ -1220,7 +1221,7 @@ impl Catalog for ConfigCatalog {
                 return Err(SnapshotsError::SecretRefused(refusal));
             }
             Err(error) => {
-                let said = failure_redactor(&repository.settings)
+                let said = failure_redactor(&repository.settings, &SystemSecrets::default())
                     .await
                     .redact(&format!("{error:?}"));
                 log::warn!(
@@ -1434,9 +1435,9 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::AlreadyConfigured(alias) => RepositoriesError::AlreadyConfigured {
             alias: alias.as_str().to_owned(),
         },
-        RepositoryError::Resolve(error) => {
-            RepositoriesError::SecretRefused(secret_refusal(&error, settings).await)
-        }
+        RepositoryError::Resolve(error) => RepositoriesError::SecretRefused(
+            secret_refusal(&error, settings, &SystemSecrets::default()).await,
+        ),
         RepositoryError::Engine(EngineError::Unavailable { detail }) => {
             unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
         }
@@ -1465,10 +1466,14 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
 
 /// A secret that couldn't be resolved, as the typed refusal of its cause.
 /// What a platform or a command said is masked of every secret of the
-/// repository first (I4).
-async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> SecretRefusal {
+/// repository first (I4), read again through `resolver`.
+async fn secret_refusal(
+    error: &ResolveError,
+    settings: &RepositorySettings,
+    resolver: &dyn SecretResolver,
+) -> SecretRefusal {
     use domain::secrets::Problem;
-    let redactor = failure_redactor(settings).await;
+    let redactor = failure_redactor(settings, resolver).await;
     let field = || ("field", MsgArg::Text(field_name(&error.field)));
     let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
         code,
@@ -1523,6 +1528,7 @@ async fn secret_refusal(error: &ResolveError, settings: &RepositorySettings) -> 
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
+        Cause::TooManyCredentials { .. } => todo!(),
         Cause::Invalid(template) => {
             let mut args = vec![field()];
             if let Some(at) = template_error_place(template) {
@@ -1571,7 +1577,7 @@ const REREAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A secret read again, for a redactor: `None` when it can't be read, since
 /// what can't be read can't show in what a failure says.
-async fn read_again(resolver: &SystemSecrets, secret: &SecretRef) -> Option<SecretValue> {
+async fn read_again(resolver: &dyn SecretResolver, secret: &SecretRef) -> Option<SecretValue> {
     tokio::time::timeout(REREAD_LIMIT, resolver.resolve(secret))
         .await
         .ok()?
@@ -1581,18 +1587,20 @@ async fn read_again(resolver: &SystemSecrets, secret: &SecretRef) -> Option<Secr
 
 /// A redactor for what a failure of `settings` says: its inline password and
 /// credential options, and what the references of its settings, and a
-/// password read from the environment or a file, resolve to. A failed
-/// resolution stops at the first fault, so the other secrets of the
-/// repository were not read yet: they are read again here, so that a command
-/// that prints one of them in its error doesn't show it. A command is not
-/// run a second time.
-async fn failure_redactor(settings: &RepositorySettings) -> Redactor {
-    let resolver = SystemSecrets::default();
+/// password read from the environment or a file, resolve to through
+/// `resolver`. A failed resolution stops at the first fault, so the other
+/// secrets of the repository were not read yet: they are read again here, so
+/// that a command that prints one of them in its error doesn't show it. A
+/// command is not run a second time.
+async fn failure_redactor(
+    settings: &RepositorySettings,
+    resolver: &dyn SecretResolver,
+) -> Redactor {
     let mut resolved = Vec::new();
     if matches!(
         settings.password,
         SecretRef::Env(_) | SecretRef::File { .. }
-    ) && let Some(value) = read_again(&resolver, &settings.password).await
+    ) && let Some(value) = read_again(resolver, &settings.password).await
     {
         resolved.push(value);
     }
@@ -1613,7 +1621,7 @@ async fn failure_redactor(settings: &RepositorySettings) -> Redactor {
         }
     }
     for reference in references {
-        if let Some(value) = read_again(&resolver, &reference.secret_ref()).await {
+        if let Some(value) = read_again(resolver, &reference.secret_ref()).await {
             resolved.push(value);
         }
     }
@@ -2043,6 +2051,30 @@ mod tests {
         assert!(
             !shown[0].contains("${") && !shown[0].contains(pass),
             "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn a_listed_repository_shows_its_rclone_locations_without_the_credentials_written_in_them() {
+        let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        settings.repository =
+            "rclone::sftp,host=nas.example.com,pass='CANARY-rclone-cold,x:y':/backups".to_owned();
+        settings.repo_hot =
+            Some("rclone::b2,account=demo,key=CANARY-rclone-hot:demo-bucket".to_owned());
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        assert_eq!(
+            row.repository,
+            "rclone::sftp,host=nas.example.com,pass=***:/backups"
+        );
+        assert_eq!(
+            row.repo_hot.as_deref(),
+            Some("rclone::b2,account=demo,key=***:demo-bucket")
+        );
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        assert!(
+            !wire.contains("CANARY") && !wire.contains("x:y"),
+            "the row repeats a credential: {wire}"
         );
     }
 
@@ -5187,6 +5219,29 @@ mod repository_service_tests {
     }
 
     #[tokio::test]
+    async fn an_existing_rclone_repository_is_refused_without_the_credential_in_its_location() {
+        let engine = engine();
+        *engine
+            .outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Err(FailureReason::RepositoryExists);
+        let mut settings = settings_dto();
+        settings.repository =
+            "rclone::sftp,host=nas.example.com,pass=CANARY-rclone-exists:/backups".to_owned();
+        let Err(RepositoriesError::Exists { location }) =
+            service(&engine, Arc::new(InMemoryConfigStore::new()))
+                .init(init(None, settings))
+                .await
+        else {
+            panic!("an existing repository is refused as one");
+        };
+        assert_eq!(
+            location,
+            "rclone::sftp,host=nas.example.com,pass=***:/backups"
+        );
+    }
+
+    #[tokio::test]
     async fn a_secret_that_cannot_be_read_names_where_it_is() {
         for (mut settings, field) in [
             (settings_dto(), "password"),
@@ -5354,6 +5409,15 @@ mod repository_service_tests {
             ),
             (
                 ResolveError {
+                    field: Field::RepoHot,
+                    cause: Cause::TooManyCredentials { limit: 16 },
+                },
+                ErrorCode::LocationTooManyCredentials,
+                vec![("field", text("repo-hot"))],
+                None,
+            ),
+            (
+                ResolveError {
                     field: Field::OptionCold("token".to_owned()),
                     cause: Cause::Invalid(TemplateError::Unterminated { at: 3 }),
                 },
@@ -5373,7 +5437,7 @@ mod repository_service_tests {
         ];
         for (error, code, args, detail) in cases {
             assert_eq!(
-                secret_refusal(&error, &settings).await,
+                secret_refusal(&error, &settings, &SystemSecrets::default()).await,
                 SecretRefusal {
                     code,
                     args,
@@ -5382,6 +5446,38 @@ mod repository_service_tests {
                 "{error:?}"
             );
         }
+    }
+
+    /// A refusal that shows nothing a secret could be in reads no secret: a
+    /// location with more credentials than a job takes, or a reference that
+    /// would reach the arguments of a process, is refused before anything is
+    /// read (§10.2), and so is its answer. One that shows what a source
+    /// said reads the repository's secrets again, to mask them.
+    #[tokio::test]
+    async fn a_refusal_that_shows_no_words_reads_no_secret() {
+        use domain::secrets::{Problem, TemplateError};
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.password = SecretRef::Env("DEMO_PASSWORD".to_owned());
+        settings.options = [("token".to_owned(), "${DEMO_TOKEN}".to_owned())].into();
+        let secrets = FakeSecrets::new();
+        secrets.set_env("DEMO_PASSWORD", "demo-password");
+        secrets.set_env("DEMO_TOKEN", "demo-token");
+        for cause in [
+            Cause::TooManyCredentials { limit: 16 },
+            Cause::ReferenceInProcessArguments,
+            Cause::ExpansionTooLong { limit: 4096 },
+            Cause::Invalid(TemplateError::TooLong { limit: 4096 }),
+        ] {
+            let error = ResolveError {
+                field: Field::Repository,
+                cause,
+            };
+            let _ = secret_refusal(&error, &settings, &secrets).await;
+            assert_eq!(secrets.reads(), [], "{error:?}");
+        }
+        let error = unresolved(Field::Password, env_source("PW"), Problem::Missing);
+        let _ = secret_refusal(&error, &settings, &secrets).await;
+        assert_eq!(secrets.reads().len(), 2);
     }
 
     /// What a command said, and what a platform said, is masked of every
@@ -5414,7 +5510,7 @@ mod repository_service_tests {
                 detail: said.to_owned(),
             },
         );
-        let refusal = secret_refusal(&error, &settings).await;
+        let refusal = secret_refusal(&error, &settings, &SystemSecrets::default()).await;
         let detail = refusal.detail.expect("the command's words are kept");
         assert_eq!(
             detail,
@@ -5443,12 +5539,23 @@ mod repository_service_tests {
         command: &str,
         engine: Arc<dyn Engine>,
     ) -> (ConfigCatalog, tempfile::TempDir) {
+        catalog_at(alias, "/srv/demo/repo", command, engine).await
+    }
+
+    /// A catalog as [`catalog_with_a_password_command`] makes it, with its
+    /// repository at `location`.
+    async fn catalog_at(
+        alias: &str,
+        location: &str,
+        command: &str,
+        engine: Arc<dyn Engine>,
+    ) -> (ConfigCatalog, tempfile::TempDir) {
         let scratch = tempfile::tempdir().expect("a scratch folder");
         let referenced = scratch.path().join("token");
         std::fs::write(&referenced, "canary-from-a-file\n").expect("the file is written");
         let config = Arc::new(InMemoryConfigStore::new());
         let settings = RepositorySettings {
-            repository: "/srv/demo/repo".to_owned(),
+            repository: location.to_owned(),
             repo_hot: None,
             password: SecretRef::Command(
                 domain::secrets::CommandLine::parse(command).expect("a command"),
@@ -5543,6 +5650,31 @@ mod repository_service_tests {
         assert!(!logged.contains("canary-from-a-file"), "{logged}");
     }
 
+    /// What the engine says of an rclone location is logged without the
+    /// credential written in it (I4).
+    #[tokio::test]
+    async fn the_log_of_a_listing_masks_the_credential_written_in_an_rclone_location() {
+        capture();
+        let engine = engine();
+        let location = "rclone::sftp,host=nas.example.com,pass=CANARY-rclone-log:/backups";
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::Unavailable {
+            detail: format!("rclone could not open {location}"),
+        });
+        let (catalog, _scratch) =
+            catalog_at("rclone-down", location, "echo not-a-real-password", engine).await;
+        let refused = catalog.snapshots("rclone-down".to_owned()).await;
+        assert_eq!(refused, Err(SnapshotsError::Unavailable));
+        let logged = logged_about("rclone-down").join("\n");
+        assert!(
+            logged.contains("rclone::sftp,host=nas.example.com,pass=***:/backups"),
+            "{logged}"
+        );
+        assert!(!logged.contains("CANARY-rclone-log"), "{logged}");
+    }
+
     /// A command's line cut at the cap can end in the beginning of a secret
     /// the mask would not find: the first characters of it are not shown
     /// either (I4).
@@ -5559,7 +5691,7 @@ mod repository_service_tests {
             },
             Problem::command_failed(Some(1), stderr.as_bytes()),
         );
-        let detail = secret_refusal(&error, &settings)
+        let detail = secret_refusal(&error, &settings, &SystemSecrets::default())
             .await
             .detail
             .expect("the words are kept");
@@ -5583,7 +5715,7 @@ mod repository_service_tests {
             },
             Problem::command_failed(Some(1), stderr.as_bytes()),
         );
-        let detail = secret_refusal(&error, &settings)
+        let detail = secret_refusal(&error, &settings, &SystemSecrets::default())
             .await
             .detail
             .expect("the words are kept");
@@ -5612,7 +5744,7 @@ mod repository_service_tests {
             ),
         ] {
             let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 60 });
-            let refusal = secret_refusal(&error, &settings).await;
+            let refusal = secret_refusal(&error, &settings, &SystemSecrets::default()).await;
             assert_eq!(refusal.code, ErrorCode::SecretUnreadable, "{field}");
             assert_eq!(
                 refusal.args,

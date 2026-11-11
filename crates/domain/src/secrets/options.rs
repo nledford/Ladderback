@@ -44,6 +44,13 @@ pub fn is_secret_option(name: &str) -> bool {
         || name.ends_with("_key")
 }
 
+/// Whether a setting of this name in an rclone connection string holds a
+/// credential.
+pub(super) fn is_rclone_secret_option(name: &str) -> bool {
+    let _ = name;
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +156,54 @@ mod tests {
             "compass",
         ] {
             assert!(!is_secret_option(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn rclones_own_credential_names_are_secrets_as_whole_names() {
+        for name in [
+            "key_file_pass",
+            "key-file-pass",
+            "KEY_PEM",
+            "sas_url",
+            "connection_string",
+            "sse_customer_key_base64",
+            // Storj's access grant, Filen's master keys, SugarSync's
+            // authorization, the headers of WebDAV and HTTP (which take
+            // `Authorization,Bearer …`), and Proton Drive's one-time code.
+            "access_grant",
+            "Access-Grant",
+            "master_keys",
+            "authorization",
+            "headers",
+            "2fa",
+        ] {
+            assert!(is_secret_option(name), "{name}");
+        }
+        for name in [
+            "key_file",
+            "key_use_agent",
+            "pubkey",
+            "sse_customer_key_md5",
+            "url",
+            "access",
+            "master_key_id",
+            "header",
+        ] {
+            assert!(!is_secret_option(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn key_is_a_credential_only_in_an_rclone_connection_string() {
+        // rclone's B2, Swift and Azure Blob backends keep a credential in
+        // `key`; a rustic option of that name is SFTP's key file path.
+        for name in ["key", "KEY", "pass", "secret_access_key", "key_pem"] {
+            assert!(is_rclone_secret_option(name), "{name}");
+        }
+        assert!(!is_secret_option("key"));
+        for name in ["key_file", "access_key_id", "use_password", "host", ""] {
+            assert!(!is_rclone_secret_option(name), "{name}");
         }
     }
 }

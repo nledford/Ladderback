@@ -18,6 +18,7 @@ use domain::maintenance::{OtherHosts, SelectionToken, Snapshot, Tally};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use http_adapter::{MaintenanceRefusal, MaintenanceRequest};
 use platform::SystemClock;
+use secrets::SystemSecrets;
 use uuid::Uuid;
 
 use super::{PlanRunner, secret_refusal};
@@ -431,9 +432,9 @@ async fn secret_refused(
         return unavailable(ErrorCode::ConfigUnavailable, Vec::new(), None);
     };
     match loaded.repository(repository) {
-        Some(found) => {
-            MaintenanceRefusal::SecretRefused(secret_refusal(error, &found.settings).await)
-        }
+        Some(found) => MaintenanceRefusal::SecretRefused(
+            secret_refusal(error, &found.settings, &SystemSecrets::default()).await,
+        ),
         None => MaintenanceRefusal::UnknownRepository,
     }
 }

@@ -126,6 +126,11 @@ pub enum ErrorCode {
     /// reference. The argument `field` names the setting, and `at`, when the
     /// fault has a place, the byte of the setting it starts at.
     TemplateInvalid,
+    /// A repository's location is an rclone connection string with more
+    /// credentials written in it than a job takes: each is a secret to mask
+    /// in every text the job shows (I4). The argument `field` names the
+    /// setting (`repository` or `repo-hot`).
+    LocationTooManyCredentials,
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
@@ -533,7 +538,7 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
-            Self::SecretInProcessArguments => &[ArgSpec {
+            Self::SecretInProcessArguments | Self::LocationTooManyCredentials => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1323,7 +1328,12 @@ mod tests {
                 "{code:?}"
             );
         }
-        assert_eq!(ErrorCode::SecretInProcessArguments.args(), &[named[0]]);
+        for code in [
+            ErrorCode::SecretInProcessArguments,
+            ErrorCode::LocationTooManyCredentials,
+        ] {
+            assert_eq!(code.args(), &[named[0]], "{code:?}");
+        }
         assert_eq!(
             ErrorCode::SecretExpansionTooLong.args(),
             &[named[0], spec("limit", ArgKind::Bytes, false)]

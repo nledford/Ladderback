@@ -128,6 +128,19 @@ fn rclone_credential_written(location: &str) -> bool {
     })
 }
 
+/// The most credentials one rclone location may hold. Each is a secret a
+/// redactor looks for in every text it masks, so a job refuses a location
+/// with more ([`too_many_rclone_credentials`]), and a redactor masks one
+/// whole.
+pub const MAX_RCLONE_CREDENTIALS: usize = 16;
+
+/// Whether an rclone location holds more than [`MAX_RCLONE_CREDENTIALS`]
+/// credentials: settings whose key names one and whose value, quotes aside,
+/// is not empty. False for any other location.
+pub fn too_many_rclone_credentials(_location: &str) -> bool {
+    todo!()
+}
+
 /// The settings of an rclone remote, as rclone reads them: the pieces between
 /// commas up to the `:` that starts the path, the remote's name first. A value
 /// may be quoted with `'` or `"`, where a quote written twice stands for
@@ -202,6 +215,13 @@ fn pieces(text: &str) -> Vec<Piece> {
     pieces
 }
 
+/// `text` as pieces, and where in `text` each piece is written: the byte
+/// offset of each, then `text.len()`.
+fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
+    let _ = text;
+    todo!()
+}
+
 /// The most characters of an option name a warning shows.
 const MAX_NAME_CHARS: usize = 80;
 
@@ -213,4 +233,113 @@ fn shown(name: &str) -> String {
         .take(MAX_NAME_CHARS)
         .map(|c| if c.is_control() { '?' } else { c })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_piece_is_where_the_text_writes_it() {
+        for text in [
+            "",
+            "plain",
+            "é€,x",
+            "a$${b}c",
+            "$$${A}",
+            "$$$${A}",
+            "x${VAR}y${file:/run/demo/key}z",
+            "${A}$${B}",
+            // Not a template: every character is text as written.
+            "${",
+            "a${}b",
+        ] {
+            let (pieces, starts) = written_pieces(text);
+            assert_eq!(starts.len(), pieces.len() + 1, "{text:?}");
+            assert_eq!(starts.last(), Some(&text.len()), "{text:?}");
+            for (at, piece) in pieces.iter().enumerate() {
+                let written = &text[starts[at]..starts[at + 1]];
+                let expected = match piece {
+                    Piece::Char('$') if written == "$$" => true,
+                    Piece::Char(c) => written == c.to_string(),
+                    Piece::Reference => written.starts_with("${") && written.ends_with('}'),
+                };
+                assert!(expected, "{text:?}: {piece:?} is written {written:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_rclone_location_with_more_than_16_credentials_holds_too_many() {
+        let credentials = |count: usize| -> String {
+            (0..count)
+                .map(|n| {
+                    if n % 2 == 0 {
+                        format!(",pass=demo-{n}")
+                    } else {
+                        format!(",key=demo-{n}")
+                    }
+                })
+                .collect()
+        };
+        // A quoted `,` ends no setting; another key, an empty value and the
+        // path after the settings hold no credential.
+        let others = ",pass='demo,pass=x',host=nas,pass=,pass='',pass=\"\"";
+        let location = |count: usize| {
+            format!(
+                "rclone::sftp{}{others}:/pass=x,key=y",
+                credentials(count)
+            )
+        };
+        assert!(!too_many_rclone_credentials(&location(15)));
+        assert!(too_many_rclone_credentials(&location(16)));
+        assert!(too_many_rclone_credentials(&format!(
+            "rclone:nas{}:/backups",
+            credentials(17)
+        )));
+        for location in [
+            format!("opendal:sftp{}", credentials(17)),
+            format!("/srv/demo{}", credentials(17)),
+            "rclone:".to_owned(),
+        ] {
+            assert!(!too_many_rclone_credentials(&location), "{location}");
+        }
+    }
+
+    /// rclone opens a quote only where a value starts, so a quote further on
+    /// hides no setting from the count.
+    #[test]
+    fn a_quote_inside_a_value_hides_no_credential_from_the_count() {
+        let settings: String = (1..=20).map(|n| format!(",pass={n}")).collect();
+        let location = format!("rclone::sftp,pass=a='b{settings},x=':/backups");
+        assert!(too_many_rclone_credentials(&location));
+    }
+
+    /// A location `depth` deep: each level but the last is a crypt remote
+    /// whose `remote` is the next level, quoted.
+    fn nested(depth: usize) -> String {
+        let innermost = ":s3,secret_access_key=demo-a,session_token=demo-b:b".to_owned();
+        (1..depth).fold(innermost, |inner, _| {
+            format!(":crypt,remote='{}':p", inner.replace('\'', "''"))
+        })
+    }
+
+    /// The credentials of a location written in a setting count with the
+    /// location's own, four levels deep; one deeper counts as one, whole.
+    #[test]
+    fn the_credentials_of_a_nested_location_count_toward_the_cap() {
+        let location = |own: usize, depth: usize| {
+            let settings: String = (0..own).map(|n| format!(",pass=demo-{n}")).collect();
+            format!(
+                "rclone::crypt{settings},remote='{}':p",
+                nested(depth - 1).replace('\'', "''")
+            )
+        };
+        // Two credentials at the fourth level.
+        assert!(!too_many_rclone_credentials(&location(14, 4)));
+        assert!(too_many_rclone_credentials(&location(15, 4)));
+        // The fifth level is one credential.
+        assert!(!too_many_rclone_credentials(&location(15, 5)));
+        assert!(too_many_rclone_credentials(&location(16, 5)));
+    }
 }

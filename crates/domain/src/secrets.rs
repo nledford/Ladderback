@@ -12,7 +12,10 @@ mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
-pub use inline::{InlineSecret, location_secret_written, rclone_location, url_password_written};
+pub use inline::{
+    InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
+    too_many_rclone_credentials, url_password_written,
+};
 pub use options::is_secret_option;
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
@@ -1290,6 +1293,174 @@ mod tests {
     fn a_repository_with_an_empty_password_redacts_nothing() {
         let redactor = for_repository("/backups/home", "");
         assert_eq!(redactor.redact("nothing to hide"), "nothing to hide");
+    }
+
+    /// rclone reads a quoted value without its quotes and with a quote
+    /// written twice as one, and may quote it so; the location shows it as
+    /// written.
+    #[test]
+    fn a_credential_written_in_an_rclone_connection_string_is_masked_as_written_and_as_rclone_reads_it()
+     {
+        let location = "rclone::sftp,host=nas.example.com,user=demo,pass='CANARY,it''s:x':/backups";
+        let redactor = for_repository(location, "hunter2");
+        assert_eq!(
+            redactor.redact(location),
+            "rclone::sftp,host=nas.example.com,user=demo,pass=***:/backups"
+        );
+        assert_eq!(redactor.redact("denied CANARY,it's:x"), "denied ***");
+        assert_eq!(redactor.redact("denied CANARY,it''s:x"), "denied ***");
+        let location = "rclone::s3,provider=AWS,access_key_id=AKIADEMO,secret_access_key=\"CANARY-s3\":bucket/repo";
+        assert_eq!(
+            for_repository(location, "hunter2").redact(location),
+            "rclone::s3,provider=AWS,access_key_id=AKIADEMO,secret_access_key=***:bucket/repo"
+        );
+        // A remote's name alone, and a value of characters wider than a byte.
+        assert_eq!(
+            for_repository("rclone::pass=é€", "hunter2").redact("é€"),
+            REDACTED
+        );
+    }
+
+    #[test]
+    fn a_credential_written_in_the_hot_rclone_location_is_masked_too() {
+        let mut settings = Settings::new("/srv/demo/repo");
+        let hot = "rclone:demo-remote,key=CANARY-b2-key:demo-bucket";
+        settings.repo_hot = Some(hot.to_owned());
+        assert_eq!(
+            settings.redactor().redact(hot),
+            "rclone:demo-remote,key=***:demo-bucket"
+        );
+    }
+
+    /// A reference in an rclone location is refused before it is resolved,
+    /// but the location still shows as written; a doubled dollar is text,
+    /// which rclone reads as `${`.
+    #[test]
+    fn an_rclone_credential_with_a_reference_or_an_escape_is_masked_as_written() {
+        let location = "rclone::sftp,pass=pre${DEMO_PASS}post:/backups";
+        assert_eq!(
+            for_repository(location, "hunter2").redact(location),
+            "rclone::sftp,pass=***:/backups"
+        );
+        let location = "rclone::sftp,pass=CANARY$${b}c:/backups";
+        let redactor = for_repository(location, "hunter2");
+        assert_eq!(redactor.redact(location), "rclone::sftp,pass=***:/backups");
+        assert_eq!(redactor.redact("denied CANARY${b}c"), "denied ***");
+    }
+
+    /// rclone opens a quote only where a value starts: a quote further on is
+    /// text, and the `,` after it ends the value all the same.
+    #[test]
+    fn a_quote_inside_an_rclone_value_is_text_as_rclone_reads_it() {
+        let location = "rclone::s3,pass=a='b,secret_access_key=XX':bucket";
+        let redactor = for_repository(location, "hunter2");
+        assert_eq!(
+            redactor.redact(location),
+            "rclone::s3,pass=***,secret_access_key=***:bucket"
+        );
+        assert_eq!(redactor.redact("denied a='b and XX'"), "denied *** and ***");
+    }
+
+    /// A location `depth` deep: each level but the last is a crypt remote
+    /// whose `remote` is the next level, quoted; the last is `innermost`.
+    fn nested(depth: usize, innermost: &str) -> String {
+        (1..depth).fold(innermost.to_owned(), |inner, _| {
+            format!(":crypt,remote='{}':p", inner.replace('\'', "''"))
+        })
+    }
+
+    /// A setting's value may be a location of its own (crypt's `remote`),
+    /// which rclone reads as it reads any: its credentials are masked too,
+    /// as written, as each level reads it and as rclone reads it last.
+    #[test]
+    fn a_credential_of_an_rclone_location_written_in_a_setting_is_masked() {
+        let location = "rclone::crypt,remote=':s3,secret_access_key=XX:bucket',password=YY:path";
+        let redactor = for_repository(location, "hunter2");
+        assert_eq!(
+            redactor.redact(location),
+            "rclone::crypt,remote=':s3,secret_access_key=***:bucket',password=***:path"
+        );
+        assert_eq!(redactor.redact("denied XX"), "denied ***");
+        // A named remote with settings of its own, in which a quoted value
+        // holds a quote: each is written twice once more in the location.
+        let location = "rclone::crypt,remote='demo,pass=''CANARY,it''''s'':bucket':path";
+        let redactor = for_repository(location, "hunter2");
+        assert_eq!(
+            redactor.redact(location),
+            "rclone::crypt,remote='demo,pass=***:bucket':path"
+        );
+        assert_eq!(
+            redactor.redact("open demo,pass='CANARY,it''s':bucket"),
+            "open demo,pass=***:bucket"
+        );
+        assert_eq!(redactor.redact("denied CANARY,it's"), "denied ***");
+        // A backend's settings with no path after them are a location too.
+        let location = "rclone::crypt,remote=':s3,secret_access_key=CANARY-s3':path";
+        assert_eq!(
+            for_repository(location, "hunter2").redact("denied CANARY-s3"),
+            "denied ***"
+        );
+    }
+
+    /// Four levels are read; a location deeper than that is masked whole.
+    #[test]
+    fn an_rclone_location_nested_deeper_than_four_is_masked_whole() {
+        let innermost = ":s3,secret_access_key=CANARY-a,session_token=CANARY-b:b";
+        let four = format!("rclone:{}", nested(4, innermost));
+        let redactor = for_repository(&four, "hunter2");
+        assert_eq!(
+            redactor.redact(&four),
+            format!(
+                "rclone:{}",
+                nested(4, ":s3,secret_access_key=***,session_token=***:b")
+            )
+        );
+        assert_eq!(redactor.redact("denied CANARY-a"), "denied ***");
+        let five = format!("rclone:{}", nested(5, innermost));
+        assert_eq!(
+            for_repository(&five, "hunter2").redact(&five),
+            format!("rclone:{}", nested(4, ":crypt,remote=***:p"))
+        );
+    }
+
+    #[test]
+    fn rclones_own_credential_names_are_masked() {
+        for name in [
+            "access_grant",
+            "master_keys",
+            "authorization",
+            "headers",
+            "2fa",
+        ] {
+            let location = format!("rclone::demo,{name}='CANARY,{name}':bucket");
+            assert_eq!(
+                for_repository(&location, "hunter2").redact(&location),
+                format!("rclone::demo,{name}=***:bucket")
+            );
+        }
+    }
+
+    /// Each credential is a secret of its own to look for in every text, so
+    /// a location with more than 16 of them is masked whole instead.
+    #[test]
+    fn an_rclone_location_with_more_credentials_than_are_read_is_masked_whole() {
+        let location = |count: usize| {
+            let settings: String = (0..count)
+                .map(|n| format!(",secret{n}=CANARY{n}"))
+                .collect();
+            format!("rclone::demo{settings}:/backups")
+        };
+        let sixteen = location(16);
+        let shown = for_repository(&sixteen, "hunter2").redact(&sixteen);
+        assert!(
+            shown.starts_with("rclone::demo,secret0=***,secret1=***") && !shown.contains("CANARY"),
+            "{shown}"
+        );
+        let seventeen = location(17);
+        assert_eq!(
+            for_repository(&seventeen, "hunter2").redact(&seventeen),
+            REDACTED
+        );
     }
 
     fn options(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {

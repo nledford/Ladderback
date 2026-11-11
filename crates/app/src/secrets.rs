@@ -48,6 +48,12 @@ pub enum Cause {
     /// command option) and holds a reference: the resolved secret would show
     /// in `ps`.
     ReferenceInProcessArguments,
+    /// The field is an rclone connection string that holds more than
+    /// `limit` credentials
+    /// ([`too_many_rclone_credentials`](domain::secrets::too_many_rclone_credentials)):
+    /// each is a secret to look for in every text a job shows, so a job
+    /// takes no more.
+    TooManyCredentials { limit: usize },
 }
 
 /// The first field that couldn't be resolved, tried in the order password,

@@ -1193,6 +1193,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SecretInProcessArguments
                 | ErrorCode::SecretExpansionTooLong
                 | ErrorCode::TemplateInvalid
+                | ErrorCode::LocationTooManyCredentials
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
