@@ -6,7 +6,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 root := justfile_directory()
 
 # The crates mutation testing gates (technical design §13.1). Add a crate here
-# when it lands, so `mutants` and `mutants-all` both cover it.
+# when it lands, so `mutants` and `mutants-all` both cover it; one added later
+# is mutated whole by the `mutants` run of the pull request that adds it.
 mutants_packages := "--package domain --package app --package api --package l10n --package config-adapter --package web --package hooks --package interop"
 
 # The cargo flags a release build is made with (technical design §12.1): the
@@ -237,9 +238,16 @@ test-ui *args: web-test _ui-deps
 _ui-deps:
     cd ui-tests && if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci; fi
 
+# A crate this branch adds to `mutants_packages` is mutated whole, not only its
+# changed lines (§13.1): its code may have merged before it joined the gate,
+# and then no diff reaches it. "Added" compares the list with the one at the
+# merge base, the commit the diff starts from; if that Justfile has no list
+# this recipe can read, every gated crate counts as added, so a change of its
+# format costs a longer run, never an untested crate. The other gated crates
+# are mutated in the diff only.
 # Further arguments go to cargo mutants, e.g. `just mutants origin/main --jobs 3`
 # when several agents share the machine.
-[doc("Mutation-test the gated crates' code changed since `base`.")]
+[doc("Mutation-test the gated crates' code changed since `base`, and the whole of any crate the branch adds to the gate.")]
 [group('test')]
 [positional-arguments]
 mutants base='origin/main' *args:
@@ -249,7 +257,23 @@ mutants base='origin/main' *args:
     diff=$(mktemp)
     trap 'rm -f "$diff"' EXIT
     git diff '{{ base }}...HEAD' > "$diff"
-    cargo mutants --in-diff "$diff" {{ mutants_packages }} "$@"
+    # The crate names in a `--package a --package b` list, space-separated.
+    names() { local word; for word in $1; do [ "$word" = --package ] || printf ' %s ' "$word"; done; }
+    at_base=$(names "$(git show "$(git merge-base '{{ base }}' HEAD):Justfile" | sed -n 's/^mutants_packages := "\(.*\)"$/\1/p')")
+    joined='' in_diff=''
+    for package in $(names '{{ mutants_packages }}'); do
+        case "$at_base" in
+            *" $package "*) in_diff="$in_diff --package $package" ;;
+            *) joined="$joined --package $package" ;;
+        esac
+    done
+    if [ -n "$joined" ]; then
+        echo "Joining the gate, so mutated whole:$joined"
+        cargo mutants $joined "$@"
+    fi
+    if [ -n "$in_diff" ]; then
+        cargo mutants --in-diff "$diff" $in_diff "$@"
+    fi
 
 # Further arguments go to cargo mutants, as for `mutants`.
 [doc('Mutation-test all of the gated crates (slow; CI runs it nightly).')]
