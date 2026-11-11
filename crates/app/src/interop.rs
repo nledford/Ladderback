@@ -120,13 +120,18 @@ impl ImportProfile {
             .await
             .map_err(ImportError::Profile)?;
         // A profile knows no repository ID, so its location alone tells
-        // whether the configuration already holds its repository.
-        let configured = loaded.alias_of(&profile.repository.settings, None);
-        let kept = match (loaded.repository(&repository), configured) {
-            (Some(entry), Some(alias)) if *alias == repository => Some(entry),
-            (Some(_), _) => return Err(ImportError::AliasTaken(repository)),
-            (None, Some(alias)) => return Err(ImportError::AlreadyConfigured(alias.clone())),
-            (None, None) => None,
+        // whether the configuration already holds its repository. The entry
+        // the alias names is looked at first: one location may hold two
+        // entries whose IDs differ, and the alias says which is meant.
+        let kept = match loaded.repository(&repository) {
+            Some(entry) if entry.settings.same_location(&profile.repository.settings) => {
+                Some(entry)
+            }
+            Some(_) => return Err(ImportError::AliasTaken(repository)),
+            None => match loaded.alias_of(&profile.repository.settings, None) {
+                Some(alias) => return Err(ImportError::AlreadyConfigured(alias.clone())),
+                None => None,
+            },
         };
         let mut notices = profile.notices;
         if let Some(entry) = kept {
@@ -583,6 +588,28 @@ mod tests {
         assert_eq!(saved.plans().len(), 1);
     }
 
+    /// One location may hold two entries whose IDs differ: the repository
+    /// there was replaced and connected again under another alias. The
+    /// alias the profile is imported as is looked at first, so the import
+    /// adds its plans to the entry it names.
+    #[tokio::test]
+    async fn a_profile_imported_as_the_second_of_two_entries_at_its_location_adds_its_plans_to_it()
+    {
+        let with_id = |id: &str| {
+            let mut entry = repository();
+            entry.id = Some(RepositoryId::parse(&id.repeat(32)).expect("an ID"));
+            entry
+        };
+        let config = holding(vec![("nas", with_id("07")), ("nas2", with_id("08"))]).await;
+        import_as(&config, repository(), "nas2")
+            .await
+            .expect("the plans are added");
+        let saved = saved(&config).await;
+        assert_eq!(saved.repository(&alias("nas2")), Some(&with_id("08")));
+        assert_eq!(saved.repository(&alias("nas")), Some(&with_id("07")));
+        assert_eq!(saved.plans().len(), 1);
+    }
+
     fn kept(setting: &str) -> ProfileNotice {
         ProfileNotice::RepositorySettingKept {
             repository: "nas".to_owned(),
@@ -748,6 +775,24 @@ mod tests {
         assert_eq!(saved.repositories().len(), 1);
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
         assert!(saved.plans().is_empty());
+    }
+
+    /// The same password, written as text in both: the profile's is still
+    /// not the one saved, and nothing is said of it. The configuration's
+    /// own is said when it loads (`config-inline-secret`).
+    #[tokio::test]
+    async fn the_same_password_written_as_text_in_both_is_not_said_kept_as_text() {
+        let mut entry = repository();
+        entry.settings.password = SecretRef::Inline(SecretValue::new("not-a-real-password"));
+        let (imported, _) = import_over(
+            &entry,
+            entry.clone(),
+            vec![ProfileNotice::InlineSecret {
+                field: "repository.password".to_owned(),
+            }],
+        )
+        .await;
+        assert_eq!(imported.notices, []);
     }
 
     /// The ID is what Ladderback read when it opened the repository, which
