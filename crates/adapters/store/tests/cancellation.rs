@@ -84,11 +84,13 @@ async fn a_start_cut_short_at_any_await_point_leaves_the_log_writable() {
 ///
 /// The cut at the start of the transaction comes before the start is stored,
 /// so it must leave the repository free. A cut after the commit has run, but
-/// before the call has seen it, comes only when the connection thread is
-/// slower than the poll that sent the commit: no lock holds a commit back
-/// in write-ahead logging, so no test can force one. Each such cut is checked
-/// when it comes, and the start that ends, stored in full, is checked to hold
-/// the repository as one cut after its commit must.
+/// before the call has seen it, comes here only when the connection thread
+/// is slower than the poll that sent the commit: no lock another connection
+/// holds keeps a commit back in write-ahead logging. Each such cut is checked
+/// when it comes. The crate's own
+/// `pool_tests::a_start_cut_after_its_commit_holds_the_repository` makes that
+/// cut every run, with a commit hook on the store's connections that holds
+/// the commit until the test lets it through.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_start_cut_short_at_any_await_point_holds_the_repository_exactly_when_it_stored_the_start()
  {
