@@ -576,6 +576,37 @@ mod tests {
         assert!(serde_json::from_value::<JobSpec>(json).is_err());
     }
 
+    /// A backup spec without `filter`, as an older daemon's would be, is
+    /// refused: read as no filter, it would back up what the plan leaves out.
+    /// One without `host` is read as no host, so rustic records the machine's
+    /// own name, as it did before a spec carried one.
+    #[test]
+    fn a_backup_spec_without_a_filter_is_refused_and_one_without_a_host_has_none() {
+        let backup = BackupJobSpec {
+            repo: repository(),
+            sources: vec!["/home/demo".to_owned()],
+            plan: PlanId::parse("home").unwrap(),
+            agent: AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            extra_tags: Vec::new(),
+            label: None,
+            host: Some("demo-laptop".to_owned()),
+            filter: SourceFilterSpec::default(),
+            deadline_budget: SignedDuration::from_hours(6),
+        };
+        let json = serde_json::to_value(spec(JobKind::Backup(backup))).unwrap();
+        let without = |field: &str| {
+            let mut json = json.clone();
+            let job = json["job"].as_object_mut().unwrap();
+            assert!(job.remove(field).is_some(), "{field} is not in the spec");
+            serde_json::from_value::<JobSpec>(json)
+        };
+        assert!(without("filter").is_err());
+        match without("host").unwrap().job {
+            JobKind::Backup(read) => assert_eq!(read.host, None),
+            other => panic!("not a backup: {other:?}"),
+        }
+    }
+
     #[test]
     fn a_deadline_budget_keeps_zero_negative_and_fractions_of_a_second() {
         for budget in [

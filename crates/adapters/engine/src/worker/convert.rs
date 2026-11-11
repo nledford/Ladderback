@@ -6,11 +6,15 @@ use std::io;
 use api::ErrorCode;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
+use domain::planning::Hostname;
 use domain::snapshot::SnapshotRef;
 use domain::{RepositoryId, SignedDuration, SnapshotId};
 use jiff::Span;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId, StringList};
-use rustic_core::{BackupOptions, CheckResults, PruneOptions, PruneStats, RusticError};
+use rustic_core::{
+    BackupOptions, CheckResults, Excludes, LocalSourceFilterOptions, PruneOptions, PruneStats,
+    RusticError,
+};
 
 use crate::job::{BackupResult, CheckResult, PrunePlanResult, PruneResult, SourceFilterSpec};
 
@@ -123,19 +127,49 @@ pub(crate) fn snapshot_tags(plan: &PlanTags, extra: &[String]) -> Result<StringL
 /// rustic's backup options with the plan's source filter: its globs and glob
 /// files as `Excludes`, the rest as `LocalSourceFilterOptions`, each field
 /// under its own name. What the filter doesn't set is rustic's default, and
-/// `exclude-larger-than`, which a plan never sets (§6.1), stays off.
+/// `exclude-larger-than`, which a plan never sets (§6.1), stays off. The
+/// filter is taken apart whole, so a field added to it fails to compile here
+/// until it is mapped.
 pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
-    let _ = filter;
-    todo!()
+    let SourceFilterSpec {
+        globs,
+        iglobs,
+        glob_files,
+        iglob_files,
+        git_ignore,
+        no_require_git,
+        custom_ignorefiles,
+        exclude_if_present,
+        exclude_if_xattr,
+        one_file_system,
+    } = filter;
+    let excludes = Excludes::default()
+        .globs(globs.clone())
+        .iglobs(iglobs.clone())
+        .glob_files(glob_files.clone())
+        .iglob_files(iglob_files.clone());
+    let filter_options = LocalSourceFilterOptions::default()
+        .git_ignore(*git_ignore)
+        .no_require_git(*no_require_git)
+        .custom_ignorefiles(custom_ignorefiles.clone())
+        .exclude_if_present(exclude_if_present.clone())
+        .exclude_if_xattr(exclude_if_xattr.clone())
+        .one_file_system(*one_file_system);
+    BackupOptions::default()
+        .excludes(excludes)
+        .ignore_filter_opts(filter_options)
 }
 
-/// The host a snapshot records, checked as the daemon's
-/// [`Hostname`](domain::planning::Hostname) checks it: one to 255 bytes, no
-/// control character. A host the daemon would refuse is an invalid spec, like
-/// a reserved extra tag.
+/// The host a snapshot records, checked as the daemon's [`Hostname`] checks
+/// it: one to 255 bytes, no control character. A host the daemon would
+/// refuse is an invalid spec, like a reserved extra tag.
 pub(crate) fn snapshot_host(host: Option<&str>) -> Result<Option<String>, JobError> {
-    let _ = host;
-    todo!()
+    host.map(|host| {
+        Hostname::parse(host)
+            .map(|host| host.as_str().to_owned())
+            .map_err(|error| invalid_spec(&error))
+    })
+    .transpose()
 }
 
 fn invalid_spec(error: &dyn std::error::Error) -> JobError {

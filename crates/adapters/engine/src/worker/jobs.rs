@@ -7,13 +7,13 @@ use std::path::PathBuf;
 
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
-    BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList,
-    SnapshotOptions, StringList,
+    CheckOptions, ConfigOptions, Credentials, KeyOptions, ParentOptions, PathList, SnapshotOptions,
+    StringList,
 };
 
 use super::convert::{
-    JobError, backup_result, check_result, prune_options, prune_plan_result, prune_result,
-    snapshot_id, snapshot_ref, snapshot_tags,
+    JobError, backup_options, backup_result, check_result, prune_options, prune_plan_result,
+    prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
 };
 use super::listing;
 use super::repository::{new_repository, open, repository_id};
@@ -203,6 +203,9 @@ fn repository_exists(error: rustic_core::RusticError) -> JobError {
     }
 }
 pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobError> {
+    // Checked before the repository is opened, so a host the daemon would
+    // refuse touches nothing.
+    let host = snapshot_host(job.host.as_deref())?;
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
 
@@ -221,7 +224,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     }
 
     let tags = snapshot_tags(&plan_tags, &job.extra_tags)?;
-    let mut snapshot_options = SnapshotOptions::default().tags(vec![tags]);
+    let mut snapshot_options = SnapshotOptions::default().tags(vec![tags]).host(host);
     if let Some(label) = &job.label {
         snapshot_options = snapshot_options.label(label.clone());
     }
@@ -234,7 +237,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     ctx.start(Some(job.deadline_budget))?;
     let repository = repository.to_indexed_ids()?;
     let snapshot = repository.backup(
-        &BackupOptions::default().parent_opts(parent_options),
+        &backup_options(&job.filter).parent_opts(parent_options),
         &paths,
         snapshot,
     )?;
