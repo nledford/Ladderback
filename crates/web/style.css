@@ -350,3 +350,25 @@ td ul {
   margin-block: 0;
   padding-inline-start: 1.25rem;
 }
+
+/* The table of repositories puts short names and labels beside long paths.
+   An automatic table gives each column at least its narrowest content, and
+   the body lets any word break anywhere, so a short name's narrowest is one
+   letter: beside the paths, which took the room, it was squeezed to a letter
+   or two a line ("Na/me", "de/m/o"). A cell that holds a path takes a fixed
+   share of the width, so the columns beside it get their whole width when the
+   screen has room. A row's name and a button's label keep a floor of 12ch,
+   so a short one is never squeezed and a long one breaks at a space or a
+   hyphen first; past the floor a word still breaks anywhere, so a 64-letter
+   name with no hyphen fits a small screen too (1.4.10). The floor is never
+   more than a third of the screen less 2rem, so it gives way as the text
+   grows: on a small screen with large text no word fits whole, and the table
+   must still fit. */
+table.repositories th[scope="row"],
+table.repositories td button {
+  min-inline-size: min(12ch, 35vw - 2rem);
+}
+
+td.path {
+  inline-size: 35%;
+}

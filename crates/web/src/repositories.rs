@@ -297,17 +297,16 @@ impl Outcome {
 }
 
 /// The route a row's Create posts to: the saved repository named `alias` is
-/// created where its entry says, with the password the entry names.
+/// created where its entry says, with the password the entry names. An
+/// alias is lower-case letters, digits and hyphens, so it needs no escaping.
 pub(crate) fn create_saved_path(alias: &str) -> String {
-    let _ = alias;
-    todo!()
+    format!("/api/v1/repositories/{alias}/init")
 }
 
 /// The name of a row's Create button: it names the row, so each one is told
 /// apart by name alone.
 pub(crate) fn create_label(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
-    let _ = alias;
-    todo!()
+    (msg::UI_REPOSITORY_CREATE, vec![("alias", text(alias))])
 }
 
 /// A repository created from its row: the daemon answered with its ID.
@@ -320,22 +319,22 @@ impl RowCreated {
     /// What the daemon's answer to a row's Create says, or `None` when it is
     /// not that answer.
     pub(crate) fn of(answer: &str) -> Option<Self> {
-        let _ = answer;
-        todo!()
+        serde_json::from_str::<RepositoryIdDto>(answer)
+            .ok()
+            .map(|answered| Self { id: answered.id })
     }
 
     /// The short confirmation the page shows, and moves focus to: the
     /// repository by name, without its ID.
     pub(crate) fn confirmation(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
-        let _ = alias;
-        todo!()
+        (msg::UI_REPOSITORY_CREATED, vec![("alias", text(alias))])
     }
 
     /// The sentence that follows the confirmation, outside what has focus:
     /// the repository's ID, which a screen reader would spell out digit by
     /// digit.
     pub(crate) fn id_sentence(&self) -> (MessageId, Vec<(&'static str, MsgArg)>) {
-        todo!()
+        (msg::UI_REPOSITORY_CREATED_ID, vec![("id", text(&self.id))])
     }
 }
 
@@ -346,8 +345,12 @@ pub(crate) fn row_refusal(
     code: ErrorCode,
     alias: &str,
 ) -> Option<(MessageId, Vec<(&'static str, MsgArg)>)> {
-    let _ = (code, alias);
-    todo!()
+    (code == ErrorCode::RepositoryExists).then(|| {
+        (
+            msg::UI_REPOSITORY_ALREADY_THERE,
+            vec![("alias", text(alias))],
+        )
+    })
 }
 
 fn text(value: &str) -> MsgArg {
