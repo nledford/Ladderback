@@ -10,7 +10,7 @@ use app::ports::{ExportRefusal, PlanExport, ProfileNotice, ProfileReader, Profil
 use common::{Scratch, nas};
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
-    HookEntry, Hooks, Hostname, KeepCount, KeepWithin, OnFailure, Plan, RepositoryConfig,
+    GlobFile, HookEntry, Hooks, Hostname, KeepCount, KeepWithin, OnFailure, Plan, RepositoryConfig,
     RepositorySettings, RetentionPolicy, Source,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
@@ -366,8 +366,8 @@ fn a_filter_is_written_only_for_what_it_sets() {
     let filter = &mut export.plan.filter;
     filter.globs = vec!["*.tmp".to_owned()];
     filter.iglobs = vec!["*.BAK".to_owned()];
-    filter.glob_files = vec!["/etc/globs".to_owned()];
-    filter.iglob_files = vec!["/etc/iglobs".to_owned()];
+    filter.glob_files = vec![GlobFile::parse("/etc/globs").unwrap()];
+    filter.iglob_files = vec![GlobFile::parse("/etc/iglobs").unwrap()];
     filter.no_require_git = true;
     filter.custom_ignorefiles = vec![".ignore".to_owned()];
     filter.exclude_if_xattr = vec!["user.skip".to_owned()];

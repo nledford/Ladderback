@@ -5,6 +5,8 @@
 //! Left out on purpose: `exclude-larger-than`, which would drop a file from a
 //! snapshot with no warning, for a size the user set once and forgot.
 
+use super::GlobFile;
+
 /// The patterns, marker files and switches that decide what a plan's
 /// sources contribute. Every list is in the order it was written, and
 /// nothing here is read from disk: a glob file that doesn't exist is a
@@ -17,10 +19,11 @@ pub struct SourceFilter {
     pub globs: Vec<String>,
     /// The same, case-insensitively (`iglobs`).
     pub iglobs: Vec<String>,
-    /// Files that hold glob patterns, one per line (`glob-files`).
-    pub glob_files: Vec<String>,
+    /// Files that hold glob patterns, one per line (`glob-files`). Each is an
+    /// absolute path, so it names the same file however the daemon started.
+    pub glob_files: Vec<GlobFile>,
     /// The same, case-insensitively (`iglob-files`).
-    pub iglob_files: Vec<String>,
+    pub iglob_files: Vec<GlobFile>,
     /// Leave out what `.gitignore` files leave out (`git-ignore`).
     pub git_ignore: bool,
     /// Apply `.gitignore` files outside a git repository too

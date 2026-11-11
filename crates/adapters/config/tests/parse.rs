@@ -136,8 +136,8 @@ fn a_plans_filter_keys_are_read() {
         SourceFilter {
             globs: strings(&["*.tmp", "!keep.tmp"]),
             iglobs: strings(&["*.LOG"]),
-            glob_files: strings(&["/home/demo/.g"]),
-            iglob_files: strings(&["/home/demo/.ig"]),
+            glob_files: vec![domain::planning::GlobFile::parse("/home/demo/.g").unwrap()],
+            iglob_files: vec![domain::planning::GlobFile::parse("/home/demo/.ig").unwrap()],
             git_ignore: true,
             no_require_git: true,
             custom_ignorefiles: strings(&[".backupignore"]),

@@ -10,8 +10,8 @@
 
 use app::ports::{ConfigError, Problem};
 use domain::planning::{
-    AgentConfig, AgentSettings, GroupBy, HookEntry, Hooks, KeepCount, KeepWithin, Maintenance,
-    Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
+    AgentConfig, AgentSettings, GlobFile, GroupBy, HookEntry, Hooks, KeepCount, KeepWithin,
+    Maintenance, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
@@ -23,6 +23,11 @@ use crate::tables::{
 /// `value` unless it is empty, which isn't written.
 fn some_if_any<T: Clone>(values: &[T]) -> Option<Vec<T>> {
     (!values.is_empty()).then(|| values.to_vec())
+}
+
+/// The glob files as the file writes them, unless there are none.
+fn glob_files(files: &[GlobFile]) -> Option<Vec<String>> {
+    (!files.is_empty()).then(|| files.iter().map(|file| file.as_str().to_owned()).collect())
 }
 
 /// The text of `tables`: `schema`, then `[agent]` and `[hooks]`, a table for
@@ -256,8 +261,8 @@ fn plan(plan: &Plan) -> PlanTable {
         }),
         globs: some_if_any(&filter.globs),
         iglobs: some_if_any(&filter.iglobs),
-        glob_files: some_if_any(&filter.glob_files),
-        iglob_files: some_if_any(&filter.iglob_files),
+        glob_files: glob_files(&filter.glob_files),
+        iglob_files: glob_files(&filter.iglob_files),
         git_ignore: filter.git_ignore.then_some(true),
         no_require_git: filter.no_require_git.then_some(true),
         custom_ignorefiles: some_if_any(&filter.custom_ignorefiles),

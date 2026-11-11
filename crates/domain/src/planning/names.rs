@@ -7,7 +7,7 @@ use super::{InvalidValue, ValueKind};
 const MAX_HOSTNAME_BYTES: usize = 255;
 /// The most bytes a path takes: Linux's `PATH_MAX`. (macOS's is 1024, so a
 /// longer path can't exist there; the cap is for the file's sake.)
-const MAX_SOURCE_BYTES: usize = 4096;
+const MAX_PATH_BYTES: usize = 4096;
 /// The most bytes a BCP 47 language tag takes in practice (RFC 5646 §4.6).
 const MAX_LOCALE_BYTES: usize = 35;
 /// The most bytes one subtag of a language tag takes.
@@ -48,8 +48,7 @@ pub struct Source(String);
 
 impl Source {
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let valid = text.starts_with('/') && text.len() <= MAX_SOURCE_BYTES && !text.contains('\0');
-        if valid {
+        if is_absolute_path(text) {
             Ok(Self(text.to_owned()))
         } else {
             Err(InvalidValue::new(ValueKind::Source, text))
@@ -59,6 +58,12 @@ impl Source {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// An absolute path of at most [`MAX_PATH_BYTES`] without a NUL, as written:
+/// what the worker reads from the disk can't depend on where it was started.
+fn is_absolute_path(text: &str) -> bool {
+    text.starts_with('/') && text.len() <= MAX_PATH_BYTES && !text.contains('\0')
 }
 
 /// A file of glob patterns a plan's source filter reads (`glob-files`,
@@ -74,12 +79,19 @@ pub struct GlobFile(String);
 
 impl GlobFile {
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let _ = text;
-        todo!()
+        if is_absolute_path(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::GlobFile, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
@@ -199,7 +211,9 @@ mod tests {
     fn a_glob_file_is_an_absolute_path_of_at_most_4096_bytes() {
         let longest = format!("/{}", "a".repeat(4095));
         for text in ["/home/demo/.excludes", "/etc/rustic/globs list", &longest] {
-            assert_eq!(GlobFile::parse(text).unwrap().as_str(), text);
+            let file = GlobFile::parse(text).unwrap();
+            assert_eq!(file.as_str(), text);
+            assert_eq!(file.into_string(), text);
         }
     }
 

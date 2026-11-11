@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use app::ports::{ConfigError, PasswordProblem, Problem};
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
-    InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
+    AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
+    Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
     RepositoryConfig, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source,
     SourceFilter, Violation, parse_duration,
 };
@@ -331,8 +331,8 @@ fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
     let filter = SourceFilter {
         globs: table.globs.unwrap_or_default(),
         iglobs: table.iglobs.unwrap_or_default(),
-        glob_files: table.glob_files.unwrap_or_default(),
-        iglob_files: table.iglob_files.unwrap_or_default(),
+        glob_files: glob_files(reader, &path.key("glob-files"), table.glob_files)?,
+        iglob_files: glob_files(reader, &path.key("iglob-files"), table.iglob_files)?,
         git_ignore: table.git_ignore.unwrap_or(false),
         no_require_git: table.no_require_git.unwrap_or(false),
         custom_ignorefiles: table.custom_ignorefiles.unwrap_or_default(),
@@ -359,6 +359,20 @@ fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
         retention,
         hooks,
     })
+}
+
+/// The files of glob patterns listed at `path`, each refused at its own index.
+fn glob_files(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    files: Option<Vec<String>>,
+) -> Read<Vec<GlobFile>> {
+    files
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(index, text)| reader.value(&path.index(index), GlobFile::parse(text)))
+        .collect()
 }
 
 fn schedule_of(reader: &Reader<'_, '_>, path: &Path, table: ScheduleTable) -> Read<Schedule> {
