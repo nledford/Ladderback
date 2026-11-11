@@ -1,5 +1,5 @@
 # cargo-deny's policy for the dependency tree (technical design §13.6, §16
-# decision 42). `just deny` runs it, for every workspace package; the `Dependencies (cargo-deny)` job in
+# decision 43). `just deny` runs it, for every workspace package; the `Dependencies (cargo-deny)` job in
 # .github/workflows/ci.yml runs the same recipe, on pull requests and nightly.
 
 # What the graph is: every feature, on the targets Ladderback builds for. The
@@ -40,7 +40,7 @@ ignore = [
 # An expression with OR is satisfied by any one of its terms: `self_cell` is
 # `Apache-2.0 OR GPL-2.0-only`, and we use it under Apache-2.0, so GPL is not on
 # the list. A crate with only a copyleft licence fails, and a new
-# licence is a decision for the maintainer (§16, decision 42), not an edit made
+# licence is a decision for the maintainer (§16, decision 43), not an edit made
 # to turn the check green.
 [licenses]
 confidence-threshold = 0.93
