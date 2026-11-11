@@ -4579,6 +4579,35 @@ mod repository_service_tests {
         assert!(config.repository(&alias("second")).is_some());
     }
 
+    /// Both connections find the configuration without the repository; the
+    /// one that writes second finds the other's entry, and is refused.
+    #[tokio::test]
+    async fn one_repository_connected_under_two_aliases_at_the_same_moment_is_kept_once() {
+        let engine = engine();
+        let config = Arc::new(Yielding(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        let (first, second) = tokio::join!(
+            service.connect(connect("first", settings_dto())),
+            service.connect(connect("second", settings_dto())),
+        );
+        let (kept, refused) = match (first.map(|_| ()), second.map(|_| ())) {
+            (Ok(()), Err(refused)) => ("first", refused),
+            (Err(refused), Ok(())) => ("second", refused),
+            other => panic!("one connection is kept and the other refused: {other:?}"),
+        };
+        assert_eq!(
+            refused,
+            RepositoriesError::AlreadyConfigured {
+                alias: kept.to_owned()
+            }
+        );
+        let config = saved(&*config).await;
+        assert_eq!(
+            config.repositories().keys().collect::<Vec<_>>(),
+            [&alias(kept)]
+        );
+    }
+
     #[tokio::test]
     async fn a_repository_that_never_answers_is_refused_and_the_lock_is_released() {
         // A job that is waited on for ever is a failure of the test, not a
