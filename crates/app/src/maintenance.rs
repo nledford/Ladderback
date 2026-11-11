@@ -386,18 +386,8 @@ impl RunMaintenance {
         kind: MaintenanceKind,
         held: Option<&SelectionToken>,
     ) -> Result<MaintenanceAssessment, MaintenanceError> {
-        let (config, mut access) = self.open(alias).await?;
-        // The repository's ID names it in the log, which is what I7 holds
-        // it by. A read reports it; nothing else runs before the slot is
-        // taken.
-        let id = identify(
-            self.engine.as_ref(),
-            self.clock.as_ref(),
-            op,
-            access.clone(),
-        )
-        .await?;
-        access.id = Some(id);
+        // Only reads run before the slot is taken.
+        let (config, access) = self.identified(op, alias).await?;
 
         let (partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -549,7 +539,8 @@ impl RunMaintenance {
                 }))
             }
             MaintenanceKind::Prune => {
-                let (_, access) = self.open(alias).await?;
+                // Opened as the prune opens it, so through the cache.
+                let (_, access) = self.identified(op, alias).await?;
                 let keep_delete = default_keep_delete();
                 let job = Job::PrunePlan(PruneJob {
                     repository: access,
@@ -657,6 +648,27 @@ impl RunMaintenance {
             .await
             .map_err(MaintenanceError::Resolve)?
             .access;
+        Ok((config, access))
+    }
+
+    /// As [`open`](Self::open), with the access naming the repository's ID,
+    /// as a run opens it: the ID names the repository in the log, which is
+    /// what I7 holds it by, and the engine gives a job the repository's
+    /// cache by it. A read reports it.
+    async fn identified(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+    ) -> Result<(AgentConfig, RepositoryAccess), MaintenanceError> {
+        let (config, mut access) = self.open(alias).await?;
+        let id = identify(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            access.clone(),
+        )
+        .await?;
+        access.id = Some(id);
         Ok((config, access))
     }
 

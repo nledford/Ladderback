@@ -418,6 +418,38 @@ impl ForgetWorld {
             })
             .collect()
     }
+
+    /// The repository's ID, as the scripted identify reports it.
+    pub fn repository_id(&self) -> &RepositoryId {
+        &self.repository_id
+    }
+
+    /// How the engine was told to open the repository for its first prune
+    /// plan, or `None` when it was given none.
+    pub fn plan_access(&self) -> Option<RepositoryAccess> {
+        self.find_job(|job| match job {
+            Job::PrunePlan(job) => Some(job.repository.clone()),
+            _ => None,
+        })
+    }
+
+    /// How the engine was told to open the repository for its first prune,
+    /// or `None` when it was given none.
+    pub fn prune_access(&self) -> Option<RepositoryAccess> {
+        self.find_job(|job| match job {
+            Job::Prune(job) => Some(job.repository.clone()),
+            _ => None,
+        })
+    }
+
+    /// The first job the engine was given that `pick` answers for.
+    fn find_job<T>(&self, pick: impl FnMut(&Job) -> Option<T>) -> Option<T> {
+        self.jobs
+            .lock()
+            .expect("the job list answers")
+            .iter()
+            .find_map(pick)
+    }
 }
 
 /// The engine the forget scenarios talk to: each identify answers the
