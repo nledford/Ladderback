@@ -131,7 +131,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "serde",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "app",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "config-adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "croner",
  "jiff",
@@ -1653,7 +1653,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "app",
@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "hooks"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "http-adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "app",
@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "interop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
@@ -3170,7 +3170,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "l10n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "fixed_decimal",
@@ -3197,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "ladderback"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "app",
@@ -4783,7 +4783,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
@@ -5952,7 +5952,7 @@ dependencies = [
 
 [[package]]
 name = "secrets"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
@@ -6642,7 +6642,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "app",
@@ -6870,7 +6870,7 @@ dependencies = [
 
 [[package]]
 name = "testkit"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "textwrap"
@@ -7674,7 +7674,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "api",
  "console_error_panic_hook",
