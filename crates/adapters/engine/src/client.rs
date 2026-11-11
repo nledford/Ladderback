@@ -1193,6 +1193,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SecretNotText
                 | ErrorCode::SecretTooLarge
                 | ErrorCode::SecretCommandFailed
+                | ErrorCode::SecretCommandOutputOpen
                 | ErrorCode::SecretCommandTimedOut
                 | ErrorCode::SecretInProcessArguments
                 | ErrorCode::SecretExpansionTooLong

@@ -226,6 +226,20 @@ fn command_fails(agent: &mut Agent, command: String, stdout: String, status: i32
     );
 }
 
+#[given(
+    expr = "the command {string} prints {string} while something it started holds its output open"
+)]
+fn command_prints_held_open(agent: &mut Agent, command: String, stdout: String) {
+    agent.secrets.script(
+        &command,
+        Script::LeavesOutputOpen {
+            status: 0,
+            stdout: text(&stdout).into_bytes(),
+            stderr: Vec::new(),
+        },
+    );
+}
+
 #[given(expr = "the command {string} never ends")]
 fn command_hangs(agent: &mut Agent, command: String) {
     agent.secrets.script(&command, Script::Hangs);
@@ -502,6 +516,24 @@ fn problem_command_failed(agent: &mut Agent, status: i32, detail: String) {
             detail
         }
     );
+}
+
+#[then(
+    expr = "the problem is that the command exited with status {int}, and nothing it said is shown"
+)]
+fn problem_command_failed_unquoted(agent: &mut Agent, status: i32) {
+    assert_eq!(
+        agent.secrets.unresolved().problem,
+        Problem::CommandFailed {
+            status: Some(status),
+            detail: String::new(),
+        }
+    );
+}
+
+#[then("the problem is that its output was cut short")]
+fn problem_output_cut(agent: &mut Agent) {
+    assert_eq!(agent.secrets.unresolved().problem, Problem::OutputCut);
 }
 
 #[then("the problem is that the command took too long")]

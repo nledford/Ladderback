@@ -1631,6 +1631,7 @@ async fn secret_refusal(
                     | SourceName::File { .. }
                     | SourceName::Env { .. } => refusal(ErrorCode::SecretUnreadable, named, None),
                 },
+                Problem::OutputCut => todo!(),
             }
         }
         Cause::ReferenceInProcessArguments => {
@@ -6142,6 +6143,12 @@ mod repository_service_tests {
                     ("source", text("pass")),
                     ("seconds", count(60)),
                 ],
+                None,
+            ),
+            (
+                unresolved(Field::Password, command(), Problem::OutputCut),
+                ErrorCode::SecretCommandOutputOpen,
+                at("password", "pass"),
                 None,
             ),
             (

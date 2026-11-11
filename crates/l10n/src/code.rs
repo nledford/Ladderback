@@ -61,6 +61,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretNotText => msg::ERROR_SECRET_NOT_TEXT,
     SecretTooLarge => msg::ERROR_SECRET_TOO_LARGE,
     SecretCommandFailed => msg::ERROR_SECRET_COMMAND_FAILED,
+    SecretCommandOutputOpen => msg::ERROR_SECRET_COMMAND_OUTPUT_OPEN,
     SecretCommandTimedOut => msg::ERROR_SECRET_COMMAND_TIMED_OUT,
     SecretInProcessArguments => msg::ERROR_SECRET_IN_PROCESS_ARGUMENTS,
     SecretExpansionTooLong => msg::ERROR_SECRET_EXPANSION_TOO_LONG,

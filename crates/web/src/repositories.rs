@@ -200,6 +200,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretNotText
         | ErrorCode::SecretTooLarge
         | ErrorCode::SecretCommandFailed
+        | ErrorCode::SecretCommandOutputOpen
         | ErrorCode::SecretCommandTimedOut
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
@@ -700,6 +701,7 @@ mod tests {
             ErrorCode::SecretNotText,
             ErrorCode::SecretTooLarge,
             ErrorCode::SecretCommandFailed,
+            ErrorCode::SecretCommandOutputOpen,
             ErrorCode::SecretCommandTimedOut,
             ErrorCode::SecretInProcessArguments,
             ErrorCode::SecretExpansionTooLong,

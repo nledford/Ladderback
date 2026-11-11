@@ -300,6 +300,13 @@ error-secret-too-large = { $source }, which the repository's { $field } refers t
 error-secret-command-failed = The command { $source }, which gives the repository's { $field }, failed. Run it yourself to see why.
     .with-detail = The command { $source }, which gives the repository's { $field }, failed ({ $detail }). Run it yourself to see why.
 
+# The command that gives a repository's secret succeeded, but something it
+# started kept its output open, and the secret's line never ended, so it gave
+# no whole secret.
+# $field (text): where in the settings the secret is.
+# $source (text): the program that was run.
+error-secret-command-output-open = The command { $source }, which gives the repository's { $field }, finished, but something it started kept its output open, and the line with the { $field } never ended. Make the command print the { $field } followed by a new line, or close its output before it exits.
+
 # The command that gives a repository's secret ran for too long.
 # $field (text): where in the settings the secret is.
 # $source (text): the program that was run.

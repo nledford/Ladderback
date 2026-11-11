@@ -7,8 +7,8 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use domain::secrets::{
-    CommandLine, MAX_SECRET_BYTES, Problem, SecretError, SecretValue, SourceName, command_failure,
-    command_secret,
+    CommandLine, MAX_SECRET_BYTES, Problem, SecretError, SecretValue, SourceName, Stdout,
+    command_failure, command_secret,
 };
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -136,13 +136,15 @@ pub(crate) async fn run_with(
     };
     // It ran to its end and was reaped: what it left running is its own
     // business, and the group is not signalled any more.
-    if status.success() {
-        command_secret(&source, &out)
+    let stdout = if stdout_ended {
+        Stdout::ReadToEnd(&out)
     } else {
-        // A stdout the grace cut holds only part of what it printed: masked
-        // against that part, what it said could show the rest (I4).
-        let printed = stdout_ended.then_some(out.as_slice());
-        Err(command_failure(&source, status.code(), printed, &err))
+        Stdout::LeftOpen(&out)
+    };
+    if status.success() {
+        command_secret(&source, stdout)
+    } else {
+        Err(command_failure(&source, status.code(), stdout, &err))
     }
 }
 

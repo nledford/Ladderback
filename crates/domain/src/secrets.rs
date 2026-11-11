@@ -19,8 +19,8 @@ pub use inline::{
 use options::is_rclone_secret_option;
 pub use options::is_secret_option;
 pub use outcome::{
-    MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, command_failure, command_secret, decode,
-    file_warning,
+    MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, Stdout, command_failure, command_secret,
+    decode, file_warning,
 };
 pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};
 pub use template::{Part, Reference, Template, TemplateError, has_reference};
