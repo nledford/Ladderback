@@ -130,8 +130,9 @@ pub fn decode(
 pub enum Stdout<'a> {
     /// Read to its end: the command, and whatever it started, closed it.
     ReadToEnd(&'a [u8]),
-    /// Left when the pipe grace ran out after the command exited, with
-    /// something it started still holding it open: more may have followed.
+    /// Not read to its end when the pipe grace ran out after the command
+    /// exited (something it started still held it, or stderr, open): more
+    /// may have followed.
     LeftOpen(&'a [u8]),
 }
 
@@ -782,6 +783,21 @@ mod tests {
                     status: Some(1),
                     detail: String::new(),
                 },
+            }
+        );
+        // Even when what was read ends a line: more lines may have followed,
+        // and the whole of what was printed is a needle too.
+        let error = command_failure(
+            &source,
+            Some(1),
+            Stdout::LeftOpen(b"hunter2-canary\n"),
+            b"rejected hunter2-canary\n",
+        );
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: String::new(),
             }
         );
     }
