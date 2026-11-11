@@ -315,6 +315,17 @@ Then("the dialog {string} stays open", async function (name) {
   assert.ok(await dialogOf(this, name).isVisible(), `the dialog "${name}" was dismissed`);
 });
 
+// A review is read as a column of sentences and a short table: a dialog that
+// takes the whole of a wide screen puts the table's two columns a screen apart.
+Then("the dialog {string} is no wider than {int} pixels", async function (name, limit) {
+  const box = await dialogOf(this, name).boundingBox();
+  assert.ok(box, `the dialog "${name}" is not on the page`);
+  assert.ok(
+    box.width <= limit,
+    `the dialog "${name}" is ${Math.round(box.width)} pixels wide, wider than ${limit}`,
+  );
+});
+
 Then("the page shows the button {string}", async function (name) {
   await this.page
     .getByRole("button", { name: namePattern(name) })

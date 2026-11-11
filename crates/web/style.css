@@ -284,6 +284,15 @@ dialog p[aria-live]:empty {
   margin-block: 0;
 }
 
+/* A dialog is as wide as its content wants, up to the room the browser leaves
+   it. A table of fixed shares wants all of it, and a review of a forget would
+   take a whole wide screen and put the table's two columns a screen apart:
+   past 48rem a review is read as a column of sentences. The second term is the
+   browser's own limit, so a small screen is no different. */
+dialog {
+  max-inline-size: min(48rem, calc(100% - 6px - 2em));
+}
+
 table {
   inline-size: 100%;
   border-collapse: collapse;

@@ -366,6 +366,18 @@ Feature: Maintenance of a repository on the Snapshots page
     And no text is clipped
     And the page has no accessibility violations
 
+  Scenario: The review of a forget keeps to a readable width on a wide screen
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And the dialog "Forget snapshots of demo" is no wider than 768 pixels
+
   Scenario: The Snapshots page reflows with larger text and wider spacing, a review open
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" keeps the last 1 snapshots
