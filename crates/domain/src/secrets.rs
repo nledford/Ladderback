@@ -185,9 +185,10 @@ impl Redactor {
         self.mask(text, None)
     }
 
-    /// `kept`, the start of a text that was cut at a cap, with every needle
-    /// replaced as [`Redactor::redact`] replaces it, and its end too from
-    /// where it is the beginning of a needle on: a secret the cut went
+    /// `kept`, a text that may have been cut short (at a cap, by a read that
+    /// stopped, or by its writer), with every needle replaced as
+    /// [`Redactor::redact`] replaces it, and its end too from where it is
+    /// the beginning of a needle on: a secret the cut went
     /// through. A cut inside a character leaves bytes of it that are no
     /// character, and they are left out. This masks more than a secret
     /// where the end of `kept` only looks like the start of one, never

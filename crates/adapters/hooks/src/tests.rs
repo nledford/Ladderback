@@ -790,26 +790,23 @@ async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_c
     }
 }
 
-/// Output that was not cut is all the hook said: an end that only begins
-/// like a secret is its own words and stays. Output that was cut is masked
-/// from where it begins a secret (I4).
+/// Output is masked from where it begins a secret, cut at the cap or not:
+/// what was read doesn't say who stopped it (I4, #232). An end that begins
+/// no secret is kept, and `truncated` is the cap's alone.
 #[test]
-fn only_output_that_was_cut_is_masked_where_it_ends_like_a_secret_begins() {
+fn output_is_masked_where_it_ends_like_a_secret_begins_whoever_cut_it() {
     let redactor =
         domain::secrets::Redactor::new(&[domain::secrets::SecretValue::new("hunter2-demo")]);
     let captured = crate::Captured::default();
-    assert_eq!(
-        captured.stream(b"done h", false, true, &redactor).text,
-        "done h"
-    );
-    assert_eq!(
-        captured.stream(b"done h", true, true, &redactor).text,
-        "done ***"
-    );
-    // Not read to its end: cut by time, not by the cap, and masked the same.
-    let stopped = captured.stream(b"done h", false, false, &redactor);
-    assert_eq!(stopped.text, "done ***");
-    assert!(!stopped.truncated, "nothing went past the cap");
+    for truncated in [false, true] {
+        let masked = captured.stream(b"done h", truncated, &redactor);
+        assert_eq!(masked.text, "done ***");
+        assert_eq!(masked.truncated, truncated);
+        assert_eq!(
+            captured.stream(b"done x", truncated, &redactor).text,
+            "done x"
+        );
+    }
 }
 
 /// The secret one write was carrying when the read of a pipe stopped. A
@@ -870,19 +867,30 @@ async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
     panic!("the hook's output was never read before its timeout");
 }
 
-/// Output read to its end is all the hook said, though it ends the way a
-/// secret begins: it is its own words and stays (#158). Only a stream the
-/// read left partway is masked as cut.
+/// A hook can cut its own output short: it stops partway through a secret
+/// and exits on its own, with no timeout, no failed read and no newline at
+/// the end, as one that a signal Ladderback didn't send ended. What was read
+/// is masked as a cut text all the same, whoever stopped the stream, and
+/// nothing of the secret shows, though the hook failed (I4, #232). Output
+/// that ends nowhere near a secret is kept as it was said.
 #[tokio::test]
-async fn output_read_to_its_end_that_only_ends_like_a_secret_begins_is_kept() {
+async fn output_a_hook_cut_short_itself_leaves_nothing_of_a_secret() {
     let scratch = TempDir::new().unwrap();
-    let entry = sh(
-        "printf 'said hunter2-'; printf 'said hunter2-' >&2",
-        &scratch.path().join("log"),
-    );
     let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
-    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    let plain = sh(
+        "printf 'said hello\\n'; printf 'said hello' >&2",
+        &scratch.path().join("plain"),
+    );
+    let outcome = within(Duration::from_secs(5), runner.run(&plain, &context())).await;
     assert_eq!(outcome.status, HookStatus::Succeeded);
-    assert_eq!(outcome.stdout.text, "said hunter2-");
-    assert_eq!(outcome.stderr.text, "said hunter2-");
+    assert_eq!(outcome.stdout.text, "said hello\n");
+    assert_eq!(outcome.stderr.text, "said hello");
+    let cut = sh(
+        "printf 'said hunter2-'; printf 'said hunter2-' >&2\nexit 3",
+        &scratch.path().join("cut"),
+    );
+    let outcome = within(Duration::from_secs(5), runner.run(&cut, &context())).await;
+    assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
+    assert_eq!(outcome.stdout.text, "said ***");
+    assert_eq!(outcome.stderr.text, "said ***");
 }

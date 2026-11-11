@@ -135,28 +135,30 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 
 /// The error of a command that ran and failed: its exit `status` and what it
 /// wrote to `stderr`, with what it printed on `stdout` masked in it.
-/// `stderr_cut`: `stderr` is only the start of what it wrote, so it may end
-/// in the start of what it printed, which is masked too.
+/// `stderr` is masked as a cut text however it ended: a reader's cap, the
+/// pipe grace, a failed read or the command itself can stop it partway
+/// through what it printed, and what was read doesn't say which did.
+///
+/// `stdout` is `None` when its read stopped before the end: what was read
+/// is then only part of what the command printed, and stderr masked
+/// against that part would show the rest of a secret it quotes. Nothing
+/// of stderr is quoted then; the error keeps its status.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
-    stdout: &[u8],
+    stdout: Option<&[u8]>,
     stderr: &[u8],
-    stderr_cut: bool,
 ) -> SecretError {
-    // A helper that rejects a value may quote it on stderr: what it printed
-    // (less the line ending its last line ends with, which isn't what it
-    // quotes), and its first line, which is what it would have given as its
-    // secret, are masked there.
-    let output = String::from_utf8_lossy(stdout);
-    let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
-    let first = SecretValue::new(first_line(&output));
-    let redactor = Redactor::new([&printed, &first]);
-    let said = if stderr_cut {
-        redactor.redact_cut(stderr)
-    } else {
-        redactor.redact(&String::from_utf8_lossy(stderr))
-    };
+    let said = stdout.map_or_else(String::new, |stdout| {
+        // A helper that rejects a value may quote it on stderr: what it
+        // printed (less the line ending its last line ends with, which isn't
+        // what it quotes), and its first line, which is what it would have
+        // given as its secret, are masked there.
+        let output = String::from_utf8_lossy(stdout);
+        let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
+        let first = SecretValue::new(first_line(&output));
+        Redactor::new([&printed, &first]).redact_cut(stderr)
+    });
     SecretError {
         source: source.clone(),
         problem: Problem::command_failed(status, said.as_bytes()),
@@ -632,9 +634,8 @@ mod tests {
         let error = command_failure(
             &source,
             Some(1),
-            b"hunter2-canary\n",
+            Some(b"hunter2-canary\n".as_slice()),
             b"rejected hunter2-canary\nsecond line\n",
-            false,
         );
         assert_eq!(
             error,
@@ -650,9 +651,8 @@ mod tests {
         let error = command_failure(
             &source,
             Some(2),
-            b"hunter2\nsecond line\n",
+            Some(b"hunter2\nsecond line\n".as_slice()),
             b"bad value hunter2\n",
-            false,
         );
         assert_eq!(
             error.problem,
@@ -673,7 +673,7 @@ mod tests {
         let stdout = format!("{secret}\n");
         // Longer than the kept stderr.
         let kept = secret.as_bytes().get(..8192).unwrap();
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), kept, true);
+        let error = command_failure(&source, Some(1), Some(stdout.as_bytes()), kept);
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -683,7 +683,7 @@ mod tests {
         );
         // Quoted, and cut inside it.
         let stderr = format!("rejected {}", secret.get(..600).unwrap());
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), stderr.as_bytes(), true);
+        let error = command_failure(&source, Some(1), Some(stdout.as_bytes()), stderr.as_bytes());
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -691,14 +691,50 @@ mod tests {
                 detail: "rejected ***".to_owned(),
             }
         );
-        // Not cut: what the helper wrote is all it said, and only what is
-        // whole is the secret.
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), b"rejected abc", false);
+    }
+
+    /// A helper can cut its stderr short itself, partway through the secret
+    /// it quotes, and nothing in what was read says so: what it said is
+    /// masked as a cut text whoever stopped it, so nothing of the secret
+    /// reaches the detail (I4, #232). What ends nowhere near the secret is
+    /// kept as it was said.
+    #[test]
+    fn what_a_failed_command_said_is_masked_as_cut_whoever_cut_it() {
+        let source = command("pass");
+        let stdout = Some(b"hunter2-canary\n".as_slice());
+        for (said, detail) in [
+            ("rejected hello", "rejected hello"),
+            ("rejected hunter2-", "rejected ***"),
+            ("rejected h", "rejected ***"),
+        ] {
+            let error = command_failure(&source, Some(1), stdout, said.as_bytes());
+            assert_eq!(
+                error.problem,
+                Problem::CommandFailed {
+                    status: Some(1),
+                    detail: detail.to_owned(),
+                },
+                "{said:?}"
+            );
+        }
+    }
+
+    /// A stdout that was cut holds only part of the secret, and masking
+    /// what the helper said against that part would show the rest of it
+    /// (`***nary`): nothing it said is quoted then, and the error keeps its
+    /// status (I4, #233).
+    #[test]
+    fn a_failed_command_whose_stdout_was_cut_quotes_nothing_it_said() {
+        let source = command("pass");
+        let error = command_failure(&source, Some(1), None, b"rejected hunter2-canary\n");
         assert_eq!(
-            error.problem,
-            Problem::CommandFailed {
-                status: Some(1),
-                detail: "rejected abc".to_owned(),
+            error,
+            SecretError {
+                source: source.clone(),
+                problem: Problem::CommandFailed {
+                    status: Some(1),
+                    detail: String::new(),
+                },
             }
         );
     }

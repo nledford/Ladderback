@@ -210,13 +210,12 @@ impl SecretResolver for FakeSecrets {
                         stdout,
                         stderr,
                     }) if *status != 0 => {
-                        // The fake keeps all of its scripted stderr.
+                        // The fake keeps all of its scripted output.
                         Err(command_failure(
                             &source,
                             Some(*status),
-                            stdout,
+                            Some(stdout),
                             stderr,
-                            false,
                         ))
                     }
                     Some(Script::Exits { stdout, .. }) => {
