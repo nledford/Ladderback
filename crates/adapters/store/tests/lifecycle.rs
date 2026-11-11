@@ -8,11 +8,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use app::ports::{HistoryQuery, OperationRecord, OperationStore, StoreError};
-use domain::execution::OperationKind;
+use app::ports::{HistoryQuery, OperationRecord, OperationStore, Start, StoreError};
+use domain::execution::{FailureReason, OperationKind};
 use sqlx::Connection;
-use store::OpenError;
+use store::{OpenError, SqliteStore};
 use support::*;
+use tokio::task::JoinHandle;
 
 /// The names in `dir`, sorted.
 fn entries(dir: &Path) -> Vec<String> {
@@ -263,46 +264,156 @@ async fn a_closed_store_answers_every_call_with_unavailable() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn closing_waits_for_a_write_in_flight() {
-    let scratch = Scratch::new();
-    let store = Arc::new(scratch.open().await);
-    // Another connection holds the write lock, so the save below has its
-    // connection and is waiting for the lock: a write in flight.
+/// A write the store can have in flight when it is closed, of operation 0x10.
+#[derive(Clone, Copy, Debug)]
+enum Write {
+    Save,
+    Start,
+    FailUnfinished,
+}
+
+impl Write {
+    /// What the store holds before the write: `fail_unfinished` needs a
+    /// running operation to end.
+    async fn prepare(self, store: &SqliteStore) {
+        if let Write::FailUnfinished = self {
+            save(store, &with_warnings(started(queued_backup(0x10)), 3), None).await;
+        }
+    }
+
+    /// Starts the write in a task of its own; the task fails on an answer
+    /// other than the one the write gives when it succeeds.
+    fn spawn(self, store: &Arc<SqliteStore>) -> JoinHandle<Result<(), StoreError>> {
+        let store = Arc::clone(store);
+        tokio::spawn(async move {
+            match self {
+                Write::Save => {
+                    let op = with_warnings(started(queued_backup(0x10)), 3);
+                    store.save(&op, None).await
+                }
+                Write::Start => {
+                    let op = started(queued_on_repository(0x10, OperationKind::Prune));
+                    let start = store.try_start(&op).await?;
+                    assert_eq!(start, Start::Started);
+                    Ok(())
+                }
+                Write::FailUnfinished => {
+                    let ended = store.fail_unfinished(&FailureReason::DaemonStopped).await?;
+                    assert_eq!(ended, 1);
+                    Ok(())
+                }
+            }
+        })
+    }
+
+    /// The status operation 0x10 has, and the warnings it keeps, once the
+    /// write has ended.
+    fn outcome(self) -> (&'static str, usize) {
+        match self {
+            Write::Save => ("running", 3),
+            Write::Start => ("running", 0),
+            Write::FailUnfinished => ("failed", 3),
+        }
+    }
+}
+
+/// Holds the write lock from another connection, so `write` started now has
+/// its connection and waits for the lock: a write in flight. `close` must not
+/// return before that write has ended, and the write must be kept. Reads
+/// made while `close` waits wait behind it and find the store closed.
+async fn closing_waits_for(write: Write, scratch: &Scratch, store: Arc<SqliteStore>) {
+    write.prepare(&store).await;
     let mut raw = scratch.raw().await;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut raw)
         .await
         .expect("the write lock is taken");
 
-    let op = with_warnings(started(queued_backup(0x10)), 3);
-    let saving = {
-        let store = Arc::clone(&store);
-        let op = op.clone();
-        tokio::spawn(async move { store.save(&op, None).await })
-    };
+    let writing = write.spawn(&store);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let mut closing = Box::pin(store.close());
     let early = tokio::time::timeout(Duration::from_millis(300), &mut closing).await;
     assert!(
         early.is_err(),
-        "close returned with a write still in flight"
+        "close returned with a write still in flight: {write:?}"
     );
+    let reading = {
+        let store = Arc::clone(&store);
+        tokio::spawn(async move {
+            let everything = HistoryQuery::default();
+            tokio::join!(store.get(id(0x10)), store.list(&everything))
+        })
+    };
 
     sqlx::query("COMMIT")
         .execute(&mut raw)
         .await
         .expect("the write lock is released");
     within(30, "closing", closing).await;
-    let saved = within(30, "the save", saving).await.expect("the task ends");
-    assert_eq!(saved, Ok(()), "the write in flight completed");
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM operations WHERE id = ?1")
+        .bind(id_text(0x10))
+        .fetch_optional(&mut raw)
+        .await
+        .expect("the status reads");
+    let warnings = stored_warnings(&mut raw, 0x10).await.len();
 
-    let reopened = scratch.open().await;
-    let found = reopened.get(id(0x10)).await.expect("reading works");
+    let written = within(30, "the write", writing)
+        .await
+        .expect("the task ends");
+    assert_eq!(written, Ok(()), "the write in flight completed: {write:?}");
+    let (expected_status, expected_warnings) = write.outcome();
     assert_eq!(
-        found.map(|detail| detail.warnings),
-        Some(op.warnings().to_vec()),
-        "and was kept, warnings and all"
+        (status.as_deref(), warnings),
+        (Some(expected_status), expected_warnings),
+        "close returned before the write it waited for had ended: {write:?}"
     );
+    let (found, listed) = within(30, "the reads", reading)
+        .await
+        .expect("the task ends");
+    assert!(
+        matches!(found, Err(StoreError::Unavailable { .. })),
+        "a read made while close waited: {found:?}"
+    );
+    assert!(
+        matches!(listed, Err(StoreError::Unavailable { .. })),
+        "a list made while close waited: {listed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_waits_for_a_write_in_flight() {
+    let scratch = Scratch::new();
+    let store = Arc::new(scratch.open().await);
+    closing_waits_for(Write::Save, &scratch, store).await;
+}
+
+/// sqlx 0.8's `Pool::close` gives the pool a permit back for every idle
+/// connection it closes, permits those connections had already returned, so
+/// with two idle connections it stops waiting for the one a write still has
+/// (#168).
+async fn closing_waits_beside_idle_connections_for(write: Write) {
+    let scratch = Scratch::new();
+    let store = Arc::new(scratch.open().await);
+    // Two reads at once, so the pool opens a second connection; both are idle
+    // again by the time the write is in flight.
+    let (first, second) = tokio::join!(store.get(id(0x01)), store.get(id(0x02)));
+    assert!(matches!(first, Ok(None)), "{first:?}");
+    assert!(matches!(second, Ok(None)), "{second:?}");
+    closing_waits_for(write, &scratch, store).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_waits_for_a_save_in_flight_beside_idle_connections() {
+    closing_waits_beside_idle_connections_for(Write::Save).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_waits_for_a_start_in_flight_beside_idle_connections() {
+    closing_waits_beside_idle_connections_for(Write::Start).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_waits_for_failing_the_unfinished_beside_idle_connections() {
+    closing_waits_beside_idle_connections_for(Write::FailUnfinished).await;
 }

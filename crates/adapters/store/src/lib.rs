@@ -36,6 +36,7 @@ use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Connection, Sqlite, SqliteConnection, SqlitePool};
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::report::cap;
 use crate::summary::Summary;
@@ -86,6 +87,9 @@ impl std::error::Error for OpenError {}
 #[derive(Debug)]
 pub struct SqliteStore {
     pool: SqlitePool,
+    /// Held shared by each call for as long as it uses the database, and
+    /// alone by [`SqliteStore::close`], which so waits for the calls in flight.
+    calls: RwLock<()>,
 }
 
 impl SqliteStore {
@@ -121,13 +125,37 @@ impl SqliteStore {
                 },
             });
         }
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            calls: RwLock::new(()),
+        })
     }
 
-    /// Closes every connection, waiting for writes in flight. Every call
-    /// after it is [`StoreError::Unavailable`].
+    /// Closes the pool once the calls in flight, reads and writes, have
+    /// ended: a write that was in flight has committed or failed by the time
+    /// it returns. A call made after it, or while it waits, is
+    /// [`StoreError::Unavailable`].
+    ///
+    /// The store waits for its calls itself rather than leave it to the
+    /// pool: sqlx 0.8's `Pool::close` gives the pool a permit back for each
+    /// idle connection it closes, permits those connections had already
+    /// returned, so with idle connections beside a busy one it can stop
+    /// waiting before that one is back (#168; sqlx 0.9 fixes it). Until then
+    /// a connection sqlx is still handing back to the pool when a call has
+    /// ended can outlive `close`: one whose call succeeded stays open, idle,
+    /// until the store is dropped, and one closed because its write was cut
+    /// short or failed (see [`Checkout`]) may still be rolling that write
+    /// back, so a writer after it waits on SQLite's busy timeout.
     pub async fn close(&self) {
+        let _alone = self.calls.write().await;
         self.pool.close().await;
+    }
+
+    /// The store, held for one call until it has done with the database.
+    /// Once `close` waits, a new call waits behind it and then finds the
+    /// pool closed: the lock is fair, so calls can't keep `close` waiting.
+    async fn call(&self) -> RwLockReadGuard<'_, ()> {
+        self.calls.read().await
     }
 
     /// A connection for one write, closed rather than reused if the write
@@ -334,6 +362,7 @@ impl OperationStore for SqliteStore {
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
         let encoded = Encoded::new(operation, result)?;
+        let _call = self.call().await;
         let mut checkout = self.checkout().await?;
         let saved = save_in_transaction(&mut checkout.conn, operation, &encoded).await;
         if saved.is_ok() {
@@ -352,6 +381,7 @@ impl OperationStore for SqliteStore {
             });
         }
         let encoded = Encoded::new(operation, None)?;
+        let _call = self.call().await;
         let mut checkout = self.checkout().await?;
         let started = start_in_transaction(&mut checkout.conn, operation, &encoded).await;
         if started.is_ok() {
@@ -362,6 +392,7 @@ impl OperationStore for SqliteStore {
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         let id = id.as_uuid().to_string();
+        let _call = self.call().await;
         // One read transaction: the row and its warnings are one snapshot, so
         // a save that lands in between can't be seen half done.
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
@@ -403,6 +434,7 @@ impl OperationStore for SqliteStore {
         let fetch = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
         let after = query.after.map(|after| after.as_uuid().to_string());
         let plan = query.plan.as_ref().map(PlanId::as_str);
+        let _call = self.call().await;
         let rows = match (plan, after.as_deref()) {
             (None, None) => {
                 sqlx::query(sql::LIST_FIRST_PAGE)
@@ -451,6 +483,7 @@ impl OperationStore for SqliteStore {
 
     async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
         let failure = codec::encode_failure(reason).map_err(encoding)?;
+        let _call = self.call().await;
         // One statement, so it is atomic: every unfinished row ends or none
         // does, and the write lock it takes keeps a save out meanwhile.
         let ended = sqlx::query(sql::FAIL_UNFINISHED)
