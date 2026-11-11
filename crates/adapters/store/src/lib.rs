@@ -31,7 +31,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
-use domain::{OperationId, PlanId, RepositoryId, Timestamp};
+use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Connection, SqliteConnection, SqlitePool};
@@ -236,6 +236,7 @@ async fn write(
         )
         .bind(encoded.failure.as_ref().and_then(|failure| failure.detail))
         .bind(i64::try_from(operation.warning_count()).unwrap_or(i64::MAX))
+        .bind(operation.repository_alias().map(RepositoryAlias::as_str))
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;
