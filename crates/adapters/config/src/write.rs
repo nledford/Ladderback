@@ -210,6 +210,7 @@ fn repository_table(repository: &RepositoryConfig) -> Result<RepositoryTable, &'
     let settings = &repository.settings;
     let mut table = RepositoryTable {
         repository: Some(settings.repository.clone()),
+        repository_id: repository.id.as_ref().map(|id| id.as_str().to_owned()),
         repo_hot: settings.repo_hot.clone(),
         maintenance: (repository.maintenance != Maintenance::default())
             .then(|| repository.maintenance.as_str().to_owned()),

@@ -13,7 +13,7 @@ use domain::planning::{
     SourceFilter, Violation, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
-use domain::{InvalidId, PlanId, RepositoryAlias};
+use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
 
 use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
@@ -109,13 +109,23 @@ pub(crate) fn config(reader: &Reader<'_, '_>, file: FileTable) -> Read<AgentConf
         .map_err(|violation| violated(reader, &root, violation))
 }
 
-/// A violation, at the plan's key that the rule is about.
+/// A violation, at the key that the rule is about: a plan's, or the second
+/// of two entries that are one repository, with both of them named.
 fn violated(reader: &Reader<'_, '_>, root: &Path, violation: Violation) -> ConfigError {
     let (index, key) = match &violation {
         Violation::DuplicatePlan { index, .. } => (*index, "id"),
         Violation::UnknownRepository { index, .. } => (*index, "repository"),
         Violation::NoSources { index, .. } => (*index, "sources"),
-        Violation::SameRepository { .. } => todo!(),
+        Violation::SameRepository { first, second } => {
+            let entry = |alias: &RepositoryAlias| root.key("repositories").key(alias.as_str());
+            let detail = format!(
+                "{} and {} are one repository: keep one entry and point its plans at it",
+                entry(first).text().unwrap_or_default(),
+                entry(second).text().unwrap_or_default(),
+            );
+            let path = entry(second);
+            return reader.error(&path, Spot::Key, Problem::Violation(violation), detail);
+        }
     };
     let path = root.key("plans").index(index).key(key);
     reader.refuse(&path, Problem::Violation(violation))
@@ -193,6 +203,7 @@ fn repository(
 ) -> Read<RepositoryConfig> {
     let RepositoryTable {
         repository,
+        repository_id,
         repo_hot,
         password,
         password_command,
@@ -207,6 +218,9 @@ fn repository(
         hooks: hooks_table,
     } = table;
     let repository = reader.required(path, "repository", repository)?;
+    let id = repository_id
+        .map(|text| reader.id(&path.key("repository-id"), RepositoryId::parse(&text)))
+        .transpose()?;
     let password = password_ref(
         reader,
         path,
@@ -227,7 +241,7 @@ fn repository(
         None => GroupBy::default(),
     };
     Ok(RepositoryConfig {
-        id: None,
+        id,
         settings: RepositorySettings {
             repository,
             repo_hot,
