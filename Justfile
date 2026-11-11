@@ -315,3 +315,107 @@ release-preview:
     cd "$scratch/ladderback"
     release-plz update
     git --no-pager diff -- Cargo.toml CHANGELOG.md
+
+# Runs the Release workflow, which opens or updates the draft release PR, and
+# waits for it (§12.1). Then, on that PR's branch: with a `version` (a version
+# the commits can't imply: the first release, a release candidate, 1.0.0) it
+# runs `release-plz set-version <version>`; in a terminal it opens CHANGELOG.md
+# in $EDITOR for the notes; if either changed anything, it commits, pushes to
+# the branch and, with a version, retitles the PR. A later run of the workflow,
+# this recipe's included, closes a release PR that has such a commit and opens
+# a new one from the commits alone, so a rerun needs the same `version` again
+# and the notes redone. If the push fails, the edited notes are saved and their
+# path printed. Needs `gh` (signed in, allowed to run workflows) and
+# `release-plz`. Nothing tests it automatically: it acts on the real repository.
+[confirm('Run the Release workflow and push to the release PR branch?')]
+[doc('Open or update the release PR; optionally set its version and edit its notes.')]
+[group('release')]
+release-pr version='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root={{ quote(root) }}
+    version={{ quote(version) }}
+    part='(0|[1-9][0-9]*)'
+    if [ -n "$version" ] && ! [[ "$version" =~ ^$part\.$part\.$part(-rc\.$part)?$ ]]; then
+        echo "error: version '$version' is not X.Y.Z or X.Y.Z-rc.N (no leading zeros)" >&2
+        exit 2
+    fi
+    for tool in gh release-plz; do
+        command -v "$tool" >/dev/null || { echo "error: $tool is not installed (just setup)" >&2; exit 2; }
+    done
+    # The run this dispatch starts: from the URL gh prints, else the newest
+    # dispatch run newer than every run before it (run IDs only grow).
+    before=$(gh run list --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId // 0')
+    out=$(gh workflow run release.yml --ref main 2>&1)
+    echo "$out"
+    run=$(grep -oE 'actions/runs/[0-9]+' <<<"$out" | grep -oE '[0-9]+$' | head -n 1 || true)
+    for _ in $(seq 1 30); do
+        [ -n "$run" ] && break
+        sleep 2
+        run=$(gh run list --workflow release.yml --event workflow_dispatch --limit 5 \
+            --json databaseId -q "[.[] | select(.databaseId > $before)][0].databaseId // empty")
+    done
+    [ -n "$run" ] || { echo "error: the Release run didn't appear within a minute" >&2; exit 1; }
+    gh run watch "$run" --interval 10 >/dev/null || true
+    case $(gh run view "$run" --json conclusion -q .conclusion) in
+        success) ;;
+        cancelled) echo "error: the Release run was cancelled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
+        *) echo "error: the Release run failed: gh run view $run --log-failed" >&2; exit 1 ;;
+    esac
+    # The release PR as release-plz finds it: open, into main, from a
+    # `release-plz-` branch. A plain listing, not search (`--label`), which can
+    # lag behind the PR the run just opened or closed.
+    pr=''
+    for _ in $(seq 1 6); do
+        pr=$(gh pr list --state open --base main --json number,headRefName \
+            -q '[.[] | select(.headRefName | startswith("release-plz-"))] | max_by(.number) | .number // empty')
+        [ -n "$pr" ] && break
+        sleep 5
+    done
+    if [ -z "$pr" ]; then
+        echo "No open release PR after the run: nothing since the last tag calls for a release (feat, fix, perf, revert or a breaking change)."
+        exit 0
+    fi
+    branch=$(gh pr view "$pr" --json headRefName -q .headRefName)
+    git -C "$root" fetch --quiet origin "$branch"
+    head=$(git -C "$root" rev-parse FETCH_HEAD)
+    scratch=$(mktemp -d)
+    keep="${TMPDIR:-/tmp}/ladderback-release-notes-$pr.md"
+    notes_edited=0
+    cleanup() {
+        status=$?
+        if [ "$status" -ne 0 ] && [ "$notes_edited" = 1 ] && cp "$scratch/release/CHANGELOG.md" "$keep" 2>/dev/null; then
+            echo "Your edited notes are saved in $keep" >&2
+        fi
+        git -C "$root" worktree remove --force "$scratch/release" 2>/dev/null || true
+        rm -rf "$scratch"
+    }
+    trap cleanup EXIT
+    git -C "$root" worktree add --quiet --detach "$scratch/release" "$head"
+    cd "$scratch/release"
+    changed=()
+    if [ -n "$version" ]; then
+        release-plz set-version "$version"
+        changed+=("set the version to $version")
+    fi
+    if [ -t 0 ] && [ -t 1 ]; then
+        before_edit=$(git hash-object CHANGELOG.md)
+        ${EDITOR:-vi} CHANGELOG.md
+        if [ "$(git hash-object CHANGELOG.md)" != "$before_edit" ]; then
+            notes_edited=1
+            changed+=("edit the release notes")
+        fi
+    fi
+    if [ "${#changed[@]}" -eq 0 ]; then
+        echo "Release PR unchanged: $(gh pr view "$pr" --json url -q .url)"
+        exit 0
+    fi
+    git add --update
+    message="chore: ${changed[0]}"
+    [ "${#changed[@]}" -eq 2 ] && message="$message and ${changed[1]}"
+    git commit --quiet -m "$message"
+    git push --quiet --force-with-lease="$branch:$head" origin "HEAD:refs/heads/$branch"
+    if [ -n "$version" ]; then
+        gh pr edit "$pr" --title "chore: release v$version" >/dev/null
+    fi
+    echo "Release PR updated: $(gh pr view "$pr" --json url -q .url)"

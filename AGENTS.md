@@ -21,7 +21,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, and on the whole of a crate the branch adds to the gate |
 | `just red-first [base]` | Checks that the first commit is a `test:` commit whose tests fail at run time (§13.1) |
 
-Also: `just setup` (tools, rustic CLI, Chromium), `just fmt`, `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui` (builds the UI with the gallery and the binary, runs the `@ui` scenarios), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just check-pr-title "<title>"` (as CI does), `just serve` (`127.0.0.1:9898`), `just release-preview` (the next release's bump and changelog entry, §12.1).
+Also: `just setup` (tools, rustic CLI, Chromium), `just fmt`, `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui` (builds the UI with the gallery and the binary, runs the `@ui` scenarios), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just check-pr-title "<title>"` (as CI does), `just serve` (`127.0.0.1:9898`), `just release-preview` (the next release's bump and changelog entry, §12.1), `just release-pr [version]` (the maintainer's: opens or updates the release PR, §12.1).
 
 Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
