@@ -1,5 +1,5 @@
-//! A `NormalizeSources` fake for the acceptance runner: sources as written,
-//! which is what the scripted listing reports.
+//! A `NormalizeSources` fake for the maintenance use cases' unit tests:
+//! sources as written, so a test's plan is checked against exactly its sources.
 
 use async_trait::async_trait;
 use domain::planning::Source;
