@@ -1081,6 +1081,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileTagDropped
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty
+                | WarningCode::ProfileSettingKept
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),

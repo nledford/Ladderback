@@ -1024,6 +1024,13 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             vec![("option", text(option)), ("variable", text(variable))],
         ),
         ProfileNotice::RetentionEmpty => (WarningCode::ProfileRetentionEmpty, Vec::new()),
+        ProfileNotice::RepositorySettingKept {
+            repository,
+            setting,
+        } => (
+            WarningCode::ProfileSettingKept,
+            vec![("repository", text(repository)), ("setting", text(setting))],
+        ),
     };
     Notice { code, args }
 }
@@ -4017,6 +4024,13 @@ mod tests {
                 "OPENDAL_SECRET_KEY",
             ),
             (ProfileNotice::RetentionEmpty, "keep-*"),
+            (
+                ProfileNotice::RepositorySettingKept {
+                    repository: "demo-nas".into(),
+                    setting: "group-by".into(),
+                },
+                "demo-nas was already configured, so the profile's plans were added to it, and it kept its own group-by",
+            ),
         ];
         for (notice, expected) in notices {
             let notice = profile_notice(notice);

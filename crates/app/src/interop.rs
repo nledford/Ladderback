@@ -9,10 +9,13 @@
 //! hostname rule below.
 //!
 //! **Repository.** A profile whose repository the configuration already
-//! holds, at the same location under the alias given, adds its plans and
-//! hooks to that entry, which keeps its settings, ID and maintenance. Under
-//! another alias it is refused, naming the alias it has; an alias the
-//! configuration holds for another location is refused as taken.
+//! holds, at the same location under the alias given, adds its plans to
+//! that entry, which keeps its settings, ID and maintenance; a notice names
+//! each setting of it the profile sets otherwise. Under another alias it is
+//! refused, naming the alias it has; an alias the configuration holds for
+//! another location is refused as taken. A location is the whole of it,
+//! options included, credentials aside
+//! ([`same_location`](domain::planning::RepositorySettings::same_location)).
 //!
 //! **Hostname.** When every imported plan names the same host `H`, the
 //! configuration has no plan yet and the agent has no hostname of its own,
@@ -25,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use domain::execution::plan_tags::PlanTags;
-use domain::planning::{AgentConfig, Hostname, Plan, Violation};
+use domain::planning::{AgentConfig, Hostname, Plan, RepositoryConfig, Violation};
 use domain::{AgentId, PlanId, RepositoryAlias};
 
 use crate::ports::{
@@ -119,12 +122,30 @@ impl ImportProfile {
         // A profile knows no repository ID, so its location alone tells
         // whether the configuration already holds its repository.
         let configured = loaded.alias_of(&profile.repository.settings, None);
-        let add_repository = match (loaded.repository(&repository), configured) {
-            (Some(_), Some(alias)) if *alias == repository => false,
+        let kept = match (loaded.repository(&repository), configured) {
+            (Some(entry), Some(alias)) if *alias == repository => Some(entry),
             (Some(_), _) => return Err(ImportError::AliasTaken(repository)),
             (None, Some(alias)) => return Err(ImportError::AlreadyConfigured(alias.clone())),
-            (None, None) => true,
+            (None, None) => None,
         };
+        let mut notices = profile.notices;
+        if let Some(entry) = kept {
+            let differ = settings_kept(entry, &profile.repository);
+            // The prune notice says the maintenance became local, which the
+            // kept entry's is not. The entry is what is saved, not the
+            // profile's repository: no secret the profile writes as text is
+            // kept as text.
+            if differ.contains(&"maintenance") {
+                notices.retain(|notice| *notice != ProfileNotice::Prune);
+            }
+            notices.retain(|notice| !matches!(notice, ProfileNotice::InlineSecret { .. }));
+            notices.extend(differ.into_iter().map(|setting| {
+                ProfileNotice::RepositorySettingKept {
+                    repository: repository.as_str().to_owned(),
+                    setting: setting.to_owned(),
+                }
+            }));
+        }
 
         let mut agent = loaded.agent().clone();
         let mut plans = loaded.plans().to_vec();
@@ -140,7 +161,7 @@ impl ImportProfile {
         hooks.run_finally.extend(profile.hooks.run_finally);
 
         let mut repositories = loaded.repositories().clone();
-        if add_repository {
+        if kept.is_none() {
             repositories.insert(repository.clone(), profile.repository);
         }
 
@@ -164,9 +185,30 @@ impl ImportProfile {
         Ok(Imported {
             repository,
             plans: ids,
-            notices: profile.notices,
+            notices,
         })
     }
+}
+
+/// The settings of `entry` that `theirs`, a profile's repository at the same
+/// location, sets otherwise, as the configuration names them, in the order
+/// it writes them. Where it is and its ID are not among them: the location
+/// is the same, and a profile knows no ID. An option set can differ only in
+/// its credentials, which are not part of the location.
+fn settings_kept(entry: &RepositoryConfig, theirs: &RepositoryConfig) -> Vec<&'static str> {
+    let (ours, profile) = (&entry.settings, &theirs.settings);
+    [
+        ("password", ours.password != profile.password),
+        ("maintenance", entry.maintenance != theirs.maintenance),
+        ("group-by", entry.group_by != theirs.group_by),
+        ("options", ours.options != profile.options),
+        ("options-hot", ours.options_hot != profile.options_hot),
+        ("options-cold", ours.options_cold != profile.options_cold),
+        ("hooks", entry.hooks != theirs.hooks),
+    ]
+    .into_iter()
+    .filter_map(|(setting, differs)| differs.then_some(setting))
+    .collect()
 }
 
 /// Applies the hostname rule of the module to the imported plans, which are
@@ -245,9 +287,10 @@ mod tests {
 
     use domain::RepositoryId;
     use domain::planning::{
-        AgentSettings, HookEntry, Hooks, RepositoryConfig, RepositorySettings, Source,
+        AgentSettings, GroupBy, HookEntry, Hooks, Maintenance, RepositoryConfig,
+        RepositorySettings, Source,
     };
-    use domain::secrets::SecretRef;
+    use domain::secrets::{SecretRef, SecretValue};
 
     use super::*;
     use crate::fakes::{FakeProfileReader, InMemoryConfigStore};
@@ -538,6 +581,183 @@ mod tests {
         let saved = saved(&config).await;
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
         assert_eq!(saved.plans().len(), 1);
+    }
+
+    fn kept(setting: &str) -> ProfileNotice {
+        ProfileNotice::RepositorySettingKept {
+            repository: "nas".to_owned(),
+            setting: setting.to_owned(),
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn import_over(
+        entry: &RepositoryConfig,
+        theirs: RepositoryConfig,
+        notices: Vec<ProfileNotice>,
+    ) -> (Imported, AgentConfig) {
+        let config = holding(vec![("nas", entry.clone())]).await;
+        let mut profile = profile(vec![plan("home", None)], Hooks::default());
+        profile.repository = theirs;
+        profile.notices = notices;
+        let imported = ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(profile))),
+            config.clone(),
+        )
+        .import(Path::new("nas.toml"), alias("nas"))
+        .await
+        .expect("the plans are added");
+        (imported, saved(&config).await)
+    }
+
+    /// The entry is kept whole, and each of its settings the profile sets
+    /// otherwise is named. The profile's prune notice said the
+    /// maintenance became local, which the kept entry's is not: it goes.
+    #[tokio::test]
+    async fn a_profile_that_sets_the_repository_up_otherwise_keeps_the_entry_and_names_each_setting()
+     {
+        let mut entry = repository();
+        entry.maintenance = Maintenance::Hub;
+        let mut theirs = repository();
+        theirs.settings.password = SecretRef::Env("OTHER_PASSWORD".to_owned());
+        theirs.maintenance = Maintenance::Local;
+        theirs.group_by = GroupBy::parse("host").expect("a grouping");
+        theirs.hooks.run_before = vec![hook("their-before")];
+        for set in [
+            &mut theirs.settings.options,
+            &mut theirs.settings.options_hot,
+            &mut theirs.settings.options_cold,
+        ] {
+            set.insert("sas_token".to_owned(), "not-a-real-token".to_owned());
+        }
+        let (imported, saved) = import_over(
+            &entry,
+            theirs,
+            vec![ProfileNotice::Prune, ProfileNotice::EnvIgnored],
+        )
+        .await;
+        assert_eq!(
+            imported.notices,
+            [
+                ProfileNotice::EnvIgnored,
+                kept("password"),
+                kept("maintenance"),
+                kept("group-by"),
+                kept("options"),
+                kept("options-hot"),
+                kept("options-cold"),
+                kept("hooks"),
+            ]
+        );
+        assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+        assert_eq!(saved.plans().len(), 1);
+    }
+
+    /// The same maintenance: the prune notice is still true, and stays.
+    #[tokio::test]
+    async fn a_profile_that_sets_the_repository_up_alike_names_nothing_kept() {
+        let mut entry = repository();
+        entry.maintenance = Maintenance::Local;
+        let (imported, _) = import_over(&entry, entry.clone(), vec![ProfileNotice::Prune]).await;
+        assert_eq!(imported.notices, [ProfileNotice::Prune]);
+    }
+
+    /// The kept entry is the one saved, not the profile's repository:
+    /// nothing the profile holds as text is kept as text, so none of its
+    /// `inline-secret` notices is said, and only the password kept is named.
+    /// The entry's own secrets written as text are said when the
+    /// configuration loads (`config-inline-secret`).
+    #[tokio::test]
+    async fn a_profile_secret_written_as_text_is_not_said_kept_as_text_when_the_entry_is_kept() {
+        let mut entry = repository();
+        entry
+            .settings
+            .options
+            .insert("secret_access_key".to_owned(), "not-a-real-key".to_owned());
+        let mut theirs = entry.clone();
+        theirs.settings.password = SecretRef::Inline(SecretValue::new("not-a-real-password"));
+        let (imported, saved) = import_over(
+            &entry,
+            theirs,
+            vec![
+                ProfileNotice::InlineSecret {
+                    field: "repository.password".to_owned(),
+                },
+                ProfileNotice::InlineSecret {
+                    field: "repository.options.secret_access_key".to_owned(),
+                },
+            ],
+        )
+        .await;
+        assert_eq!(imported.notices, [kept("password")]);
+        assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+    }
+
+    /// An entry that reads its credential from the environment, as the
+    /// `inline-secret` warning advises, beside a profile that writes it as
+    /// text, or a profile with a credential the entry lacks.
+    fn with_credential(value: Option<&str>) -> RepositoryConfig {
+        let mut repository = in_bucket("photos");
+        if let Some(value) = value {
+            repository
+                .settings
+                .options
+                .insert("secret_access_key".to_owned(), value.to_owned());
+        }
+        repository
+    }
+
+    /// A credential is how to open the repository, not where it is: the
+    /// entry is still at the profile's location, so the plans are added to
+    /// it and it keeps its own options.
+    #[tokio::test]
+    async fn a_profile_whose_credential_the_entry_reads_otherwise_adds_its_plans_to_it() {
+        for (entry, theirs) in [
+            (
+                with_credential(Some("${AWS_SECRET_ACCESS_KEY}")),
+                with_credential(Some("not-a-real-key")),
+            ),
+            (
+                with_credential(None),
+                with_credential(Some("not-a-real-key")),
+            ),
+        ] {
+            let (imported, saved) = import_over(
+                &entry,
+                theirs,
+                vec![ProfileNotice::InlineSecret {
+                    field: "repository.options.secret_access_key".to_owned(),
+                }],
+            )
+            .await;
+            assert_eq!(imported.notices, [kept("options")]);
+            assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+            assert_eq!(saved.plans().len(), 1);
+        }
+    }
+
+    /// The credential changed and nothing else: the same repository, so a
+    /// new alias for it is a second name.
+    #[tokio::test]
+    async fn a_profile_whose_credential_alone_differs_under_a_new_alias_is_refused() {
+        let entry = with_credential(Some("${AWS_SECRET_ACCESS_KEY}"));
+        let config = holding(vec![("nas", entry.clone())]).await;
+        let refused = import_as(&config, with_credential(Some("not-a-real-key")), "backup").await;
+        assert_eq!(refused, Err(ImportError::AlreadyConfigured(alias("nas"))));
+        let saved = saved(&config).await;
+        assert_eq!(saved.repositories().len(), 1);
+        assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+        assert!(saved.plans().is_empty());
+    }
+
+    /// The ID is what Ladderback read when it opened the repository, which
+    /// a profile can't know: it is not a setting the profile sets otherwise.
+    #[tokio::test]
+    async fn the_entrys_id_is_not_a_setting_kept() {
+        let mut entry = repository();
+        entry.id = Some(RepositoryId::parse(&"07".repeat(32)).expect("an ID"));
+        let (imported, _) = import_over(&entry, repository(), Vec::new()).await;
+        assert_eq!(imported.notices, []);
     }
 
     #[tokio::test]

@@ -18,7 +18,7 @@ use app::ports::{
 use cucumber::{given, then, when};
 use domain::execution::plan_tags::PlanTags;
 use domain::planning::{
-    AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Plan, RepositoryConfig,
+    AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
     RepositorySettings, Source,
 };
 use domain::secrets::{FileRead, SecretRef};
@@ -221,6 +221,31 @@ fn holds_profile_repository(agent: &mut Agent, name: String) {
         .insert(alias(&name), demo_repository());
 }
 
+#[given(
+    expr = "the configuration holds the repository {string} at the profile's location, maintained by the hub"
+)]
+fn holds_profile_repository_for_hub(agent: &mut Agent, name: String) {
+    let mut repository = demo_repository();
+    repository.maintenance = Maintenance::Hub;
+    agent.interop.repositories.insert(alias(&name), repository);
+}
+
+/// One option more is another location (an `opendal:` backend keeps its
+/// bucket in one), unless it is a credential, which is how to open it.
+#[given(
+    expr = "the configuration holds the repository {string} at the profile's location with the option {string} set to {string}"
+)]
+fn holds_profile_repository_with_option(
+    agent: &mut Agent,
+    name: String,
+    option: String,
+    value: String,
+) {
+    let mut repository = demo_repository();
+    repository.settings.options.insert(option, value);
+    agent.interop.repositories.insert(alias(&name), repository);
+}
+
 #[given(expr = "the configuration holds the repositories {string} and {string}")]
 fn holds_repositories(agent: &mut Agent, one: String, other: String) {
     for name in [one, other] {
@@ -395,6 +420,29 @@ fn notes_key(agent: &mut Agent, key: String) {
         notices.contains(&ProfileNotice::KeyIgnored { key: key.clone() }),
         "no notice for {key:?} in {notices:?}"
     );
+}
+
+#[then(expr = "the configuration's repository {string} is as it was")]
+async fn repository_as_it_was(agent: &mut Agent, name: String) {
+    let name = alias(&name);
+    let before = agent.interop.before.as_ref().expect("the command ran");
+    assert_eq!(
+        agent.interop.now().await.repository(&name),
+        before.repository(&name)
+    );
+}
+
+#[then(expr = "the import notes that the repository {string} kept its own {string}")]
+fn notes_kept(agent: &mut Agent, repository: String, setting: String) {
+    let notices = match agent.interop.imported() {
+        Ok(imported) => &imported.notices,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    let kept = ProfileNotice::RepositorySettingKept {
+        repository,
+        setting,
+    };
+    assert!(notices.contains(&kept), "no {kept:?} in {notices:?}");
 }
 
 #[then(expr = "the agent's hostname is now {string}")]

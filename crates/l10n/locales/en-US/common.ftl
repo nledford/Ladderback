@@ -405,6 +405,11 @@ warning-profile-option-left-out = The option { $option } was left out of the pro
 # `keep-*`, `forget` and `rustic forget` are what a person types, typed as they are: keep them string literals.
 warning-profile-retention-empty = The plan keeps every snapshot, so the profile has no { "keep-*" } option, and rustic's { "forget" } refuses to run until one is set. { -brand-name } never forgets from this plan. Add a { "keep-*" } option to the profile before you run { "rustic forget" } on it.
 
+# An import added its plans to a repository the configuration already had at the profile's location, and kept one of that repository's settings, which the profile set otherwise.
+# $repository (text): the repository's name in the configuration.
+# $setting (text): the setting, as the configuration names it: password, maintenance, group-by, options, options-hot, options-cold or hooks. Keep it as it is.
+warning-profile-setting-kept = The repository { $repository } was already configured, so the profile's plans were added to it, and it kept its own { $setting }: the profile sets it otherwise. Change { $setting } in the configuration if the profile's is the one you want.
+
 ## Command-line codes: what a command says when it cannot start (technical design §4.5)
 
 # The command has no folder to keep the configuration in.

@@ -259,6 +259,13 @@ pub enum WarningCode {
     /// An export wrote a plan that keeps everything, which rustic's forget
     /// refuses to run on until a `keep-*` option is set.
     ProfileRetentionEmpty,
+    /// An import added its plans to a repository the configuration already
+    /// held at the profile's location, and kept one of the entry's settings,
+    /// which the profile set otherwise. The argument `repository` is the
+    /// entry's alias and `setting` the setting, as the configuration names
+    /// it: `password`, `maintenance`, `group-by`, `options`, `options-hot`,
+    /// `options-cold` or `hooks`.
+    ProfileSettingKept,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -730,6 +737,18 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "variable",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::ProfileSettingKept => &[
+                ArgSpec {
+                    name: "repository",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "setting",
                     kind: ArgKind::Text,
                     optional: false,
                 },

@@ -106,5 +106,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileTagDropped => msg::WARNING_PROFILE_TAG_DROPPED,
     ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
+    ProfileSettingKept => msg::WARNING_PROFILE_SETTING_KEPT,
     Unknown => msg::WARNING_UNKNOWN,
 });

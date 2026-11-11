@@ -57,6 +57,36 @@ Feature: Import a rustic profile
       Then the import is refused because the repository is configured as "nas"
       And the configuration is unchanged
 
+    Scenario: A profile for a repository the configuration has under that name, set up otherwise, keeps the configuration's settings and says which
+      Given the configuration holds the repository "nas" at the profile's location, maintained by the hub
+      And a profile holding the plan "docs"
+      When the owner imports the profile as the repository "nas"
+      Then the import succeeds
+      And the configuration's repository "nas" is as it was
+      And the import notes that the repository "nas" kept its own "maintenance"
+
+    Scenario: A profile for another bucket under a name the configuration has is refused
+      Given the configuration holds the repository "nas" at the profile's location with the option "bucket" set to "photos"
+      And a profile holding the plan "home"
+      When the owner imports the profile as the repository "nas"
+      Then the import is refused because the repository "nas" is already taken
+      And the configuration is unchanged
+
+    Scenario: A profile for a repository the configuration has under that name, with a credential only the configuration has, adds its plans to it
+      Given the configuration holds the repository "nas" at the profile's location with the option "secret_access_key" set to "${AWS_SECRET_ACCESS_KEY}"
+      And a profile holding the plan "docs"
+      When the owner imports the profile as the repository "nas"
+      Then the import succeeds
+      And the configuration's repository "nas" is as it was
+      And the import notes that the repository "nas" kept its own "options"
+
+    Scenario: A profile for a repository the configuration has under another name, with a credential only the configuration has, is refused
+      Given the configuration holds the repository "nas" at the profile's location with the option "secret_access_key" set to "${AWS_SECRET_ACCESS_KEY}"
+      And a profile holding the plan "home"
+      When the owner imports the profile as the repository "backup"
+      Then the import is refused because the repository is configured as "nas"
+      And the configuration is unchanged
+
     Scenario: A profile that cannot be read changes nothing
       Given the configuration holds the repository "cloud"
       And a profile that cannot be read
