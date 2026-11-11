@@ -1,0 +1,58 @@
+# Playwright's Chromium and the system packages it needs, for the @ui scenarios
+# of ci.yml's `ui` job and of red-first.yml. Use it after `npm ci` in ui-tests,
+# on a GitHub-hosted Linux runner, as `uses: $/.github/actions/chromium`: GitHub
+# then fetches the action from the commit the workflow runs, with the script
+# beside it, whatever the job checked out (red-first.yml checks out a pull
+# request's head, which may predate both files).
+#
+# Two caches, both keyed on ui-tests/package-lock.json, which pins the
+# Playwright version:
+# - the browser download, which lives outside node_modules;
+# - the system packages (fonts and libraries) as the .deb files apt downloaded,
+#   keyed on the runner image too (ImageOS, ImageVersion), so they always match
+#   the packages the image already has. With them the script installs with dpkg
+#   and needs no Ubuntu mirror, so a mirror outage ("Temporary failure resolving
+#   'security.ubuntu.com'") can't fail the job. A new image or Playwright
+#   version misses and installs through apt once.
+#
+# Each package set is saved under its own key (the run's ID) and the newest one
+# that matches is restored, so when cached files fail to install and apt
+# replaces them, the next run gets apt's set instead of the broken one.
+name: Chromium for the UI journeys
+description: Installs Playwright's Chromium and its system packages, from caches when it can.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('ui-tests/package-lock.json') }}
+    # Only GitHub-hosted runners set the image variables; elsewhere the prefix
+    # is empty and the packages aren't cached.
+    - id: debs
+      shell: bash
+      env:
+        LOCK_HASH: ${{ hashFiles('ui-tests/package-lock.json') }}
+      run: |
+        if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+          echo "prefix=playwright-debs-$ImageOS-$ImageVersion-$LOCK_HASH-" >> "$GITHUB_OUTPUT"
+        fi
+    # No entry has the bare prefix as its key, so this always restores through
+    # restore-keys: the newest entry under the prefix.
+    - if: steps.debs.outputs.prefix != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/playwright-debs
+        key: ${{ steps.debs.outputs.prefix }}
+        restore-keys: ${{ steps.debs.outputs.prefix }}
+    - id: install
+      shell: bash
+      working-directory: ui-tests
+      run: '"$GITHUB_ACTION_PATH/../../../scripts/install-chromium.sh"'
+    # Saved straight away, not when the job ends, so a failing journey later
+    # in the job still leaves the packages for the next run.
+    - if: steps.debs.outputs.prefix != '' && steps.install.outputs.debs == 'saved'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/playwright-debs
+        key: ${{ steps.debs.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}

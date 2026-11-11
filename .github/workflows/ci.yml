@@ -1,6 +1,20 @@
 # Every job runs the same `just` recipes developers and agents run locally.
-# mr boxington (mbx) caches Cargo builds: pushes to main save the cache,
-# pull requests only restore it. The red-first check is in red-first.yml.
+# The red-first check is in red-first.yml.
+#
+# mr boxington (mbx) caches Cargo builds: pushes to main save the cache, pull
+# requests only restore it. It keeps one build per OS and commit, under one
+# key, and the first job to finish saves it; before, that was `Wasm tests`, a
+# few hundred megabytes, and every other Linux job restored it and rebuilt
+# nearly every crate. So on Linux only `Check (ubuntu-latest)` saves under that
+# key: it builds the most, and `Release-build tests`, the host part of `UI
+# journeys` and red-first.yml start from its build. `UI journeys` and
+# `Release-build tests` empty their target dir after their last step on a
+# push, and mbx skips the save of a job with no build to keep. `Wasm tests`
+# builds wasm32 tests, which Check doesn't, so it keeps a cache of its own
+# (`cache-generation`), a few hundred megabytes. A cache per job doesn't fit:
+# the repository's Actions cache holds 10 GB, and the macOS build alone takes
+# 4.7. If Check fails on a push, that commit saves no Linux build, and pull
+# requests restore the one before.
 name: CI
 
 on:
@@ -25,10 +39,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # CI builds are cached and thrown away, never debugged in place. Incremental
-  # compilation only adds files to the cache, and full debug info makes the
-  # target dir bigger without helping a test log: line tables keep the file and
-  # line numbers in backtraces. The mbx action sets neither of these.
+  # CI builds are cached and thrown away, never debugged in place. The restored
+  # target dir already makes a build incremental crate by crate; rustc's own
+  # incremental mode would only add its session files to every cache entry, and
+  # full debug info makes the target dir bigger without helping a test log:
+  # line tables keep the file and line numbers in backtraces. The mbx action
+  # sets neither of these.
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
@@ -104,7 +120,11 @@ jobs:
       - if: needs.changes.outputs.docs-only != 'true'
         uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
-      - if: needs.changes.outputs.docs-only != 'true'
+      # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
+      # code). Formatting, the wasm32 clippy, the journey and doc-path lints,
+      # the architecture checks and the contrast gate give one answer
+      # anywhere, so they run on Linux alone; macOS needs no Node then.
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
@@ -118,16 +138,18 @@ jobs:
       # official release, checked against the SHA-256 the script pins.
       - if: needs.changes.outputs.docs-only != 'true'
         run: scripts/install-rustic.sh
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: npm ci
         working-directory: ui-tests
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just fmt-check
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just lint
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os != 'Linux'
+        run: just clippy
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just architecture
-      - if: needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just test-contrast
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
       # writes the JUnit report.
@@ -173,16 +195,11 @@ jobs:
           tool: just,trunk
       - run: npm ci
         working-directory: ui-tests
-      # Playwright's browsers live outside node_modules; keyed on the lockfile,
-      # which pins the Playwright version. `--with-deps` still installs the
-      # system packages on every run, and a cache miss downloads as before.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('ui-tests/package-lock.json') }}
-      - run: npx playwright install --with-deps chromium
-        working-directory: ui-tests
+      - uses: $/.github/actions/chromium
       - run: just test-ui
+      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
+      - if: github.event_name == 'push'
+        run: rm -rf target
 
   # The wasm-bindgen tests (`#[wasm_bindgen_test]`) under Node. Not a required
   # check: add it to the ruleset once it has proved stable. The wasm32 target
@@ -201,9 +218,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it. Its
+      # own cache key, not Check's (top of this file).
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
+        with:
+          cache-generation: v1-wasm
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
@@ -270,6 +290,9 @@ jobs:
       - run: just test-release
         env:
           NEXTEST_PROFILE: ci
+      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
+      - if: github.event_name == 'push'
+        run: rm -rf target
 
   # The dependency tree against deny.toml: RustSec advisories, licences, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
