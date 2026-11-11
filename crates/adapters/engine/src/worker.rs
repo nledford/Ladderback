@@ -496,6 +496,64 @@ mod tests {
         );
     }
 
+    /// A backup the cancel ended reports nothing more, neither a result nor
+    /// a failure, and the worker exits as a SIGTERM's, so that the daemon
+    /// tells it from a crash when the SIGTERM wasn't its own.
+    #[test]
+    fn a_cancelled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("notes.txt"), b"demo").unwrap();
+        let repo = RepositorySpec {
+            repository: dir.path().join("repo").to_string_lossy().into_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo-password"),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+            secrets: Vec::new(),
+        };
+        let run = |job, process| {
+            let spec = JobSpec {
+                op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+                cache_dir: None,
+                watchdog_interval_ms: 10,
+                job,
+            };
+            let (events, capture) = capture();
+            let input = serde_json::to_vec(&spec).unwrap();
+            let exit = run_events(input.as_slice(), events, 1, process).unwrap();
+            (exit, capture.parsed())
+        };
+        let (exit, _) = run(JobKind::Init(repo.clone()), Process::real());
+        assert_eq!(exit, Exit::Reported { failed: false });
+
+        let process = Process::real();
+        process.cancel.request();
+        let backup = crate::job::BackupJobSpec {
+            repo,
+            sources: vec![source.to_string_lossy().into_owned()],
+            plan: domain::PlanId::parse("home").unwrap(),
+            agent: domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            extra_tags: Vec::new(),
+            label: None,
+            host: None,
+            filter: Default::default(),
+            deadline_budget: SignedDuration::from_hours(1),
+        };
+        let (exit, events) = run(JobKind::Backup(backup), process);
+        assert_eq!(exit.code(), crate::job::exit_code::TERMINATED);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, WorkerEvent::Result(_) | WorkerEvent::Failed { .. })),
+            "{events:?}"
+        );
+        let snapshots = std::fs::read_dir(dir.path().join("repo/snapshots")).unwrap();
+        assert_eq!(snapshots.count(), 0, "a cancelled backup wrote a snapshot");
+    }
+
     #[test]
     fn a_job_with_a_budget_counts_it_from_the_started_event_and_is_stopped_when_it_ends() {
         let at = Timestamp::from_second(1_800_000_000).unwrap();
