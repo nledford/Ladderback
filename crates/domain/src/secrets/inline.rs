@@ -1,8 +1,10 @@
 //! Secrets written in the configuration itself, where a reference, a file, a
 //! command or the keyring would keep them out of it (technical design §10.2).
 
-use super::is_rclone_secret_option;
+use std::ops::Range;
+
 use super::template::{Part, Template};
+use super::{SecretValue, is_rclone_secret_option};
 
 /// Where in a repository's settings a secret is written as text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,9 +68,10 @@ const RCLONE: &str = "rclone:";
 /// scheme, and its userinfo at the last `@` of the authority. A reference is
 /// one opaque piece, so a `/`, `:` or `@` inside `${file:/path}` ends nothing.
 /// Percent-encoding is not undone: `%70` is text in the file all the same.
-/// One pass over the text, with no allocation beyond its pieces.
+/// One pass over the text, with no allocation beyond its pieces and where
+/// they are written.
 pub fn url_password_written(text: &str) -> bool {
-    let pieces = pieces(text);
+    let pieces = written_pieces(text).0;
     let Some(start) = pieces
         .windows(3)
         .position(|three| three == [Piece::Char(':'), Piece::Char('/'), Piece::Char('/')])
@@ -98,34 +101,23 @@ pub fn url_password_written(text: &str) -> bool {
 /// Whether an rclone connection string keeps a credential as text: one of
 /// its settings (`rclone::s3,secret_access_key=…:bucket`,
 /// `rclone:remote,pass=…:path`) whose key names a credential
-/// ([`is_rclone_secret_option`]) and whose value, quotes aside, is not empty and
-/// holds no `${…}` reference. What follows the settings is the path, which
-/// holds none.
+/// ([`is_rclone_secret_option`]) and whose value, quotes aside, is not empty
+/// and holds no `${…}` reference. What follows the settings is the path,
+/// which holds none.
 fn rclone_credential_written(location: &str) -> bool {
-    let Some(rest) = location.strip_prefix(RCLONE) else {
+    let Some(remote) = rclone_remote(location) else {
         return false;
     };
-    // `rclone::sftp,…` names a backend rather than a remote of rclone's
-    // configuration file; its settings follow the backend's name all the same.
-    let rest = rest.strip_prefix(':').unwrap_or(rest);
-    let pieces = pieces(rest);
-    rclone_settings(&pieces).into_iter().any(|setting| {
-        let Some(equals) = setting.iter().position(|piece| *piece == Piece::Char('=')) else {
-            return false;
-        };
-        let key = setting.get(..equals).unwrap_or_default();
-        let value = unquoted(setting.get(equals.saturating_add(1)..).unwrap_or_default());
-        let name: Option<String> = key
-            .iter()
-            .map(|piece| match piece {
-                Piece::Char(c) => Some(*c),
-                Piece::Reference => None,
-            })
-            .collect();
-        name.is_some_and(|name| is_rclone_secret_option(&name))
-            && !value.is_empty()
-            && !value.contains(&Piece::Reference)
-    })
+    let pieces = written_pieces(remote).0;
+    rclone_settings(&pieces)
+        .into_iter()
+        .filter_map(|setting| credential(&pieces, setting))
+        .any(|value| {
+            let value = pieces
+                .get(unquoted(&pieces, value))
+                .unwrap_or_default();
+            !value.is_empty() && !value.contains(&Piece::Reference)
+        })
 }
 
 /// The most credentials one rclone location may hold. Each is a secret a
@@ -135,17 +127,112 @@ fn rclone_credential_written(location: &str) -> bool {
 pub const MAX_RCLONE_CREDENTIALS: usize = 16;
 
 /// Whether an rclone location holds more than [`MAX_RCLONE_CREDENTIALS`]
-/// credentials: settings whose key names one and whose value, quotes aside,
-/// is not empty. False for any other location.
+/// credentials: settings whose key names one ([`is_rclone_secret_option`])
+/// and whose value, quotes aside, is not empty. False for any other
+/// location.
 pub fn too_many_rclone_credentials(_location: &str) -> bool {
     todo!()
 }
 
+/// What of an rclone location must not show wherever the location is echoed
+/// (I4): the value of each of its settings whose key names a credential
+/// ([`is_rclone_secret_option`]) and that is not empty, quotes aside. Each is
+/// given as `location` writes it, quotes and `$${` included, and as rclone
+/// reads it: with `$${` as `${`, without the quotes around it, and with a
+/// quote written twice inside them as one. A value with a `${…}` reference
+/// in it is given only as written. A location with more than
+/// [`MAX_RCLONE_CREDENTIALS`] of them is one secret whole. Empty for any
+/// other location.
+pub(super) fn rclone_credentials(location: &str) -> Vec<SecretValue> {
+    let Some(remote) = rclone_remote(location) else {
+        return Vec::new();
+    };
+    let (pieces, starts) = written_pieces(remote);
+    let values: Vec<Range<usize>> = rclone_settings(&pieces)
+        .into_iter()
+        .filter_map(|setting| credential(&pieces, setting))
+        .filter(|value| !unquoted(&pieces, value.clone()).is_empty())
+        .collect();
+    if values.len() > MAX_RCLONE_CREDENTIALS {
+        return vec![SecretValue::new(location)];
+    }
+    let written = |range: &Range<usize>| -> String {
+        starts
+            .get(range.start)
+            .zip(starts.get(range.end))
+            .and_then(|(&from, &to)| remote.get(from..to))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let text = |range: &Range<usize>| -> Option<String> {
+        pieces
+            .get(range.clone())
+            .unwrap_or_default()
+            .iter()
+            .map(|piece| match piece {
+                Piece::Char(c) => Some(*c),
+                Piece::Reference => None,
+            })
+            .collect()
+    };
+    let mut found: Vec<String> = Vec::new();
+    for value in values {
+        let inner = unquoted(&pieces, value.clone());
+        let inner_forms: Vec<String> = std::iter::once(written(&inner))
+            .chain(text(&inner))
+            .collect();
+        let mut forms: Vec<String> = std::iter::once(written(&value))
+            .chain(text(&value))
+            .collect();
+        if let Some(Piece::Char(quote)) = pieces.get(value.start).filter(|_| inner != value) {
+            let twice: String = [*quote, *quote].iter().collect();
+            let once = quote.to_string();
+            forms.extend(inner_forms.iter().map(|form| form.replace(&twice, &once)));
+        }
+        forms.extend(inner_forms);
+        for form in forms {
+            if !found.contains(&form) {
+                found.push(form);
+            }
+        }
+    }
+    found.into_iter().map(SecretValue::new).collect()
+}
+
+/// What follows `rclone:` in an rclone location. `rclone::sftp,…` names a
+/// backend rather than a remote of rclone's configuration file; its settings
+/// follow the backend's name all the same, so the second `:` goes too.
+fn rclone_remote(location: &str) -> Option<&str> {
+    let rest = location.strip_prefix(RCLONE)?;
+    Some(rest.strip_prefix(':').unwrap_or(rest))
+}
+
+/// The value of `setting`, the pieces after its first `=`, when its key
+/// names a credential in a connection string ([`is_rclone_secret_option`]).
+/// A key that holds a reference names nothing in the file.
+fn credential(pieces: &[Piece], setting: Range<usize>) -> Option<Range<usize>> {
+    let equals = pieces
+        .get(setting.clone())?
+        .iter()
+        .position(|piece| *piece == Piece::Char('='))?;
+    let value_start = setting.start.saturating_add(equals);
+    let name: String = pieces
+        .get(setting.start..value_start)?
+        .iter()
+        .map(|piece| match piece {
+            Piece::Char(c) => Some(*c),
+            Piece::Reference => None,
+        })
+        .collect::<Option<String>>()?;
+    is_rclone_secret_option(&name).then(|| value_start.saturating_add(1)..setting.end)
+}
+
 /// The settings of an rclone remote, as rclone reads them: the pieces between
-/// commas up to the `:` that starts the path, the remote's name first. A value
-/// may be quoted with `'` or `"`, where a quote written twice stands for
-/// itself, so a `,` or `:` inside the quotes ends nothing.
-fn rclone_settings(pieces: &[Piece]) -> Vec<&[Piece]> {
+/// commas up to the `:` that starts the path, the remote's name first, each
+/// as the range of `pieces` it covers. A value may be quoted with `'` or `"`,
+/// where a quote written twice stands for itself, so a `,` or `:` inside the
+/// quotes ends nothing.
+fn rclone_settings(pieces: &[Piece]) -> Vec<Range<usize>> {
     let mut settings = Vec::new();
     let mut start = 0;
     let mut at = 0;
@@ -168,7 +255,7 @@ fn rclone_settings(pieces: &[Piece]) -> Vec<&[Piece]> {
                 quote = Some(c);
             }
             (None, Piece::Char(',')) => {
-                settings.push(pieces.get(start..at).unwrap_or_default());
+                settings.push(start..at);
                 start = next;
             }
             (None, Piece::Char(':')) => break,
@@ -176,15 +263,15 @@ fn rclone_settings(pieces: &[Piece]) -> Vec<&[Piece]> {
         }
         at = at.saturating_add(1);
     }
-    settings.push(pieces.get(start..at).unwrap_or_default());
+    settings.push(start..at);
     settings
 }
 
-/// A setting's value without the quotes around it.
-fn unquoted(value: &[Piece]) -> &[Piece] {
-    match value {
-        [Piece::Char(open @ ('\'' | '"')), inner @ .., last] if *last == Piece::Char(*open) => {
-            inner
+/// The range of a setting's value, `value`, without the quotes around it.
+fn unquoted(pieces: &[Piece], value: Range<usize>) -> Range<usize> {
+    match pieces.get(value.clone()) {
+        Some([Piece::Char(open @ ('\'' | '"')), .., last]) if *last == Piece::Char(*open) => {
+            value.start.saturating_add(1)..value.end.saturating_sub(1)
         }
         _ => value,
     }
@@ -198,28 +285,48 @@ enum Piece {
     Reference,
 }
 
-/// `text` as pieces. A text that is not a valid template has no reference:
-/// a job refuses it, and until then it is text as written, as
-/// [`has_reference`](super::has_reference) reads it. `$${` is the text `${`.
-fn pieces(text: &str) -> Vec<Piece> {
+/// `text` as pieces, and where in `text` each piece is written: the byte
+/// offset of each, then `text.len()`. A text that is not a valid template
+/// has no reference: a job refuses it, and until then it is text as written,
+/// as [`has_reference`](super::has_reference) reads it. `$${` is the text
+/// `${`: its `$` is written `$$`.
+fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
     let Ok(template) = Template::parse(text) else {
-        return text.chars().map(Piece::Char).collect();
+        let (pieces, mut starts): (Vec<Piece>, Vec<usize>) = text
+            .char_indices()
+            .map(|(at, c)| (Piece::Char(c), at))
+            .unzip();
+        starts.push(text.len());
+        return (pieces, starts);
     };
     let mut pieces = Vec::with_capacity(text.len());
+    let mut starts = Vec::with_capacity(text.len().saturating_add(1));
+    let mut at: usize = 0;
     for part in template.parts() {
         match part {
-            Part::Text(text) => pieces.extend(text.chars().map(Piece::Char)),
-            Part::Reference(_) => pieces.push(Piece::Reference),
+            Part::Text(literal) => {
+                let mut chars = literal.chars().peekable();
+                while let Some(c) = chars.next() {
+                    pieces.push(Piece::Char(c));
+                    starts.push(at);
+                    // A `${` in the text is the escape `$${`.
+                    let width = if c == '$' && chars.peek() == Some(&'{') {
+                        2
+                    } else {
+                        c.len_utf8()
+                    };
+                    at = at.saturating_add(width);
+                }
+            }
+            Part::Reference(reference) => {
+                pieces.push(Piece::Reference);
+                starts.push(at);
+                at = at.saturating_add(reference.written_len());
+            }
         }
     }
-    pieces
-}
-
-/// `text` as pieces, and where in `text` each piece is written: the byte
-/// offset of each, then `text.len()`.
-fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
-    let _ = text;
-    todo!()
+    starts.push(at);
+    (pieces, starts)
 }
 
 /// The most characters of an option name a warning shows.

@@ -12,6 +12,7 @@ mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
+use inline::rclone_credentials;
 pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
@@ -132,10 +133,12 @@ impl Redactor {
     /// password; the password in the userinfo of every URL in its repository
     /// string and its hot repository string (`rest:https://…`) and in the
     /// value of any option, shared, hot or cold (an `endpoint`), which
-    /// rustic's and OpenDAL's errors quote; the value of every option, in any
-    /// of the three sets, whose name says it holds a credential
-    /// ([`is_secret_option`]), even one written inline; and `resolved`, what
-    /// the references in its settings were resolved to.
+    /// rustic's and OpenDAL's errors quote; the value of every credential
+    /// setting of either string when it is an rclone connection string
+    /// (`rclone::sftp,pass=…:path`), as written and as rclone reads it; the
+    /// value of every option, in any of the three sets, whose name says it
+    /// holds a credential ([`is_secret_option`]), even one written inline;
+    /// and `resolved`, what the references in its settings were resolved to.
     pub fn for_repository(repository: RepositorySecrets<'_>) -> Self {
         let RepositorySecrets {
             repository,
@@ -156,6 +159,10 @@ impl Redactor {
             )
             .flat_map(url_passwords)
             .collect();
+        let rclone: Vec<SecretValue> = std::iter::once(repository)
+            .chain(repo_hot)
+            .flat_map(rclone_credentials)
+            .collect();
         let credentials: Vec<SecretValue> = option_sets
             .iter()
             .flat_map(|set| set.iter())
@@ -165,6 +172,7 @@ impl Redactor {
         Self::new(
             std::iter::once(password)
                 .chain(&url_passwords)
+                .chain(&rclone)
                 .chain(&credentials)
                 .chain(resolved),
         )
