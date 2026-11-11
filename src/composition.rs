@@ -1466,14 +1466,16 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
 
 /// A secret that couldn't be resolved, as the typed refusal of its cause.
 /// What a platform or a command said is masked of every secret of the
-/// repository first (I4), read again through `resolver`.
+/// repository first (I4), read again through `resolver`. A refusal that
+/// shows nothing a source said reads nothing: a location with too many
+/// credentials, or a reference that would reach a process's arguments, is
+/// refused before any secret is read (§10.2).
 async fn secret_refusal(
     error: &ResolveError,
     settings: &RepositorySettings,
     resolver: &dyn SecretResolver,
 ) -> SecretRefusal {
     use domain::secrets::Problem;
-    let redactor = failure_redactor(settings, resolver).await;
     let field = || ("field", MsgArg::Text(field_name(&error.field)));
     let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
         code,
@@ -1483,6 +1485,7 @@ async fn secret_refusal(
     let bytes = |limit: usize| MsgArg::Bytes(u64::try_from(limit).unwrap_or(u64::MAX));
     match &error.cause {
         Cause::Unresolved(secret) => {
+            let redactor = failure_redactor(settings, resolver).await;
             let source = (
                 "source",
                 MsgArg::Text(redactor.redact(&source_text(&secret.source))),
