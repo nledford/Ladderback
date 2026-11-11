@@ -176,6 +176,34 @@ mod tests {
         assert!(!format!("{leaky:?}{leaky}").contains("hunter2"));
     }
 
+    // A hook runs in the daemon's working directory, so a program named by a
+    // relative path would be a different one, or none, by how it was started.
+    #[test]
+    fn only_a_program_named_by_a_relative_path_is_refused_with_the_program_alone() {
+        for (text, program) in [
+            ("./notify.sh --token hunter2", "./notify.sh"),
+            ("bin/notify --token hunter2", "bin/notify"),
+            ("../notify", "../notify"),
+            ("~/bin/notify", "~/bin/notify"),
+            ("'demo tools/notify' done", "demo tools/notify"),
+        ] {
+            let refused = Err(InvalidValue::new(ValueKind::HookProgram, program));
+            assert_eq!(HookEntry::parse(text), refused, "{text:?}");
+            assert_eq!(
+                HookEntry::new(program, ["--token", "hunter2"], OnFailure::Warn),
+                refused,
+                "{program:?}"
+            );
+        }
+        // A name is looked up on `PATH`, and an absolute path is the same
+        // file wherever the daemon started.
+        for program in ["notify-send", "~notify", "..", "/usr/local/bin/notify"] {
+            assert_eq!(entry(program).command.program(), program);
+            let hook = HookEntry::new(program, ["done"], OnFailure::Ignore).unwrap();
+            assert_eq!(hook.command.program(), program);
+        }
+    }
+
     #[test]
     fn an_entry_never_shows_its_arguments() {
         let hook = entry("login --password hunter2");

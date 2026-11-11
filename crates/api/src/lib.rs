@@ -143,6 +143,11 @@ pub enum ErrorCode {
     /// in every text the job shows (I4). The argument `field` names the
     /// setting (`repository` or `repo-hot`).
     LocationTooManyCredentials,
+    /// A repository's setting names a file, a folder or a program on this
+    /// machine by a relative path, which would be read from wherever the
+    /// daemon was started. The argument `field` names the setting
+    /// (`repository`, `repo-hot`, `password`, `options-cold.http-cacert`).
+    RepositoryPathRelative,
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
@@ -552,7 +557,9 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
-            Self::SecretInProcessArguments | Self::LocationTooManyCredentials => &[ArgSpec {
+            Self::SecretInProcessArguments
+            | Self::LocationTooManyCredentials
+            | Self::RepositoryPathRelative => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1347,6 +1354,7 @@ mod tests {
         for code in [
             ErrorCode::SecretInProcessArguments,
             ErrorCode::LocationTooManyCredentials,
+            ErrorCode::RepositoryPathRelative,
         ] {
             assert_eq!(code.args(), &[named[0]], "{code:?}");
         }

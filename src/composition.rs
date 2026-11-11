@@ -5107,9 +5107,6 @@ mod repository_service_tests {
     async fn a_value_the_settings_cannot_take_is_an_invalid_body_and_nothing_runs() {
         for password in [
             PasswordDto::File {
-                path: "password.txt".into(),
-            },
-            PasswordDto::File {
                 path: String::new(),
             },
             PasswordDto::Keyring {
@@ -5604,6 +5601,65 @@ mod repository_service_tests {
                 "a long {what}"
             );
             assert_eq!(jobs(&engine), 0, "a long {what} ran a job");
+            assert!(saved(&*config).await.repositories().is_empty());
+        }
+    }
+
+    // The configuration refuses these when it loads, so a saved one would
+    // stop the daemon from starting again. The refusal names the setting, so
+    // the page can show it there.
+    #[tokio::test]
+    async fn a_relative_path_on_this_machine_is_refused_at_its_setting_and_nothing_runs() {
+        let mut relative = settings_dto();
+        relative.repository = "backups/repo".to_owned();
+        let mut relative_hot = settings_dto();
+        relative_hot.repo_hot = Some("~/hot".to_owned());
+        let mut relative_file = settings_dto();
+        relative_file.password = PasswordDto::File {
+            path: "password.txt".into(),
+        };
+        let mut relative_root = settings_dto();
+        relative_root.repository = "opendal:fs".to_owned();
+        relative_root.options = [("root".to_owned(), "backups".to_owned())].into();
+        let mut relative_cert = settings_dto();
+        relative_cert.repository = "rest:https://nas.example/repo".to_owned();
+        relative_cert.options_cold = [("http-cacert".to_owned(), "ca.pem".to_owned())].into();
+        for (settings, field) in [
+            (relative, "repository"),
+            (relative_hot, "repo-hot"),
+            (relative_file, "password"),
+            (relative_root, "options.root"),
+            (relative_cert, "options-cold.http-cacert"),
+        ] {
+            let refused = Err(RepositoriesError::PathRelative {
+                field: field.to_owned(),
+            });
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            assert_eq!(
+                service
+                    .test(api::TestRepositoryDto {
+                        settings: settings.clone()
+                    })
+                    .await
+                    .map(|_| ()),
+                refused,
+                "{field}"
+            );
+            assert_eq!(
+                service
+                    .connect(connect("demo", settings.clone()))
+                    .await
+                    .map(|_| ()),
+                refused,
+                "{field}"
+            );
+            assert_eq!(
+                service.init(init(Some("demo"), settings)).await.map(|_| ()),
+                refused,
+                "{field}"
+            );
+            assert_eq!(jobs(&engine), 0, "a relative {field} ran a job");
             assert!(saved(&*config).await.repositories().is_empty());
         }
     }

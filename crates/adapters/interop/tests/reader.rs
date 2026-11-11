@@ -643,6 +643,173 @@ async fn a_glob_file_that_is_not_an_absolute_path_is_refused_at_the_file() {
     }
 }
 
+/// A `[repository]` at `location` with a password file, and `lines` after.
+fn located(location: &str, lines: &str) -> String {
+    format!(
+        "[repository]\nrepository = \"{location}\"\npassword-file = \"/srv/demo-password\"\n\
+         {lines}\n{ENTRY}"
+    )
+}
+
+// rustic and the programs it starts run in the folder rustic was started in,
+// which a profile doesn't record; the daemon's would be another one.
+#[tokio::test]
+async fn a_relative_path_on_this_machine_is_refused_at_its_key() {
+    for (text, key, written) in [
+        (
+            located("backups/repo", ""),
+            "repository.repository",
+            "backups/repo",
+        ),
+        (
+            located("local:repo", ""),
+            "repository.repository",
+            "local:repo",
+        ),
+        // rustic reads a profile's `${…}` as text.
+        (
+            located("${HOME}/repo", ""),
+            "repository.repository",
+            "${HOME}/repo",
+        ),
+        (
+            located("/srv/demo-repo", "repo-hot = \"./hot\"\n"),
+            "repository.repo-hot",
+            "./hot",
+        ),
+        (
+            located("opendal:fs", "\n[repository.options]\nroot = \"backups\"\n"),
+            "repository.options.root",
+            "backups",
+        ),
+        (
+            located(
+                "rest:https://nas.example/repo",
+                "\n[repository.options-cold]\nhttp-cacert = \"certs/ca.pem\"\n",
+            ),
+            "repository.options-cold.http-cacert",
+            "certs/ca.pem",
+        ),
+        (
+            located(
+                "rclone:nas:backups",
+                "\n[repository.options]\nrclone-command = \"./rclone serve restic\"\n",
+            ),
+            "repository.options.rclone-command",
+            "./rclone serve restic",
+        ),
+        (
+            located(
+                "/srv/demo-repo",
+                "repo-hot = \"opendal:fs\"\n\n[repository.options-hot]\nroot = \"hot\"\n",
+            ),
+            "repository.options-hot.root",
+            "hot",
+        ),
+        (
+            located("rclone:backups/repo", ""),
+            "repository.repository",
+            "rclone:backups/repo",
+        ),
+    ] {
+        let (found, line) = unsupported(read_err(&text).await);
+        assert_eq!(found, key, "{text}");
+        assert_eq!(
+            line,
+            Some(line_of(&text, &format!("\"{written}\""))),
+            "{text}"
+        );
+    }
+    // What rustic doesn't read from the folder it runs in.
+    for text in [
+        located("rclone:nas:backups/repo", ""),
+        located("rest:https://nas.example/repo", ""),
+        located("opendal:s3", "\n[repository.options]\nroot = \"backups\"\n"),
+    ] {
+        read_ok(&text).await;
+    }
+}
+
+#[tokio::test]
+async fn a_hook_that_starts_a_program_by_a_relative_path_is_refused_at_its_key() {
+    for (table, key, written) in [
+        (
+            "[global.hooks]\nrun-before = [\"./notify.sh --done\"]\n",
+            "global.hooks.run-before[0]",
+            "./notify.sh --done",
+        ),
+        (
+            "[repository.hooks]\nrun-after = [{ command = \"bin/notify\", args = [\"done\"] }]\n",
+            "repository.hooks.run-after[0].command",
+            "bin/notify",
+        ),
+        (
+            "[backup.hooks]\nrun-failed = [\"~/bin/notify\"]\n",
+            "backup.hooks.run-failed[0]",
+            "~/bin/notify",
+        ),
+    ] {
+        let text = profile_text(table);
+        let (found, line) = unsupported(read_err(&text).await);
+        assert_eq!(found, key, "{table}");
+        assert_eq!(
+            line,
+            Some(line_of(&text, &format!("\"{written}\""))),
+            "{table}"
+        );
+    }
+    read_ok(&located(
+        "/srv/demo-repo",
+        "\n[repository.hooks]\nrun-before = [\"notify-send done\", \"/usr/local/bin/notify\"]\n",
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn a_password_command_that_starts_a_program_by_a_relative_path_is_refused_at_its_key() {
+    let with = |password: &str| {
+        format!("[repository]\nrepository = \"/srv/demo-repo\"\n{password}\n\n{ENTRY}")
+    };
+    for (text, key, written) in [
+        (
+            with("password-command = \"./get-pass --vault demo\""),
+            "repository.password-command",
+            "./get-pass --vault demo",
+        ),
+        (
+            with("password-command = { command = \"bin/get-pass\", args = [\"--vault\"] }"),
+            "repository.password-command.command",
+            "bin/get-pass",
+        ),
+    ] {
+        let (found, line) = unsupported(read_err(&text).await);
+        assert_eq!(found, key, "{text}");
+        assert_eq!(
+            line,
+            Some(line_of(&text, &format!("\"{written}\""))),
+            "{text}"
+        );
+    }
+    let scratch = Scratch::new();
+    let error = scratch
+        .read_with(&[("RUSTIC_PASSWORD_COMMAND", "./get-pass")], &with(""))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        unsupported(error),
+        ("RUSTIC_PASSWORD_COMMAND".to_owned(), None)
+    );
+    // rustic runs a command on `PATH` or at an absolute path as written, and
+    // never one the profile's own password beats.
+    for password in [
+        "password-command = \"get-pass --vault demo\"",
+        "password-command = \"/usr/local/bin/get-pass\"",
+        "password-file = \"/srv/demo-password\"\npassword-command = \"./get-pass\"",
+    ] {
+        read_ok(&with(password)).await;
+    }
+}
+
 #[tokio::test]
 async fn a_host_that_is_not_a_host_name_is_refused() {
     let text = profile_text("[backup]\nhost = \"\"\n");

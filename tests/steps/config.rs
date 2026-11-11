@@ -253,6 +253,18 @@ fn refused_too_many_options(agent: &mut Agent, key: String) {
     }
 }
 
+#[then(expr = "the load is refused because the path {string} is not an absolute path")]
+fn refused_relative_local_path(agent: &mut Agent, key: String) {
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Value(ValueKind::LocalPath),
+            key: Some(found),
+            ..
+        } => assert_eq!(*found, key),
+        other => panic!("the load should refuse the path at {key:?}, got {other:?}"),
+    }
+}
+
 #[then(expr = "the load is refused because {string} and {string} are one repository")]
 fn refused_one_repository(agent: &mut Agent, first: String, second: String) {
     let alias = |name: &str| domain::RepositoryAlias::parse(name).expect("an alias");

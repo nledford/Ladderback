@@ -132,9 +132,20 @@ Feature: Repositories over HTTP
       | no alias                 | /api/v1/repositories       | {"settings":{"repository":"/x","password":{"source":"inline","value":"p"}}}              |
       | a source the API refuses | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"command","command":"pass show x"}}} |
       | an unknown field         | /api/v1/repositories/_init | {"settings":{"repository":"/x","password":{"source":"inline","value":"p"},"repo_hot":"/y"}} |
-      | a relative password file | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}}      |
       | an empty password        | /api/v1/repositories/_test | {"settings":{"repository":"/x","password":{"source":"inline","value":""}}}               |
       | an empty location        | /api/v1/repositories/_test | {"settings":{"repository":"","password":{"source":"inline","value":"p"}}}                |
       | a location over 64 KiB   | /api/v1/repositories/_test | {"settings":{"repository":"{a location of 65537 bytes}","password":{"source":"inline","value":"p"}}} |
       | an option over 64 KiB    | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"inline","value":"p"},"options":{"endpoint":"{a value of 65537 bytes}"}}} |
       | 65 options in one table  | /api/v1/repositories/_test | {"settings":{"repository":"/x","repo-hot":"/y","password":{"source":"inline","value":"p"},"options-hot":{65 options as JSON}}} |
+
+  Scenario Outline: A setting that names a path on this machine by a relative one is refused at that setting: <what>
+    When the client sends <body> to "<route>"
+    Then the refusal has status 422 and the typed code "repository-path-relative"
+    And the refusal names the setting "<setting>"
+    And the daemon lists no repositories
+
+    Examples:
+      | what                     | route                      | body                                                                                               | setting    |
+      | a relative location      | /api/v1/repositories/_test | {"settings":{"repository":"backups/repo","password":{"source":"inline","value":"p"}}}              | repository |
+      | a hot location under ~   | /api/v1/repositories/_init | {"settings":{"repository":"/x","repo-hot":"~/hot","password":{"source":"inline","value":"p"}}}     | repo-hot   |
+      | a relative password file | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}} | password   |

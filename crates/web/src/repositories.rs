@@ -728,6 +728,24 @@ mod tests {
     }
 
     #[test]
+    fn a_relative_path_belongs_to_the_field_that_holds_it() {
+        let field = |name: &str| {
+            field_of(
+                ErrorCode::RepositoryPathRelative,
+                &[("field".into(), text(name))],
+            )
+        };
+        assert_eq!(field("repository"), Some(Field::Location));
+        assert_eq!(field("repo-hot"), Some(Field::HotStorage));
+        assert_eq!(field("password"), Some(Field::Password));
+        assert_eq!(
+            field("options.root"),
+            None,
+            "the form has no field for an option"
+        );
+    }
+
+    #[test]
     fn an_unreadable_secret_belongs_to_the_field_that_holds_it() {
         let field =
             |name: &str| field_of(ErrorCode::SecretMissing, &[("field".into(), text(name))]);

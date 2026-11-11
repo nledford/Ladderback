@@ -1199,6 +1199,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SecretExpansionTooLong
                 | ErrorCode::TemplateInvalid
                 | ErrorCode::LocationTooManyCredentials
+                | ErrorCode::RepositoryPathRelative
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut

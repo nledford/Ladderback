@@ -133,6 +133,8 @@ Feature: An agent's configuration
         | group-by         | colour                 |
         | on-failure       | explode                |
         | hook-command     | echo 'never closed     |
+        | hook-program     | ./notify.sh --done     |
+        | hook-program     | ~/bin/notify           |
 
     Scenario Outline: A value at the edge of what is allowed is accepted
       When the <kind> "<value>" is read
@@ -157,6 +159,8 @@ Feature: An agent's configuration
         | group-by         |                        |
         | on-failure       | warn                   |
         | hook-command     | notify-send 'all done' |
+        | hook-program     | notify-send done       |
+        | hook-program     | /opt/demo/notify done  |
 
   Rule: A refused hook command is never repeated
 
@@ -267,6 +271,19 @@ Feature: An agent's configuration
       When the agent loads the config file
       Then the load is refused because "repositories.nas.options" holds more than 64 options
       And the refusal points at line 6 of the config file
+
+    Scenario: A relative path on this machine is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "backups/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because the path "repositories.nas.repository" is not an absolute path
+      And the refusal points at line 4 of the config file
 
     Scenario: A file with two entries for one location is refused, naming both
       Given a config file holding:

@@ -98,6 +98,98 @@ keep-last = 9
     assert_eq!(home.retention.keep_daily.map(KeepCount::get), Some(7));
 }
 
+// Whether an option names a file on this machine depends on the location,
+// which may come from another profile: the refusal names the file and the
+// line the option is written at.
+#[tokio::test]
+async fn a_relative_path_an_option_of_a_used_profile_holds_is_refused_where_it_is_written() {
+    let scratch = Scratch::new();
+    let base = "[repository]\npassword-file = \"/srv/demo-password\"\n\n\
+                [repository.options]\nroot = \"backups\"\n";
+    scratch.profile("base.toml", base);
+    let error = scratch
+        .read(&uses(
+            &["base"],
+            &format!("[repository]\nrepository = \"opendal:fs\"\n\n{ENTRY}"),
+        ))
+        .await
+        .expect_err("a relative root on the local disk");
+    match error {
+        ProfileError::Unsupported { file, key, at } => {
+            assert!(file.ends_with("base.toml"), "{file}");
+            assert_eq!(key, "repository.options.root");
+            assert_eq!(at.map(|at| at.line), Some(line_of(base, "\"backups\"")));
+        }
+        other => panic!("the profile should be unsupported, got {other:?}"),
+    }
+    // The profile's own root is the one rustic reads.
+    scratch
+        .read(&uses(
+            &["base"],
+            &format!(
+                "[repository]\nrepository = \"opendal:fs\"\n\n\
+                 [repository.options]\nroot = \"/srv/demo-repo\"\n\n{ENTRY}"
+            ),
+        ))
+        .await
+        .expect("the own absolute root");
+}
+
+#[tokio::test]
+async fn a_relative_location_or_password_command_of_a_used_profile_is_refused_where_it_is_written()
+{
+    let scratch = Scratch::new();
+    for (name, used, own, key, written) in [
+        (
+            "cold",
+            "[repository]\nrepository = \"backups/repo\"\npassword-file = \"/srv/demo-password\"\n",
+            "",
+            "repository.repository",
+            "\"backups/repo\"",
+        ),
+        (
+            "hot",
+            "[repository]\nrepo-hot = \"./hot\"\n",
+            "[repository]\nrepository = \"/srv/demo-repo\"\npassword-file = \"/srv/demo-password\"\n",
+            "repository.repo-hot",
+            "\"./hot\"",
+        ),
+        (
+            "command",
+            "[repository]\npassword-command = \"./get-pass --vault demo\"\n",
+            "[repository]\nrepository = \"/srv/demo-repo\"\n",
+            "repository.password-command",
+            "\"./get-pass --vault demo\"",
+        ),
+    ] {
+        scratch.profile(&format!("{name}.toml"), used);
+        let error = scratch
+            .read(&uses(&[name], &format!("{own}\n{ENTRY}")))
+            .await
+            .expect_err(name);
+        match error {
+            ProfileError::Unsupported {
+                file,
+                key: found,
+                at,
+            } => {
+                assert!(file.ends_with(&format!("{name}.toml")), "{file}");
+                assert_eq!(found, key);
+                assert_eq!(at.map(|at| at.line), Some(line_of(used, written)), "{name}");
+            }
+            other => panic!("the profile should be unsupported, got {other:?}"),
+        }
+    }
+    // The profile's own location is the one rustic reads.
+    scratch
+        .read(&uses(
+            &["cold"],
+            &format!("[repository]\nrepository = \"/srv/demo-repo\"\n\n{ENTRY}"),
+        ))
+        .await
+        .expect("the own absolute location");
+}
+
 #[tokio::test]
 async fn a_list_the_profile_sets_replaces_the_used_one_and_an_empty_list_takes_it() {
     let scratch = Scratch::new();

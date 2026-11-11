@@ -12,6 +12,7 @@ mod agent;
 mod duration;
 mod filter;
 mod hooks;
+mod local_paths;
 mod names;
 mod plan;
 mod repository;
@@ -22,6 +23,7 @@ pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, Violation};
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
+pub use local_paths::RepositoryField;
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Plan, RetryPolicy};
 pub use repository::{
@@ -37,6 +39,9 @@ pub enum ValueKind {
     Hostname,
     Source,
     GlobFile,
+    /// A file or folder on this machine, which a repository's settings name
+    /// by an absolute path: its location, or a file an option names.
+    LocalPath,
     Locale,
     Concurrency,
     Nice,
@@ -58,6 +63,8 @@ pub enum ValueKind {
     /// A table of options (`options`, `options-hot`, `options-cold`) with
     /// more than [`MAX_OPTIONS`](crate::secrets::MAX_OPTIONS).
     Options,
+    /// The program of a hook: a name looked up on `PATH`, or an absolute path.
+    HookProgram,
 }
 
 /// A value the model refuses. `value` is the text as it was written, except
@@ -65,6 +72,7 @@ pub enum ValueKind {
 /// [`ValueKind::OptionValue`], which may hold a secret, so their text is
 /// never kept here, and an error shows no more than the key it is at; and
 /// [`ValueKind::Options`], a table, which has no text of its own.
+/// A [`ValueKind::HookProgram`] keeps the program and none of its arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidValue {
     pub kind: ValueKind,

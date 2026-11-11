@@ -600,6 +600,16 @@ fn api_refused(agent: &mut Agent, status: u16, code: String) {
     assert_eq!(json["code"], serde_json::json!(code), "the refusal: {json}");
 }
 
+#[then(expr = "the refusal names the setting {string}")]
+fn api_refusal_names_setting(agent: &mut Agent, setting: String) {
+    let (_, json) = api_answer(agent);
+    assert_eq!(
+        json["args"]["field"],
+        serde_json::json!({"type": "text", "value": setting}),
+        "the refusal: {json}"
+    );
+}
+
 #[then(expr = "the refusal names the setting {string} and the file the password is read from")]
 fn api_refusal_names_setting_and_file(agent: &mut Agent, setting: String) {
     let (_, json) = api_answer(agent);
