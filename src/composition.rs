@@ -94,12 +94,43 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     }
 }
 
-/// What `serve` runs: the router's state, and the hold on the data folder that
-/// keeps every other process off it. The caller keeps the lock until the
-/// daemon is gone.
+/// What `serve` runs: the router's state, the operation log it writes, and
+/// the hold on the data folder that keeps every other process off it. The
+/// caller closes the log once it has stopped serving, and keeps the lock
+/// until the daemon is gone (§9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
+    pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
+}
+
+/// How long the daemon waits for the operation log to close once it stops
+/// (§9): as long as a run waits for one write of its own
+/// ([`app::log_write::SAVE_BOUND`]), which is past the store's own bound on
+/// a call (about 15 s: 10 s for a connection, 5 s for the write lock). A
+/// close waits for the calls in flight, so a busy store still finishes
+/// them; one that hasn't by then is stalled (a disk that stopped
+/// answering), and the daemon stops without it rather than hold up the
+/// service manager, which would kill it anyway.
+const LOG_CLOSE_BOUND: std::time::Duration =
+    std::time::Duration::from_secs(app::log_write::SAVE_BOUND.as_secs().unsigned_abs());
+
+/// The operation log the daemon writes, which it closes before it lets go
+/// of the data folder.
+pub(crate) struct OperationLog {
+    store: Arc<SqliteStore>,
+    database: std::path::PathBuf,
+}
+
+impl OperationLog {
+    /// Closes the log once the calls in flight have ended, so no connection
+    /// to it, and none of its `-wal` and `-shm` files, outlives the daemon.
+    /// It waits [`LOG_CLOSE_BOUND`] at most, and says in the log when it
+    /// gave up; what a call cut off then was still writing is ended at the
+    /// next start, as after a crash.
+    pub(crate) async fn close(&self) {
+        close_within(self.store.close(), &self.database, LOG_CLOSE_BOUND).await;
+    }
 }
 
 /// What the daemon's router runs against (§4.2), or why it cannot.
@@ -133,11 +164,33 @@ async fn daemon_at(
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
     let database = data_dir.join("ladderback.db");
-    let store: Arc<dyn OperationStore> = Arc::new(
-        SqliteStore::open(&database)
-            .await
-            .map_err(|detail| store_refused(&database, &detail.to_string()))?,
-    );
+    let log = OperationLog {
+        store: Arc::new(
+            SqliteStore::open(&database)
+                .await
+                .map_err(|detail| store_refused(&database, &detail.to_string()))?,
+        ),
+        database,
+    };
+    // Every refusal from here on closes the log first: the refused daemon
+    // leaves it as tidy as one that served and stopped.
+    match state_over(config, &data_dir, &log).await {
+        Ok(state) => Ok(Daemon { state, log, lock }),
+        Err(refused) => {
+            log.close().await;
+            Err(refused)
+        }
+    }
+}
+
+/// The router's state over the operation log `log`, once it has ended what
+/// an earlier run left unfinished, or why the daemon cannot serve.
+async fn state_over(
+    config: Arc<dyn ConfigStore>,
+    data_dir: &std::path::Path,
+    log: &OperationLog,
+) -> Result<AppState, Refused> {
+    let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     // Nothing has run yet, so an operation the log still shows as queued or
     // running was left by a process that stopped. It ends as failed now, which
     // also lets go of the repository a running maintenance operation held
@@ -146,14 +199,14 @@ async fn daemon_at(
     let ended = RecoverOperations::new(Arc::clone(&store))
         .recover()
         .await
-        .map_err(|error| recovery_refused(&database, &error))?;
+        .map_err(|error| recovery_refused(&log.database, &error))?;
     if ended > 0 {
         log::warn!(
             "ended {ended} operation(s) the operation log still showed as queued or running: the daemon that ran them stopped before they finished"
         );
     }
-    let agent_id = agent_id::load_or_create(&data_dir)
-        .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
+    let agent_id = agent_id::load_or_create(data_dir)
+        .map_err(|detail| store_refused(data_dir, &detail.to_string()))?;
     // Workers are this program: `ladderback worker` (§4.1).
     let program = std::env::current_exe().map_err(|detail| Refused {
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
@@ -183,14 +236,11 @@ async fn daemon_at(
         Arc::clone(&config),
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
-    Ok(Daemon {
-        state: AppState {
-            events: bus,
-            operations,
-            catalog,
-            repositories,
-        },
-        lock,
+    Ok(AppState {
+        events: bus,
+        operations,
+        catalog,
+        repositories,
     })
 }
 
@@ -201,8 +251,13 @@ async fn close_within(
     database: &std::path::Path,
     bound: std::time::Duration,
 ) {
-    let _ = (close, database, bound);
-    todo!()
+    if tokio::time::timeout(bound, close).await.is_err() {
+        log::warn!(
+            "the operation log {} did not close within {} s, and the daemon stops without it: an operation it was still recording is ended at the next start",
+            database.display(),
+            bound.as_secs_f64()
+        );
+    }
 }
 
 /// A data folder another process holds, or a lock that couldn't be taken, as
