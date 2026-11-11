@@ -100,7 +100,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::MaintenancePartial => "maintenance-partial",
         WarningKind::CheckWarning => "check-warning",
         WarningKind::CheckError => "check-error",
-        WarningKind::OtherHosts => todo!("the stored code of an other-hosts warning"),
+        WarningKind::OtherHosts => "maintenance-other-hosts",
         WarningKind::Other => "unknown",
     }
 }
@@ -114,6 +114,7 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
         "maintenance-partial" => WarningKind::MaintenancePartial,
         "check-warning" => WarningKind::CheckWarning,
         "check-error" => WarningKind::CheckError,
+        "maintenance-other-hosts" => WarningKind::OtherHosts,
         _ => WarningKind::Other,
     }
 }
@@ -301,13 +302,15 @@ mod tests {
         }
     }
 
-    /// Every kind of warning round-trips, a partial maintenance run included.
+    /// Every kind of warning round-trips, a partial maintenance run and other
+    /// hosts included.
     #[test]
     fn every_warning_kind_round_trips() {
         for kind in [
             WarningKind::SourceUnreadable,
             WarningKind::Hook,
             WarningKind::MaintenancePartial,
+            WarningKind::OtherHosts,
             WarningKind::Other,
         ] {
             let text = warning_code_text(kind);

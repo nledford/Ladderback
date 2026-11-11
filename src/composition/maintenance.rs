@@ -151,7 +151,7 @@ pub(super) async fn preview(
     let operation = OperationId::from_uuid(Uuid::now_v7());
     let preview = runner.maintenance().preview(operation, &alias, &kind).await;
     let preview = told(runner, &alias, preview).await?;
-    Ok(preview_dto(&alias, &preview.preview))
+    Ok(preview_dto(&alias, &preview.preview).warned(other_hosts_warnings(&preview.other_hosts)))
 }
 
 /// `repository`'s snapshots grouped by who owns them, read live like a
@@ -242,7 +242,20 @@ fn groups_dto(alias: &RepositoryAlias, groups: &RepositoryGroups) -> api::Snapsh
                 )
             })
             .collect(),
-        warnings: Vec::new(),
+        warnings: other_hosts_warnings(&groups.other_hosts),
+    }
+}
+
+/// What the page warns of the other hosts a repository maintained here
+/// holds snapshots from (§7.3): nothing when there are none.
+fn other_hosts_warnings(other_hosts: &OtherHosts) -> Vec<api::WarningDto> {
+    if other_hosts.is_empty() {
+        Vec::new()
+    } else {
+        vec![api::WarningDto::other_hosts(
+            other_hosts.count(),
+            other_hosts.hosts(),
+        )]
     }
 }
 
@@ -264,8 +277,19 @@ fn other_hosts_line(
     other_hosts: &OtherHosts,
     localizer: &l10n::Localizer,
 ) -> String {
-    let _ = (alias, other_hosts, localizer);
-    todo!("the line the daemon's log says of the other hosts")
+    let escaped: Vec<String> = other_hosts
+        .hosts()
+        .iter()
+        .map(|host| host.escape_debug().to_string())
+        .collect();
+    let warning = api::WarningDto::other_hosts(other_hosts.count(), &escaped);
+    let args: Vec<(&str, MsgArg)> = warning
+        .args
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.clone()))
+        .collect();
+    let message = localizer.warning(warning.code, &args, None);
+    format!("repository {}: {message}", alias.as_str())
 }
 
 /// A preview as the page reads it. The selection of a forget's and an

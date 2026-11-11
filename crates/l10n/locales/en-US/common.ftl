@@ -230,6 +230,14 @@ warning-check-warning = The check found something in the repository to tidy. Unl
 warning-check-error = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again.
     .with-detail = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again. What it found: { $detail }
 
+# A repository this program maintains itself (forgets and prunes from this machine) holds snapshots that other machines made. Any of them may maintain it too, which the program cannot tell.
+# $count (count): how many other hosts there are.
+# $hosts (text): the names of the first five of them, separated by commas. Keep them as they are.
+warning-maintenance-other-hosts = { $count ->
+    [one] This repository holds snapshots from another host, { $hosts }. { -brand-name } forgets and prunes it from here, and cannot tell whether that host does too. Make sure only one machine maintains it.
+   *[other] This repository holds snapshots from { $count } other hosts, including { $hosts }. { -brand-name } forgets and prunes it from here, and cannot tell whether any of them does too. Make sure only one machine maintains it.
+  }
+
 # A warning this version of the program has no message for, such as one from a newer agent.
 # $detail (text): the sender's own message. It is shown as it came.
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.
