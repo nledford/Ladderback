@@ -125,8 +125,7 @@ pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option
 /// transaction, holding the write lock, and the call never learns it began.
 /// The write after it must not be held up: sqlx's thread, which waits for
 /// the call to take its answer, rolls the `BEGIN` back once the call is
-/// dropped, and the store closes that connection besides (see `Checkout`
-/// in the store).
+/// dropped, before the pool takes the connection back.
 ///
 /// The threads can't move the call past that point unseen. `probe` holds
 /// the write lock while the call is polled, so its `BEGIN IMMEDIATE` can't

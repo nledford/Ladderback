@@ -562,10 +562,10 @@ async fn closing_right_after_a_call_lets_go_of_the_file() {
     closing_lets_go_of_the_file(store, &scratch, hand_back, "right after a save").await;
 }
 
-/// The store closes the connection of a write cut short instead of
-/// returning it (see `cancellation.rs`), in a task of its own; `close` must
-/// not return before that connection is closed, so nothing holds the file
-/// afterwards (#174).
+/// The connection's own thread rolls back a write cut short, and sqlx hands
+/// the connection back to the pool in a task of its own (see
+/// `cancellation.rs`); `close` must not return before that is done and the
+/// connection is closed, so nothing holds the file afterwards (#174).
 #[tokio::test]
 async fn closing_right_after_a_write_cut_short_lets_go_of_the_file() {
     let scratch = Scratch::new();
