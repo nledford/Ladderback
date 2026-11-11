@@ -245,6 +245,18 @@ pub(crate) fn check_result(repository: RepositoryId, results: &CheckResults) -> 
     }
 }
 
+/// A check's findings, each with its warning code: the errors first, then the
+/// rest, each in the order rustic found them. An operation keeps only its
+/// first warnings (§4.1), and rustic finds the packs to tidy before the damage
+/// in the trees, so a check that found more than that would otherwise keep
+/// none of the errors it counts.
+pub(crate) fn errors_first<L: std::fmt::Debug, F>(
+    findings: &[(L, F)],
+) -> impl Iterator<Item = (WarningCode, &F)> {
+    let _ = findings;
+    std::iter::from_fn(|| todo!())
+}
+
 #[cfg(test)]
 mod tests {
     use domain::Timestamp;
@@ -252,6 +264,34 @@ mod tests {
     use rustic_core::repofile::{SnapshotId as RusticSnapshotId, SnapshotSummary, StringList};
 
     use super::*;
+
+    #[derive(Debug)]
+    enum Level {
+        Warn,
+        Error,
+    }
+
+    #[test]
+    fn a_checks_errors_come_before_what_it_found_to_tidy_each_in_the_order_found() {
+        let found = [
+            (Level::Warn, "a"),
+            (Level::Error, "b"),
+            (Level::Warn, "c"),
+            (Level::Error, "d"),
+        ];
+        let sent: Vec<_> = errors_first(&found)
+            .map(|(code, finding)| (code, *finding))
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                (WarningCode::CheckError, "b"),
+                (WarningCode::CheckError, "d"),
+                (WarningCode::CheckWarning, "a"),
+                (WarningCode::CheckWarning, "c"),
+            ]
+        );
+    }
 
     fn repository() -> RepositoryId {
         RepositoryId::parse(&"cd".repeat(32)).unwrap()
