@@ -57,12 +57,35 @@ pub(crate) fn new_repository(
 /// refused at once (`repository-replaced`, §7.3), before anything in it is
 /// read past its config or written. After it opens, each half that is a
 /// local folder is cleaned up after killed workers.
+///
+/// A half on OpenDAL's `fs` whose root folder isn't there fails the job
+/// before its backend is set up, which would make that folder (decision 53).
+/// When the repository doesn't open, and only then, its folders are looked
+/// at: when each half is a folder on this machine holding nothing of a
+/// repository, the job fails with `repository-not-found`, and otherwise
+/// with the error opening gave, as it always did. A repository that opens
+/// costs no extra look.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
-    let repository =
-        new_repository(ctx, spec)?.open(&Credentials::password(spec.password.expose()))?;
+    if let Some(root) = missing_fs_root(spec) {
+        return Err(JobError::failed(format!(
+            "the repository's root folder {} is not there",
+            root.display()
+        )));
+    }
+    let credentials = Credentials::password(spec.password.expose());
+    let repository = match new_repository(ctx, spec)?.open(&credentials) {
+        Ok(repository) => repository,
+        Err(_) if no_repository_there(spec) => {
+            return Err(JobError::Failed {
+                code: ErrorCode::RepositoryNotFound,
+                detail: "no repository config file is at the location".to_owned(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
     if let Some(expected) = &spec.id {
         let found = repository_id(&repository)?;
         if found != *expected {
@@ -83,6 +106,94 @@ pub(crate) fn open(
         remove_leftovers(ctx, half)?;
     }
     Ok(repository)
+}
+
+/// Where a half of the repository is, as far as telling "no repository"
+/// goes (decision 53).
+enum Half {
+    /// A local folder. rustic's local backend makes no folder when it opens.
+    Local(PathBuf),
+    /// The root folder of OpenDAL's `fs`, the root as rustic sets the half
+    /// up: `options_cold` over `options` for the cold half, `options_hot`
+    /// over `options` for the hot one. Setting that backend up makes a
+    /// missing root folder.
+    Fs(PathBuf),
+    /// Anywhere else: a server or a store elsewhere (REST, rclone, and every
+    /// other OpenDAL service), or a location rustic refuses, such as `fs`
+    /// with no root.
+    Elsewhere,
+}
+
+/// The repository's halves, the cold one first.
+fn halves(spec: &RepositorySpec) -> impl Iterator<Item = Half> + '_ {
+    let cold = (spec.repository.as_str(), &spec.options_cold);
+    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
+    std::iter::once(cold).chain(hot).map(
+        |(location, half_options)| match location_to_type_and_path(location) {
+            Ok((SupportedBackend::Local, path)) => Half::Local(PathBuf::from(path.as_str())),
+            Ok((SupportedBackend::OpenDAL, service))
+                if service
+                    .as_str()
+                    .split(':')
+                    .next()
+                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("fs")) =>
+            {
+                half_options
+                    .get("root")
+                    .or_else(|| spec.options.get("root"))
+                    .map_or(Half::Elsewhere, |root| Half::Fs(PathBuf::from(root)))
+            }
+            _ => Half::Elsewhere,
+        },
+    )
+}
+
+/// The root folder of a half on OpenDAL's `fs` that isn't there, or isn't a
+/// folder. Setting that backend up would make it, and on an unplugged drive
+/// that is an empty folder at the mount point, on the system disk: the next
+/// job would find no repository in it and the row would offer to create one
+/// there (decision 53).
+fn missing_fs_root(spec: &RepositorySpec) -> Option<PathBuf> {
+    halves(spec).find_map(|half| match half {
+        Half::Fs(root) if !is_folder(&root) => Some(root),
+        _ => None,
+    })
+}
+
+/// Whether the repository is, definitely, not there (decision 53): every
+/// half is a folder on this machine that holds nothing of a repository.
+/// A half anywhere else is no answer: a server's or a store's missing root
+/// is the remote form of an unplugged drive, and rustic's backends there
+/// list no config file for one, or for a refused password.
+fn no_repository_there(spec: &RepositorySpec) -> bool {
+    halves(spec).all(|half| match half {
+        Half::Local(folder) | Half::Fs(folder) => holds_nothing_of_a_repository(&folder),
+        Half::Elsewhere => false,
+    })
+}
+
+/// What a repository holds at the top of its folder: its config file, and
+/// the folders of its keys, packs, index and snapshots.
+const REPOSITORY_ENTRIES: [&str; 5] = ["config", "keys", "data", "index", "snapshots"];
+
+/// Whether `folder` is there, is a folder, and holds none of
+/// [`REPOSITORY_ENTRIES`], as the file system tells it. A folder that isn't
+/// there is what an unplugged drive looks like, and a repository made there
+/// would be a new, empty one in the old one's place; a folder that can't be
+/// read is no answer; and a folder holding a repository's other entries
+/// without its config file is an initialisation cut short or a repository
+/// that lost its config, which a new repository would be mixed into.
+fn holds_nothing_of_a_repository(folder: &Path) -> bool {
+    is_folder(folder)
+        && REPOSITORY_ENTRIES
+            .iter()
+            .all(|entry| matches!(folder.join(entry).try_exists(), Ok(false)))
+}
+
+/// Whether a folder is at `path`, through any symbolic links; anything that
+/// can't be looked at is not one.
+fn is_folder(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
 }
 
 /// The cache directory the job may use: the one it was given, if no other
@@ -370,9 +481,12 @@ mod tests {
             password: SecretValue::new(wrong),
             ..spec_at(&repository.to_string_lossy())
         };
-        let Err(JobError::Failed { detail, .. }) = open(&ctx, &spec) else {
+        // A repository that is there, with the wrong password, is the
+        // engine's own failure: only a missing config is not-found.
+        let Err(JobError::Failed { code, detail }) = open(&ctx, &spec) else {
             panic!("a wrong password must fail the job");
         };
+        assert_eq!(code, api::ErrorCode::OperationFailed);
         assert!(!detail.is_empty());
         assert!(!detail.contains(wrong), "the password is in {detail}");
     }
@@ -397,6 +511,295 @@ mod tests {
         let opened = open(&ctx, &spec_at(&missing.to_string_lossy()));
         assert!(matches!(opened, Err(JobError::Failed { .. })));
         assert!(!missing.exists(), "opening made a repository folder");
+    }
+
+    /// A repository folder that is there and holds no repository config
+    /// file is no repository: the job fails with `repository-not-found`,
+    /// decided by looking for the config file rather than by rustic's
+    /// words, and nothing is made there.
+    #[test]
+    fn an_existing_folder_with_no_repository_config_is_no_repository_found() {
+        let root = tempfile::tempdir().unwrap();
+        let empty = root.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        let (ctx, _capture) = context(None);
+        let Err(JobError::Failed { code, detail }) = open(&ctx, &spec_at(&empty.to_string_lossy()))
+        else {
+            panic!("opening an empty folder must fail the job");
+        };
+        assert_eq!(code, api::ErrorCode::RepositoryNotFound);
+        assert!(!detail.is_empty());
+        assert_eq!(fs::read_dir(&empty).unwrap().count(), 0);
+    }
+
+    /// A repository folder that isn't there, or isn't a folder, is no
+    /// definite answer: it is what an unplugged drive looks like, and
+    /// creating a repository there would make a new, empty one in its
+    /// place (decision 53). The job fails as it would have, never as
+    /// `repository-not-found`, and nothing is made.
+    #[test]
+    fn a_repository_folder_that_is_not_there_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("a-file");
+        fs::write(&file, b"x").unwrap();
+        let missing = root.path().join("nowhere");
+        let unplugged = root.path().join("usb").join("restic");
+        for location in [&missing, &unplugged, &file] {
+            assert_eq!(
+                failed_code(&spec_at(&location.to_string_lossy())),
+                api::ErrorCode::OperationFailed,
+                "{location:?}"
+            );
+        }
+        assert!(!missing.exists(), "opening made a repository folder");
+        assert!(!unplugged.exists(), "opening made a repository folder");
+    }
+
+    /// Opens `spec` and returns the code the job failed with.
+    fn failed_code(spec: &RepositorySpec) -> api::ErrorCode {
+        let (ctx, _capture) = context(None);
+        match open(&ctx, spec) {
+            Err(JobError::Failed { code, .. }) => code,
+            Err(other) => panic!("opening {} broke the events: {other:?}", spec.repository),
+            Ok(_) => panic!("{} opened", spec.repository),
+        }
+    }
+
+    /// A location the backend says no config file is at, when the backend
+    /// says so of a location it couldn't read too, is not a definite answer:
+    /// the job fails as it would have, never as `repository-not-found`, so
+    /// a repository that is only out of reach is never offered to be
+    /// created (decision 53). Here a real repository in a folder nobody may
+    /// read, which rustic's local backend lists as holding no config file.
+    #[test]
+    fn a_folder_that_cannot_be_read_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let _restored = Writable(repository.clone());
+        fs::set_permissions(&repository, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&repository).is_ok() {
+            testkit::skip!("running as root: permissions don't stop reading a folder");
+        }
+        assert_eq!(
+            failed_code(&spec_at(&repository.to_string_lossy())),
+            api::ErrorCode::OperationFailed
+        );
+    }
+
+    /// An HTTP server on a free local port that answers every request with
+    /// `status` (`401 Unauthorized`, say) and an empty body. It serves until
+    /// the test process ends.
+    fn server_answering(status: &'static str) -> std::net::SocketAddr {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                let mut length = 0;
+                while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                    line.clear();
+                }
+                let _ = io::copy(&mut io::Read::take(&mut reader, length), &mut io::sink());
+                let _ = (&stream).write_all(
+                    format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                        .as_bytes(),
+                );
+            }
+        });
+        address
+    }
+
+    /// A REST server that refuses the credentials, as `401 Unauthorized`.
+    fn refusing_rest_server() -> String {
+        format!("rest:http://{}/", server_answering("401 Unauthorized"))
+    }
+
+    /// rustic's REST backend lists no config file when the server answers
+    /// the config's request with any status but success, a refusal of the
+    /// credentials included: that is no definite answer, so the job fails
+    /// as it would have.
+    #[test]
+    fn a_rest_server_that_refuses_the_credentials_is_not_said_to_hold_no_repository() {
+        assert_eq!(
+            failed_code(&spec_at(&refusing_rest_server())),
+            api::ErrorCode::OperationFailed
+        );
+    }
+
+    /// A server that can't be reached gives no answer at all: the job fails
+    /// with the backend's error, as it would have.
+    #[test]
+    fn a_rest_server_that_cannot_be_reached_is_not_said_to_hold_no_repository() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let spec = RepositorySpec {
+            options: [("retry".to_owned(), "off".to_owned())].into(),
+            ..spec_at(&format!("rest:http://127.0.0.1:{port}/"))
+        };
+        assert_eq!(failed_code(&spec), api::ErrorCode::OperationFailed);
+    }
+
+    /// OpenDAL's `fs` is a folder on this machine, looked at as a local one:
+    /// an empty root folder holds no repository, and one that can't be read
+    /// is no answer, which fails the job as before. A root folder that isn't
+    /// there is no definite answer either, as with a local folder: it fails
+    /// the job as before, and before the backend is set up, which would
+    /// make it.
+    #[test]
+    fn an_opendal_fs_root_is_no_repository_only_when_it_is_an_empty_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let at = |folder: &Path| RepositorySpec {
+            options: [("root".to_owned(), folder.to_string_lossy().into_owned())].into(),
+            ..spec_at("opendal:fs")
+        };
+        let empty = root.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        assert_eq!(failed_code(&at(&empty)), api::ErrorCode::RepositoryNotFound);
+        let in_options_cold = RepositorySpec {
+            options_cold: [("root".to_owned(), empty.to_string_lossy().into_owned())].into(),
+            ..at(&root.path().join("overridden"))
+        };
+        assert_eq!(
+            failed_code(&in_options_cold),
+            api::ErrorCode::RepositoryNotFound
+        );
+        let missing = root.path().join("usb").join("restic");
+        assert_eq!(failed_code(&at(&missing)), api::ErrorCode::OperationFailed);
+        assert!(
+            !root.path().join("usb").exists(),
+            "opening made a root folder"
+        );
+        // The hot half's root is `options_hot` over `options`; the cold half
+        // here is a local folder, which has no use for a root option.
+        let hot_missing = root.path().join("usb-hot").join("restic");
+        let hot_unplugged = RepositorySpec {
+            repo_hot: Some("opendal:fs".to_owned()),
+            options: [("root".to_owned(), empty.to_string_lossy().into_owned())].into(),
+            options_hot: [(
+                "root".to_owned(),
+                hot_missing.to_string_lossy().into_owned(),
+            )]
+            .into(),
+            ..spec_at(&empty.to_string_lossy())
+        };
+        assert_eq!(failed_code(&hot_unplugged), api::ErrorCode::OperationFailed);
+        assert!(
+            !root.path().join("usb-hot").exists(),
+            "opening made a hot root folder"
+        );
+        let repository = root.path().join("repo");
+        init(&repository);
+        let _restored = Writable(repository.clone());
+        fs::set_permissions(&repository, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&repository).is_ok() {
+            testkit::skip!("running as root: permissions don't stop reading a folder");
+        }
+        assert_eq!(
+            failed_code(&at(&repository)),
+            api::ErrorCode::OperationFailed
+        );
+    }
+
+    /// Only OpenDAL's `fs` is a folder on this machine. Every other service
+    /// is a server or a store elsewhere, where a missing root is the remote
+    /// form of an unplugged drive: rustic lists no config file for one that
+    /// isn't there, and creating a repository would make it (decision 53).
+    /// So the job fails as it would have, never as `repository-not-found`,
+    /// like REST's. Here a WebDAV server that answers `404 Not Found` to
+    /// everything and an empty in-memory store.
+    #[test]
+    fn an_opendal_service_other_than_fs_is_never_said_to_hold_no_repository() {
+        let webdav = RepositorySpec {
+            options: [
+                (
+                    "endpoint".to_owned(),
+                    format!("http://{}", server_answering("404 Not Found")),
+                ),
+                ("retry".to_owned(), "off".to_owned()),
+            ]
+            .into(),
+            ..spec_at("opendal:webdav")
+        };
+        for spec in [webdav, spec_at("opendal:memory")] {
+            assert_eq!(
+                failed_code(&spec),
+                api::ErrorCode::OperationFailed,
+                "{}",
+                spec.repository
+            );
+        }
+    }
+
+    /// A folder holding what a repository holds beside its config file (a
+    /// `keys`, `data`, `index` or `snapshots` folder) is no empty location:
+    /// an initialisation cut short, or a repository whose config file was
+    /// lost. Creating one there would mix a new repository into what is left
+    /// of another, so the job fails as it would have, never as
+    /// `repository-not-found` (decision 53), on either half and through
+    /// OpenDAL's `fs` as well.
+    #[test]
+    fn a_folder_holding_repository_content_but_no_config_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let lost_config = root.path().join("lost-config");
+        init(&lost_config);
+        fs::remove_file(lost_config.join("config")).unwrap();
+        assert_eq!(
+            failed_code(&spec_at(&lost_config.to_string_lossy())),
+            api::ErrorCode::OperationFailed
+        );
+        let empty = root.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        for content in ["keys", "data", "index", "snapshots"] {
+            let folder = root.path().join(content);
+            fs::create_dir_all(folder.join(content)).unwrap();
+            let location = folder.to_string_lossy().into_owned();
+            let through_fs = RepositorySpec {
+                options: [("root".to_owned(), location.clone())].into(),
+                ..spec_at("opendal:fs")
+            };
+            let as_hot_half = RepositorySpec {
+                repo_hot: Some(location.clone()),
+                ..spec_at(&empty.to_string_lossy())
+            };
+            for spec in [spec_at(&location), through_fs, as_hot_half] {
+                assert_eq!(
+                    failed_code(&spec),
+                    api::ErrorCode::OperationFailed,
+                    "{content}: {spec:?}"
+                );
+            }
+        }
+    }
+
+    /// A repository with a hot half is no repository only when both halves
+    /// are empty folders: a hot half on a local folder that isn't there is
+    /// what an unplugged drive looks like, as with the cold half, and
+    /// creating the repository would make that folder (decision 53).
+    #[test]
+    fn a_local_hot_half_that_is_not_there_is_not_said_to_hold_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        let hot = root.path().join("hot");
+        fs::create_dir(&cold).unwrap();
+        let with_hot = RepositorySpec {
+            repo_hot: Some(hot.to_string_lossy().into_owned()),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        assert_eq!(failed_code(&with_hot), api::ErrorCode::OperationFailed);
+        assert!(!hot.exists(), "opening made the hot folder");
+        fs::create_dir(&hot).unwrap();
+        assert_eq!(failed_code(&with_hot), api::ErrorCode::RepositoryNotFound);
     }
 
     #[test]

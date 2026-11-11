@@ -177,6 +177,7 @@ pub(crate) fn encode_failure(
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
+        FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -235,6 +236,7 @@ pub(crate) fn decode_failure(
         "deadline-passed" => Ok(FailureReason::DeadlinePassed),
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
+        "repository-not-found" => Ok(FailureReason::RepositoryNotFound),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
@@ -360,6 +362,21 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryReplaced);
+    }
+
+    /// A persisted `repository-not-found` failure reads back as the typed
+    /// reason, which a saved repository's row reads (decision 53).
+    #[test]
+    fn repository_not_found_round_trips() {
+        let columns = encode_failure(&FailureReason::RepositoryNotFound)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "repository-not-found");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::RepositoryNotFound);
     }
 
     /// A persisted `daemon-stopped` failure reads back as the typed reason:

@@ -219,7 +219,7 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
     // The rule holds from here on.
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true)]
+        [(1, true), (2, true), (3, true), (4, true), (5, true)]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
     assert_eq!(
@@ -269,7 +269,7 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
     assert_eq!(rows_of_operations(&mut raw, &everything).await, before);
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true)]
+        [(1, true), (2, true), (3, true), (4, true), (5, true)]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
     assert_eq!(
@@ -317,7 +317,7 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
     );
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true)]
+        [(1, true), (2, true), (3, true), (4, true), (5, true)]
     );
     let check = store
         .get(id(0x60))
@@ -370,4 +370,42 @@ async fn a_log_that_already_has_the_alias_column_is_refused_and_left_at_its_vers
         "the migration that failed is not recorded"
     );
     assert_eq!(rows_of_operations(&mut raw, &[0x70]).await, before);
+}
+
+/// A log a build that kept the alias wrote gains the index of the operations
+/// that succeeded, which the Repositories page asks whether a plan ever
+/// succeeded (decision 53), and keeps every row as it was.
+#[tokio::test]
+async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 4).await;
+    legacy(&mut old, 0x80, "check", "succeeded", Some(REPOSITORY_HEX)).await;
+    legacy(&mut old, 0x81, "backup", "failed", Some(REPOSITORY_HEX)).await;
+    let both = [0x80, 0x81];
+    let before = rows_of_operations(&mut old, &both).await;
+    old.close().await.expect("the old database is closed");
+
+    let _store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    assert_eq!(
+        rows_of_operations(&mut raw, &both).await,
+        before,
+        "the upgrade changes no row"
+    );
+    assert_eq!(
+        applied_versions(&mut raw).await,
+        [(1, true), (2, true), (3, true), (4, true), (5, true)]
+    );
+    let index: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'ops_succeeded_by_plan'",
+    )
+    .fetch_optional(&mut raw)
+    .await
+    .expect("the schema is readable");
+    let index = index.expect("the upgrade adds the index");
+    assert!(
+        index.contains("ON operations(plan_id)")
+            && index.contains("WHERE status IN ('succeeded', 'succeeded_with_warnings')"),
+        "{index}"
+    );
 }

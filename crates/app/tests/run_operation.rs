@@ -265,6 +265,10 @@ impl OperationStore for Journal {
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
     }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
 }
 
 /// An operation log that refuses its first `refuse` writes, then works.
@@ -325,6 +329,10 @@ impl OperationStore for Flaky {
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
     }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
 }
 
 /// An operation log whose writes, from the `passes`th on, never answer: a
@@ -375,6 +383,10 @@ impl OperationStore for Stalled {
 
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
     }
 }
 
@@ -1293,6 +1305,10 @@ impl OperationStore for Slow {
 
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
     }
 }
 

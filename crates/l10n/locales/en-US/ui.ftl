@@ -934,3 +934,19 @@ ui-repositories-created-with-id = The repository was created. Its ID is { $id }.
 # Shown and announced politely when a repository was connected and saved.
 # $alias (text): the name it was saved under.
 ui-repositories-connected = Connected { $alias }.
+
+# The button in a repository's row that creates the repository where its entry says, with the password the entry names. Shown only once an operation found no repository there, while none of them ever succeeded.
+# $alias (text): the name the repository is saved under.
+ui-repository-create = Create { $alias }
+
+# Shown below the list of repositories when a repository was created from its row, which then offers no Create; focus moves to it, so a screen reader reads it. The repository's ID follows in a sentence of its own, ui-repository-created-id, outside what has focus.
+# $alias (text): the name the repository is saved under.
+ui-repository-created = Created { $alias }.
+
+# Shown right after ui-repository-created: the ID of the repository created from its row. Kept apart from it, so a screen reader doesn't read 64 hex digits when focus moves to the confirmation.
+# $id (text): the repository's ID, as rustic knows it.
+ui-repository-created-id = Its ID is { $id }.
+
+# Shown in a repository's row when creating it was refused because a repository is already where its entry says. Nothing was written.
+# $alias (text): the name the repository is saved under.
+ui-repository-already-there = There is already a repository at the location of { $alias }, so nothing was created.

@@ -1,18 +1,19 @@
 //! The routes the Repositories page speaks to (technical design §4.2): test a
-//! repository, connect it, initialise one. A request carries the password a
-//! person typed, so no answer carries it back (I4): an answer is an ID, or a
-//! typed refusal whose arguments are names, never values.
+//! repository, connect it, initialise one, and initialise the one an entry of
+//! the configuration names. A request carries the password a person typed,
+//! so no answer carries it back (I4): an answer is an ID, or a typed refusal
+//! whose arguments are names, never values.
 
 use async_trait::async_trait;
 use axum::Json;
-use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::{AppState, refused_detailed as refused};
 
-/// What the repository routes ask of the daemon: the three things the
+/// What the repository routes ask of the daemon: the four things the
 /// Repositories page does, each from a request as it came, before anything
 /// in it was read as a domain value.
 #[async_trait]
@@ -37,6 +38,12 @@ pub trait Repositories: Send + Sync {
         &self,
         request: api::InitRepositoryDto,
     ) -> Result<api::RepositoryInitDto, RepositoriesError>;
+
+    /// Creates the repository the configuration holds under `alias`, where
+    /// its entry says it is and with the entry's own password reference,
+    /// and records only its new ID in the entry. An entry that records an ID
+    /// is refused as a repository already there.
+    async fn create_saved(&self, alias: String) -> Result<api::RepositoryIdDto, RepositoriesError>;
 }
 
 /// A refusal for a secret that couldn't be resolved or a template that isn't
@@ -59,6 +66,8 @@ pub enum RepositoriesError {
     /// settings can't take: a relative password file, a keyring entry that
     /// is not `service/name`.
     InvalidBody,
+    /// The configuration holds no repository under `alias`.
+    Unknown { alias: String },
     /// The alias is not a name.
     AliasInvalid,
     /// The configuration already holds a repository under the alias.
@@ -68,6 +77,12 @@ pub enum RepositoriesError {
     AlreadyConfigured { alias: String },
     /// A repository already exists at `location`, which is redacted.
     Exists { location: String },
+    /// The saved repository's row doesn't offer to create it: no job found
+    /// its location empty since nothing reached it (decision 53).
+    CreateNotOffered,
+    /// No repository is at the location: it is a folder on this machine
+    /// holding nothing of a repository (decision 53).
+    NotFound,
     /// A secret couldn't be resolved, or a setting with a reference isn't
     /// valid: the refusal says which, with the setting it is about.
     SecretRefused(SecretRefusal),
@@ -126,6 +141,22 @@ pub(crate) async fn init_repository(
     }
 }
 
+/// Creates the repository the configuration holds under the path's alias:
+/// the empty JSON body the JSON-body rule asks of every mutating method.
+pub(crate) async fn create_saved_repository(
+    State(state): State<AppState>,
+    Path(alias): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Response {
+    if body.is_err() {
+        return refusal(&RepositoriesError::InvalidBody);
+    }
+    match state.repositories.create_saved(alias).await {
+        Ok(id) => (StatusCode::CREATED, Json(id)).into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
 /// The refusal for a secret: 422, like a setting the daemon can't take.
 pub(crate) fn secret_refusal(secret: &SecretRefusal) -> Response {
     refused(
@@ -137,9 +168,11 @@ pub(crate) fn secret_refusal(secret: &SecretRefusal) -> Response {
 }
 
 /// The typed refusal of `error`, with the status of its kind: a body that
-/// can't be read is 400; a name the configuration can't take, or a job the
-/// engine ran and failed, 422; something that is already there, 409; and the
-/// daemon not being able to do it now, 503.
+/// can't be read is 400; a name the configuration doesn't hold, or a location
+/// that holds no repository, 404; a name the configuration can't take, or a
+/// job the engine ran and failed, 422; something that is already there, or a
+/// Create its row doesn't offer, 409; and the daemon not being able to do it
+/// now, 503.
 fn refusal(error: &RepositoriesError) -> Response {
     use api::{ErrorCode, MsgArg};
     let text = |name, value: &String| vec![(name, MsgArg::Text(value.clone()))];
@@ -148,6 +181,12 @@ fn refusal(error: &RepositoriesError) -> Response {
             StatusCode::BAD_REQUEST,
             ErrorCode::InvalidBody,
             Vec::new(),
+            None,
+        ),
+        RepositoriesError::Unknown { alias } => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryUnknown,
+            text("alias", alias),
             None,
         ),
         RepositoriesError::AliasInvalid => refused(
@@ -172,6 +211,18 @@ fn refusal(error: &RepositoriesError) -> Response {
             StatusCode::CONFLICT,
             ErrorCode::RepositoryExists,
             text("location", location),
+            None,
+        ),
+        RepositoriesError::CreateNotOffered => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::CreateNotOffered,
+            Vec::new(),
+            None,
+        ),
+        RepositoriesError::NotFound => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryNotFound,
+            Vec::new(),
             None,
         ),
         RepositoriesError::SecretRefused(secret) => secret_refusal(secret),

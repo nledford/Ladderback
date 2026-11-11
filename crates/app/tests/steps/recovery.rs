@@ -477,6 +477,10 @@ impl OperationStore for UnwritableLog {
         self.0.list(query).await
     }
 
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.0.ever_succeeded(plan).await
+    }
+
     async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
         Err(StoreError::Unavailable {
             detail: "the log cannot be written".to_owned(),

@@ -2,7 +2,12 @@
 Feature: Repositories page
   The Repositories page lists the repositories Ladderback backs up to, tests a
   location, connects one that exists and creates one that doesn't, with the
-  keyboard alone (A1, A2). A failed attempt moves focus to an error summary
+  keyboard alone (A1, A2). A row offers to create its repository where its
+  entry says once a backup found no repository there, as an imported
+  profile's repository needs, with the password the entry already names; once
+  it is created the list is read again, so its button goes, and focus moves to
+  the sentence that says it was created. A failed attempt moves focus to an
+  error summary
   that names each problem and links to its field, and what the daemon said is
   shown as the catalog writes it (A4, components.md §4.5). A password is never
   shown again once typed (I4). A connected repository is maintained from this
@@ -77,7 +82,7 @@ Feature: Repositories page
     And the page doesn't show "not-the-password"
     And the page has no accessibility violations
 
-  Scenario: A location with no repository is refused the same way
+  Scenario: A folder with no repository in it is refused as holding none, without the advice to try again
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
     And I press Tab until focus is on the textbox "Location"
@@ -87,7 +92,8 @@ Feature: Repositories page
     And I press Tab until focus is on the button "Test the repository"
     And I press Enter
     Then focus is on the heading "There is 1 problem with the form"
-    And the page shows a message containing "The operation failed:"
+    And the page shows a message containing "There is no repository at this location."
+    And the page doesn't show "Check the location and the password, then try again."
 
   Scenario: A form missing its location and password names both, and each problem links to its field
     Given a daemon with a scratch demo repository and no repositories
@@ -215,6 +221,72 @@ Feature: Repositories page
     And the page shows a message containing "because one is already there"
     And the page has no accessibility violations
 
+  Scenario: A repository an imported profile names is created from its row by keyboard alone once a backup found none, and backed up to
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Read from the file"
+    And the page offers no button "Create demo"
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Read from the file"
+    And the button "Create demo" sits on one line
+    And the row header "demo" sits on one line
+    And the column header "Name" sits on one line
+    When I press Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then focus is on the message "Created demo."
+    And the page shows a repository ID
+    And the button "Create demo" leaves the page
+    And focus is on the message "Created demo."
+    And the page doesn't show "demo-password"
+    And the page has no accessibility violations
+    When I press Tab until focus is on the button "Test the repository"
+    And I press Enter
+    Then focus is on the heading "There are 2 problems with the form"
+    And the page doesn't show "Created demo."
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    Then the table "Operations" has a row "demo-home" that shows "Succeeded"
+    When I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Read from the file"
+    And the page offers no button "Create demo"
+
+  Scenario: A row's Create takes no second press while the list is read again
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories"
+    And the list of repositories is slow to answer from now on
+    And I press Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then focus is on the message "Created demo."
+    When I press Shift+Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then the button "Create demo" leaves the page
+    And the page asked to create "demo" once
+
+  Scenario: Creating a repository that is already there from its row says so, and changes nothing
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And the demo repository is copied into the profile's repository folder
+    And I open the address "/repositories"
+    And I press Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then the page shows an alert containing "There is already a repository at the location of"
+    And focus stays on the button "Create demo"
+    And the page has no accessibility violations
+
+  Scenario: A row's Create where the repository's folder isn't there is refused, and makes no folder
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And the profile's repository is moved to a folder that isn't there
+    And I open the address "/repositories"
+    And I press Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then the page shows an alert containing "This repository wasn't created"
+    And focus stays on the button "Create demo"
+    And no folder is where the profile's repository was moved to
+
   Scenario: A page whose daemon has stopped says so when a test gets no answer
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
@@ -253,12 +325,46 @@ Feature: Repositories page
       | en-XA  |
       | ar-XB  |
 
-  Scenario: The repositories page reflows on a small screen
-    Given a demo plan "demo-home" with a scratch repository
+  Scenario Outline: A row's Create is in the language of the page
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories?locale=<locale>"
+    And I press Tab until focus is on the button of the repository "demo"
+    Then every visible text but the data of the tables and lists is transformed
+    And the page has no accessibility violations
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |
+
+  Scenario Outline: The repositories page reflows on a small screen, a name or a label broken inside a word only when the word is longer than a line
+    Given a daemon with a profile imported as "<alias>" whose repository folder is empty
     And a viewport of 320 by 256 pixels
-    When I open the address "/repositories"
-    Then the page shows the paragraph "Kept in the configuration file"
-    And the page doesn't scroll sideways
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories"
+    Then the table "Repositories" has a row "<alias>" that shows "Read from the file"
+    When I press Tab until focus is on the button "Create <alias>"
+    Then the page doesn't scroll sideways
+    And no text is clipped
+    And the button "Create <alias>" breaks <breaks>
+    And the row header "<alias>" breaks <breaks>
+    And the page has no accessibility violations
+
+    Examples:
+      | alias                                                            | breaks                                           |
+      | demo                                                             | only at a space or a hyphen                      |
+      | offsite-copies-of-the-family-photo-library-kept-on-the-attic-nas | a word only where the word is longer than a line |
+      | offsitecopiesofthefamilyphotolibrarykeptontheatticnasandthecloud | a word only where the word is longer than a line |
+
+  Scenario: The repositories page reflows with larger text, a long name offered Create
+    Given a daemon with a profile imported as "offsitecopiesofthefamilyphotolibrarykeptontheatticnasandthecloud" whose repository folder is empty
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories"
+    And I press Tab until focus is on the button "Create offsitecopiesofthefamilyphotolibrarykeptontheatticnasandthecloud"
+    Then the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
 

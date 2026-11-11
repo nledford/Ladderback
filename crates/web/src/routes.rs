@@ -19,8 +19,9 @@ use crate::components::{Checkbox, ErrorSummary, FormField, Progress, StatusBadge
 use crate::live::say;
 use crate::operations::{self, Name};
 use crate::repositories::{
-    Action, Field, Form, Outcome, Sentence, advises_retry, error_of, field_of, password_source,
-    problems_of, repository_notes, rereads_list,
+    Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
+    create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
+    rereads_list, row_refusal,
 };
 use crate::ws::{self, Phase, Posted};
 use crate::{page, text};
@@ -762,10 +763,11 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let caption = text(&localizer, msg::UI_REPOSITORIES_CAPTION);
-    let (name_column, location_column, password_column) = (
+    let (name_column, location_column, password_column, actions_column) = (
         text(&localizer, msg::UI_COLUMN_NAME),
         text(&localizer, msg::UI_COLUMN_LOCATION),
         text(&localizer, msg::UI_COLUMN_PASSWORD),
+        text(&localizer, msg::UI_COLUMN_ACTIONS),
     );
     let empty = text(&localizer, msg::UI_NO_REPOSITORIES);
     let form_heading = text(&localizer, msg::UI_REPOSITORIES_FORM_HEADING);
@@ -792,6 +794,12 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
     load.run(());
+    // What the last of the rows' Creates came to, said below the list.
+    let creates = RowCreates {
+        phase,
+        created: RwSignal::new(None),
+        load,
+    };
 
     let inputs = Inputs::new();
     let problems = Problems::new();
@@ -805,6 +813,8 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         }
         let form = inputs.read();
         result.set(None);
+        // What a row's Create came to is the page's last answer no more.
+        creates.created.set(None);
         if let Some(items) = problems_of(&form, action, |id| text(&submit_localizer, id)) {
             problems.show(items, None);
             return;
@@ -882,20 +892,22 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             Phase::Ready => match rows.get() {
                 Some(rows) if !rows.is_empty() => {
                     let localizer = Arc::clone(&list_localizer);
+                    let base = base.get_value();
                     view! {
-                        <table>
+                        <table class="repositories">
                             <caption class="text-muted">{caption.clone()}</caption>
                             <thead>
                                 <tr>
                                     <th scope="col">{name_column.clone()}</th>
                                     <th scope="col">{location_column.clone()}</th>
                                     <th scope="col">{password_column.clone()}</th>
+                                    <th scope="col">{actions_column.clone()}</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {rows
                                     .into_iter()
-                                    .map(|row| repository_row(&localizer, row))
+                                    .map(|row| repository_row(&localizer, &base, creates, row))
                                     .collect_view()}
                             </tbody>
                         </table>
@@ -904,6 +916,14 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 }
                 _ => view! { <p>{empty.clone()}</p> }.into_any(),
             },
+        }}
+        {move || {
+            creates
+                .created
+                .get()
+                .map(|(confirmation, id_sentence)| {
+                    view! { <CreatedNote confirmation=confirmation id_sentence=id_sentence /> }
+                })
         }}
         <section aria-labelledby="repositories-form-heading">
             <h2 id="repositories-form-heading">{form_heading}</h2>
@@ -984,10 +1004,28 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// What a row's Create needs from its page: the page's phase, which an
+/// answer that never came sets; where the page says what a Create came to;
+/// and the reading of the list, after which a created repository's row
+/// offers Create no more.
+#[derive(Clone, Copy)]
+struct RowCreates {
+    phase: RwSignal<Phase>,
+    /// What a row's Create came to: the confirmation, then the ID's sentence.
+    created: RwSignal<Option<(String, String)>>,
+    load: Callback<()>,
+}
+
 /// One row of the repositories table: the name as the row's header, where the
-/// repository is (the hot half on a line of its own), and where its password
-/// comes from. Never the password itself (I4).
-fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
+/// repository is (the hot half on a line of its own), where its password
+/// comes from, and its Create, when the row offers it (decision 53). Never
+/// the password itself (I4).
+fn repository_row(
+    localizer: &Arc<Localizer>,
+    base: &str,
+    creates: RowCreates,
+    row: RepositoryDto,
+) -> impl IntoView {
     let (id, args) = password_source(&row.password);
     let password = text_with(localizer, id, &args);
     let notes = repository_notes(localizer, &row.warnings);
@@ -998,18 +1036,121 @@ fn repository_row(localizer: &Localizer, row: RepositoryDto) -> impl IntoView {
             &[("location", MsgArg::Text(location))],
         )
     });
+    let create = row
+        .create_offered
+        .then(|| create_in_row(localizer, base, creates, &row.alias));
     view! {
         <tr>
             <th scope="row">{row.alias}</th>
-            <td>
+            <td class="path">
                 <div>{row.repository}</div>
                 {hot.map(|hot| view! { <div>{hot}</div> })}
             </td>
-            <td>
+            <td class="path">
                 <div>{password}</div>
                 {notes.into_iter().map(|note| view! { <div class="text-muted">{note}</div> }).collect_view()}
             </td>
+            <td>{create}</td>
         </tr>
+    }
+}
+
+/// A row's Create: the button, named after its row, that creates the saved
+/// repository where its entry says. A created repository is said below the
+/// list, which is read again, so the row's button goes and focus moves to
+/// what was said ([`CreatedNote`]); a refusal is the row's alert, and the
+/// row and its button stay.
+fn create_in_row(
+    localizer: &Arc<Localizer>,
+    base: &str,
+    creates: RowCreates,
+    alias: &str,
+) -> impl IntoView + use<> {
+    let (id, args) = create_label(alias);
+    let label = text_with(localizer, id, &args);
+    let url = format!("{base}{}", create_saved_path(alias));
+    let alias = alias.to_owned();
+    let localizer = Arc::clone(localizer);
+    // The last answer's refusal, as the row shows it, and whether the button
+    // takes no press: from a press until the answer is a refusal, or, once the
+    // repository is created, until the list is read again and the row goes.
+    let refused = RwSignal::<Option<String>>::new(None);
+    let busy = RwSignal::new(false);
+    let create = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        creates.created.set(None);
+        refused.set(None);
+        say(
+            Politeness::Polite,
+            &text(&localizer, msg::UI_REPOSITORIES_WORKING),
+        );
+        let (url, alias, localizer) = (url.clone(), alias.clone(), Arc::clone(&localizer));
+        spawn_local(async move {
+            let posted = ws::post(&url, &serde_json::Map::new()).await;
+            // The reader may have followed a link while the engine worked:
+            // the page went with it, and there is nobody left to tell.
+            if creates.phase.try_get_untracked().is_none() {
+                return;
+            }
+            match posted {
+                Some(Posted::Done(answer)) => match RowCreated::of(&answer) {
+                    // The button stays busy: the list is read again, and
+                    // the row and its button go with it.
+                    Some(created) => {
+                        let (id, args) = RowCreated::confirmation(&alias);
+                        let confirmation = text_with(&localizer, id, &args);
+                        let (id, args) = created.id_sentence();
+                        let id_sentence = text_with(&localizer, id, &args);
+                        creates.created.set(Some((confirmation, id_sentence)));
+                        creates.load.run(());
+                    }
+                    // An answer that is not the one the route gives is a
+                    // daemon the page cannot talk to.
+                    None => creates.phase.set(Phase::Unreachable),
+                },
+                Some(Posted::Refused(code, args, detail)) => {
+                    // The list may have been drawn again while the engine
+                    // worked, and the row's own signals went with the row.
+                    busy.try_set(false);
+                    let shown = match row_refusal(code, &alias) {
+                        Some((id, args)) => text_with(&localizer, id, &args),
+                        None => refusal(&localizer, code, &args, detail.as_deref()),
+                    };
+                    refused.try_set(Some(shown));
+                }
+                // No answer at all: the page's phase says that its own way.
+                None => creates.phase.set(Phase::Unreachable),
+            }
+        });
+    };
+    view! {
+        <button type="button" on:click=create>
+            {label}
+        </button>
+        {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
+    }
+}
+
+/// What a row's Create came to, below the list: focus moves to the short
+/// confirmation as it is shown, for the row's button goes when the list is
+/// read again, and a screen reader reads it there, so nothing is announced
+/// (§4.5). The ID is a sentence of its own after it, outside what has focus,
+/// so a screen reader doesn't spell out 64 hex digits unasked.
+#[component]
+fn CreatedNote(confirmation: String, id_sentence: String) -> impl IntoView {
+    let note = NodeRef::<leptos::html::P>::new();
+    Effect::new(move |_| {
+        if let Some(note) = note.get() {
+            // A failed focus leaves focus where it was.
+            let _ = note.focus();
+        }
+    });
+    view! {
+        <p tabindex="-1" node_ref=note>{confirmation}</p>
+        <p>{id_sentence}</p>
     }
 }
 

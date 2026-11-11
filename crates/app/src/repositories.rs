@@ -4,6 +4,10 @@
 //! resolves the repository's secrets first, so no resolved value is kept past
 //! the job it was resolved for.
 
+mod create_offers;
+
+pub use create_offers::CreateOffers;
+
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
@@ -14,7 +18,7 @@ use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
 use crate::ports::{
     Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Problem,
-    RepositoryAccess, RunningJob,
+    RepositoryAccess, RunningJob, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
@@ -25,7 +29,9 @@ use crate::secrets::{ResolveError, ResolveRepository};
 ///
 /// When `alias` is given, the repository is saved into the configuration
 /// after the initialisation succeeded, as [`ConnectRepository`](crate::repositories::ConnectRepository)
-/// saves one.
+/// saves one. A repository the configuration already holds, such as one an
+/// imported profile added, is initialised from its own entry by
+/// [`InitRepository::init_saved`], which records only the new ID in it.
 pub struct InitRepository {
     clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
@@ -39,6 +45,28 @@ pub struct InitRepository {
 pub struct InitOutcome {
     pub id: RepositoryId,
     pub saved: bool,
+}
+
+/// What initialising a saved repository tried: the settings of its entry,
+/// which a refusal is redacted with, and how the initialisation went.
+#[derive(Debug, PartialEq)]
+pub struct SavedInit {
+    pub settings: RepositorySettings,
+    pub created: Result<RepositoryId, RepositoryError>,
+}
+
+/// Why a saved repository's entry couldn't be found, or whether it may be
+/// created couldn't be told, so nothing ran. Every failure once both are
+/// known is [`SavedInit::created`]'s, refused with the entry's settings.
+#[derive(Debug, PartialEq)]
+pub enum SavedEntryError {
+    /// The configuration holds no repository under the alias.
+    Unknown(RepositoryAlias),
+    /// The configuration couldn't be read.
+    Config(ConfigError),
+    /// The operation log, which says whether the row offers Create,
+    /// couldn't be read.
+    Log(StoreError),
 }
 
 /// Tests a repository: resolves the settings, opens the repository with a
@@ -72,6 +100,12 @@ pub enum RepositoryError {
     /// A repository already exists at the location, so it was not
     /// initialised, and nothing there was changed.
     Exists,
+    /// The repository's row doesn't offer to create it: its entry records
+    /// no ID, and no job found the location empty since nothing reached it;
+    /// or the engine, looking just before Create, found no folder with no
+    /// repository in it where the entry says (decision 53). Nothing says
+    /// the location is reachable and empty, so nothing was created.
+    CreateNotOffered,
     /// The configuration already holds a repository under the alias.
     AliasTaken(RepositoryAlias),
     /// The configuration already holds this repository, under the alias
@@ -138,6 +172,84 @@ impl InitRepository {
             None => false,
         };
         Ok(InitOutcome { id, saved })
+    }
+
+    /// Initialises the repository the configuration holds under `alias`,
+    /// where its entry says it is and with the entry's own references, so a
+    /// password the configuration already names is never asked for again.
+    /// Only the new repository's ID is recorded in the entry, as [`init`]
+    /// records it; the rest stays as it was, `maintenance` included: who
+    /// maintains a saved repository was decided when it was saved (§7.3,
+    /// decision 53). An entry that records an ID names a repository
+    /// Ladderback has opened, so it is refused with [`RepositoryError::Exists`];
+    /// any other whose row `offers` doesn't offer Create, with
+    /// [`RepositoryError::CreateNotOffered`]: the request may come from a page
+    /// shown before the log changed, or from no page at all. Both are refused
+    /// before anything runs. An alias the configuration doesn't hold is
+    /// refused with [`SavedEntryError::Unknown`], and a log that can't be
+    /// read with [`SavedEntryError::Log`], before anything runs.
+    ///
+    /// [`init`]: Self::init
+    pub async fn init_saved(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        offers: &CreateOffers,
+    ) -> Result<SavedInit, SavedEntryError> {
+        let loaded = self.config.load().await.map_err(SavedEntryError::Config)?;
+        let Some(entry) = loaded.repository(alias) else {
+            return Err(SavedEntryError::Unknown(alias.clone()));
+        };
+        let settings = entry.settings.clone();
+        let refused = if entry.id.is_some() {
+            Some(RepositoryError::Exists)
+        } else if offers
+            .offers(&loaded, alias)
+            .await
+            .map_err(SavedEntryError::Log)?
+        {
+            None
+        } else {
+            Some(RepositoryError::CreateNotOffered)
+        };
+        if let Some(refused) = refused {
+            return Ok(SavedInit {
+                settings,
+                created: Err(refused),
+            });
+        }
+        let created = async {
+            let access = access(&self.resolve, &settings).await?;
+            found_empty(&*self.clock, &*self.engine, op, &access).await?;
+            let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
+            record(&*self.config, alias, &settings, &id).await?;
+            Ok(id)
+        }
+        .await;
+        Ok(SavedInit { settings, created })
+    }
+}
+
+/// Whether the engine, looking at the location now, finds a folder there
+/// holding nothing of a repository: the only place Create may make one. The
+/// row's offer comes from the log, which doesn't say where its jobs ran, so
+/// the entry may since name another location, or the drive be unplugged; an
+/// initialisation there would make the folder (decision 53). A repository
+/// that opens is refused as one already there, and any other failure to find
+/// one as not offered; a refusal of the look itself (a timeout, an engine
+/// that didn't start) is its own.
+#[allow(clippy::result_large_err)]
+async fn found_empty(
+    clock: &dyn Clock,
+    engine: &dyn Engine,
+    op: OperationId,
+    access: &RepositoryAccess,
+) -> Result<(), RepositoryError> {
+    match run(clock, engine, op, Job::Identify(access.clone())).await {
+        Err(RepositoryError::Failed(FailureReason::RepositoryNotFound)) => Ok(()),
+        Ok(_) => Err(RepositoryError::Exists),
+        Err(RepositoryError::Failed(_)) => Err(RepositoryError::CreateNotOffered),
+        Err(other) => Err(other),
     }
 }
 
@@ -370,6 +482,38 @@ async fn save(
     config.save(&saved).await.map_err(RepositoryError::Config)
 }
 
+/// Records `id` as the ID of the repository saved under `alias`, the rest of
+/// the configuration as it is now, while that entry still names the location
+/// `settings` describe, the one the repository was created at. An entry
+/// removed or moved meanwhile, by a hand edit or the CLI's import, which
+/// don't take the daemon's lock, records nothing: the ID is not its
+/// repository's (decision 53).
+#[allow(clippy::result_large_err)]
+async fn record(
+    config: &dyn ConfigStore,
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    id: &RepositoryId,
+) -> Result<(), RepositoryError> {
+    let loaded = config.load().await.map_err(RepositoryError::Config)?;
+    let mut repositories = loaded.repositories().clone();
+    match repositories.get_mut(alias) {
+        Some(entry) if entry.settings.same_location(settings) => entry.id = Some(id.clone()),
+        _ => return Ok(()),
+    }
+    let recorded = AgentConfig::new(
+        loaded.agent().clone(),
+        loaded.hooks().clone(),
+        repositories,
+        loaded.plans().to_vec(),
+    )
+    .map_err(unwritable)?;
+    config
+        .save(&recorded)
+        .await
+        .map_err(RepositoryError::Config)
+}
+
 /// A configuration that can't be, as a configuration error: only reachable
 /// through a violation that [`AgentConfig::new`] reports.
 fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
@@ -382,7 +526,8 @@ fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
     })
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -392,19 +537,19 @@ mod tests {
     use async_trait::async_trait;
     use domain::SignedDuration;
     use domain::Timestamp;
-    use domain::execution::FailureReason;
     use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
+    use domain::execution::{FailureReason, Operation, OperationKind, Target, Trigger};
     use domain::planning::Maintenance;
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
     use futures::StreamExt;
 
-    use super::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
-    use crate::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
-    use crate::ports::ConfigStore;
+    use super::{ConnectRepository, CreateOffers, InitRepository, RepositoryError, TestRepository};
+    use crate::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore, InMemoryOperationStore};
     use crate::ports::{
         Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RunningJob,
     };
+    use crate::ports::{ConfigStore, OperationStore};
     use crate::secrets::ResolveRepository;
 
     /// An engine that answers every repository job with the scripted outcome,
@@ -428,26 +573,48 @@ mod tests {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(job);
-            let id = match self
+            let outcome = self
                 .outcome
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-            {
-                Ok(id) => id,
-                Err(reason) => {
-                    return Ok(RunningJob {
-                        events: Box::pin(futures::stream::iter([EngineEvent::Failed(reason)])),
-                        control: Box::new(Stop),
-                    });
-                }
-            };
-            Ok(RunningJob {
-                events: Box::pin(futures::stream::iter([EngineEvent::Succeeded(
-                    crate::ports::EngineResult::Repository { id },
-                )])),
-                control: Box::new(Stop),
-            })
+                .clone();
+            Ok(ended(outcome))
+        }
+    }
+
+    /// A job that ends at once with `outcome`: the repository's ID, or the
+    /// failure.
+    fn ended(outcome: Result<RepositoryId, FailureReason>) -> RunningJob {
+        let event = match outcome {
+            Ok(id) => EngineEvent::Succeeded(crate::ports::EngineResult::Repository { id }),
+            Err(reason) => EngineEvent::Failed(reason),
+        };
+        RunningJob {
+            events: Box::pin(futures::stream::iter([event])),
+            control: Box::new(Stop),
+        }
+    }
+
+    /// An engine that answers a `Job::Identify` with `found`, what it finds
+    /// at the location now, and every other job as `job` does, keeping every
+    /// job it was given in `job.seen`.
+    struct Located {
+        found: Result<RepositoryId, FailureReason>,
+        job: Scripted,
+    }
+
+    #[async_trait]
+    impl Engine for Located {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if !matches!(job, Job::Identify(_)) {
+                return self.job.run(op, job).await;
+            }
+            self.job
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            Ok(ended(self.found.clone()))
         }
     }
 
@@ -1033,5 +1200,469 @@ mod tests {
                 panic!("initialising runs Job::Init, got {:?}", seen[0]);
             };
         }
+    }
+
+    /// The plan that backs up to `alias()` in [`saved_entry`]'s
+    /// configuration.
+    #[allow(clippy::panic)]
+    fn home() -> domain::PlanId {
+        domain::PlanId::parse("home").unwrap_or_else(|e| panic!("a plan ID: {e:?}"))
+    }
+
+    /// A configuration holding `settings` under `alias()`, as an imported
+    /// profile leaves it: with `recorded` as its repository ID, asking
+    /// nobody to maintain it, and backed up to by the plan [`home`]; and the
+    /// engine and the use case to initialise it with. The engine finds no
+    /// repository at the location, and ends an initialisation with
+    /// `outcome`.
+    async fn saved_entry(
+        settings: &domain::planning::RepositorySettings,
+        recorded: Option<RepositoryId>,
+        secrets: FakeSecrets,
+        outcome: Result<RepositoryId, FailureReason>,
+    ) -> (Arc<Located>, Arc<InMemoryConfigStore>, InitRepository) {
+        saved_entry_finding(
+            settings,
+            recorded,
+            secrets,
+            Err(FailureReason::RepositoryNotFound),
+            outcome,
+        )
+        .await
+    }
+
+    /// [`saved_entry`], with an engine that finds `found` at the location.
+    #[allow(clippy::panic)]
+    async fn saved_entry_finding(
+        settings: &domain::planning::RepositorySettings,
+        recorded: Option<RepositoryId>,
+        secrets: FakeSecrets,
+        found: Result<RepositoryId, FailureReason>,
+        outcome: Result<RepositoryId, FailureReason>,
+    ) -> (Arc<Located>, Arc<InMemoryConfigStore>, InitRepository) {
+        let engine = Arc::new(Located {
+            found,
+            job: Scripted {
+                outcome: Mutex::new(outcome),
+                seen: Mutex::new(Vec::new()),
+            },
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        let entry = domain::planning::RepositoryConfig {
+            settings: settings.clone(),
+            id: recorded,
+            maintenance: Maintenance::None,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        };
+        let source = domain::planning::Source::parse("/home/demo")
+            .unwrap_or_else(|e| panic!("a source: {e:?}"));
+        let saved = domain::planning::AgentConfig::new(
+            Default::default(),
+            Default::default(),
+            BTreeMap::from([(alias(), entry)]),
+            vec![domain::planning::Plan::new(home(), alias(), vec![source])],
+        )
+        .unwrap_or_else(|e| panic!("a valid configuration: {e:?}"));
+        config
+            .save(&saved)
+            .await
+            .unwrap_or_else(|e| panic!("the entry is saved: {e:?}"));
+        let resolve = ResolveRepository::new(Arc::new(secrets));
+        let use_case = InitRepository::new(clock(), engine.clone(), resolve, config.clone());
+        (engine, config, use_case)
+    }
+
+    /// The offers over an operation log holding a backup of [`home`] for
+    /// each of `ends`, oldest first, each succeeded (`Ok`) or failed.
+    #[allow(clippy::panic)]
+    async fn log_of(ends: &[Result<(), FailureReason>]) -> CreateOffers {
+        let store = Arc::new(InMemoryOperationStore::new());
+        for (n, end) in (1u128..).zip(ends) {
+            let mut backup = Operation::queue(
+                OperationId::from_uuid(Uuid::from_u128(n)),
+                OperationKind::Backup,
+                Trigger::Manual,
+                Target {
+                    plan: Some(home()),
+                    repository: None,
+                },
+                START,
+            );
+            backup
+                .start(START)
+                .and_then(|()| match end {
+                    Ok(()) => backup.succeed(START),
+                    Err(reason) => backup.fail(reason.clone(), START),
+                })
+                .unwrap_or_else(|e| panic!("{end:?}: {e:?}"));
+            store
+                .save(&backup, None)
+                .await
+                .unwrap_or_else(|e| panic!("the backup is recorded: {e:?}"));
+        }
+        CreateOffers::new(store)
+    }
+
+    /// The offers over a log whose only backup of [`home`] found no
+    /// repository at its location: what makes its row offer Create
+    /// (decision 53).
+    async fn found_none() -> CreateOffers {
+        log_of(&[Err(FailureReason::RepositoryNotFound)]).await
+    }
+
+    #[tokio::test]
+    async fn a_saved_repository_is_initialised_from_its_entry_which_records_only_its_new_id() {
+        let mut entry = settings();
+        entry.repo_hot = Some("/home/demo/scratch/hot".to_owned());
+        entry.password = SecretRef::Env("DEMO_PASSWORD".to_owned());
+        let secrets = FakeSecrets::new();
+        secrets.set_env("DEMO_PASSWORD", "from-the-environment");
+        let (engine, config, use_case) = saved_entry(&entry, None, secrets, Ok(id())).await;
+        let before = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+
+        let tried = use_case
+            .init_saved(op(), &alias(), &found_none().await)
+            .await
+            .unwrap_or_else(|e| panic!("the entry is found: {e:?}"));
+
+        assert_eq!(
+            tried,
+            super::SavedInit {
+                settings: entry.clone(),
+                created: Ok(id()),
+            }
+        );
+        {
+            let seen = engine
+                .job
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let [Job::Identify(looked), Job::Init(access)] = seen.as_slice() else {
+                panic!("creating looks at the location, then runs one Job::Init, got {seen:?}");
+            };
+            for access in [looked, access] {
+                assert_eq!(access.repository, entry.repository);
+                assert_eq!(access.repo_hot, entry.repo_hot);
+                assert_eq!(access.password.expose(), "from-the-environment");
+            }
+        }
+        let after = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        let mut expected = before.repositories().clone();
+        if let Some(saved) = expected.get_mut(&alias()) {
+            saved.id = Some(id());
+        }
+        assert_eq!(
+            after.repositories(),
+            &expected,
+            "only the new repository's ID is recorded, its maintenance unchanged"
+        );
+        assert_eq!(after.plans(), before.plans());
+        assert_eq!(after.agent(), before.agent());
+        assert_eq!(after.hooks(), before.hooks());
+    }
+
+    /// An entry that records a repository ID names a repository Ladderback
+    /// has opened: it was there, so it is not created again, even once a job
+    /// found none at its location, and nothing runs (decision 53).
+    #[tokio::test]
+    async fn a_saved_repository_whose_entry_records_an_id_is_refused_before_anything_runs() {
+        let recorded = RepositoryId::parse(&"b".repeat(64))
+            .unwrap_or_else(|e| panic!("a repository ID: {e:?}"));
+        let (engine, config, use_case) =
+            saved_entry(&settings(), Some(recorded), FakeSecrets::new(), Ok(id())).await;
+        let before = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            use_case
+                .init_saved(op(), &alias(), &found_none().await)
+                .await,
+            Ok(super::SavedInit {
+                settings: settings(),
+                created: Err(RepositoryError::Exists),
+            })
+        );
+        assert!(
+            engine
+                .job
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "a job ran for a repository already reached"
+        );
+        assert_eq!(
+            config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}")),
+            before
+        );
+    }
+
+    /// A row that doesn't offer Create is refused it as not offered, not as
+    /// one already there, whatever page the request came from, and nothing
+    /// runs: nothing on record (a new import, or a drive that isn't plugged
+    /// in), a backup that once succeeded, or a latest job that found the
+    /// repository (decision 53).
+    #[tokio::test]
+    async fn a_saved_repository_whose_row_offers_no_create_is_refused_as_not_offered() {
+        let histories: [&[Result<(), FailureReason>]; 3] = [
+            &[],
+            &[Ok(()), Err(FailureReason::RepositoryNotFound)],
+            &[Err(FailureReason::RepositoryNotFound), Ok(())],
+        ];
+        for history in histories {
+            let (engine, config, use_case) =
+                saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
+            let before = config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+            assert_eq!(
+                use_case
+                    .init_saved(op(), &alias(), &log_of(history).await)
+                    .await,
+                Ok(super::SavedInit {
+                    settings: settings(),
+                    created: Err(RepositoryError::CreateNotOffered),
+                }),
+                "{history:?}"
+            );
+            assert!(
+                engine
+                    .job
+                    .seen
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_empty(),
+                "a job ran after {history:?}"
+            );
+            assert_eq!(
+                config
+                    .load()
+                    .await
+                    .unwrap_or_else(|e| panic!("the configuration loads: {e:?}")),
+                before,
+                "{history:?}"
+            );
+        }
+    }
+
+    /// An engine that, while it initialises, moves the entry saved under
+    /// `alias()` to `to`, as a hand edit of the configuration or a second
+    /// import may; each job itself is the scripted one.
+    struct MovedMeanwhile {
+        job: Located,
+        config: Arc<InMemoryConfigStore>,
+        to: domain::planning::RepositorySettings,
+    }
+
+    #[async_trait]
+    impl Engine for MovedMeanwhile {
+        #[allow(clippy::panic)]
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let loaded = self
+                .config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+            let mut repositories = loaded.repositories().clone();
+            if let Some(entry) = repositories.get_mut(&alias()) {
+                entry.settings = self.to.clone();
+            }
+            let moved = domain::planning::AgentConfig::new(
+                loaded.agent().clone(),
+                loaded.hooks().clone(),
+                repositories,
+                loaded.plans().to_vec(),
+            )
+            .unwrap_or_else(|e| panic!("a valid configuration: {e:?}"));
+            if matches!(job, Job::Init(_)) {
+                self.config
+                    .save(&moved)
+                    .await
+                    .unwrap_or_else(|e| panic!("the moved entry is saved: {e:?}"));
+            }
+            self.job.run(op, job).await
+        }
+    }
+
+    /// The ID belongs to the repository created where the entry was: an
+    /// entry that names another location by the time the job ends is left
+    /// without one, so it is not taken for that repository (decision 53).
+    #[tokio::test]
+    async fn a_saved_entry_moved_while_its_repository_is_created_records_no_id() {
+        let (_, config, _) = saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
+        let mut elsewhere = settings();
+        elsewhere.repository = "/home/demo/scratch/elsewhere".to_owned();
+        let engine = Arc::new(MovedMeanwhile {
+            job: Located {
+                found: Err(FailureReason::RepositoryNotFound),
+                job: Scripted {
+                    outcome: Mutex::new(Ok(id())),
+                    seen: Mutex::new(Vec::new()),
+                },
+            },
+            config: config.clone(),
+            to: elsewhere.clone(),
+        });
+        let use_case = InitRepository::new(
+            clock(),
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+
+        assert_eq!(
+            use_case
+                .init_saved(op(), &alias(), &found_none().await)
+                .await,
+            Ok(super::SavedInit {
+                settings: settings(),
+                created: Ok(id()),
+            }),
+            "the repository was created where the entry was"
+        );
+        let after = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        let entry = after
+            .repository(&alias())
+            .unwrap_or_else(|| panic!("the entry is still saved"));
+        assert_eq!(entry.settings, elsewhere, "the move is kept");
+        assert_eq!(entry.id, None, "an ID was recorded for another location");
+    }
+
+    #[tokio::test]
+    async fn a_saved_repository_already_there_is_refused_with_its_entrys_settings() {
+        let (_, config, use_case) = saved_entry(
+            &settings(),
+            None,
+            FakeSecrets::new(),
+            Err(FailureReason::RepositoryExists),
+        )
+        .await;
+        let before = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            use_case
+                .init_saved(op(), &alias(), &found_none().await)
+                .await,
+            Ok(super::SavedInit {
+                settings: settings(),
+                created: Err(RepositoryError::Exists),
+            })
+        );
+        assert_eq!(
+            config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}")),
+            before,
+            "a refused creation records nothing"
+        );
+    }
+
+    /// The row's offer is a hint from the log, which doesn't say where its
+    /// jobs ran: a backup found no repository at one location, and the entry
+    /// now names another, whose folder isn't there, as on a drive that isn't
+    /// plugged in. The engine looks at the entry's location first, and
+    /// anything but a folder that is there and holds nothing of a repository is
+    /// refused before anything is created: no folder and nothing at all as
+    /// not offered, a repository it opens as one already there (decision 53).
+    #[tokio::test]
+    async fn a_saved_repository_is_created_only_where_the_engine_finds_a_folder_with_no_repository()
+    {
+        let mut elsewhere = settings();
+        elsewhere.repository = "/media/demo-drive/repo".to_owned();
+        let cases = [
+            (
+                Err(FailureReason::EngineFailed {
+                    detail: "the repository folder is not there".to_owned(),
+                }),
+                RepositoryError::CreateNotOffered,
+            ),
+            (Ok(id()), RepositoryError::Exists),
+        ];
+        for (found, refused) in cases {
+            let said = format!("{found:?}");
+            let (engine, config, use_case) =
+                saved_entry_finding(&elsewhere, None, FakeSecrets::new(), found, Ok(id())).await;
+            let before = config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+            assert_eq!(
+                use_case
+                    .init_saved(op(), &alias(), &found_none().await)
+                    .await,
+                Ok(super::SavedInit {
+                    settings: elsewhere.clone(),
+                    created: Err(refused),
+                }),
+                "{said}"
+            );
+            {
+                let seen = engine
+                    .job
+                    .seen
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let [Job::Identify(looked)] = seen.as_slice() else {
+                    panic!("only a look at the location ran after {said}: {seen:?}");
+                };
+                assert_eq!(looked.repository, elsewhere.repository, "{said}");
+            }
+            assert_eq!(
+                config
+                    .load()
+                    .await
+                    .unwrap_or_else(|e| panic!("the configuration loads: {e:?}")),
+                before,
+                "{said}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repository_the_configuration_does_not_hold_is_refused_before_anything_runs() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        let use_case = InitRepository::new(
+            clock(),
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+        assert_eq!(
+            use_case
+                .init_saved(op(), &alias(), &found_none().await)
+                .await,
+            Err(super::SavedEntryError::Unknown(alias()))
+        );
+        assert!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "a job ran for a repository nobody saved"
+        );
     }
 }

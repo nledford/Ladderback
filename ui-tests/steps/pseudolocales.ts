@@ -61,12 +61,13 @@ Then("every visible text is transformed", async function (this: BrowserWorld) {
   assert.deepEqual(plain, [], "visible text that the pseudolocale did not transform");
 });
 
-// What a page shows of a repository is data besides sentences: the IDs and
-// instants in the cells of a table's body, the paths of a list (each in a
-// `bdi`), and the engine's own words (`lang="en"`). The catalog wrote none of
-// them, so they stay as they are; every other text must be transformed.
+// What a page shows of a repository is data besides sentences: the names, IDs
+// and instants in the cells of a table's body, its row headers included, the
+// paths of a list (each in a `bdi`), and the engine's own words
+// (`lang="en"`). The catalog wrote none of them, so they stay as they are;
+// every other text must be transformed.
 Then("every visible text but the data of the tables and lists is transformed", async function (this: BrowserWorld) {
-  const { inspected, plain } = await untransformed(this.page, 'tbody td, bdi, [lang="en"]');
+  const { inspected, plain } = await untransformed(this.page, 'tbody th, tbody td, bdi, [lang="en"]');
   assert.ok(inspected > 0, "the page shows no text to check");
   assert.deepEqual(plain, [], "visible text outside the data that the pseudolocale did not transform");
 });

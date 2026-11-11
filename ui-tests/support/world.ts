@@ -41,8 +41,9 @@ function cargoTargetDir(): string {
   throw new Error("cargo metadata named no target directory");
 }
 
-// The binary cargo built last, unless `LADDERBACK_BIN` names another.
-const binary = process.env.LADDERBACK_BIN ?? path.join(cargoTargetDir(), "debug", "ladderback");
+// The binary cargo built last, unless `LADDERBACK_BIN` names another. Steps
+// that run one of its commands before the daemon starts run this one too.
+export const binary = process.env.LADDERBACK_BIN ?? path.join(cargoTargetDir(), "debug", "ladderback");
 const entryPage = path.join(repoRoot, "crates/web/dist/index.html");
 
 // A real rustic repository, initialized once (see `fixtures/make-demo-repo.rs`)

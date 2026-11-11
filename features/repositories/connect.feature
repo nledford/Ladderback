@@ -2,12 +2,21 @@
 Feature: Connecting a repository
   The agent initialises a repository where nothing is yet, tests one that is
   there, and connects one by saving it into its configuration once its test
-  passed. A repository is never overwritten, an alias is never reused, a
-  repository has one alias, and what the configuration keeps is the settings
-  as written: a secret stays a reference, never the value it resolved to. A
-  repository created here is maintained by this agent; one that is connected
-  is maintained by it only when the person chose so, for only one party may
-  maintain a repository and another may already do it (I1, §7.3).
+  passed. A repository the configuration already names, such as one an
+  imported profile added, is created where its entry says, with the entry's
+  own password reference, and only its new ID is recorded in the entry. It
+  is created only once a job found no repository where its entry says and
+  none ever reached it, and only where the engine, looking just before,
+  finds a folder with no repository in it: what the log says may be about
+  another location, or a drive since unplugged. One whose entry records an
+  ID was reached before and is never created again.
+  A repository is never overwritten, an alias is never reused, a repository
+  has one alias, and what the configuration keeps is the settings as
+  written: a secret stays a reference, never the value it resolved to. A
+  repository created here under a name is maintained by this agent; one that
+  is connected is maintained by it only when the person chose so, for only
+  one party may maintain a repository and another may already do it (I1,
+  §7.3).
 
   Scenario: Testing a repository reports its ID and saves nothing
     Given a repository the engine identifies
@@ -76,6 +85,90 @@ Feature: Connecting a repository
     Given a repository the engine identifies
     When the agent initialises the repository as "demo"
     Then the repository "demo" asks this agent to maintain it
+
+  Scenario: Creating a saved repository initialises it where its entry says, and records only its new ID in the entry
+    Given a location the engine finds empty
+    And the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
+    And the latest operation of the plan "demo-home" failed because no repository is there
+    When the agent creates the saved repository "demo"
+    Then the creation reports the repository's ID
+    And the engine looked at the location, then initialised the repository there, with its saved settings
+    And the agent has the repository "demo" configured with the repository's ID
+    And the agent has the repository "demo" configured with its settings
+    And the repository "demo" asks nobody to maintain it
+
+  Scenario: Creating a saved repository whose folder is not there is refused as not offered, and nothing is created
+    Given a location whose folder is not there
+    And the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
+    And the latest operation of the plan "demo-home" failed because no repository is there
+    When the agent creates the saved repository "demo"
+    Then the creation is refused because its row doesn't offer it
+    And the engine initialised no repository
+    And the agent has the repository "demo" configured with no repository ID
+
+  Scenario: Creating a saved repository the engine finds there now is refused as already there, and nothing is created
+    Given a repository the engine identifies
+    And the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
+    And the latest operation of the plan "demo-home" failed because no repository is there
+    When the agent creates the saved repository "demo"
+    Then the creation is refused because a repository already exists
+    And the engine initialised no repository
+    And the agent has the repository "demo" configured with no repository ID
+
+  Scenario: Creating a saved repository whose entry records a repository ID is refused, and nothing runs
+    Given a repository the engine identifies
+    And the agent has the repository "demo" configured with another repository's ID
+    When the agent creates the saved repository "demo"
+    Then the creation is refused because a repository already exists
+    And the engine ran no job
+    And the agent has the repository "demo" configured with another repository's ID
+
+  Scenario Outline: Creating a saved repository no job found missing is refused as not offered, and nothing runs
+    Given a repository the engine identifies
+    And the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
+    And <history>
+    When the agent creates the saved repository "demo"
+    Then the creation is refused because its row doesn't offer it
+    And the engine ran no job
+    And the agent has the repository "demo" configured with no repository ID
+
+    Examples:
+      | history                                                                                           |
+      | no operation of the plan "demo-home" is on record                                                 |
+      | a backup of the plan "demo-home" succeeded, then the latest failed because no repository is there |
+      | the latest operation of the plan "demo-home" succeeded                                            |
+
+  Scenario: Creating a repository the agent has not saved is refused, and nothing runs
+    Given a repository the engine identifies
+    When the agent creates the saved repository "demo"
+    Then the creation is refused because the agent has no repository "demo"
+    And the engine ran no job
+
+  Scenario Outline: A saved repository is offered to be created only once a job found no repository there and none reached it
+    Given the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
+    And <history>
+    When the agent decides which saved repositories to offer to create
+    Then the repository "demo" <offer>
+
+    Examples:
+      | history                                                                                           | offer                        |
+      | no operation of the plan "demo-home" is on record                                                 | is not offered to be created |
+      | the latest operation of the plan "demo-home" failed because no repository is there                | is offered to be created     |
+      | a backup of the plan "demo-home" succeeded, then the latest failed because no repository is there | is not offered to be created |
+      | the latest operation of the plan "demo-home" succeeded                                            | is not offered to be created |
+      | the latest operation of the plan "demo-home" failed because the daemon stopped                    | is not offered to be created |
+      | the latest operation of the plan "demo-home" is still running                                     | is not offered to be created |
+
+  Scenario Outline: A saved repository whose entry records a repository ID is never offered to be created
+    Given the agent has the repository "demo" configured with another repository's ID, backed up to by the plan "demo-home"
+    And <history>
+    When the agent decides which saved repositories to offer to create
+    Then the repository "demo" is not offered to be created
+
+    Examples:
+      | history                                                                            |
+      | no operation of the plan "demo-home" is on record                                  |
+      | the latest operation of the plan "demo-home" failed because no repository is there |
 
   Scenario: Connecting a repository asks nobody to maintain it unless the person chose so
     Given a repository the engine identifies

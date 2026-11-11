@@ -77,6 +77,7 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
         F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
+        F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
         F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
     }
 }
@@ -237,6 +238,7 @@ mod tests {
             (F::EngineExitTimedOut, C::EngineExitTimedOut, vec![]),
             (F::RepositoryExists, C::RepositoryExists, vec![]),
             (F::RepositoryReplaced, C::RepositoryReplaced, vec![]),
+            (F::RepositoryNotFound, C::RepositoryNotFound, vec![]),
             (F::DaemonStopped, C::DaemonStopped, vec![]),
         ];
         for (reason, code, args) in cases {

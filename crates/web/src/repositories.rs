@@ -296,6 +296,63 @@ impl Outcome {
     }
 }
 
+/// The route a row's Create posts to: the saved repository named `alias` is
+/// created where its entry says, with the password the entry names. An
+/// alias is lower-case letters, digits and hyphens, so it needs no escaping.
+pub(crate) fn create_saved_path(alias: &str) -> String {
+    format!("/api/v1/repositories/{alias}/init")
+}
+
+/// The name of a row's Create button: it names the row, so each one is told
+/// apart by name alone.
+pub(crate) fn create_label(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    (msg::UI_REPOSITORY_CREATE, vec![("alias", text(alias))])
+}
+
+/// A repository created from its row: the daemon answered with its ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowCreated {
+    pub(crate) id: String,
+}
+
+impl RowCreated {
+    /// What the daemon's answer to a row's Create says, or `None` when it is
+    /// not that answer.
+    pub(crate) fn of(answer: &str) -> Option<Self> {
+        serde_json::from_str::<RepositoryIdDto>(answer)
+            .ok()
+            .map(|answered| Self { id: answered.id })
+    }
+
+    /// The short confirmation the page shows, and moves focus to: the
+    /// repository by name, without its ID.
+    pub(crate) fn confirmation(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+        (msg::UI_REPOSITORY_CREATED, vec![("alias", text(alias))])
+    }
+
+    /// The sentence that follows the confirmation, outside what has focus:
+    /// the repository's ID, which a screen reader would spell out digit by
+    /// digit.
+    pub(crate) fn id_sentence(&self) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+        (msg::UI_REPOSITORY_CREATED_ID, vec![("id", text(&self.id))])
+    }
+}
+
+/// The row's own words for a refusal of its Create, when it has them: a
+/// repository already where the entry says names the row. Any other refusal
+/// reads as the daemon's sentence, as the form shows it.
+pub(crate) fn row_refusal(
+    code: ErrorCode,
+    alias: &str,
+) -> Option<(MessageId, Vec<(&'static str, MsgArg)>)> {
+    (code == ErrorCode::RepositoryExists).then(|| {
+        (
+            msg::UI_REPOSITORY_ALREADY_THERE,
+            vec![("alias", text(alias))],
+        )
+    })
+}
+
 fn text(value: &str) -> MsgArg {
     MsgArg::Text(value.to_owned())
 }
@@ -974,5 +1031,84 @@ mod tests {
         let text = "The operation failed: wrong password.";
         assert_eq!(Sentence::new(text, Some("wrong password")).plain(), text);
         assert_eq!(Sentence::new(text, None).plain(), text);
+    }
+
+    #[test]
+    fn a_rows_create_posts_to_the_route_of_its_saved_repository() {
+        assert_eq!(create_saved_path("demo"), "/api/v1/repositories/demo/init");
+        assert_eq!(
+            create_saved_path("off-site-2"),
+            "/api/v1/repositories/off-site-2/init"
+        );
+    }
+
+    #[test]
+    fn a_rows_create_button_is_named_after_its_row() {
+        assert_eq!(
+            create_label("demo"),
+            (msg::UI_REPOSITORY_CREATE, vec![("alias", text("demo"))])
+        );
+        assert_eq!(english_of(create_label("demo")), "Create demo");
+    }
+
+    #[test]
+    fn a_rows_create_answers_with_the_repository_id() {
+        assert_eq!(
+            RowCreated::of(r#"{"id":"abc"}"#),
+            Some(RowCreated { id: "abc".into() })
+        );
+        assert_eq!(RowCreated::of("not json"), None);
+        assert_eq!(RowCreated::of("{}"), None);
+    }
+
+    #[test]
+    fn a_row_created_is_confirmed_by_name_and_its_id_said_apart() {
+        assert_eq!(
+            RowCreated::confirmation("demo"),
+            (msg::UI_REPOSITORY_CREATED, vec![("alias", text("demo"))])
+        );
+        assert_eq!(
+            english_of(RowCreated::confirmation("demo")),
+            "Created demo."
+        );
+        let created = RowCreated { id: "abc".into() };
+        assert_eq!(
+            created.id_sentence(),
+            (msg::UI_REPOSITORY_CREATED_ID, vec![("id", text("abc"))])
+        );
+        assert_eq!(english_of(created.id_sentence()), "Its ID is abc.");
+    }
+
+    #[test]
+    fn a_repository_already_there_is_refused_in_the_rows_own_words() {
+        let said = row_refusal(ErrorCode::RepositoryExists, "demo");
+        assert_eq!(
+            said,
+            Some((
+                msg::UI_REPOSITORY_ALREADY_THERE,
+                vec![("alias", text("demo"))]
+            ))
+        );
+        assert!(
+            english_of(said.unwrap_or((msg::UI_REPOSITORY_CREATE, vec![])))
+                .starts_with("There is already a repository at the location of")
+        );
+    }
+
+    #[test]
+    fn any_other_refusal_of_a_rows_create_reads_as_the_daemons_sentence() {
+        for code in [
+            ErrorCode::OperationFailed,
+            ErrorCode::RepositoryUnknown,
+            ErrorCode::SecretMissing,
+            ErrorCode::EngineUnavailable,
+            ErrorCode::InvalidBody,
+        ] {
+            assert_eq!(row_refusal(code, "demo"), None, "{code:?}");
+        }
+    }
+
+    fn english_of((id, args): (MessageId, Vec<(&'static str, MsgArg)>)) -> String {
+        crate::routes::text_with(&Localizer::new(&[]), id, &args)
     }
 }

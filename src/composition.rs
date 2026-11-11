@@ -25,7 +25,10 @@ use app::ports::{
     ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::recovery::RecoverOperations;
-use app::repositories::{ConnectRepository, InitRepository, RepositoryError, TestRepository};
+use app::repositories::{
+    ConnectRepository, CreateOffers, InitRepository, RepositoryError, SavedEntryError,
+    TestRepository,
+};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
@@ -248,7 +251,7 @@ async fn state_over(
         resolve: Arc::clone(&resolve),
         agent_id,
         engine: Arc::clone(&engine),
-        store,
+        store: Arc::clone(&store),
         retention: Arc::new(engine::RusticRetention),
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
@@ -259,8 +262,13 @@ async fn state_over(
         Arc::clone(&engine),
         resolve.as_ref().clone(),
         Arc::clone(&config),
+        Arc::clone(&store),
     ));
-    let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
+    let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
+        config,
+        engine,
+        operations: store,
+    });
     Ok(AppState {
         events: bus,
         operations,
@@ -1146,10 +1154,12 @@ struct CancelRegistry {
 
 /// The catalog the API asks of the daemon (§4.2): the configuration's plans
 /// and repositories, and one repository's snapshots, listed live through the
-/// engine (§9: a read stores nothing and takes no slot).
+/// engine (§9: a read stores nothing and takes no slot). Which repositories a
+/// row offers to create is read from the operation log (decision 53).
 struct ConfigCatalog {
     config: Arc<dyn ConfigStore>,
     engine: Arc<dyn Engine>,
+    operations: Arc<dyn OperationStore>,
 }
 
 #[async_trait]
@@ -1178,12 +1188,18 @@ impl Catalog for ConfigCatalog {
             .load()
             .await
             .map_err(|_| CatalogError::Unavailable)?;
+        let offered = self.offers(&config).await;
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
                 .iter()
                 .map(|(alias, repository)| {
-                    repository_row(alias, &repository.settings, repository.maintenance)
+                    repository_row(
+                        alias,
+                        &repository.settings,
+                        repository.maintenance,
+                        offered.contains(alias),
+                    )
                 })
                 .collect(),
         })
@@ -1257,6 +1273,30 @@ impl Catalog for ConfigCatalog {
     }
 }
 
+impl ConfigCatalog {
+    /// The repositories whose rows offer to create them (decision 53). A log
+    /// that can't be read offers none: the list is still shown, and Create
+    /// is never offered on a guess.
+    async fn offers(
+        &self,
+        config: &domain::planning::AgentConfig,
+    ) -> std::collections::BTreeSet<RepositoryAlias> {
+        match CreateOffers::new(Arc::clone(&self.operations))
+            .offered(config)
+            .await
+        {
+            Ok(offered) => offered,
+            Err(error) => {
+                log::warn!(
+                    "the operation log could not be read, so no repository is offered to be created: {}",
+                    error.code()
+                );
+                std::collections::BTreeSet::new()
+            }
+        }
+    }
+}
+
 /// A listed snapshot as the page is told of it, with what the engine cut
 /// from it said.
 fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::InvalidSnapshot> {
@@ -1281,6 +1321,9 @@ struct RepositoryService {
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
+    /// The operation log, which says whether a saved repository's row
+    /// offers Create (decision 53).
+    operations: Arc<dyn OperationStore>,
     /// Held across a use case's read-modify-write of the configuration.
     writes: tokio::sync::Mutex<()>,
 }
@@ -1291,12 +1334,14 @@ impl RepositoryService {
         engine: Arc<dyn Engine>,
         resolve: ResolveRepository,
         config: Arc<dyn ConfigStore>,
+        operations: Arc<dyn OperationStore>,
     ) -> Self {
         Self {
             clock,
             engine,
             resolve,
             config,
+            operations,
             writes: tokio::sync::Mutex::new(()),
         }
     }
@@ -1393,6 +1438,55 @@ impl Repositories for RepositoryService {
             saved: initialised.saved,
         })
     }
+
+    async fn create_saved(&self, alias: String) -> Result<api::RepositoryIdDto, RepositoriesError> {
+        // A name that is no alias is one the configuration can't hold.
+        let Ok(parsed) = RepositoryAlias::parse(&alias) else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        // Create records the new repository's ID in its entry, and whether
+        // the row offers it is read under the same lock, so two Creates
+        // can't both find it offered.
+        let _writing = self.writes.lock().await;
+        let saved = match InitRepository::new(
+            Arc::clone(&self.clock),
+            Arc::clone(&self.engine),
+            self.resolve.clone(),
+            Arc::clone(&self.config),
+        )
+        .init_saved(
+            new_operation(),
+            &parsed,
+            &CreateOffers::new(Arc::clone(&self.operations)),
+        )
+        .await
+        {
+            Ok(saved) => saved,
+            // Before the entry is found and its row known to offer Create,
+            // nothing ran: the configuration can't be read, it doesn't hold
+            // the alias, or the operation log can't be read.
+            Err(SavedEntryError::Config(error)) => return Err(config_refusal(error)),
+            Err(SavedEntryError::Unknown(_)) => return Err(RepositoriesError::Unknown { alias }),
+            // The log's own words say what it couldn't do, as maintenance
+            // tells it.
+            Err(SavedEntryError::Log(
+                app::ports::StoreError::Unavailable { detail }
+                | app::ports::StoreError::Corrupt { detail },
+            )) => {
+                return Err(unavailable(
+                    ErrorCode::OperationFailed,
+                    Vec::new(),
+                    Some(detail),
+                ));
+            }
+        };
+        match saved.created {
+            Ok(id) => Ok(api::RepositoryIdDto {
+                id: id.as_str().to_owned(),
+            }),
+            Err(error) => Err(refusal_of(error, &saved.settings).await),
+        }
+    }
 }
 
 /// A fresh operation ID: a UUIDv7, as every operation of the daemon has.
@@ -1444,6 +1538,7 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
 async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> RepositoriesError {
     match error {
         RepositoryError::Exists => exists(settings),
+        RepositoryError::CreateNotOffered => RepositoriesError::CreateNotOffered,
         RepositoryError::AliasTaken(alias) => RepositoriesError::AliasTaken {
             alias: alias.as_str().to_owned(),
         },
@@ -1700,6 +1795,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
+        F::RepositoryNotFound => RepositoriesError::NotFound,
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }
@@ -1760,15 +1856,18 @@ fn config_refusal(error: ConfigError) -> RepositoriesError {
 }
 
 /// One configured repository as a list shows it: its locations masked, and
-/// where its password comes from, never the password (I4).
+/// where its password comes from, never the password (I4). `create_offered`
+/// is whether its row offers to create it (decision 53).
 fn repository_row(
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
     maintenance: domain::planning::Maintenance,
+    create_offered: bool,
 ) -> api::RepositoryDto {
     api::RepositoryDto {
         alias: alias.as_str().to_owned(),
         maintained_here: domain::maintenance::Ownership::owned_here(maintenance),
+        create_offered,
         repository: redacted_location(settings, &settings.repository),
         repo_hot: settings
             .repo_hot
@@ -2071,7 +2170,12 @@ mod tests {
             .options_cold
             .insert("secret_access_key".to_owned(), key.to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        let row = repository_row(
+            &alias,
+            &settings,
+            domain::planning::Maintenance::Local,
+            false,
+        );
         assert_eq!(
             row.warnings,
             [
@@ -2094,7 +2198,13 @@ mod tests {
             .insert("secret_access_key".to_owned(), "${DEMO_KEY}".to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
         assert_eq!(
-            repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
+            repository_row(
+                &alias,
+                &settings,
+                domain::planning::Maintenance::Local,
+                false
+            )
+            .warnings,
             []
         );
     }
@@ -2107,7 +2217,12 @@ mod tests {
         settings.repository = format!("rest:https://demo:{cold}@backup.example.com/nas");
         settings.repo_hot = Some(format!("rest:https://demo:{hot}@hot.example.com/nas"));
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        let row = repository_row(
+            &alias,
+            &settings,
+            domain::planning::Maintenance::Local,
+            false,
+        );
         let location = |field: &str| api::WarningDto {
             code: WarningCode::LocationSecret,
             args: [
@@ -2148,7 +2263,12 @@ mod tests {
         let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
         settings.repository = format!("rclone::sftp,host=nas.example.com,pass={pass}:/backups");
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        let row = repository_row(
+            &alias,
+            &settings,
+            domain::planning::Maintenance::Local,
+            false,
+        );
         assert_eq!(
             row.warnings,
             [api::WarningDto {
@@ -2180,7 +2300,12 @@ mod tests {
         settings.repo_hot =
             Some("rclone::b2,account=demo,key=CANARY-rclone-hot:demo-bucket".to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        let row = repository_row(
+            &alias,
+            &settings,
+            domain::planning::Maintenance::Local,
+            false,
+        );
         assert_eq!(
             row.repository,
             "rclone::sftp,host=nas.example.com,pass=***:/backups"
@@ -2224,7 +2349,13 @@ mod tests {
             settings.repository = location.to_owned();
             let alias = RepositoryAlias::parse("demo").expect("an alias");
             assert_eq!(
-                repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
+                repository_row(
+                    &alias,
+                    &settings,
+                    domain::planning::Maintenance::Local,
+                    false
+                )
+                .warnings,
                 [],
                 "{location}"
             );
@@ -2240,7 +2371,7 @@ mod tests {
             (domain::planning::Maintenance::Hub, false),
             (domain::planning::Maintenance::None, false),
         ] {
-            let row = repository_row(&alias, &settings, maintenance);
+            let row = repository_row(&alias, &settings, maintenance, false);
             assert_eq!(row.maintained_here, here, "{maintenance:?}");
             let wire = serde_json::to_value(&row).expect("a row is JSON");
             assert_eq!(
@@ -3012,6 +3143,7 @@ mod tests {
         let catalog = ConfigCatalog {
             config: Arc::clone(&runner.config),
             engine: Arc::clone(&runner.engine),
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -3153,6 +3285,13 @@ mod tests {
             query: &app::ports::HistoryQuery,
         ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
             self.inner.list(query).await
+        }
+
+        async fn ever_succeeded(
+            &self,
+            plan: &domain::PlanId,
+        ) -> Result<bool, app::ports::StoreError> {
+            self.inner.ever_succeeded(plan).await
         }
     }
 
@@ -3318,6 +3457,13 @@ mod tests {
             query: &app::ports::HistoryQuery,
         ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
             self.inner.list(query).await
+        }
+
+        async fn ever_succeeded(
+            &self,
+            plan: &domain::PlanId,
+        ) -> Result<bool, app::ports::StoreError> {
+            self.inner.ever_succeeded(plan).await
         }
     }
 
@@ -3554,6 +3700,13 @@ mod tests {
             query: &app::ports::HistoryQuery,
         ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
             self.inner.list(query).await
+        }
+
+        async fn ever_succeeded(
+            &self,
+            plan: &domain::PlanId,
+        ) -> Result<bool, app::ports::StoreError> {
+            self.inner.ever_succeeded(plan).await
         }
     }
 
@@ -4032,6 +4185,13 @@ mod tests {
             query: &app::ports::HistoryQuery,
         ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
             self.inner.list(query).await
+        }
+
+        async fn ever_succeeded(
+            &self,
+            plan: &domain::PlanId,
+        ) -> Result<bool, app::ports::StoreError> {
+            self.inner.ever_succeeded(plan).await
         }
     }
 
@@ -4548,6 +4708,8 @@ mod repository_service_tests {
     /// own: a success there names that ID instead of the scripted one.
     struct Scripted {
         outcome: Mutex<Result<RepositoryId, FailureReason>>,
+        /// What a `Job::Identify` finds instead of the outcome, once set.
+        found: Mutex<Option<Result<RepositoryId, FailureReason>>>,
         ids: Mutex<BTreeMap<String, RepositoryId>>,
         refuses: Mutex<Option<EngineError>>,
         /// How many of the next jobs never answer.
@@ -4574,6 +4736,14 @@ mod repository_service_tests {
                     .cloned(),
                 _ => None,
             };
+            let found = match &job {
+                Job::Identify(_) => self
+                    .found
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+                _ => None,
+            };
             self.seen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -4596,12 +4766,13 @@ mod repository_service_tests {
                     });
                 }
             }
-            let event = match self
-                .outcome
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-            {
+            let outcome = found.unwrap_or_else(|| {
+                self.outcome
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()
+            });
+            let event = match outcome {
                 Ok(id) => EngineEvent::Succeeded(EngineResult::Repository {
                     id: own.unwrap_or(id),
                 }),
@@ -4652,6 +4823,7 @@ mod repository_service_tests {
     fn engine() -> Arc<Scripted> {
         Arc::new(Scripted {
             outcome: Mutex::new(Ok(repository_id())),
+            found: Mutex::new(None),
             ids: Mutex::new(BTreeMap::new()),
             refuses: Mutex::new(None),
             hangs: Mutex::new(0),
@@ -4659,12 +4831,14 @@ mod repository_service_tests {
         })
     }
 
+    /// The service over `config` and an operation log of its own, empty.
     fn service(engine: &Arc<Scripted>, config: Arc<dyn ConfigStore>) -> RepositoryService {
         RepositoryService::new(
             clock(),
             engine.clone(),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config,
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
         )
     }
 
@@ -4720,6 +4894,79 @@ mod repository_service_tests {
         config.load().await.expect("the configuration loads")
     }
 
+    /// Leaves the configuration as an imported profile's are before anything
+    /// reached their repositories: no entry records its repository's ID, and
+    /// the plan `demo-home` backs up to `demo`.
+    async fn imported(config: &dyn ConfigStore) {
+        let recorded = saved(config).await;
+        let repositories = recorded
+            .repositories()
+            .iter()
+            .map(|(alias, entry)| {
+                let mut entry = entry.clone();
+                entry.id = None;
+                (alias.clone(), entry)
+            })
+            .collect();
+        let mut plans = recorded.plans().to_vec();
+        plans.push(domain::planning::Plan::new(
+            domain::PlanId::parse("demo-home").expect("a plan ID"),
+            alias("demo"),
+            vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+        ));
+        let forgotten = domain::planning::AgentConfig::new(
+            recorded.agent().clone(),
+            recorded.hooks().clone(),
+            repositories,
+            plans,
+        )
+        .expect("a valid configuration");
+        config
+            .save(&forgotten)
+            .await
+            .expect("the configuration saves");
+    }
+
+    /// Records in `operations` a backup of the plan `demo-home` that ended
+    /// as `end` has it, succeeded (`Ok`) or failed.
+    async fn backed_up(operations: &dyn OperationStore, end: Result<(), FailureReason>) {
+        let at = domain::Timestamp::UNIX_EPOCH;
+        let mut backup = domain::execution::Operation::queue(
+            OperationId::from_uuid(Uuid::now_v7()),
+            domain::execution::OperationKind::Backup,
+            domain::execution::Trigger::Manual,
+            domain::execution::Target {
+                plan: Some(domain::PlanId::parse("demo-home").expect("a plan ID")),
+                repository: None,
+            },
+            at,
+        );
+        backup.start(at).expect("it starts");
+        match end {
+            Ok(()) => backup.succeed(at),
+            Err(reason) => backup.fail(reason, at),
+        }
+        .expect("it ends");
+        operations
+            .save(&backup, None)
+            .await
+            .expect("the backup is recorded");
+    }
+
+    /// [`imported`], then a backup of `demo-home` that found no repository
+    /// at `demo`'s location: what makes its row offer Create (decision 53).
+    /// The engine finds the location empty now too, as Create looks first.
+    async fn imported_and_found_none(
+        engine: &Scripted,
+        service: &RepositoryService,
+        config: &dyn ConfigStore,
+    ) {
+        imported(config).await;
+        backed_up(&*service.operations, Err(FailureReason::RepositoryNotFound)).await;
+        *engine.found.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(Err(FailureReason::RepositoryNotFound));
+    }
+
     #[tokio::test]
     async fn a_test_reports_the_id_and_saves_nothing() {
         let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
@@ -4754,6 +5001,7 @@ mod repository_service_tests {
             engine.clone(),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
         )
         .connect(connect("demo", settings))
         .await;
@@ -4838,6 +5086,7 @@ mod repository_service_tests {
                 engine.clone(),
                 ResolveRepository::new(Arc::new(secrets)),
                 config.clone(),
+                Arc::new(app::fakes::InMemoryOperationStore::new()),
             );
             service
                 .connect(connect("demo", settings))
@@ -4977,6 +5226,279 @@ mod repository_service_tests {
             })
         );
         assert!(saved(&*config).await.repository(&alias("fresh")).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_saved_repository_is_created_from_its_entry_which_records_only_its_new_id() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the entry is saved");
+        // The entry as the connection left it, recording the ID it reached.
+        let recorded = saved(&*config).await;
+        imported_and_found_none(&engine, &service, &*config).await;
+        let answer = service.create_saved("demo".to_owned()).await;
+        assert_eq!(answer, Ok(api::RepositoryIdDto { id: "a".repeat(64) }));
+        {
+            let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            let [_, Job::Identify(looked), Job::Init(access)] = seen.as_slice() else {
+                panic!("creating looks at the location, then runs Job::Init, got {seen:?}");
+            };
+            assert_eq!(looked.repository, "/srv/demo/repo");
+            assert_eq!(access.repository, "/srv/demo/repo");
+        }
+        assert_eq!(
+            saved(&*config).await.repositories(),
+            recorded.repositories()
+        );
+    }
+
+    /// An entry that records an ID was reached once: it is refused as a
+    /// repository already there, its location redacted, and nothing runs.
+    #[tokio::test]
+    async fn a_saved_repository_whose_entry_records_an_id_is_refused_as_existing_and_nothing_runs()
+    {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        let mut settings = settings_dto();
+        settings.repository = "rest:https://backup:hunter2@nas.example/repo".to_owned();
+        service
+            .connect(connect("demo", settings))
+            .await
+            .expect("the entry is saved");
+        let before = saved(&*config).await;
+        let Err(RepositoriesError::Exists { location }) =
+            service.create_saved("demo".to_owned()).await
+        else {
+            panic!("an entry that records an ID is refused as existing");
+        };
+        assert!(!location.contains("hunter2"), "{location}");
+        assert!(location.contains("nas.example/repo"), "{location}");
+        assert_eq!(jobs(&engine), 1, "only the connection's test ran");
+        assert_eq!(saved(&*config).await, before);
+    }
+
+    /// A row that doesn't offer Create is refused it as not offered, not as a
+    /// repository already there, whatever page sent the request, and nothing
+    /// runs: nothing on record, or a backup that once succeeded before the
+    /// latest found none there (decision 53).
+    #[tokio::test]
+    async fn a_saved_repository_no_job_found_missing_is_refused_as_not_offered_and_nothing_runs() {
+        let histories: [&[Result<(), FailureReason>]; 2] =
+            [&[], &[Ok(()), Err(FailureReason::RepositoryNotFound)]];
+        for history in histories {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            service
+                .connect(connect("demo", settings_dto()))
+                .await
+                .expect("the entry is saved");
+            imported(&*config).await;
+            for end in history {
+                backed_up(&*service.operations, end.clone()).await;
+            }
+            let before = saved(&*config).await;
+            assert_eq!(
+                service.create_saved("demo".to_owned()).await,
+                Err(RepositoriesError::CreateNotOffered),
+                "{history:?}"
+            );
+            assert_eq!(jobs(&engine), 1, "only the connection's test ran");
+            assert_eq!(saved(&*config).await, before, "{history:?}");
+        }
+    }
+
+    /// The row offers Create on what a backup found, wherever it ran; the
+    /// entry may since name a location whose folder isn't there, as on a
+    /// drive that isn't plugged in. Create looks first, and is refused as
+    /// not offered before anything is created (decision 53).
+    #[tokio::test]
+    async fn a_saved_repository_whose_folder_is_not_there_is_refused_as_not_offered() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the entry is saved");
+        imported_and_found_none(&engine, &service, &*config).await;
+        *engine.found.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(Err(FailureReason::EngineFailed {
+                detail: "the repository folder is not there".into(),
+            }));
+        let before = saved(&*config).await;
+        assert_eq!(
+            service.create_saved("demo".to_owned()).await,
+            Err(RepositoriesError::CreateNotOffered)
+        );
+        assert_eq!(saved(&*config).await, before);
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(
+            matches!(seen.as_slice(), [_, Job::Identify(_)]),
+            "only the connection's test and Create's look ran: {seen:?}"
+        );
+    }
+
+    /// An operation log that can't be read can't say whether the row offers
+    /// Create: it is refused with the log's own words, and nothing runs.
+    #[tokio::test]
+    async fn creating_while_the_operation_log_cannot_be_read_is_refused_and_nothing_runs() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = RepositoryService::new(
+            clock(),
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+            Arc::new(NoLog),
+        );
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the entry is saved");
+        imported(&*config).await;
+        assert_eq!(
+            service.create_saved("demo".to_owned()).await,
+            Err(RepositoriesError::Unavailable {
+                code: ErrorCode::OperationFailed,
+                args: vec![],
+                detail: Some("the database is locked".to_owned()),
+            })
+        );
+        assert_eq!(jobs(&engine), 1, "only the connection's test ran");
+    }
+
+    #[tokio::test]
+    async fn creating_an_unknown_or_unnamed_repository_is_refused_and_nothing_runs() {
+        let engine = engine();
+        let service = service(&engine, Arc::new(InMemoryConfigStore::new()));
+        for alias in ["demo", "Not A Name"] {
+            assert_eq!(
+                service.create_saved(alias.to_owned()).await,
+                Err(RepositoriesError::Unknown {
+                    alias: alias.to_owned()
+                }),
+                "{alias}"
+            );
+        }
+        assert_eq!(jobs(&engine), 0);
+    }
+
+    #[tokio::test]
+    async fn a_saved_repository_already_there_is_refused_with_its_location_redacted() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        let mut settings = settings_dto();
+        settings.repository = "rest:https://backup:hunter2@nas.example/repo".to_owned();
+        service
+            .connect(connect("demo", settings))
+            .await
+            .expect("the entry is saved");
+        imported_and_found_none(&engine, &service, &*config).await;
+        *engine
+            .outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Err(FailureReason::RepositoryExists);
+        let Err(RepositoriesError::Exists { location }) =
+            service.create_saved("demo".to_owned()).await
+        else {
+            panic!("an existing repository is refused as one");
+        };
+        assert!(!location.contains("hunter2"), "{location}");
+        assert!(location.contains("nas.example/repo"), "{location}");
+    }
+
+    /// A configuration that can't be read refuses the creation with the
+    /// configuration's own code: the alias may well be there.
+    #[tokio::test]
+    async fn creating_from_a_configuration_that_cannot_be_read_is_refused_with_its_code() {
+        let engine = engine();
+        let service = service(
+            &engine,
+            Arc::new(Broken(ConfigError::Unavailable {
+                file: "/c/config.toml".into(),
+                detail: "permission denied".into(),
+            })),
+        );
+        let Err(RepositoriesError::Unavailable { code, .. }) =
+            service.create_saved("demo".to_owned()).await
+        else {
+            panic!("a configuration that can't be read is refused as one");
+        };
+        assert_eq!(code, ErrorCode::ConfigUnavailable);
+        assert_eq!(jobs(&engine), 0);
+    }
+
+    /// The entry's password that can't be read is refused with the secret's
+    /// code, as a test of the same settings would be.
+    #[tokio::test]
+    async fn a_saved_repository_whose_password_cannot_be_read_is_refused_with_the_secrets_code() {
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let mut settings = settings_dto();
+        settings.password = PasswordDto::Env {
+            name: "DEMO_PASSWORD".into(),
+        };
+        // Saved while the variable was set; created once it no longer is.
+        let secrets = FakeSecrets::new();
+        secrets.set_env("DEMO_PASSWORD", "demo-password");
+        RepositoryService::new(
+            clock(),
+            engine.clone(),
+            ResolveRepository::new(Arc::new(secrets)),
+            config.clone(),
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
+        )
+        .connect(connect("demo", settings))
+        .await
+        .expect("the entry is saved");
+        let creating = service(&engine, config.clone());
+        imported_and_found_none(&engine, &creating, &*config).await;
+        assert_eq!(
+            creating.create_saved("demo".to_owned()).await,
+            Err(RepositoriesError::SecretRefused(SecretRefusal {
+                code: ErrorCode::SecretMissing,
+                args: vec![
+                    ("field", MsgArg::Text("password".to_owned())),
+                    ("source", MsgArg::Text("DEMO_PASSWORD".to_owned())),
+                ],
+                detail: None,
+            }))
+        );
+        assert_eq!(jobs(&engine), 1, "only the connection's test ran");
+    }
+
+    /// A job that failed is refused with the code of its failure: one that
+    /// finds no repository as `repository-not-found`, and any other in the
+    /// engine's words, as an initialisation of new settings is.
+    #[tokio::test]
+    async fn a_saved_repository_whose_job_failed_is_refused_with_the_failures_code() {
+        for (reason, refusal) in [
+            (
+                FailureReason::RepositoryNotFound,
+                RepositoriesError::NotFound,
+            ),
+            (
+                FailureReason::EngineFailed {
+                    detail: "disk full".into(),
+                },
+                RepositoriesError::OperationFailed {
+                    detail: "disk full".into(),
+                },
+            ),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let service = service(&engine, config.clone());
+            service
+                .connect(connect("demo", settings_dto()))
+                .await
+                .expect("the entry is saved");
+            imported_and_found_none(&engine, &service, &*config).await;
+            *engine
+                .outcome
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Err(reason);
+            assert_eq!(service.create_saved("demo".to_owned()).await, Err(refusal));
+        }
     }
 
     #[tokio::test]
@@ -5154,6 +5676,35 @@ mod repository_service_tests {
         assert_eq!(
             config.repositories().keys().collect::<Vec<_>>(),
             [&alias(kept)]
+        );
+    }
+
+    /// Both Creates find the entry recording no ID; the one that takes the
+    /// lock second finds the ID the first recorded, and is refused as a
+    /// repository already there.
+    #[tokio::test]
+    async fn one_saved_repository_created_twice_at_the_same_moment_is_created_once() {
+        let engine = engine();
+        let config = Arc::new(Yielding(InMemoryConfigStore::new()));
+        let service = service(&engine, config.clone());
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the entry is saved");
+        imported_and_found_none(&engine, &service, &*config).await;
+        let (first, second) = tokio::join!(
+            service.create_saved("demo".to_owned()),
+            service.create_saved("demo".to_owned()),
+        );
+        match (first, second) {
+            (Ok(_), Err(RepositoriesError::Exists { .. }))
+            | (Err(RepositoriesError::Exists { .. }), Ok(_)) => {}
+            other => panic!("one Create runs and the other is refused: {other:?}"),
+        }
+        assert_eq!(
+            jobs(&engine),
+            3,
+            "the connection's test, and one Create's look and initialisation"
         );
     }
 
@@ -5395,6 +5946,31 @@ mod repository_service_tests {
         };
         assert!(!location.contains("hunter2"), "{location}");
         assert!(location.contains("nas.example/repo"), "{location}");
+    }
+
+    /// A job that finds no repository at the location is refused as
+    /// `repository-not-found`, not as a failure in the engine's words, by a
+    /// test and a connection alike (decision 53).
+    #[tokio::test]
+    async fn a_location_with_no_repository_is_refused_as_one() {
+        let engine = engine();
+        *engine
+            .outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Err(FailureReason::RepositoryNotFound);
+        let service = service(&engine, Arc::new(InMemoryConfigStore::new()));
+        assert_eq!(
+            service
+                .test(api::TestRepositoryDto {
+                    settings: settings_dto(),
+                })
+                .await,
+            Err(RepositoriesError::NotFound)
+        );
+        assert_eq!(
+            service.connect(connect("demo", settings_dto())).await,
+            Err(RepositoriesError::NotFound)
+        );
     }
 
     #[tokio::test]
@@ -5771,7 +6347,12 @@ mod repository_service_tests {
             )
             .await
             .expect("the configuration saves");
-        (ConfigCatalog { config, engine }, scratch)
+        let catalog = ConfigCatalog {
+            config,
+            engine,
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+        };
+        (catalog, scratch)
     }
 
     /// A listing whose password command fails with the other secrets of the
@@ -6115,6 +6696,7 @@ mod repository_service_tests {
         let catalog = ConfigCatalog {
             config,
             engine: engine(),
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
         };
         let listed = catalog.repositories().await.expect("the list");
         // In the order of the aliases, one row each.
@@ -6140,6 +6722,183 @@ mod repository_service_tests {
                 .as_deref()
                 .is_some_and(|hot| hot.contains("hot.example/repo")),
             "{first:?}"
+        );
+    }
+
+    /// An operation log that can't be read: every call is refused.
+    struct NoLog;
+
+    #[async_trait]
+    impl OperationStore for NoLog {
+        async fn save(
+            &self,
+            _operation: &domain::execution::Operation,
+            _result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn try_start(
+            &self,
+            _operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn get(
+            &self,
+            _id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn list(
+            &self,
+            _query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn ever_succeeded(
+            &self,
+            _plan: &domain::PlanId,
+        ) -> Result<bool, app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn fail_unfinished(
+            &self,
+            _reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            Err(no_log())
+        }
+    }
+
+    fn no_log() -> app::ports::StoreError {
+        app::ports::StoreError::Unavailable {
+            detail: "the database is locked".to_owned(),
+        }
+    }
+
+    /// The rows of a configuration of `demo`, which the plan `demo-home`
+    /// backs up to and whose entry records `demo_id`, and `spare`, which no
+    /// plan does, each at its own location, listed over `operations`: each
+    /// alias and whether its row offers to create it.
+    async fn offers_listed(
+        operations: Arc<dyn OperationStore>,
+        demo_id: Option<RepositoryId>,
+    ) -> Vec<(String, bool)> {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let entry = |name: &str, id| domain::planning::RepositoryConfig {
+            settings: domain::planning::RepositorySettings {
+                repository: format!("/srv/{name}/repo"),
+                repo_hot: None,
+                password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+                options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
+            },
+            id,
+            maintenance: Default::default(),
+            group_by: Default::default(),
+            hooks: Default::default(),
+        };
+        let plan = domain::planning::Plan::new(
+            domain::PlanId::parse("demo-home").expect("a plan ID"),
+            alias("demo"),
+            vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+        );
+        config
+            .save(
+                &domain::planning::AgentConfig::new(
+                    Default::default(),
+                    Default::default(),
+                    [
+                        (alias("demo"), entry("demo", demo_id)),
+                        (alias("spare"), entry("spare", None)),
+                    ]
+                    .into(),
+                    vec![plan],
+                )
+                .expect("a valid configuration"),
+            )
+            .await
+            .expect("the configuration saves");
+        let catalog = ConfigCatalog {
+            config,
+            engine: engine(),
+            operations,
+        };
+        let listed = catalog.repositories().await.expect("the list");
+        listed
+            .repositories
+            .into_iter()
+            .map(|row| (row.alias, row.create_offered))
+            .collect()
+    }
+
+    fn rows(offers: [(&str, bool); 2]) -> Vec<(String, bool)> {
+        offers
+            .into_iter()
+            .map(|(alias, offered)| (alias.to_owned(), offered))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_row_offers_to_create_its_repository_only_once_a_job_found_none_and_none_reached_it()
+    {
+        let log = Arc::new(app::fakes::InMemoryOperationStore::new());
+        assert_eq!(
+            offers_listed(log.clone(), None).await,
+            rows([("demo", false), ("spare", false)]),
+            "nothing on record"
+        );
+        backed_up(&*log, Err(FailureReason::RepositoryNotFound)).await;
+        assert_eq!(
+            offers_listed(log.clone(), None).await,
+            rows([("demo", true), ("spare", false)]),
+            "a backup found none there"
+        );
+        backed_up(&*log, Ok(())).await;
+        assert_eq!(
+            offers_listed(log, None).await,
+            rows([("demo", false), ("spare", false)]),
+            "a backup reached it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_row_whose_entry_records_a_repository_id_offers_no_create() {
+        let log = Arc::new(app::fakes::InMemoryOperationStore::new());
+        backed_up(&*log, Err(FailureReason::RepositoryNotFound)).await;
+        assert_eq!(
+            offers_listed(log, Some(repository_id())).await,
+            rows([("demo", false), ("spare", false)])
+        );
+    }
+
+    /// The daemon logs that it offers nothing, with the log's failure as a
+    /// code: the log's own words may hold a stored value nobody checked (I4).
+    #[tokio::test]
+    async fn an_operation_log_that_cannot_be_read_offers_nothing_to_create() {
+        capture();
+        assert_eq!(
+            offers_listed(Arc::new(NoLog), None).await,
+            rows([("demo", false), ("spare", false)])
+        );
+        let said: Vec<String> = captured_log::lines()
+            .into_iter()
+            .map(|(_, line)| line)
+            .filter(|line| line.contains("no repository is offered to be created"))
+            .collect();
+        assert!(
+            said.iter().any(|line| line.contains("store-unavailable")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .all(|line| !line.contains("the database is locked")),
+            "{said:?}"
         );
     }
 

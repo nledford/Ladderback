@@ -10,6 +10,7 @@ use domain::execution::{
     Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::{OperationId, RepositoryId, Timestamp, Uuid};
+use sqlx::Row;
 use tokio::time::Instant;
 
 use super::{ACQUIRE_TIMEOUT, BUSY_TIMEOUT, MAX_CONNECTIONS, SqliteStore};
@@ -69,6 +70,31 @@ async fn a_warning_for_an_operation_that_is_not_there_is_refused() {
         "the store's connections enforce foreign keys"
     );
     assert_eq!(warning_rows(&store).await, 0);
+}
+
+/// Asking whether a plan ever succeeded reads one partial index that holds
+/// only successes, so it costs one probe however many operations of the
+/// plan failed, not a walk back through the plan's history (decision 53).
+#[tokio::test]
+async fn asking_whether_a_plan_ever_succeeded_reads_only_the_index_of_successes() {
+    let (_dir, store) = scratch_store().await;
+
+    // The statement and a fixed prefix: nothing from outside the crate.
+    let explain = format!("EXPLAIN QUERY PLAN {}", super::sql::EVER_SUCCEEDED);
+    let plan: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(explain))
+        .bind("demo-home")
+        .fetch_all(&store.pool)
+        .await
+        .expect("the statement's plan")
+        .iter()
+        .map(|step| step.get::<String, _>("detail"))
+        .collect();
+
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("USING INDEX ops_succeeded_by_plan")),
+        "{plan:?}"
+    );
 }
 
 #[tokio::test]

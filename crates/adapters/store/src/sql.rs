@@ -87,3 +87,13 @@ pub(crate) const LIST_PLAN_FIRST_PAGE: &str =
 /// Parameters: the plan, the cursor, how many rows.
 pub(crate) const LIST_PLAN_AFTER: &str =
     select_operations!(" WHERE plan_id = ? AND id < ? ORDER BY id DESC LIMIT ?");
+
+/// Whether any operation of a plan succeeded, with warnings or without.
+/// Parameter: the plan. The statuses are literals, not parameters, so SQLite
+/// can see when it prepares the statement that they are those of the partial
+/// index `ops_succeeded_by_plan`, and answers from it: one probe, however
+/// many operations the plan has failed.
+pub(crate) const EVER_SUCCEEDED: &str = concat!(
+    "SELECT EXISTS (SELECT 1 FROM operations ",
+    "WHERE plan_id = ? AND status IN ('succeeded', 'succeeded_with_warnings'))"
+);

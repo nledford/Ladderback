@@ -123,3 +123,59 @@ async fn identifying_the_initialised_repository_reports_the_same_id() {
         &EngineResult::Repository { id: id.clone() }
     );
 }
+
+/// An empty scratch folder holds no repository: a job that opens one fails
+/// as `RepositoryNotFound`, the code a saved repository's row reads as one
+/// to create (decision 53), and the folder stays empty.
+#[tokio::test]
+async fn identifying_an_empty_folder_fails_as_no_repository_there() {
+    let scratch = Scratch::new();
+    let empty = scratch.repo_dir();
+    fs::create_dir_all(&empty).expect("the empty folder");
+    let location = Location::local(&empty);
+    let events = run_to_end(&engine(), Job::Identify(location.access(PASSWORD))).await;
+    assert_eq!(
+        failed(&events),
+        &domain::execution::FailureReason::RepositoryNotFound
+    );
+    assert_eq!(contents(&empty), Vec::new(), "nothing was written");
+}
+
+/// A repository folder that isn't there is what an unplugged drive looks
+/// like (decision 53). A backup there fails as it always did, never as
+/// `RepositoryNotFound`, and leaves no folder behind: had it made an empty
+/// one at the mount point, the next job would find a folder with no
+/// repository in it, and the row would offer Create on the system disk.
+/// OpenDAL's `fs` makes its root folder when it is set up, so the job fails
+/// before that; rustic's local backend makes nothing when it opens. Create
+/// still makes the folder.
+#[tokio::test]
+async fn a_backup_where_the_repository_folder_is_not_there_makes_none_and_create_still_does() {
+    const HOUR: domain::SignedDuration = domain::SignedDuration::from_hours(1);
+    let scratch = Scratch::new();
+    let opendal = scratch.dir.path().join("usb-opendal").join("restic");
+    let local = scratch.dir.path().join("usb-local").join("restic");
+    for (missing, location) in [
+        (&opendal, Location::opendal_fs(&opendal, None)),
+        (&local, Location::local(&local)),
+    ] {
+        for attempt in 1..=2 {
+            let job = backup_job(&location, &scratch.source(), "home", HOUR);
+            let events = run_to_end(&engine(), job).await;
+            assert!(
+                matches!(
+                    failed(&events),
+                    domain::execution::FailureReason::EngineFailed { .. }
+                ),
+                "backup {attempt} at {missing:?}: {events:?}"
+            );
+            assert!(
+                !missing.parent().unwrap().exists(),
+                "backup {attempt} made a folder at {missing:?}"
+            );
+        }
+        let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
+        succeeded(&events);
+        assert!(missing.is_dir(), "Create made no folder at {missing:?}");
+    }
+}

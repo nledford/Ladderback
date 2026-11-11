@@ -1619,7 +1619,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod read_timeout_tests {
     #![allow(clippy::expect_used, reason = "test code")]
 
@@ -1703,7 +1704,8 @@ mod read_timeout_tests {
     }
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod record_tests {
     #![allow(clippy::expect_used, reason = "test code")]
 
@@ -1749,6 +1751,10 @@ mod record_tests {
         }
 
         async fn list(&self, _query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+            futures::future::pending().await
+        }
+
+        async fn ever_succeeded(&self, _plan: &domain::PlanId) -> Result<bool, StoreError> {
             futures::future::pending().await
         }
     }
@@ -1820,7 +1826,8 @@ mod record_tests {
     }
 }
 
-#[cfg(all(test, feature = "fakes"))]
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod cancel_tests {
     #![allow(clippy::expect_used, reason = "test code")]
 

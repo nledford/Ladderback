@@ -28,8 +28,7 @@ Feature: Repositories over HTTP
   Scenario: Testing a location with no repository is refused, and saves nothing
     Given an empty repository location
     When the client tests the repository
-    Then the refusal has status 422 and the typed code "operation-failed"
-    And the refusal carries the engine's detail
+    Then the refusal has status 404 and the typed code "repository-not-found"
     And the daemon lists no repositories
 
   Scenario: Connecting a repository adds it to the list, without its password

@@ -60,6 +60,9 @@ pub enum MaintenanceRefusal {
     /// setting with a reference isn't valid: the refusal says which, as the
     /// repository routes and the snapshot listing tell it.
     SecretRefused(SecretRefusal),
+    /// No repository is at the location: it is a folder on this machine
+    /// holding nothing of a repository (decision 53).
+    RepositoryNotFound,
     /// The engine ran the read and it failed: the wrong password, no
     /// repository at the location. `detail` is the engine's own words.
     OperationFailed { detail: String },
@@ -192,11 +195,11 @@ pub(crate) async fn start(
 }
 
 /// The typed refusal of `error` on the repository `alias`, with the status of
-/// its kind: a body that can't be taken is 400; something unknown 404; a run
-/// refused because of what the repository holds, or a read the engine ran
-/// and failed, 422; a repository that is busy or has changed since its
-/// preview 409; a read the repository didn't answer in time 504; and the
-/// daemon not being able to do it now, 503.
+/// its kind: a body that can't be taken is 400; something unknown, or a
+/// location that holds no repository, 404; a run refused because of what the
+/// repository holds, or a read the engine ran and failed, 422; a repository
+/// that is busy or has changed since its preview 409; a read the repository
+/// didn't answer in time 504; and the daemon not being able to do it now, 503.
 fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
     use api::{ErrorCode, MsgArg};
     let text = |name, value: String| vec![(name, MsgArg::Text(value))];
@@ -260,6 +263,12 @@ fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
             secret.code,
             secret.args,
             secret.detail,
+        ),
+        MaintenanceRefusal::RepositoryNotFound => (
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryNotFound,
+            Vec::new(),
+            None,
         ),
         MaintenanceRefusal::OperationFailed { detail } => (
             StatusCode::UNPROCESSABLE_ENTITY,

@@ -196,6 +196,10 @@ impl OperationStore for HeldEnd {
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
     }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
 }
 
 /// What a page has heard so far, without waiting for any more.
@@ -329,6 +333,10 @@ impl OperationStore for NotesWrites {
 
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
     }
 }
 

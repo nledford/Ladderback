@@ -40,6 +40,7 @@ pub async fn run(store: &dyn OperationStore) {
     a_page_ends_at_its_limit_and_says_whether_more_remain(store, &fx).await;
     a_page_continues_after_any_cursor(store, &fx).await;
     history_can_be_limited_to_one_plan(store, &fx).await;
+    a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store).await;
     serialization::run(store, &fx).await;
 }
 
@@ -808,4 +809,73 @@ async fn history_can_be_limited_to_one_plan(store: &dyn OperationStore, fx: &Fix
     // A plan nothing ran for lists nothing, and no plan lists another's operations.
     assert_eq!(listing(store, Some(&fx.empty), 10).await, Vec::new());
     assert_eq!(listing(store, Some(&fx.videos), 10).await.len(), 6);
+}
+
+/// Whether a plan ever succeeded: the answer is `None` when the store failed.
+async fn ever_succeeded(store: &dyn OperationStore, plan: &PlanId) -> Option<bool> {
+    let answer = store.ever_succeeded(plan).await;
+    assert!(answer.is_ok(), "asking about {plan:?} failed: {answer:?}");
+    answer.ok()
+}
+
+async fn a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store: &dyn OperationStore) {
+    let plans: Option<Vec<PlanId>> = [
+        "demo-never-ran",
+        "demo-never-succeeded",
+        "demo-succeeded-then-failed",
+        "demo-warned",
+    ]
+    .into_iter()
+    .map(|name| PlanId::parse(name).ok())
+    .collect();
+    assert!(plans.is_some(), "the case's own plan IDs are valid IDs");
+    let Some([never_ran, never_succeeded, succeeded_then_failed, warned]) =
+        plans.and_then(|plans| <[PlanId; 4]>::try_from(plans).ok())
+    else {
+        return;
+    };
+
+    // Queued, running, cancelled and failed: none of them a success.
+    save(store, &queued(0x900, Some(&never_succeeded)), None).await;
+    save(store, &started(queued(0x901, Some(&never_succeeded))), None).await;
+    let mut cancelled = started(queued(0x902, Some(&never_succeeded)));
+    applied(cancelled.cancel(at(40)));
+    save(store, &cancelled, None).await;
+    let not_there = FailureReason::EngineFailed {
+        detail: "no repository".to_owned(),
+    };
+    save(
+        store,
+        &failed(queued(0x903, Some(&never_succeeded)), not_there.clone()),
+        None,
+    )
+    .await;
+    // A success the plan's later failure doesn't undo.
+    save(
+        store,
+        &succeeded(queued(0x910, Some(&succeeded_then_failed))),
+        None,
+    )
+    .await;
+    save(
+        store,
+        &failed(queued(0x911, Some(&succeeded_then_failed)), not_there),
+        None,
+    )
+    .await;
+    // A success with warnings is a success.
+    let mut with_warning = started(queued(0x920, Some(&warned)));
+    applied(with_warning.record_warning(unreadable("/home/demo/a")));
+    applied(with_warning.succeed(at(70)));
+    save(store, &with_warning, None).await;
+    // A success of no plan is no plan's.
+    save(store, &succeeded(queued(0x930, None)), None).await;
+
+    assert_eq!(ever_succeeded(store, &never_ran).await, Some(false));
+    assert_eq!(ever_succeeded(store, &never_succeeded).await, Some(false));
+    assert_eq!(
+        ever_succeeded(store, &succeeded_then_failed).await,
+        Some(true)
+    );
+    assert_eq!(ever_succeeded(store, &warned).await, Some(true));
 }
