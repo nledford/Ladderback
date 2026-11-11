@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use api::{
     MaintenancePreviewDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, PlanGroupDto,
-    RepositoriesDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto,
+    RepositoriesDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
@@ -24,7 +24,7 @@ use crate::live::say;
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
-use crate::repositories::Sentence;
+use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{Empty, PageHeading, instant, refusal, short_id, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
@@ -112,6 +112,11 @@ impl Page {
 
     fn words(self, words: &Words) -> String {
         self.text(words.id, &words.args)
+    }
+
+    /// The notes of `warnings`, one sentence each.
+    fn notes(self, warnings: &[WarningDto]) -> Vec<String> {
+        repository_notes(&self.localizer.get_value(), warnings)
     }
 
     fn url(self, route: String) -> String {
@@ -493,12 +498,25 @@ fn Repository(
         let reading = page.reading.get();
         page.groups.with(|groups| shown(groups.as_ref(), reading))
     });
+    // What the history warns of, such as snapshots from other hosts in a
+    // repository maintained here (§7.3): said before the buttons that act on it.
+    let warned = Memo::new(move |_| {
+        page.groups
+            .with(|groups| groups.as_ref().map(|groups| groups.warnings.clone()))
+            .unwrap_or_default()
+    });
     view! {
         <section aria-labelledby=MAINTENANCE_HEADING>
             <h2 id=MAINTENANCE_HEADING tabindex="-1">
                 {heading}
             </h2>
             <p>{intro}</p>
+            {move || {
+                page.notes(&warned.get())
+                    .into_iter()
+                    .map(|note| view! { <p>{note}</p> })
+                    .collect_view()
+            }}
             {buttons}
             {move || {
                 step.get()
@@ -787,6 +805,13 @@ fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
         .flat_map(wording::fact)
         .map(|words| view! { <p>{page.words(&words)}</p> })
         .collect_view();
+    // A warning is part of what the review says, so a screen reader reads it
+    // with the facts as the dialog opens.
+    let warnings = page
+        .notes(&review.warnings)
+        .into_iter()
+        .map(|note| view! { <p>{note}</p> })
+        .collect_view();
     let listings = review
         .listings
         .into_iter()
@@ -810,7 +835,7 @@ fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
             working=working
             fallback=MAINTENANCE_HEADING.to_owned()
         >
-            <div id=REVIEW_SUMMARY>{facts}</div>
+            <div id=REVIEW_SUMMARY>{facts}{warnings}</div>
             {listings}
         </ReviewDialog>
     }

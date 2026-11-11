@@ -190,6 +190,7 @@ impl Review {
     /// The review of `preview`, the answer to `request`.
     pub(crate) fn of(request: &MaintenanceRequestDto, preview: &MaintenancePreviewDto) -> Review {
         let request = request.clone();
+        let warnings = preview.warnings().to_vec();
         match preview {
             MaintenancePreviewDto::Forget {
                 plans,
@@ -232,7 +233,7 @@ impl Review {
                         snapshots: removing,
                     }),
                     selection: Some(selection.clone()),
-                    warnings: Vec::new(),
+                    warnings,
                 }
             }
             MaintenancePreviewDto::Adopt {
@@ -251,7 +252,7 @@ impl Review {
                 listings: Listing::of(into, *count, listed).into_iter().collect(),
                 confirm: (*count > 0).then_some(Confirm::Adopt { snapshots: *count }),
                 selection: Some(selection.clone()),
-                warnings: Vec::new(),
+                warnings,
             },
             MaintenancePreviewDto::Prune {
                 packs_marked,
@@ -277,7 +278,7 @@ impl Review {
                     || *bytes_deleted > 0)
                     .then_some(Confirm::Prune),
                 selection: None,
-                warnings: Vec::new(),
+                warnings,
             },
             MaintenancePreviewDto::Check { read_data } => Review {
                 kind: Kind::Check,
@@ -288,7 +289,7 @@ impl Review {
                 listings: Vec::new(),
                 confirm: Some(Confirm::Check),
                 selection: None,
-                warnings: Vec::new(),
+                warnings,
             },
         }
     }
