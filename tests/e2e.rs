@@ -57,6 +57,8 @@ mod plan_settings_steps;
 mod repositories_steps;
 #[path = "steps/restart.rs"]
 mod restart_steps;
+#[path = "steps/shutdown.rs"]
+mod shutdown_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
 

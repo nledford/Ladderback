@@ -194,6 +194,17 @@ async fn daemon_at(
     })
 }
 
+/// Waits for `close`, the closing of the operation log at `database`, for
+/// at most `bound`, and says in the log when it gave up.
+async fn close_within(
+    close: impl Future<Output = ()>,
+    database: &std::path::Path,
+    bound: std::time::Duration,
+) {
+    let _ = (close, database, bound);
+    todo!()
+}
+
 /// A data folder another process holds, or a lock that couldn't be taken, as
 /// the message for whoever started the daemon.
 fn lock_refused(data_dir: &std::path::Path, error: LockError) -> Refused {
@@ -1949,23 +1960,18 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held() {
+    /// Leaves at `database` a log that shows `id` as a running backup and
+    /// refuses every change to its operations, as a failing disk would.
+    async fn a_log_that_refuses_changes(database: &std::path::Path, id: OperationId) {
         use sqlx::{ConnectOptions, Connection};
-        let scratch = tempfile::tempdir().expect("a scratch dir");
-        let (config, data) = own_folders(scratch.path());
-        let database = data.join("ladderback.db");
-        let id = OperationId::from_uuid(Uuid::from_u128(1));
-        let earlier = SqliteStore::open(&database).await.expect("the log opens");
+        let earlier = SqliteStore::open(database).await.expect("the log opens");
         earlier
             .save(&running_backup(id), None)
             .await
             .expect("the running backup is saved");
         earlier.close().await;
-        // A log that refuses every change to its operations, as a failing disk
-        // would.
         let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&database)
+            .filename(database)
             .connect()
             .await
             .expect("a raw connection to the log");
@@ -1977,6 +1983,30 @@ mod tests {
         .await
         .expect("the log is made to refuse changes");
         raw.close().await.expect("the connection closes");
+    }
+
+    /// Fails unless the operation log at `database` is closed: SQLite removes
+    /// its `-wal` and `-shm` files when the last connection to it closes.
+    fn assert_closed(database: &std::path::Path) {
+        for suffix in ["-wal", "-shm"] {
+            let mut file = database.as_os_str().to_owned();
+            file.push(suffix);
+            let file = std::path::PathBuf::from(file);
+            assert!(
+                !file.exists(),
+                "{} outlived the daemon: the operation log is still open",
+                file.display()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        let id = OperationId::from_uuid(Uuid::from_u128(1));
+        a_log_that_refuses_changes(&database, id).await;
 
         let refused = daemon_at(Some(config), Some(data))
             .await
@@ -1996,6 +2026,72 @@ mod tests {
             detail.record.status,
             OperationStatus::Running,
             "the log is as it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_refused_once_the_log_is_open_closes_the_log_before_it_returns() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        a_log_that_refuses_changes(&database, OperationId::from_uuid(Uuid::from_u128(1))).await;
+
+        let refused = daemon_at(Some(config), Some(data))
+            .await
+            .err()
+            .expect("a log that cannot be changed refuses the start");
+        assert_eq!(refused.message, msg::CLI_CANNOT_RECOVER_OPERATIONS);
+        assert_closed(&database);
+    }
+
+    #[tokio::test]
+    async fn a_close_that_ends_within_its_bound_is_waited_for_and_says_nothing() {
+        super::captured_log::capture();
+        let database = std::path::Path::new("/srv/demo/closes-in-time/ladderback.db");
+        let (closed, mut close) = futures::channel::oneshot::channel::<()>();
+        let closing = async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let _ = closed.send(());
+        };
+        close_within(closing, database, std::time::Duration::from_secs(5)).await;
+        assert_eq!(
+            close.try_recv(),
+            Ok(Some(())),
+            "the close ran to its end before close_within returned"
+        );
+        let said: Vec<_> = super::captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("closes-in-time"))
+            .collect();
+        assert!(said.is_empty(), "a close in time logs nothing: {said:?}");
+    }
+
+    #[tokio::test]
+    async fn a_close_that_outlasts_its_bound_is_given_up_with_a_warning() {
+        super::captured_log::capture();
+        let database = std::path::Path::new("/srv/demo/never-closes/ladderback.db");
+        let bound = std::time::Duration::from_millis(50);
+        let began = std::time::Instant::now();
+        // Bounded itself, so a close_within that waited for ever fails here
+        // rather than at the test runner's limit.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            close_within(std::future::pending(), database, bound),
+        )
+        .await
+        .expect("close_within gives up once its bound has run out");
+        assert!(
+            began.elapsed() >= bound,
+            "it waited the bound out first, not {:?}",
+            began.elapsed()
+        );
+        let said: Vec<_> = super::captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("/srv/demo/never-closes/ladderback.db"))
+            .collect();
+        assert!(
+            said.len() == 1 && said.iter().all(|(level, _)| *level == log::Level::Warn),
+            "one warning names the log it gave up on: {said:?}"
         );
     }
 
