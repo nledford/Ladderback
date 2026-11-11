@@ -116,14 +116,14 @@ fn snapshot_id(snapshot: &SnapshotFile) -> SnapshotId {
 }
 
 async fn init(folders: &Folders) {
+    init_with(folders, ConfigOptions::default()).await;
+}
+
+async fn init_with(folders: &Folders, config: ConfigOptions) {
     let folders = folders.clone();
     blocking(move || {
         repository(&folders)
-            .init(
-                &credentials(),
-                &KeyOptions::default(),
-                &ConfigOptions::default(),
-            )
+            .init(&credentials(), &KeyOptions::default(), &config)
             .expect("the scratch repository initializes");
     })
     .await;
@@ -132,6 +132,22 @@ async fn init(folders: &Folders) {
 #[given("a new repository")]
 async fn a_new_repository(agent: &mut Agent) {
     new_repository(agent).await;
+}
+
+/// Small packs, so that a backup of a few megabytes has written whole packs
+/// long before it ends.
+#[given(expr = "a new repository that saves data in packs of {int} MiB")]
+async fn a_new_repository_with_small_packs(agent: &mut Agent, mib: u64) {
+    let config: ConfigOptions = toml::from_str(&format!(
+        "set-datapack-size = \"{mib} MiB\"\nset-datapack-growfactor = 0"
+    ))
+    .expect("rustic's config options");
+    let folders = Folders {
+        cold: agent.scratch().join("repo"),
+        hot: None,
+    };
+    init_with(&folders, config).await;
+    agent.backup.repository = Some(folders.cold);
 }
 
 /// A scratch repository the scenario's plan backs up into: what "a new
@@ -195,6 +211,26 @@ fn plan_with_large_file(agent: &mut Agent, plan: String) {
         .unwrap()
         .set_len(16 << 30)
         .unwrap();
+}
+
+/// Data no chunk of which repeats, so a backup must save every byte of it:
+/// files of 4 MiB from a seeded generator (SplitMix64).
+#[given(expr = "a plan {string} backing up a folder with {int} MiB of new data")]
+fn plan_with_new_data(agent: &mut Agent, plan: String, mib: usize) {
+    let source = new_source(agent, &plan);
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    for n in 0..mib.div_ceil(4) {
+        let mut file = Vec::with_capacity(4 << 20);
+        while file.len() < 4 << 20 {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            file.extend_from_slice(&(z ^ (z >> 31)).to_le_bytes());
+        }
+        fs::write(source.join(format!("data-{n}.bin")), file).unwrap();
+    }
+    agent.backup.source_bytes = Some((mib as u64) << 20);
 }
 
 /// Only runs where file permissions work: `tests/e2e.rs` skips scenarios
@@ -285,6 +321,35 @@ async fn backs_up_and_cancels(agent: &mut Agent) {
     agent.run_backup_cancelled_after(CANCEL_AFTER).await;
 }
 
+#[when(
+    expr = "the agent backs up the plan and the user cancels it once the repository holds {int} packs"
+)]
+async fn backs_up_and_cancels_once_packs_saved(agent: &mut Agent, packs: usize) {
+    let data = agent.repository().cold.join("data");
+    agent
+        .run_backup_cancelled_once(async move {
+            while packs_in(&data) < packs {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+}
+
+/// The packs in a local repository's `data` folder: its files, but for the
+/// temporary ones the local backend writes a pack to before renaming it.
+fn packs_in(data: &Path) -> usize {
+    let Ok(folders) = fs::read_dir(data) else {
+        return 0;
+    };
+    folders
+        .flatten()
+        .filter_map(|folder| fs::read_dir(folder.path()).ok())
+        .flatten()
+        .flatten()
+        .filter(|file| !file.file_name().to_string_lossy().contains("-tmp-"))
+        .count()
+}
+
 #[then(expr = "the repository has {int} snapshot(s)")]
 async fn has_snapshots(agent: &mut Agent, count: usize) {
     assert_eq!(snapshots(&agent.repository()).await.len(), count);
@@ -294,6 +359,40 @@ async fn has_snapshots(agent: &mut Agent, count: usize) {
 async fn has_no_snapshots(agent: &mut Agent) {
     let snapshots = snapshots(&agent.repository()).await;
     assert!(snapshots.is_empty(), "{snapshots:?}");
+}
+
+/// rustic's own check, reading every pack: a pack no index lists is one of
+/// its warnings.
+#[then("a check of the repository finds nothing to warn about")]
+async fn check_finds_nothing(agent: &mut Agent) {
+    let folders = agent.repository();
+    let findings = blocking(move || {
+        let results = repository(&folders)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .check(rustic_core::CheckOptions::default().read_data(true))
+            .expect("the check runs");
+        results
+            .0
+            .iter()
+            .map(|(level, finding)| format!("{level:?}: {finding}"))
+            .collect::<Vec<_>>()
+    })
+    .await;
+    assert!(findings.is_empty(), "{findings:#?}");
+}
+
+#[then("the backup adds less data than the folder holds")]
+fn adds_less_than_the_folder(agent: &mut Agent) {
+    let Some(EngineResult::Backup(summary)) = &agent.finished().result else {
+        panic!("the operation made no backup: {:?}", agent.operation());
+    };
+    let folder = agent.backup.source_bytes.expect("a folder of known size");
+    assert!(
+        summary.data_added < folder,
+        "the backup added {} of the folder's {folder} bytes",
+        summary.data_added
+    );
 }
 
 #[then("the snapshot is tagged with the plan and the agent")]
@@ -381,6 +480,8 @@ pub struct BackupSetup {
     pub hot: Option<PathBuf>,
     pub plan: Option<domain::PlanId>,
     pub source: Option<PathBuf>,
+    /// How many bytes the plan's folder holds, where a step made it so.
+    pub source_bytes: Option<u64>,
     /// A snapshot made before the one under test.
     pub earlier: Option<SnapshotId>,
     pub deadline_budget: Option<SignedDuration>,

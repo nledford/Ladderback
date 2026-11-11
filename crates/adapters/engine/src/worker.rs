@@ -11,6 +11,7 @@
 //! the passwords in URLs, in every text it writes. What the programs it
 //! starts write to stderr, it can't mask; the daemon does that.
 
+mod cancel;
 mod convert;
 mod events;
 mod fake;
