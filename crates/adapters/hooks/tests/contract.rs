@@ -178,7 +178,7 @@ async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
         // hang the run for something else to give up on.
         let outcome = tokio::time::timeout(Duration::from_secs(30), runner.run(&hook, &context))
             .await
-            .expect("the hook was still running 30 s after its timeout");
+            .expect("the call was still running 30 s after it began");
         let elapsed = started.elapsed();
         assert_eq!(outcome.status, HookStatus::TimedOut);
         let lines = harness.written().await;

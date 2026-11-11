@@ -84,9 +84,11 @@ fn pid_in(lines: &[String]) -> i32 {
 }
 
 /// The longest a call may take to stop a hook that ends on its SIGTERM, with
-/// a timeout of a second: the signal, the hook's own exit and slack for a
-/// loaded machine.
-const ENDS_ON_TERM: Duration = Duration::from_secs(11);
+/// a timeout of a second, which takes about that: the signal, the hook's own
+/// exit and slack for a loaded machine. No longer, so that a mutant that
+/// fails every test at its bound still ends inside cargo-mutants' limit on a
+/// runner with few cores.
+const ENDS_ON_TERM: Duration = Duration::from_secs(6);
 
 /// A loop a hook starts in the background: it writes a line to `$1.ticks`
 /// every 50 ms for as long as `$1`, the log, is there, so one that a test
@@ -295,8 +297,8 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         ),
         limit,
         grace,
-        // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
-        limit + grace + Duration::from_secs(15),
+        // The reap after the SIGKILL is bounded by five seconds; one more is slack.
+        limit + grace + Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -321,7 +323,7 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
 
 /// Waits until the log at `log` has the line `line`.
 async fn logged(log: &Path, line: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if lines(log).iter().any(|written| written == line) {
             return;
@@ -659,7 +661,7 @@ async fn what_ignores_sigterm_is_killed_with_the_hook_when_the_grace_is_over() {
         &format!("trap '' TERM\n{TICKER}echo ready >> \"$1\"\nwhile :; do sleep 1 & wait $!; done"),
         limit,
         grace,
-        limit + grace + Duration::from_secs(15),
+        limit + grace + Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -709,7 +711,7 @@ async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
     let timeout = Duration::from_millis(300);
     let runner = ProcessHookRunner::with_timeout(timeout);
     let started = Instant::now();
-    let outcome = within(Duration::from_secs(10), runner.run(&entry, &context())).await;
+    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
     assert_eq!(outcome.status, HookStatus::TimedOut);
     assert!(
         started.elapsed() >= timeout,
