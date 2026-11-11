@@ -14,7 +14,7 @@ import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { serveDemoPlan } from "./live.ts";
+import { serveDemoPlans } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
 const ALIAS = "demo";
@@ -89,7 +89,7 @@ function configPath(world: BrowserWorld): string {
   return path.join(world.ownServer.scratch, "config", "config.toml");
 }
 
-/** The source folder serveDemoPlan filled. */
+/** The source folder serveDemoPlans filled. */
 function sourcePath(world: BrowserWorld): string {
   assert.ok(world.ownServer, "this scenario's daemon was never started");
   return path.join(world.ownServer.scratch, "source");
@@ -126,7 +126,7 @@ async function textOfDialog(world: BrowserWorld, name: string): Promise<string> 
 }
 
 Given("a demo plan {string} with a tiny scratch repository", async function (this: BrowserWorld, plan: string) {
-  await serveDemoPlan(this, plan, "tiny");
+  await serveDemoPlans(this, [plan], "tiny");
 });
 
 Given("the plan {string} has been backed up {int} times", async function (this: BrowserWorld, plan: string, times: number) {

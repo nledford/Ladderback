@@ -87,7 +87,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let body = text(&localizer, msg::UI_OPERATIONS_BODY);
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
-    let start_label = text(&localizer, msg::UI_START_BACKUP);
+    let start_localizer = Arc::clone(&localizer);
     let caption = text(&localizer, msg::UI_OPERATIONS_CAPTION);
     let (plan_column, status_column, started_column, actions_column) = (
         text(&localizer, msg::UI_COLUMN_PLAN),
@@ -185,6 +185,14 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             let ops = start_ops;
                             let base = start_base.clone();
                             let error_localizer = Arc::clone(&localizer_for_errors);
+                            // Named with its plan, as a row's Cancel is: a
+                            // reader tabbing through the plans hears which
+                            // one each button runs (2.4.6, 4.1.2).
+                            let label = text_with(
+                                &start_localizer,
+                                msg::UI_START_PLAN,
+                                &[("plan", MsgArg::Text(plan.id.clone()))],
+                            );
                             view! {
                                 <button
                                     type="button"
@@ -222,7 +230,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         });
                                     }
                                 >
-                                    {start_label.clone()}
+                                    {label}
                                 </button>
                             }
                         })

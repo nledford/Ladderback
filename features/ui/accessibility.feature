@@ -115,7 +115,7 @@ Feature: Accessibility of the app shell
     When I open the address "/operations"
     Then the page is titled "Operations – Ladderback"
     And the page has no accessibility violations
-    When I press Tab until focus is on the button "Start backup"
+    When I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the table "Operations" has a row "demo-home" that shows "Running"
     And the polite region comes to contain "Backup started."
@@ -123,10 +123,27 @@ Feature: Accessibility of the app shell
     And the polite region comes to contain "Backup finished."
     And the page has no accessibility violations
 
+  # A start button is named with the plan it starts (2.4.6, 4.1.2), so a reader
+  # who tabs through the plans hears which one each button runs, and each
+  # button starts that plan and no other.
+  Scenario: Each plan's start button names the plan it starts
+    Given two demo plans "demo-home" and "demo-work" with a scratch repository
+    When I open the address "/operations"
+    Then the page has no accessibility violations
+    When I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    Then the table "Operations" has a row "demo-home" that shows "Succeeded"
+    And the table "Operations" has 1 rows
+    When I press Tab until focus is on the button "Start backup of demo-work"
+    And I press Enter
+    Then the table "Operations" has a row "demo-work" that shows "Succeeded"
+    And the table "Operations" has 2 rows
+    And the page has no accessibility violations
+
   Scenario: Cancelling a running backup by keyboard
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Running"
     And I press Tab until focus is on the button "Cancel demo-home"
@@ -138,10 +155,10 @@ Feature: Accessibility of the app shell
   Scenario: The operations table sorts by keyboard with the sort announced
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has 2 rows
     And I press Tab until focus is on the button "Sort by started"
@@ -190,10 +207,10 @@ Feature: Accessibility of the app shell
   Scenario: The snapshots page lists a plan's snapshots newest first
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has 2 rows
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -208,7 +225,7 @@ Feature: Accessibility of the app shell
     Given a demo plan "demo-home" with a scratch repository
     And the browser is in the time zone "Pacific/Auckland"
     When I open the address "/operations"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
     Then the table "Operations" shows its "Started" column in the time zone "Pacific/Auckland"
@@ -227,7 +244,7 @@ Feature: Accessibility of the app shell
   Scenario: A page opened mid-run shows the running operation before any event arrives
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
-    And I press Tab until focus is on the button "Start backup"
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Running"
     And I reload the page
