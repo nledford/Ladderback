@@ -7,7 +7,9 @@
 # "survives" without the code ever running. Its tests run in `just test-wasm`
 # (CI lane: #46); a wasm32 mutants run is done by hand when it changes:
 # `CARGO_BUILD_TARGET=wasm32-unknown-unknown`, with the runner `just test-wasm`
-# sets, `cargo mutants -p l10n --features browser-intl --file <it>`.
+# sets, `env -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR cargo mutants -p l10n
+# --features browser-intl --file <it>` (unset as the `mutants` recipe does,
+# technical design §13.5).
 #
 # The `web` crate's DOM glue (`components.rs`, `live.rs`, `page.rs`,
 # `gallery.rs`, `ws.rs`) and the `main` of `main.rs` (the rest of that file is
