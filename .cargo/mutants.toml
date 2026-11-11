@@ -9,11 +9,12 @@
 # `CARGO_BUILD_TARGET=wasm32-unknown-unknown`, with the runner `just test-wasm`
 # sets, `cargo mutants -p l10n --features browser-intl --file <it>`.
 #
-# The `web` crate's DOM glue (`main.rs`, `components.rs`, `live.rs`,
-# `page.rs`, `gallery.rs`, `ws.rs`) calls `web-sys`, which only works in a
-# browser: on the host every mutant of it builds and "survives" without the
-# code ever running, and a mutant that panics on the host is caught for the
-# wrong reason. The `@ui` scenarios of `features/ui/` run it in Chromium
+# The `web` crate's DOM glue (`components.rs`, `live.rs`, `page.rs`,
+# `gallery.rs`, `ws.rs`) and the `main` of `main.rs` (the rest of that file is
+# host code, so `main` is left out by name below) call `web-sys`, which only
+# works in a browser: on the host every mutant of it builds and "survives"
+# without the code ever running, and a mutant that panics on the host is caught
+# for the wrong reason. The `@ui` scenarios of `features/ui/` run it in Chromium
 # (`just test-ui`). What decides anything on the host stays covered: the
 # announcer's timing (`announcer.rs`), the page titles (`routes.rs`), the
 # focus wrap (`focus.rs`), the toast's arrival and lifetime (`toast.rs`) and
@@ -35,9 +36,23 @@ exclude_globs = [
     "crates/web/src/gallery.rs",
     "crates/web/src/ws.rs",
 ]
-# Core error types implement Display only because `Error` requires it; they
-# carry codes and values, and adapters render them (technical design §8.4).
-exclude_re = ["<impl std::fmt::Display for "]
+# Mutants that no test can tell from the real code, or that no host can run:
+exclude_re = [
+    # Core error types implement Display only because `Error` requires it; they
+    # carry codes and values, and adapters render them (technical design §8.4).
+    "<impl std::fmt::Display for ",
+    # `web`'s `main` mounts the app into the page's `#app` through `web-sys`,
+    # which only works in a browser: on the host the mutant builds and nothing
+    # calls `main`. The `@ui` scenarios run it in Chromium, where a `main` that
+    # mounts nothing leaves them nothing to drive.
+    'crates/web/src/main\.rs.*: replace main with \(\)$',
+    # `hooks`' `READ_CHUNK` is the size of the buffer one read of a hook's pipe
+    # fills: it changes how many reads a stream takes, not what is kept of it
+    # nor whether it is marked cut, so no test can tell `8 * 1024` from
+    # `8 + 1024`. The size that matters, none (`8 / 1024` is 0, so nothing is
+    # ever read), is not excluded and is caught.
+    'crates/adapters/hooks/src/lib\.rs.*: replace \* with \+$',
+]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
 # Skip gitignored files when copying the tree (off by default since
