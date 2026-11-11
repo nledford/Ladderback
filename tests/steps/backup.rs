@@ -77,6 +77,40 @@ pub async fn snapshots(folders: &Folders) -> Vec<SnapshotFile> {
     .await
 }
 
+/// The newest snapshot in the scenario's repository: the backup's.
+pub(crate) async fn newest_snapshot(agent: &Agent) -> SnapshotFile {
+    snapshots(&agent.repository())
+        .await
+        .pop()
+        .expect("the backup's snapshot")
+}
+
+/// The name of every file and folder the newest snapshot holds, at any
+/// depth, as rustic itself lists them.
+pub(crate) async fn names_in_newest(agent: &Agent) -> Vec<String> {
+    let snapshot = newest_snapshot(agent).await;
+    let folders = agent.repository();
+    blocking(move || {
+        let repository = repository(&folders)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .to_indexed()
+            .expect("the scratch repository indexes");
+        let root = repository
+            .node_from_snapshot_and_path(&snapshot, "")
+            .expect("the snapshot's root");
+        repository
+            .ls(&root, &rustic_core::LsOptions::default())
+            .expect("the snapshot lists")
+            .map(|entry| {
+                let (_, node) = entry.expect("a listed node");
+                node.name().to_string_lossy().into_owned()
+            })
+            .collect()
+    })
+    .await
+}
+
 fn snapshot_id(snapshot: &SnapshotFile) -> SnapshotId {
     SnapshotId::parse(snapshot.id.to_hex().as_str()).expect("rustic's IDs are 64 hex digits")
 }
@@ -214,6 +248,12 @@ fn folder_moved(agent: &mut Agent) {
 
 #[given("the folder was backed up without Ladderback")]
 async fn backed_up_without_ladderback(agent: &mut Agent) {
+    back_up_without_ladderback(agent, None).await;
+}
+
+/// A plain rustic backup of the plan's folder, with no tags or label, under
+/// `host` or, when it is `None`, the machine's own name, as rustic chooses.
+pub(crate) async fn back_up_without_ladderback(agent: &mut Agent, host: Option<String>) {
     let (folders, source) = (agent.repository(), agent.source());
     let snapshot = blocking(move || {
         let repo = repository(&folders)
@@ -222,7 +262,7 @@ async fn backed_up_without_ladderback(agent: &mut Agent) {
             .to_indexed_ids()
             .unwrap();
         let source = PathList::from_iter([source]).sanitize().unwrap();
-        let snapshot = SnapshotOptions::default().to_snapshot().unwrap();
+        let snapshot = SnapshotOptions::default().host(host).to_snapshot().unwrap();
         repo.backup(&BackupOptions::default(), &source, snapshot)
             .expect("a plain rustic backup")
     })
@@ -344,6 +384,12 @@ pub struct BackupSetup {
     /// A snapshot made before the one under test.
     pub earlier: Option<SnapshotId>,
     pub deadline_budget: Option<SignedDuration>,
+    /// The plan's own host, written to the daemon's configuration.
+    pub plan_host: Option<domain::planning::Hostname>,
+    /// The agent's hostname, written to the daemon's configuration.
+    pub agent_hostname: Option<domain::planning::Hostname>,
+    /// The plan's source filter, written to the daemon's configuration.
+    pub filter: domain::planning::SourceFilter,
 }
 
 impl Agent {
@@ -380,6 +426,8 @@ impl Agent {
             tags: self.plan_tags(),
             extra_tags: Vec::new(),
             label: None,
+            host: None,
+            filter: domain::planning::SourceFilter::default(),
             deadline_budget: self
                 .backup
                 .deadline_budget

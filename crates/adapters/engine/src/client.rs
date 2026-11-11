@@ -1311,6 +1311,8 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .map(|tag| tag.as_str().to_owned())
                 .collect(),
             label: job.label,
+            host: None,
+            filter: crate::job::SourceFilterSpec::default(),
             deadline_budget: job.deadline_budget,
         }),
         Job::Forget(job) => JobKind::Forget(ForgetJobSpec {

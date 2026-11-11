@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
-use domain::planning::masked_options;
+use domain::planning::{Hostname, SourceFilter, masked_options};
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use futures::stream::BoxStream;
@@ -59,6 +59,10 @@ pub enum EngineError {
 }
 
 /// What an operation should do.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one job per operation, built once and moved to the engine: boxing the backup would only add an allocation"
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
     /// Touches no repository. Exercises the engine boundary (worker process,
@@ -228,6 +232,13 @@ pub struct BackupJob {
     /// reserved `ladderback-` prefix.
     pub extra_tags: Vec<UserTag>,
     pub label: Option<String>,
+    /// The snapshot host the snapshot records ([`Plan::snapshot_host`]).
+    /// `None` leaves the name to the engine: the machine's own.
+    ///
+    /// [`Plan::snapshot_host`]: domain::planning::Plan::snapshot_host
+    pub host: Option<Hostname>,
+    /// What the backup leaves out of `sources`: the plan's source filter.
+    pub filter: SourceFilter,
     /// See [`Job::deadline_budget`].
     pub deadline_budget: SignedDuration,
 }
@@ -507,6 +518,8 @@ mod tests {
             tags: PlanTags::new(plan.clone(), AgentId::from_uuid(Uuid::from_u128(1))),
             extra_tags: Vec::new(),
             label: None,
+            host: None,
+            filter: SourceFilter::default(),
             deadline_budget: SignedDuration::from_hours(6),
         });
         assert_eq!(backup.kind(), OperationKind::Backup);

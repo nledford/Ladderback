@@ -82,6 +82,10 @@ pub struct JobSpec {
     pub job: JobKind,
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one spec per worker, read once: boxing the backup would only add an allocation"
+)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobKind {
@@ -180,9 +184,32 @@ pub struct BackupJobSpec {
     pub agent: AgentId,
     pub extra_tags: Vec<String>,
     pub label: Option<String>,
+    /// The host the snapshot records. The worker checks it as the daemon's
+    /// `Hostname` does; `None` leaves the machine's own name to rustic.
+    pub host: Option<String>,
+    /// What the backup leaves out of `sources`.
+    pub filter: SourceFilterSpec,
     /// Counted from the start of the index read; once it passes, the worker
     /// stops (I3).
     pub deadline_budget: SignedDuration,
+}
+
+/// A plan's source filter as the worker takes it: the fields of rustic's
+/// `Excludes` and `LocalSourceFilterOptions` that a plan sets (§6.1). Its
+/// lists are as long as the plan's; the message cap bounds them, as it does
+/// every list in a spec (§4.1).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceFilterSpec {
+    pub globs: Vec<String>,
+    pub iglobs: Vec<String>,
+    pub glob_files: Vec<String>,
+    pub iglob_files: Vec<String>,
+    pub git_ignore: bool,
+    pub no_require_git: bool,
+    pub custom_ignorefiles: Vec<String>,
+    pub exclude_if_present: Vec<String>,
+    pub exclude_if_xattr: Vec<String>,
+    pub one_file_system: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -499,6 +526,19 @@ mod tests {
             agent: AgentId::from_uuid(domain::Uuid::from_u128(1)),
             extra_tags: vec!["weekly".to_owned()],
             label: Some("laptop".to_owned()),
+            host: Some("demo-laptop".to_owned()),
+            filter: SourceFilterSpec {
+                globs: vec!["!*.tmp".to_owned()],
+                iglobs: vec!["!node_modules".to_owned()],
+                glob_files: vec!["/home/demo/.globs".to_owned()],
+                iglob_files: vec!["/home/demo/.iglobs".to_owned()],
+                git_ignore: true,
+                no_require_git: true,
+                custom_ignorefiles: vec![".rusticignore".to_owned()],
+                exclude_if_present: vec![".nobackup".to_owned()],
+                exclude_if_xattr: vec!["user.nobackup".to_owned()],
+                one_file_system: true,
+            },
             deadline_budget: SignedDuration::from_hours(6),
         };
         for job in [
@@ -584,6 +624,8 @@ mod tests {
             agent: AgentId::from_uuid(domain::Uuid::from_u128(1)),
             extra_tags: Vec::new(),
             label: None,
+            host: None,
+            filter: SourceFilterSpec::default(),
             deadline_budget: SignedDuration::from_hours(6),
         }));
         let text = format!("{spec:?}");
