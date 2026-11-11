@@ -237,7 +237,7 @@ impl OperationRecord {
             finished_at: operation.finished_at().map(to_millisecond),
             warning_count: operation.warning_count(),
             result: result.cloned(),
-            repository_alias: None,
+            repository_alias: operation.repository_alias().cloned(),
         }
     }
 
