@@ -1,6 +1,6 @@
 ## 14. Milestones
 
-Rough effort assumes one experienced developer working part-time (~10–15 h/week). Everything that is expensive to retrofit after the first real backup (repo identity, snapshot tags, the worker deadline, the config schema version, request checks) is in M1. Each milestone is finished when its feature files pass (§13.2).
+Rough effort assumes one experienced developer working part-time (~10–15 h/week). Everything that is expensive to retrofit after the first real backup (repo identity, snapshot tags, the worker deadline, the config schema version, request checks) is in M1. Each milestone is finished when its feature files pass (§13.2). A [GitHub milestone](https://github.com/nledford/Ladderback/milestones) of the same name collects the issues that must close before it is finished; this section, not the milestone, says what each one delivers.
 
 | # | Milestone | Deliverables | Effort |
 |---|---|---|---|
