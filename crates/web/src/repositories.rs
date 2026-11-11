@@ -203,7 +203,8 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretCommandTimedOut
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
-        | ErrorCode::TemplateInvalid => {
+        | ErrorCode::TemplateInvalid
+        | ErrorCode::LocationTooManyCredentials => {
             let named = args.iter().find_map(|(name, value)| match value {
                 MsgArg::Text(field) if name == "field" => Some(field.as_str()),
                 _ => None,

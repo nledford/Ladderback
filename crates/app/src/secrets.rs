@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    MAX_SECRET_BYTES, Part, Reference, SecretError, SecretRef, SecretValue, SecretWarning,
-    Template, TemplateError, has_reference,
+    MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, Part, Reference, SecretError, SecretRef, SecretValue,
+    SecretWarning, Template, TemplateError, has_reference, too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
@@ -95,6 +95,7 @@ impl ResolveRepository {
         settings: &RepositorySettings,
     ) -> Result<ResolvedRepository, ResolveError> {
         refuse_references_in_arguments(settings)?;
+        refuse_too_many_credentials(settings)?;
         let mut run = Run {
             resolver: self.resolver.as_ref(),
             values: BTreeMap::new(),
@@ -178,6 +179,31 @@ fn refuse_references_in_arguments(settings: &RepositorySettings) -> Result<(), R
     }
     if let Some(name) = commands(&settings.options_cold) {
         return Err(refuse(Field::OptionCold(name)));
+    }
+    Ok(())
+}
+
+/// A redactor looks for each credential written in an rclone location in
+/// every text it masks, and masks a location with more than
+/// [`MAX_RCLONE_CREDENTIALS`] whole, where one of them on its own, quoted in
+/// an error of rclone's, would show (I4). Such a location is refused before
+/// anything is read.
+fn refuse_too_many_credentials(settings: &RepositorySettings) -> Result<(), ResolveError> {
+    let refuse = |field| ResolveError {
+        field,
+        cause: Cause::TooManyCredentials {
+            limit: MAX_RCLONE_CREDENTIALS,
+        },
+    };
+    if too_many_rclone_credentials(&settings.repository) {
+        return Err(refuse(Field::Repository));
+    }
+    if settings
+        .repo_hot
+        .as_deref()
+        .is_some_and(too_many_rclone_credentials)
+    {
+        return Err(refuse(Field::RepoHot));
     }
     Ok(())
 }

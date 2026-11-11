@@ -130,8 +130,21 @@ pub const MAX_RCLONE_CREDENTIALS: usize = 16;
 /// credentials: settings whose key names one ([`is_rclone_secret_option`])
 /// and whose value, quotes aside, is not empty. False for any other
 /// location.
-pub fn too_many_rclone_credentials(_location: &str) -> bool {
-    todo!()
+pub fn too_many_rclone_credentials(location: &str) -> bool {
+    rclone_remote(location).is_some_and(|remote| {
+        credential_values(&written_pieces(remote).0).len() > MAX_RCLONE_CREDENTIALS
+    })
+}
+
+/// The value of each setting of an rclone remote, read as `pieces`, whose
+/// key names a credential ([`is_rclone_secret_option`]) and that is not
+/// empty, quotes aside.
+fn credential_values(pieces: &[Piece]) -> Vec<Range<usize>> {
+    rclone_settings(pieces)
+        .into_iter()
+        .filter_map(|setting| credential(pieces, setting))
+        .filter(|value| !unquoted(pieces, value.clone()).is_empty())
+        .collect()
 }
 
 /// What of an rclone location must not show wherever the location is echoed
@@ -141,18 +154,14 @@ pub fn too_many_rclone_credentials(_location: &str) -> bool {
 /// reads it: with `$${` as `${`, without the quotes around it, and with a
 /// quote written twice inside them as one. A value with a `${…}` reference
 /// in it is given only as written. A location with more than
-/// [`MAX_RCLONE_CREDENTIALS`] of them is one secret whole. Empty for any
-/// other location.
+/// [`MAX_RCLONE_CREDENTIALS`] of them, which a job refuses, is one secret
+/// whole. Empty for any other location.
 pub(super) fn rclone_credentials(location: &str) -> Vec<SecretValue> {
     let Some(remote) = rclone_remote(location) else {
         return Vec::new();
     };
     let (pieces, starts) = written_pieces(remote);
-    let values: Vec<Range<usize>> = rclone_settings(&pieces)
-        .into_iter()
-        .filter_map(|setting| credential(&pieces, setting))
-        .filter(|value| !unquoted(&pieces, value.clone()).is_empty())
-        .collect();
+    let values = credential_values(&pieces);
     if values.len() > MAX_RCLONE_CREDENTIALS {
         return vec![SecretValue::new(location)];
     }

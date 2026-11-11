@@ -1528,7 +1528,9 @@ async fn secret_refusal(
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
-        Cause::TooManyCredentials { .. } => todo!(),
+        Cause::TooManyCredentials { .. } => {
+            refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
+        }
         Cause::Invalid(template) => {
             let mut args = vec![field()];
             if let Some(at) = template_error_place(template) {
