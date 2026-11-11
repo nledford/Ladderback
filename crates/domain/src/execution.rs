@@ -5,7 +5,7 @@ pub mod plan_tags;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp};
+use crate::{OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
 /// The most warnings one operation keeps (technical design §9). Warnings
 /// past it are counted but not kept ([`Operation::warning_count`]), so a
@@ -254,6 +254,12 @@ pub struct Operation {
     /// Every warning recorded; `warnings` keeps only the first
     /// [`MAX_STORED_WARNINGS`].
     warning_count: u64,
+    /// The alias this agent gave the repository a maintenance operation runs
+    /// on, as it stood when the run started: a repository renamed since keeps
+    /// its old name in the log (§16, decision NN). `None` for a backup, which
+    /// its plan names, and for an operation an earlier build logged.
+    #[serde(default)]
+    repository_alias: Option<RepositoryAlias>,
 }
 
 impl Operation {
@@ -275,7 +281,20 @@ impl Operation {
             finished_at: None,
             warnings: Vec::new(),
             warning_count: 0,
+            repository_alias: None,
         }
+    }
+
+    /// The operation, named with the alias of the repository it runs on.
+    pub fn with_repository_alias(self, alias: RepositoryAlias) -> Self {
+        let _ = alias;
+        todo!()
+    }
+
+    /// The alias the repository had when the operation was queued, when one
+    /// was given ([`Self::with_repository_alias`]).
+    pub fn repository_alias(&self) -> Option<&RepositoryAlias> {
+        todo!()
     }
 
     pub fn id(&self) -> OperationId {
@@ -512,6 +531,16 @@ mod tests {
         assert_eq!(op.kind(), OperationKind::Prune);
         assert_eq!(op.trigger(), Trigger::CatchUp);
         assert_eq!(op.target(), &target);
+    }
+
+    #[test]
+    fn an_operation_keeps_the_alias_of_the_repository_it_runs_on() {
+        let alias = RepositoryAlias::parse("demo").unwrap();
+        assert_eq!(queued().repository_alias(), None);
+        let mut op = queued().with_repository_alias(alias.clone());
+        op.start(t(10)).unwrap();
+        op.succeed(t(20)).unwrap();
+        assert_eq!(op.repository_alias(), Some(&alias));
     }
 
     #[test]

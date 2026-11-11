@@ -87,6 +87,7 @@ pub(crate) fn backup_result(
         files_new: summary.files_new,
         files_changed: summary.files_changed,
         files_unmodified: summary.files_unmodified,
+        bytes_processed: 0,
         data_added: summary.data_added,
         data_added_packed: summary.data_added_packed,
         error_count: summary.error_count,
@@ -349,6 +350,7 @@ mod tests {
         summary.files_new = 3;
         summary.files_changed = 2;
         summary.files_unmodified = 11;
+        summary.total_bytes_processed = 65_536;
         summary.data_added = 4096;
         summary.data_added_packed = 1024;
         summary.error_count = 1;
@@ -371,6 +373,7 @@ mod tests {
                 files_new: 3,
                 files_changed: 2,
                 files_unmodified: 11,
+                bytes_processed: 65_536,
                 data_added: 4096,
                 data_added_packed: 1024,
                 error_count: 1,
@@ -382,6 +385,12 @@ mod tests {
     fn a_first_backup_has_no_parent() {
         let result = backup_result(repository(), &summarized(None)).unwrap();
         assert_eq!(result.parent, None);
+    }
+
+    #[test]
+    fn a_backup_result_carries_the_bytes_the_backup_went_through() {
+        let result = backup_result(repository(), &summarized(None)).unwrap();
+        assert_eq!(result.bytes_processed, 65_536);
     }
 
     #[test]

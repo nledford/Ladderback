@@ -173,6 +173,7 @@ impl From<Summary> for EngineResult {
                 data_added,
                 data_added_packed,
                 error_count,
+                bytes_processed: None,
             }),
             Summary::Prune {
                 repository,

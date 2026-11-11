@@ -30,15 +30,24 @@ interface Operation {
   "finished-at": string | null;
   "warning-codes": string[];
   "failure-code": string | null;
-  result: null;
+  result: Record<string, unknown> | null;
 }
 
 export class ScriptedDaemon {
   /** The history the page reads: the operations as the daemon's wire has
    *  them, newest first. */
   #operations: Operation[] = [];
-  /** The events stream the page last opened, once it has opened one. */
+  /** The events stream the page last opened, once it has one open; none
+   *  between a drop and the page's next one. */
   #stream: WebSocketRoute | null = null;
+  /** Whether the next reading of the history is held back. */
+  #holdNext = false;
+  /** The answer to the reading held back, as the history was when the page
+   *  asked: what the daemon had then. */
+  #held: (() => Promise<void>) | null = null;
+  /** The readings of the history the page asked for, with its events stream
+   *  open, while one was held back. */
+  #readsBesideTheHeld = 0;
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -75,11 +84,17 @@ export class ScriptedDaemon {
 
   /** Answers a context's reads of the daemon with this script. */
   async install(context: BrowserContext): Promise<void> {
-    await context.route("**/api/v1/operations", (route) =>
-      route.request().method() === "GET"
-        ? route.fulfill({ json: { operations: this.#operations, next: null } })
-        : route.fallback(),
-    );
+    await context.route("**/api/v1/operations", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const json = { operations: structuredClone(this.#operations), next: null };
+      if (this.#holdNext) {
+        this.#holdNext = false;
+        this.#held = () => route.fulfill({ json });
+        return;
+      }
+      if (this.#held !== null && this.#stream !== null) this.#readsBesideTheHeld += 1;
+      await route.fulfill({ json });
+    });
     await context.route("**/api/v1/plans", (route) =>
       route.fulfill({
         json: {
@@ -93,6 +108,45 @@ export class ScriptedDaemon {
     await context.routeWebSocket("**/api/v1/events", (stream) => {
       this.#stream = stream;
     });
+  }
+
+  /** Holds back the answer to the page's next reading of the history, until
+   *  `answerTheHeld`. */
+  holdTheNextRead(): void {
+    this.#holdNext = true;
+  }
+
+  /** Waits until the page has asked for the reading held back. */
+  async untilAReadIsHeld(): Promise<void> {
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (this.#held === null) {
+      if (Date.now() > end) throw new Error("the page never read the history again");
+      await sleep(50);
+    }
+  }
+
+  /** How many readings of the history the page asked for, its events stream
+   *  open, while one was held back. */
+  get readsBesideTheHeld(): number {
+    return this.#readsBesideTheHeld;
+  }
+
+  /** Answers the reading held back, with the history as it was when the page
+   *  asked for it. */
+  async answerTheHeld(): Promise<void> {
+    const held = this.#held;
+    if (held === null) throw new Error("no reading of the history is held back");
+    this.#held = null;
+    await held();
+  }
+
+  /** Closes the events stream the page has open; the page opens its next one
+   *  after it has read the history again. */
+  async dropTheStream(): Promise<void> {
+    const stream = this.#stream;
+    if (stream === null) throw new Error("the page has no events stream open");
+    this.#stream = null;
+    await stream.close();
   }
 
   /** Tells the page `event` over its events stream, once it has one open. */
@@ -122,5 +176,17 @@ export class ScriptedDaemon {
     for (let current = 1; current <= steps; current += 1) {
       await this.#tell({ type: "operation-progress", operation, current, total: steps });
     }
+  }
+
+  /** The backup of `plan` succeeds: its log has the end and what the backup
+   *  went through, `files` files, before the page is told, as the daemon's
+   *  own run tells of an end only after its last write to the log. The event
+   *  carries no result: the page has to read the history again to show it. */
+  async succeeds(plan: string, files: number, finishedAt: string): Promise<void> {
+    const backup = this.#backupOf(plan);
+    backup.status = "succeeded";
+    backup["finished-at"] = finishedAt;
+    backup.result = { type: "backup", files, bytes: 4096, "duration-ms": 1000 };
+    await this.#tell({ type: "operation-succeeded", operation: backup.id, finished_at: finishedAt });
   }
 }

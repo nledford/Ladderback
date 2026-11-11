@@ -15,7 +15,7 @@ import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, startServer } from "../support/world.ts";
-import { serveDemoPlans } from "./live.ts";
+import { serveDemoPlans, untilCellLists } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
 const ALIAS = "demo";
@@ -206,6 +206,49 @@ Given("the repository holds data no snapshot uses", async function (this: Browse
     "the forget",
   );
 });
+
+// A check the API starts, as the Snapshots page's review would: it runs to
+// its end before the scenario goes on.
+Given("the repository {string} has been checked", async function (this: BrowserWorld, alias: string) {
+  assert.equal(alias, ALIAS, `only the repository ${ALIAS} is served`);
+  await succeeds(
+    this,
+    await api(this, "POST", `/api/v1/repositories/${ALIAS}/maintenance`, { kind: "check" }),
+    "the check",
+  );
+});
+
+/** The ID of the newest snapshot of `plan` in the scenario's repository, as
+ *  the daemon lists the repository: newest first, each tagged with its plan. */
+async function latestSnapshotOf(world: BrowserWorld, plan: string): Promise<string> {
+  assert.ok(world.baseUrl, "this scenario's daemon was never started");
+  const response = await fetch(new URL(`/api/v1/repositories/${ALIAS}/snapshots`, world.baseUrl), {
+    headers: { Origin: new URL(world.baseUrl).origin },
+  });
+  const listing: unknown = await response.json();
+  assert.equal(response.status, 200, `the snapshots of ${ALIAS} could not be listed: ${JSON.stringify(listing)}`);
+  const snapshots = listing !== null && typeof listing === "object" && "snapshots" in listing ? listing.snapshots : null;
+  assert.ok(Array.isArray(snapshots), `the listing of ${ALIAS} holds no snapshots: ${JSON.stringify(listing)}`);
+  for (const snapshot of snapshots) {
+    if (snapshot === null || typeof snapshot !== "object" || !("id" in snapshot) || !("tags" in snapshot)) continue;
+    const { id, tags } = snapshot;
+    if (typeof id === "string" && Array.isArray(tags) && tags.some((tag) => typeof tag === "string" && tag.includes(plan))) {
+      return id;
+    }
+  }
+  assert.fail(`the repository ${ALIAS} holds no snapshot of the plan ${plan}`);
+}
+
+// The snapshot is read from the repository, through the daemon's listing of
+// it, not from the operation the row shows. A row names a snapshot by the
+// first 8 hex digits of its ID, as rustic does.
+Then(
+  "the row {string} of the table {string} lists the latest snapshot of the plan {string} in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, plan: string, column: string) {
+    const latest = await latestSnapshotOf(this, plan);
+    await untilCellLists(this, name, row, column, latest.slice(0, 8));
+  },
+);
 
 // The daemon asks the engine for the repository's folder, which is gone, and
 // says so with the engine's own words.

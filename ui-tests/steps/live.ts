@@ -14,7 +14,7 @@ import { After, Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
-import { namePattern } from "../support/keyboard.ts";
+import { ISOLATION, namePattern } from "../support/keyboard.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 
@@ -143,6 +143,19 @@ Given("the daemon reports a queued backup of {string}", function (this: BrowserW
   this.scriptedDaemon = daemon;
 });
 
+Given("the daemon reports a running backup of {string}", function (this: BrowserWorld, plan: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addBackup(plan, "running", { queuedAt: "2026-11-09T10:00:00Z", startedAt: "2026-11-09T10:00:01Z" });
+  this.scriptedDaemon = daemon;
+});
+
+Given("the daemon reports running backups of {string} and {string}", function (this: BrowserWorld, first: string, second: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addBackup(first, "running", { queuedAt: "2026-11-09T10:00:00Z", startedAt: "2026-11-09T10:00:01Z" });
+  daemon.addBackup(second, "running", { queuedAt: "2026-11-09T10:00:02Z", startedAt: "2026-11-09T10:00:03Z" });
+  this.scriptedDaemon = daemon;
+});
+
 Given("the daemon reports two finished backups of {string}", function (this: BrowserWorld, plan: string) {
   const daemon = new ScriptedDaemon();
   this.scriptedDaemon = daemon;
@@ -161,6 +174,37 @@ When("the daemon reports that the backup of {string} has started", async functio
 
 When("the daemon reports {int} steps of progress of the backup of {string}", async function (this: BrowserWorld, steps: number, plan: string) {
   await scripted(this).progresses(plan, steps);
+});
+
+When(
+  "the daemon reports that the backup of {string} has succeeded with {int} files",
+  async function (this: BrowserWorld, plan: string, files: number) {
+    await scripted(this).succeeds(plan, files, "2026-11-09T10:05:00Z");
+  },
+);
+
+When("the daemon holds back its answer to the next reading of the history", function (this: BrowserWorld) {
+  scripted(this).holdTheNextRead();
+});
+
+Then("the page reads the history again", async function (this: BrowserWorld) {
+  await scripted(this).untilAReadIsHeld();
+});
+
+When("the daemon's events stream drops", async function (this: BrowserWorld) {
+  await scripted(this).dropTheStream();
+});
+
+// A page that read again beside the reading held back would have asked as it
+// heard the end, before this step began; the moment it waits is for that
+// request to reach the scripted daemon, not for the page.
+Then("the page reads the history no more while that answer is held back", async function (this: BrowserWorld) {
+  await sleep(1_000);
+  assert.equal(scripted(this).readsBesideTheHeld, 0, "the page read the history beside the reading held back");
+});
+
+When("the daemon gives the answer it held back", async function (this: BrowserWorld) {
+  await scripted(this).answerTheHeld();
 });
 
 When("the daemon has stopped", async function (this: BrowserWorld) {
@@ -212,6 +256,73 @@ Then("the table {string} has {int} rows", async function (this: BrowserWorld, na
     `the table ${name} never had ${count} rows`,
   );
 });
+
+/** The row of a table that its row header names. A name the catalog wrote
+ *  holds its arguments in bidi isolation marks, which a reader never hears. */
+function rowNamed(world: BrowserWorld, name: string, row: string): Locator {
+  return table(world, name)
+    .getByRole("row")
+    .filter({ has: world.page.getByRole("rowheader", { name: namePattern(row) }) });
+}
+
+Then("the table {string} has the row {string}", async function (this: BrowserWorld, name: string, row: string) {
+  await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+});
+
+/** What a reader hears of the cell of `row` under the column header `column`,
+ *  once the row is there: its text without bidi isolation marks. */
+export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  const found = rowNamed(world, name, row).first();
+  await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+  const text = await found.evaluate((tr: HTMLTableRowElement, at) => tr.cells[at]?.innerText ?? null, index);
+  assert.ok(text !== null, `the row ${row} of the table ${name} has no cell under ${column}`);
+  return text.replace(/[\u2066-\u2069]/g, "");
+}
+
+/** Waits until the cell of `row` under `column` holds `expected`: a row that
+ *  is still running says what it did only once it has ended. */
+export async function untilCellShows(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
+  const end = Date.now() + ROW_PATIENCE_MS;
+  let seen = "";
+  while (Date.now() < end) {
+    seen = await cellText(world, name, row, column);
+    if (seen.includes(expected)) return;
+    await sleep(250);
+  }
+  assert.fail(`the row ${row} of the table ${name} never showed "${expected}" in its ${column} column; it showed "${seen}"`);
+}
+
+Then(
+  "the row {string} of the table {string} shows {string} in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    await untilCellShows(this, name, row, column, expected);
+  },
+);
+
+/** Waits until the cell of `row` under `column` holds a list with an item
+ *  that says `expected`: a reader hears what a run did as a list, one fact an
+ *  item. */
+export async function untilCellLists(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  const found = rowNamed(world, name, row).first();
+  await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+  // A cell's role leaves the row header out, so the cells count from after it.
+  const headerAt = await found.getByRole("rowheader").evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  assert.equal(headerAt, 0, `the row ${row} of the table ${name} is not named by its first cell`);
+  const said = new RegExp([...expected].map(escape).join(ISOLATION));
+  const item = found.getByRole("cell").nth(index - 1).getByRole("list").getByRole("listitem").filter({ hasText: said });
+  await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1, { timeout: ROW_PATIENCE_MS });
+}
+
+Then(
+  "the row {string} of the table {string} lists {string} in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    await untilCellLists(this, name, row, column, expected);
+  },
+);
 
 // The cells of the named column each carry the instant they show, so the
 // order is read from those, not from localized text.

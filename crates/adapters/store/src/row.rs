@@ -215,6 +215,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         finished_at,
         warning_count,
         result,
+        repository_alias: None,
     })
 }
 

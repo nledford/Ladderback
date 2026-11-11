@@ -150,10 +150,10 @@ async fn reopening_does_not_apply_the_migrations_again() {
     scratch.open().await.close().await;
     let first = migration_rows(&scratch).await;
     let versions: Vec<i64> = first.iter().map(|row| row.0).collect();
-    assert_eq!(versions, [1, 2, 3], "three migrations ship: {first:?}");
+    assert_eq!(versions, [1, 2, 3, 4], "four migrations ship: {first:?}");
     assert!(
         first.iter().all(|row| row.2),
-        "and both are recorded as applied"
+        "and each is recorded as applied"
     );
 
     let store = scratch.open().await;

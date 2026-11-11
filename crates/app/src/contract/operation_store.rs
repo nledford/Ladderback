@@ -5,7 +5,7 @@ use domain::execution::{
     FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
     Target, Transition, Trigger, Warning, WarningKind,
 };
-use domain::{OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
+use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 
 use crate::ports::{
     BackupSummary, CheckSummary, EngineResult, HistoryPage, HistoryQuery, OperationDetail,
@@ -30,6 +30,7 @@ pub async fn run(store: &dyn OperationStore) {
     every_status_and_failure_reason_reads_back(store).await;
     every_kind_and_trigger_reads_back(store, &fx).await;
     every_result_reads_back(store, &fx).await;
+    a_maintenance_operation_keeps_the_alias_it_ran_under(store, &fx).await;
     warnings_read_back_whole_and_in_order(store).await;
     a_later_save_replaces_the_warnings_too(store).await;
     one_operations_warnings_are_not_anothers(store).await;
@@ -64,6 +65,9 @@ struct Fixtures {
     repository: RepositoryId,
     snapshot: SnapshotId,
     parent: SnapshotId,
+    alias: RepositoryAlias,
+    /// The alias `repository` goes by after it was renamed.
+    renamed: RepositoryAlias,
 }
 
 impl Fixtures {
@@ -78,6 +82,8 @@ impl Fixtures {
             repository: RepositoryId::parse(&"ab".repeat(32)).ok()?,
             snapshot: SnapshotId::parse(&"cd".repeat(32)).ok()?,
             parent: SnapshotId::parse(&"ef".repeat(32)).ok()?,
+            alias: RepositoryAlias::parse("demo").ok()?,
+            renamed: RepositoryAlias::parse("demo-nas").ok()?,
         })
     }
 }
@@ -460,6 +466,7 @@ async fn every_result_reads_back(store: &dyn OperationStore, fx: &Fixtures) {
         files_new: 1,
         files_changed: 2,
         files_unmodified: 3,
+        bytes_processed: Some(u64::MAX - 1),
         // Past what a signed 64-bit column holds: a count is never narrowed.
         data_added: u64::MAX,
         data_added_packed: 5,
@@ -474,6 +481,8 @@ async fn every_result_reads_back(store: &dyn OperationStore, fx: &Fixtures) {
         },
         EngineResult::Backup(BackupSummary {
             parent: None,
+            // A result an earlier build logged did not keep it.
+            bytes_processed: None,
             ..backup.clone()
         }),
         EngineResult::Backup(backup),
@@ -500,6 +509,68 @@ async fn every_result_reads_back(store: &dyn OperationStore, fx: &Fixtures) {
         );
         assert_eq!(found, Some(OperationRecord::of(&op, Some(&result))));
     }
+}
+
+async fn a_maintenance_operation_keeps_the_alias_it_ran_under(
+    store: &dyn OperationStore,
+    fx: &Fixtures,
+) {
+    let alias = fx.alias.clone();
+    let target = Target {
+        plan: None,
+        repository: Some(fx.repository.clone()),
+    };
+    let op = Operation::queue(
+        id(0xb8),
+        OperationKind::Check,
+        Trigger::Manual,
+        target,
+        at(0),
+    )
+    .with_repository_alias(alias.clone());
+    save(store, &op, None).await;
+    let found = read(store, id(0xb8)).await.map(|found| found.record);
+    assert_eq!(
+        found
+            .as_ref()
+            .map(|record| record.repository_alias.as_ref()),
+        Some(Some(&alias)),
+        "the log names the repository as the run did"
+    );
+    assert_eq!(found, Some(OperationRecord::of(&op, None)));
+
+    // The repository renamed, its next run goes by the new alias, and the
+    // row of the one before keeps the alias it ran under.
+    let target = Target {
+        plan: None,
+        repository: Some(fx.repository.clone()),
+    };
+    let after = Operation::queue(
+        id(0xba),
+        OperationKind::Check,
+        Trigger::Manual,
+        target,
+        at(1),
+    )
+    .with_repository_alias(fx.renamed.clone());
+    save(store, &after, None).await;
+    let alias_of =
+        |found: Option<OperationRecord>| found.and_then(|record| record.repository_alias);
+    assert_eq!(
+        alias_of(read(store, id(0xba)).await.map(|found| found.record)),
+        Some(fx.renamed.clone())
+    );
+    assert_eq!(
+        alias_of(read(store, id(0xb8)).await.map(|found| found.record)),
+        Some(alias),
+        "a rename leaves the rows of earlier runs as they were"
+    );
+
+    // Every other operation names no repository by its alias.
+    let backup = queued(0xb9, Some(&fx.home));
+    save(store, &backup, None).await;
+    let found = read(store, id(0xb9)).await.map(|found| found.record);
+    assert_eq!(found.map(|record| record.repository_alias), Some(None));
 }
 
 async fn warnings_read_back_whole_and_in_order(store: &dyn OperationStore) {

@@ -1202,6 +1202,23 @@ fn checked(agent: &mut Agent) {
     );
 }
 
+/// The check's row names the repository by the alias it had when the run
+/// started, so the history can say what ran where.
+#[then(expr = "the log names the repository {string} for the check")]
+async fn log_names_the_repository(agent: &mut Agent, named: String) {
+    let detail = agent
+        .store
+        .get(operation_id(0xcc))
+        .await
+        .expect("the log answers")
+        .expect("the check is in the log");
+    assert_eq!(detail.record.kind, OperationKind::Check);
+    assert_eq!(
+        detail.record.repository_alias,
+        Some(RepositoryAlias::parse(&named).expect("an alias"))
+    );
+}
+
 #[then(expr = "the log shows the forget removed {int} snapshots")]
 async fn log_shows_the_forget(agent: &mut Agent, removed: usize) {
     let detail = agent

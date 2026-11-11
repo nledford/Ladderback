@@ -703,6 +703,7 @@ mod tests {
             files_new: 1,
             files_changed: 0,
             files_unmodified: 0,
+            bytes_processed: Some(100),
             data_added: 10,
             data_added_packed: 5,
             error_count: 0,

@@ -391,6 +391,9 @@ pub struct BackupSummary {
     pub files_new: u64,
     pub files_changed: u64,
     pub files_unmodified: u64,
+    /// Bytes of the source the backup went through, changed or not. `None`
+    /// in a result an earlier build logged, which didn't keep it.
+    pub bytes_processed: Option<u64>,
     /// Bytes of new data before and after compression and packing.
     pub data_added: u64,
     pub data_added_packed: u64,

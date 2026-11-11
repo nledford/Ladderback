@@ -707,7 +707,10 @@ mod tests {
                 files: 3,
                 bytes: 4096,
                 duration_ms: 1000,
+                snapshot: Some("cd".repeat(32)),
+                bytes_processed: Some(65_536),
             }),
+            None,
         )
         .unwrap()
     }

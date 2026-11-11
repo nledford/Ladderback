@@ -100,13 +100,15 @@ impl RawRow {
             .with("error_detail", "repository not found")
     }
 
+    /// The row with `column` set to `cell`. A column the row doesn't fill
+    /// yet, one it leaves to its default as a row of a backup does
+    /// (`repo_alias`), is added.
     fn with(mut self, column: &'static str, cell: impl Into<Cell>) -> Self {
-        let slot = self
-            .cells
-            .iter_mut()
-            .find(|(name, _)| *name == column)
-            .expect("a column of `operations`");
-        slot.1 = cell.into();
+        let cell = cell.into();
+        match self.cells.iter_mut().find(|(name, _)| *name == column) {
+            Some(slot) => slot.1 = cell,
+            None => self.cells.push((column, cell)),
+        }
         self
     }
 
@@ -414,6 +416,11 @@ fn cases() -> Vec<Case> {
             good().with("repo_uuid", "repo"),
         ),
         broken(
+            "an invalid repository alias",
+            "repo_alias",
+            good().with("repo_alias", "Demo Repo"),
+        ),
+        broken(
             "an invalid snapshot ID",
             "snapshot_id",
             good().with("snapshot_id", "snap"),
@@ -500,10 +507,13 @@ fn expected_good_record() -> OperationRecord {
         started_at: Some(at(10)),
         finished_at: Some(at(70)),
         warning_count: 0,
+        // The raw row keeps no bytes processed, as an earlier build wrote it.
         result: Some(EngineResult::Backup(BackupSummary {
             parent: None,
+            bytes_processed: None,
             ..backup_summary()
         })),
+        repository_alias: None,
     }
 }
 

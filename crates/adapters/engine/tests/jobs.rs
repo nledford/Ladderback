@@ -107,6 +107,21 @@ async fn a_backup_writes_a_snapshot_with_the_plan_tags_extra_tags_and_label() {
 }
 
 #[tokio::test]
+async fn a_backup_reports_the_bytes_of_the_source_it_went_through() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    write_file(scratch.source().join("b.txt"), b"hello, again");
+    let events = run_to_end(
+        &engine(),
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    assert_eq!(backed_up(&events).bytes_processed, Some(17));
+}
+
+#[tokio::test]
 async fn a_backup_after_the_source_folder_moved_has_the_previous_plan_snapshot_as_parent() {
     let scratch = Scratch::new();
     let location = scratch.local();

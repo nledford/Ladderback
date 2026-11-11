@@ -369,6 +369,7 @@ pub fn backup_summary() -> BackupSummary {
         files_new: 1,
         files_changed: 2,
         files_unmodified: 3,
+        bytes_processed: Some(7),
         data_added: 4,
         data_added_packed: 5,
         error_count: 6,

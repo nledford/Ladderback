@@ -52,6 +52,8 @@ mod live;
 // browser journeys.
 mod backend;
 mod maintenance;
+// What a row of the Operations page says, decided on the host.
+mod operations;
 mod page;
 mod repositories;
 mod routes;

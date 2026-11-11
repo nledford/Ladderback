@@ -1208,6 +1208,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                None,
             )
             .unwrap_or_else(|problem| panic!("a valid summary: {problem:?}")),
             progress: None,
