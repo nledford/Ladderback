@@ -720,6 +720,26 @@ mod tests {
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
     }
 
+    /// A kept entry is at the profile's location, so a password in that
+    /// location is the entry's own, said when the configuration loads; the
+    /// import says nothing of it.
+    #[tokio::test]
+    async fn a_password_in_the_location_is_not_said_kept_as_text_when_the_entry_is_kept() {
+        let mut entry = repository();
+        entry.settings.repository = "rest:https://demo:not-real@backup.example.com/nas".to_owned();
+        let (imported, saved) = import_over(
+            &entry,
+            entry.clone(),
+            vec![ProfileNotice::LocationSecret {
+                field: "repository.repository".to_owned(),
+                rclone: false,
+            }],
+        )
+        .await;
+        assert_eq!(imported.notices, []);
+        assert_eq!(saved.repository(&alias("nas")), Some(&entry));
+    }
+
     /// An entry that reads its credential from the environment, as the
     /// `inline-secret` warning advises, beside a profile that writes it as
     /// text, or a profile with a credential the entry lacks.

@@ -1079,6 +1079,7 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
         ProfileNotice::InlineSecret { field } => {
             (WarningCode::InlineSecret, vec![("field", text(field))])
         }
+        ProfileNotice::LocationSecret { .. } => todo!(),
         ProfileNotice::TagDropped { tag } => {
             (WarningCode::ProfileTagDropped, vec![("tag", text(tag))])
         }
@@ -1935,6 +1936,114 @@ mod tests {
             repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
             []
         );
+    }
+
+    #[test]
+    fn a_listed_repository_with_a_password_in_its_location_is_warned_of_by_the_setting_never_the_password()
+     {
+        let (cold, hot) = ("CANARY-cold-password", "CANARY-hot-password");
+        let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        settings.repository = format!("rest:https://demo:{cold}@backup.example.com/nas");
+        settings.repo_hot = Some(format!("rest:https://demo:{hot}@hot.example.com/nas"));
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        let location = |field: &str| api::WarningDto {
+            code: WarningCode::LocationSecret,
+            args: [
+                ("field".to_owned(), MsgArg::Text(field.to_owned())),
+                ("kind".to_owned(), MsgArg::Text("url".to_owned())),
+            ]
+            .into(),
+        };
+        assert_eq!(row.warnings, [location("repository"), location("repo-hot")]);
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        let shown = row_warnings(&row);
+        // The row shows the location masked (`demo:***@`), but never the
+        // password; the warning names only the setting, not the user either.
+        assert!(
+            !wire.contains(cold) && !wire.contains(hot),
+            "the row repeats a password: {wire}"
+        );
+        for said in &shown {
+            assert!(
+                !said.contains(cold) && !said.contains(hot) && !said.contains("demo"),
+                "a warning repeats the credentials: {said}"
+            );
+        }
+        assert!(
+            shown[0].contains("The location in repository holds a password as text")
+                && shown[1].contains("The location in repo-hot holds a password as text"),
+            "{shown:?}"
+        );
+    }
+
+    /// rclone is handed the location in its arguments, where a `${…}`
+    /// reference is refused (§10.2), so the warning sends the credential to
+    /// rclone's own configuration file instead.
+    #[test]
+    fn a_listed_repository_with_a_credential_in_its_rclone_location_is_sent_to_rclones_configuration()
+     {
+        let pass = "CANARY-rclone-pass";
+        let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        settings.repository = format!("rclone::sftp,host=nas.example.com,pass={pass}:/backups");
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
+        assert_eq!(
+            row.warnings,
+            [api::WarningDto {
+                code: WarningCode::LocationSecret,
+                args: [
+                    ("field".to_owned(), MsgArg::Text("repository".to_owned())),
+                    ("kind".to_owned(), MsgArg::Text("rclone".to_owned())),
+                ]
+                .into(),
+            }]
+        );
+        let shown = row_warnings(&row);
+        assert!(
+            shown[0].contains("rclone's own configuration file")
+                && shown[0].contains("rclone:remote:path"),
+            "{shown:?}"
+        );
+        assert!(
+            !shown[0].contains("${") && !shown[0].contains(pass),
+            "{shown:?}"
+        );
+    }
+
+    /// What a listed repository's warnings say, in English.
+    fn row_warnings(row: &api::RepositoryDto) -> Vec<String> {
+        row.warnings
+            .iter()
+            .map(|warning| {
+                let args: Vec<(&str, MsgArg)> = warning
+                    .args
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.clone()))
+                    .collect();
+                english()
+                    .warning(warning.code, &args, None)
+                    .text()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_listed_repository_whose_location_has_no_password_written_in_it_has_no_warning() {
+        let mut settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        for location in [
+            "rest:https://demo@backup.example.com/nas",
+            "rest:https://demo:${DEMO_REST_PASSWORD}@backup.example.com/nas",
+        ] {
+            settings.repository = location.to_owned();
+            let alias = RepositoryAlias::parse("demo").expect("an alias");
+            assert_eq!(
+                repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
+                [],
+                "{location}"
+            );
+        }
     }
 
     #[test]
@@ -4157,6 +4266,20 @@ mod tests {
                     field: "repository.password".into(),
                 },
                 "repository.password",
+            ),
+            (
+                ProfileNotice::LocationSecret {
+                    field: "repository.repository".into(),
+                    rclone: false,
+                },
+                "The location in repository.repository holds a password as text",
+            ),
+            (
+                ProfileNotice::LocationSecret {
+                    field: "repository.repo-hot".into(),
+                    rclone: true,
+                },
+                "Set up the remote in rclone's own configuration file",
             ),
             (
                 ProfileNotice::TagDropped {

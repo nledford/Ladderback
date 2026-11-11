@@ -319,3 +319,57 @@ fn output_has_colour(agent: &mut Agent) {
         "the output has no colour: {said:?}"
     );
 }
+
+#[given("the daemon's config file holds:")]
+fn daemon_config_holds(agent: &mut Agent, step: &Step) {
+    let text = step.docstring.as_deref().expect("the step has a text");
+    let folder = testkit::daemon::config_dir(&agent.scratch().join("daemon"));
+    std::fs::create_dir_all(&folder).expect("the daemon's config folder");
+    std::fs::write(
+        folder.join("config.toml"),
+        format!("{}\n", text.trim_start_matches('\n')),
+    )
+    .expect("the daemon's config file");
+}
+
+#[then(
+    expr = "the daemon warns that the location in {string} of the repository {string} holds a password"
+)]
+fn daemon_warns_location(agent: &mut Agent, field: String, alias: String) {
+    let log = &ran(agent).stderr;
+    let line = format!("repository {alias}: The location in {field} holds a password as text");
+    assert!(log.contains(&line), "no {line:?} in the log: {log}");
+}
+
+#[then(
+    expr = "the daemon warns that the location in {string} of the repository {string} holds a credential that belongs in rclone's own configuration"
+)]
+fn daemon_warns_rclone_location(agent: &mut Agent, field: String, alias: String) {
+    let log = &ran(agent).stderr;
+    let warning = format!("repository {alias}: The location in {field} holds a credential as text");
+    let line = log
+        .lines()
+        .find(|line| line.contains(&warning))
+        .unwrap_or_else(|| panic!("no {warning:?} in the log: {log}"));
+    // rclone is started with the location in its arguments, where a `${…}`
+    // reference is refused, so the warning sends the credential to rclone.
+    assert!(
+        line.contains("rclone's own configuration file")
+            && line.contains("rclone:remote:path")
+            && !line.contains("${"),
+        "{line}"
+    );
+}
+
+#[then(expr = "the daemon gives no warning about the repository {string}")]
+fn daemon_no_warning(agent: &mut Agent, alias: String) {
+    let log = &ran(agent).stderr;
+    assert!(log.contains(LISTENING), "the daemon didn't start: {log}");
+    assert!(!log.contains(&format!("repository {alias}:")), "{log}");
+}
+
+#[then(expr = "the daemon's log never shows {string}")]
+fn daemon_log_never_shows(agent: &mut Agent, text: String) {
+    let log = &ran(agent).stderr;
+    assert!(!log.contains(&text), "{log}");
+}

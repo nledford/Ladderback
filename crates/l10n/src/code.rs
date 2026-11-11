@@ -105,6 +105,7 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileUsedMissing => msg::WARNING_PROFILE_USED_MISSING,
     InlineSecret => msg::WARNING_INLINE_SECRET,
     ConfigInlineSecret => msg::WARNING_CONFIG_INLINE_SECRET,
+    LocationSecret => msg::WARNING_LOCATION_SECRET,
     ProfileTagDropped => msg::WARNING_PROFILE_TAG_DROPPED,
     ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,

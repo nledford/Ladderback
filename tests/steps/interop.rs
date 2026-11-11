@@ -456,6 +456,44 @@ fn warns_inline_secret(agent: &mut Agent, field: String) {
     assert_stderr_names(agent, &field);
 }
 
+#[then(
+    expr = "the import warns that the location in {string} holds a password written in the config"
+)]
+fn warns_location_secret(agent: &mut Agent, field: String) {
+    assert_stderr_names(
+        agent,
+        &format!("The location in {field} holds a password as text"),
+    );
+}
+
+#[then(
+    expr = "the import warns that the location in {string} holds a credential that belongs in rclone's own configuration"
+)]
+fn warns_rclone_location_secret(agent: &mut Agent, field: String) {
+    assert_succeeded(agent);
+    let said = said(agent);
+    let warning = format!("The location in {field} holds a credential as text");
+    let line = said
+        .lines()
+        .find(|line| line.contains(&warning))
+        .unwrap_or_else(|| panic!("no {warning:?} in: {said}"));
+    // rclone is started with the location in its arguments, where a `${…}`
+    // reference is refused, so the warning sends the credential to rclone.
+    assert!(
+        line.contains("rclone's own configuration file")
+            && line.contains("rclone:remote:path")
+            && !line.contains("${"),
+        "{line}"
+    );
+}
+
+#[then(expr = "the import gives no warning about {string}")]
+fn no_warning_about(agent: &mut Agent, field: String) {
+    assert_succeeded(agent);
+    let said = said(agent);
+    assert!(!said.contains(&field), "{said}");
+}
+
 #[then(expr = "the import never shows {string}")]
 fn import_never_shows(agent: &mut Agent, text: String) {
     let said = said(agent);

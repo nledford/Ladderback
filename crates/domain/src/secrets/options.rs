@@ -126,4 +126,21 @@ mod tests {
         assert!(!is_secret_option("USE-PASSWORD"));
         assert!(!is_secret_option("Application-Key-Id"));
     }
+
+    #[test]
+    fn pass_is_a_secret_only_as_the_whole_name() {
+        // rclone's SFTP, FTP and SMB backends keep their password in `pass`.
+        for name in ["pass", "PASS", "Pass"] {
+            assert!(is_secret_option(name), "{name}");
+        }
+        for name in [
+            "bypass_cache",
+            "bypass-cache",
+            "passive",
+            "pass_through",
+            "compass",
+        ] {
+            assert!(!is_secret_option(name), "{name}");
+        }
+    }
 }

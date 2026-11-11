@@ -1020,6 +1020,105 @@ async fn an_option_that_holds_a_credential_is_noted_by_name() {
     assert!(!format!("{:?}", profile.notices).contains("CANARY"));
 }
 
+#[tokio::test]
+async fn a_password_in_a_location_is_kept_with_a_notice_that_names_its_key_and_not_the_password() {
+    let profile = read_ok(&format!(
+        "[repository]\n\
+         repository = \"rest:https://demo:CANARY-cold@backup.example.com/nas\"\n\
+         repo-hot = \"rest:https://demo:CANARY-hot@hot.example.com/nas\"\n\
+         password-file = \"/srv/demo-password\"\n{ENTRY}"
+    ))
+    .await;
+    assert_eq!(
+        profile.notices,
+        [
+            ProfileNotice::LocationSecret {
+                field: "repository.repository".to_owned(),
+                rclone: false,
+            },
+            ProfileNotice::LocationSecret {
+                field: "repository.repo-hot".to_owned(),
+                rclone: false,
+            },
+        ]
+    );
+    assert!(!format!("{:?}", profile.notices).contains("CANARY"));
+}
+
+#[tokio::test]
+async fn a_credential_in_an_rclone_location_is_noted_as_an_rclone_one() {
+    let profile = read_ok(&format!(
+        "[repository]\n\
+         repository = \"rest:https://demo:CANARY-cold@backup.example.com/nas\"\n\
+         repo-hot = \"rclone::sftp,host=nas.example.com,pass=CANARY-hot:/hot\"\n\
+         password-file = \"/srv/demo-password\"\n{ENTRY}"
+    ))
+    .await;
+    assert_eq!(
+        profile.notices,
+        [
+            ProfileNotice::LocationSecret {
+                field: "repository.repository".to_owned(),
+                rclone: false,
+            },
+            ProfileNotice::LocationSecret {
+                field: "repository.repo-hot".to_owned(),
+                rclone: true,
+            },
+        ]
+    );
+    assert!(!format!("{:?}", profile.notices).contains("CANARY"));
+}
+
+#[tokio::test]
+async fn a_location_without_a_password_in_it_has_no_notice() {
+    for location in [
+        "rest:https://backup.example.com/nas",
+        "rest:https://demo@backup.example.com/nas",
+        "/srv/demo-repo",
+    ] {
+        let profile = read_ok(&format!(
+            "[repository]\nrepository = \"{location}\"\npassword-file = \"/srv/demo-password\"\n{ENTRY}"
+        ))
+        .await;
+        assert_eq!(profile.notices, [], "{location}");
+    }
+}
+
+#[tokio::test]
+async fn a_reference_rustic_reads_as_text_in_a_location_is_a_password_kept_as_text() {
+    // rustic doesn't substitute `${…}`, so the profile's password is these
+    // characters, and the import keeps them as text.
+    let profile = read_ok(&format!(
+        "[repository]\n\
+         repository = \"rest:https://demo:${{DEMO_PASSWORD}}@backup.example.com/nas\"\n\
+         password-file = \"/srv/demo-password\"\n{ENTRY}"
+    ))
+    .await;
+    assert_eq!(
+        profile.notices,
+        [ProfileNotice::LocationSecret {
+            field: "repository.repository".to_owned(),
+            rclone: false,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn an_option_whose_value_is_a_url_with_a_password_is_noted_by_name() {
+    let profile = read_ok(&format!(
+        "{REPOSITORY}\n[repository.options]\nendpoint = \"https://demo:CANARY-endpoint@minio.example.com\"\nregion = \"https://demo@example.com\"\n"
+    ))
+    .await;
+    assert_eq!(
+        profile.notices,
+        [ProfileNotice::InlineSecret {
+            field: "repository.options.endpoint".to_owned()
+        }]
+    );
+    assert!(!format!("{:?}", profile.notices).contains("CANARY"));
+}
+
 // --- Text that stays text ---------------------------------------------------
 
 /// The text a repository field holds, as the daemon will read it: `${`

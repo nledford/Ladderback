@@ -10,7 +10,7 @@ use super::{Hooks, InvalidValue, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
     InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
-    is_secret_option,
+    is_secret_option, location_secret_written, url_password_written,
 };
 
 /// A repository as the configuration describes it: its fields may hold
@@ -28,20 +28,35 @@ pub struct RepositorySettings {
 }
 
 impl RepositorySettings {
-    /// Every secret these settings hold as text: the password when it is
-    /// inline, and each option whose name says it is a credential
-    /// ([`is_secret_option`]) and whose value has no `${…}` reference in it.
-    /// In the order password, `options`, `options-hot`, `options-cold`, each
-    /// by name. A secret that is empty is nothing to move.
+    /// Every secret these settings hold as text: a credential written in
+    /// `repository` or `repo-hot` ([`location_secret_written`]), the password
+    /// when it is inline, and each option whose name says it is a credential
+    /// ([`is_secret_option`]) and whose value has no `${…}` reference in it,
+    /// or whose value is a URL with a password written in it
+    /// ([`url_password_written`]). In the order `repository`, `repo-hot`,
+    /// password, `options`, `options-hot`, `options-cold`, each set by name.
+    /// A secret that is empty is nothing to move.
     pub fn inline_secrets(&self) -> Vec<InlineSecret> {
         let mut found = Vec::new();
+        if location_secret_written(&self.repository) {
+            found.push(InlineSecret::Location);
+        }
+        if self
+            .repo_hot
+            .as_deref()
+            .is_some_and(location_secret_written)
+        {
+            found.push(InlineSecret::LocationHot);
+        }
         if matches!(&self.password, SecretRef::Inline(value) if !value.expose().is_empty()) {
             found.push(InlineSecret::Password);
         }
         let mut credentials = |set: &BTreeMap<String, String>,
                                secret: fn(String) -> InlineSecret| {
             for (name, value) in set {
-                if is_secret_option(name) && !value.is_empty() && !has_reference(value) {
+                let credential =
+                    is_secret_option(name) && !value.is_empty() && !has_reference(value);
+                if credential || url_password_written(value) {
                     found.push(secret(name.clone()));
                 }
             }
@@ -50,6 +65,16 @@ impl RepositorySettings {
         credentials(&self.options_hot, InlineSecret::OptionHot);
         credentials(&self.options_cold, InlineSecret::OptionCold);
         found
+    }
+
+    /// The location `secret` is written in: `repository` for
+    /// [`InlineSecret::Location`], `repo-hot` for
+    /// [`InlineSecret::LocationHot`], and none for a secret in a setting of
+    /// its own. How to move it out depends on the location
+    /// ([`rclone_location`](crate::secrets::rclone_location)).
+    pub fn location_of(&self, secret: &InlineSecret) -> Option<&str> {
+        let _ = secret;
+        todo!()
     }
 
     /// Whether `other` points at the same place: the same `repository`,
