@@ -1,8 +1,15 @@
 //! The paths on this machine that a repository's settings name. rustic, the
-//! programs it starts and the hooks run in the daemon's working directory
-//! (`/` under launchd or a system unit, the home folder under a user unit),
-//! never the folder `config.toml` is in, so a relative path there would name
-//! a different file, or none, depending on how the daemon was started.
+//! programs it starts, the hooks and the password command run in the
+//! daemon's working directory (`/` under launchd or a system unit, the home
+//! folder under a user unit), never the folder `config.toml` is in, so a
+//! relative path there would name a different file, or none, depending on
+//! how the daemon was started.
+//!
+//! A field is judged by what is known of it before a job resolves its
+//! `${…}` references: the text up to the first one. What a reference holds
+//! is checked by nothing here.
+
+use crate::secrets::{CommandLine, Part, SecretRef, Template};
 
 use super::RepositorySettings;
 
@@ -25,8 +32,222 @@ impl RepositorySettings {
     /// `password-command`, `options`, `options-hot`, `options-cold`, each
     /// set by name.
     pub fn relative_path(&self) -> Option<RepositoryField> {
-        todo!()
+        let cold = location(&self.repository);
+        if cold.as_ref().is_some_and(|cold| cold.relative) {
+            return Some(RepositoryField::Repository);
+        }
+        let hot = self.repo_hot.as_deref().and_then(location);
+        if hot.as_ref().is_some_and(|hot| hot.relative) {
+            return Some(RepositoryField::RepoHot);
+        }
+        if let SecretRef::Command(command) = &self.password
+            && is_relative_program(command.program())
+        {
+            return Some(RepositoryField::PasswordCommand);
+        }
+        let cold = cold.map(|cold| cold.backend);
+        let hot = hot.map(|hot| hot.backend);
+        let reads = |backend: &Option<Backend>, name: &str, value: &str| {
+            backend
+                .as_ref()
+                .is_some_and(|backend| backend.reads_relative(name, value))
+        };
+        // A shared option counts for each half that doesn't set its own.
+        for (name, value) in &self.options {
+            if (!self.options_cold.contains_key(name) && reads(&cold, name, value))
+                || (!self.options_hot.contains_key(name) && reads(&hot, name, value))
+            {
+                return Some(RepositoryField::Option(name.clone()));
+            }
+        }
+        if let Some((name, _)) = self
+            .options_hot
+            .iter()
+            .find(|(name, value)| reads(&hot, name, value))
+        {
+            return Some(RepositoryField::OptionHot(name.clone()));
+        }
+        self.options_cold
+            .iter()
+            .find(|(name, value)| reads(&cold, name, value))
+            .map(|(name, _)| RepositoryField::OptionCold(name.clone()))
     }
+}
+
+/// Whether a program is named by a relative path: with a `/` in it, and not
+/// at its start. A name without one is looked up on `PATH`.
+pub(super) fn is_relative_program(program: &str) -> bool {
+    program.contains('/') && !program.starts_with('/')
+}
+
+/// What a field is known to hold before a job resolves it: the text before
+/// its first reference, and whether that is all of it. Nothing is known of a
+/// field that starts with a reference, or that is no template, which a job
+/// refuses.
+struct Known {
+    head: String,
+    whole: bool,
+}
+
+impl Known {
+    fn of(value: &str) -> Option<Self> {
+        let template = Template::parse(value).ok()?;
+        let mut parts = template.parts().iter();
+        match parts.next() {
+            None => Some(Self {
+                head: String::new(),
+                whole: true,
+            }),
+            Some(Part::Text(head)) => Some(Self {
+                head: head.clone(),
+                whole: parts.next().is_none(),
+            }),
+            Some(Part::Reference(_)) => None,
+        }
+    }
+}
+
+/// Whether a path is relative, by `head`, what it starts with. An empty one
+/// is relative only when it is all there is.
+fn starts_relative(head: &str, whole: bool) -> bool {
+    if head.is_empty() {
+        whole
+    } else {
+        !head.starts_with('/')
+    }
+}
+
+/// Whether `value`, a path, is known to be relative.
+fn is_relative_file(value: &str) -> bool {
+    Known::of(value).is_some_and(|known| starts_relative(&known.head, known.whole))
+}
+
+/// The backend rustic reaches a repository through, by its location's scheme.
+enum Backend {
+    Local,
+    Rclone,
+    Rest,
+    /// The service, in lower case, unless a reference holds it.
+    OpenDal(Option<String>),
+}
+
+struct Location {
+    backend: Backend,
+    /// Whether it is a local path, and relative.
+    relative: bool,
+}
+
+/// A location as rustic reads it: the scheme before the first `:`, else a
+/// local path. Nothing when a reference may still decide the backend, or
+/// when rustic refuses the scheme.
+fn location(value: &str) -> Option<Location> {
+    let Known { head, whole } = Known::of(value)?;
+    let Some((scheme, rest)) = head.split_once(':') else {
+        // A `/` before any `:` leaves no scheme a reference could finish.
+        return (whole || head.contains('/')).then(|| Location {
+            backend: Backend::Local,
+            relative: starts_relative(&head, whole),
+        });
+    };
+    let (backend, relative) = match scheme {
+        "local" => (Backend::Local, starts_relative(rest, whole)),
+        "rclone" => (Backend::Rclone, rclone_folder_relative(rest, whole)),
+        "rest" => (Backend::Rest, false),
+        // rustic gives OpenDAL the text up to the next `:` as the service.
+        "opendal" => {
+            let service = match rest.split_once(':') {
+                Some((service, _)) => Some(service),
+                None => whole.then_some(rest),
+            };
+            (
+                Backend::OpenDal(service.map(str::to_ascii_lowercase)),
+                false,
+            )
+        }
+        _ => return None,
+    };
+    Some(Location { backend, relative })
+}
+
+/// Whether rclone reads `path`, what a location has after `rclone:`, as a
+/// folder on this machine named by a relative path: one with no `remote:`
+/// before its first `/` (a remote's name has no `/`), and not starting with
+/// one. Without either, a reference could still make it a remote.
+fn rclone_folder_relative(path: &str, whole: bool) -> bool {
+    match path.find([':', '/']) {
+        Some(at) => at > 0 && path[at..].starts_with('/'),
+        None => whole,
+    }
+}
+
+impl Backend {
+    /// Whether the option `name`, which this backend reads, names a file or
+    /// runs a program by a relative path when it is `value`. rustic matches
+    /// its own option names exactly; OpenDAL's, in any case.
+    fn reads_relative(&self, name: &str, value: &str) -> bool {
+        match (self, name) {
+            (
+                Self::Rclone | Self::Rest | Self::OpenDal(_),
+                "http-cacert" | "http-tls-client-cert",
+            ) => is_relative_file(value),
+            (Self::Rclone, "rclone-command") => runs_relative(value, true),
+            (Self::Local, "post-create-command" | "post-delete-command") => {
+                runs_relative(value, false)
+            }
+            (Self::OpenDal(Some(service)), name) => {
+                let name = name.to_ascii_lowercase();
+                is_opendal_file(service, &name)
+                    && is_relative_file(value)
+                    // ssh expands a `~` in the key it is given (`-i`) itself.
+                    && !(service == "sftp" && value.starts_with('~'))
+            }
+            _ => false,
+        }
+    }
+}
+
+/// The options of an OpenDAL service that name a file on this machine, by
+/// every name OpenDAL takes for them.
+fn is_opendal_file(service: &str, name: &str) -> bool {
+    matches!(
+        (service, name),
+        ("fs" | "file", "root" | "atomic_write_dir")
+            | ("sftp", "key")
+            | ("gcs", "credential_path" | "google_application_credentials")
+            | ("oss", "oidc_token_file")
+    )
+}
+
+/// Whether the command line `value` starts its program by a relative path,
+/// or, for rclone, names its configuration file by one (`--config`). A
+/// command with a reference in it is split only once the job resolves it,
+/// and one that can't be split is rustic's to refuse.
+fn runs_relative(value: &str, rclone: bool) -> bool {
+    let Ok(template) = Template::parse(value) else {
+        return false;
+    };
+    // An empty command has no program to split.
+    let [Part::Text(text)] = template.parts() else {
+        return false;
+    };
+    let Ok(command) = CommandLine::parse(text) else {
+        return false;
+    };
+    if is_relative_program(command.program()) {
+        return true;
+    }
+    let mut args = command.args().iter();
+    while rclone && let Some(arg) = args.next() {
+        let config = if arg == "--config" {
+            args.next().map(String::as_str)
+        } else {
+            arg.strip_prefix("--config=")
+        };
+        if config.is_some_and(|path| !path.is_empty() && !path.starts_with('/')) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
