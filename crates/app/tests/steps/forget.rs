@@ -865,16 +865,20 @@ async fn forget(agent: &mut Agent) {
                 agent.forget.listed(),
                 "the partition sees every snapshot once"
             );
+            // The engine holds the run's first forget job until released.
+            // The release comes before the run can reach the hold, the order
+            // in which a release can be lost (#246): the hold must still let
+            // the run through, and a lost release fails here, not by hanging.
+            agent.forget.release.notify_waiters();
             let runner = Arc::clone(&use_case);
             let running =
                 tokio::spawn(
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
-            // The engine records the forget job before its result is held,
-            // so the release reaches a waiter that is registered.
-            wait_for_forget(agent).await;
-            agent.forget.release.notify_waiters();
-            agent.finished = Some(running.await.expect("the run ends"));
+            let ended = tokio::time::timeout(Duration::from_secs(5), running)
+                .await
+                .expect("the run ends once its held job is released, whenever the release came");
+            agent.finished = Some(ended.expect("the run ends"));
         }
         Err(error) => agent.forget.refused = Some(error),
     }
