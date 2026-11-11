@@ -12,10 +12,11 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 
 | Command | Does |
 |---|---|
-| `just setup` | Installs the wasm target, trunk, wasm-bindgen-cli (at the version of `Cargo.lock`'s `wasm-bindgen`), cargo-mutants, cargo-nextest and release-plz (through cargo-binstall), the rustic CLI the profile golden tests compare against (`scripts/install-rustic.sh`: the official release, checked against a pinned SHA-256), the UI test dependencies and Chromium |
-| `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `architecture`, `test`, `test-release`, `test-wasm`, `test-ui` |
+| `just setup` | Installs the wasm target, trunk, wasm-bindgen-cli (at the version of `Cargo.lock`'s `wasm-bindgen`), cargo-mutants, cargo-nextest, release-plz and zizmor (through cargo-binstall), the rustic CLI the profile golden tests compare against (`scripts/install-rustic.sh`) and actionlint (`scripts/install-actionlint.sh`), each the official release checked against a pinned SHA-256, the UI test dependencies and Chromium |
+| `just verify` | Everything CI checks except mutants and red-first: `fmt-check`, `lint`, `lint-workflows`, `architecture`, `test`, `test-release`, `test-wasm`, `test-ui` |
 | `just fmt` | Formats Rust code |
 | `just lint` | Clippy with `-D warnings` on the host crates and on `web` for wasm32, the journey lint (no pointer actions in `ui-tests/steps`), then `scripts/check-doc-paths.sh`: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full. CI runs that script on docs-only pull requests too |
+| `just lint-workflows` | actionlint and zizmor on `.github/workflows/`. zizmor's online audits (known-vulnerable actions, impostor commits) run only with `GH_TOKEN` set, as CI sets it. CI runs it in the `Workflow lint (actionlint, zizmor)` job |
 | `just architecture` | Banned crates in `domain` and `app`, the `domain` wasm32 build, `fluent-pseudo` in a default build of `ladderback` and `web` and out of a build with the Justfile's `release_flags` (`--no-default-features`), the `web` `gallery` feature in neither a default nor a `release_flags` build, identical banned-call lists (`crates/{domain,app}/clippy.toml`), the no-panic settings and crate-root lints, `testkit` only as a dev-dependency |
 | `just test [args]` | Unit and contract tests (`cargo nextest`; `args` go to it, e.g. a test name), doc tests, then the acceptance and `@e2e` runners, then the list of skipped tests. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-acceptance [args]` / `just test-e2e [args]` | One cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows its scenarios |
