@@ -18,3 +18,20 @@ impl NormalizeSources for FakeSources {
         Ok(sources.to_vec())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use domain::planning::Source;
+
+    use super::FakeSources;
+    use crate::ports::NormalizeSources;
+
+    #[tokio::test]
+    async fn sources_come_back_as_written() {
+        // Not normalized: a dot, a repeat and the order all stay as written.
+        let written: Vec<Source> = ["/srv/demo/photos", "/srv/demo/./music", "/srv/demo/photos"]
+            .map(|text| Source::parse(text).expect("a demo source"))
+            .into();
+        assert_eq!(FakeSources.normalized(&written).await, Ok(written));
+    }
+}
