@@ -869,3 +869,20 @@ async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
     }
     panic!("the hook's output was never read before its timeout");
 }
+
+/// Output read to its end is all the hook said, though it ends the way a
+/// secret begins: it is its own words and stays (#158). Only a stream the
+/// read left partway is masked as cut.
+#[tokio::test]
+async fn output_read_to_its_end_that_only_ends_like_a_secret_begins_is_kept() {
+    let scratch = TempDir::new().unwrap();
+    let entry = sh(
+        "printf 'said hunter2-'; printf 'said hunter2-' >&2",
+        &scratch.path().join("log"),
+    );
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
+    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert_eq!(outcome.stdout.text, "said hunter2-");
+    assert_eq!(outcome.stderr.text, "said hunter2-");
+}
