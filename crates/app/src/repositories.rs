@@ -109,7 +109,10 @@ impl InitRepository {
     /// Saved only when `alias` is given, by the same rule
     /// [`ConnectRepository`] saves one: an alias the configuration already
     /// holds is refused, and before the job runs, so a refused request has
-    /// created no repository the person could not then find again.
+    /// created no repository the person could not then find again. A
+    /// repository created here asks this agent to maintain it
+    /// (`maintenance = "local"`, §7.3): nothing else knows it yet, so no
+    /// other party maintains it.
     pub async fn init(
         &self,
         op: OperationId,
@@ -123,7 +126,7 @@ impl InitRepository {
         let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
         let saved = match alias {
             Some(alias) => {
-                save(&*self.config, &alias, settings).await?;
+                save(&*self.config, &alias, settings, Maintenance::Local).await?;
                 true
             }
             None => false,
@@ -171,7 +174,9 @@ impl ConnectRepository {
     }
 
     /// Tests the repository and, once the test passed, saves it under `alias`
-    /// with `maintenance`, the person's choice of who maintains it (§7.3).
+    /// with `maintenance`, the person's choice of who maintains it (§7.3): a
+    /// repository that exists may already be maintained by another party,
+    /// and only one may do it (I1).
     pub async fn connect(
         &self,
         op: OperationId,
@@ -179,10 +184,9 @@ impl ConnectRepository {
         settings: &RepositorySettings,
         maintenance: Maintenance,
     ) -> Result<RepositoryId, RepositoryError> {
-        let _ = maintenance;
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Identify(access)).await?;
-        save(&*self.config, &alias, settings).await?;
+        save(&*self.config, &alias, settings, maintenance).await?;
         Ok(id)
     }
 }
@@ -312,13 +316,15 @@ async fn unused(
     Ok(loaded)
 }
 
-/// Saves `settings` under `alias`, refusing an alias the configuration
-/// already holds. What is saved is the settings as written: a secret stays
+/// Saves `settings` under `alias` with `maintenance` as its request of who
+/// maintains it, refusing an alias the configuration already holds. What is
+/// saved is the settings as written: a secret stays a reference.
 #[allow(clippy::result_large_err)]
 async fn save(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
+    maintenance: Maintenance,
 ) -> Result<(), RepositoryError> {
     let loaded = unused(config, alias).await?;
     let mut repositories = loaded.repositories().clone();
@@ -326,7 +332,7 @@ async fn save(
         alias.clone(),
         RepositoryConfig {
             settings: settings.clone(),
-            maintenance: Default::default(),
+            maintenance,
             group_by: Default::default(),
             hooks: Default::default(),
         },

@@ -1209,6 +1209,13 @@ impl Repositories for RepositoryService {
         let alias =
             RepositoryAlias::parse(&request.alias).map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
+        // Asked for, this agent maintains it; otherwise nobody is asked, for
+        // a repository that exists may already be maintained elsewhere (I1).
+        let maintenance = if request.maintain_here {
+            Maintenance::Local
+        } else {
+            Maintenance::None
+        };
         let _writing = self.writes.lock().await;
         let id = match ConnectRepository::new(
             Arc::clone(&self.clock),
@@ -1216,7 +1223,7 @@ impl Repositories for RepositoryService {
             self.resolve.clone(),
             Arc::clone(&self.config),
         )
-        .connect(new_operation(), alias, &settings, Maintenance::None)
+        .connect(new_operation(), alias, &settings, maintenance)
         .await
         {
             Ok(value) => value,
