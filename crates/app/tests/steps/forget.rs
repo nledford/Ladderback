@@ -28,15 +28,18 @@ use futures::stream;
 use tokio::sync::Notify;
 
 use super::Agent;
-use app::fakes::{FakeRetention, FakeSources, InMemoryConfigStore};
+use app::fakes::{FakeRetention, InMemoryConfigStore};
 use app::maintenance::{
     MaintenanceAssessment, MaintenanceError, MaintenanceKind, PreparedMaintenance, RunMaintenance,
 };
 use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, MAX_JOB_IDS, OperationStore, PruneSummary, RewriteSummary, RunningJob,
-    SnapshotSummary, Start,
+    JobControl, MAX_JOB_IDS, NormalizeSources, OperationStore, PrunePlanSummary, PruneSummary,
+    RepositoryAccess, Retention, RetentionError, RewriteSummary, RunningJob, SnapshotSummary,
+    SourcesError, Start,
 };
+use domain::maintenance::Snapshot;
+use domain::planning::{RetentionPolicy, Source};
 
 /// The alias every forget scenario's repository goes under.
 fn alias() -> RepositoryAlias {
@@ -72,9 +75,12 @@ pub enum ReadFailure {
     Unreachable,
     /// The listing answers a failure event.
     Listing,
-    /// The repository never answers: the identify starts and says nothing
-    /// more.
+    /// The repository never answers: the identify and the listing start and
+    /// say nothing more.
     Silent,
+    /// The repository lists its snapshots, and a read of them for a plan's
+    /// retention never answers.
+    RetentionSilent,
 }
 
 /// What the forget scenarios set up and what the runs answered.
@@ -107,6 +113,15 @@ pub struct ForgetWorld {
     fail_at: Option<usize>,
     /// The run a scenario assessed and has not started.
     assessed: Option<MaintenanceAssessment>,
+    /// The folder whose normalization the sources port refuses, when a
+    /// scenario says: a drive that is not mounted.
+    unreadable_folder: Option<String>,
+    /// A folder the sources port records under another spelling, as rustic
+    /// does with a link: `(as written, as recorded)`.
+    recorded_folder: Option<(String, String)>,
+    /// How many times the sources port was asked to normalize a plan's
+    /// sources.
+    source_reads: Arc<AtomicUsize>,
 }
 
 impl Default for ForgetWorld {
@@ -125,6 +140,9 @@ impl Default for ForgetWorld {
             hold_at: Some(0),
             fail_at: None,
             assessed: None,
+            unreadable_folder: None,
+            recorded_folder: None,
+            source_reads: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -205,6 +223,21 @@ impl ForgetWorld {
         self.fail = fail;
     }
 
+    /// Makes the sources port refuse every plan that backs up `folder`.
+    pub fn refuse_sources_of(&mut self, folder: &str) {
+        self.unreadable_folder = Some(folder.to_owned());
+    }
+
+    /// Makes the sources port record `written` as `recorded`.
+    pub fn record_folder_as(&mut self, written: &str, recorded: &str) {
+        self.recorded_folder = Some((written.to_owned(), recorded.to_owned()));
+    }
+
+    /// How many plans' sources were asked of the sources port.
+    pub fn source_reads(&self) -> usize {
+        self.source_reads.load(Ordering::SeqCst)
+    }
+
     /// Adds a plan as drafted, with whatever policy it carries.
     pub async fn plan_raw(&mut self, plan: Plan) {
         self.plans.push(plan);
@@ -242,21 +275,27 @@ impl ForgetWorld {
         plan: Option<(String, AgentId)>,
         folder: &str,
     ) {
+        let tags = match &plan {
+            Some((plan, agent)) => vec![
+                format!("{PLAN_TAG_PREFIX}{plan}"),
+                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            ],
+            None => Vec::new(),
+        };
+        self.snapshots_tagged(count, &tags, folder);
+    }
+
+    /// Adds `count` snapshots of `folder` carrying exactly `tags`. The first
+    /// added is the newest.
+    pub fn snapshots_tagged(&mut self, count: u64, tags: &[String], folder: &str) {
         for _ in 0..count {
             self.made += 1;
-            let tags = match &plan {
-                Some((plan, agent)) => vec![
-                    format!("{PLAN_TAG_PREFIX}{plan}"),
-                    format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
-                ],
-                None => Vec::new(),
-            };
             self.snapshots.push(SnapshotSummary {
                 id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
                 time: at(-i64::try_from(self.made * 3_600).expect("an hour")),
                 hostname: "demo-host".to_owned(),
                 label: String::new(),
-                tags,
+                tags: tags.to_vec(),
                 paths: vec![folder.to_owned()],
                 paths_truncated: false,
                 tags_truncated: false,
@@ -329,7 +368,7 @@ impl ForgetWorld {
     }
 
     /// The IDs of the snapshots the plan `plan` owns, newest first.
-    fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
+    pub fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
         self.snapshots
             .iter()
             .filter(|snapshot| {
@@ -346,7 +385,7 @@ impl ForgetWorld {
     }
 
     /// The IDs the engine was asked to remove, or none when it never was.
-    fn removed(&self) -> Vec<SnapshotId> {
+    pub fn removed(&self) -> Vec<SnapshotId> {
         self.jobs
             .lock()
             .expect("the job list answers")
@@ -371,6 +410,7 @@ impl ForgetWorld {
                 Job::Forget(_) => "forget",
                 Job::Rewrite(_) => "adopt",
                 Job::Prune(_) => "prune",
+                Job::PrunePlan(_) => "prune-plan",
                 Job::Check(_) => "check",
                 Job::Fake(_) => "fake",
                 Job::Init(_) => "init",
@@ -430,7 +470,7 @@ impl Engine for Scripted {
         // Which of the forgets and rewrites this is, counting from 0.
         let change = matches!(job, Job::Forget(_) | Job::Rewrite(_))
             .then(|| self.changes.fetch_add(1, Ordering::SeqCst));
-        if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_)) {
+        if self.fail == ReadFailure::Silent && matches!(job, Job::Identify(_) | Job::Ls(_)) {
             return Ok(RunningJob {
                 events: stream::pending().boxed(),
                 control: Box::new(Nothing),
@@ -476,6 +516,15 @@ impl Engine for Scripted {
                 packs_deleted: 0,
                 packs_recovered: 0,
             }))],
+            Job::PrunePlan(_) => vec![EngineEvent::Succeeded(EngineResult::PrunePlan(
+                PrunePlanSummary {
+                    repository: self.repository_id.clone(),
+                    packs_marked: 2,
+                    packs_deleted: 1,
+                    packs_recovered: 3,
+                    bytes_deleted: 4096,
+                },
+            ))],
             Job::Check(_) => vec![EngineEvent::Succeeded(EngineResult::Check(CheckSummary {
                 repository: self.repository_id.clone(),
                 errors: 0,
@@ -515,11 +564,18 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 agent.clock.clone(),
                 agent.store.clone(),
                 app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
-                Arc::new(FakeRetention),
+                match agent.forget.fail {
+                    ReadFailure::RetentionSilent => Arc::new(NeverAnswers),
+                    _ => Arc::new(FakeRetention),
+                },
                 agent.forget.store.clone(),
                 self_agent(),
                 "demo-host".to_owned(),
-                Arc::new(FakeSources),
+                Arc::new(ScriptedSources {
+                    unreadable_folder: agent.forget.unreadable_folder.clone(),
+                    recorded_folder: agent.forget.recorded_folder.clone(),
+                    reads: Arc::clone(&agent.forget.source_reads),
+                }),
             )),
     )
 }
@@ -533,6 +589,53 @@ pub async fn assess_and_start(
 ) -> Result<PreparedMaintenance, MaintenanceError> {
     let assessment = use_case.assess(operation, &alias(), kind).await?;
     use_case.start(assessment).await
+}
+
+/// A retention port whose read never answers: the repository listed its
+/// snapshots and then stalled.
+struct NeverAnswers;
+
+#[async_trait]
+impl Retention for NeverAnswers {
+    async fn removes(
+        &self,
+        _repository: &RepositoryAccess,
+        _policy: &RetentionPolicy,
+        _group: &[Snapshot],
+    ) -> Result<Vec<SnapshotId>, RetentionError> {
+        std::future::pending().await
+    }
+}
+
+/// The sources as written, as the scripted listing reports them, except a
+/// plan that backs up the unreadable folder: its sources can't be read.
+struct ScriptedSources {
+    unreadable_folder: Option<String>,
+    recorded_folder: Option<(String, String)>,
+    reads: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl NormalizeSources for ScriptedSources {
+    async fn normalized(&self, sources: &[Source]) -> Result<Vec<Source>, SourcesError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        match &self.unreadable_folder {
+            Some(folder) if sources.iter().any(|source| source.as_str() == folder) => {
+                Err(SourcesError::Unreadable {
+                    detail: "no such folder".to_owned(),
+                })
+            }
+            _ => Ok(sources
+                .iter()
+                .map(|source| match &self.recorded_folder {
+                    Some((written, recorded)) if source.as_str() == written => {
+                        Source::parse(recorded).unwrap_or_else(|_| source.clone())
+                    }
+                    _ => source.clone(),
+                })
+                .collect()),
+        }
+    }
 }
 
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s)")]
@@ -588,6 +691,21 @@ async fn engine_unreachable(agent: &mut Agent) {
 #[given("the repository never answers")]
 async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
+}
+
+#[given(expr = "the folder {string} is recorded by the engine as {string}")]
+async fn folder_recorded_as(agent: &mut Agent, written: String, recorded: String) {
+    agent.forget.record_folder_as(&written, &recorded);
+}
+
+#[given(expr = "the sources of the folder {string} cannot be read")]
+async fn sources_unreadable(agent: &mut Agent, folder: String) {
+    agent.forget.refuse_sources_of(&folder);
+}
+
+#[given("the repository lists its snapshots but never answers a read of them for retention")]
+async fn retention_silent(agent: &mut Agent) {
+    agent.forget.fail_read(ReadFailure::RetentionSilent);
 }
 
 #[given("the engine fails the second forget job")]
@@ -978,11 +1096,13 @@ fn refused_listing(agent: &mut Agent) {
 #[then("the forget is refused because the policy is not one the engine accepts")]
 fn refused_policy(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    let MaintenanceError::Failed(domain::execution::FailureReason::EngineFailed { detail }) = error
-    else {
-        panic!("a failed policy evaluation, not {error:?}")
-    };
-    assert_eq!(detail, "the retention policy is not one the engine accepts");
+    assert_eq!(
+        error,
+        MaintenanceError::InvalidRetention {
+            plan: PlanId::parse("home").expect("a plan ID")
+        },
+        "a typed reason, not a sentence"
+    );
 }
 
 #[then("the engine was asked to prune the repository")]

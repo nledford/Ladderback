@@ -30,15 +30,28 @@ impl Retention for RusticRetention {
         group: &[Snapshot],
     ) -> Result<Vec<SnapshotId>, RetentionError> {
         let access = RepositorySpec::of(repository);
+        let redactor = redactor_of(repository);
         let policy = policy.clone();
         let wanted: std::collections::HashSet<String> =
             group.iter().map(|s| s.id.as_str().to_owned()).collect();
-        tokio::task::spawn_blocking(move || evaluate(&access, &policy, &wanted))
-            .await
-            .map_err(|error| RetentionError::Engine {
-                detail: error.to_string(),
-            })?
+        blocking(&redactor, move |redactor| {
+            evaluate(&access, redactor, &policy, &wanted)
+        })
+        .await
     }
+}
+
+/// Runs `work` on a blocking thread. What the thread panics with is masked
+/// like any other text of the open: the panic message may quote what the
+/// open was reading (I4).
+async fn blocking<T: Send + 'static>(
+    redactor: &domain::secrets::Redactor,
+    work: impl FnOnce(&domain::secrets::Redactor) -> Result<T, RetentionError> + Send + 'static,
+) -> Result<T, RetentionError> {
+    let owned = redactor.clone();
+    tokio::task::spawn_blocking(move || work(&owned))
+        .await
+        .map_err(|error| engine(redactor, error))?
 }
 
 /// The repository as the in-process opener reads it. Spelled out here, like
@@ -71,10 +84,10 @@ impl RepositorySpec {
 /// would — and names the ones the policy lets go.
 fn evaluate(
     spec: &RepositorySpec,
+    redactor: &domain::secrets::Redactor,
     policy: &RetentionPolicy,
     wanted: &std::collections::HashSet<String>,
 ) -> Result<Vec<SnapshotId>, RetentionError> {
-    let redactor = redactor_of(spec);
     let backends = BackendOptions::default()
         .repository(spec.repository.clone())
         .options(spec.options.clone())
@@ -85,14 +98,14 @@ fn evaluate(
         None => backends,
     }
     .to_backends()
-    .map_err(|error| engine(&redactor, error))?;
+    .map_err(|error| engine(redactor, error))?;
     let repository = Repository::new(&RepositoryOptions::default().no_cache(true), &backends)
-        .map_err(|error| engine(&redactor, error))?
+        .map_err(|error| engine(redactor, error))?
         .open(&Credentials::password(spec.password.clone()))
-        .map_err(|error| engine(&redactor, error))?;
+        .map_err(|error| engine(redactor, error))?;
     let snapshots: Vec<SnapshotFile> = repository
         .get_all_snapshots()
-        .map_err(|error| engine(&redactor, error))?
+        .map_err(|error| engine(redactor, error))?
         .iter()
         .filter(|snapshot| wanted.contains(&*snapshot.id.to_hex().to_string()))
         .cloned()
@@ -126,16 +139,21 @@ fn engine(redactor: &domain::secrets::Redactor, error: impl std::fmt::Display) -
 }
 
 /// Everything the open of this repository could let slip into an error
-/// (I4), so the adapter's errors are redacted like the worker's own.
-fn redactor_of(spec: &RepositorySpec) -> domain::secrets::Redactor {
+/// (I4), so the adapter's errors are redacted like the worker's own: the
+/// repository's secrets, what its references resolved to, and the proxy
+/// credentials of this process's environment, which the in-process opener
+/// reads.
+fn redactor_of(access: &RepositoryAccess) -> domain::secrets::Redactor {
+    let environment: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    let resolved: Vec<domain::secrets::SecretValue> = access
+        .secrets
+        .iter()
+        .cloned()
+        .chain(crate::environment::proxy_credentials(&environment))
+        .collect();
     domain::secrets::Redactor::for_repository(domain::secrets::RepositorySecrets {
-        repository: &spec.repository,
-        repo_hot: spec.repo_hot.as_deref(),
-        password: &domain::secrets::SecretValue::new(spec.password.clone()),
-        options: &spec.options,
-        options_hot: &spec.options_hot,
-        options_cold: &spec.options_cold,
-        resolved: &[],
+        resolved: &resolved,
+        ..access.known_secrets()
     })
 }
 
@@ -223,5 +241,27 @@ impl app::ports::NormalizeSources for RusticSources {
         .map_err(|error| app::ports::SourcesError::Unreadable {
             detail: error.to_string(),
         })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::secrets::{Redactor, SecretValue};
+
+    #[tokio::test]
+    async fn what_a_blocking_task_panics_with_is_masked() {
+        let canary = "CANARY-quoted-by-a-panic";
+        let redactor = Redactor::new(&[SecretValue::new(canary)]);
+        let error = blocking::<()>(&redactor, move |_| {
+            panic!("the open read {canary} and gave up");
+        })
+        .await
+        .expect_err("a panicking task is an error");
+        let RetentionError::Engine { detail } = &error else {
+            panic!("an engine failure, not {error:?}");
+        };
+        assert!(!detail.contains(canary), "the detail leaks: {detail}");
+        assert!(detail.contains("gave up"), "the rest stays: {detail}");
     }
 }

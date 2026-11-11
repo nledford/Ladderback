@@ -93,6 +93,10 @@ pub enum JobKind {
     /// selection was made by the owner before the job ran (§7.3, step 3).
     Rewrite(RewriteJobSpec),
     Prune(PruneJobSpec),
+    /// What a [`Prune`](Self::Prune) of the same repository would do, worked
+    /// out and not done: the plan, then the result, with nothing deleted or
+    /// marked. A read.
+    PrunePlan(PruneJobSpec),
     Check(CheckJobSpec),
     /// Lists the repository's snapshots. A read, never an operation.
     Ls(RepositorySpec),
@@ -325,6 +329,8 @@ pub enum OpResult {
     Forget(ForgetResult),
     Rewrite(RewriteResult),
     Prune(PruneResult),
+    /// What a [`JobKind::PrunePlan`] found.
+    PrunePlan(PrunePlanResult),
     Check(CheckResult),
     /// A listing's end: how many snapshots the `snapshots` events before it
     /// carried, so a daemon knows it has them all.
@@ -370,6 +376,17 @@ pub struct PruneResult {
     pub packs_marked: u64,
     pub packs_deleted: u64,
     pub packs_recovered: u64,
+}
+
+/// The figures of a prune that was only planned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrunePlanResult {
+    pub repository: RepositoryId,
+    pub packs_marked: u64,
+    pub packs_deleted: u64,
+    pub packs_recovered: u64,
+    /// The bytes of the packs a prune would delete.
+    pub bytes_deleted: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,6 +499,10 @@ mod tests {
             JobKind::Identify(repository()),
             JobKind::Backup(backup),
             JobKind::Prune(PruneJobSpec {
+                repo: repository(),
+                keep_delete: SignedDuration::from_hours(144),
+            }),
+            JobKind::PrunePlan(PruneJobSpec {
                 repo: repository(),
                 keep_delete: SignedDuration::from_hours(144),
             }),
@@ -652,6 +673,26 @@ mod tests {
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["event"], "result");
         assert_eq!(json["op"], "prune");
+        assert_eq!(serde_json::from_value::<WorkerEvent>(json).unwrap(), result);
+    }
+
+    #[test]
+    fn a_prune_plan_names_its_own_job_and_result() {
+        let job = serde_json::to_value(spec(JobKind::PrunePlan(PruneJobSpec {
+            repo: repository(),
+            keep_delete: SignedDuration::from_hours(144),
+        })))
+        .unwrap();
+        assert_eq!(job["job"]["kind"], "prune_plan");
+        let result = WorkerEvent::Result(OpResult::PrunePlan(PrunePlanResult {
+            repository: RepositoryId::parse(&"ab".repeat(32)).unwrap(),
+            packs_marked: 3,
+            packs_deleted: 2,
+            packs_recovered: 1,
+            bytes_deleted: 4096,
+        }));
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["op"], "prune_plan");
         assert_eq!(serde_json::from_value::<WorkerEvent>(json).unwrap(), result);
     }
 

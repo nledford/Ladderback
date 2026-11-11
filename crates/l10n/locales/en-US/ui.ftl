@@ -176,6 +176,43 @@ ui-gallery-save-settings = Save the demo settings
 # The toast shown after the demo settings are saved.
 ui-gallery-settings-saved = Settings saved.
 
+# The heading of the gallery's review dialog demo.
+ui-gallery-review-heading = Review dialog
+
+# The button that opens the review demo that has something to confirm.
+ui-gallery-open-review = Open a demo review
+
+# The button that opens the review demo that has nothing to do.
+ui-gallery-open-empty-review = Open an empty demo review
+
+# The accessible name and heading of the review demo that has something to confirm.
+ui-gallery-demo-review = Demo review to confirm
+
+# What the review demo that has something to confirm says it is about.
+ui-gallery-demo-review-body = Nothing changes until you confirm this demo review.
+
+# The button inside that review demo that confirms it.
+ui-gallery-confirm-demo-review = Confirm the demo review
+
+# Announced politely when the demo review is confirmed.
+ui-gallery-demo-review-confirmed = Demo review confirmed.
+
+# The accessible name and heading of the review demo that has nothing to do.
+ui-gallery-demo-empty-review = Demo review with nothing to do
+
+# What the review demo that has nothing to do says.
+ui-gallery-demo-empty-review-body = There is nothing to change.
+
+## The review dialog (§4.5): what a run would do, shown in a dialog before it
+## runs. The gallery's demos and the snapshots page both use its buttons.
+
+# The button of a review dialog that has something to confirm, which closes it
+# without running anything.
+ui-review-cancel = Cancel
+
+# The only button of a review dialog that has nothing to run.
+ui-review-close = Close
+
 ## The operations page: the backup history, live (§4.4).
 
 # The operations page's title, as the browser's tab and history show it.
@@ -266,7 +303,8 @@ ui-unreachable-body = The daemon that serves this page is not answering. It come
 # What a live page says while its first answer is still on its way.
 ui-loading = Loading…
 
-## The snapshots page: one repository's snapshots, newest first (§4.4).
+## The snapshots page: a repository's history grouped by owner, newest first,
+## and the maintenance that changes it, each run reviewed before it starts (§4.4).
 
 # The snapshots page's title, as the browser's tab and history show it.
 ui-snapshots-title = Snapshots – { -brand-name }
@@ -275,10 +313,7 @@ ui-snapshots-title = Snapshots – { -brand-name }
 ui-snapshots-heading = Snapshots
 
 # The snapshots page's text, until a repository is chosen.
-ui-snapshots-body = The snapshots of a repository, newest first.
-
-# The snapshots table's caption.
-ui-snapshots-caption = Snapshots
+ui-snapshots-body = The snapshots of a repository, grouped by the plan that owns them, newest first.
 
 # The snapshots table's column of snapshot IDs.
 ui-column-snapshot = Snapshot
@@ -291,6 +326,261 @@ ui-snapshots-of = Snapshots of { $alias }
 
 # What the snapshots page says when the repository holds no snapshots.
 ui-no-snapshots = No snapshots yet.
+
+# The heading of the section of a repository's maintenance, named with the repository.
+ui-maintenance-heading = Maintenance of { $alias }
+
+# What the maintenance section says before its buttons.
+ui-maintenance-body = Each of these shows what it would do first. Nothing changes until you confirm.
+
+# The button that reviews a forget: the snapshots the plans' retention no longer keeps.
+ui-maintenance-forget = Forget snapshots
+
+# The button that reviews a prune: the data no snapshot uses.
+ui-maintenance-prune = Prune unused data
+
+# The button that reviews a check of the repository.
+ui-maintenance-check = Check the repository
+
+# What the maintenance section shows while a review is being prepared.
+ui-maintenance-preparing = Preparing the review…
+
+# What the maintenance section shows, and the review that confirmed it says, while the start of a run is on its way. $kind is the wire text of what starts: forget, prune, check or adopt.
+ui-maintenance-starting =
+    { $kind ->
+        [forget] Starting the forget…
+        [prune] Starting the prune…
+        [check] Starting the check…
+       *[adopt] Starting the adoption…
+    }
+
+# What the maintenance section says while a run goes on. $kind is the wire text of what runs: forget, prune, check or adopt.
+ui-maintenance-running =
+    { $kind ->
+        [forget] A forget is running.
+        [prune] A prune is running.
+        [check] A check is running.
+       *[adopt] An adoption is running.
+    }
+
+# The button that asks the run that goes on to stop.
+ui-maintenance-cancel = Cancel the run
+
+# Said politely, and shown, when a run finished. $kind is the wire text of what ran: forget, prune, check or adopt.
+ui-maintenance-finished =
+    { $kind ->
+        [forget] Forget finished.
+        [prune] Prune finished.
+        [check] Check finished.
+       *[adopt] Adoption finished.
+    }
+
+# Said politely, and shown, when a run was cancelled. $kind is the wire text of what ran: forget, prune, check or adopt.
+ui-maintenance-cancelled =
+    { $kind ->
+        [forget] Forget cancelled.
+        [prune] Prune cancelled.
+        [check] Check cancelled.
+       *[adopt] Adoption cancelled.
+    }
+
+# Said assertively, and shown, when a run failed. $kind is the wire text of what ran: forget, prune, check or adopt.
+ui-maintenance-failed =
+    { $kind ->
+        [forget] Forget failed.
+        [prune] Prune failed.
+        [check] Check failed.
+       *[adopt] Adoption failed.
+    }
+
+# Said politely, and shown, when this page stopped watching a run that goes on. $kind is the wire text of what runs: forget, prune, check or adopt.
+ui-maintenance-unwatched =
+    { $kind ->
+        [forget] This page stopped watching the forget, which goes on. The Operations page shows how it ends.
+        [prune] This page stopped watching the prune, which goes on. The Operations page shows how it ends.
+        [check] This page stopped watching the check, which goes on. The Operations page shows how it ends.
+       *[adopt] This page stopped watching the adoption, which goes on. The Operations page shows how it ends.
+    }
+
+# The heading of the section of one plan's snapshots.
+ui-snapshots-plan = Plan { $plan }
+
+# The caption of the table of one plan's snapshots.
+ui-snapshots-of-plan = Snapshots of plan { $plan }
+
+# What follows a list that shows only the newest of its snapshots, a sentence of its own; $count is how many it leaves out.
+ui-snapshots-more =
+    { $count ->
+        [one] 1 more snapshot is not listed.
+       *[other] { $count } more snapshots are not listed.
+    }
+
+# The heading of the section of history that no plan of this agent owns.
+ui-orphaned-heading = Orphaned history
+
+# What the orphaned section says about its groups.
+ui-orphaned-body = No plan of this agent owns these snapshots now. A forget leaves them alone, and adopting a group rewrites it into a plan.
+
+# The heading of an orphaned group. $owner is both when the group carries the tags of an agent and a plan, plan or agent when it carries one of them, and neither when it carries none; $plan and $agent are the tags.
+ui-orphaned-group =
+    { $owner ->
+        [both] Plan { $plan } of agent { $agent }
+        [plan] Plan { $plan } of an unknown agent
+        [agent] An unknown plan of agent { $agent }
+       *[neither] History of an unknown agent and plan
+    }
+
+# The caption of the table of an orphaned group's snapshots; $owner, $plan and $agent are as in the group's heading.
+ui-orphaned-caption =
+    { $owner ->
+        [both] Snapshots of plan { $plan } of agent { $agent }
+        [plan] Snapshots of plan { $plan } of an unknown agent
+        [agent] Snapshots of an unknown plan of agent { $agent }
+       *[neither] Snapshots of an unknown agent and plan
+    }
+
+# The button that adopts an orphaned group, named by its agent and plan, into a plan of this agent.
+ui-adopt-orphaned = Adopt history of plan { $plan } from agent { $agent } into plan { $into }
+
+# What an orphaned group says when it lacks the tag of an agent or of a plan, which an adoption names.
+ui-orphaned-untagged = This history lacks the tag of an agent or a plan, so it cannot be adopted.
+
+# What an orphaned group says when no plan of this agent could take it.
+ui-orphaned-no-plan = No plan of this agent could take this history, so it cannot be adopted.
+
+# The heading of the section of history that no agent tagged.
+ui-unmanaged-heading = Unmanaged history
+
+# What the unmanaged section says about its groups.
+ui-unmanaged-body = No agent tagged these snapshots. A forget leaves them alone, and a plan that backs up the same host, label and paths can adopt them.
+
+# The heading of an unmanaged group. $labeled is yes when the group has a label and no when it has none; $hostname is its host and $label its label.
+ui-unmanaged-group =
+    { $labeled ->
+        [yes] Host { $hostname }, label { $label }
+       *[no] Host { $hostname }, no label
+    }
+
+# What introduces the list of the paths an unmanaged group backed up.
+ui-unmanaged-paths = Paths:
+
+# The caption of the table of an unmanaged group's snapshots; $labeled, $hostname and $label are as in the group's heading.
+ui-unmanaged-caption =
+    { $labeled ->
+        [yes] Snapshots of host { $hostname }, label { $label }
+       *[no] Snapshots of host { $hostname }, no label
+    }
+
+# The button that adopts an unmanaged group into the plan that backs up the same things; $labeled, $hostname and $label are as in the group's heading, $into is the plan.
+ui-adopt-unmanaged =
+    { $labeled ->
+        [yes] Adopt history of host { $hostname }, label { $label } into plan { $into }
+       *[no] Adopt history of host { $hostname }, no label into plan { $into }
+    }
+
+# What an unmanaged group says when no plan of this agent could adopt it.
+ui-unmanaged-no-plan = No plan of this agent backs up this host, label and paths, so this history cannot be adopted.
+
+# The title of the review of a forget, named with the repository.
+ui-review-title-forget = Forget snapshots of { $alias }
+
+# The title of the review of a prune, named with the repository.
+ui-review-title-prune = Prune { $alias }
+
+# The title of the review of a check, named with the repository.
+ui-review-title-check = Check { $alias }
+
+# The title of the review of an adoption, named with the plan that takes the history.
+ui-review-title-adopt = Adopt history into { $plan }
+
+# The button that confirms a forget; $count is how many snapshots it removes.
+ui-review-confirm-forget =
+    { $count ->
+        [one] Forget 1 snapshot
+       *[other] Forget { $count } snapshots
+    }
+
+# The button that confirms an adoption; $count is how many snapshots it rewrites.
+ui-review-confirm-adopt =
+    { $count ->
+        [one] Adopt 1 snapshot
+       *[other] Adopt { $count } snapshots
+    }
+
+# The button that confirms a prune.
+ui-review-confirm-prune = Start prune
+
+# The button that confirms a check.
+ui-review-confirm-check = Start check
+
+# What a forget does to the snapshots of one plan; $remove of its $total go.
+ui-review-removes =
+    { $remove ->
+        [one]
+            { $total ->
+                [one] Plan { $plan }: its 1 snapshot is forgotten.
+               *[other] Plan { $plan }: 1 of its { $total } snapshots is forgotten.
+            }
+       *[other] Plan { $plan }: { $remove } of its { $total } snapshots are forgotten.
+    }
+
+# What a forget does to a plan whose retention lets none of its $total snapshots go.
+ui-review-removes-none =
+    { $total ->
+        [one] Plan { $plan }: nothing is forgotten among its 1 snapshot.
+       *[other] Plan { $plan }: nothing is forgotten among its { $total } snapshots.
+    }
+
+# What a forget says when no plan of this agent backs up to the repository.
+ui-review-no-plans = No plan of this agent backs up to this repository, so a forget has nothing to keep or remove.
+
+# What a forget leaves alone when it finds only orphaned history; $snapshots counts the snapshots.
+ui-review-leaves-orphaned = Left alone: orphaned snapshots ({ $snapshots }), which no plan of this agent owns.
+
+# What a forget leaves alone when it finds only unmanaged history; $snapshots counts the snapshots.
+ui-review-leaves-unmanaged = Left alone: unmanaged snapshots ({ $snapshots }), which no agent tagged.
+
+# What a forget leaves alone when it finds both kinds of history, counted by $orphaned and $unmanaged.
+ui-review-leaves-both = Left alone: orphaned snapshots ({ $orphaned }), which no plan of this agent owns, and unmanaged snapshots ({ $unmanaged }), which no agent tagged.
+
+# What an adoption does; $snapshots is how many snapshots become part of the plan $into.
+ui-review-adopts =
+    { $snapshots ->
+        [one] 1 snapshot becomes part of plan { $into }. It gets a new ID and keeps its tree.
+       *[other] { $snapshots } snapshots become part of plan { $into }. They get new IDs and keep their trees.
+    }
+
+# What an adoption says when no snapshot is left to adopt into the plan $into.
+ui-review-adopts-none = No snapshots are left to adopt into plan { $into }.
+
+# What a prune's dry run found: packs marked as unused now, packs deleted now, packs recovered, and the bytes the deleted ones free.
+ui-review-prunes = Packs marked as unused now: { $marked }. Packs deleted now, which were marked earlier: { $deleted }, freeing { $bytes }. Packs recovered: { $recovered }.
+
+# How long a pack that is marked now waits for a later prune to delete it, in whole days.
+ui-review-prune-wait-days =
+    { $days ->
+        [one] Packs marked now are deleted by a later prune, after 1 day.
+       *[other] Packs marked now are deleted by a later prune, after { $days } days.
+    }
+
+# How long a pack that is marked now waits for a later prune to delete it, in hours.
+ui-review-prune-wait-hours =
+    { $hours ->
+        [one] Packs marked now are deleted by a later prune, after 1 hour.
+       *[other] Packs marked now are deleted by a later prune, after { $hours } hours.
+    }
+
+# What a check reads when it looks at the repository's structure only.
+ui-review-checks-structure = The check reads the structure of the repository and changes nothing. It holds the repository while it runs.
+
+# What a check reads when it also reads all the data.
+ui-review-checks-data = The check reads the structure and all the data of the repository, which takes longer, and changes nothing. It holds the repository while it runs.
+
+# The caption of the table of the snapshots a forget removes from the plan $plan.
+ui-review-forget-caption = Snapshots forgotten from plan { $plan }
+
+# The caption of the table of the snapshots an adoption rewrites into the plan $plan.
+ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.

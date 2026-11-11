@@ -170,6 +170,14 @@ error-adoption-no-match = No plan of this agent matches that history, so nothing
 # $plans (text): the plans that match, such as home, mirror.
 error-adoption-ambiguous = Plans { $plans } all match that history, and which one it belongs to is yours to say. Point the adoption at one plan, or change the others so only one matches.
 
+# A forget or an adoption was started with the selection its preview named,
+# and the snapshots it would act on have changed since, so nothing was done.
+error-maintenance-selection-changed = The repository changed after you reviewed this, so nothing was done. Review it again to see what it would do now.
+
+# The repository did not answer a read in time, so there was nothing to show
+# or to review.
+error-repository-read-timed-out = The repository did not answer in time, so what was asked of it could not be read. Check that it can be reached, then try again.
+
 # The request asks for a maintenance kind this version does not run.
 # $kind (text): the kind as it was sent.
 error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, adopt, prune or check.

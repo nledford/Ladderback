@@ -256,7 +256,7 @@ pub(crate) fn start_backup(agent: &mut Agent, plan: &str) -> String {
 }
 
 /// Reads the history page until the operation `id` has ended.
-async fn wait_ended(agent: &Agent, id: &str) {
+pub(crate) async fn wait_ended(agent: &Agent, id: &str) {
     let started = Instant::now();
     loop {
         let page = history_page(agent, "limit=50").await;
@@ -363,7 +363,7 @@ fn starts_two_backups(agent: &mut Agent, plan: String) {
 
 #[when(expr = "the daemon has finished {int} backups of the plan {string}")]
 #[when(expr = "the daemon has finished {int} backup of the plan {string}")]
-async fn finished_backups(agent: &mut Agent, count: usize, plan: String) {
+pub(crate) async fn finished_backups(agent: &mut Agent, count: usize, plan: String) {
     for _ in 0..count {
         let id = start_backup(agent, &plan);
         agent.ops.started.push(id.clone());

@@ -13,6 +13,7 @@ import path from "node:path";
 import { After, Given, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 
+import { namePattern } from "../support/keyboard.mjs";
 import { ScriptedDaemon } from "../support/scripted-daemon.mjs";
 import { fixtureRepo, startServer } from "../support/world.mjs";
 
@@ -28,12 +29,13 @@ const ROW_PATIENCE_MS = 120_000;
 // moment at most: this long, not as long as a real backup.
 const UPDATE_PATIENCE_MS = 5_000;
 
-// The two sources a demo plan backs up: `small` runs long enough that its
+// The three sources a demo plan backs up: `tiny` ends at once, for journeys
+// that need several real snapshots; `small` runs long enough that its
 // Running row is there to be read (a second or two) and then ends; `big`
 // outlives the moment a journey cancels it or reloads the page mid-run
 // (about ten seconds). Each file's content is unique to its number, so the
 // repository cannot collapse the source into one chunk and end at once.
-const SOURCE_FILES = { small: 10_000, big: 50_000 };
+const SOURCE_FILES = { tiny: 3, small: 10_000, big: 50_000 };
 const FILE_BYTES = 2048;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -52,14 +54,15 @@ async function until(read, ms, what) {
   assert.fail(`${what} (last saw ${last === null ? "nothing" : JSON.stringify(last)})`);
 }
 
-/** The table a page shows, by its caption. */
+/** The table a page shows, by its whole caption. A value in the caption is
+ *  wrapped in bidi isolation marks, which a reader never hears (§4.5). */
 function table(world, name) {
-  return world.page.getByRole("table", { name });
+  return world.page.getByRole("table", { name: namePattern(name) });
 }
 
 /** Writes a demo plan's config and repository into a scratch folder, starts
  *  a daemon on it, and points the scenario's pages at that daemon. */
-async function serveDemoPlan(world, plan, size) {
+export async function serveDemoPlan(world, plan, size) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");
@@ -154,7 +157,13 @@ When("the daemon has stopped", async function () {
 // The page's own loading state (§4.4): every answer the daemon owes the UI
 // arrives late, so the page opens on "Loading…" alone.
 When("the daemon's answers to the UI are delayed", function () {
-  this.slowNetwork = true;
+  this.answerDelayMs = 10_000;
+});
+
+// A shorter wait, for a journey that has to read a wait and then act within
+// it: every answer arrives this many seconds late.
+When("the daemon's answers to the UI are delayed by {int} seconds", function (seconds) {
+  this.answerDelayMs = seconds * 1_000;
 });
 
 When("I reload the page", async function () {

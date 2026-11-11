@@ -16,9 +16,7 @@ use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
-use app::maintenance::{
-    Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, RunMaintenance,
-};
+
 use app::ports::Retention;
 use app::ports::SecretResolver as _;
 use app::ports::{
@@ -47,8 +45,8 @@ use engine::WorkerEngine;
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
-    AppState, Catalog, CatalogError, Operations, Repositories, RepositoriesError, SecretRefusal,
-    SnapshotsError, StartError,
+    AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Repositories,
+    RepositoriesError, SecretRefusal, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
 use platform::SystemClock;
@@ -57,6 +55,8 @@ use platform::{agent_id, dirs};
 use secrets::SystemSecrets;
 use store::SqliteStore;
 use uuid::Uuid;
+
+mod maintenance;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
 pub(crate) struct Refused {
@@ -506,85 +506,29 @@ impl Operations for PlanRunner {
         let _ = wait_for_log.await;
         Ok(id_text)
     }
+
     async fn start_maintenance(
         &self,
         repository: String,
         request: http_adapter::MaintenanceRequest,
-    ) -> Result<String, http_adapter::MaintenanceStartError> {
-        let alias = RepositoryAlias::parse(&repository)
-            .map_err(|_| http_adapter::MaintenanceStartError::UnknownRepository)?;
-        let kind = match request {
-            http_adapter::MaintenanceRequest::Forget => MaintenanceKind::Forget,
-            http_adapter::MaintenanceRequest::Prune => MaintenanceKind::Prune,
-            http_adapter::MaintenanceRequest::Check => MaintenanceKind::Check,
-            http_adapter::MaintenanceRequest::Adopt { into, from } => {
-                let into = PlanId::parse(&into)
-                    .map_err(|_| http_adapter::MaintenanceStartError::UnknownPlan { plan: into })?;
-                MaintenanceKind::Adopt(Adoption {
-                    from: match from {
-                        http_adapter::AdoptionFrom::Orphaned { agent, plan } => {
-                            AdoptionSource::Orphaned { agent, plan }
-                        }
-                        http_adapter::AdoptionFrom::Unmanaged => AdoptionSource::Unmanaged,
-                    },
-                    into,
-                })
-            }
-        };
-        let use_case = RunMaintenance::new(
-            Arc::clone(&self.engine),
-            Arc::new(SystemClock),
-            Arc::clone(&self.store),
-            self.resolve.as_ref().clone(),
-            Arc::clone(&self.retention),
-            Arc::clone(&self.config),
-            self.agent_id,
-            platform::hostname(),
-            Arc::new(engine::RusticSources),
-        )
-        .with_events(Arc::clone(&self.events));
-        let operation = OperationId::from_uuid(Uuid::now_v7());
-        let id_text = operation.as_uuid().hyphenated().to_string();
-        // The reads come first, on the request's own future: they store
-        // nothing and take no slot, so a client that hangs up meanwhile has
-        // left nothing behind.
-        let assessment = use_case
-            .assess(operation, &alias, kind)
-            .await
-            .map_err(maintenance_refusal)?;
-        // The start writes the log. A write dropped after SQLite committed
-        // it leaves a running row that holds the repository (I7) and that
-        // nothing in this process ends, so the start happens on a task of its
-        // own, which the client's hanging up can't drop, and the route waits
-        // for that task's answer.
-        let (started, wait_for_start) = futures::channel::oneshot::channel();
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let prepared = match use_case.start(assessment).await {
-                Ok(prepared) => prepared,
-                Err(refused) => {
-                    let _ = started.send(Err(maintenance_refusal(refused)));
-                    return;
-                }
-            };
-            // The cancel switch is parked before the route answers, not
-            // lazily when the run first polls it, so a cancel that arrives
-            // the instant the route answers finds it (§4.2).
-            let cancel = registry.register(operation);
-            let cancel = async move {
-                let _ = cancel.await;
-            };
-            let _ = started.send(Ok(()));
-            let finished = use_case.execute(prepared, cancel).await;
-            registry.finish(&operation);
-            log_ended(&finished);
-        });
-        // A task that ended without answering has not started anything the
-        // route could name.
-        match wait_for_start.await {
-            Ok(answer) => answer.map(|()| id_text),
-            Err(_) => Err(http_adapter::MaintenanceStartError::Unavailable),
-        }
+        selection: Option<String>,
+    ) -> Result<String, MaintenanceRefusal> {
+        maintenance::start(self, repository, request, selection).await
+    }
+
+    async fn preview(
+        &self,
+        repository: String,
+        request: http_adapter::MaintenanceRequest,
+    ) -> Result<api::MaintenancePreviewDto, MaintenanceRefusal> {
+        maintenance::preview(self, repository, request).await
+    }
+
+    async fn groups(
+        &self,
+        repository: String,
+    ) -> Result<api::SnapshotGroupsDto, MaintenanceRefusal> {
+        maintenance::groups(self, repository).await
     }
 
     async fn history(
@@ -706,30 +650,6 @@ fn log_ended(finished: &Finished) {
     }
 }
 
-/// Why a maintenance run could not start, as the API answers it. A failure
-/// to read the configuration, the secrets, the repository or the operation
-/// log is `Unavailable`: none of them is the caller's to fix.
-fn maintenance_refusal(error: MaintenanceError) -> http_adapter::MaintenanceStartError {
-    use http_adapter::MaintenanceStartError as Answer;
-    match error {
-        MaintenanceError::UnknownRepository => Answer::UnknownRepository,
-        MaintenanceError::Busy { running } => Answer::Busy {
-            running: running.as_uuid().hyphenated().to_string(),
-        },
-        MaintenanceError::KeepsNothing { plan } => Answer::KeepsNothing {
-            plan: plan.as_str().to_owned(),
-        },
-        MaintenanceError::UnknownPlan { plan } => Answer::UnknownPlan {
-            plan: plan.as_str().to_owned(),
-        },
-        MaintenanceError::AdoptionNoMatch => Answer::AdoptionNoMatch,
-        MaintenanceError::AdoptionAmbiguous { plans } => Answer::AdoptionAmbiguous {
-            plans: plans.iter().map(|plan| plan.as_str().to_owned()).collect(),
-        },
-        _ => Answer::Unavailable,
-    }
-}
-
 /// An operation's ID as the wire carries it, when the text is one.
 fn operation_of(text: &str) -> Option<OperationId> {
     text.parse::<Uuid>().ok().map(OperationId::from_uuid)
@@ -798,8 +718,10 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
             duration_ms,
         }),
+        // Reads: a result no operation row holds, so the page shows none.
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
+        | EngineResult::PrunePlan(_)
         | EngineResult::Snapshots(_) => None,
     }
 }
@@ -2380,6 +2302,162 @@ mod tests {
         cancel.expect("a cancel in the start window is accepted");
     }
 
+    /// An engine for a repository that holds no snapshots: it names the
+    /// repository when asked to identify it, and lists nothing for any other
+    /// job.
+    struct Empty;
+
+    #[async_trait]
+    impl Engine for Empty {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let result = match job {
+                Job::Identify(_) => EngineResult::Repository {
+                    id: domain::RepositoryId::parse(&"a".repeat(64)).expect("a repository ID"),
+                },
+                _ => EngineResult::Snapshots(Vec::new()),
+            };
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Succeeded(result)]).boxed(),
+                control: Box::new(Parked),
+            })
+        }
+    }
+
+    /// A start, a preview and a read of the groups name a repository by its
+    /// alias: one the configuration doesn't hold and one no alias could be
+    /// are both unknown, and the engine is never asked.
+    #[tokio::test]
+    async fn a_maintenance_request_for_a_repository_that_is_not_there_is_unknown() {
+        use http_adapter::MaintenanceRequest as Request;
+        let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        for repository in ["missing", "Not An Alias"] {
+            for request in [Request::Forget, Request::Prune, Request::Check] {
+                assert_eq!(
+                    runner.preview(repository.to_owned(), request.clone()).await,
+                    Err(MaintenanceRefusal::UnknownRepository),
+                    "a preview of {request:?} on {repository}"
+                );
+                assert_eq!(
+                    runner
+                        .start_maintenance(repository.to_owned(), request.clone(), None)
+                        .await,
+                    Err(MaintenanceRefusal::UnknownRepository),
+                    "a start of {request:?} on {repository}"
+                );
+            }
+            assert_eq!(
+                runner.groups(repository.to_owned()).await,
+                Err(MaintenanceRefusal::UnknownRepository),
+                "the groups of {repository}"
+            );
+        }
+    }
+
+    /// A check says nothing of the repository but that it is configured, so
+    /// its preview needs no engine: this runner's parks every job.
+    #[tokio::test]
+    async fn a_check_preview_is_told_without_the_engine() {
+        let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        assert_eq!(
+            runner
+                .preview("demo".to_owned(), http_adapter::MaintenanceRequest::Check)
+                .await,
+            Ok(api::MaintenancePreviewDto::Check { read_data: false })
+        );
+    }
+
+    /// A selection is the text a preview named it by; anything else is
+    /// refused before the repository is read: this runner's engine parks.
+    #[tokio::test]
+    async fn a_selection_that_is_not_one_is_refused_before_anything_is_read() {
+        let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        assert_eq!(
+            runner
+                .start_maintenance(
+                    "demo".to_owned(),
+                    http_adapter::MaintenanceRequest::Forget,
+                    Some("not-a-selection".to_owned()),
+                )
+                .await,
+            Err(MaintenanceRefusal::InvalidBody)
+        );
+    }
+
+    /// An adoption into a plan no plan could be called is unknown before the
+    /// repository is read.
+    #[tokio::test]
+    async fn an_adoption_into_a_plan_that_cannot_be_named_is_refused_before_anything_is_read() {
+        let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        for into in ["Not A Plan", ""] {
+            assert_eq!(
+                runner
+                    .start_maintenance(
+                        "demo".to_owned(),
+                        http_adapter::MaintenanceRequest::Adopt {
+                            into: into.to_owned(),
+                            from: api::AdoptionFromDto::Unmanaged,
+                        },
+                        None,
+                    )
+                    .await,
+                Err(MaintenanceRefusal::UnknownPlan {
+                    plan: into.to_owned()
+                })
+            );
+        }
+    }
+
+    /// Every plan of the repository is listed, the ones with no snapshots
+    /// too, with the repository read live through the engine.
+    #[tokio::test]
+    async fn the_groups_of_a_repository_with_no_snapshots_still_list_every_plan() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(Empty);
+        assert_eq!(
+            runner.groups("demo".to_owned()).await,
+            Ok(api::SnapshotGroupsDto {
+                plans: vec![api::PlanGroupDto {
+                    plan: "home".to_owned(),
+                    count: 0,
+                    snapshots: Vec::new(),
+                }],
+                orphaned: Vec::new(),
+                unmanaged: Vec::new(),
+            })
+        );
+    }
+
+    /// A start that carries a selection is held to it (I6): what a forget
+    /// would remove is read again, and a repository that no longer matches
+    /// what the review named refuses before anything is removed.
+    #[tokio::test]
+    async fn a_forget_held_to_a_selection_the_repository_no_longer_matches_is_refused() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(Empty);
+        let reviewed = runner
+            .preview("demo".to_owned(), http_adapter::MaintenanceRequest::Forget)
+            .await
+            .expect("a preview of the empty repository");
+        let api::MaintenancePreviewDto::Forget { selection, .. } = reviewed else {
+            panic!("a forget is previewed as a forget");
+        };
+        let other = if selection == "0123456789abcdef" {
+            "fedcba9876543210"
+        } else {
+            "0123456789abcdef"
+        };
+        assert_eq!(
+            runner
+                .start_maintenance(
+                    "demo".to_owned(),
+                    http_adapter::MaintenanceRequest::Forget,
+                    Some(other.to_owned()),
+                )
+                .await,
+            Err(MaintenanceRefusal::SelectionChanged)
+        );
+    }
+
     /// A client that cancels the instant it has the answer to its start is
     /// not told the operation is unknown or not running: the operation is
     /// recorded and its cancel switch parked before the route answers, and
@@ -2741,7 +2819,7 @@ mod tests {
         let log = Arc::new(HeldEnd::over(Arc::clone(&runner.store)));
         let mut heard = listen(&mut runner, Completes, log.clone()).await;
         let id = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("the check starts");
 
@@ -2895,7 +2973,7 @@ mod tests {
         let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
         runner.engine = Arc::new(IdentifiesThenParks);
         let id = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("the check starts");
         runner
@@ -3001,7 +3079,7 @@ mod tests {
             refused: Arc::clone(&refused),
         });
         let id = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("a check starts");
         let lines = logged_about_the_run(&id, &refused).await;
@@ -3066,76 +3144,6 @@ mod tests {
     /// A maintenance run that could not start is answered with the kind of
     /// its refusal, and whatever is not the caller's to fix (the
     /// configuration, a secret, the repository, the log) with `Unavailable`.
-    #[test]
-    fn a_maintenance_start_is_answered_with_the_kind_of_its_refusal() {
-        use http_adapter::MaintenanceStartError as Answer;
-        let plan = |slug: &str| PlanId::parse(slug).expect("a plan ID");
-        let answers = [
-            (
-                MaintenanceError::UnknownRepository,
-                Answer::UnknownRepository,
-            ),
-            (
-                MaintenanceError::Busy {
-                    running: OperationId::from_uuid(Uuid::from_u128(0x7003)),
-                },
-                Answer::Busy {
-                    running: "00000000-0000-0000-0000-000000007003".to_owned(),
-                },
-            ),
-            (
-                MaintenanceError::KeepsNothing { plan: plan("home") },
-                Answer::KeepsNothing {
-                    plan: "home".to_owned(),
-                },
-            ),
-            (
-                MaintenanceError::UnknownPlan { plan: plan("home") },
-                Answer::UnknownPlan {
-                    plan: "home".to_owned(),
-                },
-            ),
-            (MaintenanceError::AdoptionNoMatch, Answer::AdoptionNoMatch),
-            (
-                MaintenanceError::AdoptionAmbiguous {
-                    plans: vec![plan("home"), plan("mirror")],
-                },
-                Answer::AdoptionAmbiguous {
-                    plans: vec!["home".to_owned(), "mirror".to_owned()],
-                },
-            ),
-            (MaintenanceError::Unavailable, Answer::Unavailable),
-            (
-                MaintenanceError::Resolve(ResolveError {
-                    field: Field::Repository,
-                    cause: Cause::ReferenceInProcessArguments,
-                }),
-                Answer::Unavailable,
-            ),
-            (
-                MaintenanceError::Engine {
-                    detail: "no worker".to_owned(),
-                },
-                Answer::Unavailable,
-            ),
-            (
-                MaintenanceError::Failed(FailureReason::DeadlinePassed),
-                Answer::Unavailable,
-            ),
-            (MaintenanceError::TimedOut, Answer::Unavailable),
-            (
-                MaintenanceError::Store(app::ports::StoreError::Unavailable {
-                    detail: "disk full".to_owned(),
-                }),
-                Answer::Unavailable,
-            ),
-        ];
-        for (refused, answer) in answers {
-            let said = format!("{refused:?}");
-            assert_eq!(maintenance_refusal(refused), answer, "{said}");
-        }
-    }
-
     /// An operation log whose starts take their time on both sides of the
     /// write, so that a handler dropped on either side is dropped with the
     /// start still going on or already stored.
@@ -3265,8 +3273,11 @@ mod tests {
             runner.store = Arc::new(SlowStarts {
                 inner: Arc::clone(&runner.store),
             });
-            let start =
-                runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+            let start = runner.start_maintenance(
+                "demo".into(),
+                http_adapter::MaintenanceRequest::Check,
+                None,
+            );
             let what = format!("after a start cut after {polls} polls");
             if let Some(answer) = cut_after(start, polls).await {
                 assert!(
@@ -3409,7 +3420,7 @@ mod tests {
         let log = Arc::clone(&runner.store);
         let mut heard = listen(&mut runner, Completes, log).await;
         let id = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("the check starts");
 
@@ -3452,7 +3463,7 @@ mod tests {
         let log = Arc::clone(&runner.store);
         let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
         let id = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("the check starts");
         runner
@@ -3479,15 +3490,15 @@ mod tests {
         let log = Arc::clone(&runner.store);
         let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
         let running = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await
             .expect("the first check starts");
         let refused = runner
-            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
             .await;
         assert_eq!(
             refused,
-            Err(http_adapter::MaintenanceStartError::Busy {
+            Err(MaintenanceRefusal::Busy {
                 running: running.clone()
             })
         );
@@ -3519,7 +3530,7 @@ mod tests {
         let log = Arc::new(HeldAnswer::over(Arc::clone(&runner.store)));
         let mut heard = listen(&mut runner, Completes, log.clone()).await;
         let route =
-            runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+            runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None);
         tokio::select! {
             answered = route => panic!("the route answered before the log did: {answered:?}"),
             () = log.start_stored() => {}

@@ -12,8 +12,8 @@ use rustic_core::{
 };
 
 use super::convert::{
-    JobError, backup_result, check_result, prune_options, prune_result, snapshot_id, snapshot_ref,
-    snapshot_tags,
+    JobError, backup_result, check_result, prune_options, prune_plan_result, prune_result,
+    snapshot_id, snapshot_ref, snapshot_tags,
 };
 use super::listing;
 use super::repository::{new_repository, open, repository_id};
@@ -255,6 +255,20 @@ pub(crate) fn prune(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError>
     let result = prune_result(id, &plan.stats);
     repository.prune(&options, plan)?;
     Ok(Done::Result(OpResult::Prune(result)))
+}
+
+/// What [`prune`] would do, worked out and not done: the plan's figures, and
+/// nothing deleted or marked.
+pub(crate) fn prune_plan(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError> {
+    let options = prune_options(job.keep_delete)?;
+    let repository = open(ctx, &job.repo)?;
+    let id = repository_id(&repository)?;
+    ctx.start(None)?;
+    let plan = repository.prune_plan(&options)?;
+    Ok(Done::Result(OpResult::PrunePlan(prune_plan_result(
+        id,
+        &plan.stats,
+    ))))
 }
 
 pub(crate) fn check(ctx: &Context, job: &CheckJobSpec) -> Result<Done, JobError> {

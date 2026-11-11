@@ -29,13 +29,12 @@ Then("the text direction is {string}", async function (direction) {
   assert.equal(laidOut, direction, "the direction the page is laid out in");
 });
 
-// §8.4: in a pseudolocale all visible text comes out of the catalog, so a text
-// with letters and no transformed character was written in the code. The
-// exemption for data (IDs, paths, hostnames, verbatim rustic text marked
-// lang="en") arrives with the first screen that shows data: the start page
-// has none.
-Then("every visible text is transformed", async function () {
-  const { inspected, plain } = await this.page.evaluate(() => {
+// The visible texts of the page that have letters and no transformed one: a
+// text written in the code, not drawn from the catalog (§8.4). `data` is a
+// selector for what the page shows besides its words, which the catalog did
+// not write and so leaves as it is; without it nothing is exempt.
+async function untransformed(page, data) {
+  return page.evaluate((data) => {
     const plain = [];
     let inspected = 0;
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -43,13 +42,31 @@ Then("every visible text is transformed", async function () {
       const text = node.textContent.trim();
       const parent = node.parentElement;
       if (!/\p{L}/u.test(text) || !parent?.checkVisibility({ visibilityProperty: true })) continue;
+      if (data && parent.closest(data)) continue;
       inspected += 1;
       if (/^[\x00-\x7f]*$/.test(text)) plain.push(text);
     }
     return { inspected, plain };
-  });
+  }, data ?? null);
+}
+
+// §8.4: in a pseudolocale all visible text comes out of the catalog, so a text
+// with letters and no transformed character was written in the code. This
+// step exempts nothing: the pages it is used on show no data.
+Then("every visible text is transformed", async function () {
+  const { inspected, plain } = await untransformed(this.page);
   assert.ok(inspected > 0, "the page shows no text to check");
   assert.deepEqual(plain, [], "visible text that the pseudolocale did not transform");
+});
+
+// What a page shows of a repository is data besides sentences: the IDs and
+// instants in the cells of a table's body, the paths of a list (each in a
+// `bdi`), and the engine's own words (`lang="en"`). The catalog wrote none of
+// them, so they stay as they are; every other text must be transformed.
+Then("every visible text but the data of the tables and lists is transformed", async function () {
+  const { inspected, plain } = await untransformed(this.page, 'tbody td, bdi, [lang="en"]');
+  assert.ok(inspected > 0, "the page shows no text to check");
+  assert.deepEqual(plain, [], "visible text outside the data that the pseudolocale did not transform");
 });
 
 Then("the page title is transformed", async function () {

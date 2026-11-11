@@ -247,6 +247,14 @@ pub fn prune_job(location: &Location) -> Job {
     })
 }
 
+/// What `prune_job` would do, as a read.
+pub fn prune_plan_job(location: &Location) -> Job {
+    Job::PrunePlan(PruneJob {
+        repository: location.access(PASSWORD),
+        keep_delete: KeepDelete::MIN,
+    })
+}
+
 pub fn check_job(location: &Location, read_data: bool) -> Job {
     Job::Check(CheckJob {
         repository: location.access(PASSWORD),

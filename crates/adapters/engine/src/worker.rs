@@ -295,6 +295,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         JobKind::Forget(job) => jobs::forget(&ctx, job),
         JobKind::Rewrite(job) => jobs::rewrite(&ctx, job),
         JobKind::Prune(job) => jobs::prune(&ctx, job),
+        JobKind::PrunePlan(job) => jobs::prune_plan(&ctx, job),
         JobKind::Check(job) => jobs::check(&ctx, job),
         JobKind::Ls(repository) => jobs::ls(&ctx, repository),
     };
@@ -326,6 +327,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
         JobKind::Forget(job) => Some(&job.repo),
         JobKind::Rewrite(job) => Some(&job.repo),
         JobKind::Prune(job) => Some(&job.repo),
+        JobKind::PrunePlan(job) => Some(&job.repo),
         JobKind::Check(job) => Some(&job.repo),
     }
 }

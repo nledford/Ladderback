@@ -12,7 +12,8 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::components::{
-    FormField, ModalDialog, Progress, SortableTable, StatusBadge, Toast, show_toast,
+    Confirmation, FormField, ModalDialog, Progress, ReviewDialog, SortableTable, StatusBadge,
+    Toast, show_toast,
 };
 use crate::live::{modal_gone, open_modal, say};
 use crate::routes::PageHeading;
@@ -63,6 +64,13 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let progress = RwSignal::new(40u8);
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
+    // The review demos: whether each is open, and what confirming the first
+    // announces.
+    let review_open = RwSignal::new(false);
+    let empty_review_open = RwSignal::new(false);
+    let review_confirmed = t(msg::UI_GALLERY_DEMO_REVIEW_CONFIRMED);
+    let review_body = t(msg::UI_GALLERY_DEMO_REVIEW_BODY);
+    let empty_review_body = t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW_BODY);
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
@@ -228,6 +236,49 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_SAVE_SETTINGS)}
                 </button>
             </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
+            <p>
+                <button type="button" id="gallery-review" on:click=move |_| review_open.set(true)>
+                    {t(msg::UI_GALLERY_OPEN_REVIEW)}
+                </button>
+            </p>
+            <p>
+                <button
+                    type="button"
+                    id="gallery-empty-review"
+                    on:click=move |_| empty_review_open.set(true)
+                >
+                    {t(msg::UI_GALLERY_OPEN_EMPTY_REVIEW)}
+                </button>
+            </p>
+            <ReviewDialog
+                open=review_open
+                title=t(msg::UI_GALLERY_DEMO_REVIEW)
+                dismiss_label=t(msg::UI_REVIEW_CANCEL)
+                confirm=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_CONFIRM_DEMO_REVIEW),
+                    action: Callback::new(move |()| {
+                        review_open.set(false);
+                        say(Politeness::Polite, &review_confirmed);
+                    }),
+                })
+                returns_to="gallery-review".to_owned()
+                described_by="gallery-review-body".to_owned()
+            >
+                <p id="gallery-review-body">{review_body}</p>
+            </ReviewDialog>
+            <ReviewDialog
+                open=empty_review_open
+                title=t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW)
+                dismiss_label=t(msg::UI_REVIEW_CLOSE)
+                confirm=None
+                returns_to="gallery-empty-review".to_owned()
+                described_by="gallery-empty-review-body".to_owned()
+            >
+                <p id="gallery-empty-review-body">{empty_review_body}</p>
+            </ReviewDialog>
         </section>
     }
 }

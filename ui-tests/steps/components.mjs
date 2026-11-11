@@ -16,7 +16,7 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 /** The gallery section of a component, found by its heading, not by a test id. */
 function demoSection(page, component) {
   return page.locator("section", {
-    has: page.getByRole("heading", { level: 2, name: component }),
+    has: page.getByRole("heading", { level: 2, name: component, exact: true }),
   });
 }
 
@@ -214,4 +214,9 @@ const SNAPSHOTS = {
   Toast: `- heading "Toast" [level=2]
 - paragraph:
   - button "Save the demo settings"`,
+  "Review dialog": `- heading "Review dialog" [level=2]
+- paragraph:
+  - button "Open a demo review"
+- paragraph:
+  - button "Open an empty demo review"`,
 };

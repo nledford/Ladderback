@@ -12,7 +12,7 @@ use jiff::Span;
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId, StringList};
 use rustic_core::{CheckResults, PruneOptions, PruneStats, RusticError};
 
-use crate::job::{BackupResult, CheckResult, PruneResult};
+use crate::job::{BackupResult, CheckResult, PrunePlanResult, PruneResult};
 
 /// How a job ended badly.
 #[derive(Debug)]
@@ -142,6 +142,24 @@ pub(crate) fn prune_result(repository: RepositoryId, stats: &PruneStats) -> Prun
         packs_marked: stats.packs.unused.saturating_add(stats.packs.repack),
         packs_deleted: stats.packs_to_delete.remove,
         packs_recovered: stats.packs_to_delete.recover,
+    }
+}
+
+/// What a prune would do, for a read: the figures of [`prune_result`], and the
+/// bytes of the packs rustic would delete now.
+pub(crate) fn prune_plan_result(repository: RepositoryId, stats: &PruneStats) -> PrunePlanResult {
+    let PruneResult {
+        repository,
+        packs_marked,
+        packs_deleted,
+        packs_recovered,
+    } = prune_result(repository, stats);
+    PrunePlanResult {
+        repository,
+        packs_marked,
+        packs_deleted,
+        packs_recovered,
+        bytes_deleted: stats.size_to_delete.remove,
     }
 }
 
@@ -337,6 +355,26 @@ mod tests {
                 packs_marked: 5,
                 packs_deleted: 4,
                 packs_recovered: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn a_prune_plan_adds_the_bytes_it_would_delete() {
+        let mut stats = PruneStats::default();
+        stats.packs.unused = 3;
+        stats.packs.repack = 2;
+        stats.packs_to_delete.remove = 4;
+        stats.packs_to_delete.recover = 1;
+        stats.size_to_delete.remove = 8192;
+        assert_eq!(
+            prune_plan_result(repository(), &stats),
+            PrunePlanResult {
+                repository: repository(),
+                packs_marked: 5,
+                packs_deleted: 4,
+                packs_recovered: 1,
+                bytes_deleted: 8192,
             }
         );
     }

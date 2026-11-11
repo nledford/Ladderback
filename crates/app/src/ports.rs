@@ -16,8 +16,8 @@ pub use config_store::{ConfigError, ConfigStore, PasswordProblem, Position, Prob
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS,
-    ProgressEvent, ProgressKind, PruneJob, PruneSummary, RepositoryAccess, RewriteJob,
-    RewriteSummary, RunningJob, SnapshotSummary,
+    ProgressEvent, ProgressKind, PruneJob, PrunePlanSummary, PruneSummary, RepositoryAccess,
+    RewriteJob, RewriteSummary, RunningJob, SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{

@@ -198,6 +198,13 @@ pub enum ErrorCode {
     /// works on, so it did nothing. The detail is the operating system's own
     /// message.
     RuntimeUnavailable,
+    /// The snapshots a forget or an adoption would act on are no longer the
+    /// ones its preview named: the repository changed after the review, so
+    /// nothing was done (I6).
+    MaintenanceSelectionChanged,
+    /// The repository did not answer a read in time, so its history, or a
+    /// preview of a maintenance run, could not be shown.
+    RepositoryReadTimedOut,
     #[serde(other)]
     Unknown,
 }
@@ -547,6 +554,7 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::AdoptionNoMatch => &[],
+            Self::MaintenanceSelectionChanged | Self::RepositoryReadTimedOut => &[],
             Self::AdoptionAmbiguous => &[ArgSpec {
                 name: "plans",
                 kind: ArgKind::Text,
@@ -2025,6 +2033,329 @@ pub struct SnapshotsDto {
     pub snapshots: Vec<SnapshotDto>,
 }
 
+/// How many snapshots one group of [`SnapshotGroupsDto`] lists. An
+/// input-derived size, capped (§13.5): a repository can hold thousands of
+/// snapshots of one plan, and a page that lists them all is no use to the
+/// person reading it. The `count` next to a capped list is the real total.
+pub const MAX_GROUP_SNAPSHOTS: usize = 500;
+
+/// How many snapshots one list of a [`MaintenancePreviewDto`] names: a
+/// review is read in one sitting, so it names fewer than a group's page.
+pub const MAX_PREVIEW_SNAPSHOTS: usize = 50;
+
+/// One plan of this agent on a repository, and the snapshots it owns, newest
+/// first, at most [`MAX_GROUP_SNAPSHOTS`] of them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PlanGroupDto {
+    pub plan: String,
+    /// How many snapshots the plan owns, listed or not.
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+}
+
+/// Snapshots a `ladderback-` tag owns that no plan of this agent does:
+/// another agent's plan, or a plan this configuration no longer has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OrphanedGroupDto {
+    /// The `ladderback-agent:` tag's text, `null` when the snapshots carry
+    /// none.
+    pub agent: Option<String>,
+    /// The `ladderback-plan:` tag's text, `null` when the snapshots carry
+    /// none.
+    pub plan: Option<String>,
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+    /// The plans of this repository the group can be adopted into: all of
+    /// them, since which one takes the history is the person's choice.
+    pub adopt_into: Vec<String>,
+}
+
+/// Untagged snapshots, grouped by host, label and paths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct UnmanagedGroupDto {
+    pub hostname: String,
+    /// Empty when the snapshots carry no label.
+    pub label: String,
+    pub paths: Vec<String>,
+    pub count: u64,
+    pub snapshots: Vec<SnapshotDto>,
+    /// The plans whose host, label and sources equal the group's: none when
+    /// no plan would adopt it, one when it is clear which does, several when
+    /// it is ambiguous.
+    pub adopt_into: Vec<String>,
+}
+
+/// One repository's snapshots grouped by who owns them (technical design
+/// §7.3): what the Snapshots page shows beside its maintenance buttons.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SnapshotGroupsDto {
+    /// Every plan of this agent on the repository, in the configuration's
+    /// order, the ones with no snapshots too.
+    pub plans: Vec<PlanGroupDto>,
+    pub orphaned: Vec<OrphanedGroupDto>,
+    pub unmanaged: Vec<UnmanagedGroupDto>,
+}
+
+/// How many of a list's snapshots are shown, and which: how many `snapshots`
+/// there are in all, and the first `max` of them as `dto` shows them. Only
+/// those are built, so a group of thousands costs no more than a page of it
+/// (an input-derived size, capped, §13.5). A snapshot `dto` can't show is
+/// left out of the list and still counted.
+fn listed<T>(
+    snapshots: &[T],
+    max: usize,
+    dto: impl FnMut(&T) -> Option<SnapshotDto>,
+) -> (u64, Vec<SnapshotDto>) {
+    (
+        u64::try_from(snapshots.len()).unwrap_or(u64::MAX),
+        snapshots.iter().take(max).filter_map(dto).collect(),
+    )
+}
+
+impl PlanGroupDto {
+    /// The group of `plan`, which owns `snapshots`, newest first: `count` is
+    /// all of them and at most [`MAX_GROUP_SNAPSHOTS`] are listed. `dto`
+    /// shows one snapshot, or `None` for one the wire can't carry.
+    pub fn new<T>(
+        plan: String,
+        snapshots: &[T],
+        dto: impl FnMut(&T) -> Option<SnapshotDto>,
+    ) -> Self {
+        let (count, snapshots) = listed(snapshots, MAX_GROUP_SNAPSHOTS, dto);
+        Self {
+            plan,
+            count,
+            snapshots,
+        }
+    }
+}
+
+impl OrphanedGroupDto {
+    /// The orphaned group of `agent` and `plan`, which holds `snapshots`,
+    /// newest first, and may be adopted into `adopt_into`: `count` is all of
+    /// the snapshots and at most [`MAX_GROUP_SNAPSHOTS`] are listed. `dto`
+    /// shows one snapshot, or `None` for one the wire can't carry.
+    pub fn new<T>(
+        agent: Option<String>,
+        plan: Option<String>,
+        snapshots: &[T],
+        adopt_into: Vec<String>,
+        dto: impl FnMut(&T) -> Option<SnapshotDto>,
+    ) -> Self {
+        let (count, snapshots) = listed(snapshots, MAX_GROUP_SNAPSHOTS, dto);
+        Self {
+            agent,
+            plan,
+            count,
+            snapshots,
+            adopt_into,
+        }
+    }
+}
+
+impl UnmanagedGroupDto {
+    /// The unmanaged group of `hostname`, `label` and `paths`, which holds
+    /// `snapshots`, newest first, and may be adopted into `adopt_into`:
+    /// `count` is all of the snapshots and at most [`MAX_GROUP_SNAPSHOTS`]
+    /// are listed. `dto` shows one snapshot, or `None` for one the wire
+    /// can't carry.
+    pub fn new<T>(
+        hostname: String,
+        label: String,
+        paths: Vec<String>,
+        snapshots: &[T],
+        adopt_into: Vec<String>,
+        dto: impl FnMut(&T) -> Option<SnapshotDto>,
+    ) -> Self {
+        let (count, snapshots) = listed(snapshots, MAX_GROUP_SNAPSHOTS, dto);
+        Self {
+            hostname,
+            label,
+            paths,
+            count,
+            snapshots,
+            adopt_into,
+        }
+    }
+}
+
+/// What a forget run would do to one plan's history.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ForgetPlanDto {
+    pub plan: String,
+    /// How many snapshots the plan owns.
+    pub total: u64,
+    /// How many of them the plan's retention lets go.
+    pub remove: u64,
+    /// The ones it lets go, newest first, at most [`MAX_PREVIEW_SNAPSHOTS`].
+    pub listed: Vec<SnapshotDto>,
+}
+
+impl ForgetPlanDto {
+    /// What a forget would do to `plan`, which owns `total` snapshots and
+    /// whose policy lets `remove` go, newest first: at most
+    /// [`MAX_PREVIEW_SNAPSHOTS`] are listed. `dto` shows one snapshot, or
+    /// `None` for one the wire can't carry.
+    pub fn new<T>(
+        plan: String,
+        total: u64,
+        remove: &[T],
+        dto: impl FnMut(&T) -> Option<SnapshotDto>,
+    ) -> Self {
+        let (remove, listed) = listed(remove, MAX_PREVIEW_SNAPSHOTS, dto);
+        Self {
+            plan,
+            total,
+            remove,
+            listed,
+        }
+    }
+}
+
+/// How many groups and snapshots a forget leaves alone of one kind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TallyDto {
+    pub groups: u64,
+    pub snapshots: u64,
+}
+
+/// The history a forget leaves alone (I6): groups no plan of this agent
+/// owns, which only an adoption or an explicit deletion touches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LeftAloneDto {
+    pub orphaned: TallyDto,
+    pub unmanaged: TallyDto,
+}
+
+/// What a maintenance run would do, told before it starts: a read, so it
+/// takes no maintenance slot and writes no log row (§7.3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
+pub enum MaintenancePreviewDto {
+    /// Which snapshots of each plan the plan's retention lets go, and what
+    /// is left alone. `selection` names that selection: a start that carries
+    /// it is refused when the repository has changed since.
+    Forget {
+        plans: Vec<ForgetPlanDto>,
+        left_alone: LeftAloneDto,
+        selection: String,
+    },
+    /// The snapshots an adoption would rewrite into the plan `into`.
+    Adopt {
+        into: String,
+        /// How many snapshots the adoption rewrites.
+        count: u64,
+        /// The first of them, newest first, at most
+        /// [`MAX_PREVIEW_SNAPSHOTS`].
+        listed: Vec<SnapshotDto>,
+        selection: String,
+    },
+    /// What a prune would do, from a dry run of the engine's own plan. Its
+    /// figures are estimates: the plan is computed again when the prune
+    /// runs.
+    Prune {
+        packs_marked: u64,
+        packs_deleted: u64,
+        packs_recovered: u64,
+        bytes_deleted: u64,
+        /// How long a pack stays marked before a later prune deletes it
+        /// (I2).
+        keep_delete_hours: u64,
+    },
+    /// A check changes nothing; it holds the repository while it runs.
+    Check { read_data: bool },
+}
+
+impl MaintenancePreviewDto {
+    /// The preview of an adoption into `into` of `snapshots`, newest first:
+    /// `count` is all of them and at most [`MAX_PREVIEW_SNAPSHOTS`] are
+    /// listed. `dto` shows one snapshot, or `None` for one the wire can't
+    /// carry.
+    pub fn adopt<T>(
+        into: String,
+        snapshots: &[T],
+        selection: String,
+        dto: impl FnMut(&T) -> Option<SnapshotDto>,
+    ) -> Self {
+        let (count, listed) = listed(snapshots, MAX_PREVIEW_SNAPSHOTS, dto);
+        Self::Adopt {
+            into,
+            count,
+            listed,
+            selection,
+        }
+    }
+}
+
+/// How a request names the group an adoption rewrites.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "from", from = "AdoptionFromWire")]
+pub enum AdoptionFromDto {
+    /// The orphaned group these two tags name.
+    Orphaned {
+        /// The `ladderback-agent:` tag's text.
+        agent: String,
+        /// The `ladderback-plan:` tag's text.
+        plan: String,
+    },
+    /// The unmanaged group whose host, label and paths equal the
+    /// destination plan's host, label and sources.
+    Unmanaged,
+}
+
+/// What [`AdoptionFromDto`] is read from. Serde's internally tagged unit
+/// variant skips every key it doesn't know, so the read goes through a
+/// struct variant that refuses them: the wire is the same, and a key the
+/// body doesn't know is an invalid body.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "from", deny_unknown_fields)]
+enum AdoptionFromWire {
+    Orphaned { agent: String, plan: String },
+    Unmanaged {},
+}
+
+impl From<AdoptionFromWire> for AdoptionFromDto {
+    fn from(wire: AdoptionFromWire) -> Self {
+        match wire {
+            AdoptionFromWire::Orphaned { agent, plan } => Self::Orphaned { agent, plan },
+            AdoptionFromWire::Unmanaged {} => Self::Unmanaged,
+        }
+    }
+}
+
+/// The body of a maintenance preview and of a maintenance start: the kind,
+/// for an adoption its destination plan and the group it rewrites, and, on a
+/// start, the selection a preview named.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MaintenanceRequestDto {
+    /// `forget`, `prune`, `check` or `adopt`.
+    pub kind: String,
+    /// The plan an adoption's history becomes part of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<String>,
+    /// The group an adoption rewrites: another owner's tagged history, or
+    /// the unmanaged history that matches the destination plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<AdoptionFromDto>,
+    /// The selection a preview named, for a forget or an adoption. Absent,
+    /// the run selects as it finds the repository; present, it is refused
+    /// when what it would select is not what the preview showed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<String>,
+}
+
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2543,5 +2874,371 @@ mod repository_request_tests {
             r#""repository-alias-invalid""#
         );
         assert!(ErrorCode::RepositoryAliasInvalid.args().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod maintenance_dto_tests {
+    use serde_json::{from_str, json, to_string, to_value};
+
+    use super::{
+        AdoptionFromDto, ErrorCode, ForgetPlanDto, LeftAloneDto, MAX_GROUP_SNAPSHOTS,
+        MAX_PREVIEW_SNAPSHOTS, MaintenancePreviewDto, MaintenanceRequestDto, OrphanedGroupDto,
+        PlanGroupDto, SnapshotDto, SnapshotGroupsDto, TallyDto, UnmanagedGroupDto,
+    };
+
+    fn snapshot() -> SnapshotDto {
+        SnapshotDto {
+            id: "ab".repeat(32),
+            time: "2026-11-09T10:15:00Z".to_owned(),
+            hostname: "demo-host".to_owned(),
+            label: "home".to_owned(),
+            tags: vec!["ladderback-plan:demo-home".to_owned()],
+            paths: vec!["/home/demo".to_owned()],
+            paths_truncated: false,
+            tags_truncated: false,
+        }
+    }
+
+    fn previews() -> [MaintenancePreviewDto; 4] {
+        [
+            MaintenancePreviewDto::Forget {
+                plans: vec![ForgetPlanDto {
+                    plan: "demo-home".to_owned(),
+                    total: 3,
+                    remove: 2,
+                    listed: vec![snapshot()],
+                }],
+                left_alone: LeftAloneDto {
+                    orphaned: TallyDto {
+                        groups: 1,
+                        snapshots: 4,
+                    },
+                    unmanaged: TallyDto::default(),
+                },
+                selection: "68497038cf038672".to_owned(),
+            },
+            MaintenancePreviewDto::Adopt {
+                into: "demo-home".to_owned(),
+                count: 1,
+                listed: vec![snapshot()],
+                selection: "68497038cf038672".to_owned(),
+            },
+            MaintenancePreviewDto::Prune {
+                packs_marked: 2,
+                packs_deleted: 1,
+                packs_recovered: 0,
+                bytes_deleted: 4096,
+                keep_delete_hours: 144,
+            },
+            MaintenancePreviewDto::Check { read_data: false },
+        ]
+    }
+
+    #[test]
+    fn each_preview_names_its_kind_on_the_wire_and_reads_back() {
+        for (preview, kind) in previews()
+            .into_iter()
+            .zip(["forget", "adopt", "prune", "check"])
+        {
+            let wire = to_value(&preview).unwrap();
+            assert_eq!(wire["kind"], kind);
+            assert_eq!(
+                from_str::<MaintenancePreviewDto>(&wire.to_string()).unwrap(),
+                preview
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_carries_kebab_case_field_names() {
+        let [forget, adopt, prune, check] = previews();
+        let forget = to_value(&forget).unwrap();
+        assert_eq!(
+            forget["left-alone"],
+            json!({
+                "orphaned": {"groups": 1, "snapshots": 4},
+                "unmanaged": {"groups": 0, "snapshots": 0},
+            })
+        );
+        assert_eq!(forget["plans"][0]["remove"], 2);
+        assert_eq!(forget["selection"], "68497038cf038672");
+        let adopt = to_value(&adopt).unwrap();
+        assert_eq!(adopt["into"], "demo-home");
+        assert_eq!(adopt["count"], 1);
+        assert_eq!(
+            to_value(&prune).unwrap(),
+            json!({
+                "kind": "prune",
+                "packs-marked": 2,
+                "packs-deleted": 1,
+                "packs-recovered": 0,
+                "bytes-deleted": 4096,
+                "keep-delete-hours": 144,
+            })
+        );
+        assert_eq!(
+            to_value(&check).unwrap(),
+            json!({"kind": "check", "read-data": false})
+        );
+    }
+
+    #[test]
+    fn a_request_names_only_what_it_holds() {
+        let bare = MaintenanceRequestDto {
+            kind: "forget".to_owned(),
+            into: None,
+            from: None,
+            selection: None,
+        };
+        assert_eq!(to_string(&bare).unwrap(), r#"{"kind":"forget"}"#);
+        assert_eq!(
+            from_str::<MaintenanceRequestDto>(r#"{"kind":"forget"}"#).unwrap(),
+            bare
+        );
+    }
+
+    #[test]
+    fn an_adoption_request_names_its_destination_source_and_selection() {
+        for (from, wire) in [
+            (
+                AdoptionFromDto::Orphaned {
+                    agent: "agent-1".to_owned(),
+                    plan: "old-home".to_owned(),
+                },
+                json!({"from": "orphaned", "agent": "agent-1", "plan": "old-home"}),
+            ),
+            (AdoptionFromDto::Unmanaged, json!({"from": "unmanaged"})),
+        ] {
+            let request = MaintenanceRequestDto {
+                kind: "adopt".to_owned(),
+                into: Some("demo-home".to_owned()),
+                from: Some(from),
+                selection: Some("68497038cf038672".to_owned()),
+            };
+            assert_eq!(
+                to_value(&request).unwrap(),
+                json!({
+                    "kind": "adopt",
+                    "into": "demo-home",
+                    "from": wire,
+                    "selection": "68497038cf038672",
+                })
+            );
+            assert_eq!(
+                from_str::<MaintenanceRequestDto>(&to_string(&request).unwrap()).unwrap(),
+                request
+            );
+        }
+    }
+
+    #[test]
+    fn a_source_that_is_no_kind_of_group_is_not_read() {
+        assert!(from_str::<AdoptionFromDto>(r#"{"from":"somewhere"}"#).is_err());
+        assert!(from_str::<AdoptionFromDto>(r#"{"agent":"a","plan":"p"}"#).is_err());
+    }
+
+    #[test]
+    fn a_source_with_a_key_its_kind_does_not_know_is_not_read() {
+        for body in [
+            r#"{"kind":"adopt","into":"demo-home","from":{"from":"unmanaged","agent":"a"}}"#,
+            r#"{"kind":"adopt","into":"demo-home","from":{"from":"orphaned","agent":"a","plan":"p","extra":1}}"#,
+        ] {
+            assert!(from_str::<MaintenanceRequestDto>(body).is_err(), "{body}");
+        }
+    }
+
+    #[test]
+    fn the_groups_carry_their_own_field_names_and_read_back() {
+        let groups = SnapshotGroupsDto {
+            plans: vec![PlanGroupDto {
+                plan: "demo-home".to_owned(),
+                count: 1,
+                snapshots: vec![snapshot()],
+            }],
+            orphaned: vec![OrphanedGroupDto {
+                agent: Some("agent-1".to_owned()),
+                plan: None,
+                count: 1,
+                snapshots: vec![snapshot()],
+                adopt_into: vec!["demo-home".to_owned()],
+            }],
+            unmanaged: vec![UnmanagedGroupDto {
+                hostname: "demo-host".to_owned(),
+                label: String::new(),
+                paths: vec!["/home/demo".to_owned()],
+                count: 1,
+                snapshots: vec![snapshot()],
+                adopt_into: vec![],
+            }],
+        };
+        let wire = to_value(&groups).unwrap();
+        assert_eq!(wire["orphaned"][0]["adopt-into"], json!(["demo-home"]));
+        assert!(wire["orphaned"][0]["plan"].is_null());
+        assert_eq!(wire["unmanaged"][0]["adopt-into"], json!([]));
+        assert_eq!(wire["plans"][0]["count"], 1);
+        assert_eq!(
+            from_str::<SnapshotGroupsDto>(&wire.to_string()).unwrap(),
+            groups
+        );
+    }
+
+    #[test]
+    fn the_codes_of_a_changed_selection_and_a_slow_read_take_no_arguments() {
+        for (code, wire) in [
+            (
+                ErrorCode::MaintenanceSelectionChanged,
+                r#""maintenance-selection-changed""#,
+            ),
+            (
+                ErrorCode::RepositoryReadTimedOut,
+                r#""repository-read-timed-out""#,
+            ),
+        ] {
+            assert_eq!(to_string(&code).unwrap(), wire);
+            assert_eq!(from_str::<ErrorCode>(wire).unwrap(), code);
+            assert!(code.args().is_empty());
+        }
+    }
+
+    /// Snapshot `n` as the wire would show it: its ID is `n`.
+    fn numbered(n: &u32) -> Option<SnapshotDto> {
+        Some(SnapshotDto {
+            id: format!("{n:064x}"),
+            ..snapshot()
+        })
+    }
+
+    fn ids(list: &[SnapshotDto]) -> Vec<String> {
+        list.iter().map(|snapshot| snapshot.id.clone()).collect()
+    }
+
+    fn first(count: u32) -> Vec<String> {
+        (0..count).map(|n| format!("{n:064x}")).collect()
+    }
+
+    /// More snapshots than any list shows.
+    fn many() -> Vec<u32> {
+        (0..=u32::try_from(MAX_GROUP_SNAPSHOTS).unwrap()).collect()
+    }
+
+    #[test]
+    fn a_group_lists_its_first_snapshots_and_counts_them_all() {
+        let items = many();
+        let cap = u32::try_from(MAX_GROUP_SNAPSHOTS).unwrap();
+
+        let plan = PlanGroupDto::new("demo-home".to_owned(), &items, numbered);
+        assert_eq!((plan.plan.as_str(), plan.count), ("demo-home", 501));
+        assert_eq!(ids(&plan.snapshots), first(cap));
+
+        let orphaned = OrphanedGroupDto::new(
+            Some("agent-1".to_owned()),
+            None,
+            &items,
+            vec!["demo-home".to_owned()],
+            numbered,
+        );
+        assert_eq!(orphaned.agent.as_deref(), Some("agent-1"));
+        assert_eq!(orphaned.plan, None);
+        assert_eq!(orphaned.adopt_into, ["demo-home"]);
+        assert_eq!(orphaned.count, 501);
+        assert_eq!(ids(&orphaned.snapshots), first(cap));
+
+        let unmanaged = UnmanagedGroupDto::new(
+            "demo-host".to_owned(),
+            "home".to_owned(),
+            vec!["/home/demo".to_owned()],
+            &items,
+            Vec::new(),
+            numbered,
+        );
+        assert_eq!(unmanaged.hostname, "demo-host");
+        assert_eq!(unmanaged.label, "home");
+        assert_eq!(unmanaged.paths, ["/home/demo"]);
+        assert!(unmanaged.adopt_into.is_empty());
+        assert_eq!(unmanaged.count, 501);
+        assert_eq!(ids(&unmanaged.snapshots), first(cap));
+    }
+
+    #[test]
+    fn a_group_that_fits_lists_every_snapshot() {
+        let cap = u32::try_from(MAX_GROUP_SNAPSHOTS).unwrap();
+        for held in [0, 3, cap] {
+            let items: Vec<u32> = (0..held).collect();
+            let plan = PlanGroupDto::new("demo-home".to_owned(), &items, numbered);
+            assert_eq!(plan.count, u64::from(held));
+            assert_eq!(ids(&plan.snapshots), first(held));
+        }
+    }
+
+    #[test]
+    fn a_preview_lists_fewer_snapshots_than_a_group_does() {
+        let items = many();
+        let cap = u32::try_from(MAX_PREVIEW_SNAPSHOTS).unwrap();
+
+        let forget = ForgetPlanDto::new("demo-home".to_owned(), 900, &items, numbered);
+        assert_eq!(forget.plan, "demo-home");
+        assert_eq!((forget.total, forget.remove), (900, 501));
+        assert_eq!(ids(&forget.listed), first(cap));
+
+        let adopt = MaintenancePreviewDto::adopt(
+            "demo-home".to_owned(),
+            &items,
+            "68497038cf038672".to_owned(),
+            numbered,
+        );
+        let MaintenancePreviewDto::Adopt {
+            into,
+            count,
+            listed,
+            selection,
+        } = adopt
+        else {
+            panic!("an adoption preview");
+        };
+        assert_eq!(
+            (into.as_str(), count, selection.as_str()),
+            ("demo-home", 501, "68497038cf038672")
+        );
+        assert_eq!(ids(&listed), first(cap));
+
+        let few: Vec<u32> = (0..3).collect();
+        let forget = ForgetPlanDto::new("demo-home".to_owned(), 3, &few, numbered);
+        assert_eq!((forget.remove, ids(&forget.listed)), (3, first(3)));
+    }
+
+    #[test]
+    fn only_the_snapshots_a_list_shows_are_built() {
+        let items = many();
+        let mut built = 0;
+        let group = PlanGroupDto::new("demo-home".to_owned(), &items, |n| {
+            built += 1;
+            numbered(n)
+        });
+        assert_eq!(built, MAX_GROUP_SNAPSHOTS);
+        assert_eq!(group.count, 501);
+    }
+
+    #[test]
+    fn a_snapshot_the_wire_cannot_carry_is_left_out_and_still_counted() {
+        let items: Vec<u32> = (0..3).collect();
+        let group = PlanGroupDto::new("demo-home".to_owned(), &items, |n| {
+            (*n != 1).then(|| numbered(n)).flatten()
+        });
+        assert_eq!(group.count, 3);
+        assert_eq!(
+            ids(&group.snapshots),
+            [first(1), vec![format!("{:064x}", 2)]].concat()
+        );
+    }
+
+    #[test]
+    fn a_request_with_a_key_it_does_not_know_is_not_read() {
+        assert!(
+            from_str::<MaintenanceRequestDto>(
+                r#"{"kind":"forget","selectoin":"68497038cf038672"}"#
+            )
+            .is_err()
+        );
     }
 }

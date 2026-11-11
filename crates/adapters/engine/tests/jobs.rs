@@ -6,7 +6,7 @@ mod support;
 use std::fs::{self, File};
 use std::time::{Duration, SystemTime};
 
-use app::ports::{Engine, EngineEvent, EngineResult, RunningJob};
+use app::ports::{Engine, EngineEvent, EngineResult, ForgetJob, Job, RunningJob};
 use domain::SignedDuration;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{FailureReason, WarningKind};
@@ -323,6 +323,82 @@ async fn a_prune_runs_and_reports_its_plan() {
         panic!("not a prune result: {events:?}");
     };
     assert_eq!(summary.packs_deleted, 0);
+}
+
+/// The names of the files under the repository's `index` and `data` folders.
+fn pack_files(root: &std::path::Path) -> Vec<String> {
+    fn walk(folder: &std::path::Path, prefix: &str, names: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(folder) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = format!("{prefix}/{}", entry.file_name().to_string_lossy());
+            if entry.path().is_dir() {
+                walk(&entry.path(), &name, names);
+            } else {
+                names.push(name);
+            }
+        }
+    }
+    let mut names = Vec::new();
+    for folder in ["index", "data"] {
+        walk(&root.join(folder), folder, &mut names);
+    }
+    names.sort();
+    names
+}
+
+#[tokio::test]
+async fn a_prune_plan_reports_what_a_prune_would_do_and_changes_nothing() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    let engine = engine();
+    write_file(scratch.source().join("a.txt"), b"the first contents");
+    let first = run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    let first = backed_up(&first).snapshot.clone();
+    write_file(
+        scratch.source().join("a.txt"),
+        b"contents the first snapshot never held",
+    );
+    run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    // The first snapshot's data is now used by nothing.
+    run_to_end(
+        &engine,
+        Job::Forget(ForgetJob {
+            repository: location.access(PASSWORD),
+            ids: vec![first],
+        }),
+    )
+    .await;
+    let before = pack_files(&scratch.repo_dir());
+
+    let events = run_to_end(&engine, prune_plan_job(&location)).await;
+    let EngineResult::PrunePlan(plan) = succeeded(&events) else {
+        panic!("not a prune plan: {events:?}");
+    };
+    assert!(plan.packs_marked >= 1, "{plan:?}");
+    assert_eq!(plan.packs_deleted, 0, "{plan:?}");
+    assert_eq!(
+        before,
+        pack_files(&scratch.repo_dir()),
+        "a plan changed the repository"
+    );
+
+    // What the plan said is what a prune then does.
+    let events = run_to_end(&engine, prune_job(&location)).await;
+    let EngineResult::Prune(pruned) = succeeded(&events) else {
+        panic!("not a prune result: {events:?}");
+    };
+    assert_eq!(pruned.packs_marked, plan.packs_marked);
 }
 
 #[tokio::test]

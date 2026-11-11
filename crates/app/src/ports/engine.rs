@@ -76,6 +76,11 @@ pub enum Job {
     /// files over the same trees, and removes the originals (§7.3).
     Rewrite(RewriteJob),
     Prune(PruneJob),
+    /// What a [`Prune`](Self::Prune) of the same repository would do, worked
+    /// out and not done: a read, so it takes no I7 slot and is never written
+    /// to the operation log (§9). It is what a person reviews before a prune
+    /// starts.
+    PrunePlan(PruneJob),
     Check(CheckJob),
     /// Lists the repository's snapshots, newest first. A read, not an
     /// operation: it takes no I7 slot and is never written to the operation
@@ -95,6 +100,7 @@ impl Job {
             | Self::Identify(_)
             | Self::Init(_)
             | Self::Prune(_)
+            | Self::PrunePlan(_)
             | Self::Check(_)
             | Self::Ls(_) => None,
         }
@@ -109,7 +115,8 @@ impl Job {
             Self::Backup(_) => OperationKind::Backup,
             Self::Forget(_) => OperationKind::Forget,
             Self::Rewrite(_) => OperationKind::Adopt,
-            Self::Prune(_) => OperationKind::Prune,
+            // A plan is never recorded; it names the kind it plans.
+            Self::Prune(_) | Self::PrunePlan(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
             Self::Ls(_) => OperationKind::Ls,
         }
@@ -124,7 +131,7 @@ impl Job {
             Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
             Self::Forget(job) => (None, &job.repository),
             Self::Rewrite(job) => (Some(job.tags.plan().clone()), &job.repository),
-            Self::Prune(job) => (None, &job.repository),
+            Self::Prune(job) | Self::PrunePlan(job) => (None, &job.repository),
             Self::Check(job) => (None, &job.repository),
         };
         Target {
@@ -352,6 +359,8 @@ pub enum EngineResult {
     },
     Backup(BackupSummary),
     Prune(PruneSummary),
+    /// What a [`Job::PrunePlan`] found.
+    PrunePlan(PrunePlanSummary),
     Check(CheckSummary),
     Forget(ForgetSummary),
     /// What an adoption produced: the new snapshots, in the order of the
@@ -384,6 +393,23 @@ pub struct PruneSummary {
     pub packs_deleted: u64,
     /// Marked packs that a newer snapshot uses again, now unmarked.
     pub packs_recovered: u64,
+}
+
+/// What a prune would do, from the engine's own plan: the figures of a run
+/// that was not made. They are estimates, since the plan is worked out again
+/// when a prune runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrunePlanSummary {
+    pub repository: RepositoryId,
+    /// Packs a prune would newly mark for deletion: unused ones and ones to
+    /// repack.
+    pub packs_marked: u64,
+    /// Packs marked by an earlier prune that this one would delete.
+    pub packs_deleted: u64,
+    /// Marked packs a newer snapshot uses again, which this one would unmark.
+    pub packs_recovered: u64,
+    /// The bytes of the packs this prune would delete.
+    pub bytes_deleted: u64,
 }
 
 /// A check that ran to the end succeeds even when it found problems; they
@@ -498,6 +524,14 @@ mod tests {
         });
         assert_eq!(prune.kind(), OperationKind::Prune);
         assert_eq!(prune.target(), on_repository);
+
+        let plan = Job::PrunePlan(PruneJob {
+            repository: access.clone(),
+            keep_delete: KeepDelete::MIN,
+        });
+        assert_eq!(plan.kind(), OperationKind::Prune);
+        assert_eq!(plan.target(), on_repository);
+        assert_eq!(plan.deadline_budget(), None);
 
         let check = Job::Check(CheckJob {
             repository: access,

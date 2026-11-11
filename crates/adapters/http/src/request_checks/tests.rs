@@ -95,8 +95,24 @@ impl crate::Operations for NoOperations {
         &self,
         _repository: String,
         _request: crate::MaintenanceRequest,
-    ) -> Result<String, crate::MaintenanceStartError> {
-        Err(crate::MaintenanceStartError::UnknownRepository)
+        _selection: Option<String>,
+    ) -> Result<String, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
+    async fn preview(
+        &self,
+        _repository: String,
+        _request: crate::MaintenanceRequest,
+    ) -> Result<api::MaintenancePreviewDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
+    async fn groups(
+        &self,
+        _repository: String,
+    ) -> Result<api::SnapshotGroupsDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
     }
 
     async fn history(

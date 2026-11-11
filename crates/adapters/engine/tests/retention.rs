@@ -137,3 +137,51 @@ async fn an_error_never_carries_the_repository_credentials() {
         "the detail leaks a credential: {detail}"
     );
 }
+
+/// The groups of a repository whose open failed: any one snapshot will do.
+fn one_snapshot() -> Vec<Snapshot> {
+    vec![Snapshot {
+        id: SnapshotId::parse(&"07".repeat(32)).unwrap(),
+        time: Timestamp::from_second(1_800_000_000).unwrap(),
+        hostname: "demo-host".to_owned(),
+        label: String::new(),
+        tags: Vec::new(),
+        paths: vec!["/home/demo".to_owned()],
+    }]
+}
+
+#[tokio::test]
+async fn an_error_never_carries_what_a_reference_resolved_to() {
+    // The secret sits in the URL's path, not its userinfo, so only the
+    // resolved list masks it (I4): the open fails on a port nothing listens
+    // on, and its error quotes the URL.
+    let canary = "CANARY-resolved-path-secret";
+    let access = RepositoryAccess {
+        repository: format!("rest:http://127.0.0.1:1/{canary}/"),
+        repo_hot: None,
+        password: domain::secrets::SecretValue::new("e2e-scratch-password"),
+        id: None,
+        options: Default::default(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: vec![domain::secrets::SecretValue::new(canary)],
+    };
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("the unreachable repository fails");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(
+        !detail.contains(canary),
+        "the detail leaks a resolved secret: {detail}"
+    );
+}
