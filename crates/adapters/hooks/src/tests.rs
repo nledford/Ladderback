@@ -1,6 +1,9 @@
 //! What the stop of a hook that outlives its timeout does, and does not do,
 //! with the signals sent for real and remembered. The contract the runner
 //! meets as a port is in `tests/contract.rs`.
+//!
+//! A runner that never stops a hook must fail the test that waits for it, not
+//! hang the run: each wait on a stop has a bound of its own (`within`).
 
 use std::fs;
 use std::path::Path;
@@ -14,10 +17,11 @@ use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 use tempfile::TempDir;
 
-use crate::{ProcessHookRunner, Stop};
+use crate::{ProcessHookRunner, Stop, signal_group};
 
-/// A stop's signals, sent for real and remembered, each with whether the
-/// leader of the group was there (not reaped) when it went.
+/// A stop's signals, sent for real, by the runner's own `signal_group`, and
+/// remembered, each with whether the leader of the group was there (not
+/// reaped) when it went.
 #[derive(Default)]
 struct Signals(Mutex<Vec<(Signal, bool)>>);
 
@@ -26,7 +30,7 @@ impl Signals {
         // Signal 0 only asks whether the process is there, reaped or not.
         let there = kill(group, None).is_ok();
         self.0.lock().unwrap().push((signal, there));
-        let _ = killpg(group, signal);
+        signal_group(group, signal);
     }
 
     fn sent(&self) -> Vec<(Signal, bool)> {
@@ -79,6 +83,20 @@ fn pid_in(lines: &[String]) -> i32 {
         .expect("the script wrote its pid")
 }
 
+/// The longest a call may take to stop a hook that ends on its SIGTERM, with
+/// a timeout of a second: the signal, the hook's own exit and slack for a
+/// loaded machine.
+const ENDS_ON_TERM: Duration = Duration::from_secs(11);
+
+/// Awaits `call` for at most `bound` and fails the test when it is still
+/// running then: a hook that is never stopped is a test that fails, not one
+/// that waits for something else to give up on it.
+async fn within<T>(bound: Duration, call: impl Future<Output = T>) -> T {
+    tokio::time::timeout(bound, call)
+        .await
+        .unwrap_or_else(|_| panic!("the call was still running after {bound:?}"))
+}
+
 /// What one run of a hook, stopped at its timeout, did.
 struct Trapped {
     status: HookStatus,
@@ -98,11 +116,18 @@ impl Trapped {
 /// starting when the timeout fires is ended by the TERM before it has trapped
 /// anything, which reads as a clean stop with nothing written: only a run
 /// whose script said `ready` once its trap was in place proves anything, so
-/// the others are tried again.
-async fn run_trapping(script: &str, timeout: Duration, grace: Duration) -> Trapped {
+/// the others are tried again. A call still running after `bound` fails the
+/// test.
+async fn run_trapping(
+    script: &str,
+    timeout: Duration,
+    grace: Duration,
+    bound: Duration,
+) -> Trapped {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
     let entry = sh(script, &log);
+    let context = context();
     let runner = ProcessHookRunner::with_timeout(timeout);
     let mut written = Vec::new();
     for _ in 0..3 {
@@ -114,7 +139,8 @@ async fn run_trapping(script: &str, timeout: Duration, grace: Duration) -> Trapp
             signal: &|group, signal| signals.send(group, signal),
         };
         let started = Instant::now();
-        let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+        let call = runner.spawn_and_wait_with(&entry, &context, &stop);
+        let (status, _) = within(bound, call).await;
         let elapsed = started.elapsed();
         written = lines(&log);
         if written.iter().any(|line| line == "ready") {
@@ -144,6 +170,7 @@ async fn a_hook_can_still_write_to_its_output_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -159,7 +186,6 @@ async fn a_hook_can_still_write_to_its_output_when_it_gets_sigterm() {
 /// the leader was there, and nothing went after it.
 #[tokio::test]
 async fn a_hook_that_ends_on_sigterm_is_signalled_once_and_not_after_the_reap() {
-    let limit = Duration::from_secs(1);
     let trapped = run_trapping(
         concat!(
             r#"trap 'echo term >> "$1"; exit 0' TERM"#,
@@ -168,18 +194,14 @@ async fn a_hook_that_ends_on_sigterm_is_signalled_once_and_not_after_the_reap() 
             "\n",
             "while :; do sleep 1 & wait $!; done",
         ),
-        limit,
+        Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
     assert!(trapped.wrote("term"), "{:?}", trapped.lines);
     assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
-    assert!(
-        trapped.elapsed < limit + Duration::from_secs(10),
-        "the call waited {:?}",
-        trapped.elapsed
-    );
 }
 
 /// A hook no signal reaches, as one stuck in the kernel is: the timeout ends
@@ -234,6 +256,8 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         ),
         limit,
         grace,
+        // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
+        limit + grace + Duration::from_secs(15),
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -245,12 +269,6 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
     assert!(
         trapped.elapsed >= limit + grace,
         "the grace was not given: {:?}",
-        trapped.elapsed
-    );
-    // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
-    assert!(
-        trapped.elapsed < limit + grace + Duration::from_secs(15),
-        "the call waited {:?}",
         trapped.elapsed
     );
     let pid = pid_in(&trapped.lines);
@@ -496,15 +514,16 @@ async fn the_call_waits_for_a_killed_hook_to_be_reaped() {
     let scratch = TempDir::new().unwrap();
     let entry = sh("exec sleep 60", &scratch.path().join("log"));
     let runner = ProcessHookRunner::with_timeout(timeout);
+    let context = context();
     let started = Instant::now();
-    let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+    let call = runner.spawn_and_wait_with(&entry, &context, &stop);
+    let (status, _) = within(Duration::from_secs(5), call).await;
     let elapsed = started.elapsed();
     assert_eq!(status, HookStatus::TimedOut);
     assert!(
         elapsed >= timeout + grace + delay,
         "the call did not wait for the hook: {elapsed:?}"
     );
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 /// A pipe holds 64 KiB or so. A hook that says more than that on its way out
@@ -525,6 +544,7 @@ async fn a_hook_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(5),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -555,6 +575,7 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     let descendant = pid_in(&trapped.lines);
@@ -565,5 +586,23 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
     assert!(
         kill(Pid::from_raw(descendant), None).is_ok(),
         "{descendant} was killed"
+    );
+}
+
+/// A runner built with a timeout stops a hook at it, not at the default of
+/// five minutes: this hook would run for a minute.
+#[tokio::test]
+async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
+    let scratch = TempDir::new().unwrap();
+    let entry = sh("exec sleep 60", &scratch.path().join("log"));
+    let timeout = Duration::from_millis(300);
+    let runner = ProcessHookRunner::with_timeout(timeout);
+    let started = Instant::now();
+    let outcome = within(Duration::from_secs(10), runner.run(&entry, &context())).await;
+    assert_eq!(outcome.status, HookStatus::TimedOut);
+    assert!(
+        started.elapsed() >= timeout,
+        "the hook was stopped before its timeout: {:?}",
+        started.elapsed()
     );
 }
