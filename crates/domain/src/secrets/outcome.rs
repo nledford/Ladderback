@@ -140,10 +140,13 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
-    stdout: &[u8],
+    stdout: Option<&[u8]>,
     stderr: &[u8],
     stderr_cut: bool,
 ) -> SecretError {
+    let Some(stdout) = stdout else {
+        todo!("a failed command whose stdout was cut")
+    };
     // A helper that rejects a value may quote it on stderr: what it printed
     // (less the line ending its last line ends with, which isn't what it
     // quotes), and its first line, which is what it would have given as its
@@ -632,7 +635,7 @@ mod tests {
         let error = command_failure(
             &source,
             Some(1),
-            b"hunter2-canary\n",
+            Some(b"hunter2-canary\n".as_slice()),
             b"rejected hunter2-canary\nsecond line\n",
             false,
         );
@@ -650,7 +653,7 @@ mod tests {
         let error = command_failure(
             &source,
             Some(2),
-            b"hunter2\nsecond line\n",
+            Some(b"hunter2\nsecond line\n".as_slice()),
             b"bad value hunter2\n",
             false,
         );
@@ -673,7 +676,7 @@ mod tests {
         let stdout = format!("{secret}\n");
         // Longer than the kept stderr.
         let kept = secret.as_bytes().get(..8192).unwrap();
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), kept, true);
+        let error = command_failure(&source, Some(1), Some(stdout.as_bytes()), kept, true);
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -683,7 +686,13 @@ mod tests {
         );
         // Quoted, and cut inside it.
         let stderr = format!("rejected {}", secret.get(..600).unwrap());
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), stderr.as_bytes(), true);
+        let error = command_failure(
+            &source,
+            Some(1),
+            Some(stdout.as_bytes()),
+            stderr.as_bytes(),
+            true,
+        );
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -691,16 +700,60 @@ mod tests {
                 detail: "rejected ***".to_owned(),
             }
         );
-        // Not cut: what the helper wrote is all it said, and only what is
-        // whole is the secret.
-        let error = command_failure(&source, Some(1), stdout.as_bytes(), b"rejected abc", false);
-        assert_eq!(
-            error.problem,
-            Problem::CommandFailed {
-                status: Some(1),
-                detail: "rejected abc".to_owned(),
-            }
-        );
+    }
+
+    /// A helper can cut its stderr short itself, partway through the secret
+    /// it quotes, and nothing in what was read says so: what it said is
+    /// masked as a cut text whoever stopped it, so nothing of the secret
+    /// reaches the detail (I4, #232). What ends nowhere near the secret is
+    /// kept as it was said.
+    #[test]
+    fn what_a_failed_command_said_is_masked_as_cut_whoever_cut_it() {
+        let source = command("pass");
+        let stdout = Some(b"hunter2-canary\n".as_slice());
+        for (said, detail) in [
+            ("rejected hello", "rejected hello"),
+            ("rejected hunter2-", "rejected ***"),
+            ("rejected h", "rejected ***"),
+        ] {
+            let error = command_failure(&source, Some(1), stdout, said.as_bytes(), false);
+            assert_eq!(
+                error.problem,
+                Problem::CommandFailed {
+                    status: Some(1),
+                    detail: detail.to_owned(),
+                },
+                "{said:?}"
+            );
+        }
+    }
+
+    /// A stdout that was cut holds only part of the secret, and masking
+    /// what the helper said against that part would show the rest of it
+    /// (`***nary`): nothing it said is quoted then, and the error keeps its
+    /// status (I4, #233).
+    #[test]
+    fn a_failed_command_whose_stdout_was_cut_quotes_nothing_it_said() {
+        let source = command("pass");
+        for stderr_cut in [false, true] {
+            let error = command_failure(
+                &source,
+                Some(1),
+                None,
+                b"rejected hunter2-canary\n",
+                stderr_cut,
+            );
+            assert_eq!(
+                error,
+                SecretError {
+                    source: source.clone(),
+                    problem: Problem::CommandFailed {
+                        status: Some(1),
+                        detail: String::new(),
+                    },
+                }
+            );
+        }
     }
 
     #[test]

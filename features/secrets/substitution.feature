@@ -335,6 +335,13 @@ Feature: Secret references in a repository's settings
       And the failure doesn't mention "demo-stdout"
       And the failure doesn't mention "demo-argument"
 
+    Scenario: A command that stops partway through quoting what it printed shows none of it
+      Given the command "vault-reader" prints "CANARY-cut-password" and fails with status 1 saying "rejected CANARY-cut"
+      And the repository's password is printed by the command "vault-reader"
+      When the repository is resolved
+      Then the resolution fails for the field "password"
+      And the problem is that the command exited with status 1 saying "rejected ***"
+
     Scenario: A command that never ends
       Given the command "pass show demo/repo" never ends
       And the repository's password is printed by the command "pass show demo/repo"

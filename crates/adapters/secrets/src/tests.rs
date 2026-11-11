@@ -613,28 +613,68 @@ async fn a_secret_cut_off_in_stderr_a_daemon_holds_open_leaves_nothing_of_itself
     );
 }
 
-/// Stderr read to its end is all the helper said, though it ends the way
-/// its secret begins: those are its own words and stay (#158). Only a
-/// stderr the read left partway, or that filled what is kept, is masked as
-/// cut.
+/// A helper can cut its own stderr short: it stops partway through the
+/// secret it quotes and exits on its own, with nothing holding its pipes and
+/// no newline at the end, as one that a signal Ladderback didn't send ended.
+/// Its stderr is masked as a cut text all the same, whoever stopped it, and
+/// nothing of the secret reaches the detail (I4, #232). A stderr that ends
+/// nowhere near the secret is kept as it was said.
 #[tokio::test]
-async fn stderr_read_to_its_end_that_only_ends_like_the_secret_begins_is_kept() {
+async fn stderr_a_helper_cut_short_itself_leaves_nothing_of_the_secret_in_the_error() {
+    for (said, detail) in [
+        ("rejected hello", "rejected hello"),
+        ("rejected hunter2-", "rejected ***"),
+    ] {
+        let script = sh(r#"echo hunter2-canary; printf %s "$1" >&2; exit 1"#, [said]);
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30)).resolve(&command(script)),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Err(SecretError {
+                source: program("sh"),
+                problem: Problem::CommandFailed {
+                    status: Some(1),
+                    detail: detail.to_owned(),
+                },
+            }),
+            "{said:?}"
+        );
+    }
+}
+
+/// A helper that prints the start of its secret and fails, quoting all of it
+/// on stderr, while a process it started holds stdout open: stdout is read
+/// for the grace and then left, so what was read is only part of the secret,
+/// and masking the detail against that part would show the rest. Nothing of
+/// what the helper said is quoted then, and the error keeps its status
+/// (I4, #233).
+#[tokio::test]
+async fn a_secret_cut_off_in_stdout_a_daemon_holds_open_leaves_nothing_of_itself_in_the_error() {
+    let directory = TempDir::new().unwrap();
+    let pidfile = directory.path().join("pid");
     let script = sh(
-        "echo hunter2-canary; printf 'rejected hunter2-' >&2; exit 1",
-        Vec::<String>::new(),
+        concat!(
+            r#"sleep 60 2>/dev/null & echo $! > "$1"; "#,
+            "printf hunter2-ca; echo 'rejected hunter2-canary' >&2; exit 1"
+        ),
+        [pidfile.display().to_string()],
     );
     let result = within(
         Duration::from_secs(5),
         resolver(Duration::from_secs(30)).resolve(&command(script)),
     )
     .await;
+    let _reaper = Reaper(recorded_pid(&pidfile).await);
     assert_eq!(
         result,
         Err(SecretError {
             source: program("sh"),
             problem: Problem::CommandFailed {
                 status: Some(1),
-                detail: "rejected hunter2-".to_owned(),
+                detail: String::new(),
             },
         })
     );

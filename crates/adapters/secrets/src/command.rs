@@ -146,7 +146,7 @@ pub(crate) async fn run_with(
         Err(command_failure(
             &source,
             status.code(),
-            &out,
+            Some(&out),
             &err,
             stderr_cut,
         ))

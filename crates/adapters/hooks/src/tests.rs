@@ -870,19 +870,30 @@ async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
     panic!("the hook's output was never read before its timeout");
 }
 
-/// Output read to its end is all the hook said, though it ends the way a
-/// secret begins: it is its own words and stays (#158). Only a stream the
-/// read left partway is masked as cut.
+/// A hook can cut its own output short: it stops partway through a secret
+/// and exits on its own, with no timeout, no failed read and no newline at
+/// the end, as one that a signal Ladderback didn't send ended. What was read
+/// is masked as a cut text all the same, whoever stopped the stream, and
+/// nothing of the secret shows, though the hook failed (I4, #232). Output
+/// that ends nowhere near a secret is kept as it was said.
 #[tokio::test]
-async fn output_read_to_its_end_that_only_ends_like_a_secret_begins_is_kept() {
+async fn output_a_hook_cut_short_itself_leaves_nothing_of_a_secret() {
     let scratch = TempDir::new().unwrap();
-    let entry = sh(
-        "printf 'said hunter2-'; printf 'said hunter2-' >&2",
-        &scratch.path().join("log"),
-    );
     let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
-    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    let plain = sh(
+        "printf 'said hello\\n'; printf 'said hello' >&2",
+        &scratch.path().join("plain"),
+    );
+    let outcome = within(Duration::from_secs(5), runner.run(&plain, &context())).await;
     assert_eq!(outcome.status, HookStatus::Succeeded);
-    assert_eq!(outcome.stdout.text, "said hunter2-");
-    assert_eq!(outcome.stderr.text, "said hunter2-");
+    assert_eq!(outcome.stdout.text, "said hello\n");
+    assert_eq!(outcome.stderr.text, "said hello");
+    let cut = sh(
+        "printf 'said hunter2-'; printf 'said hunter2-' >&2\nexit 3",
+        &scratch.path().join("cut"),
+    );
+    let outcome = within(Duration::from_secs(5), runner.run(&cut, &context())).await;
+    assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
+    assert_eq!(outcome.stdout.text, "said ***");
+    assert_eq!(outcome.stderr.text, "said ***");
 }

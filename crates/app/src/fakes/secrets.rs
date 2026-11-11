@@ -214,7 +214,7 @@ impl SecretResolver for FakeSecrets {
                         Err(command_failure(
                             &source,
                             Some(*status),
-                            stdout,
+                            Some(stdout),
                             stderr,
                             false,
                         ))
