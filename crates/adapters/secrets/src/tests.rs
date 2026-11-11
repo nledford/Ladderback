@@ -579,18 +579,19 @@ async fn a_secret_quoted_past_the_kept_stderr_leaves_nothing_of_itself_in_the_er
 }
 
 /// A helper that rejects its secret, quotes it on stderr and exits, while a
-/// process it started holds stderr open: stderr is read for the grace and
-/// then left, so what was read can end partway through the secret (a write
-/// larger than the pipe takes at once reaches the reader in parts; the
-/// helper here writes the start and leaves the rest unsaid, which is where
-/// such a split leaves the reader). Nothing of it reaches the detail (I4).
+/// process it started holds stderr open (stdout it lets go, so all of the
+/// secret is known): stderr is read for the grace and then left, so what
+/// was read can end partway through the secret (a write larger than the
+/// pipe takes at once reaches the reader in parts; the helper here writes
+/// the start and leaves the rest unsaid, which is where such a split leaves
+/// the reader). Nothing of it reaches the detail (I4).
 #[tokio::test]
 async fn a_secret_cut_off_in_stderr_a_daemon_holds_open_leaves_nothing_of_itself_in_the_error() {
     let directory = TempDir::new().unwrap();
     let pidfile = directory.path().join("pid");
     let script = sh(
         concat!(
-            r#"sleep 60 & echo $! > "$1"; "#,
+            r#"sleep 60 >/dev/null & echo $! > "$1"; "#,
             "echo hunter2-canary; printf 'rejected hunter2-' >&2; exit 1"
         ),
         [pidfile.display().to_string()],
@@ -675,6 +676,64 @@ async fn a_secret_cut_off_in_stdout_a_daemon_holds_open_leaves_nothing_of_itself
             problem: Problem::CommandFailed {
                 status: Some(1),
                 detail: String::new(),
+            },
+        })
+    );
+}
+
+/// A process the helper started may hold stdout open a moment after the
+/// helper exits, and let go of it within the grace: stdout is then read to
+/// its end, so it holds all of the secret, and the detail is masked against
+/// it as for any failed helper, not left empty (#233).
+#[tokio::test]
+async fn stdout_a_daemon_lets_go_of_within_the_grace_is_read_whole_for_the_error() {
+    let script = sh(
+        concat!(
+            "sleep 0.3 2>/dev/null & ",
+            "echo hunter2-canary; echo 'rejected hunter2-canary' >&2; exit 1"
+        ),
+        Vec::<String>::new(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::CommandFailed {
+                status: Some(1),
+                detail: "rejected ***".to_owned(),
+            },
+        })
+    );
+}
+
+/// A helper that prints past the cap, cutting its secret there, and fails,
+/// quoting all of the secret on stderr: what it printed is too large, and
+/// that is the error, which quotes nothing it said (I4, #233).
+#[tokio::test]
+async fn a_secret_cut_off_at_the_stdout_cap_leaves_nothing_of_itself_in_the_error() {
+    let script = sh(
+        concat!(
+            "printf '%65530s' ''; printf hunter2-canary; ",
+            "echo 'rejected hunter2-canary' >&2; exit 1"
+        ),
+        Vec::<String>::new(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TooLarge {
+                limit: MAX_SECRET_BYTES
             },
         })
     );

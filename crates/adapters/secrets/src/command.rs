@@ -112,8 +112,11 @@ pub(crate) async fn run_with(
         &mut err,
     )
     .await;
-    let status = match outcome {
-        Ok(Outcome::Exited(status)) => status,
+    let (status, stdout_ended) = match outcome {
+        Ok(Outcome::Exited {
+            status,
+            stdout_ended,
+        }) => (status, stdout_ended),
         Ok(Outcome::TooLarge) => {
             running.kill_and_reap().await;
             return Err(fail(Problem::TooLarge {
@@ -136,7 +139,10 @@ pub(crate) async fn run_with(
     if status.success() {
         command_secret(&source, &out)
     } else {
-        Err(command_failure(&source, status.code(), Some(&out), &err))
+        // A stdout the grace cut holds only part of what it printed: masked
+        // against that part, what it said could show the rest (I4).
+        let printed = stdout_ended.then_some(out.as_slice());
+        Err(command_failure(&source, status.code(), printed, &err))
     }
 }
 
@@ -260,7 +266,12 @@ async fn discard(mut reader: impl AsyncRead + Unpin) {
 }
 
 enum Outcome {
-    Exited(ExitStatus),
+    /// The command exited; `stdout_ended` is whether its stdout was read to
+    /// its end, rather than left when the grace was over.
+    Exited {
+        status: ExitStatus,
+        stdout_ended: bool,
+    },
     /// Stdout went past the limit.
     TooLarge,
     /// The command was still running at its limit.
@@ -277,6 +288,8 @@ enum End {
 /// exited and been reaped, what is left is a pipe a daemon may hold open,
 /// which the grace bounds, so a command that ended in time is never timed
 /// out, and the group is signalled only while its leader is not reaped.
+/// Stdout was read to its end when its read gave the end before the grace
+/// was over.
 async fn collect(
     child: &mut Child,
     stdout: &mut ChildStdout,
@@ -288,6 +301,7 @@ async fn collect(
     // One byte more than the limit: that is already too much.
     let mut out_read = pin!(read_capped(stdout, out, MAX_SECRET_BYTES + 1, true));
     let mut err_read = pin!(read_capped(stderr, err, STDERR_KEPT, false));
+    // Set once stdout was read to its end, and only then.
     let mut out_done = false;
     let mut err_done = false;
     let running = async {
@@ -314,10 +328,11 @@ async fn collect(
         let (out_end, ()) = tokio::join!(
             async {
                 if out_done {
-                    Ok(End::Eof)
-                } else {
-                    (&mut out_read).await
+                    return Ok(End::Eof);
                 }
+                let end = (&mut out_read).await;
+                out_done = matches!(end, Ok(End::Eof));
+                end
             },
             async {
                 if !err_done {
@@ -331,7 +346,10 @@ async fn collect(
         Ok(Ok(End::Full)) => Ok(Outcome::TooLarge),
         Ok(Err(error)) => Err(error),
         // Ended, or kept open by a daemon: go on with what was read.
-        Ok(Ok(End::Eof)) | Err(_) => Ok(Outcome::Exited(status)),
+        Ok(Ok(End::Eof)) | Err(_) => Ok(Outcome::Exited {
+            status,
+            stdout_ended: out_done,
+        }),
     }
 }
 

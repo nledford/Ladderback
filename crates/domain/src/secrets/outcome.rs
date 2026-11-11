@@ -138,24 +138,27 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 /// `stderr` is masked as a cut text however it ended: a reader's cap, the
 /// pipe grace, a failed read or the command itself can stop it partway
 /// through what it printed, and what was read doesn't say which did.
+///
+/// `stdout` is `None` when its read stopped before the end: what was read
+/// is then only part of what the command printed, and stderr masked
+/// against that part would show the rest of a secret it quotes. Nothing
+/// of stderr is quoted then; the error keeps its status.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
     stdout: Option<&[u8]>,
     stderr: &[u8],
 ) -> SecretError {
-    let Some(stdout) = stdout else {
-        todo!("a failed command whose stdout was cut")
-    };
-    // A helper that rejects a value may quote it on stderr: what it printed
-    // (less the line ending its last line ends with, which isn't what it
-    // quotes), and its first line, which is what it would have given as its
-    // secret, are masked there.
-    let output = String::from_utf8_lossy(stdout);
-    let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
-    let first = SecretValue::new(first_line(&output));
-    let redactor = Redactor::new([&printed, &first]);
-    let said = redactor.redact_cut(stderr);
+    let said = stdout.map_or_else(String::new, |stdout| {
+        // A helper that rejects a value may quote it on stderr: what it
+        // printed (less the line ending its last line ends with, which isn't
+        // what it quotes), and its first line, which is what it would have
+        // given as its secret, are masked there.
+        let output = String::from_utf8_lossy(stdout);
+        let printed = SecretValue::new(output.trim_end_matches(['\r', '\n']));
+        let first = SecretValue::new(first_line(&output));
+        Redactor::new([&printed, &first]).redact_cut(stderr)
+    });
     SecretError {
         source: source.clone(),
         problem: Problem::command_failed(status, said.as_bytes()),
