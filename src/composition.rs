@@ -1786,10 +1786,10 @@ impl CancelRegistry {
     }
 }
 
-/// What the daemon logs at warning level and above, for the tests that look
-/// at the log. `log` takes one logger for a process, so the tests of every
-/// module that reads the log share this one, and each reads only the lines
-/// about what it started.
+/// What the daemon logs, for the tests that look at the log: the warnings it
+/// gives (`lines`) and what it says at info level (`infos`). `log` takes one
+/// logger for a process, so the tests of every module that reads the log
+/// share this one, and each reads only the lines about what it started.
 #[cfg(test)]
 mod captured_log {
     use std::sync::{Mutex, PoisonError};
@@ -1814,15 +1814,29 @@ mod captured_log {
     /// Starts capturing, before the code that logs runs.
     pub(super) fn capture() {
         let _ = log::set_logger(&Captured);
-        log::set_max_level(log::LevelFilter::Warn);
+        log::set_max_level(log::LevelFilter::Info);
     }
 
-    /// Every line logged so far, with its level.
+    /// Every line logged so far at warning level or above, with its level.
     pub(super) fn lines() -> Vec<(log::Level, String)> {
         LOGGED
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .iter()
+            .filter(|(level, _)| *level <= log::Level::Warn)
+            .cloned()
+            .collect()
+    }
+
+    /// Every line logged so far at info level.
+    pub(super) fn infos() -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(level, _)| *level == log::Level::Info)
+            .map(|(_, line)| line.clone())
+            .collect()
     }
 }
 
@@ -3281,6 +3295,246 @@ mod tests {
             assert_the_repository_takes_another_check(&runner, &what).await;
         }
         panic!("a start took more than {MOST_POLLS} polls");
+    }
+
+    /// An operation log that stores a start and then keeps its answer until
+    /// the test lets it through: the moment a client that hangs up cuts the
+    /// route, after the log has the start and before the route has learned
+    /// so.
+    struct HeldAnswer {
+        inner: Arc<dyn OperationStore>,
+        stored: tokio::sync::Notify,
+        open: tokio::sync::watch::Sender<bool>,
+    }
+
+    impl HeldAnswer {
+        fn over(inner: Arc<dyn OperationStore>) -> Self {
+            Self {
+                inner,
+                stored: tokio::sync::Notify::new(),
+                open: tokio::sync::watch::channel(false).0,
+            }
+        }
+
+        /// Waits until the log has stored a start.
+        async fn start_stored(&self) {
+            tokio::time::timeout(std::time::Duration::from_secs(10), self.stored.notified())
+                .await
+                .expect("the log stored the start");
+        }
+
+        fn let_the_answer_through(&self) {
+            self.open.send_replace(true);
+        }
+    }
+
+    #[async_trait]
+    impl OperationStore for HeldAnswer {
+        async fn fail_unfinished(
+            &self,
+            reason: &FailureReason,
+        ) -> Result<u64, app::ports::StoreError> {
+            self.inner.fail_unfinished(reason).await
+        }
+
+        async fn save(
+            &self,
+            operation: &domain::execution::Operation,
+            result: Option<&app::ports::EngineResult>,
+        ) -> Result<(), app::ports::StoreError> {
+            self.inner.save(operation, result).await
+        }
+
+        async fn try_start(
+            &self,
+            operation: &domain::execution::Operation,
+        ) -> Result<app::ports::Start, app::ports::StoreError> {
+            let decided = self.inner.try_start(operation).await;
+            self.stored.notify_one();
+            let _ = self.open.subscribe().wait_for(|open| *open).await;
+            decided
+        }
+
+        async fn get(
+            &self,
+            id: OperationId,
+        ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn list(
+            &self,
+            query: &app::ports::HistoryQuery,
+        ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+            self.inner.list(query).await
+        }
+    }
+
+    /// How operations have ended as far as the page has heard, once the task
+    /// that runs them is done. That task holds a clone of the cancel registry
+    /// until it has told the pages and the log how the run ended, so all the
+    /// news is in when the clone is dropped.
+    async fn ends_heard_when_done(runner: &PlanRunner, heard: &mut Heard) -> Vec<UiEvent> {
+        let done = async {
+            while Arc::strong_count(&runner.registry) > 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), done)
+            .await
+            .expect("the run is done");
+        ends_heard(heard)
+    }
+
+    /// The daemon said once, at info level, that the run of `operation`
+    /// ended, and how. The run is done, so the line is in the log already.
+    fn assert_said_once_that_it_ended(operation: &str, how: &str) {
+        let said: Vec<String> = captured_log::infos()
+            .into_iter()
+            .filter(|line| line.contains(operation) && line.contains(" ended: "))
+            .collect();
+        let [line] = said.as_slice() else {
+            panic!("one line says the run ended: {said:?}");
+        };
+        assert!(line.ends_with(how), "{line}");
+    }
+
+    /// A maintenance run that ends is told to the pages once, by the run,
+    /// and said once in the daemon's log, by the task that ran it, however
+    /// fast the route answered.
+    #[tokio::test]
+    async fn a_maintenance_run_that_ends_is_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, Completes, log).await;
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        assert!(
+            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+            "the page hears one end, the run's: {ends:?}"
+        );
+        assert_said_once_that_it_ended(&id, "Succeeded");
+    }
+
+    /// The same for a backup, which the daemon runs on a task of its own too.
+    #[tokio::test]
+    async fn a_backup_that_ends_is_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+        open_hooks.send(true).expect("the gate opens");
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, Completes, log).await;
+        let id = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        assert!(
+            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+            "the page hears one end, the run's: {ends:?}"
+        );
+        assert_said_once_that_it_ended(&id, "Succeeded");
+    }
+
+    /// A maintenance run cancelled after its start is announced to no page
+    /// (the page that cancelled it reads the history until it settles), and
+    /// the daemon's log says once that it ended cancelled.
+    #[tokio::test]
+    async fn a_maintenance_run_cancelled_after_its_start_is_announced_to_no_page_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the check starts");
+        runner
+            .cancel(id.clone())
+            .await
+            .expect("a cancel straight after the answer is accepted");
+
+        assert_eq!(
+            ends_heard_when_done(&runner, &mut heard).await,
+            [],
+            "the page was told how a cancelled run ended"
+        );
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+        assert_said_once_that_it_ended(&id, "Cancelled");
+    }
+
+    /// A maintenance start refused because a run holds the repository began
+    /// no operation, so no page is told how one ended; the run that holds
+    /// the repository goes on undisturbed, until its cancel.
+    #[tokio::test]
+    async fn a_maintenance_start_refused_for_a_busy_repository_is_announced_to_no_page() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::clone(&runner.store);
+        let mut heard = listen(&mut runner, IdentifiesThenParks, log).await;
+        let running = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await
+            .expect("the first check starts");
+        let refused = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check)
+            .await;
+        assert_eq!(
+            refused,
+            Err(http_adapter::MaintenanceStartError::Busy {
+                running: running.clone()
+            })
+        );
+        assert_eq!(
+            ends_heard(&mut heard),
+            [],
+            "the refused start was announced, or the run it was refused for ended"
+        );
+        runner
+            .cancel(running)
+            .await
+            .expect("the run that holds the repository is cancelled");
+
+        assert_eq!(
+            ends_heard_when_done(&runner, &mut heard).await,
+            [],
+            "the page was told how a run ended: the refused one began none, and the one cancelled is no news"
+        );
+    }
+
+    /// A client that hangs up after the log has stored its maintenance start
+    /// has no ID to ask for the run by, but the run goes on, and the pages
+    /// are told how it ended, once, and the log says so: the task that
+    /// started it ends it, not the route that was dropped.
+    #[tokio::test]
+    async fn a_maintenance_run_whose_client_hung_up_is_still_announced_once_and_logged_once() {
+        captured_log::capture();
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let log = Arc::new(HeldAnswer::over(Arc::clone(&runner.store)));
+        let mut heard = listen(&mut runner, Completes, log.clone()).await;
+        let route =
+            runner.start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check);
+        tokio::select! {
+            answered = route => panic!("the route answered before the log did: {answered:?}"),
+            () = log.start_stored() => {}
+        }
+        log.let_the_answer_through();
+
+        let ends = ends_heard_when_done(&runner, &mut heard).await;
+        let [UiEvent::OperationSucceeded { operation, .. }] = ends.as_slice() else {
+            panic!("the page hears how the run ended, once: {ends:?}");
+        };
+        assert_eq!(
+            history_of(&runner, operation).await.record.status,
+            OperationStatus::Succeeded
+        );
+        assert_said_once_that_it_ended(operation, "Succeeded");
     }
 
     fn english() -> l10n::Localizer {
