@@ -61,9 +61,10 @@ function table(world: BrowserWorld, name: string): Locator {
   return world.page.getByRole("table", { name: namePattern(name) });
 }
 
-/** Writes a demo plan's config and repository into a scratch folder, starts
- *  a daemon on it, and points the scenario's pages at that daemon. */
-export async function serveDemoPlan(world: BrowserWorld, plan: string, size: keyof typeof SOURCE_FILES): Promise<void> {
+/** Writes the config of one or more demo plans and their repository into a
+ *  scratch folder, starts a daemon on it, and points the scenario's pages at
+ *  that daemon. */
+export async function serveDemoPlans(world: BrowserWorld, plans: readonly string[], size: keyof typeof SOURCE_FILES): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");
@@ -71,8 +72,8 @@ export async function serveDemoPlan(world: BrowserWorld, plan: string, size: key
   for (let n = 1; n <= SOURCE_FILES[size]; n += 1) {
     await writeFile(path.join(source, `demo-${n}.txt`), `${n}:` + "d".repeat(FILE_BYTES));
   }
-  // The shape of the e2e `serving_with_plan` step: one repository, one plan
-  // backing the source up into it, nothing else set.
+  // The shape of the e2e `serving_with_plan` step: one repository, and each
+  // plan backing the source up into it, nothing else set.
   const config = [
     "schema = 1",
     "",
@@ -80,11 +81,13 @@ export async function serveDemoPlan(world: BrowserWorld, plan: string, size: key
     `repository = ${JSON.stringify(path.join(scratch, "repo"))}`,
     `password = ${JSON.stringify(PASSWORD)}`,
     "",
-    "[[plans]]",
-    `id = ${JSON.stringify(plan)}`,
-    'repository = "demo"',
-    `sources = [${JSON.stringify(source)}]`,
-    "",
+    ...plans.flatMap((plan) => [
+      "[[plans]]",
+      `id = ${JSON.stringify(plan)}`,
+      'repository = "demo"',
+      `sources = [${JSON.stringify(source)}]`,
+      "",
+    ]),
   ].join("\n");
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
@@ -109,12 +112,21 @@ After(async function (this: BrowserWorld) {
 });
 
 Given("a demo plan {string} with a scratch repository", async function (this: BrowserWorld, plan: string) {
-  await serveDemoPlan(this, plan, "small");
+  await serveDemoPlans(this, [plan], "small");
 });
 
 Given("a demo plan {string} with a big scratch repository", async function (this: BrowserWorld, plan: string) {
-  await serveDemoPlan(this, plan, "big");
+  await serveDemoPlans(this, [plan], "big");
 });
+
+// Two plans that back up the same source into the same repository: only
+// their names tell them apart.
+Given(
+  "two demo plans {string} and {string} with a scratch repository",
+  async function (this: BrowserWorld, first: string, second: string) {
+    await serveDemoPlans(this, [first, second], "small");
+  },
+);
 
 // The scripted daemon (support/scripted-daemon.ts): a Given says what its
 // history holds, and its Whens say what its events stream tells the page and
