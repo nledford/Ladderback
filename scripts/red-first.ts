@@ -10,8 +10,9 @@
 // The two trees (the merge base and the test: commit) are checked out at fixed
 // paths, target/red-first/trees/base and trees/first, each with its own target
 // dir, target/red-first/base and first. Paths that stay the same from run to
-// run let a target dir outlive its run: CI caches the base tree's, and the
-// first tree starts from a copy of it. Run one at a time per checkout.
+// run let a target dir outlive its run. The base tree can start from a copy of
+// another build (RED_FIRST_SEED, below; CI passes it main's), and the first
+// tree starts from a copy of the base tree's. Run one at a time per checkout.
 //
 // Usage: node scripts/red-first.ts <base-ref>
 // Exit status: 0 when every new test fails at run time, 1 otherwise.
@@ -141,28 +142,51 @@ function removeTree(dir: string): void {
 }
 
 /**
- * Gives the first tree a copy of the base tree's build to start from, unless it
- * already has a target dir. Both trees compile the same dependencies, so after
- * the copy only the crates the test: commit touches build again.
+ * Copies a target dir to `to` unless `to` exists, beside it first and then
+ * renamed, so a copy that died half way never passes for a target dir. Entries
+ * named in `skip` stay behind.
  *
- * Order matters: call this after the base tree is built and before the first
- * tree is checked out. Cargo treats a crate as fresh when no source file is
- * newer than its outputs, so files checked out before the copy would look older
- * than the base tree's outputs and the commit's changes would go unseen, the
- * very failure that separate target dirs exist to prevent. `cp -a` keeps the
- * outputs' own times, and the checkout that follows is newer than all of them.
+ * Order matters: copy before the tree that builds into `to` is checked out.
+ * Cargo treats a workspace crate as fresh when no source file is newer than its
+ * outputs, so files checked out before the copy would look older than the
+ * copied outputs and their changes would go unseen, the very failure that
+ * separate target dirs exist to prevent. `cp -a` keeps the outputs' own times,
+ * and the checkout that follows is newer than all of them.
  */
-function seedFirstTarget(): void {
-  const from = targetDir("base");
-  const to = targetDir("first");
+function seedTarget(from: string, to: string, skip: string[] = []): void {
   if (existsSync(to) || !existsSync(from)) return;
-  // Copy beside the destination and rename, so a copy that died half way
-  // never passes for a target dir.
   const partial = `${to}.partial`;
   rmSync(partial, { recursive: true, force: true });
-  execFileSync("cp", ["-a", from, partial]);
+  mkdirSync(partial, { recursive: true });
+  for (const entry of readdirSync(from)) {
+    if (!skip.includes(entry)) execFileSync("cp", ["-a", path.join(from, entry), partial]);
+  }
   renameSync(partial, to);
-  console.log(`red-first: the first tree starts from a copy of ${path.relative(repo, from)}`);
+  console.log(`red-first: ${path.relative(repo, to)} starts from a copy of ${path.relative(repo, from)}`);
+}
+
+/**
+ * Gives the base tree a copy of the build that RED_FIRST_SEED names to start
+ * from, unless it already has a target dir. CI names the build of main it
+ * restored, so only what changed since then builds again, the workspace crates
+ * at least. Opt-in: a local target dir can be many gigabytes, and locally the
+ * base tree's own target dir outlives the run anyway.
+ */
+function seedBaseTarget(): void {
+  const seed = process.env.RED_FIRST_SEED;
+  if (!seed) return;
+  // The seed may hold target/red-first itself.
+  seedTarget(path.resolve(repo, seed), targetDir("base"), ["red-first"]);
+}
+
+/**
+ * Gives the first tree a copy of the base tree's build to start from, unless it
+ * already has a target dir. Both trees compile the same dependencies, so after
+ * the copy only the crates the test: commit touches build again. Call it after
+ * the base tree is built and before the first tree is checked out.
+ */
+function seedFirstTarget(): void {
+  seedTarget(targetDir("base"), targetDir("first"));
 }
 
 // --- Rust tests ------------------------------------------------------------
@@ -385,6 +409,7 @@ const trees = { base: path.join(treesRoot, "base"), first: path.join(treesRoot, 
 try {
   for (const dir of Object.values(trees)) removeTree(dir);
   const mergeBase = git("merge-base", base, first);
+  seedBaseTarget();
   git("worktree", "add", "--detach", trees.base, mergeBase);
   const before = rustTests(trees.base);
   if (!before.ok) {

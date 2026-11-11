@@ -2,13 +2,13 @@
 # own. It depends on a pull request's labels, and a label change must re-run
 # this check alone, not every job in ci.yml.
 #
-# Each run builds the base tree and then the test: commit's tree, which starts
-# from a copy of the base tree's build (scripts/red-first.ts). The base tree's
-# build is cached per merge base, so a later run of the same pull request
-# restores it and builds the workspace crates again but not the dependencies
-# (the trees are checked out afresh, so their sources are always newer). Pull
-# requests can't read each other's caches, so the first run of a pull request
-# is cold.
+# Each run builds the base tree and then the test: commit's tree
+# (scripts/red-first.ts). The base tree starts from a copy of the build of main
+# that mr boxington (mbx) restored, which ci.yml's `Check (ubuntu-latest)`
+# saved (RED_FIRST_SEED), and the test: commit's tree from a copy of the base
+# tree's. So only what changed since that build of main compiles again, the
+# workspace crates at least: the trees are checked out after the copies, so
+# their sources are newer.
 name: Red-first
 
 on:
@@ -90,34 +90,7 @@ jobs:
       - run: npm ci
         working-directory: ui-tests
       - uses: ./.github/actions/chromium
-      # The parts of the cache key that aren't a file hash. rust-toolchain.toml
-      # names a channel, not a version, so the toolchain is identified by what
-      # rustc reports about itself.
-      - id: key
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          rustc -vV > "$RUNNER_TEMP/rustc-version"
-          merge_base=$(git merge-base "origin/$BASE_REF" HEAD)
-          echo "toolchain=$(sha256sum "$RUNNER_TEMP/rustc-version" | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "merge-base=$merge_base" >> "$GITHUB_OUTPUT"
-      # Restore and save are separate steps, so the base build is saved even
-      # when the check goes red: a red check is the expected result on a good
-      # test: commit, and rebuilding the base on the next push would be waste.
-      - id: base-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/red-first/base
-          key: red-first-base-${{ runner.os }}-${{ steps.key.outputs.toolchain }}-${{ hashFiles('Cargo.lock') }}-${{ steps.key.outputs.merge-base }}
-          # After a rebase the merge base changes but most of the build is still good.
-          restore-keys: |
-            red-first-base-${{ runner.os }}-${{ steps.key.outputs.toolchain }}-${{ hashFiles('Cargo.lock') }}-
       - run: just red-first "origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}
-      # Skipped when an earlier step failed before the restore, so there is no key.
-      - if: ${{ !cancelled() && steps.base-cache.outcome == 'success' && steps.base-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/red-first/base
-          key: ${{ steps.base-cache.outputs.cache-primary-key }}
+          RED_FIRST_SEED: target
