@@ -49,6 +49,7 @@ Keyed by what you see. Each line points at where the full reason lives.
 - **A `GREEN` line from `just red-first`:** the test passed (it specifies nothing new) or its run failed without a failing test, as when the name matches no test. Make it assert the missing behaviour, under the name the commit adds (§13.1).
 - **An `@e2e` cancel scenario ends `Succeeded` on a fast runner (macOS CI):** the job finished before the cancel. Cancel once the operation has started, on a source big enough to outlive it, never after a fixed delay (`features/execution/cancel.feature`).
 - **A mutant "survives" in `web` DOM glue or in wasm32-only code:** that code never runs on the host (§13.1). Exclude the file in `.cargo/mutants.toml` only when `just test-wasm` or the `@ui` scenarios test it, with its reason, and say so in the pull request; code that decides anything moves out of the glue into a host-tested module instead.
+- **"Temporary failure resolving 'security.ubuntu.com'", then "install-chromium: apt failed; trying once more in 30 s"** in the UI journeys or red-first job: the runner couldn't reach Ubuntu's package servers. Chromium's system packages come from a cache (`.github/actions/chromium`), so this happens only when the cache misses, after a new runner image or Playwright version, and after Quad9 and one retry have failed too. Nothing in the change causes it; rerun the failed jobs once it clears (`gh run rerun <run-id> --failed`).
 
 ## Read first
 
