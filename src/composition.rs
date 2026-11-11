@@ -1422,14 +1422,20 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
         ),
         api::PasswordDto::Env { name } => SecretRef::Env(name),
     };
-    Ok(RepositorySettings {
+    let settings = RepositorySettings {
         repository: dto.repository,
         repo_hot: dto.repo_hot,
         password,
         options: dto.options,
         options_hot: dto.options_hot,
         options_cold: dto.options_cold,
-    })
+    };
+    // What the configuration would refuse when it loads next is not saved,
+    // nor tested: a request can't take more than a job does.
+    settings
+        .check_sizes()
+        .map_err(|_| RepositoriesError::InvalidBody)?;
+    Ok(settings)
 }
 
 /// Why a repository use case failed, as the typed refusal the route answers

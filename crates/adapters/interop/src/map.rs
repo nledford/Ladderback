@@ -10,6 +10,7 @@ use app::ports::{ImportedProfile, ProfileError, ProfileNotice, ProfileProblem};
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
+    check_options,
 };
 use domain::secrets::{
     CommandLine, FileRead, SecretRef, SecretValue, Template, is_secret_option,
@@ -363,6 +364,15 @@ fn options(
         }
         options.entry(name).or_insert_with(|| reference(variable));
     }
+    // The profiles it uses and rustic's variables may add options to the
+    // ones the profile writes: the table the config gets is counted whole.
+    check_options(&options).map_err(|_| ProfileError::Invalid {
+        file: file.to_owned(),
+        key: Some(format!("repository.{table}")),
+        at: None,
+        problem: ProfileProblem::BadValue,
+        detail: String::new(),
+    })?;
     Ok(options)
 }
 

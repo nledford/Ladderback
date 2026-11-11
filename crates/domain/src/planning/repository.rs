@@ -17,22 +17,28 @@ use crate::secrets::{
 /// Refuses a location longer than [`MAX_LOCATION_BYTES`]. A location may
 /// hold a password, so the refusal keeps none of its text.
 pub fn check_location(location: &str) -> Result<(), InvalidValue> {
-    let _ = location;
-    todo!()
+    if location.len() > MAX_LOCATION_BYTES {
+        return Err(InvalidValue::new(ValueKind::Location, ""));
+    }
+    Ok(())
 }
 
 /// Refuses the value of an option longer than [`MAX_OPTION_VALUE_BYTES`].
 /// A value may be a secret, so the refusal keeps none of its text.
 pub fn check_option_value(value: &str) -> Result<(), InvalidValue> {
-    let _ = (value, MAX_OPTION_VALUE_BYTES);
-    todo!()
+    if value.len() > MAX_OPTION_VALUE_BYTES {
+        return Err(InvalidValue::new(ValueKind::OptionValue, ""));
+    }
+    Ok(())
 }
 
 /// Refuses a table of options (`options`, `options-hot`, `options-cold`)
 /// that holds more than [`MAX_OPTIONS`].
 pub fn check_options(options: &BTreeMap<String, String>) -> Result<(), InvalidValue> {
-    let _ = (options, MAX_OPTIONS);
-    todo!()
+    if options.len() > MAX_OPTIONS {
+        return Err(InvalidValue::new(ValueKind::Options, ""));
+    }
+    Ok(())
 }
 
 /// A repository as the configuration describes it: its fields may hold
@@ -58,7 +64,15 @@ impl RepositorySettings {
     /// [`check_option_value`]; this is for settings that come whole, from a
     /// request.
     pub fn check_sizes(&self) -> Result<(), InvalidValue> {
-        todo!()
+        check_location(&self.repository)?;
+        self.repo_hot.as_deref().map_or(Ok(()), check_location)?;
+        for table in [&self.options, &self.options_hot, &self.options_cold] {
+            check_options(table)?;
+            table
+                .values()
+                .try_for_each(|value| check_option_value(value))?;
+        }
+        Ok(())
     }
 
     /// Every secret these settings hold as text: a credential written in
