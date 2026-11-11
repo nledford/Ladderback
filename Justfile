@@ -95,6 +95,31 @@ architecture:
 deny:
     cargo deny --locked --all-features --workspace check
 
+# Builds the workspace with the oldest compiler it claims to support (technical
+# design §8.2, decision 47), which CI doesn't: CI builds with stable. It runs in
+# Docker, in the official image of the `rust-version` Cargo.toml declares, on
+# Linux because macOS 27 can't load the proc-macro libraries 1.94 builds.
+# RUSTUP_TOOLCHAIN names the image's own toolchain: rust-toolchain.toml would
+# otherwise swap in stable, and the check would prove nothing. The target folder
+# and the Cargo home are Docker volumes, so a second run is quick; `docker volume
+# rm ladderback-msrv-target ladderback-msrv-cargo` frees them.
+[doc('Build the workspace, wasm32 included, with the MSRV in Docker (decision 47).')]
+[group('quality')]
+msrv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+    if [ -z "$version" ]; then echo 'msrv: Cargo.toml declares no rust-version' >&2; exit 1; fi
+    docker run --rm \
+        -v '{{ root }}':/src:ro -v ladderback-msrv-target:/target -v ladderback-msrv-cargo:/cargo \
+        -e CARGO_TARGET_DIR=/target -e CARGO_HOME=/cargo -e CARGO_PROFILE_DEV_DEBUG=0 -w /src \
+        "rust:$version" bash -euo pipefail -c '
+            export RUSTUP_TOOLCHAIN="$(cd / && rustup default | cut -d " " -f 1)"
+            rustup target add wasm32-unknown-unknown
+            rustc --version
+            cargo check --locked --workspace --all-targets
+            cargo check --locked --package web --target wasm32-unknown-unknown'
+
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
 # name). Tests that skip themselves (`testkit::skip!`) are listed at the end.
@@ -228,6 +253,29 @@ build: web
 [group('dev')]
 serve: build
     cargo run --package ladderback -- serve
+
+# Runs the ladderback binary on folders of its own under the target directory:
+# the configuration, the data and HOME (where rustic keeps its profiles and
+# cache) are all scratch, so nothing reaches your real Ladderback or rustic
+# setup, and the daemon listens on a free port, never `serve`'s 9898. Arguments
+# replace `serve`, and paths are relative to where you run it: `just try
+# import-profile demo.toml` imports into the same scratch configuration. A
+# keyring password source still uses the login keychain. Delete the folder to
+# start over.
+[doc('Run ladderback on scratch folders and a free port (default: serve).')]
+[group('dev')]
+[no-cd]
+[positional-arguments]
+try *args: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="${CARGO_TARGET_DIR:-{{ root }}/target}"
+    scratch="$target/try"
+    mkdir -p "$scratch/config" "$scratch/data" "$scratch/home"
+    if [ $# -eq 0 ]; then set -- serve --listen 127.0.0.1:0; fi
+    echo "try: scratch folders in $scratch" >&2
+    HOME="$scratch/home" LADDERBACK_CONFIG_DIR="$scratch/config" LADDERBACK_DATA_DIR="$scratch/data" \
+        exec "$target/debug/ladderback" "$@"
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even
 # `npm exec --no`) runs an unrelated registry package of that name, or a cached

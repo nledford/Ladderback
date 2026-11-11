@@ -21,7 +21,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, and on the whole of a crate the branch adds to the gate |
 | `just red-first [base]` | Checks that the first commit is a `test:` commit whose tests fail at run time (§13.1) |
 
-Also: `just setup` (tools, rustic CLI, Chromium), `just fmt`, `just clippy` (host clippy only, the part of `lint` that can differ by OS), `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui` (builds the UI with the gallery and the binary, runs the `@ui` scenarios), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just check-pr-title "<title>"` (as CI does), `just serve` (`127.0.0.1:9898`), `just release-preview` (the next release's bump and changelog entry, §12.1), `just release-pr [version]` (the maintainer's: opens or updates the release PR, §12.1).
+Also: `just setup` (tools, rustic CLI, Chromium), `just fmt`, `just clippy` (host clippy only, the part of `lint` that can differ by OS), `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui` (builds the UI with the gallery and the binary, runs the `@ui` scenarios), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just msrv` (builds the workspace with the MSRV in Docker; run it when a change raises `rust-version`, §16 decision 47), `just check-pr-title "<title>"` (as CI does), `just serve` (`127.0.0.1:9898`, your real configuration), `just try [args]` (the daemon on scratch folders and a free port; arguments replace `serve`, as in `just try import-profile demo.toml`), `just release-preview` (the next release's bump and changelog entry, §12.1), `just release-pr [version]` (the maintainer's: opens or updates the release PR, §12.1).
 
 Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
@@ -49,6 +49,7 @@ Keyed by what you see. Each line points at where the full reason lives.
 - **A `GREEN` line from `just red-first`:** the test passed (it specifies nothing new) or its run failed without a failing test, as when the name matches no test. Make it assert the missing behaviour, under the name the commit adds (§13.1).
 - **An `@e2e` cancel scenario ends `Succeeded` on a fast runner (macOS CI):** the job finished before the cancel. Cancel once the operation has started, on a source big enough to outlive it, never after a fixed delay (`features/execution/cancel.feature`).
 - **A mutant "survives" in `web` DOM glue or in wasm32-only code:** that code never runs on the host (§13.1). Exclude the file in `.cargo/mutants.toml` only when `just test-wasm` or the `@ui` scenarios test it, with its reason, and say so in the pull request; code that decides anything moves out of the glue into a host-tested module instead.
+- **"Temporary failure resolving 'security.ubuntu.com'", then "install-chromium: apt failed; trying once more in 30 s"** in the UI journeys or red-first job: the runner couldn't reach Ubuntu's package servers. Chromium's system packages come from a cache (`.github/actions/chromium`), so this happens only when the cache misses, after a new runner image or Playwright version, and after Quad9 and one retry have failed too. Nothing in the change causes it; rerun the failed jobs once it clears (`gh run rerun <run-id> --failed`).
 
 ## Read first
 
@@ -150,7 +151,7 @@ Several agents may work on the repository at once (§13.5). Each one:
 
 - works in its own git worktree under `.worktrees/<slug>` (git ignores the folder): `git worktree add -b <branch> .worktrees/<slug> origin/main` from the main checkout. It uses its own `CARGO_TARGET_DIR` and deletes that target directory when done;
 - edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
-- passes `--jobs` to `just mutants` when several agents share the machine, uses its own ports (never `just serve`'s 9898) and its own scratch folder, and never runs `rm -rf` on a shared path;
+- passes `--jobs` to `just mutants` when several agents share the machine, uses its own ports (never `just serve`'s 9898) and its own scratch folder (`just try` gives a daemon both), and never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
 - adds a new §16 decision as `docs/design/decisions/NN-<slug>.md` plus its index row in §16, and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
