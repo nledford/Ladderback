@@ -6,7 +6,7 @@
 //! hang the run: each wait on a stop has a bound of its own (`within`).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -88,6 +88,16 @@ fn pid_in(lines: &[String]) -> i32 {
 /// loaded machine.
 const ENDS_ON_TERM: Duration = Duration::from_secs(11);
 
+/// A loop a hook starts in the background: it writes a line to `$1.ticks`
+/// every 50 ms for as long as `$1`, the log, is there, so one that a test
+/// leaves running by mistake ends with the test's scratch directory. The
+/// script moves on once the loop has ticked: it runs.
+const TICKER: &str = concat!(
+    ": > \"$1.ticks\"\n",
+    "(while [ -e \"$1\" ]; do echo tick >> \"$1.ticks\"; sleep 0.05; done) &\n",
+    "until [ -s \"$1.ticks\" ]; do sleep 0.01; done\n",
+);
+
 /// Awaits `call` for at most `bound` and fails the test when it is still
 /// running then: a hook that is never stopped is a test that fails, not one
 /// that waits for something else to give up on it.
@@ -97,17 +107,45 @@ async fn within<T>(bound: Duration, call: impl Future<Output = T>) -> T {
         .unwrap_or_else(|_| panic!("the call was still running after {bound:?}"))
 }
 
+/// Whether the ticks of the hook with the log `log` have stopped: their
+/// count no longer grows. What a stop ends is gone moments after the call
+/// returns, not at its return, so this looks for a few seconds. The loop has
+/// ticked, or there is nothing to have outlived the stop.
+async fn ticks_stop(log: &Path) -> bool {
+    let ticks = PathBuf::from(format!("{}.ticks", log.display()));
+    let count = || lines(&ticks).len();
+    assert!(count() > 0, "the hook's loop never ticked");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let before = count();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        if count() == before {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+    }
+}
+
 /// What one run of a hook, stopped at its timeout, did.
 struct Trapped {
     status: HookStatus,
     lines: Vec<String>,
     elapsed: Duration,
     sent: Vec<(Signal, bool)>,
+    /// Holds the hook's files until the test is over.
+    scratch: TempDir,
 }
 
 impl Trapped {
     fn wrote(&self, line: &str) -> bool {
         self.lines.iter().any(|written| written == line)
+    }
+
+    /// The log the hook wrote to, `$1` of its script.
+    fn log(&self) -> PathBuf {
+        self.scratch.path().join("log")
     }
 }
 
@@ -149,6 +187,7 @@ async fn run_trapping(
                 lines: written,
                 elapsed,
                 sent: signals.sent(),
+                scratch,
             };
         }
     }
@@ -586,6 +625,78 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
     assert!(
         kill(Pid::from_raw(descendant), None).is_ok(),
         "{descendant} was killed"
+    );
+}
+
+/// A hook's process group holds what the hook started, and a stop is for the
+/// group, not the hook alone: the SIGTERM that ends a hook at its timeout
+/// ends what it started too. That is watched by what the loop writes
+/// (`TICKER`), not by a pid, so the test does not depend on who reaps an
+/// orphan.
+#[tokio::test]
+async fn what_a_hook_started_is_stopped_with_it_at_its_timeout() {
+    let trapped = run_trapping(
+        &format!("{TICKER}echo ready >> \"$1\"\nwait"),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
+        ENDS_ON_TERM,
+    )
+    .await;
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(
+        ticks_stop(&trapped.log()).await,
+        "what the hook started is still running"
+    );
+}
+
+/// The SIGKILL, once the grace is over, is for the group too: the hook and
+/// what it started all ignore the SIGTERM, and are all gone after it.
+#[tokio::test]
+async fn what_ignores_sigterm_is_killed_with_the_hook_when_the_grace_is_over() {
+    let limit = Duration::from_secs(1);
+    let grace = Duration::from_secs(1);
+    let trapped = run_trapping(
+        &format!("trap '' TERM\n{TICKER}echo ready >> \"$1\"\nwhile :; do sleep 1 & wait $!; done"),
+        limit,
+        grace,
+        limit + grace + Duration::from_secs(15),
+    )
+    .await;
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(
+        ticks_stop(&trapped.log()).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A call that is given up on while the hook runs ends the hook's group, and
+/// what it started with it: `kill_on_drop` reaches the hook alone.
+#[tokio::test]
+async fn dropping_the_call_stops_what_the_hook_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    // The loop of `TICKER` runs for as long as the log is there.
+    fs::write(&log, "").unwrap();
+    let entry = sh(&format!("{TICKER}echo ready >> \"$1\"\nwait"), &log);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(60));
+    let context = context();
+    let stop = Stop {
+        grace: Duration::from_secs(60),
+        reap_limit: Duration::from_secs(5),
+        signal: &signal_group,
+    };
+    {
+        let running = runner.spawn_and_wait_with(&entry, &context, &stop);
+        tokio::pin!(running);
+        tokio::select! {
+            outcome = &mut running => panic!("the hook ended by itself: {:?}", outcome.0),
+            () = logged(&log, "ready") => {}
+        }
+        // `running` is dropped here, with the hook running.
+    }
+    assert!(
+        ticks_stop(&log).await,
+        "what the hook started is still running"
     );
 }
 
