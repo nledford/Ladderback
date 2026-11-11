@@ -75,6 +75,14 @@ pub enum ErrorCode {
     /// A repository already exists where one was to be initialised, so
     /// nothing was written. The argument `location` is where it is.
     RepositoryExists,
+    /// No repository is at the location: the engine found no repository
+    /// config file there, so nothing was opened or written.
+    RepositoryNotFound,
+    /// A saved repository's Create was refused because its row doesn't offer
+    /// it: no job found its location empty since nothing reached it, so
+    /// nothing says the location is reachable and holds no repository
+    /// (decision 53). Nothing was run.
+    CreateNotOffered,
     /// A repository didn't answer a test, a connection or an initialisation
     /// in time, so the engine's worker was stopped and nothing was saved.
     RepositoryTimedOut,
@@ -483,6 +491,7 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::RepositoryNotFound | Self::CreateNotOffered => &[],
             Self::RepositoryAliasTaken | Self::RepositoryAlreadyConfigured => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -1190,6 +1199,7 @@ mod tests {
             repo_hot: None,
             password: PasswordSourceDto::Inline,
             maintained_here: true,
+            create_offered: true,
             warnings: vec![WarningDto {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
@@ -1198,7 +1208,7 @@ mod tests {
         let json = serde_json::to_string(&row).unwrap();
         assert_eq!(
             json,
-            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true,"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
+            r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true,"create-offered":true,"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
         );
         assert_eq!(serde_json::from_str::<RepositoryDto>(&json).unwrap(), row);
         let bare = r#"{"alias":"demo","repository":"/x","password":{"source":"inline"}}"#;
@@ -2064,6 +2074,12 @@ pub struct RepositoryDto {
     /// so a client offers no maintenance for it.
     #[serde(default)]
     pub maintained_here: bool,
+    /// Whether the row offers to create the repository where its entry says:
+    /// its entry records no repository ID, its latest operation failed with
+    /// `repository-not-found`, and none of them ever succeeded, so never
+    /// while none is on record (decision 53). Left out when it doesn't.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub create_offered: bool,
     /// What the configuration holds that the user should know about this
     /// repository, one per secret written inline. Left out when there is
     /// none.
@@ -2858,6 +2874,7 @@ mod catalog_dto_tests {
                 repo_hot: None,
                 password: PasswordSourceDto::Inline,
                 maintained_here: false,
+                create_offered: false,
                 warnings: Vec::new(),
             }],
         };
@@ -2909,6 +2926,7 @@ mod catalog_dto_tests {
             repo_hot: Some("/mnt/hot".to_owned()),
             password: PasswordSourceDto::Inline,
             maintained_here: false,
+            create_offered: false,
             warnings: Vec::new(),
         };
         assert_eq!(

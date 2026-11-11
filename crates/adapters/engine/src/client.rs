@@ -1173,6 +1173,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // spec named (§7.3): nothing there was read or written. As
                 // with `RepositoryExists`, the code says it all.
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
+                ErrorCode::RepositoryNotFound => todo!(),
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes
@@ -1181,6 +1182,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // this side doesn't know, so it is reported as the failure it
                 // claims, in its own words.
                 ErrorCode::OperationFailed
+                | ErrorCode::CreateNotOffered
                 | ErrorCode::EngineUnavailable
                 | ErrorCode::RepositoryAliasTaken
                 | ErrorCode::RepositoryAlreadyConfigured

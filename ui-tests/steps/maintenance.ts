@@ -50,14 +50,20 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What these steps read of the daemon's answers: a started operation's id,
- *  or an operation with its status. */
-interface Answer {
+ *  or an operation with its status and, when it failed, its code. */
+export interface Answer {
   status: number;
-  json: { operation?: string | { status?: string } } | null;
+  json: { operation?: string | { status?: string; "failure-code"?: string } } | null;
+}
+
+/** How an operation ended: its status and, when it failed, its code. */
+export interface Ended {
+  status: string;
+  failureCode: string | undefined;
 }
 
 /** One request to the scenario's daemon, as its own page would send it. */
-async function api(world: Pick<BrowserWorld, "baseUrl">, method: string, route: string, body?: unknown): Promise<Answer> {
+export async function api(world: Pick<BrowserWorld, "baseUrl">, method: string, route: string, body?: unknown): Promise<Answer> {
   assert.ok(world.baseUrl, "this scenario's daemon was never started");
   const headers: Record<string, string> = { Origin: new URL(world.baseUrl).origin };
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -71,19 +77,27 @@ async function api(world: Pick<BrowserWorld, "baseUrl">, method: string, route: 
   return { status: response.status, json: text === "" ? null : (JSON.parse(text) as Answer["json"]) };
 }
 
-/** Waits for the operation to end and asserts that it succeeded. */
-async function succeeds(world: Pick<BrowserWorld, "baseUrl">, started: Answer, what: string): Promise<void> {
+/** Waits for the started operation to end and says how it ended. */
+export async function ended(world: Pick<BrowserWorld, "baseUrl">, started: Answer, what: string): Promise<Ended> {
   assert.equal(started.status, 202, `${what} was refused: ${JSON.stringify(started.json)}`);
   const id = started.json?.operation;
   assert.ok(typeof id === "string", `${what} was started with no operation id: ${JSON.stringify(started.json)}`);
   const end = Date.now() + RUN_PATIENCE_MS;
   let status = "queued";
+  let failureCode: string | undefined;
   while (Date.now() < end) {
     const operation = (await api(world, "GET", `/api/v1/operations/${id}`)).json?.operation;
     status = (typeof operation === "object" ? operation.status : undefined) ?? status;
+    failureCode = typeof operation === "object" ? operation["failure-code"] : undefined;
     if (!["queued", "running"].includes(status)) break;
     await sleep(250);
   }
+  return { status, failureCode };
+}
+
+/** Waits for the operation to end and asserts that it succeeded. */
+async function succeeds(world: Pick<BrowserWorld, "baseUrl">, started: Answer, what: string): Promise<void> {
+  const { status } = await ended(world, started, what);
   assert.ok(status.startsWith("succeeded"), `${what} ended as ${status}`);
 }
 

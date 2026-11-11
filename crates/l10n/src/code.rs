@@ -49,6 +49,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ConfigSchemaMissing => msg::ERROR_CONFIG_SCHEMA_MISSING,
     ConfigSchemaNewer => msg::ERROR_CONFIG_SCHEMA_NEWER,
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
+    RepositoryNotFound => msg::ERROR_REPOSITORY_NOT_FOUND,
+    CreateNotOffered => msg::ERROR_CREATE_NOT_OFFERED,
     RepositoryTimedOut => msg::ERROR_REPOSITORY_TIMED_OUT,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,
     RepositoryAlreadyConfigured => msg::ERROR_REPOSITORY_ALREADY_CONFIGURED,

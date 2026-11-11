@@ -39,6 +39,13 @@ impl OperationStatus {
     pub fn is_finished(&self) -> bool {
         !matches!(self, Self::Queued | Self::Running)
     }
+
+    /// Whether the operation failed because no repository is at its
+    /// location ([`FailureReason::RepositoryNotFound`]): a saved repository
+    /// whose latest operation did is one to create (decision 53).
+    pub fn found_no_repository(&self) -> bool {
+        todo!()
+    }
 }
 
 /// Why an operation failed. Typed, never a sentence: adapters map it onto
@@ -70,6 +77,11 @@ pub enum FailureReason {
     /// the one the configuration recorded for it (§7.3): the location now
     /// holds a different repository, so nothing was read or written.
     RepositoryReplaced,
+    /// No repository is at the location: it holds no repository config
+    /// file, so nothing was opened and nothing was written. A saved
+    /// repository whose latest operation failed this way is one to create
+    /// (decision 53).
+    RepositoryNotFound,
     /// The engine's process didn't start the operation in time, so it never
     /// ran: it didn't read its job, or read it and sent nothing (not even a
     /// log line) before the start timeout, and it was killed.
@@ -105,6 +117,7 @@ impl FailureReason {
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
+            Self::RepositoryNotFound => todo!(),
             Self::DaemonStopped => "daemon-stopped",
         }
     }
@@ -961,6 +974,31 @@ mod tests {
         assert_eq!(
             FailureReason::RepositoryReplaced.code(),
             "repository-replaced"
+        );
+    }
+
+    #[test]
+    fn only_a_failure_for_no_repository_at_the_location_found_none() {
+        let failed = |reason| OperationStatus::Failed { reason };
+        assert!(failed(FailureReason::RepositoryNotFound).found_no_repository());
+        for status in [
+            OperationStatus::Queued,
+            OperationStatus::Running,
+            OperationStatus::Succeeded,
+            OperationStatus::SucceededWithWarnings,
+            OperationStatus::Cancelled,
+            failed(FailureReason::RepositoryExists),
+            failed(FailureReason::DaemonStopped),
+        ] {
+            assert!(!status.found_no_repository(), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn no_repository_at_the_location_codes_as_repository_not_found() {
+        assert_eq!(
+            FailureReason::RepositoryNotFound.code(),
+            "repository-not-found"
         );
     }
 

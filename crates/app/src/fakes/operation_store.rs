@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
-use domain::OperationId;
 use domain::execution::{FailureReason, Operation, OperationStatus};
+use domain::{OperationId, PlanId};
 
 use crate::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationRecord, OperationStore,
@@ -111,6 +111,11 @@ impl OperationStore for InMemoryOperationStore {
             .filter(|_| more_remain)
             .map(|last| last.id);
         Ok(HistoryPage { operations, next })
+    }
+
+    async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError> {
+        let _ = plan;
+        todo!()
     }
 
     async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {

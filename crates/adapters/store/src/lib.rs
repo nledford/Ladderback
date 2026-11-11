@@ -441,6 +441,11 @@ impl OperationStore for SqliteStore {
         Ok(HistoryPage { operations, next })
     }
 
+    async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError> {
+        let _ = (plan, sql::EVER_SUCCEEDED);
+        todo!()
+    }
+
     async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
         let failure = codec::encode_failure(reason).map_err(encoding)?;
         let _call = self.call().await;

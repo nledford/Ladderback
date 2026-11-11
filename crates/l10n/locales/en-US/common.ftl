@@ -247,6 +247,12 @@ warning-unknown = The operation reported a problem that this version of { -brand
 # $location (text): where the repository is.
 error-repository-exists = { -brand-name } did not initialise a repository at { $location }, because one is already there. Connect the existing repository instead.
 
+# No repository is at the location: there is no repository config file there, so nothing was opened or written.
+error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.
+
+# A saved repository's Create was refused because its row doesn't offer it: no backup found the location empty, or one reached the repository there once, so nothing says the location can be reached and holds no repository. Nothing was run.
+error-create-not-offered = This repository wasn't created: { -brand-name } creates one only where a backup found the location empty. Check that the drive or location can be reached, then run a backup.
+
 # A repository did not answer a test, a connection or an initialisation in time.
 error-repository-timed-out = The repository did not answer in time, so { -brand-name } stopped waiting and saved nothing. Check that it can be reached, then try again.
 

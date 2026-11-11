@@ -206,6 +206,10 @@ impl OperationStore for Broken {
     async fn list(&self, _: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         Err(self.0.clone())
     }
+
+    async fn ever_succeeded(&self, _: &domain::PlanId) -> Result<bool, StoreError> {
+        Err(self.0.clone())
+    }
 }
 
 #[tokio::test]

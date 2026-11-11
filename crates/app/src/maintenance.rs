@@ -1751,6 +1751,10 @@ mod record_tests {
         async fn list(&self, _query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
             futures::future::pending().await
         }
+
+        async fn ever_succeeded(&self, _plan: &domain::PlanId) -> Result<bool, StoreError> {
+            futures::future::pending().await
+        }
     }
 
     fn use_case(store: Arc<dyn OperationStore>) -> RunMaintenance {

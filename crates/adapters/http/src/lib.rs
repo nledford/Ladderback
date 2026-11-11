@@ -311,6 +311,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::post(repositories::init_repository),
         )
         .route(
+            "/api/v1/repositories/{alias}/init",
+            axum::routing::post(repositories::create_saved_repository),
+        )
+        .route(
             "/api/v1/repositories/{alias}/snapshots",
             axum::routing::get(list_snapshots),
         )
@@ -743,6 +747,7 @@ mod tests {
                 ],
                 detail: None,
             }),
+            "not-found" => MaintenanceRefusal::RepositoryNotFound,
             "failed" => MaintenanceRefusal::OperationFailed {
                 detail: text("wrong password or no repository at the location"),
             },
@@ -929,6 +934,7 @@ mod tests {
                     repo_hot: None,
                     password: api::PasswordSourceDto::Inline,
                     maintained_here: true,
+                    create_offered: false,
                     warnings: Vec::new(),
                 }],
             })
@@ -1412,6 +1418,7 @@ mod tests {
                     "detail": "wrong password or no repository at the location",
                 }),
             ),
+            ("not-found", 404, json!({"code": "repository-not-found"})),
             ("bad-token", 400, json!({"code": "invalid-body"})),
             ("slow", 504, json!({"code": "repository-read-timed-out"})),
             ("unreachable", 503, json!({"code": "config-unavailable"})),
@@ -1853,6 +1860,7 @@ mod tests {
                 "/exists" => Err(RepositoriesError::Exists {
                     location: "/exists".to_owned(),
                 }),
+                "/not-found" => Err(RepositoriesError::NotFound),
                 "/secret" => Err(RepositoriesError::SecretRefused(SecretRefusal {
                     code: api::ErrorCode::SecretMissing,
                     args: vec![
@@ -1915,6 +1923,23 @@ mod tests {
                 id: format!("init:{}", request.settings.repository),
                 saved: request.alias.is_some(),
             })
+        }
+
+        async fn create_saved(
+            &self,
+            alias: String,
+        ) -> Result<api::RepositoryIdDto, RepositoriesError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match alias.as_str() {
+                "missing" => Err(RepositoriesError::Unknown { alias }),
+                "exists" => Err(RepositoriesError::Exists {
+                    location: "/srv/exists".to_owned(),
+                }),
+                "not-offered" => Err(RepositoriesError::CreateNotOffered),
+                _ => Ok(api::RepositoryIdDto {
+                    id: format!("created:{alias}"),
+                }),
+            }
         }
     }
 
@@ -2003,6 +2028,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_saved_repository_is_created_and_answers_with_its_id() {
+        let (response, calls) = post_counted("/api/v1/repositories/demo/init", "{}".into()).await;
+        assert_eq!(calls, 1);
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(answer, serde_json::json!({"id": "created:demo"}));
+    }
+
+    #[tokio::test]
+    async fn creating_a_saved_repository_is_refused_by_the_kind_of_its_refusal() {
+        use serde_json::json;
+        let text = |value: &str| json!({"type": "text", "value": value});
+        for (alias, status, expected) in [
+            (
+                "missing",
+                404,
+                json!({"code": "repository-unknown", "args": {"alias": text("missing")}}),
+            ),
+            (
+                "exists",
+                409,
+                json!({"code": "repository-exists", "args": {"location": text("/srv/exists")}}),
+            ),
+            ("not-offered", 409, json!({"code": "create-not-offered"})),
+        ] {
+            let route = format!("/api/v1/repositories/{alias}/init");
+            let (response, _) = post_counted(&route, "{}".into()).await;
+            let (actual, answer) = json_of(response).await;
+            assert_eq!(actual.as_u16(), status, "{alias}");
+            assert_eq!(answer, expected, "{alias}");
+        }
+        let (response, calls) =
+            post_counted("/api/v1/repositories/demo/init", "not json".into()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(calls, 0, "a body that is not JSON reached the daemon");
+    }
+
+    #[tokio::test]
     async fn every_refusal_is_typed_with_the_status_of_its_kind() {
         use serde_json::json;
         let text = |value: &str| json!({"type": "text", "value": value});
@@ -2028,6 +2091,7 @@ mod tests {
                 409,
                 json!({"code": "repository-exists", "args": {"location": text("/exists")}}),
             ),
+            ("/not-found", 404, json!({"code": "repository-not-found"})),
             (
                 "/secret",
                 422,

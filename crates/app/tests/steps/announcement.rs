@@ -116,6 +116,10 @@ impl OperationStore for FaultyLog {
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         self.inner.list(query).await
     }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
 }
 
 /// The page a scenario listens with, and the fault it gives the log.

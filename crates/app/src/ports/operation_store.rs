@@ -41,6 +41,10 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 ///   operation recorded them. Times are kept to the millisecond.
 /// - [`list`](Self::list) returns operations newest first, which is highest
 ///   ID first, because IDs are UUIDv7 and so ordered by time.
+/// - [`ever_succeeded`](Self::ever_succeeded) says whether any operation of a
+///   plan the log holds ended [`Succeeded`](OperationStatus::Succeeded) or
+///   [`SucceededWithWarnings`](OperationStatus::SucceededWithWarnings), at a
+///   cost that doesn't grow with the plan's history.
 /// - A call may be dropped before it answers: a run drops the write that says
 ///   an operation is running when a cancel or the deadline comes first, and
 ///   one that stalls past [`SAVE_BOUND`](crate::log_write::SAVE_BOUND). Cut
@@ -89,6 +93,12 @@ pub trait OperationStore: Send + Sync {
     /// One page of history, newest first. The page ends at `query.limit`
     /// operations; [`HistoryPage::next`] says whether older ones remain.
     async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError>;
+
+    /// Whether any operation of `plan` the log holds succeeded, with
+    /// warnings or without. One lookup, whatever the size of the plan's
+    /// history: the Repositories page asks it for each plan whose newest
+    /// operation found no repository (decision 53).
+    async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError>;
 
     /// Ends every operation the log shows as queued or running as
     /// [`Failed`](OperationStatus::Failed) with `reason`, and returns how

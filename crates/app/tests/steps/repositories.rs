@@ -3,7 +3,7 @@
 //! them with an engine scripted to identify or fail, and the in-memory config
 //! store stands in for the configuration file.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,9 +19,12 @@ use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
 use app::fakes::{FakeSecrets, InMemoryConfigStore};
 use app::ports::{
-    Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RunningJob,
+    Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
+    OperationStore, RunningJob,
 };
-use app::repositories::{ConnectRepository, InitOutcome, RepositoryError, TestRepository};
+use app::repositories::{
+    ConnectRepository, InitOutcome, RepositoryError, SavedEntryError, SavedInit, TestRepository,
+};
 use app::secrets::ResolveRepository;
 
 struct Stop;
@@ -46,11 +49,15 @@ impl Drop for Killable {
 }
 
 /// An engine that answers every repository job with the scripted outcome, or
-/// never answers.
+/// never answers, and keeps the jobs it was given. A `Job::Identify` is
+/// answered with `found` instead once a scenario sets it: what the engine
+/// finds at a location it doesn't initialise.
 struct Scripted {
     outcome: Mutex<Result<RepositoryId, FailureReason>>,
+    found: Mutex<Option<Result<RepositoryId, FailureReason>>>,
     hangs: AtomicBool,
     killed: Arc<AtomicBool>,
+    seen: Mutex<Vec<Job>>,
 }
 
 /// What a use case gave: the ID it reported, or how it was refused.
@@ -58,10 +65,26 @@ struct Scripted {
 enum Outcome {
     Id(RepositoryId),
     Saved(InitOutcome),
+    /// What creating a saved repository tried.
+    Created(SavedInit),
     Refused(RepositoryError),
+    /// Creating a saved repository found no entry to create it from.
+    NoEntry(SavedEntryError),
     /// The use case was still waiting after more real time than a fake
     /// clock needs: it would have waited for ever.
     Hung,
+}
+
+impl From<RepositoryError> for Outcome {
+    fn from(error: RepositoryError) -> Self {
+        Self::Refused(error)
+    }
+}
+
+impl From<SavedEntryError> for Outcome {
+    fn from(error: SavedEntryError) -> Self {
+        Self::NoEntry(error)
+    }
 }
 
 /// What the connect scenarios set up and what the use cases gave.
@@ -73,6 +96,8 @@ pub struct RepositoriesWorld {
     outcome: Option<Outcome>,
     /// When the request began, on the agent's clock.
     began: Option<Timestamp>,
+    /// The saved repositories the agent offered to create, once it decided.
+    offered: Option<BTreeSet<RepositoryAlias>>,
 }
 
 impl Default for RepositoriesWorld {
@@ -80,8 +105,10 @@ impl Default for RepositoriesWorld {
         Self {
             engine: Arc::new(Scripted {
                 outcome: Mutex::new(Ok(id())),
+                found: Mutex::new(None),
                 hangs: AtomicBool::new(false),
                 killed: Arc::new(AtomicBool::new(false)),
+                seen: Mutex::new(Vec::new()),
             }),
             store: Arc::new(InMemoryConfigStore::new()),
             settings: RepositorySettings {
@@ -95,6 +122,7 @@ impl Default for RepositoriesWorld {
             id: id(),
             outcome: None,
             began: None,
+            offered: None,
         }
     }
 }
@@ -110,8 +138,18 @@ fn op() -> OperationId {
 /// The configuration holding `settings` under `name`, as a connect would
 /// leave it.
 fn config_with(name: &str, settings: &RepositorySettings) -> AgentConfig {
+    config_recording(name, settings, None)
+}
+
+/// The configuration holding `settings` under `name`, its entry recording
+/// `recorded` as the repository's ID.
+fn config_recording(
+    name: &str,
+    settings: &RepositorySettings,
+    recorded: Option<RepositoryId>,
+) -> AgentConfig {
     let repository = RepositoryConfig {
-        id: None,
+        id: recorded,
         settings: settings.clone(),
         maintenance: Default::default(),
         group_by: Default::default(),
@@ -126,20 +164,32 @@ fn config_with(name: &str, settings: &RepositorySettings) -> AgentConfig {
     .expect("a valid configuration")
 }
 
+/// The ID of a repository other than the one the engine identifies, as an
+/// entry records once something reached it there.
+fn other_id() -> RepositoryId {
+    RepositoryId::parse(&"b".repeat(64)).expect("a repository ID")
+}
+
 fn alias(name: &str) -> RepositoryAlias {
     RepositoryAlias::try_from(name.to_owned()).expect("a valid alias")
 }
 
 #[async_trait]
 impl Engine for Scripted {
-    async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+    async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        let found = match &job {
+            Job::Identify(_) => self.found.lock().expect("what is found").clone(),
+            _ => None,
+        };
+        self.seen.lock().expect("the jobs").push(job);
         if self.hangs.load(Ordering::SeqCst) {
             return Ok(RunningJob {
                 events: Box::pin(futures::stream::pending()),
                 control: Box::new(Killable(self.killed.clone())),
             });
         }
-        let event = match self.outcome.lock().expect("the outcome").clone() {
+        let outcome = found.unwrap_or_else(|| self.outcome.lock().expect("the outcome").clone());
+        let event = match outcome {
             Ok(id) => EngineEvent::Succeeded(EngineResult::Repository { id }),
             Err(reason) => EngineEvent::Failed(reason),
         };
@@ -172,6 +222,32 @@ fn cannot_open(agent: &mut super::Agent) {
     });
 }
 
+/// A location with a folder and no repository config file in it: the
+/// engine finds no repository there, and initialises one.
+#[given("a location the engine finds empty")]
+fn finds_empty(agent: &mut super::Agent) {
+    *agent
+        .repositories
+        .engine
+        .found
+        .lock()
+        .expect("what is found") = Some(Err(FailureReason::RepositoryNotFound));
+}
+
+/// A location whose folder isn't there, as on a drive that isn't plugged
+/// in: the engine opens nothing there, and says so in its own words.
+#[given("a location whose folder is not there")]
+fn folder_not_there(agent: &mut super::Agent) {
+    *agent
+        .repositories
+        .engine
+        .found
+        .lock()
+        .expect("what is found") = Some(Err(FailureReason::EngineFailed {
+        detail: "the repository folder is not there".to_owned(),
+    }));
+}
+
 #[given("a repository the engine never answers")]
 fn never_answers(agent: &mut super::Agent) {
     agent
@@ -183,16 +259,16 @@ fn never_answers(agent: &mut super::Agent) {
 
 /// Runs a use case to its end, and notes when it began. A use case that
 /// waits for ever is a failure of the scenario, not a stuck run.
-async fn within<T>(
+async fn within<T, E: Into<Outcome>>(
     agent: &mut super::Agent,
-    run: impl Future<Output = Result<T, RepositoryError>>,
+    run: impl Future<Output = Result<T, E>>,
     wrap: impl FnOnce(T) -> Outcome,
 ) {
     agent.repositories.began = Some(agent.clock.now());
     agent.repositories.outcome = Some(
         match tokio::time::timeout(Duration::from_secs(5), run).await {
             Ok(Ok(done)) => wrap(done),
-            Ok(Err(error)) => Outcome::Refused(error),
+            Ok(Err(error)) => error.into(),
             Err(_) => Outcome::Hung,
         },
     );
@@ -201,6 +277,17 @@ async fn within<T>(
 #[given(expr = "the agent has the repository {string} configured with its settings")]
 async fn already_configured(agent: &mut super::Agent, name: String) {
     let config = config_with(&name, &agent.repositories.settings);
+    agent
+        .repositories
+        .store
+        .save(&config)
+        .await
+        .expect("the configuration saves");
+}
+
+#[given(expr = "the agent has the repository {string} configured with another repository's ID")]
+async fn configured_with_other_id(agent: &mut super::Agent, name: String) {
+    let config = config_recording(&name, &agent.repositories.settings, Some(other_id()));
     agent
         .repositories
         .store
@@ -288,6 +375,24 @@ async fn initialise(agent: &mut super::Agent, name: Option<String>) {
     .await;
 }
 
+#[when(expr = "the agent creates the saved repository {string}")]
+async fn creates_saved(agent: &mut super::Agent, name: String) {
+    let use_case = app::repositories::InitRepository::new(
+        agent.clock.clone(),
+        agent.repositories.engine.clone(),
+        ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        agent.repositories.store.clone(),
+    );
+    let alias = alias(&name);
+    let offers = app::repositories::CreateOffers::new(agent.store.clone());
+    within(
+        agent,
+        use_case.init_saved(op(), &alias, &offers),
+        Outcome::Created,
+    )
+    .await;
+}
+
 async fn saved(agent: &super::Agent) -> AgentConfig {
     agent
         .repositories
@@ -311,6 +416,78 @@ fn init_reports_id(agent: &mut super::Agent) {
         Some(Outcome::Saved(outcome)) => assert_eq!(outcome.id, agent.repositories.id),
         other => panic!("the initialisation did not report an ID: {other:?}"),
     }
+}
+
+#[then("the creation reports the repository's ID")]
+fn creation_reports_id(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Created(tried)) => {
+            assert_eq!(tried.created, Ok(agent.repositories.id.clone()))
+        }
+        other => panic!("the creation did not report an ID: {other:?}"),
+    }
+}
+
+#[then(
+    "the engine looked at the location, then initialised the repository there, with its saved settings"
+)]
+fn initialised_with_saved_settings(agent: &mut super::Agent) {
+    let seen = agent.repositories.engine.seen.lock().expect("the jobs");
+    let [Job::Identify(looked), Job::Init(access)] = seen.as_slice() else {
+        panic!("the engine was not given a look, then one initialisation: {seen:?}");
+    };
+    let settings = &agent.repositories.settings;
+    let SecretRef::Inline(password) = &settings.password else {
+        panic!("the scenarios' password is written inline");
+    };
+    for access in [looked, access] {
+        assert_eq!(access.repository, settings.repository);
+        assert_eq!(access.repo_hot, settings.repo_hot);
+        assert_eq!(access.password.expose(), password.expose());
+    }
+}
+
+#[then("the engine initialised no repository")]
+fn initialised_none(agent: &mut super::Agent) {
+    let seen = agent.repositories.engine.seen.lock().expect("the jobs");
+    assert!(
+        !seen.iter().any(|job| matches!(job, Job::Init(_))),
+        "the engine ran {seen:?}"
+    );
+}
+
+#[then(expr = "the creation is refused because the agent has no repository {string}")]
+fn creation_refused_unknown(agent: &mut super::Agent, name: String) {
+    match &agent.repositories.outcome {
+        Some(Outcome::NoEntry(SavedEntryError::Unknown(unknown))) => {
+            assert_eq!(*unknown, alias(&name))
+        }
+        other => panic!("the creation was not refused as unknown: {other:?}"),
+    }
+}
+
+#[then("the creation is refused because a repository already exists")]
+fn creation_refused_exists(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Created(tried)) => assert_eq!(tried.created, Err(RepositoryError::Exists)),
+        other => panic!("the creation was not refused as existing: {other:?}"),
+    }
+}
+
+#[then("the creation is refused because its row doesn't offer it")]
+fn creation_refused_not_offered(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Created(tried)) => {
+            assert_eq!(tried.created, Err(RepositoryError::CreateNotOffered))
+        }
+        other => panic!("the creation was not refused as not offered: {other:?}"),
+    }
+}
+
+#[then("the engine ran no job")]
+fn ran_no_job(agent: &mut super::Agent) {
+    let seen = agent.repositories.engine.seen.lock().expect("the jobs");
+    assert!(seen.is_empty(), "the engine ran {seen:?}");
 }
 
 #[then("the agent has no repository configured")]
@@ -380,6 +557,25 @@ async fn configured_with_id(agent: &mut super::Agent, name: String) {
     assert_eq!(repository.id.as_ref(), Some(&agent.repositories.id));
 }
 
+#[then(expr = "the agent has the repository {string} configured with no repository ID")]
+async fn configured_without_id(agent: &mut super::Agent, name: String) {
+    let config = saved(agent).await;
+    let repository = config
+        .repository(&alias(&name))
+        .unwrap_or_else(|| panic!("no repository {name} was saved"));
+    assert_eq!(repository.id, None);
+}
+
+#[then(expr = "the agent has the repository {string} configured with another repository's ID")]
+async fn still_configured_with_other_id(agent: &mut super::Agent, name: String) {
+    let config = saved(agent).await;
+    let repository = config
+        .repository(&alias(&name))
+        .unwrap_or_else(|| panic!("no repository {name} was saved"));
+    assert_eq!(repository.id, Some(other_id()));
+    assert_eq!(repository.settings, agent.repositories.settings);
+}
+
 #[then("the connection fails")]
 fn connection_fails(agent: &mut super::Agent) {
     match &agent.repositories.outcome {
@@ -414,4 +610,171 @@ fn gave_up_on_time(agent: &mut super::Agent) {
             .expect("a time within range"),
         "the request waited for another time than the job's"
     );
+}
+
+#[given(
+    expr = "the agent has the repository {string} configured with its settings, backed up to by the plan {string}"
+)]
+async fn configured_with_plan(agent: &mut super::Agent, name: String, plan: String) {
+    let only = config_with(&name, &agent.repositories.settings);
+    save_with_plan(agent, only, &name, &plan).await;
+}
+
+#[given(
+    expr = "the agent has the repository {string} configured with another repository's ID, backed up to by the plan {string}"
+)]
+async fn configured_with_other_id_and_plan(agent: &mut super::Agent, name: String, plan: String) {
+    let only = config_recording(&name, &agent.repositories.settings, Some(other_id()));
+    save_with_plan(agent, only, &name, &plan).await;
+}
+
+/// Saves `only`'s repositories with the plan `plan` backing up to `name`.
+async fn save_with_plan(agent: &super::Agent, only: AgentConfig, name: &str, plan: &str) {
+    let source = domain::planning::Source::parse("/home/demo").expect("a source");
+    let config = AgentConfig::new(
+        Default::default(),
+        Default::default(),
+        only.repositories().clone(),
+        vec![domain::planning::Plan::new(
+            domain::PlanId::parse(plan).expect("a plan ID"),
+            alias(name),
+            vec![source],
+        )],
+    )
+    .expect("a valid configuration");
+    agent
+        .repositories
+        .store
+        .save(&config)
+        .await
+        .expect("the configuration saves");
+}
+
+/// Records the latest backup of `plan` in the agent's operation log, ended as
+/// `status` says.
+async fn record_latest(
+    agent: &super::Agent,
+    plan: &str,
+    status: domain::execution::OperationStatus,
+) {
+    record_backup(agent, op(), plan, status).await;
+}
+
+/// Records backup `id` of `plan` in the agent's operation log, ended as
+/// `status` says; a lower `id` is an older backup.
+async fn record_backup(
+    agent: &super::Agent,
+    id: OperationId,
+    plan: &str,
+    status: domain::execution::OperationStatus,
+) {
+    use domain::execution::{Operation, OperationKind, OperationStatus, Target, Trigger};
+    let at = agent.clock.now();
+    let mut operation = Operation::queue(
+        id,
+        OperationKind::Backup,
+        Trigger::Manual,
+        Target {
+            plan: Some(domain::PlanId::parse(plan).expect("a plan ID")),
+            repository: None,
+        },
+        at,
+    );
+    operation.start(at).expect("a queued operation starts");
+    match status {
+        OperationStatus::Running => {}
+        OperationStatus::Failed { reason } => operation.fail(reason, at).expect("it fails"),
+        _ => operation.succeed(at).expect("it succeeds"),
+    }
+    agent
+        .store
+        .save(&operation, None)
+        .await
+        .expect("the operation is recorded");
+}
+
+#[given(expr = "no operation of the plan {string} is on record")]
+fn no_operation(_agent: &mut super::Agent, _plan: String) {}
+
+#[given(expr = "the latest operation of the plan {string} failed because no repository is there")]
+async fn latest_found_none(agent: &mut super::Agent, plan: String) {
+    let reason = FailureReason::RepositoryNotFound;
+    record_latest(
+        agent,
+        &plan,
+        domain::execution::OperationStatus::Failed { reason },
+    )
+    .await;
+}
+
+#[given(expr = "the latest operation of the plan {string} failed because the daemon stopped")]
+async fn latest_daemon_stopped(agent: &mut super::Agent, plan: String) {
+    let reason = FailureReason::DaemonStopped;
+    record_latest(
+        agent,
+        &plan,
+        domain::execution::OperationStatus::Failed { reason },
+    )
+    .await;
+}
+
+#[given(
+    expr = "a backup of the plan {string} succeeded, then the latest failed because no repository is there"
+)]
+async fn succeeded_then_found_none(agent: &mut super::Agent, plan: String) {
+    let earlier = OperationId::from_uuid(Uuid::from_u128(0x5eec));
+    record_backup(
+        agent,
+        earlier,
+        &plan,
+        domain::execution::OperationStatus::Succeeded,
+    )
+    .await;
+    let reason = FailureReason::RepositoryNotFound;
+    record_latest(
+        agent,
+        &plan,
+        domain::execution::OperationStatus::Failed { reason },
+    )
+    .await;
+}
+
+#[given(expr = "the latest operation of the plan {string} succeeded")]
+async fn latest_succeeded(agent: &mut super::Agent, plan: String) {
+    record_latest(agent, &plan, domain::execution::OperationStatus::Succeeded).await;
+}
+
+#[given(expr = "the latest operation of the plan {string} is still running")]
+async fn latest_running(agent: &mut super::Agent, plan: String) {
+    record_latest(agent, &plan, domain::execution::OperationStatus::Running).await;
+}
+
+#[when("the agent decides which saved repositories to offer to create")]
+async fn decides_offers(agent: &mut super::Agent) {
+    let config = saved(agent).await;
+    let offered = app::repositories::CreateOffers::new(agent.store.clone())
+        .offered(&config)
+        .await
+        .expect("the operation log is read");
+    agent.repositories.offered = Some(offered);
+}
+
+#[then(expr = "the repository {string} is offered to be created")]
+fn is_offered(agent: &mut super::Agent, name: String) {
+    let offered = agent
+        .repositories
+        .offered
+        .as_ref()
+        .expect("the agent decided");
+    assert!(offered.contains(&alias(&name)), "offered only {offered:?}");
+}
+
+#[then(expr = "the repository {string} is not offered to be created")]
+fn is_not_offered(agent: &mut super::Agent, name: String) {
+    let offered = agent
+        .repositories
+        .offered
+        .as_ref()
+        .expect("the agent decided");
+    assert!(!offered.contains(&alias(&name)), "offered {offered:?}");
 }
