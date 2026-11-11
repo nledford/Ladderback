@@ -15,7 +15,7 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 |---|---|
 | Async runtime / HTTP | `tokio`, `axum 0.8`, `tower-http` |
 | Engine | `rustic_core`, `rustic_backend` (one pinned git revision until a release has `Progress::error`; wrapped in our `engine` crate) |
-| DB | `sqlx 0.8` (SQLite, migrations; runtime-checked queries with bound parameters, because compile-time-checked ones need `sqlx-cli` and committed query data in CI). 0.9 needs a newer compiler than our MSRV, so we stay on 0.8 |
+| DB | `sqlx 0.8` (SQLite, migrations; runtime-checked queries with bound parameters, because compile-time-checked ones need `sqlx-cli` and committed query data in CI). 0.9 is within the MSRV, and the move is #174 |
 | Logging | `log` facade; `env_logger` in the daemon, writing to stderr at `info` unless `RUST_LOG` says otherwise |
 | Scheduling | `croner` (with its `jiff` feature, not `chrono`) |
 | Time | `jiff` with `tzdb-bundle-always`: the build carries the IANA time-zone database for a host that has none (§3.2, §16 decision 30) |
@@ -26,6 +26,8 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 | Notifications | `reqwest` (webhooks, ntfy, Gotify, healthchecks.io), `lettre` (SMTP) |
 | Localization | `fluent-bundle`, `fluent-langneg`, `unic-langid`; `icu` (ICU4X) for dates and numbers in daemon-rendered text (§8.4) |
 | CLI | `clap` |
+
+The minimum supported Rust version (MSRV) is **1.94**, the workspace's `rust-version`. Every crate inherits it (§16 decision 50).
 
 The git dependency means Ladderback can't be published to crates.io until it moves to a release. Distribution doesn't depend on crates.io (§12).
 
