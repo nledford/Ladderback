@@ -1936,6 +1936,11 @@ pub struct OperationSummaryDto {
     pub failure_code: Option<ErrorCode>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<OperationResultDto>,
+    /// The alias of the repository a maintenance operation ran on, as it
+    /// stood when the run started. Absent for a backup, which `plan` names,
+    /// and for an operation an earlier version logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
 }
 
 /// Why an operation DTO can't be: an ID that isn't a UUID, or a time that
@@ -1970,6 +1975,7 @@ impl OperationSummaryDto {
         warning_codes: Vec<WarningCode>,
         failure_code: Option<ErrorCode>,
         result: Option<OperationResultDto>,
+        repository: Option<String>,
     ) -> Result<Self, InvalidOperation> {
         if !is_uuid(&id) {
             return Err(InvalidOperation::Id);
@@ -1993,6 +1999,7 @@ impl OperationSummaryDto {
             warning_codes,
             failure_code,
             result,
+            repository,
         })
     }
 }
@@ -2588,7 +2595,7 @@ pub struct OperationDetailDto {
 
 /// What a successful operation produced, as the history page shows it: a
 /// small typed summary per kind, mapped from the app's engine result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "kebab-case",
@@ -2596,9 +2603,21 @@ pub struct OperationDetailDto {
 )]
 pub enum OperationResultDto {
     Backup {
+        /// Files the backup went through: new, changed and unmodified.
         files: u64,
+        /// Bytes of new data the backup added to the repository, before
+        /// compression.
         bytes: u64,
         duration_ms: u64,
+        /// The snapshot the backup wrote: 64 hex digits. Absent from a
+        /// result an earlier version sent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<String>,
+        /// Bytes of the source the backup went through, changed or not.
+        /// Absent when the log didn't keep them, for a backup an earlier
+        /// version ran.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bytes_processed: Option<u64>,
     },
     Prune {
         packs_deleted: u64,
@@ -2644,7 +2663,10 @@ mod operation_dto_tests {
                 files: 3,
                 bytes: 4096,
                 duration_ms: 1000,
+                snapshot: Some("cd".repeat(32)),
+                bytes_processed: Some(65_536),
             }),
+            None,
         )
         .unwrap_or_else(|e| panic!("a valid summary: {e:?}"))
     }
@@ -2658,6 +2680,20 @@ mod operation_dto_tests {
             json.contains("\"queued-at\""),
             "times are kebab-case on the wire: {json}"
         );
+
+        // A maintenance row names its repository; a row an earlier version
+        // sent has no such key and reads without one.
+        let mut check = summary();
+        check.kind = "check".to_owned();
+        check.result = None;
+        check.repository = Some("demo".to_owned());
+        let json = to_string(&check).unwrap();
+        assert!(json.contains(r#""repository":"demo""#), "{json}");
+        assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), check);
+        check.repository = None;
+        let earlier = to_string(&check).unwrap();
+        assert!(!earlier.contains("repository"), "{earlier}");
+        assert_eq!(from_str::<OperationSummaryDto>(&earlier).unwrap(), check);
     }
 
     #[test]
@@ -2675,6 +2711,7 @@ mod operation_dto_tests {
                 dto.warning_codes,
                 dto.failure_code,
                 dto.result,
+                dto.repository,
             ),
             Err(InvalidOperation::Id)
         );
@@ -2697,6 +2734,7 @@ mod operation_dto_tests {
                 dto.warning_codes,
                 dto.failure_code,
                 dto.result,
+                dto.repository,
             ),
             Err(InvalidOperation::Id)
         );
@@ -2717,6 +2755,7 @@ mod operation_dto_tests {
                 dto.warning_codes,
                 dto.failure_code,
                 dto.result,
+                dto.repository,
             ),
             Err(InvalidOperation::Time)
         );
@@ -2754,6 +2793,8 @@ mod operation_dto_tests {
                 files: 3,
                 bytes: 4096,
                 duration_ms: 1000,
+                snapshot: Some("cd".repeat(32)),
+                bytes_processed: Some(65_536),
             },
             OperationResultDto::Prune {
                 packs_deleted: 2,
@@ -2769,15 +2810,18 @@ mod operation_dto_tests {
             let json = to_string(&result).unwrap();
             assert_eq!(from_str::<OperationResultDto>(&json).unwrap(), result);
         }
-        assert_eq!(
-            to_string(&OperationResultDto::Backup {
-                files: 3,
-                bytes: 4096,
-                duration_ms: 1000
-            })
-            .unwrap(),
-            r#"{"type":"backup","files":3,"bytes":4096,"duration-ms":1000}"#
-        );
+        // A result an earlier version sent, without the snapshot and the
+        // bytes processed, reads as one, and is sent as it was.
+        let earlier = r#"{"type":"backup","files":3,"bytes":4096,"duration-ms":1000}"#;
+        let read = OperationResultDto::Backup {
+            files: 3,
+            bytes: 4096,
+            duration_ms: 1000,
+            snapshot: None,
+            bytes_processed: None,
+        };
+        assert_eq!(from_str::<OperationResultDto>(earlier).unwrap(), read);
+        assert_eq!(to_string(&read).unwrap(), earlier);
     }
 }
 

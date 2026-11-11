@@ -234,19 +234,23 @@ ui-operations-title = Operations – { -brand-name }
 ui-operations-heading = Operations
 
 # The operations page's text, until its history loads.
-ui-operations-body = The history of every backup, live.
+ui-operations-body = The history of every operation, live.
 
 # The operations table's caption.
 ui-operations-caption = Operations
 
-# The operations table's column of plan names.
-ui-column-plan = Plan
+# The operations table's column of what each row is: a backup's plan, or the
+# maintenance run and its repository. Its cells are the rows' headers.
+ui-column-operation = Operation
 
 # The operations table's column of statuses.
 ui-column-status = Status
 
 # The operations table's column of the instants runs started.
 ui-column-started = Started
+
+# The operations table's column of what a run that succeeded produced.
+ui-column-result = Result
 
 # The operations table's column of what a row offers to do.
 ui-column-actions = Actions
@@ -259,6 +263,174 @@ ui-start-plan = Start backup of { $plan }
 # The button that cancels a plan's running or queued backup, named with its
 # row's plan.
 ui-cancel-plan = Cancel { $plan }
+
+# The row header of a maintenance run: what ran and the repository it ran on,
+# by the alias this agent gave the repository when the run started.
+# $kind is the wire text of what ran: forget, prune, check or adopt; any other
+# kind is an operation.
+# $repository (text): the repository's alias. It is shown as it came.
+ui-operation-of =
+    { $kind ->
+        [forget] Forget in { $repository }
+        [prune] Prune of { $repository }
+        [check] Check of { $repository }
+        [adopt] Adoption in { $repository }
+       *[other] Operation on { $repository }
+    }
+
+# The row header of a run the log names no plan or repository for, such as a
+# maintenance run an earlier version logged: what ran.
+# $kind is the wire text of what ran: backup, forget, prune, check or adopt;
+# any other kind is an operation.
+ui-operation =
+    { $kind ->
+        [backup] Backup
+        [forget] Forget
+        [prune] Prune
+        [check] Check
+        [adopt] Adoption
+       *[other] Operation
+    }
+
+# The button that cancels a running or queued maintenance run, named as its
+# row is, so each Cancel says which run it stops.
+# $kind is the wire text of what runs: forget, prune, check or adopt; any other
+# kind is an operation.
+# $repository (text): the repository's alias. It is shown as it came.
+ui-cancel-operation-of =
+    { $kind ->
+        [forget] Cancel the forget in { $repository }
+        [prune] Cancel the prune of { $repository }
+        [check] Cancel the check of { $repository }
+        [adopt] Cancel the adoption in { $repository }
+       *[other] Cancel the operation on { $repository }
+    }
+
+# The button that cancels a running or queued run the log names no plan or
+# repository for.
+# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
+# any other kind is an operation.
+ui-cancel-operation =
+    { $kind ->
+        [backup] Cancel the backup
+        [forget] Cancel the forget
+        [prune] Cancel the prune
+        [check] Cancel the check
+        [adopt] Cancel the adoption
+       *[other] Cancel the operation
+    }
+
+# Announced politely on the Operations page when a run it watched ended well,
+# warnings or not. $kind is the wire text of what ran: backup, forget, prune,
+# check or adopt; any other kind is an operation.
+ui-operation-finished =
+    { $kind ->
+        [backup] Backup finished.
+        [forget] Forget finished.
+        [prune] Prune finished.
+        [check] Check finished.
+        [adopt] Adoption finished.
+       *[other] Operation finished.
+    }
+
+# Announced politely on the Operations page when a run it watched was
+# cancelled. $kind is the wire text of what ran: backup, forget, prune, check
+# or adopt; any other kind is an operation.
+ui-operation-cancelled =
+    { $kind ->
+        [backup] Backup cancelled.
+        [forget] Forget cancelled.
+        [prune] Prune cancelled.
+        [check] Check cancelled.
+        [adopt] Adoption cancelled.
+       *[other] Operation cancelled.
+    }
+
+# Announced assertively on the Operations page when a run it watched ended
+# badly. $kind is the wire text of what ran: backup, forget, prune, check or
+# adopt; any other kind is an operation.
+ui-operation-failed =
+    { $kind ->
+        [backup] Backup failed.
+        [forget] Forget failed.
+        [prune] Prune failed.
+        [check] Check failed.
+        [adopt] Adoption failed.
+       *[other] Operation failed.
+    }
+
+# One fact of a finished backup's result: the snapshot it wrote, by the first
+# 8 hex digits of its ID, as rustic names a snapshot.
+# $snapshot (text): those digits. They are shown as they came.
+ui-result-snapshot = Snapshot { $snapshot }
+
+# One fact of a finished backup's result: the files it went through, new,
+# changed or unmodified.
+# $files (count): how many.
+ui-result-files =
+    { $files ->
+        [one] { $files } file
+       *[other] { $files } files
+    }
+
+# One fact of a finished backup's result: the bytes of the source it went
+# through, changed or not.
+# $bytes (bytes): how much, as a size such as 1 MiB.
+ui-result-processed = { $bytes } processed
+
+# One fact of a finished backup's result: the new data it added to the
+# repository, before compression.
+# $bytes (bytes): how much, as a size such as 1 MiB.
+ui-result-added = { $bytes } added
+
+# One fact of a finished prune's result: the packs it deleted.
+# $packs (count): how many.
+ui-result-packs-deleted =
+    { $packs ->
+        [one] { $packs } pack deleted
+       *[other] { $packs } packs deleted
+    }
+
+# One fact of a finished check's result, when it found no error and nothing
+# to tidy.
+ui-result-check-clean = The check found nothing wrong
+
+# One fact of a finished check's result: the errors it found.
+# $errors (count): how many.
+ui-result-check-errors =
+    { $errors ->
+        [one] { $errors } error found
+       *[other] { $errors } errors found
+    }
+
+# One fact of a finished check's result: the things to tidy it found.
+# $warnings (count): how many.
+ui-result-check-untidy =
+    { $warnings ->
+        [one] { $warnings } thing to tidy
+       *[other] { $warnings } things to tidy
+    }
+
+# One fact of a finished forget's result: the snapshots it removed.
+# $removed (count): how many.
+ui-result-removed =
+    { $removed ->
+        [one] { $removed } snapshot removed
+       *[other] { $removed } snapshots removed
+    }
+
+# One fact of a finished adoption's result: the snapshots it rewrote into
+# the plan.
+# $rewritten (count): how many.
+ui-result-adopted =
+    { $rewritten ->
+        [one] { $rewritten } snapshot adopted
+       *[other] { $rewritten } snapshots adopted
+    }
+
+# One fact of a finished run's result: how long it ran.
+# $duration (duration): that length of time, such as 1 min 5 s.
+ui-result-took = Took { $duration }
 
 # The button in the operations header that re-sorts the rows.
 ui-sort-by-started = Sort by started
@@ -295,15 +467,6 @@ ui-status-cancelled = Cancelled
 
 # Announced politely when a backup has been asked for.
 ui-backup-started = Backup started.
-
-# Announced politely when a backup ends well.
-ui-backup-finished = Backup finished.
-
-# Announced politely when a backup is cancelled.
-ui-backup-cancelled = Backup cancelled.
-
-# Announced assertively when a backup ends badly.
-ui-backup-failed = Backup failed.
 
 # An instant, as the page's locale writes it.
 ui-instant = { DATETIME($when, dateStyle: "short", timeStyle: "medium") }

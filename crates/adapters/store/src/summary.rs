@@ -29,6 +29,9 @@ pub(crate) enum Summary {
         files_new: u64,
         files_changed: u64,
         files_unmodified: u64,
+        /// Absent from a summary an earlier build wrote, and read as `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bytes_processed: Option<u64>,
         data_added: u64,
         data_added_packed: u64,
         error_count: u64,
@@ -99,6 +102,7 @@ impl From<&EngineResult> for Summary {
                 files_new: summary.files_new,
                 files_changed: summary.files_changed,
                 files_unmodified: summary.files_unmodified,
+                bytes_processed: summary.bytes_processed,
                 data_added: summary.data_added,
                 data_added_packed: summary.data_added_packed,
                 error_count: summary.error_count,
@@ -160,6 +164,7 @@ impl From<Summary> for EngineResult {
                 files_new,
                 files_changed,
                 files_unmodified,
+                bytes_processed,
                 data_added,
                 data_added_packed,
                 error_count,
@@ -173,6 +178,7 @@ impl From<Summary> for EngineResult {
                 data_added,
                 data_added_packed,
                 error_count,
+                bytes_processed,
             }),
             Summary::Prune {
                 repository,

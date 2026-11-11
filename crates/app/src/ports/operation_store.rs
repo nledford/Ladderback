@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
 };
-use domain::{OperationId, PlanId, RepositoryId, Timestamp};
+use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 
 use crate::ports::EngineResult;
 
@@ -217,6 +217,9 @@ pub struct OperationRecord {
     pub warning_count: u64,
     /// What the engine reported when the operation succeeded.
     pub result: Option<EngineResult>,
+    /// The alias of the repository a maintenance operation ran on, as it
+    /// stood when the run started ([`Operation::repository_alias`]).
+    pub repository_alias: Option<RepositoryAlias>,
 }
 
 impl OperationRecord {
@@ -234,6 +237,7 @@ impl OperationRecord {
             finished_at: operation.finished_at().map(to_millisecond),
             warning_count: operation.warning_count(),
             result: result.cloned(),
+            repository_alias: operation.repository_alias().cloned(),
         }
     }
 

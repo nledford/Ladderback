@@ -773,6 +773,10 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .result
             .as_ref()
             .and_then(|result| result_dto(result, record)),
+        record
+            .repository_alias
+            .as_ref()
+            .map(|alias| alias.as_str().to_owned()),
     )
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
@@ -788,9 +792,14 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         .unwrap_or(0);
     match result {
         EngineResult::Backup(backup) => Some(api::OperationResultDto::Backup {
-            files: backup.files_new + backup.files_changed + backup.files_unmodified,
+            files: backup
+                .files_new
+                .saturating_add(backup.files_changed)
+                .saturating_add(backup.files_unmodified),
             bytes: backup.data_added,
             duration_ms,
+            snapshot: Some(backup.snapshot.as_str().to_owned()),
+            bytes_processed: backup.bytes_processed,
         }),
         EngineResult::Prune(prune) => Some(api::OperationResultDto::Prune {
             packs_deleted: prune.packs_deleted,
@@ -1929,6 +1938,104 @@ mod tests {
         let dto = snapshot_dto(&listed(false, false)).expect("a valid snapshot");
         assert!(!dto.paths_truncated && !dto.tags_truncated);
         assert_eq!(dto.label, "home");
+    }
+
+    /// A succeeded operation of `kind` as the log keeps it, with `result`
+    /// and the alias of its repository.
+    fn logged(
+        kind: OperationKind,
+        result: Option<EngineResult>,
+        alias: Option<&str>,
+    ) -> OperationRecord {
+        let at =
+            |second: i64| domain::Timestamp::from_second(1_800_000_000 + second).expect("a time");
+        OperationRecord {
+            id: OperationId::from_uuid(Uuid::from_u128(0x0192)),
+            kind,
+            trigger: Trigger::Manual,
+            target: domain::execution::Target {
+                plan: None,
+                repository: Some(demo_repository()),
+            },
+            status: OperationStatus::Succeeded,
+            queued_at: at(0),
+            started_at: Some(at(10)),
+            finished_at: Some(at(70)),
+            warning_count: 0,
+            result,
+            repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
+        }
+    }
+
+    fn backed_up(bytes_processed: Option<u64>) -> EngineResult {
+        EngineResult::Backup(app::ports::BackupSummary {
+            repository: demo_repository(),
+            snapshot: domain::SnapshotId::parse(&"cd".repeat(32)).expect("a snapshot ID"),
+            parent: None,
+            files_new: 1,
+            files_changed: 2,
+            files_unmodified: 3,
+            bytes_processed,
+            data_added: 4096,
+            data_added_packed: 1024,
+            error_count: 0,
+        })
+    }
+
+    #[test]
+    fn a_maintenance_row_names_its_repository_by_the_alias_it_ran_under() {
+        let check = logged(OperationKind::Check, None, Some("demo"));
+        let dto = summary(&check).expect("a row the page can show");
+        assert_eq!(dto.repository.as_deref(), Some("demo"));
+        // A row logged before the alias was kept names none.
+        let old = logged(OperationKind::Check, None, None);
+        assert_eq!(summary(&old).expect("a row").repository, None);
+    }
+
+    #[test]
+    fn a_backup_row_carries_its_snapshot_and_the_bytes_it_went_through() {
+        let backup = logged(OperationKind::Backup, Some(backed_up(Some(65_536))), None);
+        let dto = summary(&backup).expect("a row the page can show");
+        assert_eq!(
+            dto.result,
+            Some(api::OperationResultDto::Backup {
+                files: 6,
+                bytes: 4096,
+                duration_ms: 60_000,
+                snapshot: Some("cd".repeat(32)),
+                bytes_processed: Some(65_536),
+            })
+        );
+        // A result logged before the bytes were kept shows none, not zero.
+        let old = logged(OperationKind::Backup, Some(backed_up(None)), None);
+        let Some(api::OperationResultDto::Backup {
+            bytes_processed, ..
+        }) = summary(&old).expect("a row").result
+        else {
+            panic!("a backup's result");
+        };
+        assert_eq!(bytes_processed, None);
+    }
+
+    #[test]
+    fn a_backups_file_count_stops_at_the_largest_number_it_can_hold() {
+        // The engine's counts are its own: three that overflow when added
+        // are shown as the most a count holds, never a panic of the read.
+        let EngineResult::Backup(mut huge) = backed_up(None) else {
+            panic!("a backup's result");
+        };
+        huge.files_new = u64::MAX;
+        let backup = logged(
+            OperationKind::Backup,
+            Some(EngineResult::Backup(huge)),
+            None,
+        );
+        let Some(api::OperationResultDto::Backup { files, .. }) =
+            summary(&backup).expect("a row").result
+        else {
+            panic!("a backup's result");
+        };
+        assert_eq!(files, u64::MAX);
     }
 
     fn demo_settings(password: SecretRef) -> RepositorySettings {

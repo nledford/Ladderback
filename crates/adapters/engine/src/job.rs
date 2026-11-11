@@ -404,6 +404,8 @@ pub struct BackupResult {
     pub files_new: u64,
     pub files_changed: u64,
     pub files_unmodified: u64,
+    /// Bytes of the source the backup went through, changed or not.
+    pub bytes_processed: u64,
     pub data_added: u64,
     pub data_added_packed: u64,
     pub error_count: u64,

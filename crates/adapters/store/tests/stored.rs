@@ -394,9 +394,12 @@ async fn every_result_is_stored_as_json_of_its_type() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
     let mut raw = scratch.raw().await;
+    // A result without the bytes processed, as an earlier build logged it,
+    // keeps no key for them.
     let big = EngineResult::Backup(BackupSummary {
         data_added: u64::MAX,
         parent: None,
+        bytes_processed: None,
         ..backup_summary()
     });
     let results: Vec<(EngineResult, Value, Option<&str>)> = vec![
@@ -417,7 +420,8 @@ async fn every_result_is_stored_as_json_of_its_type() {
             json!({
                 "type": "backup", "repository": REPOSITORY_HEX, "snapshot": SNAPSHOT_HEX,
                 "parent": PARENT_HEX, "files_new": 1, "files_changed": 2,
-                "files_unmodified": 3, "data_added": 4, "data_added_packed": 5, "error_count": 6
+                "files_unmodified": 3, "bytes_processed": 7, "data_added": 4,
+                "data_added_packed": 5, "error_count": 6
             }),
             Some(SNAPSHOT_HEX),
         ),

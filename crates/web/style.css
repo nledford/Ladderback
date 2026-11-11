@@ -342,3 +342,11 @@ td {
   padding-inline: 0.5rem;
   border-block-end: 1px solid var(--muted);
 }
+
+/* A list in a cell, such as an operation's Result, starts on the row's first
+   line, level with the text of the cells beside it: no margin above or below,
+   and only the indent its markers need. */
+td ul {
+  margin-block: 0;
+  padding-inline-start: 1.25rem;
+}

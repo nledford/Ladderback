@@ -71,6 +71,12 @@ Feature: Forget keeps each plan's history within its policy
     Then the operation ends as succeeded
     And the engine was asked to check the repository
 
+  Scenario: The log names the repository a check ran on by its alias
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner checks the repository
+    Then the log names the repository "demo" for the check
+
   Scenario: A cancel made before the engine is up beats the result it already has
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"

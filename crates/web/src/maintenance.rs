@@ -470,10 +470,10 @@ impl End {
     /// error.
     pub(crate) fn read(kind: Kind, operation: &OperationSummaryDto) -> End {
         let end = End::of(kind, &operation.status);
-        match (end.outcome, operation.result) {
+        match (end.outcome, operation.result.as_ref()) {
             (
                 Outcome::Finished,
-                Some(OperationResultDto::Check {
+                Some(&OperationResultDto::Check {
                     errors, warnings, ..
                 }),
             ) if errors > 0 || warnings > 0 => End::told(kind, Outcome::Found { errors, warnings }),
@@ -521,9 +521,9 @@ impl Findings {
     /// [`MAX_LISTED_FINDINGS`]; `more` is how many more its result counts.
     /// Nothing for a run that is not a check.
     pub(crate) fn of(detail: &OperationDetailDto) -> Findings {
-        let Some(OperationResultDto::Check {
+        let Some(&OperationResultDto::Check {
             errors, warnings, ..
-        }) = detail.operation.result
+        }) = detail.operation.result.as_ref()
         else {
             return Findings::default();
         };
@@ -1410,6 +1410,7 @@ mod tests {
             warning_codes: Vec::new(),
             failure_code: None,
             result,
+            repository: Some("demo".to_owned()),
         }
     }
 

@@ -125,11 +125,12 @@ impl OperationsState {
     }
 
     /// Merges a page the page just re-read: the settle-poll after a cancel
-    /// (a cancelled run emits no `UiEvent`) and the refetch a reconnect
-    /// starts from. The page is the source of truth for what it holds, but
-    /// it never regresses a status an event advanced — a `Started` event can
-    /// beat the store's own write — and a live row the page doesn't hold yet
-    /// stays, newest: dropping it would unshow a run the reader is watching.
+    /// (a cancelled run emits no `UiEvent`), the re-read a run's end asks for
+    /// and the refetch a reconnect starts from. The page is the source of
+    /// truth for what it holds, but it never regresses a status an event
+    /// advanced — a `Started` event can beat the store's own write — and a
+    /// live row the page doesn't hold yet stays, newest: dropping it would
+    /// unshow a run the reader is watching.
     pub(crate) fn merge(&mut self, page: OperationsPageDto) {
         let mut held: HashMap<String, OperationRow> = self
             .rows
@@ -141,8 +142,12 @@ impl OperationsState {
             let live = held.remove(&summary.id);
             rows.push(match live {
                 // The held row is at least as far along as the page says:
-                // what the events said wins, progress included.
-                Some(row) if rank(&row.summary.status) >= rank(&summary.status) => row,
+                // what the events said wins, progress included. An end that
+                // came by an event carries no result, so the page's is kept.
+                Some(mut row) if rank(&row.summary.status) >= rank(&summary.status) => {
+                    row.summary.result = row.summary.result.take().or(summary.result);
+                    row
+                }
                 _ => OperationRow {
                     summary,
                     progress: None,
@@ -225,6 +230,73 @@ pub(crate) fn succeeded(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
+/// Whether `event` asks the page to read its operations again: the end of a
+/// run. The event carries no result, and the run tells of its end only after
+/// its last write to the log (§4.4), so the re-read finds the end there with
+/// what the run produced, and the row's Result shows without a reload. A run
+/// started elsewhere, which the page did not hold, comes in with it.
+pub(crate) fn asks_for_a_reread(event: &UiEvent) -> bool {
+    matches!(
+        event,
+        UiEvent::OperationSucceeded { .. } | UiEvent::OperationFailed { .. }
+    )
+}
+
+/// How long a re-read waits for the history before it counts as no answer: a
+/// fetch that hangs would otherwise keep the one re-read out for good.
+pub(crate) const REREAD_PATIENCE: Duration = Duration::from_secs(10);
+
+/// How many times a re-read that got no history is tried again before the
+/// page waits for the next end, or the stream's re-fetch, to read it.
+const REREAD_RETRIES: u32 = 3;
+
+/// The page's re-reads of its operations, one at a time. An end that arrives
+/// while one is out may be newer than what that one reads, so it is owed one
+/// more, after it; any number of ends then are owed that same one, because a
+/// read finds every end told before it. A re-read that gets no history is
+/// tried again, later each time, a few times: the end it was for carries no
+/// result, so without it the row would show none until the page is reloaded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Rereads {
+    /// A re-read is out, or waits to be tried again.
+    reading: bool,
+    /// An end arrived while it was out: one more is owed.
+    owed: bool,
+    /// How many tries in a row got no history.
+    failed: u32,
+}
+
+impl Rereads {
+    /// An end arrived: whether to start a re-read now. With one out, the
+    /// answer is no, and one more is owed after it.
+    pub(crate) fn ask(&mut self) -> bool {
+        if self.reading {
+            self.owed = true;
+            return false;
+        }
+        self.reading = true;
+        true
+    }
+
+    /// The re-read that was out is done, `answered` with the history or not:
+    /// how long to wait before the next one, or `None` for no next one. A try
+    /// again after no answer reads every end told before it, so it is the one
+    /// owed too; once the tries run out, only an end owed meanwhile reads again.
+    pub(crate) fn finish(&mut self, answered: bool) -> Option<Duration> {
+        if answered {
+            self.failed = 0;
+        } else if self.failed < REREAD_RETRIES {
+            self.failed += 1;
+            self.owed = false;
+            return Some(Duration::from_secs(1 << (self.failed - 1)));
+        } else {
+            self.failed = 0;
+        }
+        self.reading = std::mem::take(&mut self.owed);
+        self.reading.then_some(Duration::ZERO)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // The decisions of §4.4, one test each; commit 1 wrote the red ones
@@ -233,7 +305,10 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{OperationsState, Progress, ended, events_url, reconnect_backoff, succeeded};
+    use super::{
+        OperationsState, Progress, Rereads, asks_for_a_reread, ended, events_url,
+        reconnect_backoff, succeeded,
+    };
     use api::{
         ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode,
     };
@@ -257,6 +332,7 @@ mod tests {
             Vec::new(),
             None,
             None,
+            None,
         )
         .unwrap_or_else(|problem| panic!("a valid summary: {problem:?}"))
     }
@@ -277,7 +353,10 @@ mod tests {
                 files: 3,
                 bytes: 4096,
                 duration_ms: 1000,
+                snapshot: Some("cd".repeat(32)),
+                bytes_processed: Some(65_536),
             }),
+            None,
         )
         .unwrap_or_else(|problem| panic!("a valid summary: {problem:?}"))
     }
@@ -615,6 +694,26 @@ mod tests {
     }
 
     #[test]
+    fn a_merged_page_gives_a_run_that_ended_live_the_result_the_store_has() {
+        // The end came by an event, which carries no result; the re-read
+        // that follows is where the row learns what the run produced.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        assert_eq!(state.rows[0].summary.result, None);
+        state.merge(page(vec![succeeded_backup(FIRST)], None));
+        assert_eq!(
+            state.rows[0].summary.result,
+            succeeded_backup(FIRST).result,
+            "the row shows what the store says the run produced"
+        );
+        assert_eq!(state.rows[0].summary.status, "succeeded");
+    }
+
+    #[test]
     fn every_2xx_answer_is_a_success_and_nothing_else_is() {
         for status in [200, 201, 202, 204, 299] {
             assert!(succeeded(status), "{status}");
@@ -622,5 +721,143 @@ mod tests {
         for status in [0, 100, 199, 300, 400, 409, 422, 500, 503] {
             assert!(!succeeded(status), "{status}");
         }
+    }
+
+    #[test]
+    fn the_end_of_a_run_asks_for_a_reread_and_nothing_else_does() {
+        let operation = id(FIRST);
+        let finished_at = "2026-11-09T10:05:00Z".to_owned();
+        assert!(asks_for_a_reread(&UiEvent::OperationSucceeded {
+            operation: operation.clone(),
+            finished_at: finished_at.clone(),
+        }));
+        assert!(asks_for_a_reread(&UiEvent::OperationFailed {
+            operation: operation.clone(),
+            code: ErrorCode::EngineUnavailable,
+            args: Vec::new(),
+            finished_at,
+        }));
+        for event in [
+            UiEvent::OperationStarted {
+                operation: operation.clone(),
+                repository: None,
+                started_at: "2026-11-09T10:00:01Z".to_owned(),
+            },
+            UiEvent::OperationProgress {
+                operation: operation.clone(),
+                current: 1,
+                total: Some(3),
+            },
+            UiEvent::OperationWarning {
+                operation,
+                code: WarningCode::SourceUnreadable,
+                args: Vec::new(),
+            },
+            UiEvent::AgentOnline {
+                agent: "demo-agent".to_owned(),
+                at: "2026-11-09T10:00:00Z".to_owned(),
+            },
+            UiEvent::AgentOffline {
+                agent: "demo-agent".to_owned(),
+                at: "2026-11-09T10:00:00Z".to_owned(),
+            },
+        ] {
+            assert!(!asks_for_a_reread(&event), "{event:?}");
+        }
+    }
+
+    /// A `Rereads::finish` that starts the next re-read at once.
+    const AT_ONCE: Option<Duration> = Some(Duration::ZERO);
+
+    #[test]
+    fn an_end_starts_a_reread_when_none_is_out() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask(), "the first end reads at once");
+        assert_eq!(
+            rereads.finish(true),
+            None,
+            "an end told before it is in what it read"
+        );
+        assert!(rereads.ask(), "a later end reads again");
+    }
+
+    #[test]
+    fn ends_during_a_reread_are_owed_one_more_and_only_one() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask());
+        assert!(!rereads.ask(), "one re-read is out at a time");
+        assert!(!rereads.ask(), "a third end shares the one owed");
+        assert_eq!(
+            rereads.finish(true),
+            AT_ONCE,
+            "the owed re-read starts as the first ends"
+        );
+        assert!(!rereads.ask(), "and it is out in turn");
+        assert_eq!(
+            rereads.finish(true),
+            AT_ONCE,
+            "an end during it is owed one more"
+        );
+        assert_eq!(
+            rereads.finish(true),
+            None,
+            "with nothing owed, the reading stops"
+        );
+        assert!(rereads.ask(), "and the next end starts it again");
+    }
+
+    #[test]
+    fn a_reread_that_gets_no_history_is_tried_again_three_times_later_each_time() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask());
+        assert_eq!(rereads.finish(false), Some(Duration::from_secs(1)));
+        assert!(!rereads.ask(), "a try that waits is still out");
+        assert_eq!(rereads.finish(false), Some(Duration::from_secs(2)));
+        assert_eq!(rereads.finish(false), Some(Duration::from_secs(4)));
+        assert_eq!(rereads.finish(false), None, "the tries ran out");
+        assert!(rereads.ask(), "and the next end reads again");
+    }
+
+    #[test]
+    fn a_reread_that_gets_the_history_starts_the_tries_over() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask());
+        assert_eq!(rereads.finish(false), Some(Duration::from_secs(1)));
+        assert_eq!(rereads.finish(true), None);
+        assert!(rereads.ask());
+        assert_eq!(
+            rereads.finish(false),
+            Some(Duration::from_secs(1)),
+            "the first try again of a new re-read waits the least"
+        );
+    }
+
+    #[test]
+    fn a_try_again_reads_the_ends_told_during_the_try_that_got_nothing() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask());
+        assert!(!rereads.ask(), "an end during the read is owed");
+        assert_eq!(rereads.finish(false), Some(Duration::from_secs(1)));
+        assert_eq!(
+            rereads.finish(true),
+            None,
+            "the try again came after that end, so nothing more is owed"
+        );
+    }
+
+    #[test]
+    fn once_the_tries_run_out_an_end_told_during_the_last_reads_again_with_tries_of_its_own() {
+        let mut rereads = Rereads::default();
+        assert!(rereads.ask());
+        for _ in 0..3 {
+            assert!(rereads.finish(false).is_some());
+        }
+        assert!(!rereads.ask(), "an end during the last try");
+        assert_eq!(rereads.finish(false), AT_ONCE);
+        assert_eq!(
+            rereads.finish(false),
+            Some(Duration::from_secs(1)),
+            "its own tries start over"
+        );
     }
 }

@@ -1122,6 +1122,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 files_new: r.files_new,
                 files_changed: r.files_changed,
                 files_unmodified: r.files_unmodified,
+                bytes_processed: Some(r.bytes_processed),
                 data_added: r.data_added,
                 data_added_packed: r.data_added_packed,
                 error_count: r.error_count,

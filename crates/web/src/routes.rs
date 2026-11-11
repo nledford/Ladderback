@@ -17,6 +17,7 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{Checkbox, ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
 use crate::live::say;
+use crate::operations::{self, Name};
 use crate::repositories::{
     Action, Field, Form, Outcome, Sentence, advises_retry, error_of, field_of, password_source,
     problems_of, repository_notes, rereads_list,
@@ -89,10 +90,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let start_localizer = Arc::clone(&localizer);
     let caption = text(&localizer, msg::UI_OPERATIONS_CAPTION);
-    let (plan_column, status_column, started_column, actions_column) = (
-        text(&localizer, msg::UI_COLUMN_PLAN),
+    let (operation_column, status_column, started_column, result_column, actions_column) = (
+        text(&localizer, msg::UI_COLUMN_OPERATION),
         text(&localizer, msg::UI_COLUMN_STATUS),
         text(&localizer, msg::UI_COLUMN_STARTED),
+        text(&localizer, msg::UI_COLUMN_RESULT),
         text(&localizer, msg::UI_COLUMN_ACTIONS),
     );
     let sort_label = text(&localizer, msg::UI_SORT_BY_STARTED);
@@ -136,10 +138,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 let previous = seen.insert(row.summary.id.clone(), status.clone());
                 let changed = previous.is_some_and(|previous| announces_end(&previous, &status));
                 if changed {
-                    // A run that warned its way to the end counts as
-                    // finished: its warnings are the row's own story.
-                    let (politeness, id) = end_display(&status);
-                    say(politeness, &text_with(&announced_localizer, id, &[]));
+                    let (politeness, words) = operations::end(&row.summary);
+                    say(
+                        politeness,
+                        &text_with(&announced_localizer, words.id, &words.args),
+                    );
                 }
             }
         });
@@ -258,7 +261,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             <caption class="text-muted">{caption.clone()}</caption>
                             <thead>
                                 <tr>
-                                    <th scope="col">{plan_column.clone()}</th>
+                                    <th scope="col">{operation_column.clone()}</th>
                                     <th scope="col">{status_column.clone()}</th>
                                     <th
                                         scope="col"
@@ -293,6 +296,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             {sort_label.clone()}
                                         </button>
                                     </th>
+                                    <th scope="col">{result_column.clone()}</th>
                                     <th scope="col">{actions_column.clone()}</th>
                                 </tr>
                             </thead>
@@ -322,10 +326,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// One row of the operations table: the plan, its status (with a running
-/// backup's progress), the instant it started — the raw instant in the cell's
-/// `title`, so an order can be read without the locale's text — and what can
-/// be done with it: a running or queued backup can be cancelled.
+/// One row of the operations table: its header, which names the operation (a
+/// backup by its plan, a maintenance run by what ran and its repository), its
+/// status (with a running backup's progress), the instant it started — the
+/// raw instant in the cell's `title`, so an order can be read without the
+/// locale's text — what a run that succeeded produced, and what can be done
+/// with it: a running or queued run can be cancelled.
 ///
 /// A row is built once, when its operation first shows, and follows the state
 /// from then on. Each fact it shows is a memo of its own, and each cell binds
@@ -342,9 +348,19 @@ fn row_view(
     error: RwSignal<Option<String>>,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
-    // The plan an operation belongs to does not change.
-    let plan = ops
-        .with_untracked(|state| state.row(&id).map(|row| row.summary.plan.clone()))
+    // What an operation is and where it ran do not change, so its name and its
+    // Cancel button's label are worded once.
+    let (name, cancel_label) = ops
+        .with_untracked(|state| {
+            state.row(&id).map(|row| {
+                let name = match operations::name(&row.summary) {
+                    Name::Plan(plan) => plan,
+                    Name::Words(words) => text_with(&localizer, words.id, &words.args),
+                };
+                let cancel = operations::cancel_label(&row.summary);
+                (name, text_with(&localizer, cancel.id, &cancel.args))
+            })
+        })
         .unwrap_or_default();
     // A row that has left the state, in the moment before its view is dropped,
     // reads as empty: never a panic, never a stale fact.
@@ -374,24 +390,31 @@ fn row_view(
         let id = id.clone();
         move |_| ops.with(|state| state.row(&id).and_then(progress_percent))
     });
+    let result = Memo::new({
+        let id = id.clone();
+        move |_| {
+            ops.with(|state| {
+                state
+                    .row(&id)
+                    .map(|row| operations::result(&row.summary))
+                    .unwrap_or_default()
+            })
+        }
+    });
     let badge = Memo::new({
         let localizer = Arc::clone(&localizer);
         move |_| status.with(|status| badge_of(&localizer, status))
     });
     let can_cancel = Memo::new(move |_| status.with(|status| cancellable(status)));
     let has_progress = Memo::new(move |_| percent.get().is_some());
-    let cancel_label = text_with(
-        &localizer,
-        msg::UI_CANCEL_PLAN,
-        &[("plan", MsgArg::Text(plan.clone()))],
-    );
+    let result_localizer = Arc::clone(&localizer);
     let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
     let url = format!("{base}/api/v1/operations/{id}/cancel");
     let operation = id;
     view! {
         <tr>
-            <td>{plan}</td>
+            <th scope="row">{name}</th>
             <td>
                 <StatusBadge
                     state=Signal::derive(move || badge.with(|badge| badge.0))
@@ -412,6 +435,23 @@ fn row_view(
             </td>
             <td title=move || started.get()>
                 {move || instant(&localizer, &started.get(), zone.as_ref())}
+            </td>
+            <td>
+                {move || {
+                    let facts = result.get();
+                    (!facts.is_empty())
+                        .then(|| {
+                            let items = facts
+                                .iter()
+                                .map(|fact| {
+                                    view! {
+                                        <li>{text_with(&result_localizer, fact.id, &fact.args)}</li>
+                                    }
+                                })
+                                .collect_view();
+                            view! { <ul>{items}</ul> }
+                        })
+                }}
             </td>
             <td>
                 {move || {
@@ -564,17 +604,6 @@ fn percent(current: u64, total: Option<u64>) -> u8 {
 /// only a run that was still going can end, and only an end is news.
 fn announces_end(previous: &str, status: &str) -> bool {
     (previous == "queued" || previous == "running") && ended(status)
-}
-
-/// How a run's end is told: which politeness, which message. A failure is
-/// said assertively; a cancellation and a finish (warnings included — they
-/// are the row's own story) politely.
-fn end_display(status: &str) -> (Politeness, MessageId) {
-    match status {
-        "failed" => (Politeness::Assertive, msg::UI_BACKUP_FAILED),
-        "cancelled" => (Politeness::Polite, msg::UI_BACKUP_CANCELLED),
-        _ => (Politeness::Polite, msg::UI_BACKUP_FINISHED),
-    }
 }
 
 /// The text of message `id`, with `args` for its variables.
@@ -1208,6 +1237,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                None,
             )
             .unwrap_or_else(|problem| panic!("a valid summary: {problem:?}")),
             progress: None,
@@ -1469,27 +1499,6 @@ mod tests {
         assert!(
             !announces_end("succeeded", "failed"),
             "history does not move"
-        );
-    }
-
-    #[test]
-    fn the_end_of_a_run_is_told_by_its_own_politeness_and_message() {
-        assert_eq!(
-            end_display("failed"),
-            (Politeness::Assertive, msg::UI_BACKUP_FAILED)
-        );
-        assert_eq!(
-            end_display("cancelled"),
-            (Politeness::Polite, msg::UI_BACKUP_CANCELLED)
-        );
-        assert_eq!(
-            end_display("succeeded"),
-            (Politeness::Polite, msg::UI_BACKUP_FINISHED)
-        );
-        assert_eq!(
-            end_display("succeeded-with-warnings"),
-            (Politeness::Polite, msg::UI_BACKUP_FINISHED),
-            "a run that warned its way to the end counts as finished"
         );
     }
 }

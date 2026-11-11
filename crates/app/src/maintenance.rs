@@ -186,6 +186,8 @@ impl PreparedMaintenance {
 /// its repository's I7 slot.
 pub struct MaintenanceAssessment {
     operation: OperationId,
+    /// The alias the run was asked under, which the log keeps with it.
+    alias: RepositoryAlias,
     job: Job,
     partition: Option<Partition>,
     other_hosts: OtherHosts,
@@ -481,6 +483,7 @@ impl RunMaintenance {
 
         Ok(MaintenanceAssessment {
             operation: op,
+            alias: alias.clone(),
             job,
             partition,
             other_hosts,
@@ -505,6 +508,7 @@ impl RunMaintenance {
     ) -> Result<PreparedMaintenance, MaintenanceError> {
         let MaintenanceAssessment {
             operation: id,
+            alias,
             job,
             partition,
             other_hosts,
@@ -515,7 +519,8 @@ impl RunMaintenance {
             Trigger::Manual,
             job.target(),
             self.clock.now(),
-        );
+        )
+        .with_repository_alias(alias);
         #[allow(
             clippy::expect_used,
             reason = "the operation was queued a moment above and nothing else runs"

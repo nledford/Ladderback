@@ -10,7 +10,7 @@ use std::fmt::Display;
 
 use app::ports::{EngineResult, OperationRecord, StoreError};
 use domain::execution::{OperationStatus, Target, Warning};
-use domain::{OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
+use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
@@ -203,6 +203,8 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
             u64::try_from(count)
                 .map_err(|_| reader.corrupt("warning_count", format!("{count} is negative")))
         })?;
+    let repository_alias =
+        reader.id_of("repo_alias", "repository alias", RepositoryAlias::parse)?;
 
     Ok(OperationRecord {
         id,
@@ -215,6 +217,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         finished_at,
         warning_count,
         result,
+        repository_alias,
     })
 }
 
