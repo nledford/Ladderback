@@ -102,7 +102,9 @@ pub struct ForgetWorld {
     snapshots: Vec<SnapshotSummary>,
     /// Every job the scripted engine was given, oldest first.
     jobs: Arc<Mutex<Vec<Job>>>,
-    /// Releases a forget the engine holds, for the slot scenarios.
+    /// Releases the forget or rewrite job the engine holds. A release keeps
+    /// until the hold is reached, so it is never lost to a run that has not
+    /// got there yet (#246).
     release: Arc<Notify>,
     /// What a refused run answered.
     refused: Option<MaintenanceError>,
@@ -156,7 +158,8 @@ impl Default for ForgetWorld {
 
 impl ForgetWorld {
     /// The engine the forget scenarios talk to: it answers an identify, a
-    /// listing and a forget, holding each forget until it is released.
+    /// listing and a forget, holding one forget or rewrite job (the first,
+    /// unless a scenario says otherwise) until it is released.
     pub fn engine(&self) -> Arc<dyn Engine> {
         Arc::new(Scripted {
             snapshots: self.snapshots.clone(),
@@ -180,9 +183,12 @@ impl ForgetWorld {
         self.refused.take()
     }
 
-    /// The release a held engine run waits for.
-    pub fn release(&self) -> &Notify {
-        &self.release
+    /// Releases the job the engine holds, whether or not the run has reached
+    /// the hold yet: the hold takes the release when it gets there. A release
+    /// no hold takes (a prune's or a check's) stays for the scenario's next
+    /// hold, which then does not hold; each scenario runs one held run today.
+    pub fn release_hold(&self) {
+        self.release.notify_one();
     }
 
     /// How many snapshots the scripted engine lists.
@@ -487,8 +493,9 @@ impl ForgetWorld {
 
 /// The engine the forget scenarios talk to: each identify answers the
 /// scripted repository ID, each listing the scripted snapshots, and each
-/// forget records its IDs and succeeds — after `release` fires, so a run
-/// can be held.
+/// forget records its IDs and succeeds; the forget or rewrite job numbered
+/// `hold_at` succeeds only after a release (see [`ForgetWorld::release_hold`]),
+/// so a run can be held.
 struct Scripted {
     snapshots: Vec<SnapshotSummary>,
     fail: ReadFailure,
@@ -869,7 +876,7 @@ async fn forget(agent: &mut Agent) {
             // The release comes before the run can reach the hold, the order
             // in which a release can be lost (#246): the hold must still let
             // the run through, and a lost release fails here, not by hanging.
-            agent.forget.release.notify_waiters();
+            agent.forget.release_hold();
             let runner = Arc::clone(&use_case);
             let running =
                 tokio::spawn(
@@ -924,7 +931,7 @@ async fn forget_then_prune(agent: &mut Agent) {
     wait_for_forget(agent).await;
     let refused = assess_and_start(&use_case, operation_id(0xee), MaintenanceKind::Prune).await;
     agent.forget.refused = refused.err();
-    agent.forget.release.notify_waiters();
+    agent.forget.release_hold();
     agent.finished = Some(running.await.expect("the run ends"));
 }
 
@@ -981,7 +988,7 @@ async fn run_maintenance(agent: &mut Agent, kind: MaintenanceKind) {
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
             wait_for_job(agent, job_name(&kind)).await;
-            agent.forget.release.notify_waiters();
+            agent.forget.release_hold();
             agent.finished = Some(running.await.expect("the run ends"));
         }
         Err(error) => agent.forget.refused = Some(error),

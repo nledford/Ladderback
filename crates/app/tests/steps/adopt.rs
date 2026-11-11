@@ -105,7 +105,7 @@ async fn adopt_then_forget(agent: &mut Agent, from: String, into: String) {
     wait_for_job(agent, "adopt").await;
     let refused = assess_and_start(&use_case, operation_id(0xcf), MaintenanceKind::Forget).await;
     agent.forget.set_refused(refused.err());
-    agent.forget.release().notify_waiters();
+    agent.forget.release_hold();
     agent.finished = Some(running.await.expect("the run ends"));
 }
 
@@ -132,7 +132,7 @@ async fn run_adoption(agent: &mut Agent, from: AdoptionSource, into: String) {
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
             wait_for_job(agent, "adopt").await;
-            agent.forget.release().notify_waiters();
+            agent.forget.release_hold();
             agent.finished = Some(running.await.expect("the run ends"));
         }
         Err(error) => agent.forget.set_refused(Some(error)),

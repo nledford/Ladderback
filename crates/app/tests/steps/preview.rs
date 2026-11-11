@@ -243,7 +243,7 @@ async fn confirm(agent: &mut Agent, kind: MaintenanceKind, op: OperationId, job:
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
             wait_for_job(agent, job).await;
-            agent.forget.release().notify_waiters();
+            agent.forget.release_hold();
             agent.finished = Some(running.await.expect("the run ends"));
         }
         Err(error) => agent.forget.set_refused(Some(error)),
