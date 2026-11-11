@@ -3,7 +3,9 @@ Feature: Backup deadline
   that the index it read still points to (invariant I3). A backup still
   running at its deadline stops without writing a snapshot and fails. What
   it had already saved stays in the repository's index, as a cancelled
-  backup's does, so the next backup reuses it.
+  backup's does, so the next backup reuses it. A snapshot already being
+  written at the deadline is finished, so that a repository with a hot and
+  a cold half never has it in one half alone; the backup fails all the same.
 
   Scenario: An operation still running at its deadline fails
     Given the engine will complete the operation in 10 steps of 1 minute each
