@@ -143,6 +143,18 @@ ui-gallery-check-repository = Check the repository name
 # The error the demo form field shows when its input is empty.
 ui-gallery-repository-required = A repository name is required.
 
+# The heading of the gallery's checkbox demo.
+ui-gallery-checkbox-heading = Checkbox
+
+# The label of the demo checkbox that starts off.
+ui-gallery-demo-notification = Send a demo notification
+
+# The description under the demo checkbox that starts off.
+ui-gallery-demo-notification-hint = A demo choice: turning it on changes nothing.
+
+# The label of the demo checkbox that starts on. It has no description.
+ui-gallery-demo-log = Keep the demo log
+
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
