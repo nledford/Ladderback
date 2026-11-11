@@ -240,6 +240,10 @@ Feature: Repositories page
     And focus is on the message "Created demo."
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
+    When I press Tab until focus is on the button "Test the repository"
+    And I press Enter
+    Then focus is on the heading "There are 2 problems with the form"
+    And the page doesn't show "Created demo."
     When I open the address "/operations"
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
@@ -247,6 +251,19 @@ Feature: Repositories page
     When I open the address "/repositories"
     Then the table "Repositories" has a row "demo" that shows "Read from the file"
     And the page offers no button "Create demo"
+
+  Scenario: A row's Create takes no second press while the list is read again
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories"
+    And the list of repositories is slow to answer from now on
+    And I press Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then focus is on the message "Created demo."
+    When I press Shift+Tab until focus is on the button "Create demo"
+    And I press Enter
+    Then the button "Create demo" leaves the page
+    And the page asked to create "demo" once
 
   Scenario: Creating a repository that is already there from its row says so, and changes nothing
     Given a daemon with a profile imported as "demo" whose repository folder is empty
@@ -302,6 +319,19 @@ Feature: Repositories page
     Then the page has 4 text boxes
     And every visible text is transformed
     And the page title is transformed
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |
+
+  Scenario Outline: A row's Create is in the language of the page
+    Given a daemon with a profile imported as "demo" whose repository folder is empty
+    When a backup of "demo-home" fails because no repository is there
+    And I open the address "/repositories?locale=<locale>"
+    And I press Tab until focus is on the button of the repository "demo"
+    Then every visible text but the data of the tables and lists is transformed
+    And the page has no accessibility violations
 
     Examples:
       | locale |

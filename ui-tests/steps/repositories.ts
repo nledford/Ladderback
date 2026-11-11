@@ -255,6 +255,43 @@ Then("the button {string} leaves the page", async function (this: BrowserWorld, 
     .waitFor({ state: "detached", timeout: ANSWER_PATIENCE_MS });
 });
 
+// How long the list of repositories takes to answer once it is slow: long
+// enough for a reader to press a button again while it is on its way.
+const SLOW_LIST_MS = 3_000;
+
+// The row Creates the page asked the daemon for, by alias, from the moment the
+// list of repositories was made slow.
+const createsAsked = new WeakMap<BrowserWorld, Map<string, number>>();
+
+// Every read of the list of repositories from now on answers late, so the
+// page shows what a Create came to a while before it reads the list again.
+// The page's requests to create a row's repository are counted from now on.
+When("the list of repositories is slow to answer from now on", async function (this: BrowserWorld) {
+  const asked = new Map<string, number>();
+  createsAsked.set(this, asked);
+  this.page.on("request", (request) => {
+    const created = /\/api\/v1\/repositories\/([^/]+)\/init$/.exec(new URL(request.url()).pathname);
+    if (request.method() === "POST" && created?.[1] !== undefined) {
+      asked.set(created[1], (asked.get(created[1]) ?? 0) + 1);
+    }
+  });
+  await this.page.route(
+    (url) => url.pathname === "/api/v1/repositories",
+    async (route) => {
+      if (route.request().method() === "GET") {
+        await new Promise((done) => setTimeout(done, SLOW_LIST_MS));
+      }
+      await route.continue();
+    },
+  );
+});
+
+Then("the page asked to create {string} once", async function (this: BrowserWorld, alias: string) {
+  const asked = createsAsked.get(this);
+  assert.ok(asked, "the page's requests were never counted");
+  assert.equal(asked.get(alias) ?? 0, 1, `the requests to create "${alias}"`);
+});
+
 // The roles of the things a person sees as a button, a column's header and a
 // row's header.
 const ROLE_OF: Record<string, string> = {
