@@ -239,8 +239,18 @@ impl HookRunner for ProcessHookRunner {
     async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome {
         let (status, captured) = self.spawn_and_wait(entry, context).await;
         HookOutcome {
-            stdout: captured.stream(&captured.stdout, captured.stdout_truncated, &self.redactor),
-            stderr: captured.stream(&captured.stderr, captured.stderr_truncated, &self.redactor),
+            stdout: captured.stream(
+                &captured.stdout,
+                captured.stdout_truncated,
+                captured.stdout_ended,
+                &self.redactor,
+            ),
+            stderr: captured.stream(
+                &captured.stderr,
+                captured.stderr_truncated,
+                captured.stderr_ended,
+                &self.redactor,
+            ),
             status,
         }
     }
@@ -251,8 +261,12 @@ impl HookRunner for ProcessHookRunner {
 struct Captured {
     stdout: Vec<u8>,
     stdout_truncated: bool,
+    /// Stdout was read to its end: nothing stopped the read partway.
+    stdout_ended: bool,
     stderr: Vec<u8>,
     stderr_truncated: bool,
+    /// Stderr was read to its end.
+    stderr_ended: bool,
 }
 
 impl Captured {
@@ -334,7 +348,13 @@ impl Captured {
     /// The kept, redacted text of one stream. A stream that was cut may end
     /// in the start of a secret, which is masked as a whole one is
     /// ([`Redactor::redact_cut`]).
-    fn stream(&self, text: &[u8], truncated: bool, redactor: &Redactor) -> HookOutput {
+    fn stream(
+        &self,
+        text: &[u8],
+        truncated: bool,
+        _ended: bool,
+        redactor: &Redactor,
+    ) -> HookOutput {
         let text = if truncated {
             redactor.redact_cut(text)
         } else {

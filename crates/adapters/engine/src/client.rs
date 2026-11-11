@@ -2453,6 +2453,33 @@ mod tests {
         );
     }
 
+    /// A worker killed partway through a write leaves its last stderr line
+    /// without its newline, cut by the kill rather than the cap: it can end
+    /// partway through a secret, and it is masked and marked as a cut line
+    /// (I4).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stderr_line_a_kill_cut_short_leaves_nothing_of_a_secret() {
+        capture_the_worker_log();
+        let script = "cat >/dev/null; printf 'killed mid-line: CANARY-kil' >&2; kill -KILL $$";
+        let engine = WorkerEngine::new("sh", ["-c", script]);
+        let job = identify("hunter2-demo", &["CANARY-killed"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let _ = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        let line = logged_soon(log::Level::Warn, |text| {
+            text.starts_with("killed mid-line:")
+        })
+        .await
+        .expect("the cut stderr line never reached the log");
+        assert_eq!(line, "killed mid-line: ***…");
+    }
+
     fn line_of(event: &WorkerEvent) -> String {
         serde_json::to_string(event).unwrap()
     }

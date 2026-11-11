@@ -798,6 +798,74 @@ fn only_output_that_was_cut_is_masked_where_it_ends_like_a_secret_begins() {
     let redactor =
         domain::secrets::Redactor::new(&[domain::secrets::SecretValue::new("hunter2-demo")]);
     let captured = crate::Captured::default();
-    assert_eq!(captured.stream(b"done h", false, &redactor).text, "done h");
-    assert_eq!(captured.stream(b"done h", true, &redactor).text, "done ***");
+    assert_eq!(
+        captured.stream(b"done h", false, true, &redactor).text,
+        "done h"
+    );
+    assert_eq!(
+        captured.stream(b"done h", true, true, &redactor).text,
+        "done ***"
+    );
+    // Not read to its end: cut by time, not by the cap, and masked the same.
+    let stopped = captured.stream(b"done h", false, false, &redactor);
+    assert_eq!(stopped.text, "done ***");
+    assert!(!stopped.truncated, "nothing went past the cap");
+}
+
+/// The secret one write was carrying when the read of a pipe stopped. A
+/// write larger than the pipe takes at once reaches the reader in parts, and
+/// the kernel picks where: the hooks below write the start of the secret and
+/// leave the rest unsaid, which is where such a split leaves the reader.
+const SPLIT_SECRET: &str = "hunter2-canary";
+
+/// A hook that ends while a process it started holds its pipes open is read
+/// for the grace and then left: what was read can end partway through a
+/// secret, and it is masked as a cut text (I4).
+#[tokio::test]
+async fn output_a_descendant_holds_open_past_the_grace_is_masked_as_cut() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
+    let entry = sh(
+        concat!(
+            "sleep 300 &\n",
+            r#"echo "pid $!" >> "$1""#,
+            "\nprintf 'said hunter2-'; printf 'said hunter2-' >&2\nexit 0"
+        ),
+        &log,
+    );
+    let outcome = within(Duration::from_secs(8), runner.run(&entry, &context())).await;
+    let _reaper = Reaper(pid_in(&lines(&log)));
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert_eq!(outcome.stdout.text, "said ***");
+    assert_eq!(outcome.stderr.text, "said ***");
+}
+
+/// A hook stopped at its timeout is read no further: what was read can end
+/// partway through a secret, and it is masked as a cut text (I4). A hook
+/// that a loaded machine hasn't let write before the timeout proves nothing,
+/// so a run with a stream still empty is tried again.
+#[tokio::test]
+async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
+    let scratch = TempDir::new().unwrap();
+    let entry = sh(
+        "printf 'said hunter2-'; printf 'said hunter2-' >&2\nexec sleep 60",
+        &scratch.path().join("log"),
+    );
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(1)).with_secret(SPLIT_SECRET);
+    for _ in 0..3 {
+        let outcome = within(ENDS_ON_TERM, runner.run(&entry, &context())).await;
+        assert_eq!(outcome.status, HookStatus::TimedOut);
+        let texts = [&outcome.stdout.text, &outcome.stderr.text];
+        for text in texts {
+            assert!(
+                text.is_empty() || text == "said ***",
+                "the start of the secret is in {text:?}"
+            );
+        }
+        if texts.iter().all(|text| !text.is_empty()) {
+            return;
+        }
+    }
+    panic!("the hook's output was never read before its timeout");
 }
