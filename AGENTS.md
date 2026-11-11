@@ -18,7 +18,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just deny` | `cargo deny` (§13.6). Needs the network; a new advisory can fail it with no change of yours. Not a required check |
 | `just test [args]` | Unit and contract tests (nextest; `args` go to it), doc tests, the acceptance and `@e2e` runners, then the skipped-test list. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-release [args]` | `l10n` and daemon tests built with `--no-default-features`, which `just test` can't run |
-| `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates |
+| `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, and on the whole of a crate the branch adds to the gate |
 | `just red-first [base]` | Checks that the first commit is a `test:` commit whose tests fail at run time (§13.1) |
 
 Also: `just setup` (tools, rustic CLI, Chromium), `just fmt`, `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui` (builds the UI with the gallery and the binary, runs the `@ui` scenarios), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just check-pr-title "<title>"` (as CI does), `just serve` (`127.0.0.1:9898`), `just release-preview` (the next release's bump and changelog entry, §12.1).
@@ -36,7 +36,7 @@ The recipes carry flags and steps a raw command drops, so a raw command can pass
 | One scenario | `just test-acceptance --name '<regex>'`, `just test-e2e --name '<regex>'` | a raw `cargo test --test …` | the recipes add `--workspace` and the skip log |
 | `@ui` scenarios | `just test-ui` | `npx cucumber-js` | `npx` can run an unrelated registry package of that name, which exits 0; the recipe builds the UI and the binary first |
 | UI build for tests | `just web-test` | `trunk build` | the `@ui` scenarios drive `/_gallery`, which only the `gallery` feature builds |
-| Mutants | `just mutants origin/main --jobs <n>` | `cargo mutants` | the recipe mutates only changed code in the gated crates, as CI does |
+| Mutants | `just mutants origin/main --jobs <n>` | `cargo mutants` | the recipe mutates only changed code in the gated crates, and all of a crate joining the gate, as CI does |
 
 Commands run unattended: pass the non-interactive flag (`cargo binstall --no-confirm`, `gh … --json`, `GH_PAGER=cat`). If a command prompts anyway, stop it and report it; never guess the answer.
 

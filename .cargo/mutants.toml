@@ -70,6 +70,19 @@ exclude_re = [
     # `8 + 1024`. The size that matters, none (`8 / 1024` is 0, so nothing is
     # ever read), is not excluded and is caught.
     'crates/adapters/hooks/src/lib\.rs.*: replace \* with \+$',
+    # `O_NONBLOCK` and `O_NOCTTY` are separate bits, so `|` and `^` give the
+    # same flags. `&` (no flags, so opening a FIFO blocks) is caught.
+    'crates/adapters/secrets/src/file\.rs.*: replace \| with \^ in read$',
+    # `Os::get` is the call to the session's own store (the macOS keychain,
+    # the Secret Service); what its errors become is `failure`, which is
+    # tested. Its test, `the_os_keyring_keeps_and_gives_back_a_secret`,
+    # writes to that store, so it runs only when LADDERBACK_TEST_OS_KEYRING=1
+    # asks for it, which a mutation run does not. Every other test reads a
+    # keyring held in memory.
+    'crates/adapters/secrets/src/keyring_store\.rs.*: replace <impl KeyringStore for Os>::get ',
+    # Compiled only where there is no OS keyring (neither macOS nor Linux): on
+    # the hosts that run mutants the mutant builds and nothing calls it.
+    'crates/adapters/secrets/src/keyring_store\.rs.*: replace <impl KeyringStore for Unavailable>::get ',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
