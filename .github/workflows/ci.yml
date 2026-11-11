@@ -217,6 +217,30 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: just test-wasm
 
+  # actionlint and zizmor on the workflows (`just lint-workflows`). zizmor's
+  # online audits (known-vulnerable actions, impostor commits) read public
+  # GitHub data with the run's read-only token. Not a required check: the
+  # maintainer may add it to the ruleset once it has proved stable.
+  workflow-lint:
+    name: Workflow lint (actionlint, zizmor)
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,zizmor
+      # Not in install-action's list: the official release, checked against
+      # the SHA-256 the script pins.
+      - run: scripts/install-actionlint.sh
+      - run: just lint-workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # The tests of the build a release is: `--no-default-features`, which leaves
   # out the development pseudolocales (technical design §8.4). `just test`
   # builds with the defaults, so the tests that exist only without them run

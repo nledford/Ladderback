@@ -31,9 +31,10 @@ alias v := verify
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
-    cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz
+    cargo binstall --no-confirm trunk cargo-mutants cargo-nextest release-plz zizmor
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     scripts/install-rustic.sh
+    scripts/install-actionlint.sh
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium
 
@@ -55,6 +56,15 @@ lint:
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
+
+# Lint the GitHub Actions workflows: actionlint for syntax, expressions and
+# shell steps, zizmor for security (template injection, permissions, unpinned
+# actions). zizmor runs its online audits (known-vulnerable actions, impostor
+# commits) only when GH_TOKEN is set, as CI sets it; without it, offline.
+[group('quality')]
+lint-workflows:
+    actionlint
+    zizmor --no-progress .github/workflows
 
 # Check the dependency rule: banned crates in domain and app, domain on wasm32.
 [group('quality')]
@@ -243,7 +253,7 @@ red-first base='origin/main':
 
 # Run every check CI runs, except mutation testing and the red-first check.
 [group('quality')]
-verify: fmt-check lint architecture test test-contrast test-release test-wasm test-ui
+verify: fmt-check lint lint-workflows architecture test test-contrast test-release test-wasm test-ui
 
 # Shows the version bump and CHANGELOG.md entry that the release PR would
 # contain for the committed history (§12.1). Changes nothing.
