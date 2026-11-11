@@ -964,6 +964,17 @@ fn an_rclone_connection_string_with_a_secret_in_it_is_refused_naming_the_key_not
             Some("rclone::s3,SECRET_ACCESS_KEY=CANARY-rclone:bucket"),
             "repo-hot",
         ),
+        // A URL's password in a setting is refused as a URL's password.
+        (
+            "rclone::webdav,url='https://demo:CANARY-rclone@dav.example.com',vendor=other:/b",
+            None,
+            "repository",
+        ),
+        (
+            "/srv/demo-repo",
+            Some("rclone::webdav,url=https://demo:CANARY-rclone@dav.example.com:/b"),
+            "repo-hot",
+        ),
     ] {
         let mut export = export();
         export.repository.settings.repository = location.to_owned();

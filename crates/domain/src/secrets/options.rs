@@ -17,10 +17,33 @@ const SECRET_WORDS: [&str; 7] = [
 /// rclone backend reads `use-password` as a switch.
 const NOT_SECRETS: [&str; 1] = ["use_password"];
 
-/// Names that hold a credential only as the whole name. rclone's SFTP, FTP
-/// and SMB backends keep their password in `pass`; `bypass_cache` and
-/// `passive` hold none.
-const SECRET_NAMES: [&str; 1] = ["pass"];
+/// Names that hold a credential only as the whole name, all of them rclone's:
+/// `pass`, the password of its SFTP, FTP, SMB and WebDAV backends
+/// (`bypass_cache` and `passive` hold none); SFTP's `key_file_pass` and
+/// `key_pem`; Azure Blob's `sas_url` and `connection_string` (which holds the
+/// account key); the `sse_customer_key_base64` of S3 and B2; Storj's
+/// `access_grant`; Filen's `master_keys`; SugarSync's `authorization`; the
+/// `headers` of WebDAV and HTTP, which take `Authorization,Bearer …`; and
+/// Proton Drive's one-time code, `2fa`.
+const SECRET_NAMES: [&str; 11] = [
+    "pass",
+    "key_file_pass",
+    "key_pem",
+    "sas_url",
+    "connection_string",
+    "sse_customer_key_base64",
+    "access_grant",
+    "master_keys",
+    "authorization",
+    "headers",
+    "2fa",
+];
+
+/// Names that hold a credential in an rclone connection string and not as a
+/// rustic option: rclone's B2 backend keeps its application key in `key`,
+/// Swift its API key and Azure Blob its shared key, where the `key` of
+/// rustic's OpenDAL SFTP backend is the path of a key file.
+const RCLONE_SECRET_NAMES: [&str; 1] = ["key"];
 
 /// Whether a backend option of this name holds a credential, whoever wrote
 /// it. The values of such options are secrets even when they are written
@@ -35,13 +58,25 @@ const SECRET_NAMES: [&str; 1] = ["pass"];
 /// file, are not secrets. Anything whose value comes from a `${…}` reference
 /// is a secret whatever its name.
 pub fn is_secret_option(name: &str) -> bool {
-    let name = name.to_ascii_lowercase().replace('-', "_");
+    let name = normalised(name);
     if NOT_SECRETS.contains(&name.as_str()) {
         return false;
     }
     SECRET_NAMES.contains(&name.as_str())
         || SECRET_WORDS.iter().any(|word| name.contains(word))
         || name.ends_with("_key")
+}
+
+/// Whether a setting of this name in an rclone connection string holds a
+/// credential: what [`is_secret_option`] takes for one, and the
+/// [`RCLONE_SECRET_NAMES`].
+pub(super) fn is_rclone_secret_option(name: &str) -> bool {
+    is_secret_option(name) || RCLONE_SECRET_NAMES.contains(&normalised(name).as_str())
+}
+
+/// `name` in lower case with `-` read as `_`.
+fn normalised(name: &str) -> String {
+    name.to_ascii_lowercase().replace('-', "_")
 }
 
 #[cfg(test)]
@@ -149,6 +184,54 @@ mod tests {
             "compass",
         ] {
             assert!(!is_secret_option(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn rclones_own_credential_names_are_secrets_as_whole_names() {
+        for name in [
+            "key_file_pass",
+            "key-file-pass",
+            "KEY_PEM",
+            "sas_url",
+            "connection_string",
+            "sse_customer_key_base64",
+            // Storj's access grant, Filen's master keys, SugarSync's
+            // authorization, the headers of WebDAV and HTTP (which take
+            // `Authorization,Bearer …`), and Proton Drive's one-time code.
+            "access_grant",
+            "Access-Grant",
+            "master_keys",
+            "authorization",
+            "headers",
+            "2fa",
+        ] {
+            assert!(is_secret_option(name), "{name}");
+        }
+        for name in [
+            "key_file",
+            "key_use_agent",
+            "pubkey",
+            "sse_customer_key_md5",
+            "url",
+            "access",
+            "master_key_id",
+            "header",
+        ] {
+            assert!(!is_secret_option(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn key_is_a_credential_only_in_an_rclone_connection_string() {
+        // rclone's B2, Swift and Azure Blob backends keep a credential in
+        // `key`; a rustic option of that name is SFTP's key file path.
+        for name in ["key", "KEY", "pass", "secret_access_key", "key_pem"] {
+            assert!(is_rclone_secret_option(name), "{name}");
+        }
+        assert!(!is_secret_option("key"));
+        for name in ["key_file", "access_key_id", "use_password", "host", ""] {
+            assert!(!is_rclone_secret_option(name), "{name}");
         }
     }
 }

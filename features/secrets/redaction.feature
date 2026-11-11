@@ -119,6 +119,15 @@ Feature: Secrets stay out of what is reported
       And the debug form of the access still shows "endpoint"
       And the debug form of the access still shows "secret_access_key"
 
+    Scenario: A credential written in an rclone connection string is hidden in either half, quotes and all
+      Given the repository is "rclone::sftp,host=nas.example.net,pass='CANARY-rclone-pass,with:colon':/backups"
+      And the hot repository is "rclone::b2,account=demo-account,key=CANARY-rclone-b2-key:demo-bucket"
+      When the repository is resolved
+      Then the debug form of the access shows no "CANARY-rclone"
+      And the debug form of the access shows no "with:colon"
+      And the debug form of the access still shows "nas.example.net"
+      And the debug form of the access still shows "demo-bucket"
+
   Rule: The debug form of the resolved repository hides the hot and cold fields too
 
     Scenario: The hot repository and the hot and cold options are hidden
@@ -181,6 +190,12 @@ Feature: Secrets stay out of what is reported
     Scenario: The hot repository is hidden
       Given the hot repository is "rest:https://demo:hunter4@hot.example.net/repo"
       Then the debug form of the settings shows no "hunter4"
+
+    Scenario: A credential written in an rclone connection string is hidden
+      Given the repository is "rclone::azureblob,account=demo-account,sas_url='CANARY-sas''url':demo-container"
+      Then the debug form of the settings shows no "CANARY-sas"
+      And the debug form of the settings shows no "url'"
+      And the debug form of the settings still shows "demo-container"
 
     Scenario: A password in the settings that names a source shows the source, not a value
       Given the repository's password is in the file "/home/demo/password"

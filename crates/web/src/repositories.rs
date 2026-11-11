@@ -203,7 +203,8 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretCommandTimedOut
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
-        | ErrorCode::TemplateInvalid => {
+        | ErrorCode::TemplateInvalid
+        | ErrorCode::LocationTooManyCredentials => {
             let named = args.iter().find_map(|(name, value)| match value {
                 MsgArg::Text(field) if name == "field" => Some(field.as_str()),
                 _ => None,
@@ -653,6 +654,18 @@ mod tests {
                 "{code:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_location_with_too_many_credentials_belongs_to_the_location_it_is() {
+        let field = |name: &str| {
+            field_of(
+                ErrorCode::LocationTooManyCredentials,
+                &[("field".into(), text(name))],
+            )
+        };
+        assert_eq!(field("repository"), Some(Field::Location));
+        assert_eq!(field("repo-hot"), Some(Field::HotStorage));
     }
 
     #[test]

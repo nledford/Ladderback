@@ -312,6 +312,32 @@ Feature: Export a plan as a rustic profile
       And the export made no profile
       And the export never shows "CANARY-rclone-secret"
 
+    Scenario Outline: A credential under a name of rclone's own is refused, naming the key and never the secret
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "<location>"
+        password-file = "/srv/demo-password"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        """
+      When the owner exports the plan "home"
+      Then the export is refused naming "repository"
+      And the export made no profile
+      And the export never shows "CANARY-rclone-credential"
+
+      Examples:
+        | location                                                                                             |
+        | rclone::sftp,host=nas.example.com,key_file_pass=CANARY-rclone-credential:/backups                    |
+        | rclone::sftp,host=nas.example.com,key_pem='CANARY-rclone-credential':/backups                        |
+        | rclone::azureblob,account=demo,sas_url='https://demo.example.com/?sig=CANARY-rclone-credential':demo |
+        | rclone::b2,account=demo,key=CANARY-rclone-credential:demo-bucket                                     |
+
     Scenario: An option with a user or a password in an address is left out like a secret
       Given a config file holding:
         """

@@ -258,6 +258,23 @@ fn hot_repository_is(agent: &mut Agent, repository: String) {
     agent.secrets.settings.repo_hot = Some(repository);
 }
 
+/// An rclone connection string with `count` credentials, each a setting of
+/// its own: `rclone::sftp,host=nas.example.net,pass=demo-pass-0,…:backups`.
+fn rclone_credentials(count: usize) -> String {
+    let settings: String = (0..count).map(|n| format!(",pass=demo-pass-{n}")).collect();
+    format!("rclone::sftp,host=nas.example.net{settings}:backups")
+}
+
+#[given(expr = "the repository is an rclone connection string with {int} credentials")]
+fn repository_with_credentials(agent: &mut Agent, count: usize) {
+    agent.secrets.settings.repository = rclone_credentials(count);
+}
+
+#[given(expr = "the hot repository is an rclone connection string with {int} credentials")]
+fn hot_repository_with_credentials(agent: &mut Agent, count: usize) {
+    agent.secrets.settings.repo_hot = Some(rclone_credentials(count));
+}
+
 #[given(expr = "the option {string} is {string}")]
 fn option_is(agent: &mut Agent, name: String, value: String) {
     agent.secrets.settings.options.insert(name, value);
@@ -413,6 +430,11 @@ fn expand_too_long(agent: &mut Agent, limit: usize) {
 #[then("the reference is refused because it would reach the arguments of a process")]
 fn refused(agent: &mut Agent) {
     assert_eq!(agent.secrets.cause(), &Cause::ReferenceInProcessArguments);
+}
+
+#[then(expr = "the field is refused because it holds more than {int} credentials")]
+fn too_many_credentials(agent: &mut Agent, limit: usize) {
+    assert_eq!(agent.secrets.cause(), &Cause::TooManyCredentials { limit });
 }
 
 #[then(expr = "the failure names the variable {string}")]

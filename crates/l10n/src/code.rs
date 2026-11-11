@@ -63,6 +63,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretInProcessArguments => msg::ERROR_SECRET_IN_PROCESS_ARGUMENTS,
     SecretExpansionTooLong => msg::ERROR_SECRET_EXPANSION_TOO_LONG,
     TemplateInvalid => msg::ERROR_TEMPLATE_INVALID,
+    LocationTooManyCredentials => msg::ERROR_LOCATION_TOO_MANY_CREDENTIALS,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
     RepositoryUnknown => msg::ERROR_REPOSITORY_UNKNOWN,
     InvalidBody => msg::ERROR_INVALID_BODY,

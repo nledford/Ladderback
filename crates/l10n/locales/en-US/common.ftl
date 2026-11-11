@@ -321,6 +321,11 @@ error-template-invalid = { $at ->
    *[other] The repository's { $field } has a reference that is not valid at byte { $at }. A reference is { "${VAR}" } for an environment variable or { "${file:/path}" } for a file.
   }
 
+# A location is an rclone connection string with more credentials written in it than a job takes: each would have to be hidden in everything the job shows.
+# $field (text): which location it is.
+# rclone is a program's name: keep it as it is.
+error-location-too-many-credentials = The repository's { $field } is an rclone connection string with more credentials written in it than a job takes. Keep rclone's credentials in its own configuration file, and name the remote that holds them in the location instead.
+
 ## Profile codes: importing and exporting a rustic profile (technical design §6.2)
 
 # The profile, or a profile it uses, could not be read.

@@ -29,6 +29,15 @@ impl Reference {
             },
         }
     }
+
+    /// How many bytes the reference is written in: `${VAR}` or
+    /// `${file:/path}`.
+    pub(super) fn written_len(&self) -> usize {
+        match self {
+            Self::Env(name) => name.len().saturating_add("${}".len()),
+            Self::File(path) => path.len().saturating_add("${file:}".len()),
+        }
+    }
 }
 
 /// One piece of a template.

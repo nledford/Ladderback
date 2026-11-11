@@ -496,6 +496,27 @@ Feature: Secret references in a repository's settings
       When the repository is resolved
       Then the resolved repository is "rclones:demo-backups"
 
+  Rule: An rclone repository holds no more than 16 credentials
+    Each credential written in an rclone connection string is a secret to
+    hide in every text a job shows, where rclone's errors may quote one on
+    its own (I4). A location with more is refused before anything is read.
+
+    Scenario: An rclone repository with more credentials than the limit is refused
+      Given the repository's password is in the environment variable "DEMO_PASSWORD"
+      And the repository is an rclone connection string with 17 credentials
+      When the repository is resolved
+      Then the resolution fails for the field "repository"
+      And the field is refused because it holds more than 16 credentials
+      And nothing was read
+
+    Scenario: An rclone hot repository with more credentials than the limit is refused
+      Given the repository is "/srv/demo-cold"
+      And the hot repository is an rclone connection string with 17 credentials
+      When the repository is resolved
+      Then the resolution fails for the field "repo-hot"
+      And the field is refused because it holds more than 16 credentials
+      And nothing was read
+
   Rule: The first field that fails is the one reported
 
     Scenario Outline: Fields are tried in a fixed order
