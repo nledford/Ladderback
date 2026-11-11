@@ -174,7 +174,11 @@ async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
     for attempt in 0..3 {
         std::fs::write(&harness.log, "").expect("the log is cleared");
         let started = std::time::Instant::now();
-        let outcome = runner.run(&hook, &context).await;
+        // A runner that never stops the hook fails this test here; it must not
+        // hang the run for something else to give up on.
+        let outcome = tokio::time::timeout(Duration::from_secs(30), runner.run(&hook, &context))
+            .await
+            .expect("the call was still running 30 s after it began");
         let elapsed = started.elapsed();
         assert_eq!(outcome.status, HookStatus::TimedOut);
         let lines = harness.written().await;
@@ -186,7 +190,7 @@ async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
                 "SIGTERM reached the group before the kill: {lines:?}"
             );
             assert!(
-                elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(30),
+                elapsed >= Duration::from_secs(5),
                 "TERM, then the 5 s grace, then KILL: {elapsed:?}"
             );
             return;

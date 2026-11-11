@@ -1,23 +1,27 @@
 //! What the stop of a hook that outlives its timeout does, and does not do,
 //! with the signals sent for real and remembered. The contract the runner
 //! meets as a port is in `tests/contract.rs`.
+//!
+//! A runner that never stops a hook must fail the test that waits for it, not
+//! hang the run: each wait on a stop has a bound of its own (`within`).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use app::ports::{HookContext, HookPhase, HookRunner, HookStatus};
+use app::ports::{HookContext, HookPhase, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 use tempfile::TempDir;
 
-use crate::{ProcessHookRunner, Stop};
+use crate::{ProcessHookRunner, READ_CHUNK, Stop, read_capped, signal_group};
 
-/// A stop's signals, sent for real and remembered, each with whether the
-/// leader of the group was there (not reaped) when it went.
+/// A stop's signals, sent for real, by the runner's own `signal_group`, and
+/// remembered, each with whether the leader of the group was there (not
+/// reaped) when it went.
 #[derive(Default)]
 struct Signals(Mutex<Vec<(Signal, bool)>>);
 
@@ -26,7 +30,7 @@ impl Signals {
         // Signal 0 only asks whether the process is there, reaped or not.
         let there = kill(group, None).is_ok();
         self.0.lock().unwrap().push((signal, there));
-        let _ = killpg(group, signal);
+        signal_group(group, signal);
     }
 
     fn sent(&self) -> Vec<(Signal, bool)> {
@@ -79,17 +83,71 @@ fn pid_in(lines: &[String]) -> i32 {
         .expect("the script wrote its pid")
 }
 
+/// The longest a call may take to stop a hook that ends on its SIGTERM, with
+/// a timeout of a second, which takes about that: the signal, the hook's own
+/// exit and slack for a loaded machine. No longer, so that a mutant that
+/// fails every test at its bound still ends inside cargo-mutants' limit on a
+/// runner with few cores.
+const ENDS_ON_TERM: Duration = Duration::from_secs(6);
+
+/// A loop a hook starts in the background: it writes a line to `$1.ticks`
+/// every 50 ms for as long as `$1`, the log, is there, so one that a test
+/// leaves running by mistake ends with the test's scratch directory. The
+/// script moves on once the loop has ticked: it runs.
+const TICKER: &str = concat!(
+    ": > \"$1.ticks\"\n",
+    "(while [ -e \"$1\" ]; do echo tick >> \"$1.ticks\"; sleep 0.05; done) &\n",
+    "until [ -s \"$1.ticks\" ]; do sleep 0.01; done\n",
+);
+
+/// Awaits `call` for at most `bound` and fails the test when it is still
+/// running then: a hook that is never stopped is a test that fails, not one
+/// that waits for something else to give up on it.
+async fn within<T>(bound: Duration, call: impl Future<Output = T>) -> T {
+    tokio::time::timeout(bound, call)
+        .await
+        .unwrap_or_else(|_| panic!("the call was still running after {bound:?}"))
+}
+
+/// Whether the ticks of the hook with the log `log` have stopped: their
+/// count no longer grows. What a stop ends is gone moments after the call
+/// returns, not at its return, so this looks for a few seconds. The loop has
+/// ticked, or there is nothing to have outlived the stop.
+async fn ticks_stop(log: &Path) -> bool {
+    let ticks = PathBuf::from(format!("{}.ticks", log.display()));
+    let count = || lines(&ticks).len();
+    assert!(count() > 0, "the hook's loop never ticked");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let before = count();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        if count() == before {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+    }
+}
+
 /// What one run of a hook, stopped at its timeout, did.
 struct Trapped {
     status: HookStatus,
     lines: Vec<String>,
     elapsed: Duration,
     sent: Vec<(Signal, bool)>,
+    /// Holds the hook's files until the test is over.
+    scratch: TempDir,
 }
 
 impl Trapped {
     fn wrote(&self, line: &str) -> bool {
         self.lines.iter().any(|written| written == line)
+    }
+
+    /// The log the hook wrote to, `$1` of its script.
+    fn log(&self) -> PathBuf {
+        self.scratch.path().join("log")
     }
 }
 
@@ -98,11 +156,18 @@ impl Trapped {
 /// starting when the timeout fires is ended by the TERM before it has trapped
 /// anything, which reads as a clean stop with nothing written: only a run
 /// whose script said `ready` once its trap was in place proves anything, so
-/// the others are tried again.
-async fn run_trapping(script: &str, timeout: Duration, grace: Duration) -> Trapped {
+/// the others are tried again. A call still running after `bound` fails the
+/// test.
+async fn run_trapping(
+    script: &str,
+    timeout: Duration,
+    grace: Duration,
+    bound: Duration,
+) -> Trapped {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
     let entry = sh(script, &log);
+    let context = context();
     let runner = ProcessHookRunner::with_timeout(timeout);
     let mut written = Vec::new();
     for _ in 0..3 {
@@ -114,7 +179,8 @@ async fn run_trapping(script: &str, timeout: Duration, grace: Duration) -> Trapp
             signal: &|group, signal| signals.send(group, signal),
         };
         let started = Instant::now();
-        let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+        let call = runner.spawn_and_wait_with(&entry, &context, &stop);
+        let (status, _) = within(bound, call).await;
         let elapsed = started.elapsed();
         written = lines(&log);
         if written.iter().any(|line| line == "ready") {
@@ -123,6 +189,7 @@ async fn run_trapping(script: &str, timeout: Duration, grace: Duration) -> Trapp
                 lines: written,
                 elapsed,
                 sent: signals.sent(),
+                scratch,
             };
         }
     }
@@ -144,6 +211,7 @@ async fn a_hook_can_still_write_to_its_output_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -159,7 +227,6 @@ async fn a_hook_can_still_write_to_its_output_when_it_gets_sigterm() {
 /// the leader was there, and nothing went after it.
 #[tokio::test]
 async fn a_hook_that_ends_on_sigterm_is_signalled_once_and_not_after_the_reap() {
-    let limit = Duration::from_secs(1);
     let trapped = run_trapping(
         concat!(
             r#"trap 'echo term >> "$1"; exit 0' TERM"#,
@@ -168,18 +235,14 @@ async fn a_hook_that_ends_on_sigterm_is_signalled_once_and_not_after_the_reap() 
             "\n",
             "while :; do sleep 1 & wait $!; done",
         ),
-        limit,
+        Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
     assert!(trapped.wrote("term"), "{:?}", trapped.lines);
     assert_eq!(trapped.sent, [(Signal::SIGTERM, true)]);
-    assert!(
-        trapped.elapsed < limit + Duration::from_secs(10),
-        "the call waited {:?}",
-        trapped.elapsed
-    );
 }
 
 /// A hook no signal reaches, as one stuck in the kernel is: the timeout ends
@@ -234,6 +297,8 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         ),
         limit,
         grace,
+        // The reap after the SIGKILL is bounded by five seconds; one more is slack.
+        limit + grace + Duration::from_secs(6),
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -247,12 +312,6 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         "the grace was not given: {:?}",
         trapped.elapsed
     );
-    // The reap after the SIGKILL is bounded by five seconds; the rest is slack.
-    assert!(
-        trapped.elapsed < limit + grace + Duration::from_secs(15),
-        "the call waited {:?}",
-        trapped.elapsed
-    );
     let pid = pid_in(&trapped.lines);
     let _reaper = Reaper(pid);
     // Reaped: gone from the process table (a zombie still answers signal 0).
@@ -264,7 +323,7 @@ async fn a_hook_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
 
 /// Waits until the log at `log` has the line `line`.
 async fn logged(log: &Path, line: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if lines(log).iter().any(|written| written == line) {
             return;
@@ -496,15 +555,16 @@ async fn the_call_waits_for_a_killed_hook_to_be_reaped() {
     let scratch = TempDir::new().unwrap();
     let entry = sh("exec sleep 60", &scratch.path().join("log"));
     let runner = ProcessHookRunner::with_timeout(timeout);
+    let context = context();
     let started = Instant::now();
-    let (status, _) = runner.spawn_and_wait_with(&entry, &context(), &stop).await;
+    let call = runner.spawn_and_wait_with(&entry, &context, &stop);
+    let (status, _) = within(Duration::from_secs(5), call).await;
     let elapsed = started.elapsed();
     assert_eq!(status, HookStatus::TimedOut);
     assert!(
         elapsed >= timeout + grace + delay,
         "the call did not wait for the hook: {elapsed:?}"
     );
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 /// A pipe holds 64 KiB or so. A hook that says more than that on its way out
@@ -525,6 +585,7 @@ async fn a_hook_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(5),
+        ENDS_ON_TERM,
     )
     .await;
     assert_eq!(trapped.status, HookStatus::TimedOut);
@@ -555,6 +616,7 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
+        ENDS_ON_TERM,
     )
     .await;
     let descendant = pid_in(&trapped.lines);
@@ -566,4 +628,164 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_hook_that_ended_on_it() {
         kill(Pid::from_raw(descendant), None).is_ok(),
         "{descendant} was killed"
     );
+}
+
+/// A hook's process group holds what the hook started, and a stop is for the
+/// group, not the hook alone: the SIGTERM that ends a hook at its timeout
+/// ends what it started too. That is watched by what the loop writes
+/// (`TICKER`), not by a pid, so the test does not depend on who reaps an
+/// orphan.
+#[tokio::test]
+async fn what_a_hook_started_is_stopped_with_it_at_its_timeout() {
+    let trapped = run_trapping(
+        &format!("{TICKER}echo ready >> \"$1\"\nwait"),
+        Duration::from_secs(1),
+        Duration::from_secs(20),
+        ENDS_ON_TERM,
+    )
+    .await;
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(
+        ticks_stop(&trapped.log()).await,
+        "what the hook started is still running"
+    );
+}
+
+/// The SIGKILL, once the grace is over, is for the group too: the hook and
+/// what it started all ignore the SIGTERM, and are all gone after it.
+#[tokio::test]
+async fn what_ignores_sigterm_is_killed_with_the_hook_when_the_grace_is_over() {
+    let limit = Duration::from_secs(1);
+    let grace = Duration::from_secs(1);
+    let trapped = run_trapping(
+        &format!("trap '' TERM\n{TICKER}echo ready >> \"$1\"\nwhile :; do sleep 1 & wait $!; done"),
+        limit,
+        grace,
+        limit + grace + Duration::from_secs(6),
+    )
+    .await;
+    assert_eq!(trapped.status, HookStatus::TimedOut);
+    assert!(
+        ticks_stop(&trapped.log()).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A call that is given up on while the hook runs ends the hook's group, and
+/// what it started with it: `kill_on_drop` reaches the hook alone.
+#[tokio::test]
+async fn dropping_the_call_stops_what_the_hook_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    // The loop of `TICKER` runs for as long as the log is there.
+    fs::write(&log, "").unwrap();
+    let entry = sh(&format!("{TICKER}echo ready >> \"$1\"\nwait"), &log);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(60));
+    let context = context();
+    let stop = Stop {
+        grace: Duration::from_secs(60),
+        reap_limit: Duration::from_secs(5),
+        signal: &signal_group,
+    };
+    {
+        let running = runner.spawn_and_wait_with(&entry, &context, &stop);
+        tokio::pin!(running);
+        tokio::select! {
+            outcome = &mut running => panic!("the hook ended by itself: {:?}", outcome.0),
+            () = logged(&log, "ready") => {}
+        }
+        // `running` is dropped here, with the hook running.
+    }
+    assert!(
+        ticks_stop(&log).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A runner built with a timeout stops a hook at it, not at the default of
+/// five minutes: this hook would run for a minute.
+#[tokio::test]
+async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
+    let scratch = TempDir::new().unwrap();
+    let entry = sh("exec sleep 60", &scratch.path().join("log"));
+    let timeout = Duration::from_millis(300);
+    let runner = ProcessHookRunner::with_timeout(timeout);
+    let started = Instant::now();
+    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    assert_eq!(outcome.status, HookStatus::TimedOut);
+    assert!(
+        started.elapsed() >= timeout,
+        "the hook was stopped before its timeout: {:?}",
+        started.elapsed()
+    );
+}
+
+/// What `read_capped` keeps of `input` when it keeps at most `keep` bytes,
+/// whether it marks the stream cut, and how much of `input` it left unread.
+async fn read_capped_from(mut input: &[u8], keep: usize) -> (Vec<u8>, bool, usize) {
+    let mut kept = Vec::new();
+    let mut truncated = false;
+    read_capped(&mut input, &mut kept, keep, &mut truncated)
+        .await
+        .unwrap();
+    (kept, truncated, input.len())
+}
+
+/// A stream that just fills the cap lost nothing, whatever the reads it came
+/// in: the last of them ends exactly at the cap.
+#[tokio::test]
+async fn a_stream_that_just_fills_the_cap_is_kept_whole_and_not_marked_cut() {
+    let keep = 2 * READ_CHUNK + 5;
+    let (kept, truncated, _) = read_capped_from(&vec![b'a'; keep], keep).await;
+    assert_eq!(kept.len(), keep);
+    assert!(!truncated);
+}
+
+/// A read that crosses the cap keeps what is under it, drops the rest and
+/// marks the stream cut.
+#[tokio::test]
+async fn a_read_that_crosses_the_cap_keeps_what_is_under_it_and_marks_the_stream_cut() {
+    let (kept, truncated, unread) = read_capped_from(b"abcdefghijk", 10).await;
+    assert_eq!(kept, b"abcdefghij");
+    assert!(truncated);
+    assert_eq!(unread, 0);
+}
+
+/// What comes after the cap is full is read to the end and dropped, so the
+/// writer is never blocked, and the stream is marked cut.
+#[tokio::test]
+async fn what_comes_after_the_cap_is_full_is_read_and_dropped() {
+    let (kept, truncated, unread) = read_capped_from(&vec![b'a'; 3 * READ_CHUNK + 7], 10).await;
+    assert_eq!(kept, [b'a'; 10]);
+    assert!(truncated);
+    assert_eq!(unread, 0);
+}
+
+/// Of each stream a hook writes, the cap is what is kept, and a stream is
+/// marked cut only when it lost something: one of exactly the cap is whole,
+/// and one byte more is cut.
+#[tokio::test]
+async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_cut() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(30));
+    for (written, cut) in [
+        (MAX_HOOK_OUTPUT_BYTES, false),
+        (MAX_HOOK_OUTPUT_BYTES + 1, true),
+    ] {
+        let entry = sh(
+            &format!("printf '%{written}s' ''\nprintf '%{written}s' '' >&2"),
+            &log,
+        );
+        let outcome = within(Duration::from_secs(25), runner.run(&entry, &context())).await;
+        assert_eq!(outcome.status, HookStatus::Succeeded);
+        for (name, stream) in [("stdout", &outcome.stdout), ("stderr", &outcome.stderr)] {
+            assert_eq!(
+                stream.text.len(),
+                MAX_HOOK_OUTPUT_BYTES,
+                "{name} of {written} bytes"
+            );
+            assert_eq!(stream.truncated, cut, "{name} of {written} bytes");
+        }
+    }
 }
