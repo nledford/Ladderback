@@ -632,8 +632,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn a_worker_that_keeps_talking_cannot_hold_off_the_deadline() {
+    #[test]
+    fn a_worker_that_keeps_talking_cannot_hold_off_the_deadline() {
         let clock = Arc::new(FakeClock::new(START));
         let engine = Arc::new(Chatty {
             clock: clock.clone(),
@@ -644,8 +644,21 @@ mod tests {
             engine.clone(),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
         );
+        // The worker's messages are always ready, so a use case that never
+        // sees its time run out loops without handing its thread back, and a
+        // timeout on that thread never gets its turn. The use case runs on a
+        // thread of its own instead, and this one waits for it, bounded; a
+        // thread left looping ends with the test process.
+        let (tell, told) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("a runtime");
+            let _ = tell.send(runtime.block_on(use_case.test(op(), &settings())));
+        });
         assert_eq!(
-            within(use_case.test(op(), &settings())).await,
+            told.recv_timeout(Duration::from_secs(5))
+                .expect("the use case waited for ever"),
             Err(RepositoryError::TimedOut)
         );
         assert!(engine.killed.load(Ordering::SeqCst));

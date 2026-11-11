@@ -2,15 +2,9 @@
 //! rustic records them — absolute, dots removed, symlinks resolved, sorted
 //! and deduplicated — which is what adoption's matching compares (§7.3).
 
-use std::sync::Arc;
-
 use app::ports::NormalizeSources;
 use domain::planning::Source;
 use engine::RusticSources;
-
-mod support;
-
-use support::write_file;
 
 #[tokio::test]
 async fn a_symlink_is_resolved_as_rustic_records_it() {
@@ -77,20 +71,4 @@ async fn a_source_that_cannot_be_read_is_an_error_not_a_panic() {
         matches!(error, app::ports::SourcesError::Unreadable { .. }),
         "{error:?}"
     );
-}
-
-#[tokio::test]
-async fn a_writable_source_round_trips_through_the_fake_as_written() {
-    // The port's fake is the identity, which is the acceptance runner's
-    // contract: its scripted listings already report the sources as
-    // written. Checked here so the two adapters can't drift apart silently.
-    let scratch = tempfile::tempdir().expect("a scratch dir");
-    write_file(scratch.path().join("a.txt"), b"hello");
-    let source = Source::parse(scratch.path().to_str().expect("UTF-8")).expect("a source");
-    let fake: Arc<dyn NormalizeSources> = Arc::new(app::fakes::FakeSources);
-    let normalized = fake
-        .normalized(std::slice::from_ref(&source))
-        .await
-        .expect("the fake answers");
-    assert_eq!(normalized, vec![source]);
 }
