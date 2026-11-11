@@ -1001,7 +1001,8 @@ async fn next_log_line(
 /// Reads one line of the worker's stderr into `line`: the first
 /// [`MAX_LOG_LINE`] bytes of it. The rest of a longer line is read and
 /// dropped, never held. `Some(cut)` is a line, `cut` whether it was longer
-/// than that; `None` is the end of the stream.
+/// than that or ended without its newline, as a worker killed partway
+/// through a write leaves it; `None` is the end of the stream.
 async fn read_log_line(
     reader: &mut BufReader<ChildStderr>,
     line: &mut Vec<u8>,
@@ -1010,8 +1011,9 @@ async fn read_log_line(
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            // A last line without its newline counts.
-            return Ok((!line.is_empty() || cut).then_some(cut));
+            // A last line without its newline counts, as a cut one: the
+            // stream may have ended partway through a write.
+            return Ok((!line.is_empty() || cut).then_some(true));
         }
         let newline = available.iter().position(|&byte| byte == b'\n');
         let content = newline.unwrap_or(available.len());
