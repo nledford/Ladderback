@@ -215,7 +215,7 @@ impl Drop for Reaper {
 
 /// The process id a script wrote to `pidfile`, once it has.
 async fn recorded_pid(pidfile: &Path) -> i32 {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + SLACK;
     loop {
         if let Ok(text) = fs::read_to_string(pidfile)
             && text.ends_with('\n')
@@ -229,7 +229,7 @@ async fn recorded_pid(pidfile: &Path) -> i32 {
 }
 
 async fn is_gone_soon(pid: i32) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + SLACK;
     while is_running(pid) {
         if Instant::now() >= deadline {
             return false;
@@ -238,6 +238,13 @@ async fn is_gone_soon(pid: i32) -> bool {
     }
     true
 }
+
+/// What a call may take past the limit, grace or delay it waits for, on a
+/// slow runner. A test that waits for a signal that never went fails this
+/// soon after, not at a limit of the code's: a mutant that sends nothing
+/// leaves a dozen tests waiting, and a mutation run gives the whole test
+/// binary three times its usual time.
+const SLACK: Duration = Duration::from_secs(2);
 
 /// Awaits `call` for at most `bound` and fails the test when it is still
 /// running then.
@@ -251,8 +258,10 @@ async fn within<T>(bound: Duration, call: impl Future<Output = T>) -> T {
 
 #[tokio::test]
 async fn the_system_resolver_meets_the_secrets_contract() {
+    // The harness's commands have half a second, and the contract times one
+    // out; the slack is for that call and the many quick ones.
     within(
-        Duration::from_secs(10),
+        Duration::from_millis(500) + 2 * SLACK,
         app::contract::secrets::run(&RealHarness::new()),
     )
     .await;
@@ -268,11 +277,8 @@ async fn a_timed_out_command_takes_a_helper_of_its_group_with_it() {
         r#"sleep 60 & echo $! > "$1"; wait"#,
         [pidfile.display().to_string()],
     );
-    let result = within(
-        Duration::from_secs(5),
-        resolver(Duration::from_secs(1)).resolve(&command(script)),
-    )
-    .await;
+    let limit = Duration::from_secs(1);
+    let result = within(limit + SLACK, resolver(limit).resolve(&command(script))).await;
     assert_eq!(
         result,
         Err(SecretError {
@@ -292,7 +298,7 @@ async fn the_time_limit_is_reported_in_whole_seconds_rounded_up() {
         (Duration::from_millis(1_100), 2),
     ] {
         let result = within(
-            limit + Duration::from_secs(5),
+            limit + SLACK,
             resolver(limit).resolve(&command(sh("sleep 60", Vec::<String>::new()))),
         )
         .await;
@@ -317,7 +323,7 @@ async fn a_command_that_prints_without_end_is_stopped_at_the_limit_and_killed() 
     );
     // A minute is far more than this test waits for: the size ends it.
     let result = within(
-        Duration::from_secs(5),
+        SLACK,
         resolver(Duration::from_secs(60)).resolve(&command(script)),
     )
     .await;
@@ -1131,7 +1137,7 @@ async fn a_timed_out_command_gets_sigterm_before_anything_else() {
         limit,
         Duration::from_secs(20),
         // Far less than the grace: the call does not wait it out.
-        limit + Duration::from_secs(5),
+        limit + SLACK,
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1158,7 +1164,7 @@ async fn a_command_can_still_write_to_its_output_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
-        Duration::from_secs(6),
+        Duration::from_secs(1) + SLACK,
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1187,7 +1193,7 @@ async fn a_command_can_say_more_than_a_pipe_holds_when_it_gets_sigterm() {
         ),
         Duration::from_secs(1),
         Duration::from_secs(5),
-        Duration::from_secs(6),
+        Duration::from_secs(1) + SLACK,
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1218,8 +1224,8 @@ async fn a_command_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
         ),
         limit,
         grace,
-        // The reap after the SIGKILL is bounded by five seconds; one more is slack.
-        limit + grace + Duration::from_secs(6),
+        // The SIGKILL ends it at once.
+        limit + grace + SLACK,
     )
     .await;
     assert_eq!(trapped.result, timed_out());
@@ -1252,9 +1258,9 @@ async fn a_command_that_ignores_sigterm_is_killed_when_the_grace_is_over() {
     assert!(is_gone_soon(pid).await, "{pid} is still running");
 }
 
-/// Waits until the log at `log` has the line `line`.
-async fn logged(log: &Path, line: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+/// Waits until the log at `log` has the line `line`, for at most `bound`.
+async fn logged(log: &Path, line: &str, bound: Duration) {
+    let deadline = Instant::now() + bound;
     loop {
         if fs::read_to_string(log).is_ok_and(|text| text.lines().any(|written| written == line)) {
             return;
@@ -1295,14 +1301,15 @@ async fn dropping_the_call_during_the_grace_kills_the_command() {
             signal: &|group, signal| signals.send(group, signal),
         };
         {
-            let running = run_with(&command, Duration::from_secs(1), &stop);
+            let limit = Duration::from_secs(1);
+            let running = run_with(&command, limit, &stop);
             tokio::pin!(running);
             tokio::select! {
                 result = &mut running => {
                     assert!(attempt < 2, "the command never reached its trap: {result:?}");
                     continue;
                 }
-                () = logged(&log, "term") => {}
+                () = logged(&log, "term", limit + SLACK) => {}
             }
             // `running` is dropped here, in the middle of the grace.
         }
@@ -1334,7 +1341,7 @@ async fn a_command_that_prints_without_end_gets_no_grace() {
     };
     // `yes` takes the ignored SIGTERM of the shell that executes it.
     let result = within(
-        Duration::from_secs(5),
+        SLACK,
         run_with(
             &sh("trap '' TERM; exec yes", Vec::<String>::new()),
             Duration::from_secs(60),
@@ -1373,7 +1380,7 @@ async fn a_descendant_that_ignores_sigterm_outlives_a_command_that_ended_on_it()
         ),
         Duration::from_secs(1),
         Duration::from_secs(20),
-        Duration::from_secs(6),
+        Duration::from_secs(1) + SLACK,
     )
     .await;
     let descendant = trapped
@@ -1412,7 +1419,7 @@ async fn the_call_waits_for_a_killed_command_to_be_reaped() {
     };
     let started = Instant::now();
     let result = within(
-        Duration::from_secs(5),
+        limit + grace + delay + SLACK,
         run_with(&sh("sleep 60", Vec::<String>::new()), limit, &stop),
     )
     .await;
