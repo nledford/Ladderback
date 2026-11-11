@@ -25,6 +25,9 @@ use super::{Agent, blocking};
 
 /// How long a page may wait for an event a run already published.
 const EVENT_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a daemon told to stop may take to exit: the 20 s it gives the
+/// operation log to close, and a few seconds for the rest.
+const STOP_TIMEOUT: Duration = Duration::from_secs(23);
 const LISTENING: &str = "listening on http://";
 
 /// What the live-updates scenarios keep between steps.
@@ -43,6 +46,8 @@ pub struct Events {
     /// so the scenario's end stops it.
     #[allow(dead_code)]
     second: Option<Daemon>,
+    /// How the daemon ended once it was told to stop.
+    stopped: Option<ExitStatus>,
 }
 
 /// A running daemon, stopped when the scenario ends.
@@ -93,6 +98,40 @@ impl Events {
     pub(crate) fn kill(&mut self) {
         let daemon = self.daemon.take().expect("Ladderback is serving");
         drop(daemon);
+    }
+
+    /// Tells the daemon to stop, with the SIGTERM systemd and launchd send,
+    /// and waits for it to exit. Runs on a blocking thread: see [`blocking`].
+    pub(crate) async fn stop(agent: &mut Agent) {
+        let mut daemon = agent.events.daemon.take().expect("Ladderback is serving");
+        let status = blocking(move || {
+            // `kill` sends it without a crate of its own for that, as
+            // `tests/logging.rs` does.
+            let sent = Command::new("kill")
+                .arg("-TERM")
+                .arg(daemon.child.id().to_string())
+                .status()
+                .expect("kill runs");
+            assert!(sent.success(), "the daemon is sent SIGTERM: {sent}");
+            let began = std::time::Instant::now();
+            loop {
+                if let Some(status) = daemon.child.try_wait().expect("the daemon's status") {
+                    return status;
+                }
+                assert!(
+                    began.elapsed() < STOP_TIMEOUT,
+                    "the daemon was still running {STOP_TIMEOUT:?} after SIGTERM"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+        .await;
+        agent.events.stopped = Some(status);
+    }
+
+    /// How the daemon ended once it was told to stop.
+    pub(crate) fn stopped(&self) -> ExitStatus {
+        self.stopped.expect("the daemon was told to stop")
     }
 
     /// The config folder of that daemon.

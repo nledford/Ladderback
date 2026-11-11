@@ -176,7 +176,11 @@ fn run_daemon(
     // is listening. By the time it is handed back it has locked the data
     // folder and ended what an earlier run left unfinished, so no request is
     // served before the log says what really happened (§4.2, §9).
-    let composition::Daemon { state, lock } = match runtime.block_on(composition::daemon()) {
+    let composition::Daemon {
+        state,
+        log: operation_log,
+        lock,
+    } = match runtime.block_on(composition::daemon()) {
         Ok(daemon) => daemon,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;
@@ -223,6 +227,11 @@ fn run_daemon(
             }
         }
     });
+    // The operation log closes once the server has stopped, inside the
+    // runtime, so a write in flight ends as it would have rather than being
+    // cut off, and nothing of the log outlives the daemon. Whatever came of
+    // serving, a refusal to listen included (§9).
+    runtime.block_on(operation_log.close());
     // The lock is let go last: until the runtime is gone, a job it was running
     // may still hold the operation log, and another daemon must not recover
     // that log from under it (§9).

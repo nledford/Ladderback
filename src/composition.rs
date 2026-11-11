@@ -94,12 +94,43 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     }
 }
 
-/// What `serve` runs: the router's state, and the hold on the data folder that
-/// keeps every other process off it. The caller keeps the lock until the
-/// daemon is gone.
+/// What `serve` runs: the router's state, the operation log it writes, and
+/// the hold on the data folder that keeps every other process off it. The
+/// caller closes the log once it has stopped serving, and keeps the lock
+/// until the daemon is gone (§9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
+    pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
+}
+
+/// How long the daemon waits for the operation log to close once it stops
+/// (§9): as long as a run waits for one write of its own
+/// ([`app::log_write::SAVE_BOUND`]), which is past the store's own bound on
+/// a call (about 15 s: 10 s for a connection, 5 s for the write lock). A
+/// close waits for the calls in flight, so a busy store still finishes
+/// them; one that hasn't by then is stalled (a disk that stopped
+/// answering), and the daemon stops without it rather than hold up the
+/// service manager, which would kill it anyway.
+const LOG_CLOSE_BOUND: std::time::Duration =
+    std::time::Duration::from_secs(app::log_write::SAVE_BOUND.as_secs().unsigned_abs());
+
+/// The operation log the daemon writes, which it closes before it lets go
+/// of the data folder.
+pub(crate) struct OperationLog {
+    store: Arc<SqliteStore>,
+    database: std::path::PathBuf,
+}
+
+impl OperationLog {
+    /// Closes the log once the calls in flight have ended, so no connection
+    /// to it, and none of its `-wal` and `-shm` files, outlives the daemon.
+    /// It waits [`LOG_CLOSE_BOUND`] at most, and says in the log when it
+    /// gave up; what a call cut off then was still writing is ended at the
+    /// next start, as after a crash.
+    pub(crate) async fn close(&self) {
+        close_within(self.store.close(), &self.database, LOG_CLOSE_BOUND).await;
+    }
 }
 
 /// What the daemon's router runs against (§4.2), or why it cannot.
@@ -133,11 +164,33 @@ async fn daemon_at(
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
     let database = data_dir.join("ladderback.db");
-    let store: Arc<dyn OperationStore> = Arc::new(
-        SqliteStore::open(&database)
-            .await
-            .map_err(|detail| store_refused(&database, &detail.to_string()))?,
-    );
+    let log = OperationLog {
+        store: Arc::new(
+            SqliteStore::open(&database)
+                .await
+                .map_err(|detail| store_refused(&database, &detail.to_string()))?,
+        ),
+        database,
+    };
+    // Every refusal from here on closes the log first: the refused daemon
+    // leaves it as tidy as one that served and stopped.
+    match state_over(config, &data_dir, &log).await {
+        Ok(state) => Ok(Daemon { state, log, lock }),
+        Err(refused) => {
+            log.close().await;
+            Err(refused)
+        }
+    }
+}
+
+/// The router's state over the operation log `log`, once it has ended what
+/// an earlier run left unfinished, or why the daemon cannot serve.
+async fn state_over(
+    config: Arc<dyn ConfigStore>,
+    data_dir: &std::path::Path,
+    log: &OperationLog,
+) -> Result<AppState, Refused> {
+    let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     // Nothing has run yet, so an operation the log still shows as queued or
     // running was left by a process that stopped. It ends as failed now, which
     // also lets go of the repository a running maintenance operation held
@@ -146,14 +199,14 @@ async fn daemon_at(
     let ended = RecoverOperations::new(Arc::clone(&store))
         .recover()
         .await
-        .map_err(|error| recovery_refused(&database, &error))?;
+        .map_err(|error| recovery_refused(&log.database, &error))?;
     if ended > 0 {
         log::warn!(
             "ended {ended} operation(s) the operation log still showed as queued or running: the daemon that ran them stopped before they finished"
         );
     }
-    let agent_id = agent_id::load_or_create(&data_dir)
-        .map_err(|detail| store_refused(&data_dir, &detail.to_string()))?;
+    let agent_id = agent_id::load_or_create(data_dir)
+        .map_err(|detail| store_refused(data_dir, &detail.to_string()))?;
     // Workers are this program: `ladderback worker` (§4.1).
     let program = std::env::current_exe().map_err(|detail| Refused {
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
@@ -183,15 +236,28 @@ async fn daemon_at(
         Arc::clone(&config),
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog { config, engine });
-    Ok(Daemon {
-        state: AppState {
-            events: bus,
-            operations,
-            catalog,
-            repositories,
-        },
-        lock,
+    Ok(AppState {
+        events: bus,
+        operations,
+        catalog,
+        repositories,
     })
+}
+
+/// Waits for `close`, the closing of the operation log at `database`, for
+/// at most `bound`, and says in the log when it gave up.
+async fn close_within(
+    close: impl Future<Output = ()>,
+    database: &std::path::Path,
+    bound: std::time::Duration,
+) {
+    if tokio::time::timeout(bound, close).await.is_err() {
+        log::warn!(
+            "the operation log {} did not close within {} s, and the daemon stops without it: an operation it was still recording is ended at the next start",
+            database.display(),
+            bound.as_secs_f64()
+        );
+    }
 }
 
 /// A data folder another process holds, or a lock that couldn't be taken, as
@@ -1969,23 +2035,18 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held() {
+    /// Leaves at `database` a log that shows `id` as a running backup and
+    /// refuses every change to its operations, as a failing disk would.
+    async fn a_log_that_refuses_changes(database: &std::path::Path, id: OperationId) {
         use sqlx::{ConnectOptions, Connection};
-        let scratch = tempfile::tempdir().expect("a scratch dir");
-        let (config, data) = own_folders(scratch.path());
-        let database = data.join("ladderback.db");
-        let id = OperationId::from_uuid(Uuid::from_u128(1));
-        let earlier = SqliteStore::open(&database).await.expect("the log opens");
+        let earlier = SqliteStore::open(database).await.expect("the log opens");
         earlier
             .save(&running_backup(id), None)
             .await
             .expect("the running backup is saved");
         earlier.close().await;
-        // A log that refuses every change to its operations, as a failing disk
-        // would.
         let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&database)
+            .filename(database)
             .connect()
             .await
             .expect("a raw connection to the log");
@@ -1997,6 +2058,30 @@ mod tests {
         .await
         .expect("the log is made to refuse changes");
         raw.close().await.expect("the connection closes");
+    }
+
+    /// Fails unless the operation log at `database` is closed: SQLite removes
+    /// its `-wal` and `-shm` files when the last connection to it closes.
+    fn assert_closed(database: &std::path::Path) {
+        for suffix in ["-wal", "-shm"] {
+            let mut file = database.as_os_str().to_owned();
+            file.push(suffix);
+            let file = std::path::PathBuf::from(file);
+            assert!(
+                !file.exists(),
+                "{} outlived the daemon: the operation log is still open",
+                file.display()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        let id = OperationId::from_uuid(Uuid::from_u128(1));
+        a_log_that_refuses_changes(&database, id).await;
 
         let refused = daemon_at(Some(config), Some(data))
             .await
@@ -2016,6 +2101,72 @@ mod tests {
             detail.record.status,
             OperationStatus::Running,
             "the log is as it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_refused_once_the_log_is_open_closes_the_log_before_it_returns() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        a_log_that_refuses_changes(&database, OperationId::from_uuid(Uuid::from_u128(1))).await;
+
+        let refused = daemon_at(Some(config), Some(data))
+            .await
+            .err()
+            .expect("a log that cannot be changed refuses the start");
+        assert_eq!(refused.message, msg::CLI_CANNOT_RECOVER_OPERATIONS);
+        assert_closed(&database);
+    }
+
+    #[tokio::test]
+    async fn a_close_that_ends_within_its_bound_is_waited_for_and_says_nothing() {
+        super::captured_log::capture();
+        let database = std::path::Path::new("/srv/demo/closes-in-time/ladderback.db");
+        let (closed, mut close) = futures::channel::oneshot::channel::<()>();
+        let closing = async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let _ = closed.send(());
+        };
+        close_within(closing, database, std::time::Duration::from_secs(5)).await;
+        assert_eq!(
+            close.try_recv(),
+            Ok(Some(())),
+            "the close ran to its end before close_within returned"
+        );
+        let said: Vec<_> = super::captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("closes-in-time"))
+            .collect();
+        assert!(said.is_empty(), "a close in time logs nothing: {said:?}");
+    }
+
+    #[tokio::test]
+    async fn a_close_that_outlasts_its_bound_is_given_up_with_a_warning() {
+        super::captured_log::capture();
+        let database = std::path::Path::new("/srv/demo/never-closes/ladderback.db");
+        let bound = std::time::Duration::from_millis(50);
+        let began = std::time::Instant::now();
+        // Bounded itself, so a close_within that waited for ever fails here
+        // rather than at the test runner's limit.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            close_within(std::future::pending(), database, bound),
+        )
+        .await
+        .expect("close_within gives up once its bound has run out");
+        assert!(
+            began.elapsed() >= bound,
+            "it waited the bound out first, not {:?}",
+            began.elapsed()
+        );
+        let said: Vec<_> = super::captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("/srv/demo/never-closes/ladderback.db"))
+            .collect();
+        assert!(
+            said.len() == 1 && said.iter().all(|(level, _)| *level == log::Level::Warn),
+            "one warning names the log it gave up on: {said:?}"
         );
     }
 
