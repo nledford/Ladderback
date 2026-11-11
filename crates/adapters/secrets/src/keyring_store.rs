@@ -38,12 +38,18 @@ impl KeyringStore for Os {
     fn get(&self, service: &str, name: &str) -> Result<String, Failure> {
         keyring::Entry::new(service, name)
             .and_then(|entry| entry.get_password())
-            .map_err(|error| match error {
-                keyring::Error::NoEntry => Failure::NoEntry,
-                // The error holds the bytes: a secret. Drop them.
-                keyring::Error::BadEncoding(_) => Failure::NotUnicode,
-                other => Failure::Unreachable(other.to_string()),
-            })
+            .map_err(failure)
+    }
+}
+
+/// Why the OS store gave no secret.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn failure(error: keyring::Error) -> Failure {
+    match error {
+        keyring::Error::NoEntry => Failure::NoEntry,
+        // The error holds the bytes: a secret. Drop them.
+        keyring::Error::BadEncoding(_) => Failure::NotUnicode,
+        other => Failure::Unreachable(other.to_string()),
     }
 }
 

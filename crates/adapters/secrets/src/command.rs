@@ -24,7 +24,9 @@ const STDERR_KEPT: usize = 8 * 1024;
 /// command started (gpg-agent) can hold it open for good.
 const PIPE_GRACE: Duration = Duration::from_secs(1);
 
-const READ_CHUNK: usize = 8 * 1024;
+/// The most one read of a pipe takes: 8 KiB. It changes how many reads a
+/// stream takes, and nothing else.
+const READ_CHUNK: usize = 8_192;
 
 /// How long a command that was killed is waited for: one in uninterruptible
 /// sleep (a hung mount) may never be reaped.
