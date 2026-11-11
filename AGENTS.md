@@ -26,6 +26,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just test-ui [args]` | Builds the web UI with the component gallery (`just web-test`) and the binary, installs the UI test dependencies if they are missing or stale, then runs the `@ui` scenarios. CI caches trunk's downloaded tools (`~/.cache/trunk`) so a GitHub-releases outage can't fail the job |
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, which the Justfile's `mutants_packages` lists; further `args` go to `cargo mutants` (e.g. `--jobs 3`) |
 | `just red-first [base]` | Checks that the branch's first commit is a `test:` commit whose new tests, host and `wasm_bindgen_test`, and scenarios fail at run time (§13.1) |
+| `just check-pr-title "<title>"` | Checks a pull request title as CI's `Pull request title` check does (`scripts/check-pr-title.ts`): a Conventional Commit whose type release-plz knows, with no trailing full stop and no `(#N)` |
 | `just serve` | Builds everything and runs `ladderback serve` on `127.0.0.1:9898` |
 | `just release-preview` | Shows the version bump and changelog entry the next release PR would make (§12.1) |
 

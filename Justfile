@@ -251,6 +251,12 @@ mutants-all *args:
 red-first base='origin/main':
     node scripts/red-first.mjs '{{ base }}'
 
+# Check a pull request title (or a commit subject) as CI's "Pull request
+# title" check does: a Conventional Commit with a type release-plz knows.
+[group('quality')]
+check-pr-title title:
+    node scripts/check-pr-title.ts {{ quote(title) }}
+
 # Run every check CI runs, except mutation testing and the red-first check.
 [group('quality')]
 verify: fmt-check lint lint-workflows architecture test test-contrast test-release test-wasm test-ui
