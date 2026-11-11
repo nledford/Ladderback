@@ -51,6 +51,8 @@ mod forget_steps;
 mod interop_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
+#[path = "steps/plan_settings.rs"]
+mod plan_settings_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/restart.rs"]

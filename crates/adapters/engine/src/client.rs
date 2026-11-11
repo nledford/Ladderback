@@ -29,8 +29,10 @@ use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
     JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
-    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, TRUNCATED, WorkerEvent, exit_code,
+    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec, TRUNCATED,
+    WorkerEvent, exit_code,
 };
+use domain::planning::SourceFilter;
 
 /// How long a worker may keep running after it reported its result, for
 /// cleanup, before it is killed.
@@ -1243,6 +1245,34 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
     }
 }
 
+/// A plan's source filter as the worker takes it, field for field.
+fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
+    let SourceFilter {
+        globs,
+        iglobs,
+        glob_files,
+        iglob_files,
+        git_ignore,
+        no_require_git,
+        custom_ignorefiles,
+        exclude_if_present,
+        exclude_if_xattr,
+        one_file_system,
+    } = filter;
+    SourceFilterSpec {
+        globs,
+        iglobs,
+        glob_files,
+        iglob_files,
+        git_ignore,
+        no_require_git,
+        custom_ignorefiles,
+        exclude_if_present,
+        exclude_if_xattr,
+        one_file_system,
+    }
+}
+
 fn job_kind(job: Job) -> Result<JobKind, EngineError> {
     // A spec names the snapshots it works on, each about 70 bytes of a
     // message that is capped: the caller splits a longer list into jobs.
@@ -1311,6 +1341,8 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .map(|tag| tag.as_str().to_owned())
                 .collect(),
             label: job.label,
+            host: job.host.map(|host| host.as_str().to_owned()),
+            filter: filter_spec(job.filter),
             deadline_budget: job.deadline_budget,
         }),
         Job::Forget(job) => JobKind::Forget(ForgetJobSpec {

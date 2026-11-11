@@ -15,6 +15,7 @@ use app::ports::{
 };
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
+use domain::planning::SourceFilter;
 use domain::secrets::SecretValue;
 use domain::{AgentId, OperationId, PlanId, SignedDuration, Uuid};
 use engine::WorkerEngine;
@@ -22,7 +23,7 @@ use futures::StreamExt;
 use rustic_backend::BackendOptions;
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{
-    ConfigOptions, Credentials, KeyOptions, OpenStatus, Repository, RepositoryBackends,
+    ConfigOptions, Credentials, KeyOptions, LsOptions, OpenStatus, Repository, RepositoryBackends,
     RepositoryOptions,
 };
 use tempfile::TempDir;
@@ -132,6 +133,20 @@ impl Location {
     pub fn snapshots(&self) -> Vec<SnapshotFile> {
         self.open().get_all_snapshots().unwrap()
     }
+
+    /// The name of every file and folder `snapshot` holds, at any depth, as
+    /// rustic itself lists them.
+    pub fn names_in(&self, snapshot: &SnapshotFile) -> Vec<String> {
+        let repository = self.open().to_indexed().unwrap();
+        let root = repository
+            .node_from_snapshot_and_path(snapshot, "")
+            .unwrap();
+        repository
+            .ls(&root, &LsOptions::default())
+            .unwrap()
+            .map(|entry| entry.unwrap().1.name().to_string_lossy().into_owned())
+            .collect()
+    }
 }
 
 /// Runs `f` on a thread outside the test's tokio runtime. `rustic_core`'s
@@ -236,6 +251,8 @@ pub fn backup_job(location: &Location, source: &Path, plan: &str, budget: Signed
         tags: plan_tags(plan),
         extra_tags: vec![UserTag::new("extra").unwrap()],
         label: Some("home".to_owned()),
+        host: None,
+        filter: SourceFilter::default(),
         deadline_budget: budget,
     })
 }
