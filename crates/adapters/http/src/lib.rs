@@ -815,6 +815,7 @@ mod tests {
                     )],
                     left_alone: api::LeftAloneDto::default(),
                     selection: SELECTION.to_owned(),
+                    warnings: Vec::new(),
                 },
                 MaintenanceRequest::Adopt { into, .. } => {
                     api::MaintenancePreviewDto::adopt(into, &snapshots, SELECTION.to_owned(), shown)
@@ -825,6 +826,7 @@ mod tests {
                     packs_recovered: 0,
                     bytes_deleted: 4096,
                     keep_delete_hours: 144,
+                    warnings: Vec::new(),
                 },
                 MaintenanceRequest::Check => api::MaintenancePreviewDto::Check { read_data: false },
             })
@@ -848,6 +850,7 @@ mod tests {
                 )],
                 orphaned: Vec::new(),
                 unmanaged: Vec::new(),
+                warnings: Vec::new(),
             })
         }
 

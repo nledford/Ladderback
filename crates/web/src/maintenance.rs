@@ -11,7 +11,7 @@ use std::time::Duration;
 use api::{
     AdoptionFromDto, ErrorCode, MaintenancePreviewDto, MaintenanceRequestDto, MsgArg,
     OperationDetailDto, OperationResultDto, OperationSummaryDto, OrphanedGroupDto, SnapshotDto,
-    SnapshotGroupsDto, UnmanagedGroupDto, WarningCode,
+    SnapshotGroupsDto, UnmanagedGroupDto, WarningCode, WarningDto,
 };
 
 use crate::announcer::Politeness;
@@ -181,6 +181,9 @@ pub(crate) struct Review {
     pub(crate) confirm: Option<Confirm>,
     /// The token the preview named, for a forget or an adoption.
     pub(crate) selection: Option<String>,
+    /// What the preview warns of, as the groups do: the other hosts a
+    /// repository maintained here holds snapshots from (§7.3).
+    pub(crate) warnings: Vec<WarningDto>,
 }
 
 impl Review {
@@ -192,6 +195,7 @@ impl Review {
                 plans,
                 left_alone,
                 selection,
+                ..
             } => {
                 let mut facts: Vec<Fact> = if plans.is_empty() {
                     vec![Fact::NoPlans]
@@ -228,6 +232,7 @@ impl Review {
                         snapshots: removing,
                     }),
                     selection: Some(selection.clone()),
+                    warnings: Vec::new(),
                 }
             }
             MaintenancePreviewDto::Adopt {
@@ -235,6 +240,7 @@ impl Review {
                 count,
                 listed,
                 selection,
+                ..
             } => Review {
                 kind: Kind::Adopt,
                 request,
@@ -245,6 +251,7 @@ impl Review {
                 listings: Listing::of(into, *count, listed).into_iter().collect(),
                 confirm: (*count > 0).then_some(Confirm::Adopt { snapshots: *count }),
                 selection: Some(selection.clone()),
+                warnings: Vec::new(),
             },
             MaintenancePreviewDto::Prune {
                 packs_marked,
@@ -252,6 +259,7 @@ impl Review {
                 packs_recovered,
                 bytes_deleted,
                 keep_delete_hours,
+                ..
             } => Review {
                 kind: Kind::Prune,
                 request,
@@ -269,6 +277,7 @@ impl Review {
                     || *bytes_deleted > 0)
                     .then_some(Confirm::Prune),
                 selection: None,
+                warnings: Vec::new(),
             },
             MaintenancePreviewDto::Check { read_data } => Review {
                 kind: Kind::Check,
@@ -279,6 +288,7 @@ impl Review {
                 listings: Vec::new(),
                 confirm: Some(Confirm::Check),
                 selection: None,
+                warnings: Vec::new(),
             },
         }
     }
@@ -915,6 +925,7 @@ mod tests {
             plans,
             left_alone,
             selection: "0123456789abcdef".to_owned(),
+            warnings: Vec::new(),
         }
     }
 
@@ -925,6 +936,7 @@ mod tests {
             packs_recovered: recovered,
             bytes_deleted: bytes,
             keep_delete_hours: 144,
+            warnings: Vec::new(),
         }
     }
 
@@ -1103,6 +1115,52 @@ mod tests {
     }
 
     #[test]
+    fn a_review_carries_what_its_preview_warns_of() {
+        let warned = vec![WarningDto::other_hosts(1, &["demo-desktop".to_owned()])];
+        let previews = [
+            (
+                plain(Kind::Forget),
+                MaintenancePreviewDto::Forget {
+                    plans: vec![plan("home", 3, 1)],
+                    left_alone: left(0, 0, 0, 0),
+                    selection: "0123456789abcdef".to_owned(),
+                    warnings: warned.clone(),
+                },
+            ),
+            (
+                adoption("home", AdoptionFromDto::Unmanaged),
+                MaintenancePreviewDto::Adopt {
+                    into: "home".to_owned(),
+                    count: 1,
+                    listed: vec![snapshot(1)],
+                    selection: "fedcba9876543210".to_owned(),
+                    warnings: warned.clone(),
+                },
+            ),
+            (
+                plain(Kind::Prune),
+                MaintenancePreviewDto::Prune {
+                    packs_marked: 1,
+                    packs_deleted: 0,
+                    packs_recovered: 0,
+                    bytes_deleted: 0,
+                    keep_delete_hours: 144,
+                    warnings: warned.clone(),
+                },
+            ),
+        ];
+        for (request, preview) in previews {
+            assert_eq!(
+                Review::of(&request, &preview).warnings,
+                warned,
+                "{preview:?}"
+            );
+        }
+        let check = MaintenancePreviewDto::Check { read_data: false };
+        assert_eq!(Review::of(&plain(Kind::Check), &check).warnings, Vec::new());
+    }
+
+    #[test]
     fn an_adoption_review_counts_what_it_rewrites_into_the_plan() {
         let request = adoption("home", AdoptionFromDto::Unmanaged);
         let preview = MaintenancePreviewDto::Adopt {
@@ -1110,6 +1168,7 @@ mod tests {
             count: 12,
             listed: vec![snapshot(1)],
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         let review = Review::of(&request, &preview);
         assert_eq!(review.kind, Kind::Adopt);
@@ -1132,6 +1191,7 @@ mod tests {
             count: 0,
             listed: Vec::new(),
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         let review = Review::of(&request, &preview);
         assert_eq!(review.confirm, None);
@@ -1146,6 +1206,7 @@ mod tests {
             count: 1,
             listed: vec![snapshot(1)],
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         let review = Review::of(&request, &preview);
         assert_eq!(review.confirm, Some(Confirm::Adopt { snapshots: 1 }));
@@ -1234,6 +1295,7 @@ mod tests {
             count: 2,
             listed: Vec::new(),
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         let body = Review::of(&request, &preview).start_body();
         assert_eq!(body.kind, "adopt");
@@ -1634,6 +1696,7 @@ mod tests {
             count: 120,
             listed: vec![snapshot(1), snapshot(2)],
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         let review = Review::of(&request, &preview);
         assert_eq!(
@@ -1654,6 +1717,7 @@ mod tests {
             count: 0,
             listed: Vec::new(),
             selection: "fedcba9876543210".to_owned(),
+            warnings: Vec::new(),
         };
         assert_eq!(Review::of(&request, &preview).listings, Vec::new());
     }
@@ -1958,6 +2022,7 @@ mod tests {
                     adopt_into: Vec::new(),
                 })
                 .collect(),
+            warnings: Vec::new(),
         }
     }
 

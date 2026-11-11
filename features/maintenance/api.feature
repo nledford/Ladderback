@@ -7,7 +7,9 @@ Feature: The Snapshots page asks the daemon for a repository's history and for a
   preview names what the run would do and changes nothing, takes no
   maintenance slot and leaves nothing in the operation log. A forget or an
   adoption that is confirmed names the selection its preview showed, and a
-  repository that has changed since is refused instead of acted on (I6).
+  repository that has changed since is refused instead of acted on (I6). The
+  groups and the previews of a repository the daemon maintains itself warn
+  of the other hosts it holds snapshots from (§7.3).
 
   Background:
     Given Ladderback is serving on loopback with the plan "home"
@@ -111,6 +113,13 @@ Feature: The Snapshots page asks the daemon for a repository's history and for a
     And the owner confirms the forget with the preview's selection
     Then the refusal has status 409 and the typed code "maintenance-selection-changed"
     And the repository has 4 snapshots
+
+  Scenario: In the running daemon, a repository it maintains warns of the other host plain rustic wrote from
+    Given the folder was backed up without Ladderback under the host "demo-desktop"
+    When the owner asks for the repository's groups
+    Then the answer warns of snapshots from the other host "demo-desktop"
+    When the owner previews forgetting
+    Then the answer warns of snapshots from the other host "demo-desktop"
 
   Scenario Outline: In the running daemon, a preview request it cannot take is refused: <what>
     When the owner previews maintenance of the repository "<alias>" with the request <body>

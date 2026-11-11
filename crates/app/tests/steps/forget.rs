@@ -14,9 +14,9 @@ use cucumber::{given, then, when};
 use domain::execution::OperationStatus;
 use domain::execution::plan_tags;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
-use domain::execution::{Operation, OperationKind, Target, Trigger};
+use domain::execution::{Operation, OperationKind, Target, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, Plan, RepositoryConfig,
+    AgentConfig, AgentSettings, GroupBy, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
     RepositorySettings,
 };
 use domain::secrets::{SecretRef, SecretValue};
@@ -41,18 +41,22 @@ use app::ports::{
 use domain::maintenance::Snapshot;
 use domain::planning::{RetentionPolicy, Source};
 
+/// The name of the machine every scenario's agent runs on, which plain
+/// rustic records on a snapshot taken there.
+pub const MACHINE: &str = "demo-host";
+
 /// The alias every forget scenario's repository goes under.
 fn alias() -> RepositoryAlias {
     RepositoryAlias::parse("demo").expect("an alias")
 }
 
 /// The agent this world's plans and snapshots belong to.
-fn self_agent() -> AgentId {
+pub(super) fn self_agent() -> AgentId {
     AgentId::from_uuid(Uuid::from_u128(0x018f_0000_0000_7000_8000_0000_0000_0001))
 }
 
 /// Another agent, whose history a forget must leave alone.
-fn other_agent() -> AgentId {
+pub(super) fn other_agent() -> AgentId {
     AgentId::from_uuid(Uuid::from_u128(0x018f_0000_0000_7000_8000_0000_0000_00aa))
 }
 
@@ -122,6 +126,8 @@ pub struct ForgetWorld {
     /// How many times the sources port was asked to normalize a plan's
     /// sources.
     source_reads: Arc<AtomicUsize>,
+    /// The agent's own hostname, when a scenario gives it one.
+    hostname: Option<Hostname>,
 }
 
 impl Default for ForgetWorld {
@@ -143,6 +149,7 @@ impl Default for ForgetWorld {
             unreadable_folder: None,
             recorded_folder: None,
             source_reads: Arc::new(AtomicUsize::new(0)),
+            hostname: None,
         }
     }
 }
@@ -188,7 +195,10 @@ impl ForgetWorld {
         let repositories = self.repositories.clone();
         let plans = self.plans.clone();
         let config = AgentConfig::new(
-            AgentSettings::default(),
+            AgentSettings {
+                hostname: self.hostname.clone(),
+                ..AgentSettings::default()
+            },
             Hooks::default(),
             repositories,
             plans,
@@ -226,6 +236,12 @@ impl ForgetWorld {
             .get_mut(&alias())
             .expect("the repository was added first")
             .maintenance = maintenance;
+        self.save().await;
+    }
+
+    /// Gives the agent a hostname of its own.
+    pub async fn name_agent(&mut self, hostname: &str) {
+        self.hostname = Some(Hostname::parse(hostname).expect("a hostname"));
         self.save().await;
     }
 
@@ -299,12 +315,18 @@ impl ForgetWorld {
     /// Adds `count` snapshots of `folder` carrying exactly `tags`. The first
     /// added is the newest.
     pub fn snapshots_tagged(&mut self, count: u64, tags: &[String], folder: &str) {
+        self.snapshots_on(count, tags, folder, MACHINE);
+    }
+
+    /// Adds `count` snapshots of `folder` carrying exactly `tags`, recorded
+    /// on the host `host`. The first added is the newest.
+    pub fn snapshots_on(&mut self, count: u64, tags: &[String], folder: &str, host: &str) {
         for _ in 0..count {
             self.made += 1;
             self.snapshots.push(SnapshotSummary {
                 id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
                 time: at(-i64::try_from(self.made * 3_600).expect("an hour")),
-                hostname: "demo-host".to_owned(),
+                hostname: host.to_owned(),
                 label: String::new(),
                 tags: tags.to_vec(),
                 paths: vec![folder.to_owned()],
@@ -613,7 +635,7 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 },
                 agent.forget.store.clone(),
                 self_agent(),
-                "demo-host".to_owned(),
+                MACHINE.to_owned(),
                 Arc::new(ScriptedSources {
                     unreadable_folder: agent.forget.unreadable_folder.clone(),
                     recorded_folder: agent.forget.recorded_folder.clone(),
@@ -631,7 +653,21 @@ pub async fn assess_and_start(
     kind: MaintenanceKind,
 ) -> Result<PreparedMaintenance, MaintenanceError> {
     let assessment = use_case.assess(operation, &alias(), kind).await?;
-    use_case.start(assessment).await
+    // The daemon logs the assessment's other hosts before the run starts
+    // (§7.3): they are the ones the run stores its warning of.
+    let assessed = assessment.other_hosts().clone();
+    let prepared = use_case.start(assessment).await?;
+    let stored = prepared
+        .operation()
+        .warnings()
+        .iter()
+        .find(|warning| warning.kind == WarningKind::OtherHosts)
+        .cloned();
+    let during = stored
+        .as_ref()
+        .map_or("", |warning| warning.during.as_str());
+    assert_eq!(assessed.warning(during), stored, "{assessed:?}");
+    Ok(prepared)
 }
 
 /// A retention port whose read never answers: the repository listed its

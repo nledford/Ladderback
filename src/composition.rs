@@ -852,6 +852,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
         WarningKind::CheckWarning => WarningCode::CheckWarning,
         WarningKind::CheckError => WarningCode::CheckError,
+        WarningKind::OtherHosts => todo!("the wire code of an other-hosts warning"),
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -2768,6 +2769,7 @@ mod tests {
                 }],
                 orphaned: Vec::new(),
                 unmanaged: Vec::new(),
+                warnings: Vec::new(),
             })
         );
     }

@@ -100,6 +100,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::MaintenancePartial => "maintenance-partial",
         WarningKind::CheckWarning => "check-warning",
         WarningKind::CheckError => "check-error",
+        WarningKind::OtherHosts => todo!("the stored code of an other-hosts warning"),
         WarningKind::Other => "unknown",
     }
 }

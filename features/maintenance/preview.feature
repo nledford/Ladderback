@@ -185,7 +185,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
     When the owner previews pruning the repository
     Then the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
     And the preview says marked packs wait the default time before a later prune deletes them
-    And the engine was only asked to identify the repository and plan a prune
+    And the engine was only asked to identify the repository, list its snapshots and plan a prune
     And the log holds no operation of this preview
 
   Scenario: A prune preview opens the repository as the prune does

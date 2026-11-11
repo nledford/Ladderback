@@ -1346,6 +1346,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::MaintenancePartial => WarningCode::MaintenancePartial,
                         WarningKind::CheckWarning => WarningCode::CheckWarning,
                         WarningKind::CheckError => WarningCode::CheckError,
+                        WarningKind::OtherHosts => todo!("a fake job's other-hosts warning"),
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,

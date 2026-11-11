@@ -7,14 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cucumber::{given, then, when};
-use domain::maintenance::{ForgetPreview, LeftAlone, PlanForget};
+use domain::maintenance::{ForgetPreview, LeftAlone, OtherHosts, PlanForget};
 use domain::planning::{KeepCount, Plan, Source};
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, SnapshotId, Uuid};
 
 use super::Agent;
 use app::maintenance::{
     AdoptPreview, Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, MaintenancePreview,
-    PlanHistory, PrunePreview, RepositoryGroups, default_keep_delete,
+    PlanHistory, Previewed, PrunePreview, RepositoryGroups, default_keep_delete,
 };
 use app::ports::{HistoryQuery, OperationStore};
 
@@ -50,6 +50,20 @@ pub struct PreviewWorld {
     previewed: Option<MaintenancePreview>,
     /// What the last groups listing answered.
     groups: Option<RepositoryGroups>,
+    /// The other hosts the last preview warned of.
+    other_hosts: Option<OtherHosts>,
+}
+
+impl PreviewWorld {
+    /// The other hosts the last preview warned of.
+    pub fn other_hosts(&self) -> &OtherHosts {
+        self.other_hosts.as_ref().expect("a preview was answered")
+    }
+
+    /// What the last groups listing answered.
+    pub fn groups(&self) -> &RepositoryGroups {
+        self.groups.as_ref().expect("the groups were listed")
+    }
 }
 
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s) of the folder {string}")]
@@ -188,7 +202,13 @@ async fn preview(agent: &mut Agent, kind: MaintenanceKind) {
     .await
     .expect("the preview returns instead of waiting for ever");
     match previewed {
-        Ok(preview) => agent.preview.previewed = Some(preview),
+        Ok(Previewed {
+            preview,
+            other_hosts,
+        }) => {
+            agent.preview.previewed = Some(preview);
+            agent.preview.other_hosts = Some(other_hosts);
+        }
         Err(error) => agent.forget.set_refused(Some(error)),
     }
 }
@@ -425,11 +445,13 @@ fn prune_waits(agent: &mut Agent) {
     assert_eq!(prune_preview(agent).keep_delete, default_keep_delete());
 }
 
-#[then("the engine was only asked to identify the repository and plan a prune")]
+#[then("the engine was only asked to identify the repository, list its snapshots and plan a prune")]
 fn only_a_plan(agent: &mut Agent) {
+    // A prune preview of a repository maintained here lists it to name the
+    // other hosts it holds snapshots from.
     assert_eq!(
         agent.forget.jobs(),
-        ["identify", "prune-plan"],
+        ["identify", "ls", "prune-plan"],
         "the engine was asked for more than the reads a prune starts with"
     );
 }

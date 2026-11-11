@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use domain::maintenance::{
     AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
-    Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -188,6 +188,16 @@ pub struct MaintenanceAssessment {
     operation: OperationId,
     job: Job,
     partition: Option<Partition>,
+    other_hosts: OtherHosts,
+}
+
+impl MaintenanceAssessment {
+    /// The other hosts the repository holds snapshots from, when it is
+    /// maintained here (§7.3): the run carries them as a warning. A check
+    /// only reads, so it has none.
+    pub fn other_hosts(&self) -> &OtherHosts {
+        &self.other_hosts
+    }
 }
 
 /// What a run would do, decided and not yet done (§7.3).
@@ -214,6 +224,15 @@ impl MaintenancePreview {
             Self::Prune(_) | Self::Check(_) => None,
         }
     }
+}
+
+/// A preview, and the other hosts the repository holds snapshots from when
+/// it is maintained here (§7.3), which the person reviewing the run is told
+/// of. A check only reads, so its preview names none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Previewed {
+    pub preview: MaintenancePreview,
+    pub other_hosts: OtherHosts,
 }
 
 /// The snapshots an adoption would rewrite with the tags of `into`, newest
@@ -292,6 +311,9 @@ pub struct RepositoryGroups {
     pub plans: Vec<PlanHistory>,
     pub orphaned: Vec<OrphanedHistory>,
     pub unmanaged: Vec<UnmanagedHistory>,
+    /// The hosts other than this one that the repository holds snapshots
+    /// from, when it is maintained here (§7.3).
+    pub other_hosts: OtherHosts,
 }
 
 /// Runs maintenance manually on the local owner.
@@ -453,6 +475,7 @@ impl RunMaintenance {
             operation: op,
             job,
             partition,
+            other_hosts: todo!("the other hosts a run warns of"),
         })
     }
 
@@ -476,6 +499,7 @@ impl RunMaintenance {
             operation: id,
             job,
             partition,
+            other_hosts: _,
         } = assessment;
         let mut operation = Operation::queue(
             id,
@@ -514,8 +538,8 @@ impl RunMaintenance {
         op: OperationId,
         alias: &RepositoryAlias,
         kind: &MaintenanceKind,
-    ) -> Result<MaintenancePreview, MaintenanceError> {
-        match kind {
+    ) -> Result<Previewed, MaintenanceError> {
+        let preview = match kind {
             MaintenanceKind::Check => {
                 // A check needs nothing of the repository to say what it
                 // does, only that this agent maintains it.
@@ -565,7 +589,11 @@ impl RunMaintenance {
                     keep_delete,
                 }))
             }
-        }
+        }?;
+        Ok(Previewed {
+            preview,
+            other_hosts: todo!("the other hosts a preview warns of"),
+        })
     }
 
     /// The repository's snapshots grouped by who owns them (§7.3), as a
@@ -631,6 +659,7 @@ impl RunMaintenance {
                 .zip(claimants)
                 .map(|(group, adopt_into)| UnmanagedHistory { group, adopt_into })
                 .collect(),
+            other_hosts: todo!("the other hosts the groups warn of"),
         })
     }
 

@@ -110,6 +110,21 @@ Feature: Maintenance of a repository on the Snapshots page
     And the dialog "Forget snapshots of demo" says "orphaned"
     And the dialog "Forget snapshots of demo" offers the button "Forget 2 snapshots"
 
+  Scenario: A repository holding snapshots from another host warns of it on the page and in the review
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 2 times
+    And another machine called "demo-desktop" has backed up the plan "home" once
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the main content warns "This repository holds snapshots from another host, demo-desktop. Ladderback forgets and prunes it from here, and cannot tell whether that host does too. Make sure only one machine maintains it."
+    When I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And the dialog "Forget snapshots of demo" is described as saying "This repository holds snapshots from another host, demo-desktop. Ladderback forgets and prunes it from here, and cannot tell whether that host does too. Make sure only one machine maintains it."
+    And the page has no accessibility violations
+
   Scenario: History no plan of this agent owns is listed under its own heading
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
