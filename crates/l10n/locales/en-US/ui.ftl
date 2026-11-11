@@ -143,6 +143,18 @@ ui-gallery-check-repository = Check the repository name
 # The error the demo form field shows when its input is empty.
 ui-gallery-repository-required = A repository name is required.
 
+# The heading of the gallery's checkbox demo.
+ui-gallery-checkbox-heading = Checkbox
+
+# The label of the demo checkbox that starts off.
+ui-gallery-demo-notification = Send a demo notification
+
+# The description under the demo checkbox that starts off.
+ui-gallery-demo-notification-hint = A demo choice: turning it on changes nothing.
+
+# The label of the demo checkbox that starts on. It has no description.
+ui-gallery-demo-log = Keep the demo log
+
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
@@ -334,6 +346,9 @@ ui-maintenance-heading = Maintenance of { $alias }
 
 # What the maintenance section says before its buttons.
 ui-maintenance-body = Each of these shows what it would do first. Nothing changes until you confirm.
+
+# What the maintenance section says instead, with no buttons, of a repository this agent does not maintain: its entry in the configuration file asks for maintenance by the hub or by nothing. What the person types is a string literal: keep it one, untranslated.
+ui-maintenance-elsewhere = This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans. To maintain it from this agent, set { "maintenance = \"local\"" } in the repository's entry in the configuration file.
 
 # The button that reviews a forget: the snapshots the plans' retention no longer keeps.
 ui-maintenance-forget = Forget snapshots
@@ -680,6 +695,12 @@ ui-repositories-password-label = Password
 
 # The hint under the password field. It says where the typed password goes: the configuration file, and the history of it that { -brand-name } keeps.
 ui-repositories-password-hint = { -brand-name } keeps it in its configuration file, and in the copies it keeps of that file's earlier versions. It never shows it again.
+
+# The label of the checkbox that asks this agent to maintain a repository it connects: run its forget, prune and check. Off unless the person turns it on.
+ui-repositories-maintain-label = Maintain this repository from this agent
+
+# The hint under that checkbox. It says what maintaining means, that a repository created here is always maintained from here, and why to leave it off: only one place may maintain a repository, and another agent or the hub may already do it.
+ui-repositories-maintain-hint = When this is on, this agent forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another agent or the hub already does. A repository you create here under a name is always maintained from here.
 
 # The button that opens the repository and saves nothing.
 ui-repositories-test = Test the repository

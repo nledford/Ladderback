@@ -35,7 +35,7 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::RepositorySettings;
+use domain::planning::{Maintenance, RepositorySettings};
 use domain::secrets::{
     FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
     Template, TemplateError,
@@ -1065,7 +1065,9 @@ impl Catalog for ConfigCatalog {
             repositories: config
                 .repositories()
                 .iter()
-                .map(|(alias, repository)| repository_row(alias, &repository.settings))
+                .map(|(alias, repository)| {
+                    repository_row(alias, &repository.settings, repository.maintenance)
+                })
                 .collect(),
         })
     }
@@ -1209,6 +1211,13 @@ impl Repositories for RepositoryService {
         let alias =
             RepositoryAlias::parse(&request.alias).map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
+        // Asked for, this agent maintains it; otherwise nobody is asked, for
+        // a repository that exists may already be maintained elsewhere (I1).
+        let maintenance = if request.maintain_here {
+            Maintenance::Local
+        } else {
+            Maintenance::None
+        };
         let _writing = self.writes.lock().await;
         let id = match ConnectRepository::new(
             Arc::clone(&self.clock),
@@ -1216,7 +1225,7 @@ impl Repositories for RepositoryService {
             self.resolve.clone(),
             Arc::clone(&self.config),
         )
-        .connect(new_operation(), alias, &settings)
+        .connect(new_operation(), alias, &settings, maintenance)
         .await
         {
             Ok(value) => value,
@@ -1608,9 +1617,14 @@ fn config_refusal(error: ConfigError) -> RepositoriesError {
 
 /// One configured repository as a list shows it: its locations masked, and
 /// where its password comes from, never the password (I4).
-fn repository_row(alias: &RepositoryAlias, settings: &RepositorySettings) -> api::RepositoryDto {
+fn repository_row(
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    maintenance: domain::planning::Maintenance,
+) -> api::RepositoryDto {
     api::RepositoryDto {
         alias: alias.as_str().to_owned(),
+        maintained_here: domain::maintenance::Ownership::owned_here(maintenance),
         repository: redacted_location(settings, &settings.repository),
         repo_hot: settings
             .repo_hot
@@ -1809,7 +1823,7 @@ mod tests {
             .options_cold
             .insert("secret_access_key".to_owned(), key.to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        let row = repository_row(&alias, &settings);
+        let row = repository_row(&alias, &settings, domain::planning::Maintenance::Local);
         assert_eq!(
             row.warnings,
             [
@@ -1831,7 +1845,30 @@ mod tests {
             .options
             .insert("secret_access_key".to_owned(), "${DEMO_KEY}".to_owned());
         let alias = RepositoryAlias::parse("demo").expect("an alias");
-        assert_eq!(repository_row(&alias, &settings).warnings, []);
+        assert_eq!(
+            repository_row(&alias, &settings, domain::planning::Maintenance::Local).warnings,
+            []
+        );
+    }
+
+    #[test]
+    fn a_listed_repository_says_whether_this_agent_maintains_it() {
+        let settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        for (maintenance, here) in [
+            (domain::planning::Maintenance::Local, true),
+            (domain::planning::Maintenance::Hub, false),
+            (domain::planning::Maintenance::None, false),
+        ] {
+            let row = repository_row(&alias, &settings, maintenance);
+            assert_eq!(row.maintained_here, here, "{maintenance:?}");
+            let wire = serde_json::to_value(&row).expect("a row is JSON");
+            assert_eq!(
+                wire["maintained-here"],
+                serde_json::Value::Bool(here),
+                "{maintenance:?}"
+            );
+        }
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
@@ -2231,7 +2268,9 @@ mod tests {
                 alias.clone(),
                 domain::planning::RepositoryConfig {
                     settings,
-                    maintenance: domain::planning::Maintenance::None,
+                    // This agent maintains it, so a preview and a run reach
+                    // the engine.
+                    maintenance: domain::planning::Maintenance::Local,
                     group_by: Default::default(),
                     hooks: Default::default(),
                 },
@@ -4014,6 +4053,7 @@ mod repository_service_tests {
         api::ConnectRepositoryDto {
             alias: alias.to_owned(),
             settings,
+            maintain_here: false,
         }
     }
 
@@ -4085,6 +4125,26 @@ mod repository_service_tests {
             settings.options_cold.get("c").map(String::as_str),
             Some("3")
         );
+    }
+
+    #[tokio::test]
+    async fn a_connection_asks_this_agent_to_maintain_the_repository_only_when_the_request_does() {
+        for (maintain_here, saved_as) in [(true, Maintenance::Local), (false, Maintenance::None)] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            service(&engine, config.clone())
+                .connect(api::ConnectRepositoryDto {
+                    maintain_here,
+                    ..connect("demo", settings_dto())
+                })
+                .await
+                .unwrap_or_else(|e| panic!("{maintain_here}: {e:?}"));
+            let config = saved(&*config).await;
+            assert_eq!(
+                config.repository(&alias("demo")).map(|r| r.maintenance),
+                Some(saved_as),
+                "maintain-here {maintain_here}"
+            );
+        }
     }
 
     #[tokio::test]

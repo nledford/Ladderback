@@ -181,6 +181,17 @@ Given("the config names no plan", async function (this: BrowserWorld) {
   await writeFile(file, config.slice(0, at));
 });
 
+// A repository with no `maintenance` key asks this agent for no maintenance
+// (§7.3). The daemon reads its configuration afresh for every request.
+Given("the repository {string} has no maintenance setting", async function (this: BrowserWorld, alias: string) {
+  assert.equal(alias, ALIAS, `only the repository ${ALIAS} is served`);
+  const file = configPath(this);
+  const config = await readFile(file, "utf8");
+  const setting = /^maintenance = .*\n/m;
+  assert.match(config, setting, "the config sets no maintenance to take away");
+  await writeFile(file, config.replace(setting, ""));
+});
+
 /** Presses Tab until the button the locator finds, once, has focus. The
  *  page reads the history it lists from the daemon, so a button made from it
  *  is not there when the presses would begin: they begin when it is. */
@@ -210,11 +221,14 @@ async function readAgain(world: BrowserWorld): Promise<void> {
 }
 
 // An adoption button names the agent too, which a journey cannot know.
-When("I press Tab until focus is on the adoption button into the plan {string}", async function (this: BrowserWorld, plan: string) {
-  const target = journey(this.page).byRole("button", {
+function adoptionButton(world: BrowserWorld, plan: string): Locator {
+  return journey(world.page).byRole("button", {
     name: new RegExp(`^Adopt history of plan .+ from agent .+ into plan ${ISOLATION}${escape(plan)}${ISOLATION}$`),
   });
-  await tabUntilFocused(this, target, `the button that adopts history into the plan "${plan}"`);
+}
+
+When("I press Tab until focus is on the adoption button into the plan {string}", async function (this: BrowserWorld, plan: string) {
+  await tabUntilFocused(this, adoptionButton(this, plan), `the button that adopts history into the plan "${plan}"`);
 });
 
 // The button of a repository by the repository it picks. Its name is a
@@ -402,6 +416,27 @@ Then("the main content shows no line {string}", async function (this: BrowserWor
     .getByText(text, { exact: true })
     .first()
     .waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+});
+
+// Asked once the page has drawn what it waits for, such as a plan's rows: a
+// button that was never drawn is not one still on its way.
+Then("the page offers no button {string}", async function (this: BrowserWorld, name: string) {
+  const buttons = this.page.getByRole("button", { name: namePattern(name) });
+  assert.equal(await buttons.count(), 0, `the page offers the button "${name}"`);
+});
+
+// Asked, like the step above, once the page has drawn the history.
+Then("the page offers no adoption button into the plan {string}", async function (this: BrowserWorld, plan: string) {
+  const buttons = adoptionButton(this, plan);
+  assert.equal(await buttons.count(), 0, `the page offers a button that adopts history into the plan "${plan}"`);
+});
+
+// Waits, as a page draws its buttons once its reads come back.
+Then("the page offers the button {string}", async function (this: BrowserWorld, name: string) {
+  await this.page
+    .getByRole("button", { name: namePattern(name) })
+    .first()
+    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
 });
 
 // What the engine says is English whatever the language of the page, and the

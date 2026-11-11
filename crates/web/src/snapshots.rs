@@ -60,6 +60,9 @@ struct Page {
     viewer: StoredValue<Option<api::IanaZone>>,
     base: StoredValue<String>,
     alias: StoredValue<String>,
+    /// Whether this agent maintains the repository: only then does the page
+    /// offer to forget, prune, check or adopt in it (I1).
+    maintained: bool,
     unreachable: RwSignal<bool>,
     /// The history read last: `None` until a read is answered, and again when
     /// the history is asked for as if for the first time.
@@ -72,12 +75,18 @@ struct Page {
 }
 
 impl Page {
-    fn new(localizer: Arc<Localizer>, alias: String, unreachable: RwSignal<bool>) -> Page {
+    fn new(
+        localizer: Arc<Localizer>,
+        alias: String,
+        maintained: bool,
+        unreachable: RwSignal<bool>,
+    ) -> Page {
         Page {
             localizer: StoredValue::new(localizer),
             viewer: StoredValue::new(l10n::viewer_zone()),
             base: StoredValue::new(ws::origin()),
             alias: StoredValue::new(alias),
+            maintained,
             unreachable,
             groups: RwSignal::new(None),
             reading: RwSignal::new(false),
@@ -328,9 +337,10 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let unreachable = RwSignal::new(false);
-    // The repositories to pick from; `None` while the read is on its way.
-    let repositories = RwSignal::<Option<Vec<String>>>::new(None);
-    let chosen = RwSignal::<Option<String>>::new(None);
+    // The repositories to pick from, each with whether this agent maintains
+    // it; `None` while the read is on its way.
+    let repositories = RwSignal::<Option<Vec<(String, bool)>>>::new(None);
+    let chosen = RwSignal::<Option<(String, bool)>>::new(None);
     // The page of a repository is made anew when another is picked, not when
     // the one shown is picked again; that only asks for its history again.
     let shown_alias = Memo::new(move |_| chosen.get());
@@ -341,7 +351,10 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             Some(read) => {
                 unreachable.set(unreachable_after(true));
                 repositories.set(Some(
-                    read.repositories.into_iter().map(|row| row.alias).collect(),
+                    read.repositories
+                        .into_iter()
+                        .map(|row| (row.alias, row.maintained_here))
+                        .collect(),
                 ));
             }
             None => unreachable.set(unreachable_after(false)),
@@ -362,7 +375,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             None => view! { <p>{loading.clone()}</p> }.into_any(),
             Some(aliases) => aliases
                 .into_iter()
-                .map(|alias| {
+                .map(|(alias, maintained)| {
                     let label = text_with(
                         &picker,
                         msg::UI_SNAPSHOTS_OF,
@@ -372,7 +385,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                         <button
                             type="button"
                             on:click=move |_| {
-                                chosen.set(Some(alias.clone()));
+                                chosen.set(Some((alias.clone(), maintained)));
                                 picks.update(|picks| *picks = picks.wrapping_add(1));
                             }
                         >
@@ -386,11 +399,12 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         {move || {
             shown_alias
                 .get()
-                .map(|alias| {
+                .map(|(alias, maintained)| {
                     view! {
                         <Repository
                             localizer=Arc::clone(&localizer)
                             alias=alias
+                            maintained=maintained
                             unreachable=unreachable
                             picks=picks
                         />
@@ -402,15 +416,18 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// One repository: its maintenance, its history by owner and the review of
 /// whatever is asked. It is made anew for each repository picked, and reads
-/// its history again each time its repository is picked.
+/// its history again each time its repository is picked. A repository this
+/// agent does not maintain shows its history and says why it offers no
+/// maintenance.
 #[component]
 fn Repository(
     localizer: Arc<Localizer>,
     alias: String,
+    maintained: bool,
     unreachable: RwSignal<bool>,
     picks: RwSignal<u32>,
 ) -> impl IntoView {
-    let page = Page::new(localizer, alias.clone(), unreachable);
+    let page = Page::new(localizer, alias.clone(), maintained, unreachable);
     Effect::new(move |_| {
         picks.track();
         untrack(|| page.reload(true));
@@ -419,31 +436,18 @@ fn Repository(
         msg::UI_MAINTENANCE_HEADING,
         &[("alias", MsgArg::Text(alias))],
     );
-    let intro = page.plain(msg::UI_MAINTENANCE_BODY);
+    let intro = page.plain(if maintained {
+        msg::UI_MAINTENANCE_BODY
+    } else {
+        msg::UI_MAINTENANCE_ELSEWHERE
+    });
     let (forget, prune, check) = (
         page.plain(msg::UI_MAINTENANCE_FORGET),
         page.plain(msg::UI_MAINTENANCE_PRUNE),
         page.plain(msg::UI_MAINTENANCE_CHECK),
     );
-    let cancel = page.plain(msg::UI_MAINTENANCE_CANCEL);
-    let loading = page.plain(msg::UI_LOADING);
-    let empty = page.plain(msg::UI_NO_SNAPSHOTS);
-    // Each part of the panel has a memo of its own, so that a change of one
-    // does not draw the others again: an alert drawn again is announced again.
-    let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
-    let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
-    let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
-    let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
-    let area = Memo::new(move |_| {
-        let reading = page.reading.get();
-        page.groups.with(|groups| shown(groups.as_ref(), reading))
-    });
-    view! {
-        <section aria-labelledby=MAINTENANCE_HEADING>
-            <h2 id=MAINTENANCE_HEADING tabindex="-1">
-                {heading}
-            </h2>
-            <p>{intro}</p>
+    let buttons = maintained.then(|| {
+        view! {
             <p class="actions">
                 <button
                     type="button"
@@ -473,6 +477,28 @@ fn Repository(
                     {check}
                 </button>
             </p>
+        }
+    });
+    let cancel = page.plain(msg::UI_MAINTENANCE_CANCEL);
+    let loading = page.plain(msg::UI_LOADING);
+    let empty = page.plain(msg::UI_NO_SNAPSHOTS);
+    // Each part of the panel has a memo of its own, so that a change of one
+    // does not draw the others again: an alert drawn again is announced again.
+    let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
+    let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
+    let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
+    let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
+    let area = Memo::new(move |_| {
+        let reading = page.reading.get();
+        page.groups.with(|groups| shown(groups.as_ref(), reading))
+    });
+    view! {
+        <section aria-labelledby=MAINTENANCE_HEADING>
+            <h2 id=MAINTENANCE_HEADING tabindex="-1">
+                {heading}
+            </h2>
+            <p>{intro}</p>
+            {buttons}
             {move || {
                 step.get()
                     .map(|step| {
@@ -619,6 +645,7 @@ fn orphaned_group_view(page: Page, index: usize, group: OrphanedGroupDto) -> imp
         .adopt_into
         .iter()
         .enumerate()
+        .filter(|_| page.maintained)
         .filter_map(|(target, into)| {
             wording::adopt_orphaned(&group, into).map(|adoption| {
                 adoption_view(page, format!("adopt-orphaned-{index}-{target}"), adoption)
@@ -677,6 +704,7 @@ fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> i
         .adopt_into
         .iter()
         .enumerate()
+        .filter(|_| page.maintained)
         .map(|(target, into)| {
             let adoption = wording::adopt_unmanaged(&group, into);
             adoption_view(page, format!("adopt-unmanaged-{index}-{target}"), adoption)

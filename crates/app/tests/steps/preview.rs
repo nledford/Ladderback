@@ -151,7 +151,9 @@ async fn adopt_orphaned_with_selection(agent: &mut Agent, from: String, into: St
     confirm(agent, adoption(from, &into), operation_id(0xce), "adopt").await;
 }
 
-#[when("the owner lists the repository's groups")]
+// "This agent" for a repository it doesn't maintain, whose history it lists all
+// the same.
+#[when(regex = r"^(?:the owner|this agent) lists the repository's groups$")]
 async fn list_groups(agent: &mut Agent) {
     let use_case = super::forget_steps::use_case(agent);
     // The scenario's clock jumps to a timer's deadline, so a listing of a

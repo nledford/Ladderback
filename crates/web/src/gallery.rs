@@ -12,8 +12,8 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::components::{
-    Confirmation, FormField, ModalDialog, Progress, ReviewDialog, SortableTable, StatusBadge,
-    Toast, show_toast,
+    Checkbox, Confirmation, FormField, ModalDialog, Progress, ReviewDialog, SortableTable,
+    StatusBadge, Toast, show_toast,
 };
 use crate::live::{modal_gone, open_modal, say};
 use crate::routes::PageHeading;
@@ -202,6 +202,17 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
                 </button>
             </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_CHECKBOX_HEADING)}</h2>
+            // Its two states: off with a description, and on without one.
+            <Checkbox
+                id="gallery-notification"
+                label=t(msg::UI_GALLERY_DEMO_NOTIFICATION)
+                description=t(msg::UI_GALLERY_DEMO_NOTIFICATION_HINT)
+                checked=RwSignal::new(false)
+            />
+            <Checkbox id="gallery-log" label=t(msg::UI_GALLERY_DEMO_LOG) checked=RwSignal::new(true) />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>

@@ -69,6 +69,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     OperationNotRunning => msg::ERROR_OPERATION_NOT_RUNNING,
     InvalidCursor => msg::ERROR_INVALID_CURSOR,
     MaintenanceBusy => msg::ERROR_MAINTENANCE_BUSY,
+    MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
     AdoptionNoMatch => msg::ERROR_ADOPTION_NO_MATCH,

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use domain::execution::FailureReason;
 use domain::execution::deadline::{Deadline, REPOSITORY_JOB_BUDGET};
-use domain::planning::{AgentConfig, RepositoryConfig, RepositorySettings};
+use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
 use domain::{OperationId, RepositoryAlias, RepositoryId};
 use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
@@ -109,7 +109,10 @@ impl InitRepository {
     /// Saved only when `alias` is given, by the same rule
     /// [`ConnectRepository`] saves one: an alias the configuration already
     /// holds is refused, and before the job runs, so a refused request has
-    /// created no repository the person could not then find again.
+    /// created no repository the person could not then find again. A
+    /// repository created here asks this agent to maintain it
+    /// (`maintenance = "local"`, §7.3): nothing else knows it yet, so no
+    /// other party maintains it.
     pub async fn init(
         &self,
         op: OperationId,
@@ -123,7 +126,7 @@ impl InitRepository {
         let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
         let saved = match alias {
             Some(alias) => {
-                save(&*self.config, &alias, settings).await?;
+                save(&*self.config, &alias, settings, Maintenance::Local).await?;
                 true
             }
             None => false,
@@ -170,16 +173,20 @@ impl ConnectRepository {
         }
     }
 
-    /// Tests the repository and, once the test passed, saves it under `alias`.
+    /// Tests the repository and, once the test passed, saves it under `alias`
+    /// with `maintenance`, the person's choice of who maintains it (§7.3): a
+    /// repository that exists may already be maintained by another party,
+    /// and only one may do it (I1).
     pub async fn connect(
         &self,
         op: OperationId,
         alias: RepositoryAlias,
         settings: &RepositorySettings,
+        maintenance: Maintenance,
     ) -> Result<RepositoryId, RepositoryError> {
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Identify(access)).await?;
-        save(&*self.config, &alias, settings).await?;
+        save(&*self.config, &alias, settings, maintenance).await?;
         Ok(id)
     }
 }
@@ -311,13 +318,15 @@ async fn unused(
     Ok(loaded)
 }
 
-/// Saves `settings` under `alias`, refusing an alias the configuration
-/// already holds. What is saved is the settings as written: a secret stays
+/// Saves `settings` under `alias` with `maintenance` as its request of who
+/// maintains it, refusing an alias the configuration already holds. What is
+/// saved is the settings as written: a secret stays a reference.
 #[allow(clippy::result_large_err)]
 async fn save(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
+    maintenance: Maintenance,
 ) -> Result<(), RepositoryError> {
     let loaded = unused(config, alias).await?;
     let mut repositories = loaded.repositories().clone();
@@ -325,7 +334,7 @@ async fn save(
         alias.clone(),
         RepositoryConfig {
             settings: settings.clone(),
-            maintenance: Default::default(),
+            maintenance,
             group_by: Default::default(),
             hooks: Default::default(),
         },
@@ -368,6 +377,7 @@ mod tests {
     use domain::Timestamp;
     use domain::execution::FailureReason;
     use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
+    use domain::planning::Maintenance;
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
     use futures::StreamExt;
@@ -682,7 +692,7 @@ mod tests {
             config.clone(),
         );
         assert_eq!(
-            within(use_case.connect(op(), alias(), &settings())).await,
+            within(use_case.connect(op(), alias(), &settings(), Maintenance::None)).await,
             Err(RepositoryError::TimedOut)
         );
         assert!(
@@ -762,7 +772,12 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
         );
-        assert_eq!(use_case.connect(op(), alias(), &settings()).await, Ok(id()));
+        assert_eq!(
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
+            Ok(id())
+        );
         let saved = config
             .load()
             .await
@@ -793,7 +808,9 @@ mod tests {
             config.clone(),
         );
         assert!(matches!(
-            use_case.connect(op(), alias(), &settings()).await,
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
             Err(RepositoryError::Failed(FailureReason::EngineFailed { .. }))
         ));
         let saved = config
@@ -817,11 +834,13 @@ mod tests {
             config.clone(),
         );
         use_case
-            .connect(op(), alias(), &settings())
+            .connect(op(), alias(), &settings(), Maintenance::None)
             .await
             .unwrap_or_else(|e| panic!("the first connect: {e:?}"));
         assert!(matches!(
-            use_case.connect(op(), alias(), &settings()).await,
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
             Err(RepositoryError::AliasTaken(_))
         ));
         let saved = config
@@ -859,6 +878,60 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_connection_saves_who_the_person_chose_to_maintain_it() {
+        for chosen in [Maintenance::Local, Maintenance::None] {
+            let engine = Arc::new(Scripted {
+                outcome: Mutex::new(Ok(id())),
+                seen: Mutex::new(Vec::new()),
+            });
+            let config = Arc::new(InMemoryConfigStore::new());
+            ConnectRepository::new(
+                clock(),
+                engine,
+                ResolveRepository::new(Arc::new(FakeSecrets::new())),
+                config.clone(),
+            )
+            .connect(op(), alias(), &settings(), chosen)
+            .await
+            .unwrap_or_else(|e| panic!("the connection: {e:?}"));
+            let saved = config
+                .load()
+                .await
+                .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+            assert_eq!(
+                saved.repository(&alias()).map(|r| r.maintenance),
+                Some(chosen)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repository_created_under_a_name_is_maintained_here() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        InitRepository::new(
+            clock(),
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        )
+        .init(op(), &settings(), Some(alias()))
+        .await
+        .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            saved.repository(&alias()).map(|r| r.maintenance),
+            Some(Maintenance::Local)
+        );
     }
 
     #[tokio::test]

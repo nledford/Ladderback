@@ -4,7 +4,10 @@ Feature: Connecting a repository
   there, and connects one by saving it into its configuration once its test
   passed. A repository is never overwritten, an alias is never reused, and
   what the configuration keeps is the settings as written: a secret stays a
-  reference, never the value it resolved to.
+  reference, never the value it resolved to. A repository created here is
+  maintained by this agent; one that is connected is maintained by it only
+  when the person chose so, for only one party may maintain a repository and
+  another may already do it (I1, §7.3).
 
   Scenario: Testing a repository reports its ID and saves nothing
     Given a repository the engine identifies
@@ -37,6 +40,18 @@ Feature: Connecting a repository
     And the agent has no repository configured
     When the agent initialises the repository as "demo"
     Then the agent has the repository "demo" configured with its settings
+
+  Scenario: Creating a repository under a name asks this agent to maintain it
+    Given a repository the engine identifies
+    When the agent initialises the repository as "demo"
+    Then the repository "demo" asks this agent to maintain it
+
+  Scenario: Connecting a repository asks this agent to maintain it only when the person chose so
+    Given a repository the engine identifies
+    When the agent connects it as "demo"
+    Then the repository "demo" asks nobody to maintain it
+    When the agent connects it as "other" to maintain it from this agent
+    Then the repository "other" asks this agent to maintain it
 
   Scenario: Testing a repository that never answers is refused once its time is up
     Given a repository the engine never answers

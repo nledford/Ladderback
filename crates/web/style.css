@@ -238,6 +238,29 @@ main:focus {
   margin-block: 0.25rem;
 }
 
+/* A checkbox sits before its label on one line, its description under the
+   label, and the label is its click target. The box is never under 24px
+   square, the smallest target 2.5.8 allows, and grows with the text. One
+   size and no color of its own: the words carry the meaning (1.4.1). */
+.field.checkbox {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+  align-items: start;
+}
+
+.field.checkbox input {
+  inline-size: max(24px, 1.5em);
+  block-size: max(24px, 1.5em);
+  min-block-size: max(24px, 1.5em);
+  margin-block: 0;
+  padding: 0;
+}
+
+.field.checkbox p {
+  grid-column: 2;
+}
+
 .form-error {
   color: var(--badge-error-fg);
   font-weight: 600;

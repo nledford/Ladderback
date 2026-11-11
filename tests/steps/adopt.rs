@@ -124,7 +124,7 @@ async fn save_config(agent: &mut Agent) {
                 options_hot: BTreeMap::new(),
                 options_cold: BTreeMap::new(),
             },
-            maintenance: Maintenance::default(),
+            maintenance: Maintenance::Local,
             group_by: GroupBy::default(),
             hooks: Hooks::default(),
         },

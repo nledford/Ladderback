@@ -28,6 +28,8 @@ mod operation_steps;
 mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/owner.rs"]
+mod owner_steps;
 #[path = "steps/preview.rs"]
 mod preview_steps;
 #[path = "steps/secrets.rs"]

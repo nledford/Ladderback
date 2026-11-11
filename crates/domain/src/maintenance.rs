@@ -1,10 +1,13 @@
-//! Which snapshots a forget run may remove (technical design §7.3). The
-//! partition into managed, orphaned and unmanaged groups is the maintenance
-//! owner's own decision, and it is the whole of invariant I6: forget only
-//! ever removes snapshots a plan of this agent owns, by tag. Untagged
-//! snapshots are never touched, and a tagged group whose plan or agent this
-//! configuration doesn't know is left alone and listed as orphaned, for the
-//! user to adopt, give a policy, or delete explicitly.
+//! Which snapshots a forget run may remove, and who may run maintenance at
+//! all (technical design §7.3). [`Ownership`] is invariant I1 on an agent
+//! with no hub: only a repository whose entry asks for `local` is forgotten,
+//! pruned, checked or adopted from here. The partition into managed,
+//! orphaned and unmanaged groups is the maintenance owner's own decision,
+//! and it is the whole of invariant I6: forget only ever removes snapshots a
+//! plan of this agent owns, by tag. Untagged snapshots are never touched,
+//! and a tagged group whose plan or agent this configuration doesn't know is
+//! left alone and listed as orphaned, for the user to adopt, give a policy,
+//! or delete explicitly.
 //!
 //! Which of a managed group's snapshots the plan's policy lets go is not
 //! decided here: retention is evaluated with rustic's own rules, through the
@@ -13,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::execution::plan_tags;
-use crate::planning::{Plan, RetentionPolicy};
+use crate::planning::{Maintenance, Plan, RetentionPolicy};
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
 
 /// One snapshot as the owner sees it: what a listing reports, minus what
@@ -506,6 +509,23 @@ impl ForgetPreview {
         self.plans
             .iter()
             .flat_map(|plan| plan.remove.iter().map(|snapshot| &snapshot.id))
+    }
+}
+
+/// Who may maintain a repository from this agent: exactly one party does
+/// (I1, §7.3). Forget, prune, check and adoption, which rewrites snapshots,
+/// are the owner's alone, and so are their previews.
+pub struct Ownership;
+
+impl Ownership {
+    /// Whether this agent owns the maintenance of a repository whose entry
+    /// asks for `request`, on an agent with no hub to grant it. Only
+    /// `local` asks for this agent, and without a hub that request runs
+    /// directly. `hub` waits for a hub this agent doesn't have, and `none`
+    /// leaves the repository to something outside Ladderback, such as a
+    /// cron job: neither runs anything here.
+    pub fn owned_here(request: Maintenance) -> bool {
+        matches!(request, Maintenance::Local)
     }
 }
 
@@ -1161,5 +1181,12 @@ mod tests {
             ]
         );
         assert!(AdoptSelection::claimants(&[], "demo-host", &candidates).is_empty());
+    }
+
+    #[test]
+    fn only_a_repository_that_asks_for_this_agent_is_maintained_here() {
+        assert!(Ownership::owned_here(Maintenance::Local));
+        assert!(!Ownership::owned_here(Maintenance::None));
+        assert!(!Ownership::owned_here(Maintenance::Hub));
     }
 }

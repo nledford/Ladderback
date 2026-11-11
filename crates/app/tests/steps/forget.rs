@@ -197,7 +197,8 @@ impl ForgetWorld {
         self.store.save(&config).await.expect("the draft saves");
     }
 
-    /// Adds the repository every forget scenario runs on.
+    /// Adds the repository every forget scenario runs on, maintained by this
+    /// agent.
     pub async fn repository(&mut self) {
         self.repositories.insert(
             alias(),
@@ -210,11 +211,20 @@ impl ForgetWorld {
                     options_hot: Default::default(),
                     options_cold: Default::default(),
                 },
-                maintenance: Maintenance::default(),
+                maintenance: Maintenance::Local,
                 group_by: GroupBy::default(),
                 hooks: Hooks::default(),
             },
         );
+        self.save().await;
+    }
+
+    /// Sets who the repository's entry asks to maintain it.
+    pub async fn maintained_by(&mut self, maintenance: Maintenance) {
+        self.repositories
+            .get_mut(&alias())
+            .expect("the repository was added first")
+            .maintenance = maintenance;
         self.save().await;
     }
 

@@ -339,7 +339,8 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
                     options_hot: Default::default(),
                     options_cold: Default::default(),
                 },
-                maintenance: domain::planning::Maintenance::None,
+                // This agent maintains it, so the maintenance scenarios run.
+                maintenance: domain::planning::Maintenance::Local,
                 group_by: Default::default(),
                 hooks: Default::default(),
             },

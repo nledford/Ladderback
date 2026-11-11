@@ -5,7 +5,9 @@ Feature: Repositories page
   keyboard alone (A1, A2). A failed attempt moves focus to an error summary
   that names each problem and links to its field, and what the daemon said is
   shown as the catalog writes it (A4, components.md §4.5). A password is never
-  shown again once typed (I4). In these scenarios {repo} is a scratch copy of
+  shown again once typed (I4). A connected repository is maintained from this
+  machine only when the person turns that on, for only one place may maintain
+  a repository (I1). In these scenarios {repo} is a scratch copy of
   the demo repository, {empty} and {hot} are empty scratch folders, and the
   demo repository's password is demo-password.
 
@@ -117,6 +119,30 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
+  Scenario: Connecting a repository to maintain from this agent offers its maintenance
+    Given a daemon with a scratch demo repository and no repositories
+    When I open the address "/repositories"
+    And I press Tab until focus is on the textbox "Name"
+    And I type "copy"
+    And I press Tab
+    And I type "{repo}"
+    And I press Tab until focus is on the textbox "Password"
+    And I type "demo-password"
+    And I press Tab until focus is on the checkbox "Maintain this repository from this agent"
+    Then the checkbox "Maintain this repository from this agent" is not checked
+    And the checkbox "Maintain this repository from this agent" is described by "When this is on, this agent forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another agent or the hub already does. A repository you create here under a name is always maintained from here."
+    When I press Space
+    And I press Tab until focus is on the button "Connect the repository"
+    And I press Enter
+    Then the polite region comes to contain "Connected copy."
+    And the checkbox "Maintain this repository from this agent" is not checked
+    And the page has no accessibility violations
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of copy"
+    And I press Enter
+    Then the main content shows the line "Each of these shows what it would do first. Nothing changes until you confirm."
+    And the page offers the button "Check the repository"
+
   Scenario: Connecting under a name already used is refused at the name
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/repositories"
@@ -126,11 +152,14 @@ Feature: Repositories page
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
     And I type "demo-password"
+    And I press Tab until focus is on the checkbox "Maintain this repository from this agent"
+    And I press Space
     And I press Tab until focus is on the button "Connect the repository"
     And I press Enter
     Then focus is on the heading "There is 1 problem with the form"
     And the page shows a message containing "already has a repository called demo"
     And the field "Name" is marked invalid
+    And the checkbox "Maintain this repository from this agent" is checked
     And the page has no accessibility violations
 
   Scenario: A name that is not a name is refused at the name
