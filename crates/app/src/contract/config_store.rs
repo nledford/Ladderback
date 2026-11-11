@@ -7,7 +7,7 @@ use domain::planning::{
     RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
-use domain::{PlanId, RepositoryAlias, SignedDuration};
+use domain::{PlanId, RepositoryAlias, RepositoryId, SignedDuration};
 
 use crate::ports::ConfigStore;
 
@@ -127,6 +127,7 @@ fn rich() -> Option<AgentConfig> {
         (
             nas.clone(),
             RepositoryConfig {
+                id: Some(RepositoryId::parse(&"0123456789abcdef".repeat(4)).ok()?),
                 settings: RepositorySettings {
                     password: SecretRef::Command(
                         CommandLine::new(
@@ -159,6 +160,7 @@ fn rich() -> Option<AgentConfig> {
         (
             cloud.clone(),
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
                     password: SecretRef::Keyring(
@@ -183,6 +185,7 @@ fn rich() -> Option<AgentConfig> {
         (
             usb,
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     password: SecretRef::File {
                         path: "/home/demo/.usb password".to_owned(),
@@ -206,6 +209,7 @@ fn rich() -> Option<AgentConfig> {
         (
             alias("vault")?,
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     password: SecretRef::Env("DEMO_VAULT_PASSWORD".to_owned()),
                     ..settings("/srv/demo-vault")
@@ -218,6 +222,7 @@ fn rich() -> Option<AgentConfig> {
         (
             alias("scratch")?,
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     password: SecretRef::Inline(SecretValue::new("demo \"inline\" #password")),
                     ..settings("/srv/demo-scratch")
@@ -339,6 +344,7 @@ fn rich() -> Option<AgentConfig> {
 fn minimal() -> Option<AgentConfig> {
     let nas = alias("nas")?;
     let repository = RepositoryConfig {
+        id: None,
         settings: settings("/srv/demo-repo"),
         maintenance: Maintenance::None,
         group_by: GroupBy::default(),

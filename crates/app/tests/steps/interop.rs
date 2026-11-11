@@ -90,6 +90,7 @@ fn hostname(name: &str) -> Hostname {
 
 fn demo_repository() -> RepositoryConfig {
     RepositoryConfig {
+        id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),
             repo_hot: None,
@@ -196,8 +197,24 @@ fn profile_hooks(agent: &mut Agent, program: String) {
     agent.interop.profile_hooks = hooks_before(&[&program]);
 }
 
+/// A repository the configuration holds, at a location of its own: not the
+/// profile's, which is another repository.
+fn configured_repository(name: &str) -> RepositoryConfig {
+    let mut repository = demo_repository();
+    repository.settings.repository = format!("/srv/{name}");
+    repository
+}
+
 #[given(expr = "the configuration holds the repository {string}")]
 fn holds_repository(agent: &mut Agent, name: String) {
+    agent
+        .interop
+        .repositories
+        .insert(alias(&name), configured_repository(&name));
+}
+
+#[given(expr = "the configuration holds the repository {string} at the profile's location")]
+fn holds_profile_repository(agent: &mut Agent, name: String) {
     agent
         .interop
         .repositories
@@ -210,7 +227,7 @@ fn holds_repositories(agent: &mut Agent, one: String, other: String) {
         agent
             .interop
             .repositories
-            .insert(alias(&name), demo_repository());
+            .insert(alias(&name), configured_repository(&name));
     }
 }
 
@@ -338,6 +355,28 @@ fn refused_unreadable(agent: &mut Agent) {
         Err(ImportError::Profile(ProfileError::Unreadable { .. })) => {}
         other => panic!("the import should be refused as unreadable, got {other:?}"),
     }
+}
+
+#[then(expr = "the import is refused because the repository is configured as {string}")]
+fn refused_already_configured(agent: &mut Agent, name: String) {
+    match agent.interop.imported() {
+        Err(ImportError::AlreadyConfigured(configured)) => assert_eq!(configured, &alias(&name)),
+        other => panic!("the import should be refused for the repository, got {other:?}"),
+    }
+}
+
+#[then(expr = "the configuration now holds the plan {string} for the repository {string}")]
+async fn now_holds_plan_for(agent: &mut Agent, id: String, repository: String) {
+    let config = agent.interop.now().await;
+    let plan = config
+        .plan(&plan_id(&id))
+        .unwrap_or_else(|| panic!("no plan {id:?}"));
+    assert_eq!(plan.repository, alias(&repository));
+}
+
+#[then(expr = "the configuration now holds {int} repository/repositories")]
+async fn now_holds_repositories(agent: &mut Agent, count: usize) {
+    assert_eq!(agent.interop.now().await.repositories().len(), count);
 }
 
 #[then("the configuration is unchanged")]

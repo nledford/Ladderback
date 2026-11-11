@@ -59,6 +59,7 @@ fn export() -> PlanExport {
             vec![Source::parse("/home/demo").expect("a source")],
         ),
         repository: RepositoryConfig {
+            id: None,
             settings: settings("/srv/demo-repo", file_password()),
             maintenance: domain::planning::Maintenance::None,
             group_by: domain::planning::GroupBy::default(),

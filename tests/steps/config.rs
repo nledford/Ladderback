@@ -148,6 +148,35 @@ fn refused_unknown_key(agent: &mut Agent, key: String) {
     }
 }
 
+#[then(expr = "the load is refused because {string} and {string} are one repository")]
+fn refused_one_repository(agent: &mut Agent, first: String, second: String) {
+    let alias = |name: &str| domain::RepositoryAlias::parse(name).expect("an alias");
+    match refusal(agent) {
+        ConfigError::Invalid {
+            problem: Problem::Violation(violation),
+            key,
+            detail,
+            ..
+        } => {
+            assert_eq!(
+                violation,
+                &domain::planning::Violation::SameRepository {
+                    first: alias(&first),
+                    second: alias(&second),
+                }
+            );
+            assert_eq!(key.as_deref(), Some(&*format!("repositories.{second}")));
+            for name in [&first, &second] {
+                assert!(
+                    detail.contains(&format!("repositories.{name}")),
+                    "the refusal names {name}: {detail}"
+                );
+            }
+        }
+        other => panic!("the load should be refused as one repository, got {other:?}"),
+    }
+}
+
 #[then(expr = "the refusal points at line {int} of the config file")]
 fn refusal_points_at(agent: &mut Agent, line: usize) {
     let path = config_path(agent).display().to_string();

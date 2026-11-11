@@ -170,6 +170,7 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::DeadlinePassed => ("deadline-passed", Vec::new(), None),
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
+        FailureReason::RepositoryReplaced => todo!(),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (

@@ -66,6 +66,10 @@ pub enum FailureReason {
     /// A repository already exists where one was to be initialised, so
     /// nothing was written. The agent refuses to overwrite one.
     RepositoryExists,
+    /// The repository at the entry's location has another repository ID than
+    /// the one the configuration recorded for it (§7.3): the location now
+    /// holds a different repository, so nothing was read or written.
+    RepositoryReplaced,
     /// The engine's process didn't start the operation in time, so it never
     /// ran: it didn't read its job, or read it and sent nothing (not even a
     /// log line) before the start timeout, and it was killed.
@@ -100,6 +104,7 @@ impl FailureReason {
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
             Self::RepositoryExists => "repository-exists",
+            Self::RepositoryReplaced => todo!(),
             Self::DaemonStopped => "daemon-stopped",
         }
     }
@@ -899,6 +904,14 @@ mod tests {
     #[test]
     fn a_daemon_that_stopped_codes_as_daemon_stopped() {
         assert_eq!(FailureReason::DaemonStopped.code(), "daemon-stopped");
+    }
+
+    #[test]
+    fn a_replaced_repository_codes_as_repository_replaced() {
+        assert_eq!(
+            FailureReason::RepositoryReplaced.code(),
+            "repository-replaced"
+        );
     }
 
     #[test]

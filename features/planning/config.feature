@@ -71,6 +71,14 @@ Feature: An agent's configuration
       When the configuration is built
       Then the configuration is accepted
 
+  Rule: A repository has one name in a configuration
+
+    Scenario: Two names for one location are refused
+      Given a repository "nas"
+      And a repository "nas-2" at the location of "nas"
+      When the configuration is built
+      Then the configuration is refused because "nas" and "nas-2" are one repository
+
   Rule: What a configuration doesn't say gets a safe default
 
     Scenario: A schedule says only when, and keeps the other defaults
@@ -196,6 +204,40 @@ Feature: An agent's configuration
       Then the load is refused because the key "repositories.nas.colour" is unknown
       And the refusal points at line 6 of the config file
       And the refusal never shows "CANARY-inline-password"
+
+    Scenario: A file with two entries for one location is refused, naming both
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [repositories.nas-2]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because "nas" and "nas-2" are one repository
+
+    Scenario: A file with two entries for one repository ID is refused, naming both
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.laptop]
+        repository = "sftp:demo@nas:/srv/demo-repo"
+        repository-id = "0707070707070707070707070707070707070707070707070707070707070707"
+        password-env = "DEMO_PASSWORD"
+
+        [repositories.mounted]
+        repository = "/Volumes/nas/demo-repo"
+        repository-id = "0707070707070707070707070707070707070707070707070707070707070707"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because "laptop" and "mounted" are one repository
 
     Scenario: A file that doesn't say which version it is in is refused
       Given a config file holding:

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::{Hooks, InvalidValue, ValueKind};
+use crate::RepositoryId;
 use crate::secrets::{
     InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference,
     is_secret_option,
@@ -199,11 +200,25 @@ impl fmt::Display for GroupBy {
 pub struct RepositoryConfig {
     /// Where it is and how to open it.
     pub settings: RepositorySettings,
+    /// The rustic repository ID Ladderback read when it connected or created
+    /// the repository (§7.3). None for an entry written by hand or imported
+    /// from a profile: Ladderback never opened those.
+    pub id: Option<RepositoryId>,
     /// Who is asked to maintain it.
     pub maintenance: Maintenance,
     pub group_by: GroupBy,
     /// Wraps every job on the repository, forget, prune and check included.
     pub hooks: Hooks,
+}
+
+impl RepositoryConfig {
+    /// Whether this entry is the repository at `location`, or the one whose
+    /// repository ID is `id`. One location is one repository, and so is one
+    /// ID (§7.3); an entry or a request that knows no ID matches by location
+    /// alone.
+    pub fn is(&self, location: &str, id: Option<&RepositoryId>) -> bool {
+        todo!("{location} {id:?}")
+    }
 }
 
 #[cfg(test)]

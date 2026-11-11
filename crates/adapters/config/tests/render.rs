@@ -26,6 +26,7 @@ fn alias(text: &str) -> RepositoryAlias {
 
 fn repository(password: SecretRef) -> RepositoryConfig {
     RepositoryConfig {
+        id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),
             repo_hot: None,

@@ -34,3 +34,10 @@ Feature: Backups
     Given the folder was backed up without Ladderback
     When the agent backs up the plan
     Then the new snapshot's parent is the snapshot made without Ladderback
+
+  Scenario: A backup refuses a location that now holds another repository
+    Given the repository's ID is known
+    And another repository has replaced it at its location
+    When the agent backs up the plan
+    Then the operation ends as failed because its location holds another repository
+    And the repository has no snapshots

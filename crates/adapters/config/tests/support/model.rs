@@ -66,6 +66,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("nas"),
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     options: by_name(&[(
                         "sftp.command",
@@ -90,6 +91,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("cloud"),
             RepositoryConfig {
+                id: None,
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
                     options: by_name(&[
@@ -118,6 +120,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("usb"),
             RepositoryConfig {
+                id: None,
                 settings: settings(
                     "/media/demo/usb backups",
                     SecretRef::File {
@@ -133,6 +136,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("vault"),
             RepositoryConfig {
+                id: None,
                 settings: settings(
                     "/srv/demo-vault",
                     SecretRef::Env("DEMO_VAULT_PASSWORD".to_owned()),
@@ -150,6 +154,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("scratch"),
             RepositoryConfig {
+                id: None,
                 settings: settings(
                     "/srv/demo-scratch",
                     SecretRef::Inline(SecretValue::new("demo \"inline\" #password")),

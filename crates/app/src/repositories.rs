@@ -72,6 +72,9 @@ pub enum RepositoryError {
     Exists,
     /// The configuration already holds a repository under the alias.
     AliasTaken(RepositoryAlias),
+    /// The configuration already holds this repository, under the alias
+    /// given: a repository has one alias (§7.3).
+    AlreadyConfigured(RepositoryAlias),
     /// The repository's settings couldn't be resolved.
     Resolve(ResolveError),
     /// The engine couldn't be started or refused the job.
@@ -333,6 +336,7 @@ async fn save(
     repositories.insert(
         alias.clone(),
         RepositoryConfig {
+            id: None,
             settings: settings.clone(),
             maintenance,
             group_by: Default::default(),

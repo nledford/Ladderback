@@ -797,6 +797,7 @@ pub(crate) fn import_refusal(error: ImportError, config_file: &std::path::Path) 
             args: vec![("alias", text(alias.as_str()))],
             detail: None,
         },
+        ImportError::AlreadyConfigured(_) => todo!(),
         ImportError::PlanTaken(plan) => Refusal {
             code: ErrorCode::PlanIdTaken,
             args: vec![("plan", text(plan.as_str()))],
@@ -1319,6 +1320,7 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::AliasTaken(alias) => RepositoriesError::AliasTaken {
             alias: alias.as_str().to_owned(),
         },
+        RepositoryError::AlreadyConfigured(_) => todo!(),
         RepositoryError::Resolve(error) => {
             RepositoriesError::SecretRefused(secret_refusal(&error, settings).await)
         }
@@ -1556,6 +1558,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         // runs no hooks. It is still a failure, in the catalog's plainest words.
         F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
         F::RepositoryExists => exists(settings),
+        F::RepositoryReplaced => todo!(),
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }
@@ -2267,6 +2270,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias.clone(),
                 domain::planning::RepositoryConfig {
+                    id: None,
                     settings,
                     // This agent maintains it, so a preview and a run reach
                     // the engine.
@@ -2455,6 +2459,117 @@ mod tests {
                 unmanaged: Vec::new(),
             })
         );
+    }
+
+    /// One repository under two names never reaches the history view (I6,
+    /// §7.3): a file with a second entry at the first one's location is not a
+    /// configuration, so neither name's groups are read, and no plan of the
+    /// one can show as orphaned history adoptable into the other.
+    #[tokio::test]
+    async fn a_repository_under_two_names_never_reaches_the_history_view() {
+        let (mut runner, _entered, _gate, scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(Empty);
+        let location = scratch.path().join("repo").display().to_string();
+        let (config_dir, _) = own_folders(scratch.path());
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!(
+                "schema = 1\n\n\
+                 [repositories.demo]\nrepository = {location:?}\npassword = \"demo-password\"\n\
+                 maintenance = \"local\"\n\n\
+                 [repositories.other]\nrepository = {location:?}\npassword = \"demo-password\"\n\n\
+                 [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [\"/home/demo\"]\n"
+            ),
+        )
+        .expect("the config file");
+        for alias in ["demo", "other"] {
+            let refused = runner.groups(alias.to_owned()).await;
+            assert!(
+                matches!(
+                    refused,
+                    Err(MaintenanceRefusal::Unavailable {
+                        code: ErrorCode::ConfigUnavailable,
+                        ..
+                    })
+                ),
+                "the groups of {alias}: {refused:?}"
+            );
+        }
+    }
+
+    /// An engine for a repository that holds no snapshots, as [`Empty`], that
+    /// also tells which repository ID each job names as the one it must open.
+    /// Like the real engine, it identifies a repository as the ID the job
+    /// named, when the job names one.
+    struct Named(tokio::sync::mpsc::UnboundedSender<(String, Option<domain::RepositoryId>)>);
+
+    #[async_trait]
+    impl Engine for Named {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let named = job.target().repository;
+            let _ = self.0.send((format!("{:?}", job.kind()), named.clone()));
+            match (&job, named) {
+                (Job::Identify(_), Some(id)) => Ok(RunningJob {
+                    events: futures::stream::iter([EngineEvent::Succeeded(
+                        EngineResult::Repository { id },
+                    )])
+                    .boxed(),
+                    control: Box::new(Parked),
+                }),
+                _ => Empty.run(op, job).await,
+            }
+        }
+    }
+
+    /// A repository ID the configuration recorded goes with every job that
+    /// opens the repository: the listing, the reads behind the history view
+    /// and a backup. The engine refuses a location whose repository has
+    /// another ID (§7.3), so a location that now holds another repository is
+    /// never read or written under the entry's name.
+    #[tokio::test]
+    async fn every_job_names_the_repository_id_the_configuration_recorded() {
+        let (mut runner, _entered, open_gate, scratch) = runner_at_a_gate().await;
+        let (seen, mut jobs) = tokio::sync::mpsc::unbounded_channel();
+        runner.engine = Arc::new(Named(seen));
+        let recorded = "07".repeat(32);
+        let location = scratch.path().join("repo").display().to_string();
+        let source = scratch.path().join("source").display().to_string();
+        let (config_dir, _) = own_folders(scratch.path());
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!(
+                "schema = 1\n\n\
+                 [repositories.demo]\nrepository = {location:?}\n\
+                 repository-id = {recorded:?}\npassword = \"demo-password\"\n\n\
+                 [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [{source:?}]\n"
+            ),
+        )
+        .expect("the config file");
+        let expected = Some(domain::RepositoryId::parse(&recorded).expect("a repository ID"));
+        let catalog = ConfigCatalog {
+            config: Arc::clone(&runner.config),
+            engine: Arc::clone(&runner.engine),
+        };
+        catalog
+            .snapshots("demo".to_owned())
+            .await
+            .expect("the listing");
+        runner.groups("demo".to_owned()).await.expect("the groups");
+        open_gate.send(true).expect("the gate opens");
+        runner
+            .start_backup("home".to_owned())
+            .await
+            .expect("the plan starts");
+        let mut kinds = Vec::new();
+        while !kinds.iter().any(|kind| kind == "Backup") {
+            let (kind, id) = tokio::time::timeout(std::time::Duration::from_secs(5), jobs.recv())
+                .await
+                .expect("the engine is asked")
+                .expect("a job");
+            assert_eq!(id, expected, "the {kind} job");
+            kinds.push(kind);
+        }
+        assert!(kinds.contains(&"Ls".to_owned()), "the jobs: {kinds:?}");
     }
 
     /// A start that carries a selection is held to it (I6): what a forget
@@ -4927,6 +5042,7 @@ mod repository_service_tests {
                     std::collections::BTreeMap::from([(
                         RepositoryAlias::parse(alias).expect("an alias"),
                         domain::planning::RepositoryConfig {
+                            id: None,
                             settings,
                             maintenance: domain::planning::Maintenance::None,
                             group_by: Default::default(),
@@ -5226,6 +5342,7 @@ mod repository_service_tests {
             repositories.insert(
                 alias(name),
                 domain::planning::RepositoryConfig {
+                    id: None,
                     settings: RepositorySettings {
                         repository: "rest:https://u:hunter2@nas.example/repo".to_owned(),
                         repo_hot: Some("rest:https://u:hunter3@hot.example/repo".to_owned()),

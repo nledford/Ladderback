@@ -2,12 +2,12 @@
 Feature: Connecting a repository
   The agent initialises a repository where nothing is yet, tests one that is
   there, and connects one by saving it into its configuration once its test
-  passed. A repository is never overwritten, an alias is never reused, and
-  what the configuration keeps is the settings as written: a secret stays a
-  reference, never the value it resolved to. A repository created here is
-  maintained by this agent; one that is connected is maintained by it only
-  when the person chose so, for only one party may maintain a repository and
-  another may already do it (I1, §7.3).
+  passed. A repository is never overwritten, an alias is never reused, a
+  repository has one alias, and what the configuration keeps is the settings
+  as written: a secret stays a reference, never the value it resolved to. A
+  repository created here is maintained by this agent; one that is connected
+  is maintained by it only when the person chose so, for only one party may
+  maintain a repository and another may already do it (I1, §7.3).
 
   Scenario: Testing a repository reports its ID and saves nothing
     Given a repository the engine identifies
@@ -26,6 +26,37 @@ Feature: Connecting a repository
     When the agent connects it as "demo"
     Then the connection is refused because the alias is taken
     And the agent has one repository configured
+
+  Scenario: Connecting a repository the agent has under another name is refused
+    Given a repository the engine identifies
+    And the agent has the repository "demo" configured with its settings
+    When the agent connects it as "other"
+    Then the request is refused because the repository is configured as "demo"
+    And the agent has one repository configured
+
+  Scenario: Connecting a repository by another location is refused when its ID is configured under another name
+    Given a repository the engine identifies
+    And the agent connected it as "demo"
+    When the agent connects it at another location as "other"
+    Then the request is refused because the repository is configured as "demo"
+    And the agent has one repository configured
+
+  Scenario: Connecting a repository keeps its ID in the configuration
+    Given a repository the engine identifies
+    When the agent connects it as "demo"
+    Then the agent has the repository "demo" configured with the repository's ID
+
+  Scenario: Initialising where the agent has a repository under another name is refused
+    Given a repository the engine identifies
+    And the agent has the repository "demo" configured with its settings
+    When the agent initialises the repository as "other"
+    Then the request is refused because the repository is configured as "demo"
+    And the agent has one repository configured
+
+  Scenario: Initialising keeps the new repository's ID in the configuration
+    Given a repository the engine identifies
+    When the agent initialises the repository as "demo"
+    Then the agent has the repository "demo" configured with the repository's ID
 
   Scenario: Connecting a repository whose test fails leaves the config unchanged
     Given a repository the engine cannot open

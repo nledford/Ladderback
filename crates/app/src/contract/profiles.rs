@@ -180,6 +180,7 @@ fn export(location: &str) -> Option<PlanExport> {
     Some(PlanExport {
         plan,
         repository: RepositoryConfig {
+            id: None,
             settings: RepositorySettings {
                 repository: location.to_owned(),
                 repo_hot: None,

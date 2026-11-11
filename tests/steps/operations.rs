@@ -85,6 +85,7 @@ async fn save_config_with_hooks(agent: &Agent, run_finally: Option<String>) {
         std::collections::BTreeMap::from([(
             alias.clone(),
             domain::planning::RepositoryConfig {
+                id: None,
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
                     repo_hot: None,

@@ -40,6 +40,23 @@ Feature: Import a rustic profile
       Then the import is refused because the repository "nas" is already taken
       And the configuration is unchanged
 
+    Scenario: A profile for a repository the configuration has under that name adds its plans to it
+      Given the configuration holds the repository "nas" at the profile's location
+      And the configuration holds the plan "home" for the repository "nas"
+      And a profile holding the plan "docs"
+      When the owner imports the profile as the repository "nas"
+      Then the import succeeds
+      And the configuration now holds 1 repository
+      And the configuration now holds the plan "home" for the repository "nas"
+      And the configuration now holds the plan "docs" for the repository "nas"
+
+    Scenario: A profile for a repository the configuration has under another name is refused
+      Given the configuration holds the repository "nas" at the profile's location
+      And a profile holding the plan "home"
+      When the owner imports the profile as the repository "backup"
+      Then the import is refused because the repository is configured as "nas"
+      And the configuration is unchanged
+
     Scenario: A profile that cannot be read changes nothing
       Given the configuration holds the repository "cloud"
       And a profile that cannot be read

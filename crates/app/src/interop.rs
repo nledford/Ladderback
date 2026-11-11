@@ -49,8 +49,12 @@ pub struct Imported {
 pub enum ImportError {
     /// The profile could not be read, or says what Ladderback cannot honour.
     Profile(ProfileError),
-    /// The configuration already holds a repository under the alias.
+    /// The configuration already holds a repository under the alias, at
+    /// another location than the profile's.
     AliasTaken(RepositoryAlias),
+    /// The configuration already holds the profile's repository, under the
+    /// alias given: a repository has one alias (§7.3).
+    AlreadyConfigured(RepositoryAlias),
     /// The configuration, or the profile itself, already has a plan with
     /// this ID.
     PlanTaken(PlanId),
@@ -242,6 +246,7 @@ mod tests {
 
     fn repository() -> RepositoryConfig {
         RepositoryConfig {
+            id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),
                 repo_hot: None,

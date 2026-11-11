@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
-use crate::{PlanId, RepositoryAlias};
+use crate::{PlanId, RepositoryAlias, RepositoryId};
 
 use super::{Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, ValueKind};
 
@@ -88,6 +88,13 @@ pub enum Violation {
     },
     /// A plan backs up nothing.
     NoSources { index: usize, plan: PlanId },
+    /// Two entries are one repository: the same location, or the same
+    /// repository ID (§7.3). A repository has one alias, so the history of
+    /// its plans is one history; `first` is the earlier alias in alias order.
+    SameRepository {
+        first: RepositoryAlias,
+        second: RepositoryAlias,
+    },
 }
 
 impl std::fmt::Display for Violation {
@@ -110,9 +117,11 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-    /// Checks the plans one by one, in order; the first one to break a rule is
-    /// reported. For each plan the rules are checked in this order: its ID is
-    /// not one an earlier plan has, its repository is one of
+    /// Checks the repositories first, in alias order: no two of them are one
+    /// repository ([`RepositoryConfig::is`]), and the first pair found is
+    /// reported. Then the plans one by one, in order; the first one to break
+    /// a rule is reported. For each plan the rules are checked in this order:
+    /// its ID is not one an earlier plan has, its repository is one of
     /// `repositories`, and it has at least one source.
     pub fn new(
         agent: AgentSettings,
@@ -176,6 +185,12 @@ impl AgentConfig {
     pub fn plan(&self, id: &PlanId) -> Option<&Plan> {
         self.plans.iter().find(|plan| &plan.id == id)
     }
+
+    /// The alias the repository at `location`, or with the ID `id`, is
+    /// already configured under (§7.3: one alias per repository).
+    pub fn alias_of(&self, location: &str, id: Option<&RepositoryId>) -> Option<&RepositoryAlias> {
+        todo!("{location} {id:?}")
+    }
 }
 
 #[cfg(test)]
@@ -194,6 +209,7 @@ mod tests {
 
     fn repository(maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),
                 repo_hot: None,
@@ -208,11 +224,24 @@ mod tests {
         }
     }
 
+    /// One entry per alias, each at a location of its own.
     fn repositories(aliases: &[&str]) -> BTreeMap<RepositoryAlias, RepositoryConfig> {
         aliases
             .iter()
-            .map(|name| (alias(name), repository(Maintenance::None)))
+            .map(|name| (alias(name), at(&format!("/srv/{name}"), None)))
             .collect()
+    }
+
+    /// An entry at `location`, with the repository ID `id` when given.
+    fn at(location: &str, id: Option<&str>) -> RepositoryConfig {
+        let mut entry = repository(Maintenance::None);
+        entry.settings.repository = location.to_owned();
+        entry.id = id.map(repository_id);
+        entry
+    }
+
+    fn repository_id(hex: &str) -> RepositoryId {
+        RepositoryId::parse(&hex.repeat(32)).unwrap()
     }
 
     fn plan(plan: &str, repository: &str) -> Plan {
@@ -451,5 +480,72 @@ mod tests {
                 plan: id("first")
             })
         );
+    }
+
+    #[test]
+    fn two_entries_at_one_location_are_one_repository_and_refused() {
+        let entries = BTreeMap::from([
+            (alias("nas"), at("/srv/demo-repo", None)),
+            (alias("cloud"), at("/srv/other", None)),
+            (alias("nas-2"), at("/srv/demo-repo", None)),
+        ]);
+        assert_eq!(
+            config(entries, vec![plan("home", "nas")]),
+            Err(Violation::SameRepository {
+                first: alias("nas"),
+                second: alias("nas-2"),
+            })
+        );
+    }
+
+    #[test]
+    fn two_entries_with_one_repository_id_are_one_repository_and_refused() {
+        let entries = BTreeMap::from([
+            (alias("laptop"), at("sftp:demo@nas:/srv/repo", Some("07"))),
+            (alias("mounted"), at("/Volumes/nas/repo", Some("07"))),
+        ]);
+        assert_eq!(
+            config(entries, Vec::new()),
+            Err(Violation::SameRepository {
+                first: alias("laptop"),
+                second: alias("mounted"),
+            })
+        );
+    }
+
+    #[test]
+    fn entries_at_other_locations_without_one_shared_id_are_other_repositories() {
+        let entries = BTreeMap::from([
+            (alias("a"), at("/srv/a", Some("07"))),
+            (alias("b"), at("/srv/b", Some("08"))),
+            (alias("c"), at("/srv/c", None)),
+            (alias("d"), at("/srv/d", None)),
+        ]);
+        let config = config(entries, Vec::new()).unwrap();
+        // A request that knows no ID matches no entry that knows none either.
+        assert_eq!(config.alias_of("/srv/e", None), None);
+        assert_eq!(config.alias_of("/srv/d", None), Some(&alias("d")));
+    }
+
+    #[test]
+    fn the_repository_a_location_or_an_id_names_is_found_under_its_alias() {
+        let entries = BTreeMap::from([
+            (alias("cloud"), at("/srv/cloud", None)),
+            (alias("nas"), at("/srv/nas", Some("07"))),
+        ]);
+        let config = config(entries, Vec::new()).unwrap();
+        let seven = repository_id("07");
+        let eight = repository_id("08");
+        assert_eq!(config.alias_of("/srv/nas", None), Some(&alias("nas")));
+        assert_eq!(
+            config.alias_of("/srv/cloud", Some(&eight)),
+            Some(&alias("cloud"))
+        );
+        assert_eq!(
+            config.alias_of("/Volumes/nas", Some(&seven)),
+            Some(&alias("nas"))
+        );
+        assert_eq!(config.alias_of("/srv/elsewhere", Some(&eight)), None);
+        assert_eq!(config.alias_of("/srv/elsewhere", None), None);
     }
 }

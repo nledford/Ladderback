@@ -115,6 +115,7 @@ fn violated(reader: &Reader<'_, '_>, root: &Path, violation: Violation) -> Confi
         Violation::DuplicatePlan { index, .. } => (*index, "id"),
         Violation::UnknownRepository { index, .. } => (*index, "repository"),
         Violation::NoSources { index, .. } => (*index, "sources"),
+        Violation::SameRepository { .. } => todo!(),
     };
     let path = root.key("plans").index(index).key(key);
     reader.refuse(&path, Problem::Violation(violation))
@@ -226,6 +227,7 @@ fn repository(
         None => GroupBy::default(),
     };
     Ok(RepositoryConfig {
+        id: None,
         settings: RepositorySettings {
             repository,
             repo_hot,
