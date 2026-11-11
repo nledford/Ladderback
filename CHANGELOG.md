@@ -7,7 +7,7 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.0.0](https://github.com/nledford/Ladderback/releases/tag/v0.0.0) - 2026-11-11
+## [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0) - 2026-11-11
 
 ### Breaking
 
