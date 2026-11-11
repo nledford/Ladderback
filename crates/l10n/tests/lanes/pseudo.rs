@@ -173,10 +173,16 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
                 "[fd00::1]",
             ],
         ),
+        (msg::UI_MAINTENANCE_ELSEWHERE, &["maintenance = \"local\""]),
+        (
+            msg::ERROR_MAINTENANCE_NOT_OWNER,
+            &["maintenance = \"local\""],
+        ),
     ];
     let args = [
         ("address", text("192.168.1.5:9898")),
         ("name", text("nas.example.com:9898")),
+        ("alias", text("demo")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

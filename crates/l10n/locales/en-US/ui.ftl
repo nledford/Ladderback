@@ -333,6 +333,9 @@ ui-maintenance-heading = Maintenance of { $alias }
 # What the maintenance section says before its buttons.
 ui-maintenance-body = Each of these shows what it would do first. Nothing changes until you confirm.
 
+# What the maintenance section says instead, with no buttons, of a repository this agent does not maintain: its entry in the configuration file asks for maintenance by the hub or by nothing. What the person types is a string literal: keep it one, untranslated.
+ui-maintenance-elsewhere = This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans. To maintain it from this agent, set { "maintenance = \"local\"" } in the repository's entry in the configuration file.
+
 # The button that reviews a forget: the snapshots the plans' retention no longer keeps.
 ui-maintenance-forget = Forget snapshots
 
