@@ -12,7 +12,7 @@ use domain::execution::{
 use domain::{OperationId, RepositoryId, Timestamp, Uuid};
 use tokio::time::Instant;
 
-use super::{MAX_CONNECTIONS, SqliteStore};
+use super::{ACQUIRE_TIMEOUT, BUSY_TIMEOUT, MAX_CONNECTIONS, SqliteStore};
 
 async fn scratch_store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("a scratch directory");
@@ -253,5 +253,56 @@ async fn a_start_cut_after_its_commit_holds_the_repository() {
             warnings: Vec::new(),
         }),
         "the cut start is stored whole"
+    );
+}
+
+/// A call made before `close` that is still waiting for one of the pool's
+/// connections is let finish rather than refused: the store waits for the
+/// calls it has begun, not only for the connections in use (#174). The pool
+/// alone would refuse it once closing began. The test holds every
+/// connection itself, so the save waits for one whatever the pool's size.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_lets_a_call_still_waiting_for_a_connection_finish() {
+    let (dir, store) = scratch_store().await;
+    let store = Arc::new(store);
+    let mut taken = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        taken.push(store.pool.acquire().await.expect("a connection"));
+    }
+    let queued = queued_on_the_repository(1, OperationKind::Backup);
+    let saving = tokio::spawn({
+        let store = Arc::clone(&store);
+        let queued = queued.clone();
+        async move { store.save(&queued, None).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !saving.is_finished(),
+        "the save ended while every connection was taken"
+    );
+
+    let mut closing = Box::pin(store.close());
+    let early = tokio::time::timeout(Duration::from_millis(300), &mut closing).await;
+    assert!(early.is_err(), "close returned with a save in flight");
+    drop(taken);
+    // The save's own bound: a connection, then the write lock, plus slack.
+    let bound = ACQUIRE_TIMEOUT + BUSY_TIMEOUT + Duration::from_secs(1);
+    tokio::time::timeout(bound, closing)
+        .await
+        .expect("close returns once the save has ended");
+    let saved = tokio::time::timeout(bound, saving)
+        .await
+        .expect("the save ends")
+        .expect("the save's task ends");
+    assert_eq!(saved, Ok(()), "the save made before close");
+
+    let reopened = SqliteStore::open(&dir.path().join("ladderback.db"))
+        .await
+        .expect("the database opens again");
+    let kept = reopened.get(queued.id()).await.expect("the log reads");
+    assert_eq!(
+        kept.map(|detail| detail.record),
+        Some(OperationRecord::of(&queued, None)),
+        "the save made before close is stored"
     );
 }

@@ -61,7 +61,7 @@ fn refused_as_a_second<T>(outcome: &Result<T, sqlx::Error>) -> bool {
 }
 
 /// How many rows of `operations` `sql` counts, for the demo repository.
-async fn rows_on_the_repository(raw: &mut SqliteConnection, sql: &str) -> i64 {
+async fn rows_on_the_repository(raw: &mut SqliteConnection, sql: &'static str) -> i64 {
     sqlx::query_scalar::<_, i64>(sql)
         .bind(REPOSITORY_HEX)
         .fetch_one(&mut *raw)

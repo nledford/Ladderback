@@ -33,9 +33,8 @@ use async_trait::async_trait;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Connection, Sqlite, SqliteConnection, SqlitePool};
+use sqlx::{Connection, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::report::cap;
@@ -133,19 +132,17 @@ impl SqliteStore {
 
     /// Closes the pool once the calls in flight, reads and writes, have
     /// ended: a write that was in flight has committed or failed by the time
-    /// it returns. A call made after it, or while it waits, is
-    /// [`StoreError::Unavailable`].
+    /// it returns, and no connection to the file is left open, short of one
+    /// sqlx gave up on closing: a close that took over five seconds, or a
+    /// connection it found broken. A call made after it, or while it waits,
+    /// is [`StoreError::Unavailable`].
     ///
-    /// The store waits for its calls itself rather than leave it to the
-    /// pool: sqlx 0.8's `Pool::close` gives the pool a permit back for each
-    /// idle connection it closes, permits those connections had already
-    /// returned, so with idle connections beside a busy one it can stop
-    /// waiting before that one is back (#168; sqlx 0.9 fixes it). Until then
-    /// a connection sqlx is still handing back to the pool when a call has
-    /// ended can outlive `close`: one whose call succeeded stays open, idle,
-    /// until the store is dropped, and one closed because its write was cut
-    /// short or failed (see [`Checkout`]) may still be rolling that write
-    /// back, so a writer after it waits on SQLite's busy timeout.
+    /// sqlx hands a connection back to the pool in a task of its own once
+    /// its call has ended, and its `Pool::close` waits for those tasks too,
+    /// so none outlives `close` (#174). The store still waits for its calls
+    /// itself rather than leave that to the pool: a call made before `close`
+    /// that is still waiting for a free connection ends as it would have,
+    /// where the pool alone would refuse it once closing began.
     pub async fn close(&self) {
         let _alone = self.calls.write().await;
         self.pool.close().await;
@@ -156,13 +153,6 @@ impl SqliteStore {
     /// pool closed: the lock is fair, so calls can't keep `close` waiting.
     async fn call(&self) -> RwLockReadGuard<'_, ()> {
         self.calls.read().await
-    }
-
-    /// A connection for one write, closed rather than reused if the write
-    /// is cut short: see [`Checkout`].
-    async fn checkout(&self) -> Result<Checkout, StoreError> {
-        let conn = self.pool.acquire().await.map_err(unavailable)?;
-        Ok(Checkout { conn, ended: false })
     }
 }
 
@@ -268,45 +258,22 @@ async fn write(
     Ok(())
 }
 
-/// A connection checked out of the pool for one write.
-///
-/// A write is cut short when its future is dropped before it ends: a run does
-/// that to the write that says an operation is running when a cancel or the
-/// deadline comes first (§9). sqlx starts a transaction on the connection's
-/// own thread, and a future dropped after the thread has acknowledged the
-/// start but before the `Transaction` that would roll it back exists leaves
-/// the connection inside the transaction, holding the database's write lock,
-/// and returns it to the pool that way: the next write waits out the busy
-/// timeout and fails, or is given the connection and fails at once, and so
-/// does every write after it until the connection is closed. A connection
-/// whose write was cut short, or ended in an error, is closed instead, which
-/// rolls back what it began and frees the lock.
-struct Checkout {
-    conn: PoolConnection<Sqlite>,
-    ended: bool,
-}
-
-impl Checkout {
-    /// The write ended without an error: its transaction is over, so the
-    /// connection is fit for the pool again.
-    fn end(&mut self) {
-        self.ended = true;
-    }
-}
-
-impl Drop for Checkout {
-    fn drop(&mut self) {
-        if !self.ended {
-            self.conn.close_on_drop();
-        }
-    }
-}
-
 /// One save, as one transaction. The write lock is taken up front, so the
 /// busy timeout covers the wait for it, and the whole save is one
 /// transaction: it all happens or none of it does. The one-maintenance index
 /// is the backstop for I7: a save that would make a second running
 /// maintenance operation fails here and stores nothing.
+///
+/// A write is cut short when its future is dropped before it ends: a run
+/// does that to the write that says an operation is running when a cancel or
+/// the deadline comes first (§9). sqlx rolls back what such a write began, so
+/// its connection goes back to the pool outside any transaction: the
+/// connection's own thread rolls back a `BEGIN` whose answer nobody took, and
+/// a dropped `Transaction` queues its rollback, which runs before the pool
+/// takes the connection back. sqlx 0.8 left a write dropped between those two
+/// points inside its transaction, holding the database's write lock, and
+/// every write after it failed (#123); `tests/cancellation.rs` cuts a save
+/// and a start at each of their await points.
 async fn save_in_transaction(
     conn: &mut SqliteConnection,
     operation: &Operation,
@@ -363,12 +330,8 @@ impl OperationStore for SqliteStore {
     ) -> Result<(), StoreError> {
         let encoded = Encoded::new(operation, result)?;
         let _call = self.call().await;
-        let mut checkout = self.checkout().await?;
-        let saved = save_in_transaction(&mut checkout.conn, operation, &encoded).await;
-        if saved.is_ok() {
-            checkout.end();
-        }
-        saved
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        save_in_transaction(&mut conn, operation, &encoded).await
     }
 
     async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
@@ -382,12 +345,8 @@ impl OperationStore for SqliteStore {
         }
         let encoded = Encoded::new(operation, None)?;
         let _call = self.call().await;
-        let mut checkout = self.checkout().await?;
-        let started = start_in_transaction(&mut checkout.conn, operation, &encoded).await;
-        if started.is_ok() {
-            checkout.end();
-        }
-        started
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        start_in_transaction(&mut conn, operation, &encoded).await
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

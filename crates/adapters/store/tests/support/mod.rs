@@ -107,7 +107,7 @@ const BETWEEN_POLLS: Duration = Duration::from_millis(20);
 /// Which await point that is depends on the threads: sqlx answers on the
 /// connection's own thread, and an answer that comes before the poll that
 /// asked for it has returned costs that call no poll. Only
-/// [`poll_to_transaction_check`] reaches a given point.
+/// [`poll_to_transaction_start`] reaches a given point.
 pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option<T> {
     let mut call = std::pin::pin!(call);
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
@@ -120,24 +120,25 @@ pub async fn cut_after<T>(call: impl Future<Output = T>, polls: usize) -> Option
     None
 }
 
-/// Polls `call` to the await point just after its `BEGIN IMMEDIATE` has
-/// run, and leaves it there, waiting to be polled again or dropped. There
-/// sqlx checks that the connection is in a transaction, before the
-/// `Transaction` that would roll it back exists: a call dropped there
-/// leaves its connection inside the transaction, holding the write lock,
-/// unless the store closes that connection.
+/// Polls `call` until its `BEGIN IMMEDIATE` has run, and leaves it waiting
+/// for the answer, to be dropped there: its connection is inside the
+/// transaction, holding the write lock, and the call never learns it began.
+/// The write after it must not be held up: sqlx's thread, which waits for
+/// the call to take its answer, rolls the `BEGIN` back once the call is
+/// dropped, before the pool takes the connection back.
 ///
 /// The threads can't move the call past that point unseen. `probe` holds
 /// the write lock while the call is polled, so its `BEGIN IMMEDIATE` can't
 /// run during a poll, and lets go of it between polls. Once the call's
 /// connection has taken the lock between two polls, the call is waiting
 /// for the answer to its `BEGIN IMMEDIATE`, which the connection's thread
-/// sends a moment after it took the lock and which wakes the call. Once
-/// woken, one more poll takes that answer and stops at the check, which
-/// always waits once, because it queues for the connection before it asks
-/// the connection's thread to let go of it. A call that ends first, or
-/// never begins its transaction, fails the test.
-pub async fn poll_to_transaction_check<F: Future>(
+/// sends a moment after it took the lock and which wakes the call. The call
+/// isn't polled again: one more poll would take that answer and go on, and
+/// sqlx 0.9 has no await point between the answer and the store's first
+/// statement, which the connection's thread can answer within that same
+/// poll. A call that ends first, or never begins its transaction, fails the
+/// test.
+pub async fn poll_to_transaction_start<F: Future>(
     mut call: std::pin::Pin<&mut F>,
     probe: &mut SqliteConnection,
 ) {
@@ -163,9 +164,6 @@ pub async fn poll_to_transaction_check<F: Future>(
                     "the call's connection took the write lock but never answered"
                 );
                 tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-            if call.as_mut().poll(&mut cx).is_ready() {
-                panic!("the call ended at the answer to its BEGIN IMMEDIATE");
             }
             return;
         }
@@ -214,9 +212,9 @@ async fn give_write_lock_back(probe: &mut SqliteConnection) {
 /// Where a test cuts a call short.
 #[derive(Clone, Copy, Debug)]
 pub enum Cut {
-    /// Just after its `BEGIN IMMEDIATE` has run, before the store's
-    /// transaction exists: the cut the store must clean up after, reached
-    /// whatever the threads do (see [`poll_to_transaction_check`]).
+    /// Just after its `BEGIN IMMEDIATE` has run, before the call has its
+    /// answer: the cut the store must clean up after, reached whatever the
+    /// threads do (see [`poll_to_transaction_start`]).
     AtTransactionStart,
     /// After this many polls, wherever the call then waits (see
     /// [`cut_after`]).
@@ -237,7 +235,7 @@ impl Cut {
         match self {
             Cut::AtTransactionStart => {
                 let mut probe = scratch.probe().await;
-                poll_to_transaction_check(std::pin::pin!(call), &mut probe).await;
+                poll_to_transaction_start(std::pin::pin!(call), &mut probe).await;
                 None
             }
             Cut::AfterPolls(polls) => cut_after(call, polls).await,
@@ -480,7 +478,7 @@ fn text(column: Option<String>) -> String {
 }
 
 /// The count a `SELECT COUNT(*) …` with no parameters returns.
-pub async fn count(conn: &mut SqliteConnection, sql: &str) -> i64 {
+pub async fn count(conn: &mut SqliteConnection, sql: &'static str) -> i64 {
     sqlx::query_scalar::<_, i64>(sql)
         .fetch_one(&mut *conn)
         .await

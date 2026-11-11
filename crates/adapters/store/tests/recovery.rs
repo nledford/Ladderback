@@ -203,7 +203,7 @@ async fn a_failure_part_way_through_leaves_every_row_as_it_was() {
          BEGIN SELECT RAISE(ABORT, 'boom'); END",
         id_text(0x13)
     );
-    sqlx::query(&refuse)
+    sqlx::query(sqlx::AssertSqlSafe(refuse))
         .execute(&mut raw)
         .await
         .expect("the fault is set up");

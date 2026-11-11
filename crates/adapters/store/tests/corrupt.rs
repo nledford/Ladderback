@@ -134,7 +134,7 @@ impl RawRow {
             columns.join(", "),
             marks.join(", ")
         );
-        let mut query = sqlx::query(&sql);
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
         for (_, cell) in &self.cells {
             query = match cell {
                 Cell::Null => query.bind(None::<i64>),
