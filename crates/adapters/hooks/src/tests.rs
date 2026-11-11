@@ -790,26 +790,23 @@ async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_c
     }
 }
 
-/// Output that was not cut is all the hook said: an end that only begins
-/// like a secret is its own words and stays. Output that was cut is masked
-/// from where it begins a secret (I4).
+/// Output is masked from where it begins a secret, cut at the cap or not:
+/// what was read doesn't say who stopped it (I4, #232). An end that begins
+/// no secret is kept, and `truncated` is the cap's alone.
 #[test]
-fn only_output_that_was_cut_is_masked_where_it_ends_like_a_secret_begins() {
+fn output_is_masked_where_it_ends_like_a_secret_begins_whoever_cut_it() {
     let redactor =
         domain::secrets::Redactor::new(&[domain::secrets::SecretValue::new("hunter2-demo")]);
     let captured = crate::Captured::default();
-    assert_eq!(
-        captured.stream(b"done h", false, true, &redactor).text,
-        "done h"
-    );
-    assert_eq!(
-        captured.stream(b"done h", true, true, &redactor).text,
-        "done ***"
-    );
-    // Not read to its end: cut by time, not by the cap, and masked the same.
-    let stopped = captured.stream(b"done h", false, false, &redactor);
-    assert_eq!(stopped.text, "done ***");
-    assert!(!stopped.truncated, "nothing went past the cap");
+    for truncated in [false, true] {
+        let masked = captured.stream(b"done h", truncated, &redactor);
+        assert_eq!(masked.text, "done ***");
+        assert_eq!(masked.truncated, truncated);
+        assert_eq!(
+            captured.stream(b"done x", truncated, &redactor).text,
+            "done x"
+        );
+    }
 }
 
 /// The secret one write was carrying when the read of a pipe stopped. A
