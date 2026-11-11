@@ -549,7 +549,18 @@ impl RunMaintenance {
                 }))
             }
             MaintenanceKind::Prune => {
-                let (_, access) = self.open(alias).await?;
+                let (_, mut access) = self.open(alias).await?;
+                // Opened as the prune opens it: the engine gives a job the
+                // repository's cache by the ID it names, and without one the
+                // plan would read the whole repository uncached.
+                let id = identify(
+                    self.engine.as_ref(),
+                    self.clock.as_ref(),
+                    op,
+                    access.clone(),
+                )
+                .await?;
+                access.id = Some(id);
                 let keep_delete = default_keep_delete();
                 let job = Job::PrunePlan(PruneJob {
                     repository: access,
