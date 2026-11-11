@@ -357,6 +357,12 @@ Feature: Secret references in a repository's settings
       And the failure names the program "pass"
       And the problem is that its output was cut short
 
+    Scenario: A command whose output something it started holds open after the password's line gives that line
+      Given the command "pass show demo/repo" prints "command-password\nnot the pass" while something it started holds its output open
+      And the repository's password is printed by the command "pass show demo/repo"
+      When the repository is resolved
+      Then the resolved password is "command-password"
+
     Scenario: A command that never ends
       Given the command "pass show demo/repo" never ends
       And the repository's password is printed by the command "pass show demo/repo"

@@ -141,9 +141,20 @@ pub enum Stdout<'a> {
 /// open with, far from its cause. (A variable, a file or a keyring entry
 /// that is set to nothing was set so on purpose, and stays the empty
 /// secret.)
+///
+/// A `stdout` left open may stop anywhere: its first line is whole once
+/// that line's newline was read, and before that it may be only part of the
+/// secret, which is `OutputCut`, never used. One read to its end needs no
+/// newline: the command and what it started closed it there.
 pub fn command_secret(source: &SourceName, stdout: Stdout<'_>) -> Result<SecretValue, SecretError> {
     let (Stdout::ReadToEnd(bytes) | Stdout::LeftOpen(bytes)) = stdout;
     let secret = decode(source, bytes, first_line)?;
+    if matches!(stdout, Stdout::LeftOpen(_)) && !bytes.contains(&b'\n') {
+        return Err(SecretError {
+            source: source.clone(),
+            problem: Problem::OutputCut,
+        });
+    }
     if secret.expose().trim().is_empty() {
         return Err(SecretError::missing(source.clone()));
     }
@@ -156,9 +167,15 @@ pub fn command_secret(source: &SourceName, stdout: Stdout<'_>) -> Result<SecretV
 /// pipe grace, a failed read or the command itself can stop it partway
 /// through what it printed, and what was read doesn't say which did.
 ///
-/// A `stdout` left open is only part of what the command printed, and
-/// stderr masked against that part would show the rest of a secret it
-/// quotes. Nothing of stderr is quoted then; the error keeps its status.
+/// `stdout` is whole only when it was read to its end and is empty or ends
+/// with a newline. One left open is only part of what the command printed,
+/// and one that ends partway through a line may be too: the command's own
+/// end (killed partway through printing its secret, or exiting there) cuts
+/// it with nothing in what was read to say so. Stderr masked against that
+/// part would show the rest of a secret it quotes (`***nary`), so nothing
+/// of stderr is quoted then; the error keeps its status. A secret is a
+/// first line, so a line with its newline is whole however the command
+/// ended.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
@@ -166,8 +183,8 @@ pub fn command_failure(
     stderr: &[u8],
 ) -> SecretError {
     let whole = match stdout {
-        Stdout::ReadToEnd(bytes) => Some(bytes),
-        Stdout::LeftOpen(_) => None,
+        Stdout::ReadToEnd(bytes) if bytes.is_empty() || bytes.ends_with(b"\n") => Some(bytes),
+        Stdout::ReadToEnd(_) | Stdout::LeftOpen(_) => None,
     };
     let said = whole.map_or_else(String::new, |stdout| {
         // A helper that rejects a value may quote it on stderr: what it
