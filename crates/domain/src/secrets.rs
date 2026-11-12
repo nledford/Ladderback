@@ -224,6 +224,13 @@ fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
 /// else of it shows in text on its own (see `partial_needles`). Secrets that
 /// overlap or touch are replaced as one span. Masking a text compares each of
 /// its bytes at most twice per needle, whatever the needles and the text are.
+///
+/// Masking a masked text again is not always idempotent: when a secret holds
+/// `*`, the character of [`REDACTED`], a mask and the text beside it can make
+/// up the secret, and a second pass masks that too (secret `*?`: `*??` masks
+/// to `***?`, and that to `*****`). A second pass only ever masks more, never
+/// reveals what the first masked (I4). Matches inside a mask are not skipped:
+/// a real `*` beside a secret would then leave part of it unmasked (#287).
 #[derive(Clone, Default)]
 pub struct Redactor {
     needles: Vec<Needle>,
