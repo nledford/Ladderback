@@ -14,11 +14,13 @@ use domain::planning::{
     KeepWithin, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy,
     Schedule, format_duration,
 };
+use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::secrets::{FileRead, SecretRef};
 
 use crate::tables::{
-    AgentTable, FileTable, HookEntryTable, HookValue, HooksTable, PlanTable, Repositories,
-    RepositoryTable, RetentionTable, RetryTable, ScheduleTable,
+    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
+    NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable,
+    RuleTable, ScheduleTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -32,7 +34,8 @@ fn glob_files(files: &[GlobFile]) -> Option<Vec<String>> {
 }
 
 /// The text of `tables`: `schema`, then `[agent]` and `[hooks]`, a table for
-/// each repository, and a table for each plan with its `[plans.retention]`.
+/// each repository, a table for each plan with its `[plans.retention]`, and
+/// a table for each notification channel and rule.
 /// `Err` holds what `toml` said when it couldn't write a value.
 pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
     let toml::Value::Table(root) = inline_value(tables)? else {
@@ -61,6 +64,19 @@ pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
                 for plan in all {
                     if let toml::Value::Table(table) = plan {
                         section(&mut out, "plans", true, table, &["retention"])?;
+                    }
+                }
+            }
+            ("notifications", toml::Value::Table(all)) => {
+                for group in ["channels", "rules"] {
+                    let Some(toml::Value::Table(named)) = all.get(group) else {
+                        continue;
+                    };
+                    for (name, value) in named {
+                        if let toml::Value::Table(table) = value {
+                            let path = format!("notifications.{group}.{name}");
+                            section(&mut out, &path, false, table, &[])?;
+                        }
                     }
                 }
             }
@@ -144,7 +160,93 @@ pub(crate) fn file(config: &AgentConfig, schema: i64) -> Result<FileTable, Strin
         hooks: hooks(config.hooks()),
         repositories: (!repositories.is_empty()).then_some(Repositories(repositories)),
         plans: (!config.plans().is_empty()).then(|| config.plans().iter().map(plan).collect()),
+        notifications: notifications(config.notifications())?,
     })
+}
+
+/// The `[notifications]` tables, unless there are none, or the key of the
+/// setting that can't be written.
+fn notifications(notifications: &Notifications) -> Result<Option<NotificationsTable>, String> {
+    if notifications.is_empty() {
+        return Ok(None);
+    }
+    let mut channels = std::collections::BTreeMap::new();
+    for (name, channel) in notifications.channels() {
+        let table = channel_table(channel)
+            .map_err(|key| format!("notifications.channels.{}.{key}", name.as_str()))?;
+        channels.insert(name.as_str().to_owned(), table);
+    }
+    let rules = notifications
+        .rules()
+        .iter()
+        .map(|(name, rule)| (name.as_str().to_owned(), rule_table(rule)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    Ok(Some(NotificationsTable {
+        channels: (!channels.is_empty()).then_some(channels),
+        rules: (!rules.is_empty()).then_some(rules),
+    }))
+}
+
+/// The four keys a channel's secret can be named by, `-command`,
+/// `-keyring`, `-file` and `-env`, with the one it is set; `None` for a
+/// secret no such key can name: one written as text, or a whole file.
+fn secret_keys(secret: &SecretRef) -> Option<[Option<String>; 4]> {
+    Some(match secret {
+        SecretRef::Command(command) => [Some(words(command)), None, None, None],
+        SecretRef::Keyring(entry) => [None, Some(entry.to_string()), None, None],
+        SecretRef::File {
+            path,
+            read: FileRead::FirstLine,
+        } => [None, None, Some(path.clone()), None],
+        SecretRef::Env(name) => [None, None, None, Some(name.clone())],
+        SecretRef::Inline(_)
+        | SecretRef::File {
+            read: FileRead::Whole,
+            ..
+        } => return None,
+    })
+}
+
+/// The channel's table, or the key of the setting that can't be written.
+fn channel_table(channel: &Channel) -> Result<ChannelTable, &'static str> {
+    let [url_command, url_keyring, url_file, url_env] = secret_keys(channel.url()).ok_or("url")?;
+    let mut table = ChannelTable {
+        kind: Some(channel.kind().name().to_owned()),
+        url_command,
+        url_keyring,
+        url_file,
+        url_env,
+        ..ChannelTable::default()
+    };
+    match channel.auth() {
+        None => {}
+        Some(Auth::Bearer(token)) => {
+            let [command, keyring, file, env] = secret_keys(token).ok_or("token")?;
+            table.token_command = command;
+            table.token_keyring = keyring;
+            table.token_file = file;
+            table.token_env = env;
+        }
+        Some(Auth::Basic { username, password }) => {
+            let [command, keyring, file, env] = secret_keys(password).ok_or("password")?;
+            table.username = Some(username.as_str().to_owned());
+            table.password_command = command;
+            table.password_keyring = keyring;
+            table.password_file = file;
+            table.password_env = env;
+        }
+    }
+    Ok(table)
+}
+
+fn rule_table(rule: &Rule) -> RuleTable {
+    RuleTable {
+        events: Some(rule.events().iter().map(|event| event.name().to_owned()).collect()),
+        channel: Some(rule.channel().as_str().to_owned()),
+        plans: (!rule.plans().is_empty())
+            .then(|| rule.plans().iter().map(|plan| plan.as_str().to_owned()).collect()),
+        template: rule.template().map(|template| template.as_str().to_owned()),
+    }
 }
 
 /// The error for a setting the format can't say.

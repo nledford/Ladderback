@@ -480,6 +480,7 @@ async fn save(
         repositories,
         loaded.plans().to_vec(),
     )
+    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
     .map_err(unwritable)?;
     config.save(&saved).await.map_err(RepositoryError::Config)
 }
@@ -509,6 +510,7 @@ async fn record(
         repositories,
         loaded.plans().to_vec(),
     )
+    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
     .map_err(unwritable)?;
     config
         .save(&recorded)

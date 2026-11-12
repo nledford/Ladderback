@@ -41,6 +41,7 @@ table! {
         hooks: HooksTable,
         repositories: Repositories,
         plans: Vec<PlanTable>,
+        notifications: NotificationsTable,
     }
 }
 
@@ -158,6 +159,47 @@ table! {
         command: String,
         args: Vec<String>,
         on_failure: String,
+    }
+}
+
+table! {
+    /// `[notifications]`: the channels and the rules, each by its name.
+    NotificationsTable {
+        channels: BTreeMap<String, ChannelTable>,
+        rules: BTreeMap<String, RuleTable>,
+    }
+}
+
+table! {
+    /// One channel. Exactly one of the four `url` keys is set; a channel
+    /// that signs in sets one `token` key, or `username` and one `password`
+    /// key. No key holds a secret as text (I4).
+    ChannelTable {
+        kind: String,
+        url_command: String,
+        url_keyring: String,
+        url_file: String,
+        url_env: String,
+        token_command: String,
+        token_keyring: String,
+        token_file: String,
+        token_env: String,
+        username: String,
+        password_command: String,
+        password_keyring: String,
+        password_file: String,
+        password_env: String,
+    }
+}
+
+table! {
+    /// One rule: the events it sends, its channel, the plans it is for and
+    /// its template.
+    RuleTable {
+        events: Vec<String>,
+        channel: String,
+        plans: Vec<String>,
+        template: String,
     }
 }
 

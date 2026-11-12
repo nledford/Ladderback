@@ -175,19 +175,18 @@ impl ImportProfile {
             repositories.insert(repository.clone(), profile.repository);
         }
 
-        let saved =
-            AgentConfig::new(agent, hooks, repositories, plans).map_err(
-                |violation| match violation {
-                    Violation::DuplicatePlan { plan, .. } => ImportError::PlanTaken(plan),
-                    violation => ImportError::Config(ConfigError::Invalid {
-                        file: String::new(),
-                        key: None,
-                        at: None,
-                        problem: Problem::Violation(violation),
-                        detail: String::new(),
-                    }),
-                },
-            )?;
+        let saved = AgentConfig::new(agent, hooks, repositories, plans)
+            .and_then(|config| config.with_notifications(loaded.notifications().clone()))
+            .map_err(|violation| match violation {
+                Violation::DuplicatePlan { plan, .. } => ImportError::PlanTaken(plan),
+                violation => ImportError::Config(ConfigError::Invalid {
+                    file: String::new(),
+                    key: None,
+                    at: None,
+                    problem: Problem::Violation(violation),
+                    detail: String::new(),
+                }),
+            })?;
         self.config
             .save(&saved)
             .await
