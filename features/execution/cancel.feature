@@ -17,10 +17,12 @@ Feature: Cancelling an operation
     Then the operation ends as cancelled
     And the history shows the operation as it ended
 
+  # A file this size keeps the backup from ending before the cancel lands,
+  # however long the runner takes to send it.
   @e2e
   Scenario: Cancelling a backup stops its worker and writes no snapshot
     Given a new repository
-    And a plan "home" backing up a folder with a 16 GiB file
+    And a plan "home" backing up a folder with a 128 GiB file
     When the agent backs up the plan and the user cancels it once it has started
     Then the operation ends as cancelled
     And the repository has no snapshots

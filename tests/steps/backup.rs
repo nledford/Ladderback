@@ -209,7 +209,14 @@ fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
 const LARGE_FILE: &str = "large.bin";
 
 /// A file of `gib` GiB in `source`. Sparse: costs no disk, yet rustic must
-/// read and hash all of it.
+/// read and hash all of it before it writes a snapshot, which keeps a
+/// backup of the folder from ending before a cancel or a deadline lands.
+/// The step that sets them off runs on the runner's thread, which may go
+/// unpolled for up to 8 s (`MAX_STALL` in `tests/e2e.rs`; 3 s seen in a
+/// full run, #252), and rustic's release build backs up 16 GiB of it in 6 s
+/// on a ten-core Mac: 128 GiB outlasts any stall the runner allows. The
+/// backup is abandoned at the cancel or deadline, so a bigger file costs no
+/// test time.
 fn add_large_file(source: &Path, gib: u64) {
     // `set_len` leaves the file sparse on CI's filesystems (ext4, APFS); one
     // that wrote the length out would fill the disk.
@@ -219,23 +226,15 @@ fn add_large_file(source: &Path, gib: u64) {
         .unwrap();
 }
 
-#[given(expr = "a plan {string} backing up a folder with a 16 GiB file")]
-fn plan_with_large_file(agent: &mut Agent, plan: String) {
+#[given(expr = "a plan {string} backing up a folder with a {int} GiB file")]
+fn plan_with_large_file(agent: &mut Agent, plan: String, gib: u64) {
     let source = new_source(agent, &plan);
-    // Large enough that no runner finishes hashing before the cancel lands;
-    // the run is abandoned at the cancel, so a bigger file costs no test time.
-    add_large_file(&source, 16);
+    add_large_file(&source, gib);
 }
 
-/// Keeps a backup of the folder from ending before a cancel or a deadline
-/// that waits for its first packs, however soon it has saved the rest:
-/// rustic writes no snapshot until it has hashed this file too. The step
-/// that notices the packs runs on the runner's thread, which may go
-/// unpolled for up to 8 s (`MAX_STALL` in `tests/e2e.rs`; 3 s seen in a
-/// full run, #252), and rustic's release build backs up 16 GiB of it in 6 s
-/// on a ten-core Mac: 128 GiB outlasts any stall the runner allows. The
-/// backup is abandoned at the cancel or deadline, so a bigger file costs no
-/// test time.
+/// Keeps a backup that saves the folder's other data from ending before a
+/// cancel or a deadline that waits for its first packs, however soon it
+/// has saved the rest.
 #[given(expr = "the folder also holds a {int} GiB file")]
 fn also_a_large_file(agent: &mut Agent, gib: u64) {
     add_large_file(&agent.source(), gib);
