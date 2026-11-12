@@ -79,15 +79,18 @@ pub(crate) async fn run_with(
     };
     let unreachable = |detail: String| fail(Problem::Unreachable { detail });
 
-    let child = Command::new(command.program())
+    let mut start = Command::new(command.program());
+    start
         .args(command.args())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .process_group(0)
-        .spawn()
-        .map_err(|error| unreachable(error.to_string()))?;
+        .process_group(0);
+    // Through the spawn gate: no other start inherits the pipe the secret
+    // comes through, and the command inherits none of theirs (decision 58).
+    let child =
+        spawn_gate::hold(|| start.spawn()).map_err(|error| unreachable(error.to_string()))?;
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
     let mut running = Running::new(child, stop);

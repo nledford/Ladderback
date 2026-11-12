@@ -15,6 +15,13 @@
 //!
 //! Whatever starts a child goes through [`hold`], and so does whatever makes
 //! a descriptor that is not close-on-exec from the start.
+//!
+//! A start can also hold a copy of every descriptor of the process, close-on-
+//! exec or not: where the standard library starts a child with `fork` and
+//! `exec` (a program looked up on a `PATH` the child's environment sets), the
+//! forked child has them all until its `exec`, and the start holds the gate
+//! until then. So a pipe end whose peer must see it gone once a call returns
+//! is dropped inside [`hold`] too: then no start in flight has a copy left.
 
 #![deny(
     clippy::unwrap_used,
@@ -25,12 +32,18 @@
     clippy::unreachable
 )]
 
+use std::sync::{Mutex, PoisonError};
+
+/// The gate: one per process, as the descriptor table is.
+static GATE: Mutex<()> = Mutex::new(());
+
 /// Runs `start` while no other call of `hold` in this process runs: `start`
 /// starts a child, or makes a descriptor that is not close-on-exec from the
-/// start and makes it so before it returns.
+/// start and makes it so before it returns. A `start` that panicked leaves
+/// the gate open: the gate guards no data, only the moment.
 pub fn hold<T>(start: impl FnOnce() -> T) -> T {
-    let _ = start;
-    todo!()
+    let _held = GATE.lock().unwrap_or_else(PoisonError::into_inner);
+    start()
 }
 
 #[cfg(test)]

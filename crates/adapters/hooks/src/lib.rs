@@ -179,7 +179,9 @@ impl ProcessHookRunner {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
-        let child = match command.spawn() {
+        // Through the spawn gate: no other start inherits the hook's pipes,
+        // and the hook inherits none of theirs (decision 58).
+        let child = match spawn_gate::hold(|| command.spawn()) {
             Ok(child) => child,
             // The platform's message names the reason; the command line
             // itself may hold a secret and never appears.
@@ -213,24 +215,27 @@ impl ProcessHookRunner {
         let outcome = captured
             .read(&mut running.child, &mut pipes, self.timeout)
             .await;
-        match outcome {
+        let status = match outcome {
             // The hook ran to its end and was reaped: what it left running
             // is its business, and the group is not signalled any more.
-            Ok(Some(status)) => (exit_status(status), captured),
+            Ok(Some(status)) => exit_status(status),
             Err(error) => {
                 running.kill_and_reap().await;
-                (
-                    HookStatus::NotStarted {
-                        detail: error.to_string(),
-                    },
-                    captured,
-                )
+                HookStatus::NotStarted {
+                    detail: error.to_string(),
+                }
             }
             Ok(None) => {
                 running.terminate_and_reap(&mut pipes).await;
-                (HookStatus::TimedOut, captured)
+                HookStatus::TimedOut
             }
-        }
+        };
+        // Let go through the spawn gate: a start in flight may have copied
+        // the read ends into a child that has not run `exec` yet, and holds
+        // the gate until it has. Once the gate is ours, no copy is left, so
+        // what a descendant writes from here on fails (decision 58).
+        spawn_gate::hold(|| drop(pipes));
+        (status, captured)
     }
 }
 

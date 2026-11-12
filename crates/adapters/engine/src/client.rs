@@ -253,9 +253,11 @@ impl Engine for WorkerEngine {
         // The worker leads a process group of its own: see `signal_group`.
         #[cfg(unix)]
         command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|e| failed_to_start(&self.program, e))?;
+        // Through the spawn gate: no other start inherits the worker's
+        // pipes, its stdin above all, and it inherits none of theirs
+        // (decision 58).
+        let mut child =
+            spawn_gate::hold(|| command.spawn()).map_err(|e| failed_to_start(&self.program, e))?;
         let Some(mut stdin) = child.stdin.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdin"));
         };
