@@ -73,3 +73,24 @@ pub fn start_in_flight(held: Duration) -> JoinHandle<Instant> {
     hold.recv().expect("the gate held");
     start
 }
+
+/// Holds the spawn gate on a thread of its own, as a start whose `exec`
+/// stalls does, until the sender is sent to or dropped, or `at_most` has
+/// passed; returns once it holds it. Joining the handle tells which: `true`
+/// when it was let go. A test lets go from a task of its runtime, so `false`
+/// shows the runtime's thread was stuck waiting for the gate meanwhile.
+pub fn stalled_start(at_most: Duration) -> (mpsc::Sender<()>, JoinHandle<bool>) {
+    let (holding, hold) = mpsc::channel();
+    let (release, released) = mpsc::channel::<()>();
+    let start = thread::spawn(move || {
+        spawn_gate::hold(|| {
+            let _ = holding.send(());
+            !matches!(
+                released.recv_timeout(at_most),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            )
+        })
+    });
+    hold.recv().expect("the gate held");
+    (release, start)
+}

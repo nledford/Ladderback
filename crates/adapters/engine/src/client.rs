@@ -254,10 +254,12 @@ impl Engine for WorkerEngine {
         #[cfg(unix)]
         command.process_group(0);
         // Through the spawn gate: no other start inherits the worker's
-        // pipes, its stdin above all, and it inherits none of theirs
-        // (decision 58).
-        let mut child =
-            spawn_gate::hold(|| command.spawn()).map_err(|e| failed_to_start(&self.program, e))?;
+        // pipes, its stdin above all, and it inherits none of theirs. Waited
+        // for on the blocking pool: a start in flight may stall (decision 58).
+        let mut child = spawn_gate::hold_blocking(move || command.spawn())
+            .await
+            .and_then(std::convert::identity)
+            .map_err(|e| failed_to_start(&self.program, e))?;
         let Some(mut stdin) = child.stdin.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdin"));
         };
@@ -2037,6 +2039,32 @@ mod tests {
             Some(EngineEvent::Failed(FailureReason::EngineExited {
                 exit_code: Some(3)
             }))
+        );
+    }
+
+    /// A worker waits for the spawn gate off the runtime's threads: a start
+    /// whose `exec` stalls holds the gate, and a run that waited for it on a
+    /// runtime thread would stop every other task of that thread meanwhile.
+    /// Here the gate is let go by a task of the same one-thread runtime, so
+    /// it can be only while the run waits elsewhere.
+    #[tokio::test]
+    async fn a_worker_waits_for_the_gate_off_the_runtime() {
+        let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(2));
+        let engine = WorkerEngine::new("sh", ["-c", "cat >/dev/null; exit 3"]);
+        let let_go = async {
+            tokio::task::yield_now().await;
+            let _ = release.send(());
+        };
+        let (RunningJob { mut events, .. }, ()) = tokio::join!(run(&engine), let_go);
+        assert_eq!(
+            events.next().await,
+            Some(EngineEvent::Failed(FailureReason::EngineExited {
+                exit_code: Some(3)
+            }))
+        );
+        assert!(
+            stalled.join().unwrap(),
+            "the run waited for the gate on the runtime's thread"
         );
     }
 

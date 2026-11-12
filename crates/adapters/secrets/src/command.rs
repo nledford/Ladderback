@@ -88,9 +88,12 @@ pub(crate) async fn run_with(
         .kill_on_drop(true)
         .process_group(0);
     // Through the spawn gate: no other start inherits the pipe the secret
-    // comes through, and the command inherits none of theirs (decision 58).
-    let child =
-        spawn_gate::hold(|| start.spawn()).map_err(|error| unreachable(error.to_string()))?;
+    // comes through, and the command inherits none of theirs. Waited for on
+    // the blocking pool: a start in flight may stall (decision 58).
+    let child = spawn_gate::hold_blocking(move || start.spawn())
+        .await
+        .and_then(std::convert::identity)
+        .map_err(|error| unreachable(error.to_string()))?;
     // From here on, whatever ends this call early (a limit, a size, the
     // caller giving up) takes the group with it.
     let mut running = Running::new(child, stop);

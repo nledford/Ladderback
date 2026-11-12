@@ -594,6 +594,62 @@ async fn a_hook_inherits_no_pipe_another_start_has_open() {
     );
 }
 
+/// A hook waits for the spawn gate off the runtime's threads: a start whose
+/// `exec` stalls (a script on a hung mount, a first scan of a new program)
+/// holds the gate, and a call that waited for it on a runtime thread would
+/// stop every other task of that thread meanwhile. Here the gate is let go
+/// by a task of the same runtime, which has one thread only, so it can be
+/// only while the call waits elsewhere.
+#[tokio::test]
+async fn a_hook_waits_for_the_gate_off_the_runtime() {
+    let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(2));
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let entry = HookEntry::new("sh", ["-c", "exit 0"], OnFailure::Error).unwrap();
+    let context = context();
+    let let_go = async {
+        tokio::task::yield_now().await;
+        let _ = release.send(());
+    };
+    let (outcome, ()) = tokio::join!(runner.run(&entry, &context), let_go);
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert!(
+        stalled.join().unwrap(),
+        "the call waited for the gate on the runtime's thread"
+    );
+}
+
+/// The call waits for the gate to let go of the hook's pipes off the
+/// runtime's threads too. Here a stalled start holds the gate before the
+/// hook may end, and a task of the same one-thread runtime lets it go a
+/// while after: it can only once the call waits elsewhere. (Should the hook
+/// take longer than that to end, the test passes without showing anything.)
+#[tokio::test]
+async fn the_call_waits_to_let_go_of_the_pipes_off_the_runtime() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let go = scratch.path().join("log.go");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let entry = sh(
+        r#"echo started >> "$1"; while [ ! -e "$1.go" ]; do sleep 0.01; done"#,
+        &log,
+    );
+    let context = context();
+    let let_go = async {
+        logged(&log, "started").await;
+        let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(2));
+        std::fs::write(&go, "").unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = release.send(());
+        stalled
+    };
+    let (outcome, stalled) = tokio::join!(runner.run(&entry, &context), let_go);
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert!(
+        stalled.join().unwrap(),
+        "the call waited to let go of the pipes on the runtime's thread"
+    );
+}
+
 /// The call returns once the killed hook is reaped, not when the SIGKILL is
 /// sent: here the SIGKILL takes a while to arrive, as it does for a hook that
 /// is busy in the kernel, and the call waits for it. (The SIGTERM is not

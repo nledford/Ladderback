@@ -182,8 +182,12 @@ impl ProcessHookRunner {
             .kill_on_drop(true)
             .process_group(0);
         // Through the spawn gate: no other start inherits the hook's pipes,
-        // and the hook inherits none of theirs (decision 58).
-        let child = match spawn_gate::hold(|| command.spawn()) {
+        // and the hook inherits none of theirs. Waited for on the blocking
+        // pool: a start in flight may stall (decision 58).
+        let started = spawn_gate::hold_blocking(move || command.spawn())
+            .await
+            .and_then(std::convert::identity);
+        let child = match started {
             Ok(child) => child,
             // The platform's message names the reason; the command line
             // itself may hold a secret and never appears.
@@ -235,8 +239,9 @@ impl ProcessHookRunner {
         // Let go through the spawn gate: a start in flight may have copied
         // the read ends into a child that has not run `exec` yet, and holds
         // the gate until it has. Once the gate is ours, no copy is left, so
-        // what a descendant writes from here on fails (decision 58).
-        spawn_gate::hold(|| drop(pipes));
+        // what a descendant writes from here on fails (decision 58). The
+        // pool lets go even if this call is dropped while it waits.
+        let _ = spawn_gate::hold_blocking(move || drop(pipes)).await;
         (status, captured)
     }
 }

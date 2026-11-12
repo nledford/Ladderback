@@ -6355,6 +6355,9 @@ dependencies = [
 [[package]]
 name = "spawn-gate"
 version = "0.1.1"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "spin"
