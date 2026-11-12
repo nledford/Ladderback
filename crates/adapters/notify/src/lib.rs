@@ -267,6 +267,7 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
             msg::NOTIFY_BACKUP_FAILED,
             vec![("plan", MsgArg::Text(plan)), ("code", MsgArg::Text(code))],
         ),
+        EventKind::BackupRetrying => todo!("the default text of backup.retrying"),
         EventKind::ForgetFailed => (
             msg::NOTIFY_FORGET_FAILED,
             vec![

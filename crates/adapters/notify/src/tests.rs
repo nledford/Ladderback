@@ -1,4 +1,4 @@
-use domain::notifications::{Event, EventKind, Ping};
+use domain::notifications::{Attempt, Event, EventKind, Ping};
 use domain::planning::Locale;
 use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
 
@@ -18,6 +18,7 @@ fn event(kind: EventKind) -> Event {
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).expect("a time"),
         code: Some("operation-failed"),
+        attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 2, of: 3 }),
     }
 }
 
@@ -103,8 +104,20 @@ fn a_webhook_is_posted_every_fact_of_the_event() {
             "repository": "demo-repo",
             "code": "operation-failed",
             "time": "2027-01-15T08:00:00Z",
+            "attempt": null,
+            "attempts": null,
         })
     );
+}
+
+#[test]
+fn a_webhook_is_posted_which_retry_is_planned_and_when_it_runs() {
+    let body = webhook_body(&event(EventKind::BackupRetrying), "demo text");
+    assert_eq!(body["event"], "backup.retrying");
+    assert_eq!(body["attempt"], 2);
+    assert_eq!(body["attempts"], 3);
+    assert_eq!(body["time"], "2027-01-15T08:00:00Z");
+    assert_eq!(body["code"], "operation-failed");
 }
 
 #[test]
@@ -114,7 +127,7 @@ fn a_fact_the_event_lacks_is_null_in_a_webhook_body() {
     event.repository = None;
     event.code = None;
     let body = webhook_body(&event, "");
-    for key in ["plan", "repository", "code"] {
+    for key in ["plan", "repository", "code", "attempt", "attempts"] {
         assert_eq!(body[key], serde_json::Value::Null, "{key}");
     }
 }
@@ -138,6 +151,10 @@ fn a_default_message_names_the_plan_or_the_repository_and_the_code() {
     assert_eq!(
         says(EventKind::BackupFailed),
         "The backup of demo-plan failed (operation-failed)."
+    );
+    assert_eq!(
+        says(EventKind::BackupRetrying),
+        "The backup of demo-plan failed (operation-failed). Retry 2 of 3 runs at Jan 15, 2027, 8:00\u{202f}AM UTC."
     );
     assert_eq!(
         says(EventKind::ForgetFailed),

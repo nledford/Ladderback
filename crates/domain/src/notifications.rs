@@ -29,8 +29,8 @@ use crate::{OperationId, PlanId, RepositoryAlias};
 
 /// What happened, as a rule names it. Each is one of the events §11 lists
 /// that the agent emits today; an event that a later part of the agent
-/// emits (a retry, a missed backup) becomes a variant here, and every rule,
-/// template and channel takes it with no other change.
+/// emits (a missed backup) becomes a variant here, and every rule, template
+/// and channel takes it with no other change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventKind {
     /// A backup started running.
@@ -42,6 +42,9 @@ pub enum EventKind {
     BackupWarning,
     /// A backup failed.
     BackupFailed,
+    /// A backup failed, and the agent retries it: the scheduler planned
+    /// one of the plan's retries (§5, decision 76).
+    BackupRetrying,
     ForgetFailed,
     PruneFailed,
     CheckFailed,
@@ -84,6 +87,7 @@ impl EventKind {
             Self::BackupSucceeded => "backup.succeeded",
             Self::BackupWarning => "backup.warning",
             Self::BackupFailed => "backup.failed",
+            Self::BackupRetrying => todo!("the name of backup.retrying"),
             Self::ForgetFailed => "forget.failed",
             Self::PruneFailed => "prune.failed",
             Self::CheckFailed => "check.failed",
@@ -106,6 +110,7 @@ impl EventKind {
             Self::BackupFailed | Self::ForgetFailed | Self::PruneFailed | Self::CheckFailed => {
                 Ping::Fail
             }
+            Self::BackupRetrying => todo!("the ping of backup.retrying"),
         }
     }
 
@@ -140,11 +145,22 @@ pub struct Event {
     pub plan: Option<PlanId>,
     /// The repository, by the alias this agent gives it.
     pub repository: Option<RepositoryAlias>,
-    /// When the operation started, for a start, or ended.
+    /// When the operation started, for a start, or ended; for a retry, when
+    /// the retry runs.
     pub at: Timestamp,
     /// The failure's stored code (`operation-failed`), for a failure whose
-    /// reason the operation records.
+    /// reason the operation records, and for the failure a retry follows.
     pub code: Option<&'static str>,
+    /// Which retry a `backup.retrying` tells of.
+    pub attempt: Option<Attempt>,
+}
+
+/// Which of a plan's retries a `backup.retrying` tells of: the `number`th
+/// of its `of` attempts (decision 76).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attempt {
+    pub number: u32,
+    pub of: u32,
 }
 
 /// The facts of an operation an event is made from: what the operation log
@@ -191,6 +207,15 @@ impl Event {
         Some(Self::of(kind, subject, code, at))
     }
 
+    /// The event a retry of `subject`, the backup that failed, makes when it
+    /// is planned: its `attempt`, and `at`, when it runs. The code is the
+    /// failure's, as the operation's status records it. Only a backup is
+    /// retried.
+    pub fn retrying(subject: Subject<'_>, attempt: Attempt, at: Timestamp) -> Option<Self> {
+        let _ = (subject, attempt, at);
+        todo!("the event of a retry")
+    }
+
     fn of(
         kind: EventKind,
         subject: Subject<'_>,
@@ -204,6 +229,7 @@ impl Event {
             repository: subject.repository.cloned(),
             at,
             code,
+            attempt: None,
         }
     }
 }

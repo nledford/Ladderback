@@ -3,7 +3,7 @@
 //! serves the channels on loopback. A check fails on the first violation,
 //! as the other suites do.
 
-use domain::notifications::{ChannelKind, Event, EventKind, Ping, Username};
+use domain::notifications::{Attempt, ChannelKind, Event, EventKind, Ping, Username};
 use domain::secrets::SecretValue;
 use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
 
@@ -102,6 +102,7 @@ fn event(kind: EventKind) -> Event {
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).unwrap_or(Timestamp::UNIX_EPOCH),
         code: (kind == EventKind::BackupFailed).then_some("operation-failed"),
+        attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 1, of: 3 }),
     }
 }
 
@@ -217,6 +218,7 @@ async fn a_healthchecks_channel_is_pinged_for_each_event(harness: &dyn NotifierH
         EventKind::BackupSucceeded,
         EventKind::BackupWarning,
         EventKind::BackupFailed,
+        EventKind::BackupRetrying,
         EventKind::PruneFailed,
     ];
     for kind in kinds {

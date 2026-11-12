@@ -23,6 +23,13 @@ Feature: Notification rules
       When the backup of "home" fails
       Then "ops" is sent "backup.failed" for the plan "home" with the code "operation-failed"
 
+    Scenario: A retry planned for a failed backup is sent with its attempt and when it runs
+      Given a webhook channel "ops"
+      And a rule "retries" that sends "backup.retrying" to "ops"
+      When the backup of "home" fails
+      And the scheduler plans retry 1 of 3 of the failed backup of "home" for "2026-11-12T10:05:00Z"
+      Then "ops" is sent "backup.retrying" for the plan "home": retry 1 of 3 at "2026-11-12T10:05:00Z"
+
     Scenario: An event no rule names is sent nowhere
       Given a webhook channel "ops"
       And a rule "failures" that sends "backup.failed" to "ops"

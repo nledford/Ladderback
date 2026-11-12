@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use api::UiEvent;
 use cucumber::{given, then, when};
 
 use app::announce::{end_of, start_of};
@@ -19,7 +20,8 @@ use domain::execution::{
     FailureReason, Operation, OperationKind, Target, Trigger, Warning, WarningKind,
 };
 use domain::notifications::{
-    Channel, ChannelKind, ChannelName, EventKind, Notifications, Ping, Rule, RuleName, Template,
+    Attempt, Channel, ChannelKind, ChannelName, EventKind, Notifications, Ping, Rule, RuleName,
+    Template,
 };
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Locale, Maintenance, Plan, RepositoryConfig,
@@ -45,6 +47,8 @@ pub struct NotificationsWorld {
     operations: Arc<InMemoryOperationStore>,
     /// Each plan's backup that has started and not yet ended.
     running: BTreeMap<String, Operation>,
+    /// Each plan's backup that failed last.
+    failed: BTreeMap<String, OperationId>,
     reports: Vec<Report>,
     /// Whether the configuration can't be read: set by the step that says
     /// so, which `steps/recovery.rs` holds for both.
@@ -395,6 +399,33 @@ async fn fails_saying(agent: &mut Agent, plan: String, detail: String) {
         .fail(engine_failure(&detail), at)
         .expect("a running backup fails");
     world.tell_end(&operation).await;
+    world.failed.insert(plan, operation.id());
+}
+
+#[when(
+    expr = "the scheduler plans retry {int} of {int} of the failed backup of {string} for {string}"
+)]
+async fn a_retry_is_planned(
+    agent: &mut Agent,
+    attempt: u32,
+    attempts: u32,
+    plan: String,
+    at: String,
+) {
+    let world = &mut agent.notifications;
+    let failed = *world
+        .failed
+        .get(&plan)
+        .expect("the scenario's backup of the plan failed");
+    let news = UiEvent::BackupRetrying {
+        operation: failed.as_uuid().hyphenated().to_string(),
+        plan,
+        attempt,
+        attempts,
+        at,
+    };
+    let reports = world.notify().await.tell(news).await;
+    world.reports.extend(reports);
 }
 
 #[when(expr = "a prune of {string} fails")]
@@ -583,5 +614,43 @@ fn refused(agent: &mut Agent, rule: String, channel: String) {
             rule: rule_name(&rule),
             channel: channel_name(&channel),
         })
+    );
+}
+
+#[then(expr = "{string} is sent {string} for the plan {string}: retry {int} of {int} at {string}")]
+fn sent_a_retry(
+    agent: &mut Agent,
+    channel: String,
+    event: String,
+    plan: String,
+    attempt: u32,
+    attempts: u32,
+    at: String,
+) {
+    let at: Timestamp = at.parse().expect("the scenario's time");
+    let sent = agent.notifications.sent_to(&channel);
+    let told: Vec<_> = sent
+        .iter()
+        .map(|notification| {
+            let event = &notification.event;
+            (
+                event.kind.name(),
+                event.plan.as_ref().map(PlanId::as_str),
+                event.attempt,
+                event.at,
+            )
+        })
+        .collect();
+    assert_eq!(
+        told,
+        [(
+            event.as_str(),
+            Some(plan.as_str()),
+            Some(Attempt {
+                number: attempt,
+                of: attempts
+            }),
+            at
+        )]
     );
 }

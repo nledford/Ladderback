@@ -156,6 +156,7 @@ fn deliver_in_copy(expect: &str) {
                     repository: None,
                     at: Timestamp::UNIX_EPOCH,
                     code: Some("operation-failed"),
+                    attempt: None,
                 },
                 message: Message::Default,
                 locale: None,
