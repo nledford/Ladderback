@@ -17,9 +17,9 @@
 //   - with `LANGUAGE=en-XA` it speaks plain English: a release build has no
 //     pseudolocales (§8.4);
 //   - `serve` starts in scratch folders (LADDERBACK_CONFIG_DIR,
-//     LADDERBACK_DATA_DIR) with no D-Bus session, and `GET /` answers 200 with
-//     the embedded web UI, whose wasm has neither the pseudolocales nor the
-//     component gallery (§4.5);
+//     LADDERBACK_DATA_DIR, LADDERBACK_CACHE_DIR) with no D-Bus session, and
+//     `GET /` answers 200 with the embedded web UI, whose wasm has neither the
+//     pseudolocales nor the component gallery (§4.5);
 //   - a scratch local repository initialised through `/api/v1`, and one backup
 //     of a folder of demo files into it, which succeeds and leaves one snapshot.
 // The results go to standard output as Markdown, and are appended to the file
@@ -514,6 +514,7 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
   const folders = (name: string): Env => ({
     LADDERBACK_CONFIG_DIR: `${scratch}/${name}/config`,
     LADDERBACK_DATA_DIR: `${scratch}/${name}/data`,
+    LADDERBACK_CACHE_DIR: `${scratch}/${name}/cache`,
   });
   const source = `${scratch}/source`;
   const repository = `${scratch}/repository`;

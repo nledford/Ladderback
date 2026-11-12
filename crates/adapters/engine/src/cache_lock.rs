@@ -20,10 +20,11 @@ pub(crate) struct CacheLock {
 }
 
 impl CacheLock {
-    /// Makes `dir` if it doesn't exist and locks it. Fails with
+    /// Makes `dir`, and every folder missing above it, if it doesn't exist
+    /// (see [`create_private_dir`]) and locks it. Fails with
     /// [`io::ErrorKind::WouldBlock`] when another process holds the lock.
     pub(crate) fn acquire(dir: &Path) -> io::Result<Self> {
-        fs::create_dir_all(dir)?;
+        create_private_dir(dir)?;
         let directory = File::open(dir)?;
         match directory.try_lock() {
             Ok(()) => Ok(Self {
@@ -33,6 +34,18 @@ impl CacheLock {
             Err(TryLockError::Error(error)) => Err(error),
         }
     }
+}
+
+/// Makes `dir`, and every folder missing above it, readable and writable by
+/// the daemon's user alone (mode 0700): rustic's files then sit under a
+/// private folder even when the cache root is wider, as a systemd
+/// `CacheDirectory=` is (0755). A folder already there is left as it is.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 #[cfg(test)]

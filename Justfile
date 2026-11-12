@@ -277,7 +277,7 @@ try *args: build
     mkdir -p "$scratch/config" "$scratch/data" "$scratch/home"
     if [ $# -eq 0 ]; then set -- serve --listen 127.0.0.1:0; fi
     echo "try: scratch folders in $scratch" >&2
-    HOME="$scratch/home" LADDERBACK_CONFIG_DIR="$scratch/config" LADDERBACK_DATA_DIR="$scratch/data" \
+    HOME="$scratch/home" LADDERBACK_CONFIG_DIR="$scratch/config" LADDERBACK_DATA_DIR="$scratch/data" LADDERBACK_CACHE_DIR="$scratch/cache" \
         exec "$target/debug/ladderback" "$@"
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even

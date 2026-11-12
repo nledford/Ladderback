@@ -163,7 +163,7 @@ impl OperationLog {
 
 /// What the daemon's router runs against (§4.2), or why it cannot.
 pub(crate) async fn daemon() -> Result<Daemon, Refused> {
-    daemon_at(dirs::config_dir(), dirs::data_dir(), None).await
+    daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await
 }
 
 /// [`daemon`] with the folders supplied, for tests. The data folder is locked
@@ -243,8 +243,10 @@ async fn state_over(
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
         args: vec![("detail", text(detail))],
     })?;
-    let _ = cache_dir;
-    let workers = WorkerEngine::new(program, ["worker"]);
+    let mut workers = WorkerEngine::new(program, ["worker"]);
+    if let Some(dir) = workers_cache(cache_dir) {
+        workers = workers.with_cache_root(dir);
+    }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
     let engine: Arc<dyn Engine> = Arc::new(EventEngine {
         inner: Arc::new(workers),
@@ -284,11 +286,31 @@ async fn state_over(
 
 /// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
 /// the daemon's user alone when it isn't there yet. `None`, said once in the
-/// log, when there is no such folder or it can't be made: the workers then
-/// run without a cache, which costs each job time and nothing else.
+/// log, when there is no such folder, it can't be made or files can't be
+/// made in it: the workers then run without a cache, which costs each job
+/// time and nothing else, instead of each job warning about it again.
 fn workers_cache(dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
-    let _ = dir;
-    todo!()
+    let Some(dir) = dir else {
+        log::warn!(
+            "workers run without a cache: there is no home directory to keep one under; set LADDERBACK_CACHE_DIR to give them one"
+        );
+        return None;
+    };
+    if let Err(error) = dirs::create_private_dir(&dir) {
+        log::warn!(
+            "workers run without a cache: the cache folder {} can't be made: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    if let Err(error) = dirs::probe_writable(&dir) {
+        log::warn!(
+            "workers run without a cache: the cache folder {} can't be written to: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    Some(dir)
 }
 
 /// Waits for `close`, the closing of the operation log at `database`, for

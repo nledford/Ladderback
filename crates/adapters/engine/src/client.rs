@@ -112,8 +112,8 @@ impl WorkerEngine {
     }
 
     /// Gives each worker of a repository with a known ID its own rustic cache
-    /// under `root/ladderback/<repository id>/<slot>`. Without a root, workers
-    /// run without a cache.
+    /// under `root/<repository id>/<slot>`, where `root` is Ladderback's own
+    /// cache folder. Without a root, workers run without a cache.
     #[must_use]
     pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.cache_root = Some(root.into());
@@ -1478,11 +1478,7 @@ struct CacheSlots {
 impl CacheSlots {
     /// `None` when every slot is taken: that worker runs without a cache.
     fn acquire(self: &Arc<Self>, root: &Path, repository: &RepositoryId) -> Option<CacheSlot> {
-        let directory = |number: u32| {
-            root.join("ladderback")
-                .join(repository.as_str())
-                .join(number.to_string())
-        };
+        let directory = |number: u32| root.join(repository.as_str()).join(number.to_string());
         let mut in_use = self.in_use.lock().unwrap_or_else(PoisonError::into_inner);
         let taken = in_use.entry(repository.as_str().to_owned()).or_default();
         let number = (0..MAX_CACHE_SLOTS)
