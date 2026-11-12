@@ -10,6 +10,31 @@ async fn the_hash_file_meets_the_admin_password_contract() {
     app::contract::admin_password::run(&FileAdminPassword::in_data_dir(data.path())).await;
 }
 
+/// Polls `future` once, then drops it, as a server drops a request's handler
+/// when its client hangs up.
+fn poll_once_and_drop<F: Future>(future: F) {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(future.as_mut().poll(&mut context).is_pending());
+}
+
+#[tokio::test]
+async fn a_check_whose_caller_hangs_up_still_holds_the_one_hash_until_it_ends() {
+    let data = tempfile::tempdir().unwrap();
+    let kept = FileAdminPassword::in_data_dir(data.path());
+    kept.set(&password("demo-admin-pass")).await.unwrap();
+    poll_once_and_drop(kept.verify(&password("a-wrong-guess")));
+    assert_eq!(
+        kept.hashing.available_permits(),
+        0,
+        "the abandoned check's hash still runs, so no other may start"
+    );
+    drop(kept.hashing.acquire().await.unwrap());
+    poll_once_and_drop(kept.set(&password("demo-admin-pass")));
+    assert_eq!(kept.hashing.available_permits(), 0);
+    drop(kept.hashing.acquire().await.unwrap());
+}
+
 #[tokio::test]
 async fn a_password_another_process_sets_changes_the_fingerprint_the_daemon_sees() {
     let data = tempfile::tempdir().unwrap();

@@ -164,12 +164,14 @@ impl AdminPassword for FileAdminPassword {
     async fn verify(&self, attempt: &Password) -> Result<bool, AdminPasswordError> {
         let hash = read_hash(&self.path)?;
         let attempt = attempt.clone();
-        let _permit = self
-            .hashing
-            .acquire()
+        // The permit goes with the hash, not this future: a caller that hangs
+        // up drops the future, while the blocking hash runs on to its end.
+        let permit = Arc::clone(&self.hashing)
+            .acquire_owned()
             .await
             .map_err(|error| AdminPasswordError::Unreadable(error.to_string()))?;
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let parsed = PasswordHash::new(&hash)
                 .map_err(|error| AdminPasswordError::Unreadable(error.to_string()))?;
             match Argon2::default().verify_password(attempt.expose().as_bytes(), &parsed) {
@@ -191,12 +193,12 @@ impl AdminPassword for FileAdminPassword {
         let salt = SaltString::encode_b64(&salt).map_err(|error| unwritable(error.to_string()))?;
         let password = password.clone();
         let path = self.path.clone();
-        let _permit = self
-            .hashing
-            .acquire()
+        let permit = Arc::clone(&self.hashing)
+            .acquire_owned()
             .await
             .map_err(|error| unwritable(error.to_string()))?;
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let hash = Argon2::default()
                 .hash_password(password.expose().as_bytes(), &salt)
                 .map_err(|error| unwritable(error.to_string()))?
