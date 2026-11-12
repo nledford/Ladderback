@@ -37,6 +37,12 @@ Feature: Notification rules
       And the backup of "home" fails
       Then "ops" is sent only "backup.failed" for the plan "home"
 
+    Scenario: A backup that succeeds without a warning is told as a success
+      Given a webhook channel "ops"
+      And a rule "endings" that sends "backup.succeeded, backup.warning" to "ops"
+      When the backup of "home" succeeds
+      Then "ops" is sent only "backup.succeeded" for the plan "home"
+
     Scenario: A backup that ends with warnings is told as a warning, not as a success
       Given a webhook channel "ops"
       And a rule "endings" that sends "backup.succeeded, backup.warning" to "ops"
@@ -56,6 +62,13 @@ Feature: Notification rules
       When the backup of "home" fails and the engine says "canary-engine-detail"
       Then "ops" is sent the message "backup.failed home nas operation-failed"
       And nothing "ops" is sent shows "canary-url-secret" or "canary-engine-detail"
+
+    Scenario: A template names the repository of the plan that ran
+      Given the plan "office" backs up to the repository "cloud"
+      And a webhook channel "ops"
+      And a rule "failures" that sends "backup.failed" to "ops" with the template "{plan} {repository}"
+      When the backup of "office" fails
+      Then "ops" is sent the message "office cloud"
 
     Scenario: A default message is written in the agent's locale
       Given a webhook channel "ops"

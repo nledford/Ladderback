@@ -237,9 +237,18 @@ impl ConfigStore for Unreadable {
 
 #[given(expr = "the plans {string} and {string} back up to the repository {string}")]
 fn plans(agent: &mut Agent, first: String, second: String, repository: String) {
-    let world = &mut agent.notifications;
+    back_up(&mut agent.notifications, &[first, second], &repository);
+}
+
+#[given(expr = "the plan {string} backs up to the repository {string}")]
+fn a_plan(agent: &mut Agent, plan: String, repository: String) {
+    back_up(&mut agent.notifications, &[plan], &repository);
+}
+
+/// Adds the repository `repository` and a plan of each of `plans` on it.
+fn back_up(world: &mut NotificationsWorld, plans: &[String], repository: &str) {
     world.repositories.insert(
-        alias(&repository),
+        alias(repository),
         RepositoryConfig {
             id: None,
             settings: RepositorySettings {
@@ -255,11 +264,11 @@ fn plans(agent: &mut Agent, first: String, second: String, repository: String) {
             hooks: Hooks::default(),
         },
     );
-    for id in [first, second] {
+    for id in plans {
         let source = Source::parse(&format!("/home/demo/{id}")).expect("a source");
         world
             .plans
-            .push(Plan::new(plan_id(&id), alias(&repository), vec![source]));
+            .push(Plan::new(plan_id(id), alias(repository), vec![source]));
     }
 }
 
