@@ -60,6 +60,17 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A browser draws a form control's text in a font of its own, fixed in size
+   (13.33 px in Chromium), so a button's label stayed that size when the
+   reader's text size doubled the rest of the page (1.4.4). A control takes
+   the size and face of the text around it instead. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 a {
   color: var(--accent);
 }
@@ -235,7 +246,6 @@ main:focus {
   margin-block: 0.25rem;
   padding-block: 0.25rem;
   padding-inline: 0.5rem;
-  font: inherit;
 }
 
 .field p {
