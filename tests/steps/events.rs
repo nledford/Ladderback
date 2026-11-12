@@ -340,10 +340,10 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
 
 /// Writes the daemon's config.toml: the scenario's scratch repository as
 /// `demo` and its plan over the scenario's source folder, with the plan's
-/// host and source filter and the agent's hostname the scenario set, keeping
-/// the last `keep_last` snapshots when given, and everything otherwise. The
-/// daemon reads its configuration on every request, so calling this again
-/// changes what a running daemon does next.
+/// host, source filter and hooks and the agent's hostname the scenario set,
+/// keeping the last `keep_last` snapshots when given, and everything
+/// otherwise. The daemon reads its configuration on every request, so
+/// calling this again changes what a running daemon does next.
 pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
     let repository = agent.backup.repository.clone().expect("a repository");
     let source = agent.backup.source.clone().expect("a plan source");
@@ -363,6 +363,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
     }
     plan.host = agent.backup.plan_host.clone();
     plan.filter = agent.backup.filter.clone();
+    plan.hooks = agent.backup.plan_hooks.clone();
     let settings = domain::planning::AgentSettings {
         hostname: agent.backup.agent_hostname.clone(),
         ..domain::planning::AgentSettings::default()
