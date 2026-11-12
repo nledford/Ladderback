@@ -21,6 +21,7 @@ mod client;
 mod environment;
 pub mod job;
 mod log_masking;
+mod rclone;
 mod retention;
 pub mod worker;
 

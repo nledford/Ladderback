@@ -114,8 +114,8 @@ fn listing(folder: &Path) -> String {
 /// `filter` (`RUST_LOG`): the stand-in for `rclone` says what it was asked
 /// to serve, as rclone does when it fails to (`Failed to create file system
 /// for ":s3,…"`), then that it serves the scratch repository, the open goes
-/// on to the end, and once rustic has stopped the server, the stand-in says
-/// it again while rustic drops the backend. Every record of it reaches the
+/// on to the end, and once the engine has stopped the server, the stand-in says
+/// it again while the engine drops the backends. Every record of it reaches the
 /// daemon's own logger,
 /// whose text this returns once the open succeeded.
 async fn open_logged(filter: Option<&str>, credential: &str) -> String {
@@ -129,11 +129,11 @@ async fn open_logged(filter: Option<&str>, credential: &str) -> String {
         Target::Pipe(Box::new(pipe.clone())),
         WriteStyle::Never,
     ));
-    // rustic appends what follows `rclone:` as the last argument; `exec`
-    // makes the shell the server rustic stops when it is done. A child of it
+    // The engine appends what follows `rclone:` as the last argument, as rustic
+    // does; `exec` makes the shell the server the engine stops when it is done. A child of it
     // holds rclone's stderr, and once the server is stopped (the write end
     // of the FIFO, which only the server holds, closes) says what was asked
-    // of it again: rustic logs that while it drops the backend, waiting for
+    // of it again: the engine logs that while it drops the server, waiting for
     // the thread that reads the stderr (I4 holds until the open is gone).
     let fifo = scratch.path().join("stopped");
     let stand_in = format!(
@@ -192,7 +192,7 @@ async fn an_open_by_the_daemon_never_logs_a_credential_of_an_rclone_location() {
     assert!(!log.contains(CANARY), "the daemon's log leaks: {log}");
 }
 
-/// At `debug`, rustic logs the command it starts rclone with as `{:?}`
+/// At `debug`, the engine logs the command it starts rclone with, as rustic does, as `{:?}`
 /// prints it, the location last, so a credential's `"` shows as `\"`: the
 /// credential is masked in that form too.
 #[tokio::test]

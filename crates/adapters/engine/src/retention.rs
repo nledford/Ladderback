@@ -30,12 +30,13 @@ impl Retention for RusticRetention {
         group: &[Snapshot],
     ) -> Result<Vec<SnapshotId>, RetentionError> {
         let access = RepositorySpec::of(repository);
-        let redactor = redactor_of(repository);
+        let server = crate::rclone::ServerCredentials::random();
+        let redactor = redactor_of(repository, &server);
         let policy = policy.clone();
         let wanted: std::collections::HashSet<String> =
             group.iter().map(|s| s.id.as_str().to_owned()).collect();
         blocking(&redactor, move |redactor| {
-            evaluate(&access, redactor, &policy, &wanted)
+            evaluate(&access, &server, redactor, &policy, &wanted)
         })
         .await
     }
@@ -84,6 +85,7 @@ impl RepositorySpec {
 /// would — and names the ones the policy lets go.
 fn evaluate(
     spec: &RepositorySpec,
+    server: &crate::rclone::ServerCredentials,
     redactor: domain::secrets::Redactor,
     policy: &RetentionPolicy,
     wanted: &std::collections::HashSet<String>,
@@ -104,23 +106,18 @@ fn evaluate(
         Some(hot) => backends.repo_hot(hot.clone()),
         None => backends,
     };
-    // An `rclone:` backend starts `rclone` children, and reads the server's
-    // output until it is up: built through the spawn gate, held until then.
-    // Other backends start nothing, and a slow one must not hold up every
-    // start (decision 58). This runs on a blocking thread already.
-    let starts_rclone = std::iter::once(&spec.repository)
-        .chain(&spec.repo_hot)
-        .any(|location| is_rclone(location));
-    let backends = if starts_rclone {
-        spawn_gate::hold(|| backends.to_backends())
-    } else {
-        backends.to_backends()
-    }
-    .map_err(|error| engine(redactor, error))?;
-    let repository = Repository::new(&RepositoryOptions::default().no_cache(true), &backends)
-        .map_err(|error| engine(redactor, error))?
-        .open(&Credentials::password(spec.password.clone()))
+    // An `rclone:` location's server starts through the spawn gate, which is
+    // held for each start alone, not while the server comes up (decision
+    // 58). Dropped at the end of this call, it stops the servers.
+    let backends = crate::rclone::backends(&backends, server, redactor)
         .map_err(|error| engine(redactor, error))?;
+    let repository = Repository::new(
+        &RepositoryOptions::default().no_cache(true),
+        &backends.backends,
+    )
+    .map_err(|error| engine(redactor, error))?
+    .open(&Credentials::password(spec.password.clone()))
+    .map_err(|error| engine(redactor, error))?;
     // The repository's own snapshot files, not the listing's: a calendar
     // rule counts each snapshot on the calendar of the offset its file
     // records, which the listing's `Timestamp` has lost (§16, decision 56).
@@ -153,12 +150,6 @@ fn evaluate(
         .collect())
 }
 
-/// Whether rustic reads `location` as an `rclone:` repository.
-fn is_rclone(location: &str) -> bool {
-    rustic_backend::util::location_to_type_and_path(location)
-        .is_ok_and(|(kind, _)| kind == rustic_backend::choose::SupportedBackend::Rclone)
-}
-
 fn engine(redactor: &domain::secrets::Redactor, error: impl std::fmt::Display) -> RetentionError {
     RetentionError::Engine {
         detail: redactor.redact(&error.to_string()),
@@ -167,16 +158,20 @@ fn engine(redactor: &domain::secrets::Redactor, error: impl std::fmt::Display) -
 
 /// Everything the open of this repository could let slip into an error
 /// (I4), so the adapter's errors are redacted like the worker's own: the
-/// repository's secrets, what its references resolved to, and the proxy
+/// repository's secrets, what its references resolved to, the proxy
 /// credentials of this process's environment, which the in-process opener
-/// reads.
-fn redactor_of(access: &RepositoryAccess) -> domain::secrets::Redactor {
+/// reads, and the credentials of the `rclone` server it may start.
+fn redactor_of(
+    access: &RepositoryAccess,
+    server: &crate::rclone::ServerCredentials,
+) -> domain::secrets::Redactor {
     let environment: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
     let resolved: Vec<domain::secrets::SecretValue> = access
         .secrets
         .iter()
         .cloned()
         .chain(crate::environment::proxy_credentials(&environment))
+        .chain(server.secrets().into_iter().cloned())
         .collect();
     domain::secrets::Redactor::for_repository(domain::secrets::RepositorySecrets {
         resolved: &resolved,

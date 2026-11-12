@@ -304,7 +304,8 @@ async fn an_rclone_that_never_serves_holds_up_no_other_start() {
 /// serves on, as the user and with the password the server was handed in
 /// its environment, and the server is stopped once the evaluation ends.
 /// The stand-in names a listener of the test's, which answers that there
-/// is no such file, so the open fails.
+/// is no such file, so the open fails, and its error names the repository
+/// as it is written, not the server's address, as rustic's own does.
 #[cfg(unix)]
 #[tokio::test]
 async fn an_rclone_repository_is_read_where_its_server_serves_and_the_server_stops() {
@@ -341,7 +342,7 @@ async fn an_rclone_repository_is_read_where_its_server_serves_and_the_server_sto
     access
         .options
         .insert("retry".to_owned(), "false".to_owned());
-    RusticRetention
+    let error = RusticRetention
         .removes(
             &access,
             &RetentionPolicy {
@@ -352,6 +353,14 @@ async fn an_rclone_repository_is_read_where_its_server_serves_and_the_server_sto
         )
         .await
         .expect_err("the listener has no repository");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(detail.contains("`rclone:demo-remote:repo`"), "{detail}");
+    assert!(
+        !detail.contains(&format!(":{port}")),
+        "the detail shows the server's address: {detail}"
+    );
     let handed = std::fs::read_to_string(&handed).unwrap();
     let (user, password) = handed.trim().split_once(':').unwrap();
     assert!(!user.is_empty() && !password.is_empty() && user != password);
@@ -374,4 +383,37 @@ async fn an_rclone_repository_is_read_where_its_server_serves_and_the_server_sto
         .unwrap()
         .success();
     assert!(!alive, "the rclone stand-in is still running, or unreaped");
+}
+
+/// The user and password an `rclone` server is started with never show in
+/// an error (I4), though rustic's quotes the address they are written in:
+/// here, a `rest-url` that is no URL. They are 64 hex digits each.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_error_never_carries_the_rclone_server_s_credentials() {
+    let mut access = rclone_repository("sh -c 'exec sleep 30' sh".to_owned());
+    access
+        .options
+        .insert("rest-url".to_owned(), "http://bad host:1".to_owned());
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("the address is no URL");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(detail.contains("bad host:1"), "{detail}");
+    let longest_hex = detail
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    assert!(longest_hex < 64, "the detail leaks a credential: {detail}");
 }
