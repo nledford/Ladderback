@@ -343,6 +343,24 @@ fn failures() -> Vec<(
             "[]",
             None,
         ),
+        (
+            FailureReason::SecretsTooLargeToMask {
+                field: Some("HTTPS_PROXY".to_owned()),
+                limit: 262_144,
+            },
+            "secrets-too-large-to-mask",
+            r#"[["limit",{"type":"bytes","value":262144}],["field",{"type":"text","value":"HTTPS_PROXY"}]]"#,
+            None,
+        ),
+        (
+            FailureReason::SecretsTooLargeToMask {
+                field: None,
+                limit: 262_144,
+            },
+            "secrets-too-large-to-mask",
+            r#"[["limit",{"type":"bytes","value":262144}]]"#,
+            None,
+        ),
         (FailureReason::DaemonStopped, "daemon-stopped", "[]", None),
     ]
 }

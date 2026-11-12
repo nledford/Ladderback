@@ -1579,6 +1579,7 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::Engine(EngineError::StartTimedOut) => {
             unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None)
         }
+        RepositoryError::Engine(EngineError::SecretsTooLargeToMask { .. }) => todo!(),
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
         RepositoryError::TimedOut => unavailable(ErrorCode::RepositoryTimedOut, Vec::new(), None),
@@ -1671,6 +1672,7 @@ async fn secret_refusal(
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
+        Cause::TooMuchToMask { .. } => todo!(),
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
@@ -1826,6 +1828,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => RepositoriesError::NotFound,
+        F::SecretsTooLargeToMask { .. } => todo!(),
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }
@@ -5961,6 +5964,20 @@ mod repository_service_tests {
                 unavailable(ErrorCode::DaemonStopped, vec![], None),
             ),
             (
+                F::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+                Err(RepositoriesError::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretsTooLargeToMask,
+                    args: vec![
+                        ("limit", MsgArg::Bytes(262_144)),
+                        ("field", text("HTTPS_PROXY")),
+                    ],
+                    detail: None,
+                })),
+            ),
+            (
                 F::RepositoryReplaced,
                 unavailable(ErrorCode::RepositoryReplaced, vec![], None),
             ),
@@ -6035,6 +6052,40 @@ mod repository_service_tests {
                 })
                 .await;
             assert_eq!(answer, Err(expected));
+        }
+    }
+
+    /// An engine that refuses a job for more secrets than it masks is told
+    /// by the code of a secret refusal, with the limit and the setting where
+    /// the secrets passed it, or none when the job's own did (§10.2).
+    #[tokio::test]
+    async fn the_engine_refusing_a_job_with_too_much_to_mask_is_told_by_its_code() {
+        for field in [Some("HTTPS_PROXY"), None] {
+            let engine = engine();
+            *engine
+                .refuses
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(EngineError::SecretsTooLargeToMask {
+                    field: field.map(str::to_owned),
+                    limit: 262_144,
+                });
+            let answer = service(&engine, Arc::new(InMemoryConfigStore::new()))
+                .test(api::TestRepositoryDto {
+                    settings: settings_dto(),
+                })
+                .await;
+            let mut args = vec![("limit", MsgArg::Bytes(262_144))];
+            args.extend(field.map(|field| ("field", MsgArg::Text(field.to_owned()))));
+            assert_eq!(
+                answer,
+                Err(RepositoriesError::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretsTooLargeToMask,
+                    args,
+                    detail: None,
+                })),
+                "{field:?}"
+            );
         }
     }
 
@@ -6280,6 +6331,18 @@ mod repository_service_tests {
             ),
             (
                 ResolveError {
+                    field: Field::Option("note".to_owned()),
+                    cause: Cause::TooMuchToMask { limit: 262_144 },
+                },
+                ErrorCode::SecretsTooLargeToMask,
+                vec![
+                    ("limit", MsgArg::Bytes(262_144)),
+                    ("field", text("options.note")),
+                ],
+                None,
+            ),
+            (
+                ResolveError {
                     field: Field::RepoHot,
                     cause: Cause::TooManyCredentials { limit: 16 },
                 },
@@ -6337,6 +6400,7 @@ mod repository_service_tests {
             Cause::TooManyCredentials { limit: 16 },
             Cause::ReferenceInProcessArguments,
             Cause::ExpansionTooLong { limit: 4096 },
+            Cause::TooMuchToMask { limit: 262_144 },
             Cause::Invalid(TemplateError::TooLong { limit: 4096 }),
         ] {
             let error = ResolveError {
@@ -6392,6 +6456,48 @@ mod repository_service_tests {
         );
         // Not the name of an option or of a program, which are not secrets.
         assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
+    }
+
+    /// The secrets read again for a redactor stop where they pass what one
+    /// masks: the rest isn't read, and what the failure says is masked
+    /// whole, since an unread secret could be in it (I4).
+    #[tokio::test]
+    async fn the_words_of_a_failed_secret_are_masked_whole_past_what_a_redactor_masks() {
+        use domain::secrets::{MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem, REDACTED};
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        let secrets = FakeSecrets::new();
+        let count = MAX_MASKED_BYTES / MAX_SECRET_BYTES + 1;
+        for at in 1..=count {
+            let letter =
+                char::from_digit(u32::try_from(at + 9).expect("small"), 36).expect("a letter");
+            secrets.set_env(
+                &format!("DEMO_{at}"),
+                &letter.to_string().repeat(MAX_SECRET_BYTES),
+            );
+            settings
+                .options
+                .insert(format!("note-{at}"), format!("${{DEMO_{at}}}"));
+        }
+        settings
+            .options
+            .insert("note-9".to_owned(), "${DEMO_LATER}".to_owned());
+        secrets.set_env("DEMO_LATER", "demo-later");
+        let error = unresolved(
+            Field::Password,
+            domain::secrets::SourceName::Command {
+                program: "pass".to_owned(),
+            },
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: "nothing of a secret here".to_owned(),
+            },
+        );
+        let refusal = secret_refusal(&error, &settings, &secrets).await;
+        assert_eq!(refusal.detail.as_deref(), Some(REDACTED));
+        assert_eq!(
+            secrets.read_count(&SecretRef::Env("DEMO_LATER".to_owned())),
+            0
+        );
     }
 
     /// The lines logged so far about the snapshots of `alias`.
@@ -6524,6 +6630,37 @@ mod repository_service_tests {
         assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
         assert!(!logged.contains("canary-inline"), "{logged}");
         assert!(!logged.contains("canary-from-a-file"), "{logged}");
+    }
+
+    /// A listing the engine refused for more secrets than it masks is
+    /// refused with that code, in the answer and in the log (§10.2).
+    #[tokio::test]
+    async fn a_listing_the_engine_refused_for_too_much_to_mask_is_refused_with_its_code() {
+        capture();
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("too-much", "echo not-a-real-password", engine).await;
+        let refused = catalog.snapshots("too-much".to_owned()).await;
+        assert_eq!(
+            refused,
+            Err(SnapshotsError::SecretRefused(SecretRefusal {
+                code: ErrorCode::SecretsTooLargeToMask,
+                args: vec![
+                    ("limit", MsgArg::Bytes(262_144)),
+                    ("field", MsgArg::Text("HTTPS_PROXY".to_owned())),
+                ],
+                detail: None,
+            }))
+        );
+        let logged = logged_about("too-much").join("\n");
+        assert!(logged.contains("SecretsTooLargeToMask"), "{logged}");
     }
 
     /// What the engine says of an rclone location is logged without the

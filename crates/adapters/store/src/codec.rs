@@ -187,6 +187,7 @@ pub(crate) fn encode_failure(
                 .unwrap_or_default(),
             None,
         ),
+        FailureReason::SecretsTooLargeToMask { .. } => todo!(),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
     };
     Ok(FailureColumns {
@@ -346,6 +347,27 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryExists);
+    }
+
+    /// A job refused for more secrets than it masks reads back with its
+    /// limit and, when it named one, the setting where they passed it.
+    #[test]
+    fn secrets_too_large_to_mask_round_trips() {
+        for field in [Some("HTTPS_PROXY".to_owned()), None] {
+            let reason = FailureReason::SecretsTooLargeToMask {
+                field,
+                limit: 262_144,
+            };
+            let columns = encode_failure(&reason).expect("the failure encodes");
+            assert_eq!(columns.code, "secrets-too-large-to-mask");
+            assert_eq!(columns.detail, None);
+            let back =
+                match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+                    Ok(reason) => reason,
+                    Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+                };
+            assert_eq!(back, reason);
+        }
     }
 
     /// A persisted `repository-replaced` failure reads back as the typed

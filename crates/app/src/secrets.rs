@@ -54,6 +54,11 @@ pub enum Cause {
     /// each is a secret to look for in every text a job shows, so a job
     /// takes no more.
     TooManyCredentials { limit: usize },
+    /// The secrets of the repository, each counted once, come to more than
+    /// `limit` bytes ([`MAX_MASKED_BYTES`](domain::secrets::MAX_MASKED_BYTES))
+    /// with this field's: more than a job masks, so the job can't run (I4).
+    /// Nothing after this field is read.
+    TooMuchToMask { limit: usize },
 }
 
 /// The first field that couldn't be resolved, tried in the order password,

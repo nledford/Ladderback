@@ -325,6 +325,14 @@ error-secret-in-process-arguments = The repository's { $field } is handed to a p
 # $limit (bytes): the most it may hold.
 error-secret-expansion-too-long = The repository's { $field } is longer than { $limit } once the secrets it refers to are put in. Shorten it.
 
+# The secrets of a repository, each counted once, come to more than a job can hide in everything it shows. The engine counts the credentials of the daemon's proxy settings with them.
+# $limit (bytes): the most they may come to together.
+# $field (text): the setting at which they passed the limit: one of the repository's, such as password or options.note, or a proxy variable of the daemon's environment, such as HTTPS_PROXY. The sender leaves it out when the repository's own secrets passed it where the engine counted them, and the program then supplies the text none.
+error-secrets-too-large-to-mask = { $field ->
+    [none] The repository's secrets come to more than { $limit } together, which is more than a job can hide in everything it shows, so none of its jobs can run. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
+   *[other] The repository's secrets, with any credentials in the daemon's proxy settings, come to more than { $limit } together, which is more than a job can hide in everything it shows, so none of its jobs can run. They passed it at the setting { $field }. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
+  }
+
 # A setting is not a valid template.
 # $field (text): where in the settings it is.
 # $at (text): the place in it where the fault starts, counted in bytes from 0. The sender leaves it out when it has no place, and the program then supplies the text none.

@@ -1197,6 +1197,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SecretCommandTimedOut
                 | ErrorCode::SecretInProcessArguments
                 | ErrorCode::SecretExpansionTooLong
+                | ErrorCode::SecretsTooLargeToMask
                 | ErrorCode::TemplateInvalid
                 | ErrorCode::LocationTooManyCredentials
                 | ErrorCode::RepositoryPathRelative
@@ -2921,6 +2922,76 @@ mod tests {
         assert!(
             matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
             "the error should name the cap: {error:?}"
+        );
+    }
+
+    /// The job's redactor masks its secrets and the proxy credentials of the
+    /// worker's environment. Up to the cap a worker is started; past it none
+    /// is, since its redactor would mask every text whole (I4, technical
+    /// design §10.2): the refusal is typed, with the cap and the proxy
+    /// variable whose password took the secrets past it, or no setting when
+    /// the job's own secrets are past it.
+    #[tokio::test]
+    async fn a_job_whose_secrets_and_proxy_credentials_pass_the_cap_is_refused_before_a_worker_starts()
+     {
+        use domain::secrets::{MAX_MASKED_BYTES, MAX_SECRET_BYTES};
+        let password = "hunter2-demo";
+        let of = |total: usize| -> Vec<String> {
+            let count = total.div_ceil(MAX_SECRET_BYTES);
+            (0..count)
+                .map(|at| {
+                    let letter = char::from(b'a' + u8::try_from(at).unwrap());
+                    letter
+                        .to_string()
+                        .repeat(total / count + usize::from(at < total % count))
+                })
+                .collect()
+        };
+        // A program that can't start: only the check before spawning
+        // refuses with the cap.
+        let start = |secrets: Vec<String>, environment: Vec<(&'static str, &'static str)>| {
+            let engine = WorkerEngine::new("/nonexistent/ladderback-worker", ["worker"])
+                .with_environment(environment);
+            async move {
+                let secrets: Vec<&str> = secrets.iter().map(String::as_str).collect();
+                engine
+                    .run(
+                        OperationId::from_uuid(Uuid::from_u128(1)),
+                        identify(password, &secrets),
+                    )
+                    .await
+                    .err()
+                    .expect("the program can't start")
+            }
+        };
+        let rest = MAX_MASKED_BYTES - password.len();
+        let at_the_cap = start(of(rest), vec![("NO_PROXY", "demo:p")]).await;
+        assert!(
+            matches!(&at_the_cap, EngineError::Unavailable { .. }),
+            "a worker should have been started: {at_the_cap:?}"
+        );
+        let past = start(
+            of(rest),
+            vec![
+                ("HTTP_PROXY", "http://proxy.demo:3128"),
+                ("HTTPS_PROXY", "http://demo:p@proxy.demo:3128"),
+            ],
+        )
+        .await;
+        assert_eq!(
+            past,
+            EngineError::SecretsTooLargeToMask {
+                field: Some("HTTPS_PROXY".to_owned()),
+                limit: MAX_MASKED_BYTES,
+            }
+        );
+        let own = start(of(rest + 1), Vec::new()).await;
+        assert_eq!(
+            own,
+            EngineError::SecretsTooLargeToMask {
+                field: None,
+                limit: MAX_MASKED_BYTES,
+            }
         );
     }
 

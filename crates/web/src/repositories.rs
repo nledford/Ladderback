@@ -707,6 +707,7 @@ mod tests {
             ErrorCode::SecretCommandTimedOut,
             ErrorCode::SecretInProcessArguments,
             ErrorCode::SecretExpansionTooLong,
+            ErrorCode::SecretsTooLargeToMask,
             ErrorCode::TemplateInvalid,
         ] {
             assert_eq!(

@@ -191,6 +191,7 @@ impl RunOperation {
                         FailureReason::EngineUnavailable { detail }
                     }
                     EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
+                    EngineError::SecretsTooLargeToMask { .. } => todo!(),
                 };
                 self.fail(run, reason);
                 return;

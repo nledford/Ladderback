@@ -134,6 +134,13 @@ pub enum ErrorCode {
     /// A repository's setting, once its references are in, is longer than a
     /// secret may be. The arguments are `field` and `limit`.
     SecretExpansionTooLong,
+    /// A repository's secrets, each counted once, come to more than a job
+    /// masks: `limit` bytes (§10.2), passed at the setting `field`: one of
+    /// the repository's, or the proxy variable of the daemon's environment
+    /// (such as `HTTPS_PROXY`) when the engine counted its credentials with
+    /// the job's. The engine leaves `field` out when the job's own secrets
+    /// passed it. Neither argument is a secret or tells one.
+    SecretsTooLargeToMask,
     /// A repository's setting is not a valid template: a `${` that is not a
     /// reference. The argument `field` names the setting, and `at`, when the
     /// fault has a place, the byte of the setting it starts at.
@@ -564,6 +571,18 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::SecretsTooLargeToMask => &[
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::SecretExpansionTooLong => &[
                 ArgSpec {
                     name: "field",
@@ -1361,6 +1380,13 @@ mod tests {
         assert_eq!(
             ErrorCode::SecretExpansionTooLong.args(),
             &[named[0], spec("limit", ArgKind::Bytes, false)]
+        );
+        assert_eq!(
+            ErrorCode::SecretsTooLargeToMask.args(),
+            &[
+                spec("limit", ArgKind::Bytes, false),
+                spec("field", ArgKind::Text, true)
+            ]
         );
         assert_eq!(
             ErrorCode::TemplateInvalid.args(),

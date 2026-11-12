@@ -52,6 +52,13 @@ pub const MAX_OPTION_VALUE_BYTES: usize = MAX_SECRET_BYTES;
 /// a handful.
 pub const MAX_OPTIONS: usize = 64;
 
+/// The most bytes of secrets one redactor looks for, each counted once
+/// however many places hold it: a secret gives up to about 50 bytes of
+/// needles per byte of it, which take about 250 bytes of memory, so this
+/// keeps one redactor under about 64 MiB. The secrets of a real repository
+/// come to a few kilobytes (technical design §10.2).
+pub const MAX_MASKED_BYTES: usize = 256 * 1024;
+
 /// A resolved secret, such as a repository password. Its `Debug` form never
 /// shows the value, so it can't leak through a log or a test failure.
 #[derive(Clone, PartialEq, Eq)]
@@ -107,6 +114,46 @@ pub struct RepositorySecrets<'a> {
     /// What the `${…}` references in all of the above resolved to (the
     /// password is not among them).
     pub resolved: &'a [SecretValue],
+}
+
+/// The secrets of a repository, counted as a job finds them, each once, in
+/// the bytes [`MAX_MASKED_BYTES`] caps: what a [`Redactor`] for it would be
+/// built from, before any of it is built. It has no `Debug` form: it holds
+/// secrets.
+#[derive(Default)]
+pub struct MaskedSecrets {
+    distinct: std::collections::BTreeSet<String>,
+    bytes: usize,
+}
+
+/// The secrets counted come to more than [`MAX_MASKED_BYTES`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TooMuchToMask;
+
+impl MaskedSecrets {
+    /// Counts a secret: the password, or what a reference resolved to.
+    pub fn secret(&mut self, _secret: &SecretValue) -> Result<(), TooMuchToMask> {
+        todo!()
+    }
+
+    /// Counts the secrets a location holds: the password of its URL, and
+    /// the credentials of an rclone connection string.
+    pub fn location(&mut self, _location: &str) -> Result<(), TooMuchToMask> {
+        todo!()
+    }
+
+    /// Counts the secrets an option holds: the password of a URL in it, and
+    /// its whole value when its name says it holds a credential.
+    pub fn option(&mut self, _name: &str, _value: &str) -> Result<(), TooMuchToMask> {
+        todo!()
+    }
+
+    /// Counts every secret of a repository that a redactor for it masks
+    /// ([`Redactor::for_repository`]): where a job is run, its secrets are
+    /// counted again, with whatever else is masked beside them.
+    pub fn repository(&mut self, _secrets: RepositorySecrets<'_>) -> Result<(), TooMuchToMask> {
+        todo!()
+    }
 }
 
 /// Replaces every known secret value, raw or as a URL parser writes it
@@ -168,6 +215,9 @@ thread_local! {
     /// How many bytes of a needle masking compared with a byte of a text,
     /// on this thread: the tests bound the work with it.
     static COMPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many secrets a redactor built the forms of, on this thread: the
+    /// tests prove with it that a redactor past the cap builds none.
+    static FORMED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// How much of the start of `needle` ends at `byte`, when the `matched`
@@ -212,7 +262,11 @@ impl Redactor {
             .into_iter()
             .map(SecretValue::expose)
             .filter(|value| !value.is_empty())
-            .flat_map(|value| url_needles(value).into_iter().chain(partial_needles(value)))
+            .flat_map(|value| {
+                #[cfg(test)]
+                FORMED.with(|count| count.set(count.get() + 1));
+                url_needles(value).into_iter().chain(partial_needles(value))
+            })
             .collect();
         needles.sort_unstable();
         needles.dedup();
@@ -226,6 +280,18 @@ impl Redactor {
             })
             .collect();
         Self { needles, whole }
+    }
+
+    /// A redactor that masks every text that isn't empty whole: for secrets
+    /// that come to more than [`MAX_MASKED_BYTES`], or that were not all
+    /// read. It masks more than a secret, never less (I4).
+    pub fn masking_everything() -> Self {
+        todo!()
+    }
+
+    /// Whether this redactor masks every text that isn't empty whole.
+    pub fn masks_everything(&self) -> bool {
+        todo!()
     }
 
     /// A redactor for everything that gives access to a repository: its
@@ -1173,8 +1239,8 @@ mod tests {
             }
         }
 
-        fn redactor(&self) -> Redactor {
-            Redactor::for_repository(RepositorySecrets {
+        fn secrets(&self) -> RepositorySecrets<'_> {
+            RepositorySecrets {
                 repository: &self.repository,
                 repo_hot: self.repo_hot.as_deref(),
                 password: &self.password,
@@ -1182,7 +1248,11 @@ mod tests {
                 options_hot: &self.options_hot,
                 options_cold: &self.options_cold,
                 resolved: &self.resolved,
-            })
+            }
+        }
+
+        fn redactor(&self) -> Redactor {
+            Redactor::for_repository(self.secrets())
         }
     }
 
@@ -1963,5 +2033,152 @@ mod tests {
         assert_eq!(redactor.redact("x"), REDACTED);
         assert_eq!(redactor.redact_cut(b"x"), REDACTED);
         assert_eq!(redactor.redact_clipped("x…", "…"), REDACTED);
+    }
+
+    /// Distinct secrets of `total` bytes, each of its own letter.
+    fn secrets_of(total: usize) -> Vec<SecretValue> {
+        let count = total.div_ceil(MAX_SECRET_BYTES);
+        (0..count)
+            .map(|at| {
+                let share = total / count + usize::from(at < total % count);
+                let letter = char::from(b'a' + u8::try_from(at).unwrap());
+                SecretValue::new(letter.to_string().repeat(share))
+            })
+            .collect()
+    }
+
+    /// How many secrets a redactor built the forms of while doing `work`,
+    /// on this thread.
+    fn formed<T>(work: impl FnOnce() -> T) -> (T, usize) {
+        let before = FORMED.with(std::cell::Cell::get);
+        let done = work();
+        (done, FORMED.with(std::cell::Cell::get) - before)
+    }
+
+    /// Up to the cap, a redactor masks each secret; past it, it builds no
+    /// form of any (each about 50 times its size) and masks every text
+    /// whole: more than a secret, never less (I4).
+    #[test]
+    fn a_redactor_builds_no_forms_of_secrets_past_the_cap() {
+        let at_the_cap = secrets_of(MAX_MASKED_BYTES);
+        assert_eq!(
+            at_the_cap.iter().map(|s| s.expose().len()).sum::<usize>(),
+            MAX_MASKED_BYTES
+        );
+        let (redactor, built) = formed(|| Redactor::new(&at_the_cap));
+        assert_eq!(built, at_the_cap.len());
+        assert!(!redactor.masks_everything());
+        assert_eq!(redactor.redact("a b"), "a b");
+        assert_eq!(
+            redactor.redact(&format!("[{}]", at_the_cap[0].expose())),
+            "[***]"
+        );
+
+        let over = secrets_of(MAX_MASKED_BYTES + 1);
+        let (redactor, built) = formed(|| Redactor::new(&over));
+        assert_eq!(built, 0);
+        assert!(redactor.masks_everything());
+        assert_eq!(redactor.redact("a b"), REDACTED);
+        assert_eq!(redactor.redact(""), "");
+    }
+
+    /// The cap counts each secret once, however often it is given, and an
+    /// empty one not at all.
+    #[test]
+    fn a_secret_given_twice_counts_once_toward_the_cap() {
+        let mut secrets = secrets_of(MAX_MASKED_BYTES);
+        secrets.push(secrets[0].clone());
+        secrets.push(SecretValue::new(""));
+        assert!(!Redactor::new(&secrets).masks_everything());
+    }
+
+    #[test]
+    fn a_redactor_masking_everything_masks_every_text_that_is_not_empty_whole() {
+        let redactor = Redactor::masking_everything();
+        assert!(redactor.masks_everything());
+        assert_eq!(redactor.redact(""), "");
+        assert_eq!(redactor.redact("x"), REDACTED);
+        assert_eq!(redactor.redact_cut(b"x"), REDACTED);
+        assert!(!Redactor::default().masks_everything());
+    }
+
+    /// What the count takes from a location and an option is what a
+    /// redactor for the repository is built from, so a repository the count
+    /// lets through gets a redactor that masks each secret.
+    #[test]
+    fn the_count_takes_from_each_setting_what_a_redactor_masks() {
+        let mut count = MaskedSecrets::default();
+        let mut secrets = secrets_of(MAX_MASKED_BYTES - 19);
+        for secret in &secrets {
+            assert_eq!(count.secret(secret), Ok(()));
+        }
+        // Counted already, and not a credential by its name: nothing more.
+        assert_eq!(count.secret(&secrets[0]), Ok(()));
+        assert_eq!(count.option("region", "eu-demo-1-not-a-secret"), Ok(()));
+        assert_eq!(count.location("/srv/demo/repo"), Ok(()));
+        // 8 bytes of a URL's password, 6 of an rclone credential, 5 of a
+        // credential option: the cap.
+        assert_eq!(count.location("rest:https://demo:pw-12345@nas/"), Ok(()));
+        assert_eq!(count.location("rclone::sftp,pass=rc-123:/b"), Ok(()));
+        assert_eq!(count.option("secret_access_key", "sk-12"), Ok(()));
+        let mut settings = Settings::new("rest:https://demo:pw-12345@nas/");
+        settings.repo_hot = Some("rclone::sftp,pass=rc-123:/b".to_owned());
+        settings.password = secrets.remove(0);
+        settings.resolved = secrets;
+        settings
+            .options
+            .insert("secret_access_key".to_owned(), "sk-12".to_owned());
+        assert!(!settings.redactor().masks_everything());
+        // One byte more, in a URL in an option: past the cap, for both.
+        assert_eq!(
+            count.option("endpoint", "https://u:x@h"),
+            Err(TooMuchToMask)
+        );
+        assert_eq!(count.secret(&SecretValue::new("")), Err(TooMuchToMask));
+        settings
+            .options
+            .insert("endpoint".to_owned(), "https://u:x@h".to_owned());
+        assert!(settings.redactor().masks_everything());
+    }
+
+    /// A repository is counted with every secret a redactor for it masks:
+    /// any one of them, of any setting, takes it past the cap.
+    #[test]
+    fn a_repository_is_counted_with_every_secret_its_redactor_masks() {
+        let at_the_cap = || {
+            let mut settings = Settings::new("/srv/demo/repo");
+            settings.password = SecretValue::new("");
+            settings.resolved = secrets_of(MAX_MASKED_BYTES - 1);
+            settings
+        };
+        let counted = |settings: &Settings| MaskedSecrets::default().repository(settings.secrets());
+        assert_eq!(counted(&at_the_cap()), Ok(()));
+        let parts: [(&str, fn(&mut Settings)); 7] = [
+            ("password", |s| s.password = SecretValue::new("p1")),
+            ("repository", |s| {
+                s.repository = "rest:https://demo:p2@nas/".to_owned();
+            }),
+            ("repo-hot", |s| {
+                s.repo_hot = Some("rclone::sftp,pass=p3:/b".to_owned());
+            }),
+            ("options", |s| {
+                s.options
+                    .insert("secret_access_key".to_owned(), "p4".to_owned());
+            }),
+            ("options-hot", |s| {
+                s.options_hot.insert("password".to_owned(), "p5".to_owned());
+            }),
+            ("options-cold", |s| {
+                s.options_cold
+                    .insert("endpoint".to_owned(), "https://u:p6@h".to_owned());
+            }),
+            ("resolved", |s| s.resolved.push(SecretValue::new("p7"))),
+        ];
+        for (part, add) in parts {
+            let mut settings = at_the_cap();
+            add(&mut settings);
+            assert_eq!(counted(&settings), Err(TooMuchToMask), "{part}");
+            assert!(settings.redactor().masks_everything(), "{part}");
+        }
     }
 }

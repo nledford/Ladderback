@@ -9,8 +9,8 @@ use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use cucumber::{given, then, when};
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
-    SecretValue, SecretWarning, SourceName, TemplateError,
+    CommandLine, FileRead, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem, SecretError,
+    SecretRef, SecretValue, SecretWarning, SourceName, TemplateError,
 };
 
 use super::Agent;
@@ -267,6 +267,41 @@ fn repository_is_bytes_then(agent: &mut Agent, bytes: usize, rest: String) {
     agent.secrets.settings.repository = filler(bytes) + &rest;
 }
 
+/// `count` environment variables `DEMO_SECRET_1` on, each a different
+/// secret, referred to by the options `note-1` on, so that they and the
+/// inline password come to `total` bytes.
+#[given(
+    expr = "different secrets that come to {int} bytes with the password, in the options \"note-1\" to \"note-{int}\""
+)]
+fn secrets_in_options(agent: &mut Agent, total: usize, count: usize) {
+    let password = agent
+        .secrets
+        .settings
+        .password
+        .inline()
+        .map_or(0, |password| password.expose().len());
+    let rest = total - password;
+    for at in 1..=count {
+        let share = rest / count + usize::from(at <= rest % count);
+        assert!(
+            share <= MAX_SECRET_BYTES,
+            "{share} bytes is too large for one secret"
+        );
+        let name = format!("DEMO_SECRET_{at}");
+        // Each of its own letter, so that no two are the same secret.
+        let letter = char::from_digit(u32::try_from(at + 9).unwrap(), 36).unwrap();
+        agent
+            .secrets
+            .store
+            .set_env(&name, &letter.to_string().repeat(share));
+        agent
+            .secrets
+            .settings
+            .options
+            .insert(format!("note-{at}"), format!("${{{name}}}"));
+    }
+}
+
 #[given(expr = "the hot repository is {string}")]
 fn hot_repository_is(agent: &mut Agent, repository: String) {
     agent.secrets.settings.repo_hot = Some(repository);
@@ -439,6 +474,12 @@ fn invalid_too_many(agent: &mut Agent, limit: usize) {
 fn expand_too_long(agent: &mut Agent, limit: usize) {
     assert_eq!(agent.secrets.cause(), &Cause::ExpansionTooLong { limit });
     assert_eq!(limit, MAX_SECRET_BYTES);
+}
+
+#[then(expr = "the secrets are refused because together they come to more than {int} bytes")]
+fn too_much_to_mask(agent: &mut Agent, limit: usize) {
+    assert_eq!(agent.secrets.cause(), &Cause::TooMuchToMask { limit });
+    assert_eq!(limit, MAX_MASKED_BYTES);
 }
 
 #[then("the reference is refused because it would reach the arguments of a process")]

@@ -1011,6 +1011,7 @@ impl RunMaintenance {
                             FailureReason::EngineUnavailable { detail }
                         }
                         EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
+                        EngineError::SecretsTooLargeToMask { .. } => todo!(),
                     };
                     note_partial(&mut operation, done.as_ref(), total);
                     let _ = operation.fail(reason, self.clock.now());
@@ -1366,6 +1367,7 @@ fn engine_error(error: EngineError) -> MaintenanceError {
     match error {
         EngineError::Unavailable { detail } => MaintenanceError::Engine { detail },
         EngineError::StartTimedOut => MaintenanceError::Failed(FailureReason::EngineStartTimedOut),
+        EngineError::SecretsTooLargeToMask { .. } => todo!(),
     }
 }
 

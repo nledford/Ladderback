@@ -472,6 +472,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
+        F::SecretsTooLargeToMask { .. } => todo!(),
         // Only an operation of the log can be ended by a stopped daemon, and a
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.
@@ -1076,6 +1077,20 @@ mod tests {
             (
                 FailureReason::RepositoryNotFound,
                 MaintenanceRefusal::RepositoryNotFound,
+            ),
+            (
+                FailureReason::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+                MaintenanceRefusal::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretsTooLargeToMask,
+                    args: vec![
+                        ("limit", MsgArg::Bytes(262_144)),
+                        ("field", text("HTTPS_PROXY")),
+                    ],
+                    detail: None,
+                }),
             ),
             (
                 FailureReason::DaemonStopped,

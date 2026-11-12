@@ -65,6 +65,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretCommandTimedOut => msg::ERROR_SECRET_COMMAND_TIMED_OUT,
     SecretInProcessArguments => msg::ERROR_SECRET_IN_PROCESS_ARGUMENTS,
     SecretExpansionTooLong => msg::ERROR_SECRET_EXPANSION_TOO_LONG,
+    SecretsTooLargeToMask => msg::ERROR_SECRETS_TOO_LARGE_TO_MASK,
     TemplateInvalid => msg::ERROR_TEMPLATE_INVALID,
     LocationTooManyCredentials => msg::ERROR_LOCATION_TOO_MANY_CREDENTIALS,
     RepositoryPathRelative => msg::ERROR_REPOSITORY_PATH_RELATIVE,

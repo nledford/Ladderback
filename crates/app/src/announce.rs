@@ -78,6 +78,7 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
         F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
         F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
+        F::SecretsTooLargeToMask { .. } => todo!(),
         F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
     }
 }
@@ -240,6 +241,22 @@ mod tests {
             (F::RepositoryReplaced, C::RepositoryReplaced, vec![]),
             (F::RepositoryNotFound, C::RepositoryNotFound, vec![]),
             (F::DaemonStopped, C::DaemonStopped, vec![]),
+            (
+                F::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+                C::SecretsTooLargeToMask,
+                vec![MsgArg::Bytes(262_144), text("HTTPS_PROXY")],
+            ),
+            (
+                F::SecretsTooLargeToMask {
+                    field: None,
+                    limit: 262_144,
+                },
+                C::SecretsTooLargeToMask,
+                vec![MsgArg::Bytes(262_144)],
+            ),
         ];
         for (reason, code, args) in cases {
             assert_eq!(failure(&reason), (code, args), "{reason:?}");
