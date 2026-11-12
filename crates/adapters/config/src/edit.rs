@@ -128,8 +128,18 @@ fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item, at: isize, 
             plans(tables, base.and_then(Item::as_array_of_tables), new, left);
         }
         (item, _, _) => {
-            if !same(base, new) {
-                replace(item, new);
+            if same(base, new) {
+                return;
+            }
+            // A value written as tables of its own, a hook list, is written
+            // again whole as the daemon writes it, spaced as a setting is.
+            let tables = !item.is_value();
+            if tables {
+                left.headers(item);
+            }
+            replace(item, new);
+            if let Some(mut key) = mine.key_mut(key).filter(|_| tables) {
+                key.leaf_decor_mut().clear();
             }
         }
     }
