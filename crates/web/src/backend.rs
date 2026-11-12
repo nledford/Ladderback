@@ -202,8 +202,17 @@ impl OperationsState {
     /// count once, however many events changed it. What a paused page's
     /// banner counts (§4.5): the rows that change when it resumes.
     pub(crate) fn changes_since(&self, shown: &Self) -> usize {
-        let _ = shown;
-        todo!("count the rows that differ")
+        let mut before: HashMap<&str, &OperationRow> = shown
+            .rows
+            .iter()
+            .map(|row| (row.summary.id.as_str(), row))
+            .collect();
+        let changed = self
+            .rows
+            .iter()
+            .filter(|row| before.remove(row.summary.id.as_str()) != Some(*row))
+            .count();
+        changed.saturating_add(before.len())
     }
 }
 

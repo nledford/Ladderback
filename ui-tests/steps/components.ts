@@ -305,4 +305,8 @@ const SNAPSHOTS: Record<string, string> = {
   - button "Open a demo review"
 - paragraph:
   - button "Open an empty demo review"`,
+  "Pause control": `- heading "Pause control" [level=2]
+- button "Pause the demo updates"
+- paragraph:
+  - button "Finish a demo run"`,
 };

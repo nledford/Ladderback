@@ -44,14 +44,39 @@ thread_local! {
     };
 }
 
-/// Tells the screen reader `text`, in the region of `politeness`.
+/// Tells the screen reader `text`, in the region of `politeness`: something
+/// that happened by itself, which waits while live updates are paused.
 pub(crate) fn say(politeness: Politeness, text: &str) {
+    announce(Kind::Event, politeness, text);
+}
+
+/// Tells the screen reader `text`, the page's answer to what the reader just
+/// did, in the region of `politeness`: said whether or not live updates are
+/// paused.
+pub(crate) fn reply(politeness: Politeness, text: &str) {
+    announce(Kind::Reply, politeness, text);
+}
+
+fn announce(kind: Kind, politeness: Politeness, text: &str) {
     let announcement = Announcement {
-        kind: Kind::Event,
+        kind,
         politeness,
         text: text.to_owned(),
     };
     step(|announcer| announcer.announce(announcement));
+}
+
+/// The reader paused live updates: `said` is said at once, and what happens
+/// by itself waits for [`resume`].
+pub(crate) fn pause(said: &str) {
+    let said = said.to_owned();
+    step(|announcer| announcer.pause(said));
+}
+
+/// The reader resumed live updates, or left the page that paused them:
+/// `summary` is said, then what waited.
+pub(crate) fn resume(summary: Option<String>) {
+    step(|announcer| announcer.resume(summary));
 }
 
 /// A modal dialog opened: polite messages wait until it closes.

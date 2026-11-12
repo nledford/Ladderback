@@ -315,6 +315,38 @@ button[aria-disabled="true"] {
   opacity: 0.6;
 }
 
+/* The control that pauses live updates (§4.5): the button, then, while it is
+   pressed, the banner that describes it. Pressed is never color alone: the
+   button's text turns bold and gains an inset edge, and the banner says it in
+   words. The banner is edged in the table rule's color, not the focus ring's,
+   so beside the focused button it never reads as a second focus ring. */
+.pause-updates {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+.pause-updates button {
+  min-block-size: 2rem;
+  padding-inline: 0.75rem;
+}
+
+.pause-updates button[aria-pressed="true"] {
+  border-style: inset;
+  font-weight: 600;
+}
+
+.pause-banner {
+  background-color: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 0.25rem;
+  margin-block: 0;
+  padding-block: 0.25rem;
+  padding-inline: 0.75rem;
+}
+
 /* The line a dialog keeps for what it says while it waits takes no room while
    it is empty. */
 dialog p[aria-live]:empty {

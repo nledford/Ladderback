@@ -38,54 +38,72 @@ pub(crate) struct Pausable {
 
 impl Pausable {
     pub(crate) fn new(state: RwSignal<OperationsState>, phase: RwSignal<Phase>) -> Self {
-        let _ = (state, phase);
-        todo!("a page that can be paused")
+        Self {
+            state,
+            phase,
+            held: RwSignal::new(None),
+        }
     }
 
     /// Holds the page as it is now. A page already paused keeps the copy it
     /// took then.
     pub(crate) fn pause(self) {
-        todo!("hold the page")
+        if self.paused_untracked() {
+            return;
+        }
+        self.held.set(Some(Held {
+            phase: self.phase.get_untracked(),
+            state: self.state.get_untracked(),
+        }));
     }
 
     /// Shows the live state again.
     pub(crate) fn resume(self) {
-        todo!("show the live state")
+        self.held.set(None);
     }
 
     /// Whether the reader has paused the page.
     pub(crate) fn paused(self) -> bool {
-        todo!("whether the page is paused")
+        self.held.with(Option::is_some)
     }
 
     /// Whether the page is paused, without following it: for the code that
     /// decides what to say of an update, which is no view of the page.
     pub(crate) fn paused_untracked(self) -> bool {
-        todo!("whether the page is paused, untracked")
+        self.held.with_untracked(Option::is_some)
     }
 
     /// The phase of the connection the page shows.
     pub(crate) fn phase(self) -> Phase {
-        todo!("the phase shown")
+        self.held
+            .with(|held| held.as_ref().map(|held| held.phase))
+            .unwrap_or_else(|| self.phase.get())
     }
 
     /// Reads the state the page shows.
     pub(crate) fn with<R>(self, read: impl FnOnce(&OperationsState) -> R) -> R {
-        let _ = read;
-        todo!("read the state shown")
+        self.held.with(|held| match held {
+            Some(held) => read(&held.state),
+            None => self.state.with(read),
+        })
     }
 
-    /// The live state, which the page's own requests change while it is
-    /// paused.
+    /// The live state, whatever the page shows: what a cancel waits on for
+    /// its run's end.
     pub(crate) fn live(self) -> RwSignal<OperationsState> {
-        todo!("the live state")
+        self.state
     }
 
     /// How many changes wait for the resume: each operation whose row will
     /// change, and the connection when its phase has changed. None when the
     /// page is not paused.
     pub(crate) fn pending(self) -> usize {
-        todo!("count the changes waiting")
+        self.held.with(|held| {
+            held.as_ref().map_or(0, |held| {
+                let rows = self.state.with(|state| state.changes_since(&held.state));
+                rows.saturating_add(usize::from(self.phase.get() != held.phase))
+            })
+        })
     }
 }
 
@@ -100,21 +118,33 @@ pub(crate) struct Ends {
 impl Ends {
     /// Counts a run that ended with `status`.
     pub(crate) fn count(&mut self, status: &str) {
-        let _ = status;
-        todo!("count an end")
+        self.ended = self.ended.saturating_add(1);
+        if status == "failed" {
+            self.failed = self.failed.saturating_add(1);
+        }
     }
 }
 
 /// The banner of a paused page, with `pending` changes waiting.
 pub(crate) fn banner(pending: usize) -> Words {
-    let _ = pending;
-    todo!("the banner's words")
+    Words {
+        id: msg::UI_LIVE_PAUSED_BANNER,
+        args: vec![(
+            "count",
+            MsgArg::Count(u64::try_from(pending).unwrap_or(u64::MAX)),
+        )],
+    }
 }
 
 /// What is said when the page resumes, after `ends`.
 pub(crate) fn resumed(ends: Ends) -> Words {
-    let _ = ends;
-    todo!("the resume's words")
+    Words {
+        id: msg::UI_LIVE_RESUMED,
+        args: vec![
+            ("ended", MsgArg::Count(ends.ended)),
+            ("failed", MsgArg::Count(ends.failed)),
+        ],
+    }
 }
 
 #[cfg(test)]

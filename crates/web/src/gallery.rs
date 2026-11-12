@@ -12,11 +12,12 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::components::{
-    Checkbox, Confirmation, FormField, ModalDialog, Progress, ReviewDialog, SortableTable,
-    StatusBadge, Toast, show_toast,
+    Checkbox, Confirmation, FormField, ModalDialog, PauseUpdates, Progress, ReviewDialog,
+    SortableTable, StatusBadge, Toast, show_toast,
 };
-use crate::live::{modal_gone, open_modal, say};
-use crate::routes::PageHeading;
+use crate::live::{modal_gone, open_modal, reply, say};
+use crate::pause::{self, Ends};
+use crate::routes::{PageHeading, text_with};
 use crate::text;
 
 #[component]
@@ -74,6 +75,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
+    // The pause control's demo: whether it is paused, and the demo runs that
+    // finished meanwhile, each a change the banner counts.
+    let demo_paused = RwSignal::new(false);
+    let demo_waiting = RwSignal::new(0usize);
+    let demo_ends = StoredValue::new(Ends::default());
+    let demo_finished = backup_finished.clone();
+    let banner_localizer = Arc::clone(&localizer);
+    let resumed_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p><A href="/">{start_link}</A></p>
@@ -195,7 +204,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                             form_error.set(None);
                         } else {
                             form_error.set(Some(required_error.clone()));
-                            say(Politeness::Polite, &required_error);
+                            reply(Politeness::Polite, &required_error);
                         }
                     }
                 >
@@ -272,7 +281,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     label: t(msg::UI_GALLERY_CONFIRM_DEMO_REVIEW),
                     action: Callback::new(move |()| {
                         review_open.set(false);
-                        say(Politeness::Polite, &review_confirmed);
+                        reply(Politeness::Polite, &review_confirmed);
                     }),
                 })
                 returns_to="gallery-review".to_owned()
@@ -290,6 +299,48 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             >
                 <p id="gallery-empty-review-body">{empty_review_body}</p>
             </ReviewDialog>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_PAUSE_HEADING)}</h2>
+            <PauseUpdates
+                label=t(msg::UI_GALLERY_PAUSE_DEMO)
+                paused_said=t(msg::UI_LIVE_PAUSED)
+                paused=demo_paused
+                banner=Signal::derive(move || {
+                    let words = pause::banner(demo_waiting.get());
+                    text_with(&banner_localizer, words.id, &words.args)
+                })
+                banner_id="gallery-paused"
+                on_pause=Callback::new(move |()| {
+                    demo_ends.set_value(Ends::default());
+                    demo_waiting.set(0);
+                    demo_paused.set(true);
+                })
+                on_resume=Callback::new(move |()| {
+                    demo_paused.set(false);
+                    demo_waiting.set(0);
+                    let words = pause::resumed(demo_ends.get_value());
+                    demo_ends.set_value(Ends::default());
+                    text_with(&resumed_localizer, words.id, &words.args)
+                })
+            />
+            <p>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        // A run that finishes by itself: said at once, or
+                        // counted while the demo is paused.
+                        if demo_paused.get_untracked() {
+                            demo_ends.update_value(|ends| ends.count("succeeded"));
+                            demo_waiting.update(|waiting| *waiting = waiting.saturating_add(1));
+                        } else {
+                            say(Politeness::Polite, &demo_finished);
+                        }
+                    }
+                >
+                    {t(msg::UI_GALLERY_FINISH_DEMO_RUN)}
+                </button>
+            </p>
         </section>
     }
 }
