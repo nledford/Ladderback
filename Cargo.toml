@@ -296,6 +296,7 @@ domain.workspace = true
 env_logger.workspace = true
 hooks.workspace = true
 log.workspace = true
+notify-adapter.workspace = true
 platform.workspace = true
 secrets.workspace = true
 serde.workspace = true

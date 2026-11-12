@@ -3218,6 +3218,7 @@ dependencies = [
  "l10n",
  "log",
  "nix 0.31.3",
+ "notify-adapter",
  "platform",
  "rustic_backend",
  "rustic_core",

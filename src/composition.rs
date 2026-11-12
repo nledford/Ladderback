@@ -18,6 +18,8 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 
 use app::conditions::NetworkWait;
+use app::notifications::{Notify, Undelivered};
+use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
 use app::ports::SecretResolver;
 use app::ports::{
@@ -56,6 +58,7 @@ use http_adapter::{
     RepositoriesError, SecretRefusal, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
+use notify_adapter::HttpNotifier;
 use platform::SystemClock;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
 use platform::random::OsRandom;
@@ -362,6 +365,7 @@ async fn state_over(
         workers = workers.with_cache_root(dir);
     }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
+    notify_over(bus.as_ref(), Arc::clone(&config), Arc::clone(&store)).await;
     // One lock for every write of the configuration the daemon makes: a
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
@@ -420,6 +424,55 @@ async fn state_over(
         },
         background,
     ))
+}
+
+/// Tells the channels of the agent's notification rules of the news on `bus`
+/// for as long as the daemon runs (§11). A notification that wasn't delivered
+/// is said in the log by its warning code, never with a secret (I4). A client
+/// that can't be built is said once, and nothing is sent.
+async fn notify_over(
+    bus: &dyn EventBus,
+    config: Arc<dyn ConfigStore>,
+    store: Arc<dyn OperationStore>,
+) {
+    let localizer = || l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+    let notifier = match HttpNotifier::new(localizer(), DELIVERY_TIMEOUT) {
+        Ok(notifier) => notifier,
+        Err(error) => {
+            log::warn!("no notification is sent: {error}");
+            return;
+        }
+    };
+    let notify = Notify::new(
+        config,
+        store,
+        Arc::new(SystemSecrets::default()),
+        Arc::new(notifier),
+    );
+    // Subscribed before any run can start, so no news is missed.
+    let news = bus.subscribe().await;
+    let localizer = localizer();
+    tokio::spawn(async move {
+        notify
+            .run(news, |undelivered| {
+                log::warn!("{}", undelivered_line(&localizer, &undelivered));
+            })
+            .await;
+    });
+}
+
+/// A notification that wasn't delivered, as the log says it: the event, the
+/// rule, the channel and why, in the catalog's words.
+fn undelivered_line(localizer: &l10n::Localizer, undelivered: &Undelivered) -> String {
+    let args = [
+        ("event", text(undelivered.event.name())),
+        ("rule", text(undelivered.rule.as_str())),
+        ("channel", text(undelivered.channel.as_str())),
+        ("reason", text(undelivered.reason.reason())),
+    ];
+    localizer
+        .warning(WarningCode::NotificationUndelivered, &args, None)
+        .to_string()
 }
 
 /// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
