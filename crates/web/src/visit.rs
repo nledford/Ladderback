@@ -6,8 +6,11 @@
 //! every task the visit runs ends there, at its next await: dropped, with
 //! what it holds, so an open events stream closes with it.
 
+use std::pin::pin;
+
+use futures::FutureExt;
 use futures::channel::oneshot;
-use futures::future::Shared;
+use futures::future::{Either, Shared, select};
 
 /// A reader's visit to a page. Every clone is the same visit, and ends with
 /// it.
@@ -25,7 +28,13 @@ pub(crate) struct Departure {
 impl Visit {
     /// A visit that lasts until its departure is dropped.
     pub(crate) fn begin() -> (Self, Departure) {
-        todo!()
+        let (sender, gone) = oneshot::channel();
+        (
+            Self {
+                gone: gone.shared(),
+            },
+            Departure { _sender: sender },
+        )
     }
 
     /// Runs `task` while the visit lasts: its output, or `None` once the
@@ -33,8 +42,12 @@ impl Visit {
     /// finds ready to go on goes no further, since the page it would change is
     /// gone; and one that begins after the end never starts.
     pub(crate) async fn during<F: Future>(self, task: F) -> Option<F::Output> {
-        let _ = (self.gone, task);
-        todo!()
+        // The end is polled first, so a task and an end ready at once is
+        // an end.
+        match select(self.gone, pin!(task)).await {
+            Either::Left(_) => None,
+            Either::Right((output, _)) => Some(output),
+        }
     }
 }
 
@@ -66,7 +79,11 @@ mod tests {
                 pending::<()>().await;
             }
         }));
-        assert_eq!((&mut task).now_or_never(), None, "the task waits while the visit lasts");
+        assert_eq!(
+            (&mut task).now_or_never(),
+            None,
+            "the task waits while the visit lasts"
+        );
         drop(departure);
         // Ended at the first poll after the reader left: a `during` that
         // missed the end fails here, rather than waiting forever.
@@ -93,4 +110,3 @@ mod tests {
         assert!(!ran.get(), "a task ran for a page that is gone");
     }
 }
-

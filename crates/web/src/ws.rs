@@ -16,8 +16,9 @@ use crate::backend::{
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Kind, Next, Watch, Watched};
+use crate::visit::Visit;
 use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
-use futures::{Sink, StreamExt};
+use futures::{FutureExt, Sink, StreamExt};
 use gloo_net::http::Request;
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
@@ -161,44 +162,58 @@ pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
 /// reads the history once more (`stream`). A fetch that fails at any point
 /// of the loop leaves the page in `Phase::Unreachable`, and the loop keeps
 /// trying with the same backoff, so a daemon that comes back is a page that
-/// heals.
-pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSignal<Phase>) {
+/// heals. All of it, the re-reads too, lasts as long as `visit`: once the
+/// reader has left the page, the loop ends at its next await, and the
+/// stream it holds closes (#300).
+pub(crate) fn watch(
+    base: &str,
+    state: RwSignal<OperationsState>,
+    phase: RwSignal<Phase>,
+    visit: &Visit,
+) {
     let base = base.to_owned();
-    spawn_local(async move {
-        let mut attempt = 0u32;
-        // The first answer builds the state; every answer after a disconnect
-        // merges into it (§4.4): a status an event advanced is never handed
-        // back to the store's lagging write, and a live row the store has
-        // not written yet stays.
-        let mut first = true;
-        // Shared by every round, so a reconnect never runs a second re-read
-        // beside one still out.
-        let rereads = Rc::new(Cell::new(Rereads::default()));
-        loop {
-            match read::<OperationsPageDto>(&format!("{base}/api/v1/operations")).await {
-                Some(page) => {
-                    attempt = 0;
-                    phase.set(Phase::Ready);
-                    if first {
-                        first = false;
-                        state.set(OperationsState::from_history(page.operations, page.next));
-                    } else {
-                        state.update(|state| state.merge(page));
+    let lasting = visit.clone();
+    spawn_local(
+        visit
+            .clone()
+            .during(async move {
+                let mut attempt = 0u32;
+                // The first answer builds the state; every answer after a disconnect
+                // merges into it (§4.4): a status an event advanced is never handed
+                // back to the store's lagging write, and a live row the store has
+                // not written yet stays.
+                let mut first = true;
+                // Shared by every round, so a reconnect never runs a second re-read
+                // beside one still out.
+                let rereads = Rc::new(Cell::new(Rereads::default()));
+                loop {
+                    match read::<OperationsPageDto>(&format!("{base}/api/v1/operations")).await {
+                        Some(page) => {
+                            attempt = 0;
+                            phase.set(Phase::Ready);
+                            if first {
+                                first = false;
+                                state
+                                    .set(OperationsState::from_history(page.operations, page.next));
+                            } else {
+                                state.update(|state| state.merge(page));
+                            }
+                            stream(&base, &state, &rereads, &lasting).await;
+                            // The stream ended: a closed socket is a failure like any
+                            // other, and the next round waits for it.
+                            attempt += 1;
+                            sleep(reconnect_backoff(attempt)).await;
+                        }
+                        None => {
+                            attempt += 1;
+                            phase.set(Phase::Unreachable);
+                            sleep(reconnect_backoff(attempt)).await;
+                        }
                     }
-                    stream(&base, &state, &rereads).await;
-                    // The stream ended: a closed socket is a failure like any
-                    // other, and the next round waits for it.
-                    attempt += 1;
-                    sleep(reconnect_backoff(attempt)).await;
                 }
-                None => {
-                    attempt += 1;
-                    phase.set(Phase::Unreachable);
-                    sleep(reconnect_backoff(attempt)).await;
-                }
-            }
-        }
-    });
+            })
+            .map(|_| ()),
+    );
 }
 
 /// Applies the events stream to `state` until it ends. A `UiEvent` the state
@@ -211,7 +226,12 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
 /// once the stream is open, as an end's re-read is, one at a time. The
 /// events are applied meanwhile; neither `apply` nor `merge` takes a row
 /// back for the order the two arrive in.
-async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell<Rereads>>) {
+async fn stream(
+    base: &str,
+    state: &RwSignal<OperationsState>,
+    rereads: &Rc<Cell<Rereads>>,
+    visit: &Visit,
+) {
     let Ok(mut socket) = WebSocket::open(&events_url(base)) else {
         return;
     };
@@ -220,14 +240,14 @@ async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell
     if !matches!(socket.state(), State::Open) {
         return;
     }
-    reread(base, *state, Rc::clone(rereads));
+    reread(base, *state, Rc::clone(rereads), visit);
     while let Some(Ok(message)) = socket.next().await {
         if let Message::Text(text) = message
             && let Ok(event) = serde_json::from_str::<UiEvent>(&text)
         {
             state.update(|state| state.apply(&event));
             if asks_for_a_reread(&event) {
-                reread(base, *state, Rc::clone(rereads));
+                reread(base, *state, Rc::clone(rereads), visit);
             }
         }
     }
@@ -239,25 +259,31 @@ async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell
 /// again, later each time, when a read gets no history in
 /// `REREAD_PATIENCE`. `rereads` is the one `watch` keeps across its
 /// reconnects, so no number of reconnects has more than two reads waiting.
-fn reread(base: &str, state: RwSignal<OperationsState>, rereads: Rc<Cell<Rereads>>) {
+/// A read lasts no longer than the `visit`.
+fn reread(base: &str, state: RwSignal<OperationsState>, rereads: Rc<Cell<Rereads>>, visit: &Visit) {
     if !turn(&rereads, Rereads::ask) {
         return;
     }
     let url = format!("{base}/api/v1/operations");
-    spawn_local(async move {
-        loop {
-            let page = read_within::<OperationsPageDto>(&url, REREAD_PATIENCE).await;
-            let answered = page.is_some();
-            if let Some(page) = page {
-                state.update(|state| state.merge(page));
-            }
-            match turn(&rereads, |now| now.finish(answered)) {
-                None => break,
-                Some(wait) if wait.is_zero() => {}
-                Some(wait) => sleep(wait).await,
-            }
-        }
-    });
+    spawn_local(
+        visit
+            .clone()
+            .during(async move {
+                loop {
+                    let page = read_within::<OperationsPageDto>(&url, REREAD_PATIENCE).await;
+                    let answered = page.is_some();
+                    if let Some(page) = page {
+                        state.update(|state| state.merge(page));
+                    }
+                    match turn(&rereads, |now| now.finish(answered)) {
+                        None => break,
+                        Some(wait) if wait.is_zero() => {}
+                        Some(wait) => sleep(wait).await,
+                    }
+                }
+            })
+            .map(|_| ()),
+    );
 }
 
 /// Turns the shared `rereads` by `step` and says what the step answered.

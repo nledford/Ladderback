@@ -27,6 +27,7 @@ use crate::repositories::{
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
     rereads_list, row_refusal,
 };
+use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
 
@@ -167,6 +168,15 @@ struct StartBackup {
 #[derive(Serialize)]
 pub(crate) struct Empty {}
 
+/// The page's connection to the daemon, as a row's Cancel uses it: the
+/// daemon's origin, and the reader's visit, which the cancel's wait for the
+/// run's end lasts no longer than (#300).
+#[derive(Clone)]
+struct Connection {
+    base: String,
+    visit: Visit,
+}
+
 /// The operations page, the route `/operations`: the backup history, live —
 /// a running operation's progress and its end arrive over the events
 /// stream (§4.4). Its decisions are `backend::OperationsState`; its glue is
@@ -221,7 +231,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let error = RwSignal::<Option<Sentence>>::new(None);
     let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
-    ws::watch(&base, ops, phase);
+    // The reader's visit to the page: the connection and the settle-polls of
+    // the page's presses last as long as it, and end as the page goes (#300).
+    let (visit, departure) = Visit::begin();
+    on_cleanup(move || drop(departure));
+    ws::watch(&base, ops, phase, &visit);
     // What the page shows: the live state, or the copy taken when the reader
     // paused it. Every view reads this; the stream, the settle-poll and the
     // end announcements read the live state.
@@ -310,7 +324,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // page shows is written in it (§8.4).
     let viewer = l10n::viewer_zone();
     let start_base = base.clone();
-    let cancel_base = base.clone();
+    let start_visit = visit.clone();
+    let connection = Connection { base, visit };
     let start_ops = ops;
     view! {
         <PageHeading>
@@ -351,6 +366,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             let url = format!("{}/api/v1/operations", start_base);
                             let ops = start_ops;
                             let base = start_base.clone();
+                            let visit = start_visit.clone();
                             let error_localizer = Arc::clone(&localizer_for_errors);
                             // Named with its plan, as a row's Cancel is: a
                             // reader tabbing through the plans hears which
@@ -368,6 +384,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         let url = url.clone();
                                         let base = base.clone();
                                         let started = started.clone();
+                                        let visit = visit.clone();
                                         let still_waiting = still_waiting.clone();
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let ops = ops;
@@ -377,7 +394,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                     reply(Politeness::Polite, &started);
                                                     if let Some(operation) =
                                                         ws::started_operation(&answer)
-                                                        && !ws::settle(&base, ops, &operation).await
+                                                        && visit.during(ws::settle(&base, ops, &operation)).await
+                                                            == Some(false)
                                                     {
                                                         reply(Politeness::Polite, &still_waiting);
                                                     }
@@ -413,7 +431,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             let newest = sorted_newest.clone();
             let oldest = sorted_oldest.clone();
             let rows_localizer = table_localizer.clone();
-            let rows_base = cancel_base.clone();
+            let rows_connection = connection.clone();
             let rows_zone = viewer.clone();
             match showing.get() {
                 Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
@@ -473,7 +491,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                     children=move |id| {
                                         row_view(
                                             rows_localizer.clone(),
-                                            rows_base.clone(),
+                                            rows_connection.clone(),
                                             page,
                                             cancelled,
                                             id,
@@ -507,11 +525,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// goes only when the run ends, and then it is no longer a control.
 ///
 /// What it shows is read from `page`, which holds still while the reader has
-/// paused it; a cancel waits for its end in the live state, and puts its run
-/// in `cancelled`, so that its end is said as the answer to the press.
+/// paused it; a cancel waits for its end in the live state, as long as the
+/// reader's visit lasts, and puts its run in `cancelled`, so that its end is
+/// said as the answer to the press.
 fn row_view(
     localizer: Arc<Localizer>,
-    base: String,
+    connection: Connection,
     page: Pausable,
     cancelled: StoredValue<HashSet<String>>,
     id: String,
@@ -583,7 +602,7 @@ fn row_view(
     let result_localizer = Arc::clone(&localizer);
     let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
-    let url = format!("{base}/api/v1/operations/{id}/cancel");
+    let url = format!("{}/api/v1/operations/{id}/cancel", connection.base);
     let operation = id;
     view! {
         <tr>
@@ -632,7 +651,7 @@ fn row_view(
                         .get()
                         .then(|| {
                             let url = url.clone();
-                            let base = base.clone();
+                            let connection = connection.clone();
                             let operation = operation.clone();
                             let still_waiting = still_waiting.clone();
                             let error_localizer = Arc::clone(&error_localizer);
@@ -641,7 +660,7 @@ fn row_view(
                                     type="button"
                                     on:click=move |_| {
                                         let error_localizer = Arc::clone(&error_localizer);
-                                        let base = base.clone();
+                                        let Connection { base, visit } = connection.clone();
                                         let still_waiting = still_waiting.clone();
                                         let operation = operation.clone();
                                         let url = url.clone();
@@ -652,7 +671,9 @@ fn row_view(
                                         spawn_local(async move {
                                             match ws::post(&url, &Empty {}).await {
                                                 Some(Posted::Done(_)) => {
-                                                    if !ws::settle(&base, ops, &operation).await {
+                                                    if visit.during(ws::settle(&base, ops, &operation)).await
+                                                        == Some(false)
+                                                    {
                                                         reply(Politeness::Polite, &still_waiting);
                                                     }
                                                 }
