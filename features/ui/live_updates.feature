@@ -124,6 +124,7 @@ Feature: Live updates can be paused
     Then the button "Pause live updates" is described by "Live updates are paused. One change is waiting."
     And the banner describing the button "Pause live updates" is edged unlike its focus ring
     And the page doesn't scroll sideways
+    And the polite region reads "Live updates are paused."
     And no text is clipped
     And the page has no accessibility violations
 
