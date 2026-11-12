@@ -305,7 +305,13 @@ async fn main() {
         .with_cli(cli)
         .fail_on_skipped()
         .before(move |feature, _, scenario, _| {
-            begun.began(feature, scenario);
+            let name = ScenarioWatch::describe(
+                &scenario.name,
+                scenario.position.line,
+                feature.path.as_deref(),
+                &feature.name,
+            );
+            begun.began(scenario, name);
             futures::future::ready(()).boxed_local()
         })
         .after(move |_, _, scenario, _, _| {

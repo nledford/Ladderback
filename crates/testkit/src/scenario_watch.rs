@@ -6,15 +6,17 @@
 //! scenario was slowest, the figure a limit is chosen from.
 //!
 //! The runner registers [`ScenarioWatch::began`] as its `before` hook and
-//! [`ScenarioWatch::ended`] as its `after` hook. The watch is a thread of its
-//! own, so a step that blocks the runner's thread can't stop it.
+//! [`ScenarioWatch::ended`] as its `after` hook, naming the scenario with
+//! [`ScenarioWatch::describe`]. The watch is a thread of its own, so a step
+//! that blocks the runner's thread can't stop it. It takes no cucumber types:
+//! as a normal dependency of `testkit`, cucumber would bring licences
+//! `cargo deny` checks only for what ships (`synthez`, BlueOak-1.0.0).
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use cucumber::gherkin::{Feature, Scenario};
 
 /// How often the watch looks at the running scenarios.
 const TICK: Duration = Duration::from_millis(250);
@@ -46,24 +48,26 @@ impl ScenarioWatch {
         watch
     }
 
-    /// Notes that `scenario` of `feature` started: the runner's `before`
-    /// hook.
-    pub fn began(&self, feature: &Feature, scenario: &Scenario) {
-        let name = match &feature.path {
-            Some(path) => format!(
-                "\"{}\" ({}:{})",
-                scenario.name,
-                path.display(),
-                scenario.position.line
-            ),
-            None => format!("\"{}\" ({})", scenario.name, feature.name),
-        };
+    /// How a scenario is named in the watch's messages: its name, and the
+    /// feature file and line it starts at, or the feature's name when the
+    /// feature has no file.
+    #[must_use]
+    pub fn describe(scenario: &str, line: usize, path: Option<&Path>, feature: &str) -> String {
+        match path {
+            Some(path) => format!("\"{scenario}\" ({}:{line})", path.display()),
+            None => format!("\"{scenario}\" ({feature})"),
+        }
+    }
+
+    /// Notes that `scenario`, named `name` (see [`Self::describe`]), started:
+    /// the runner's `before` hook.
+    pub fn began<S: ?Sized>(&self, scenario: &S, name: String) {
         self.running().began(key(scenario), name, Instant::now());
     }
 
     /// Notes that `scenario` ended, however it ended: the runner's `after`
     /// hook.
-    pub fn ended(&self, scenario: &Scenario) {
+    pub fn ended<S: ?Sized>(&self, scenario: &S) {
         self.running().ended(key(scenario), Instant::now());
     }
 
@@ -120,8 +124,8 @@ impl Drop for ReportSlowest {
 /// Cucumber gives its `before` and `after` hooks the same scenario, so its
 /// address tells the scenarios running at once apart, the expanded rows of
 /// one outline too.
-fn key(scenario: &Scenario) -> usize {
-    std::ptr::from_ref(scenario).addr()
+fn key<S: ?Sized>(scenario: &S) -> usize {
+    std::ptr::from_ref(scenario).cast::<()>().addr()
 }
 
 /// The bookkeeping, apart from the clock and the thread.
@@ -244,13 +248,14 @@ mod tests {
         if std::env::var_os(HUNG_RUN_ENV).is_some() {
             // The child: a scenario begins and never ends.
             let watch = ScenarioWatch::start("hung runner", Duration::from_millis(100));
-            let mut feature = Feature::parse(
-                "Feature: Demo\n\n  Scenario: A step that waits for ever\n    Given nothing\n",
-                cucumber::gherkin::GherkinEnv::default(),
-            )
-            .unwrap();
-            feature.path = Some("features/demo.feature".into());
-            watch.began(&feature, &feature.scenarios[0]);
+            let scenario = "A step that waits for ever";
+            let name = ScenarioWatch::describe(
+                scenario,
+                3,
+                Some(Path::new("features/demo.feature")),
+                "Demo",
+            );
+            watch.began(scenario, name);
             thread::sleep(Duration::from_secs(30));
             return;
         }

@@ -6811,9 +6811,6 @@ dependencies = [
 [[package]]
 name = "testkit"
 version = "0.1.1"
-dependencies = [
- "cucumber",
-]
 
 [[package]]
 name = "textwrap"
