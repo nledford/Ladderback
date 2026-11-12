@@ -412,6 +412,49 @@ fn a_rule_sends_at_least_one_event() {
     assert_eq!(refused.unwrap_err().kind, ValueKind::NotificationEvent);
 }
 
+/// What a rule is read back by, as the config file writes it: the events,
+/// channel, plans and template it was made with.
+#[test]
+fn a_rule_gives_back_what_it_was_made_with() {
+    let template = Template::parse("{event} {plan}").unwrap();
+    let made = Rule::new(
+        events(&[EventKind::BackupFailed, EventKind::BackupStarted]),
+        channel_name("ops"),
+        BTreeSet::from([plan("home")]),
+        Some(template.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        made.events(),
+        &events(&[EventKind::BackupFailed, EventKind::BackupStarted])
+    );
+    assert_eq!(made.channel(), &channel_name("ops"));
+    assert_eq!(made.plans(), &BTreeSet::from([plan("home")]));
+    assert_eq!(made.template(), Some(&template));
+}
+
+/// The notifications are empty, and so left out of the file, only when they
+/// have neither a rule nor a channel: a channel no rule sends to yet is kept.
+#[test]
+fn notifications_are_empty_only_without_rules_and_channels() {
+    assert!(Notifications::default().is_empty());
+
+    let channels = BTreeMap::from([(channel_name("ops"), webhook())]);
+    let unused = Notifications::new(channels.clone(), BTreeMap::new()).unwrap();
+    assert!(!unused.is_empty());
+    assert_eq!(unused.channels(), &channels);
+    assert!(unused.rules().is_empty());
+
+    let rules = BTreeMap::from([(
+        rule_name("failures"),
+        rule(&[EventKind::BackupFailed], "ops", &[]),
+    )]);
+    let used = Notifications::new(channels.clone(), rules.clone()).unwrap();
+    assert!(!used.is_empty());
+    assert_eq!(used.channels(), &channels);
+    assert_eq!(used.rules(), &rules);
+}
+
 #[test]
 fn a_rule_matches_the_events_it_names_for_the_plans_it_names() {
     let any_plan = rule(&[EventKind::BackupFailed], "ops", &[]);
