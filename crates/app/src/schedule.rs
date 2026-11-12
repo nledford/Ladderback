@@ -1121,6 +1121,39 @@ mod tests {
         );
     }
 
+    /// Runs whose start never returns, as when the daemon stops while it
+    /// records one.
+    struct NeverRecorded;
+
+    #[async_trait]
+    impl PlanRuns for NeverRecorded {
+        async fn start(&self, _: &PlanId, _: Trigger, _: Place) {
+            std::future::pending::<()>().await;
+        }
+
+        async fn resume(&self, _: Operation) {}
+
+        fn report(&self, _: ScheduleReport) {}
+    }
+
+    #[tokio::test]
+    async fn a_retry_stays_pending_until_its_run_is_recorded() {
+        let mut scheduler = scheduler("2026-06-10T03:10:00Z", Arc::new(Started::default()));
+        scheduler.runs = Arc::new(NeverRecorded);
+        let pending = PendingRetry {
+            plan: home(),
+            retry: retry_at("2026-06-10T03:10:00Z"),
+        };
+        scheduler.schedules.keep_retry(&pending).await.unwrap();
+        let mut retries = BTreeMap::from([(home(), Retrying::Pending(pending.retry))]);
+        // The daemon stops while the retry's run is being recorded.
+        assert_eq!(scheduler.start_retries(&mut retries).now_or_never(), None);
+        assert_eq!(
+            scheduler.schedules.pending_retries().await.unwrap(),
+            vec![pending]
+        );
+    }
+
     fn daily() -> Schedule {
         Schedule::new(CronExpression::parse("0 3 * * *").unwrap())
     }
