@@ -44,6 +44,14 @@ fn packs_in(folder: &Path) -> usize {
         .count()
 }
 
+/// The daemon's grace period in these tests: past the worker's own 30 s
+/// limit on a wind-down (`WIND_DOWN_LIMIT` in `src/worker.rs`), so the
+/// worker, not the daemon's SIGKILL, ends a backup that winds down. A
+/// wind-down cut off by the grace period leaves the packs it wrote with no
+/// index (decision 50), which is not what these tests are about: on a busy
+/// machine one can outlast the 5 s that `engine()` gives (#285).
+const PAST_THE_WIND_DOWN_LIMIT: Duration = Duration::from_secs(35);
+
 /// Starts a backup, stops its worker once `packs` packs are in the cold half,
 /// and reads its events to their end. A backup that ends first proves
 /// nothing, so it fails the test.
@@ -52,6 +60,7 @@ async fn cancel_once_packs_are_saved(scratch: &Scratch, location: &Location, pac
         mut events,
         mut control,
     } = engine()
+        .with_stop_grace(PAST_THE_WIND_DOWN_LIMIT)
         .run(op(), backup_job(location, &scratch.source(), "home", HOUR))
         .await
         .unwrap();
