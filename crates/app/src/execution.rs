@@ -64,6 +64,17 @@ pub struct Queued {
     job: Job,
 }
 
+impl Queued {
+    /// `operation`, which the log already holds as queued, with the job it
+    /// runs: a backup queued before the daemon stopped, taken up again by the
+    /// persistent queue (§5, decision 73). Nothing is recorded: the log has
+    /// it as it was queued, so it keeps its ID, trigger and queue time.
+    pub fn resumed(operation: Operation, job: Job) -> Self {
+        let _ = (operation, job);
+        todo!()
+    }
+}
+
 /// How the write that says an operation is running ended, or what cut it
 /// short.
 enum Written {

@@ -7,7 +7,7 @@
 use api::MsgArg;
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
-use domain::{OperationId, RepositoryId, Timestamp, Uuid};
+use domain::{OperationId, PlanId, RepositoryId, Timestamp, Uuid};
 use l10n::{Localizer, msg};
 use store::SqliteStore;
 
@@ -61,6 +61,35 @@ async fn a_prune_left_running(agent: &mut Agent) {
         Start::Started,
         "the log held no other maintenance on the repository"
     );
+    // Closed, so the file is quiet when the daemon opens it.
+    store.close().await;
+    agent
+        .ops
+        .note_started(id.as_uuid().hyphenated().to_string());
+}
+
+#[given(expr = "the log, while the daemon is down, shows a queued backup of the plan {string}")]
+async fn a_backup_left_queued(agent: &mut Agent, plan: String) {
+    let id = OperationId::from_uuid(Uuid::from_u128(0x0bac_0e1d));
+    let queued = Timestamp::from_second(SEEDED_QUEUED_AT).expect("a time");
+    let backup = Operation::queue(
+        id,
+        OperationKind::Backup,
+        Trigger::Schedule,
+        Target {
+            plan: Some(PlanId::try_from(plan).expect("a plan ID")),
+            repository: None,
+        },
+        queued,
+    );
+    let path = Events::data_dir(agent).join("ladderback.db");
+    let store = SqliteStore::open(&path)
+        .await
+        .expect("the operation log opens while the daemon is down");
+    store
+        .save(&backup, None)
+        .await
+        .expect("the queued backup is stored");
     // Closed, so the file is quiet when the daemon opens it.
     store.close().await;
     agent

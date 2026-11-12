@@ -26,8 +26,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start, StoreError,
-    maintained_repository,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PlannedRun,
+    Recovered, ScheduleStore, Start, StoreError, maintained_repository,
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
@@ -450,21 +450,46 @@ impl OperationStore for SqliteStore {
             .map_err(unavailable)
     }
 
-    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError> {
+    async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
+        // Not the persistent queue yet: the queued operations end with the
+        // running ones, as before it, and none is handed back. The daemon
+        // still starts, so the scenarios fail at their own steps.
         let failure = codec::encode_failure(reason).map_err(encoding)?;
         let _call = self.call().await;
-        // One statement, so it is atomic: every unfinished row ends or none
-        // does, and the write lock it takes keeps a save out meanwhile.
-        let ended = sqlx::query(sql::FAIL_UNFINISHED)
-            .bind(codec::FAILED)
-            .bind(failure.code)
-            .bind(failure.args.as_str())
-            .bind(failure.detail)
-            .bind(codec::status_text(&OperationStatus::Queued))
-            .bind(codec::status_text(&OperationStatus::Running))
-            .execute(&self.pool)
-            .await
-            .map_err(unavailable)?;
-        Ok(ended.rows_affected())
+        let mut ended = 0;
+        for status in [OperationStatus::Queued, OperationStatus::Running] {
+            ended += sqlx::query(sql::FAIL_RUNNING)
+                .bind(codec::FAILED)
+                .bind(failure.code)
+                .bind(failure.args.as_str())
+                .bind(failure.detail)
+                .bind(codec::status_text(&status))
+                .execute(&self.pool)
+                .await
+                .map_err(unavailable)?
+                .rows_affected();
+        }
+        Ok(Recovered {
+            ended,
+            ..Recovered::default()
+        })
+    }
+}
+
+#[async_trait]
+impl ScheduleStore for SqliteStore {
+    async fn planned_runs(&self) -> Result<Vec<PlannedRun>, StoreError> {
+        // No run planned yet, so the plans list still answers.
+        Ok(Vec::new())
+    }
+
+    async fn plan_run(&self, run: &PlannedRun) -> Result<(), StoreError> {
+        let _ = run;
+        todo!()
+    }
+
+    async fn unplan(&self, plan: &PlanId) -> Result<(), StoreError> {
+        let _ = plan;
+        todo!()
     }
 }

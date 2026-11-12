@@ -56,10 +56,11 @@ pub const DEFAULT_PAGE_SIZE: usize = 50;
 ///   one to end what the call stored doesn't drop it: a cut
 ///   [`try_start`](Self::try_start) may have stored a running maintenance
 ///   operation, which holds its repository (I7) with no run to end it.
-/// - [`fail_unfinished`](Self::fail_unfinished) ends every queued or running
-///   operation as failed, for startup recovery: all of them or none, nothing
-///   ever as succeeded, finished operations untouched, and a running
-///   maintenance operation stops holding its repository (I7).
+/// - [`recover`](Self::recover) ends every running operation as failed, for
+///   startup recovery, and returns the queued ones, oldest first, as one
+///   step: all of the ends or none, nothing ever ended as succeeded, queued
+///   and finished operations untouched, and a running maintenance operation
+///   stops holding its repository (I7).
 #[async_trait]
 pub trait OperationStore: Send + Sync {
     /// Stores `operation`, and `result` when the engine reported one.
@@ -100,24 +101,39 @@ pub trait OperationStore: Send + Sync {
     /// operation found no repository (decision 53).
     async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError>;
 
-    /// Ends every operation the log shows as queued or running as
-    /// [`Failed`](OperationStatus::Failed) with `reason`, and returns how
-    /// many it ended. Startup recovery calls it before anything runs, when
-    /// whatever still looks unfinished was left by a process that stopped: a
-    /// crash, a kill or a power cut.
+    /// Ends every operation the log shows as running as
+    /// [`Failed`](OperationStatus::Failed) with `reason`, and returns how many
+    /// it ended and the operations the log shows as queued, oldest first.
+    /// Startup recovery calls it before anything runs, when whatever still
+    /// looks running was left by a process that stopped: a crash, a kill or a
+    /// power cut. The queued ones are the persistent queue (§5): they never
+    /// started, so the daemon runs them again (decision 73).
     ///
-    /// It ends them where they stand: a started operation keeps its start
-    /// time, warnings and target, and none gets a finish time, because when
-    /// it ended is unknown. It never ends one as succeeded, and leaves every
-    /// finished operation as it was. A running maintenance operation that
-    /// held its repository (I7) stops holding it. All of it happens or none
-    /// of it does, and a second call finds nothing left to end.
+    /// It ends running ones where they stand: a started operation keeps its
+    /// start time, warnings and target, and none gets a finish time, because
+    /// when it ended is unknown. It never ends one as succeeded, and leaves
+    /// every queued and finished operation as it was. A running maintenance
+    /// operation that held its repository (I7) stops holding it. All of it
+    /// happens or none of it does, and a second call ends nothing more.
     ///
     /// Unlike every other use of this port, its caller doesn't carry on after
-    /// an error: a daemon that can't end the unfinished operations refuses to
+    /// an error: a daemon that can't end the running operations refuses to
     /// start, since a stale running maintenance operation would hold its
     /// repository for good.
-    async fn fail_unfinished(&self, reason: &FailureReason) -> Result<u64, StoreError>;
+    async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError>;
+}
+
+/// What [`OperationStore::recover`] did and found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Recovered {
+    /// How many running operations it ended.
+    pub ended: u64,
+    /// The operations the log shows as queued, oldest first.
+    pub queued: Vec<OperationRecord>,
+    /// Why each queued operation the log holds but couldn't read was left
+    /// out of `queued`: a row this build can't read stays queued as it is,
+    /// rather than refuse the start (§9 reads strictly).
+    pub unreadable: Vec<StoreError>,
 }
 
 /// What [`OperationStore::try_start`] decided.
@@ -257,6 +273,27 @@ impl OperationRecord {
     /// no other maintenance operation may be running on it (I7).
     pub fn maintaining(&self) -> Option<&RepositoryId> {
         maintained_repository(self.kind, &self.status, &self.target)
+    }
+
+    /// The operation this record keeps, when it is queued: a queued
+    /// operation has nothing but what the record holds, so it is the
+    /// operation as it was queued, to run again after a restart (§5). `None`
+    /// for an operation that started.
+    pub fn queued_operation(&self) -> Option<Operation> {
+        if self.status != OperationStatus::Queued {
+            return None;
+        }
+        let operation = Operation::queue(
+            self.id,
+            self.kind,
+            self.trigger,
+            self.target.clone(),
+            self.queued_at,
+        );
+        Some(match &self.repository_alias {
+            Some(alias) => operation.with_repository_alias(alias.clone()),
+            None => operation,
+        })
     }
 }
 

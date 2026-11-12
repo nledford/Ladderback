@@ -1,15 +1,20 @@
 //! Steps for `features/execution/recovery.feature`: they leave operations in
 //! the in-memory operation log the world's `store` holds, as a daemon that
-//! stopped would, start the daemon again through `RecoverOperations`, and read
-//! the log back through its port.
+//! stopped would, start the daemon again through `RecoverOperations` (its
+//! recovery, then the persistent queue's resume over a configuration with
+//! every plan the scenario names, less those it removed, each on the
+//! repository "nas" unless the scenario moved it), and read the log back
+//! through its port, and what the queue ran again and said off a recording.
 
 use std::sync::Arc;
 
 use app::fakes::InMemoryOperationStore;
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start, StoreError,
+    Clock, EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, Start,
+    StoreError,
 };
-use app::recovery::RecoverOperations;
+use app::recovery::{QueuedEnd, RecoverOperations};
+use app::schedule::ScheduleReport;
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::{
@@ -18,6 +23,7 @@ use domain::execution::{
 use domain::{OperationId, PlanId, RepositoryId, Timestamp, Uuid};
 
 use super::Agent;
+use super::scheduler_steps::{RecordingRuns, config_with_plans};
 
 /// An operation the scenario put in the log, and how it names its target.
 struct Seeded {
@@ -39,6 +45,15 @@ pub struct RecoveryWorld {
     seeded: Vec<Seeded>,
     /// What each start of the daemon reported, oldest first.
     starts: Vec<Result<u64, StoreError>>,
+    /// The plans the configuration no longer has.
+    removed: Vec<String>,
+    /// The plans the configuration now has on another repository, and the
+    /// alias of that repository.
+    moved: Vec<(String, String)>,
+    /// Whether the configuration can't be read.
+    unreadable: bool,
+    /// What the last start ran again.
+    runs: Option<Arc<RecordingRuns>>,
 }
 
 impl RecoveryWorld {
@@ -233,6 +248,21 @@ async fn backup_queued(agent: &mut Agent, plan: String) {
     agent.recovery.remember(&op, Some(&plan), None, None);
 }
 
+#[given(expr = "the log shows a backup of the plan {string} on the repository {string} as queued")]
+async fn backup_queued_on(agent: &mut Agent, plan: String, repository: String) {
+    let op = agent
+        .recovery
+        .queue(OperationKind::Backup, Some(&plan), Some(&repository));
+    agent
+        .store
+        .save(&op, None)
+        .await
+        .expect("the log answers a save");
+    agent
+        .recovery
+        .remember(&op, Some(&plan), Some(&repository), None);
+}
+
 #[given(expr = "the log shows a {word} of the repository {string} as running")]
 async fn maintenance_running(agent: &mut Agent, kind: String, repository: String) {
     let kind = maintenance_kind(&kind);
@@ -308,16 +338,173 @@ async fn empty_log(agent: &mut Agent) {
     );
 }
 
+#[given(expr = "the log shows a {word} of the repository {string} as queued")]
+async fn maintenance_queued(agent: &mut Agent, kind: String, repository: String) {
+    let op = agent
+        .recovery
+        .queue(maintenance_kind(&kind), None, Some(&repository));
+    agent
+        .store
+        .save(&op, None)
+        .await
+        .expect("the log answers a save");
+    agent.recovery.remember(&op, None, Some(&repository), None);
+}
+
+#[given(expr = "the configuration no longer has the plan {string}")]
+fn plan_removed(agent: &mut Agent, plan: String) {
+    agent.recovery.removed.push(plan);
+}
+
+#[given(expr = "the plan {string} now backs up to the repository {string}")]
+fn plan_moved(agent: &mut Agent, plan: String, repository: String) {
+    agent.recovery.moved.push((plan, repository));
+}
+
+#[given("the configuration can't be read")]
+fn config_unreadable(agent: &mut Agent) {
+    agent.recovery.unreadable = true;
+}
+
 #[when("the daemon starts again")]
 async fn daemon_starts_again(agent: &mut Agent) {
     let recovery = RecoverOperations::new(agent.store.clone());
-    agent.recovery.starts.push(recovery.recover().await);
+    let recovered = recovery.recover().await;
+    agent.recovery.starts.push(
+        recovered
+            .as_ref()
+            .map(|recovered| recovered.ended)
+            .map_err(Clone::clone),
+    );
+    let runs = Arc::new(RecordingRuns::new(agent.clock.clone()));
+    if let Ok(recovered) = recovered {
+        let world = &agent.recovery;
+        let plans: Vec<(&str, &str)> = world
+            .seeded
+            .iter()
+            .filter_map(|seeded| seeded.plan.as_deref())
+            .filter(|plan| !world.removed.iter().any(|removed| removed == plan))
+            .map(|plan| {
+                let on = world
+                    .moved
+                    .iter()
+                    .find(|(moved, _)| moved == plan)
+                    .map_or("nas", |(_, repository)| repository.as_str());
+                (plan, on)
+            })
+            .collect();
+        let config = config_with_plans(&plans, repository_id);
+        recovery
+            .resume(
+                recovered.queued,
+                (!world.unreadable).then_some(&config),
+                runs.as_ref(),
+                agent.clock.now(),
+            )
+            .await;
+    }
+    agent.recovery.runs = Some(runs);
 }
 
 #[when("the daemon starts again on a log that cannot be written")]
 async fn daemon_starts_on_unwritable_log(agent: &mut Agent) {
     let recovery = RecoverOperations::new(Arc::new(UnwritableLog(agent.store.clone())));
-    agent.recovery.starts.push(recovery.recover().await);
+    agent
+        .recovery
+        .starts
+        .push(recovery.recover().await.map(|recovered| recovered.ended));
+    // A start whose recovery failed refuses to serve: nothing runs again.
+    agent.recovery.runs = Some(Arc::new(RecordingRuns::new(agent.clock.clone())));
+}
+
+/// What the agent says when the queue ends an operation, as the scenario
+/// words it.
+fn queued_end(words: &str) -> QueuedEnd {
+    match words {
+        "its plan is gone" => QueuedEnd::PlanGone,
+        "its plan's repository changed" => QueuedEnd::RepositoryChanged,
+        "the configuration can't be read" => QueuedEnd::ConfigUnreadable,
+        "the log doesn't keep its job" => QueuedEnd::JobNotKept,
+        other => panic!("no step says why a queued operation ended as {other:?}"),
+    }
+}
+
+fn said_ended(agent: &Agent, id: OperationId, kind: OperationKind, why: &str) {
+    let said = agent
+        .recovery
+        .runs
+        .as_ref()
+        .expect("the daemon started again in the scenario")
+        .reports();
+    let ended = ScheduleReport::QueuedEnded {
+        operation: id,
+        kind,
+        why: queued_end(why),
+    };
+    assert!(said.contains(&ended), "the agent said {said:?}");
+}
+
+#[then(regex = r#"^the agent said the queued backup of the plan "([^"]*)" ended because (.+)$"#)]
+fn said_backup_ended(agent: &mut Agent, plan: String, why: String) {
+    let id = agent.recovery.backup(&plan).id;
+    said_ended(agent, id, OperationKind::Backup, &why);
+}
+
+#[then(
+    regex = r#"^the agent said the queued (\w+) of the repository "([^"]*)" ended because (.+)$"#
+)]
+fn said_maintenance_ended(agent: &mut Agent, kind: String, repository: String, why: String) {
+    let kind = maintenance_kind(&kind);
+    let id = agent.recovery.maintenance(kind, &repository).id;
+    said_ended(agent, id, kind, &why);
+}
+
+fn ran_again(agent: &Agent) -> Vec<Operation> {
+    agent
+        .recovery
+        .runs
+        .as_ref()
+        .expect("the daemon started again in the scenario")
+        .resumed()
+}
+
+#[then(expr = "the backup of the plan {string} runs again under its own ID")]
+async fn backup_runs_again(agent: &mut Agent, plan: String) {
+    let id = agent.recovery.backup(&plan).id;
+    let queued = detail(agent, id).await.record;
+    assert_eq!(
+        queued.status,
+        OperationStatus::Queued,
+        "still queued in the log"
+    );
+    let again: Vec<Operation> = ran_again(agent)
+        .into_iter()
+        .filter(|operation| operation.id() == id)
+        .collect();
+    match again.as_slice() {
+        [operation] => {
+            assert_eq!(operation.status(), &OperationStatus::Queued);
+            assert_eq!(operation.kind(), OperationKind::Backup);
+            assert_eq!(operation.trigger(), queued.trigger);
+            assert_eq!(operation.target(), &queued.target);
+        }
+        runs => panic!("the backup ran again {} times", runs.len()),
+    }
+}
+
+#[then(expr = "the queued backups run again in the order {string}, {string}")]
+fn run_again_in_order(agent: &mut Agent, first: String, second: String) {
+    let order: Vec<OperationId> = [first, second]
+        .iter()
+        .map(|plan| agent.recovery.backup(plan).id)
+        .collect();
+    let ran: Vec<OperationId> = ran_again(agent).iter().map(Operation::id).collect();
+    assert_eq!(ran, order);
+}
+
+#[then("nothing runs again")]
+fn nothing_runs_again(agent: &mut Agent) {
+    assert_eq!(ran_again(agent), Vec::new());
 }
 
 #[then(expr = "the log shows the backup of the plan {string} as failed because the daemon stopped")]
@@ -426,20 +613,6 @@ fn first_start_ended(agent: &mut Agent, count: u64) {
     assert_eq!(first, &Ok(count));
 }
 
-#[then("no operation the scenario put in the log is left queued or running")]
-async fn none_unfinished(agent: &mut Agent) {
-    let ids: Vec<OperationId> = agent
-        .recovery
-        .seeded
-        .iter()
-        .map(|seeded| seeded.id)
-        .collect();
-    for id in ids {
-        let status = detail(agent, id).await.record.status;
-        assert!(status.is_finished(), "an operation is still {status:?}");
-    }
-}
-
 #[then("the daemon's start reports that the log could not be written")]
 fn start_reports_unwritable(agent: &mut Agent) {
     assert!(
@@ -481,7 +654,7 @@ impl OperationStore for UnwritableLog {
         self.0.ever_succeeded(plan).await
     }
 
-    async fn fail_unfinished(&self, _reason: &FailureReason) -> Result<u64, StoreError> {
+    async fn recover(&self, _reason: &FailureReason) -> Result<app::ports::Recovered, StoreError> {
         Err(StoreError::Unavailable {
             detail: "the log cannot be written".to_owned(),
         })

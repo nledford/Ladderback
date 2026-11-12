@@ -1,9 +1,11 @@
 //! The operation store's contract for ending what a stopped daemon left
-//! behind: every queued or running operation ends failed with
-//! `DaemonStopped`, and a running maintenance operation stops holding its
-//! repository (I7). Each case seeds operations and repositories of its own,
-//! recovers, and leaves nothing unfinished behind, so the next case's count
-//! is exact. The first case needs the log to hold nothing unfinished.
+//! behind: every running operation ends failed with `DaemonStopped`, a
+//! running maintenance operation stops holding its repository (I7), and the
+//! queued ones stay queued and are handed back, oldest first, for the
+//! daemon to run again (decision 73). Each case seeds operations and
+//! repositories of its own, recovers, and leaves nothing unfinished behind,
+//! so the next case's count is exact. The first case needs the log to hold
+//! nothing unfinished.
 
 use domain::execution::OperationKind::{Adopt, Backup, Check, Forget, Prune};
 use domain::execution::{
@@ -12,12 +14,14 @@ use domain::execution::{
 use domain::{OperationId, PlanId, RepositoryId};
 
 use super::{applied, at, failed, id, listing, queued, read, save, started, succeeded, unreadable};
-use crate::ports::{EngineResult, OperationDetail, OperationRecord, OperationStore, Start};
+use crate::ports::{
+    EngineResult, OperationDetail, OperationRecord, OperationStore, Recovered, Start,
+};
 
 pub(super) async fn run(store: &dyn OperationStore) {
     an_empty_log_recovers_nothing(store).await;
     a_running_operation_ends_failed_and_keeps_all_else(store).await;
-    a_queued_operation_ends_failed_too(store).await;
+    a_queued_operation_stays_queued_and_is_handed_back(store).await;
     finished_operations_are_untouched(store).await;
     the_count_is_exact_and_a_second_recovery_finds_nothing(store).await;
     a_running_maintenance_operation_stops_holding_its_repository(store).await;
@@ -92,9 +96,40 @@ async fn try_start(store: &dyn OperationStore, op: &Operation) -> Option<Start> 
 /// How many operations recovery ended; a store that can't recover fails the
 /// suite.
 async fn recover(store: &dyn OperationStore) -> Option<u64> {
-    let ended = store.fail_unfinished(&FailureReason::DaemonStopped).await;
-    assert!(ended.is_ok(), "ending the unfinished failed: {ended:?}");
-    ended.ok()
+    recovered(store).await.map(|recovered| recovered.ended)
+}
+
+/// What recovery did and found; a store that can't recover fails the suite.
+async fn recovered(store: &dyn OperationStore) -> Option<Recovered> {
+    let recovered = store.recover(&FailureReason::DaemonStopped).await;
+    assert!(recovered.is_ok(), "recovering failed: {recovered:?}");
+    recovered.ok()
+}
+
+/// The IDs of the queued operations recovery hands back, in its order.
+async fn queued_ids(store: &dyn OperationStore) -> Option<Vec<OperationId>> {
+    recovered(store)
+        .await
+        .map(|recovered| recovered.queued.iter().map(|record| record.id).collect())
+}
+
+/// Cancels every queued operation, so the cases that follow find none.
+async fn clear_queue(store: &dyn OperationStore) {
+    let Some(recovered) = recovered(store).await else {
+        return;
+    };
+    for record in recovered.queued {
+        let op = record.queued_operation();
+        assert!(
+            op.is_some(),
+            "recovery handed back an operation that isn't queued: {record:?}"
+        );
+        let Some(mut op) = op else {
+            return;
+        };
+        applied(op.cancel(at(90)));
+        save(store, &op, None).await;
+    }
 }
 
 async fn detail(store: &dyn OperationStore, n: u128) -> Option<OperationDetail> {
@@ -175,27 +210,49 @@ async fn a_running_operation_ends_failed_and_keeps_all_else(store: &dyn Operatio
     );
 }
 
-async fn a_queued_operation_ends_failed_too(store: &dyn OperationStore) {
-    let Some(docs) = plan("demo-recover-docs") else {
+async fn a_queued_operation_stays_queued_and_is_handed_back(store: &dyn OperationStore) {
+    let (Some(docs), Some(repository)) = (plan("demo-recover-docs"), numbered(0x73)) else {
         return;
     };
-    let op = queued(0x7100, Some(&docs));
-    save(store, &op, None).await;
-
-    assert_eq!(recover(store).await, Some(1));
-
-    let after = detail(store, 0x7100).await;
-    assert_eq!(
-        after,
-        Some(OperationDetail {
-            record: OperationRecord {
-                status: daemon_stopped(),
-                ..OperationRecord::of(&op, None)
-            },
-            warnings: Vec::new(),
-        }),
-        "a queued operation ends failed, never having started or finished"
+    let newer = queued(0x7101, Some(&docs));
+    save(store, &newer, None).await;
+    let older = Operation::queue(
+        id(0x7100),
+        Backup,
+        Trigger::Schedule,
+        Target {
+            plan: Some(docs.clone()),
+            repository: Some(repository),
+        },
+        at(1),
     );
+    save(store, &older, None).await;
+
+    let found = recovered(store).await;
+    assert_eq!(
+        found,
+        Some(Recovered {
+            ended: 0,
+            queued: vec![
+                OperationRecord::of(&older, None),
+                OperationRecord::of(&newer, None)
+            ],
+            unreadable: Vec::new(),
+        }),
+        "a queued operation isn't ended: it comes back as it was queued, oldest first"
+    );
+    assert_eq!(
+        detail(store, 0x7101).await,
+        Some(stored(&newer)),
+        "and the log still shows it queued"
+    );
+    assert_eq!(
+        queued_ids(store).await,
+        Some(vec![id(0x7100), id(0x7101)]),
+        "a second recovery hands it back again"
+    );
+    clear_queue(store).await;
+    assert_eq!(queued_ids(store).await, Some(Vec::new()));
 }
 
 async fn finished_operations_are_untouched(store: &dyn OperationStore) {
@@ -279,7 +336,7 @@ async fn the_count_is_exact_and_a_second_recovery_finds_nothing(store: &dyn Oper
         return;
     };
     // Unfinished: two queued and two running backups, a queued prune, a
-    // running prune and a running check.
+    // running prune and a running check. Only the running ones end.
     save(store, &queued(0x7300, Some(&music)), None).await;
     save(store, &queued(0x7301, None), None).await;
     start_running(store, &started(queued(0x7302, Some(&music)))).await;
@@ -300,17 +357,22 @@ async fn the_count_is_exact_and_a_second_recovery_finds_nothing(store: &dyn Oper
     .await;
 
     assert_eq!(
-        recover(store).await,
-        Some(7),
-        "every queued and running operation is ended, and only those"
+        recovered(store).await.map(|found| found.ended),
+        Some(4),
+        "every running operation is ended, and only those"
     );
-    for n in 0x7300..=0x7306 {
+    for n in [0x7302, 0x7303, 0x7305, 0x7306] {
         assert_eq!(
             detail(store, n).await.map(|found| found.record.status),
             Some(daemon_stopped()),
             "operation {n:#x} ended failed"
         );
     }
+    assert_eq!(
+        queued_ids(store).await,
+        Some(vec![id(0x7300), id(0x7301), id(0x7304)]),
+        "the queued ones stay queued"
+    );
 
     let log = listing(store, None, 10).await;
     assert_eq!(
@@ -319,6 +381,7 @@ async fn the_count_is_exact_and_a_second_recovery_finds_nothing(store: &dyn Oper
         "a second recovery has nothing left to end"
     );
     assert_eq!(listing(store, None, 10).await, log, "and changes nothing");
+    clear_queue(store).await;
 }
 
 async fn a_running_maintenance_operation_stops_holding_its_repository(store: &dyn OperationStore) {
@@ -405,7 +468,7 @@ async fn nothing_unfinished_ends_succeeded(store: &dyn OperationStore) {
     let Some(repository) = numbered(0x6b) else {
         return;
     };
-    let unfinished: [OperationId; 4] = [id(0x7600), id(0x7601), id(0x7602), id(0x7603)];
+    let running: [OperationId; 2] = [id(0x7601), id(0x7603)];
     save(store, &queued(0x7600, None), None).await;
     start_running(store, &started(queued(0x7601, None))).await;
     save(store, &on(0x7602, Check, Some(&repository)), None).await;
@@ -413,9 +476,10 @@ async fn nothing_unfinished_ends_succeeded(store: &dyn OperationStore) {
     save(store, &succeeded(queued(0x7610, None)), None).await;
 
     let succeeded_before = succeeded_ids(store).await;
-    assert_eq!(recover(store).await, Some(4));
+    assert_eq!(recover(store).await, Some(2));
+    clear_queue(store).await;
 
-    for unfinished in unfinished {
+    for unfinished in running {
         let status = read(store, unfinished)
             .await
             .map(|found| found.record.status);

@@ -59,15 +59,35 @@ pub(crate) const GET_OPERATION: &str = select_operations!(" WHERE id = ?");
 pub(crate) const GET_WARNINGS: &str =
     "SELECT item, during, code, detail FROM op_warnings WHERE op_id = ? ORDER BY rowid LIMIT ?";
 
-/// Ends every queued or running operation as failed (startup recovery), and
-/// nothing else about it: not its times, warnings or target. Parameters:
-/// `status`, `error_code`, `error_args`, `error_detail`, then the two statuses
-/// it ends, queued and running. A running maintenance row stops being one, so
-/// the one-maintenance index stops holding its repository.
-pub(crate) const FAIL_UNFINISHED: &str = concat!(
+/// Ends every running operation as failed (startup recovery), and nothing
+/// else about it: not its times, warnings or target. Parameters: `status`,
+/// `error_code`, `error_args`, `error_detail`, then the status it ends,
+/// running. A running maintenance row stops being one, so the
+/// one-maintenance index stops holding its repository.
+pub(crate) const FAIL_RUNNING: &str = concat!(
     "UPDATE operations SET status = ?, error_code = ?, error_args = ?, error_detail = ? ",
-    "WHERE status IN (?, ?)"
+    "WHERE status = ?"
 );
+
+/// The persistent queue (§5), oldest first: the queued operations by ID,
+/// which is time order. The status is a literal, so SQLite matches the
+/// statement to the partial index `ops_queue` when it prepares it, and the
+/// read doesn't grow with the history.
+pub(crate) const LIST_QUEUED: &str = select_operations!(" WHERE status = 'queued' ORDER BY id");
+
+/// Every plan's planned run, in plan order.
+pub(crate) const PLANNED_RUNS: &str =
+    "SELECT plan_id, next_run FROM schedule_state ORDER BY plan_id";
+
+/// Keeps a plan's planned run, replacing the one kept before. Parameters:
+/// `plan_id`, `next_run`.
+pub(crate) const PLAN_RUN: &str = concat!(
+    "INSERT INTO schedule_state (plan_id, next_run) VALUES (?, ?) ",
+    "ON CONFLICT(plan_id) DO UPDATE SET next_run = excluded.next_run"
+);
+
+/// Forgets a plan's planned run. Parameter: `plan_id`.
+pub(crate) const UNPLAN: &str = "DELETE FROM schedule_state WHERE plan_id = ?";
 
 // History, newest first, in four statements: with or without a plan, and with
 // or without a cursor. The cursor is a term of its own, not an `IS NULL OR`

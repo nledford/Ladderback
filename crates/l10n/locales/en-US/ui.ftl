@@ -13,8 +13,32 @@ ui-start-title = { -brand-name }
 # The start page's heading: the one main heading of the page.
 ui-start-heading = Welcome to { -brand-name }
 
-# The start page's text, until there is something to set up.
-ui-start-body = Nothing is scheduled yet. Plans and their schedules arrive in later releases.
+# The start page's text above its list of plans.
+ui-start-plans-body = These are the plans in { "config.toml" }, with when each one runs next.
+
+# What the start page says when config.toml has no plan.
+ui-start-no-plans = There are no plans yet. A plan added to { "config.toml" } is listed here with its next run.
+
+# The start page's table of plans: its caption.
+ui-start-caption = Plans
+
+# The start page's column of plans. Its cells are the rows' headers.
+ui-column-plan = Plan
+
+# The start page's column of the instants plans run next on their schedule.
+ui-column-next-run = Next run
+
+# The next run of a plan that has a schedule, while the scheduler has planned
+# none: it hasn't yet, or the schedule has no run left.
+ui-start-not-planned = Not planned yet
+
+# The next run of a plan without a schedule: it runs only when someone starts
+# it on the operations page.
+ui-start-on-demand = When started from Operations
+
+# The link from the start page to the operations page, where a plan's backup
+# is started by hand.
+ui-start-operations-link = Start a backup from the Operations page
 
 # The title of the page shown for an address nothing serves: the browser's tab
 # and history show it.

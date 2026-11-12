@@ -10,12 +10,14 @@ use app::contract;
 use app::contract::clock::ClockHarness;
 use app::contract::hooks::HooksHarness;
 use app::contract::secrets::SecretsHarness;
-use app::fakes::InMemoryConfigStore;
 use app::fakes::{
     FakeClock, FakeHookRunner, FakeSecrets, InMemoryEventBus, InMemoryOperationStore, Script,
     SimulatedEngine,
 };
-use app::ports::{Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, SecretResolver};
+use app::fakes::{InMemoryConfigStore, InMemoryScheduleStore, SeededRandom};
+use app::ports::{
+    Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, ScheduleStore, SecretResolver,
+};
 use async_trait::async_trait;
 use domain::secrets::{CommandLine, KeyringEntry};
 use domain::{SignedDuration, Timestamp};
@@ -58,6 +60,34 @@ async fn in_memory_operation_store_meets_the_operation_store_contract() {
 #[tokio::test]
 async fn in_memory_operation_store_recovers_its_unfinished_operations() {
     contract::operation_store::run_recovery(&InMemoryOperationStore::new()).await;
+}
+
+/// The in-memory schedule store: a new one for each `empty`, and the same
+/// one again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemorySchedules(Mutex<Option<Arc<InMemoryScheduleStore>>>);
+
+#[async_trait]
+impl contract::schedule_store::ScheduleHarness for InMemorySchedules {
+    async fn empty(&self) -> Arc<dyn ScheduleStore> {
+        let store = Arc::new(InMemoryScheduleStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        store
+    }
+
+    async fn reopened(&self) -> Arc<dyn ScheduleStore> {
+        self.0.lock().unwrap().clone().expect("a store was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_schedule_store_meets_the_schedule_store_contract() {
+    contract::schedule_store::run(&InMemorySchedules::default()).await;
+}
+
+#[test]
+fn seeded_randomness_meets_the_random_contract() {
+    contract::random::run(&SeededRandom::new(0x5eed));
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@
 
 use std::fmt::Display;
 
-use app::ports::{EngineResult, OperationRecord, StoreError};
+use app::ports::{EngineResult, OperationRecord, PlannedRun, StoreError};
 use domain::execution::{OperationStatus, Target, Warning};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
@@ -126,6 +126,25 @@ impl Reader<'_> {
         }
         Ok(status)
     }
+}
+
+/// A row of `schedule_state`: a plan's planned run.
+pub(crate) fn planned_run(row: &SqliteRow) -> Result<PlannedRun, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "a planned run".to_owned(),
+    };
+    let plan = reader
+        .id_of("plan_id", "plan ID", PlanId::parse)?
+        .ok_or_else(|| reader.corrupt("plan_id", "is NULL"))?;
+    let reader = Reader {
+        row,
+        scope: format!("the planned run of {}", plan.as_str()),
+    };
+    Ok(PlannedRun {
+        plan,
+        at: reader.required_time("next_run")?,
+    })
 }
 
 /// What a column that couldn't be read says: for a value of the wrong type,

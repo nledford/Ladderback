@@ -17,18 +17,21 @@ use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 
+use app::conditions::NetworkWait;
 use app::ports::Retention;
 use app::ports::SecretResolver;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
     EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network, OperationRecord, OperationStore,
-    PowerSupply, ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
+    PowerSupply, ProfileError, ProfileNotice, ProgressEvent, RunningJob, ScheduleStore,
+    SnapshotSummary,
 };
 use app::recovery::RecoverOperations;
 use app::repositories::{
     ConfigWrites, ConnectRepository, CreateOffers, InitRepository, RecordOpened, Recording,
     RepositoryError, SavedEntryError, TestRepository,
 };
+use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
@@ -54,6 +57,7 @@ use http_adapter::{
 use l10n::{MessageId, msg};
 use platform::SystemClock;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
+use platform::random::OsRandom;
 use platform::{agent_id, dirs};
 use secrets::SystemSecrets;
 use store::SqliteStore;
@@ -123,23 +127,19 @@ fn location_kind(rclone: bool) -> MsgArg {
 }
 
 /// What `serve` runs: the router's state, the operation log it writes, the
-/// hold on the data folder that keeps every other process off it, and what
-/// a scheduled run asks the machine before it starts. The caller closes the
-/// log once it has stopped serving, and keeps the lock until the daemon is
-/// gone (§9).
+/// hold on the data folder that keeps every other process off it, and the
+/// work it does with no request: the queue left from before it started and
+/// the scheduler. The caller closes the log once it has stopped serving, and
+/// keeps the lock until the daemon is gone (§9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
     pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
-    pub(crate) conditions: RunConditions,
+    pub(crate) background: Background,
 }
 
 /// What the conditions before a scheduled run ask the machine (§5): what
 /// powers it and whether it is online.
-#[expect(
-    dead_code,
-    reason = "the scheduler (#274) is the first to ask them; until then the daemon only builds them"
-)]
 pub(crate) struct RunConditions {
     pub(crate) power: Arc<dyn PowerSupply>,
     pub(crate) network: Arc<dyn Network>,
@@ -153,6 +153,54 @@ impl RunConditions {
             network: platform::network::system_network(),
         }
     }
+}
+
+/// The daemon's work that no request starts (§5): the backups the operation
+/// log still holds as queued from before the start, then the scheduler.
+pub(crate) struct Background {
+    runner: Arc<PlanRunner>,
+    /// The queued operations recovery found, oldest first.
+    queued: Vec<OperationRecord>,
+    config: Arc<dyn ConfigStore>,
+    schedules: Arc<dyn ScheduleStore>,
+    store: Arc<dyn OperationStore>,
+    conditions: RunConditions,
+}
+
+impl Background {
+    /// Runs the queue's leftovers, oldest first, then the scheduler, until
+    /// the future is dropped.
+    pub(crate) async fn run(self) {
+        let runs: Arc<dyn PlanRuns> = self.runner;
+        resume_queued(self.queued, self.config.as_ref(), self.store, runs.as_ref()).await;
+        Scheduler {
+            clock: Arc::new(SystemClock),
+            random: Arc::new(OsRandom),
+            schedules: self.schedules,
+            config: self.config,
+            power: self.conditions.power,
+            network: self.conditions.network,
+            runs,
+            zone: domain::TimeZone::system(),
+        }
+        .run()
+        .await;
+    }
+}
+
+/// Hands each of `queued` to the queue, oldest first, against the
+/// configuration read once now. A configuration that can't be read builds
+/// no job, so each ends as failed with `daemon-stopped`, and the log says
+/// why (decision 73): left queued, it would show as queued with nothing to
+/// run it until the next start.
+async fn resume_queued(
+    queued: Vec<OperationRecord>,
+    config: &dyn ConfigStore,
+    store: Arc<dyn OperationStore>,
+    runs: &dyn PlanRuns,
+) {
+    let _ = (queued, config, store, runs);
+    todo!()
 }
 
 /// How long the daemon waits for the operation log to close once it stops
@@ -228,12 +276,21 @@ async fn daemon_at(
     };
     // Every refusal from here on closes the log first: the refused daemon
     // leaves it as tidy as one that served and stopped.
-    match state_over(config, &data_dir, cache_dir, recorded, &log).await {
-        Ok(state) => Ok(Daemon {
+    match state_over(
+        config,
+        &data_dir,
+        cache_dir,
+        recorded,
+        &log,
+        RunConditions::system(),
+    )
+    .await
+    {
+        Ok((state, background)) => Ok(Daemon {
             state,
             log,
             lock,
-            conditions: RunConditions::system(),
+            background,
         }),
         Err(refused) => {
             log.close().await;
@@ -242,30 +299,41 @@ async fn daemon_at(
     }
 }
 
-/// The router's state over the operation log `log`, once it has ended what
-/// an earlier run left unfinished, or why the daemon cannot serve. The
-/// workers' cache folder is tidied first, keeping the caches of the
-/// repositories `recorded` names.
+/// The router's state over the operation log `log`, and the work the daemon
+/// does with no request, once it has ended what an earlier run left
+/// running, or why the daemon cannot serve. The workers' cache folder is
+/// tidied first, keeping the caches of the repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
     data_dir: &std::path::Path,
     cache_dir: Option<std::path::PathBuf>,
     recorded: Recorded,
     log: &OperationLog,
-) -> Result<AppState, Refused> {
+    conditions: RunConditions,
+) -> Result<(AppState, Background), Refused> {
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
-    // Nothing has run yet, so an operation the log still shows as queued or
-    // running was left by a process that stopped. It ends as failed now, which
-    // also lets go of the repository a running maintenance operation held
-    // (I7). A log that cannot be changed is a refusal: serving over it would
-    // keep that repository held for good.
-    let ended = RecoverOperations::new(Arc::clone(&store))
+    let schedules: Arc<dyn ScheduleStore> = Arc::<SqliteStore>::clone(&log.store);
+    // Nothing has run yet, so an operation the log still shows as running was
+    // left by a process that stopped. It ends as failed now, which also lets
+    // go of the repository a running maintenance operation held (I7). A log
+    // that cannot be changed is a refusal: serving over it would keep that
+    // repository held for good. Queued operations stay queued (decision 73).
+    let recovered = RecoverOperations::new(Arc::clone(&store))
         .recover()
         .await
         .map_err(|error| recovery_refused(&log.database, &error))?;
+    let ended = recovered.ended;
     if ended > 0 {
         log::warn!(
-            "ended {ended} operation(s) the operation log still showed as queued or running: the daemon that ran them stopped before they finished"
+            "ended {ended} operation(s) the operation log still showed as running: the daemon that ran them stopped before they finished"
+        );
+    }
+    // By its code alone: the store's account of a row repeats what the row
+    // holds, which nobody has checked for a value (I4).
+    for error in &recovered.unreadable {
+        log::warn!(
+            "a queued operation in the operation log can't be read, and stays queued ({})",
+            error.code()
         );
     }
     let agent_id = agent_id::load_or_create(data_dir)
@@ -295,7 +363,7 @@ async fn state_over(
         Arc::new(log_recording),
     ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
-    let operations: Arc<dyn Operations> = Arc::new(PlanRunner {
+    let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         resolve: Arc::clone(&resolve),
         agent_id,
@@ -306,6 +374,7 @@ async fn state_over(
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
     });
+    let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
         Arc::clone(&engine),
@@ -315,16 +384,28 @@ async fn state_over(
         writes,
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
-        config,
+        config: Arc::clone(&config),
         engine,
-        operations: store,
+        operations: Arc::clone(&store),
+        schedules: Arc::clone(&schedules),
     });
-    Ok(AppState {
-        events: bus,
-        operations,
-        catalog,
-        repositories,
-    })
+    let background = Background {
+        runner,
+        queued: recovered.queued,
+        config,
+        schedules,
+        store,
+        conditions,
+    };
+    Ok((
+        AppState {
+            events: bus,
+            operations,
+            catalog,
+            repositories,
+        },
+        background,
+    ))
 }
 
 /// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
@@ -708,18 +789,15 @@ struct PlanRunner {
     events: Arc<dyn EventBus>,
 }
 
-#[async_trait]
-impl Operations for PlanRunner {
-    async fn start_backup(&self, plan: String) -> Result<String, StartError> {
-        let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
-        let config = self.config.load().await.map_err(|error| {
-            config_unusable(error, |code, args, detail| StartError::Unavailable {
-                code,
-                args,
-                detail,
-            })
-        })?;
-        let plan = config.plan(&id).ok_or(StartError::UnknownPlan)?;
+impl PlanRunner {
+    /// The backup job of plan `id` and the hooks around it, as `config`
+    /// stands now: a rewrite between runs is picked up.
+    async fn backup_of(
+        &self,
+        config: &domain::planning::AgentConfig,
+        id: &PlanId,
+    ) -> Result<(Job, HookSetup), StartError> {
+        let plan = config.plan(id).ok_or(StartError::UnknownPlan)?;
         let repository = config
             .repository(&plan.repository)
             .ok_or(StartError::UnknownPlan)?;
@@ -751,37 +829,54 @@ impl Operations for PlanRunner {
             filter: plan.filter.clone(),
             deadline_budget: backup_budget(None, None),
         });
-        // A UUIDv7: the log orders by ID, so the newest run is the highest.
-        let operation = OperationId::from_uuid(Uuid::now_v7());
-        let id_text = operation.as_uuid().hyphenated().to_string();
-        // The cancel switch is parked before the run starts — not lazily
-        // when the run first polls it — so a cancel that arrives the
-        // instant the route answers finds it (§4.2). A cancel that fires
-        // only resolves; whether the receiver was still listening is
-        // nobody's business here.
-        let cancel = self.registry.register(operation);
-        let cancel = async move {
-            let _ = cancel.await;
-        };
-        // The agent, repository and plan hooks of §6.1 wrap the run, as the
-        // configuration stands now: a rewrite between runs is picked up.
+        // The agent, repository and plan hooks of §6.1 wrap the run.
         let setup = HookSetup {
             agent: config.hooks().clone(),
-            repository: config
-                .repository(&plan.repository)
-                .map(|repository| repository.hooks.clone())
-                .unwrap_or_default(),
+            repository: repository.hooks.clone(),
             plan: plan.hooks.clone(),
             plan_id: plan.id.clone(),
             repository_alias: plan.repository.clone(),
         };
-        let use_case = RunOperation::new(
+        Ok((job, setup))
+    }
+
+    /// The use case that runs a backup with `setup`'s hooks.
+    fn backup_use_case(&self, setup: HookSetup) -> RunOperation {
+        RunOperation::new(
             Arc::clone(&self.engine),
             Arc::new(SystemClock),
             Arc::clone(&self.store),
         )
         .with_hooks(Arc::clone(&self.hooks), setup)
-        .with_events(Arc::clone(&self.events));
+        .with_events(Arc::clone(&self.events))
+    }
+
+    /// Parks `operation`'s cancel switch before its run starts — not lazily
+    /// when the run first polls it — so a cancel that arrives the instant
+    /// the route answers finds it (§4.2). A cancel that fires only resolves;
+    /// whether the receiver was still listening is nobody's business here.
+    fn cancel_switch(&self, operation: OperationId) -> impl Future<Output = ()> + Send + use<> {
+        let cancel = self.registry.register(operation);
+        async move {
+            let _ = cancel.await;
+        }
+    }
+
+    /// Starts a backup of plan `id`, started by `trigger`, on a task of its
+    /// own, and returns its operation's ID once the log has it queued.
+    async fn start_plan(&self, id: &PlanId, trigger: Trigger) -> Result<OperationId, StartError> {
+        let config = self.config.load().await.map_err(|error| {
+            config_unusable(error, |code, args, detail| StartError::Unavailable {
+                code,
+                args,
+                detail,
+            })
+        })?;
+        let (job, setup) = self.backup_of(&config, id).await?;
+        // A UUIDv7: the log orders by ID, so the newest run is the highest.
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        let cancel = self.cancel_switch(operation);
+        let use_case = self.backup_use_case(setup);
         // Recorded as queued before the route answers, so a cancel that
         // arrives the instant it does finds the operation in the log. The
         // task does the recording and the run, so a handler that is dropped
@@ -789,7 +884,7 @@ impl Operations for PlanRunner {
         let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
         tokio::spawn(async move {
-            let queued = use_case.queue(operation, Trigger::Manual, job).await;
+            let queued = use_case.queue(operation, trigger, job).await;
             let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus.
             let finished = use_case.run_queued(queued, cancel).await;
@@ -798,7 +893,92 @@ impl Operations for PlanRunner {
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
-        Ok(id_text)
+        Ok(operation)
+    }
+}
+
+/// Why a plan's run didn't start, for the daemon's log: a code, never the
+/// words of a secret's refusal, which may quote what was read (I4).
+fn start_refused(error: &StartError) -> String {
+    match error {
+        StartError::UnknownPlan => "the plan or its repository isn't configured".to_owned(),
+        StartError::Unavailable { code, .. } => {
+            format!("the configuration can't be read or used ({code:?})")
+        }
+        StartError::SecretRefused(refusal) => {
+            format!(
+                "a secret of its repository was refused ({:?})",
+                refusal.code
+            )
+        }
+    }
+}
+
+#[async_trait]
+impl PlanRuns for PlanRunner {
+    async fn start(&self, plan: &PlanId, trigger: Trigger) {
+        if let Err(error) = self.start_plan(plan, trigger).await {
+            log::warn!(
+                "the {trigger:?} run of plan {} didn't start: {}",
+                plan.as_str(),
+                start_refused(&error)
+            );
+        }
+    }
+
+    async fn resume(&self, operation: domain::execution::Operation) {
+        let _ = operation;
+        todo!()
+    }
+
+    fn report(&self, report: ScheduleReport) {
+        match report {
+            ScheduleReport::Skipped { plan, unmet } => log::info!(
+                "the scheduled run of plan {} was skipped: a condition it sets isn't met ({unmet:?})",
+                plan.as_str()
+            ),
+            ScheduleReport::PowerUnknown { plan, error } => log::warn!(
+                "the scheduled run of plan {} starts, though what powers the machine is unknown: {error:?}",
+                plan.as_str()
+            ),
+            ScheduleReport::NetworkWaited(NetworkWait::Online { waited }) => {
+                log::info!("the catch-up runs after a wake waited {waited:#} for the network")
+            }
+            ScheduleReport::NetworkWaited(NetworkWait::GaveUp) => log::warn!(
+                "the catch-up runs after a wake start, though the machine is still offline"
+            ),
+            ScheduleReport::NetworkWaited(NetworkWait::Unknown(error)) => log::warn!(
+                "the catch-up runs after a wake start, though whether the machine is online is unknown: {error:?}"
+            ),
+            ScheduleReport::NoNextRun { plan } => log::warn!(
+                "plan {} isn't run again: its schedule has no run after now",
+                plan.as_str()
+            ),
+            ScheduleReport::Store(error) => log::warn!(
+                "the scheduler couldn't read or write the operation log ({}); it goes on with what it holds",
+                error.code()
+            ),
+            ScheduleReport::Config(error) => log::warn!(
+                "the scheduler couldn't read the configuration, and goes on with the plans it last read: {error}"
+            ),
+            ScheduleReport::QueuedEnded {
+                operation,
+                kind,
+                why,
+            } => log::warn!(
+                "the queued {kind:?} {} can't run again, and ends as failed ({why:?})",
+                operation.as_uuid().hyphenated()
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl Operations for PlanRunner {
+    async fn start_backup(&self, plan: String) -> Result<String, StartError> {
+        let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
+        let operation = self.start_plan(&id, Trigger::Manual).await?;
+        Ok(operation.as_uuid().hyphenated().to_string())
     }
 
     async fn start_maintenance(
@@ -1351,27 +1531,52 @@ struct CancelRegistry {
     running: std::sync::Mutex<HashMap<OperationId, futures::channel::oneshot::Sender<()>>>,
 }
 
-/// The catalog the API asks of the daemon (§4.2): the configuration's plans
-/// and repositories, and one repository's snapshots, listed live through the
-/// engine (§9: a read stores nothing and takes no slot). Which repositories a
-/// row offers to create is read from the operation log (decision 53).
+/// The catalog the API asks of the daemon (§4.2): the configuration's plans,
+/// with the scheduler's planned runs, and repositories, and one repository's
+/// snapshots, listed live through the engine (§9: a read stores nothing and
+/// takes no slot). Which repositories a row offers to create is read from
+/// the operation log (decision 53).
 struct ConfigCatalog {
     config: Arc<dyn ConfigStore>,
     engine: Arc<dyn Engine>,
     operations: Arc<dyn OperationStore>,
+    schedules: Arc<dyn ScheduleStore>,
 }
 
 #[async_trait]
 impl Catalog for ConfigCatalog {
     async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
+        // A planned run that can't be read is no reason to hide the plans:
+        // each scheduled one shows that it has none planned.
+        let planned: HashMap<PlanId, domain::Timestamp> = match self.schedules.planned_runs().await
+        {
+            Ok(runs) => runs.into_iter().map(|run| (run.plan, run.at)).collect(),
+            Err(error) => {
+                log::warn!(
+                    "the planned runs couldn't be read ({}); the plans are listed without them",
+                    error.code()
+                );
+                HashMap::new()
+            }
+        };
         Ok(api::PlansDto {
             plans: config
                 .plans()
                 .iter()
-                .map(|plan| api::PlanSummaryDto {
-                    id: plan.id.as_str().to_owned(),
-                    repository: plan.repository.as_str().to_owned(),
+                .map(|plan| {
+                    let scheduled = plan.schedule.is_some();
+                    api::PlanSummaryDto {
+                        id: plan.id.as_str().to_owned(),
+                        repository: plan.repository.as_str().to_owned(),
+                        scheduled,
+                        // A run kept for a plan whose schedule was just
+                        // removed is the scheduler's to forget, not a run.
+                        next_run: planned
+                            .get(&plan.id)
+                            .filter(|_| scheduled)
+                            .map(ToString::to_string),
+                    }
                 })
                 .collect(),
         })
@@ -2929,6 +3134,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_queued_row_that_cannot_be_read_is_logged_by_its_code_alone() {
+        use sqlx::{ConnectOptions, Connection};
+        super::captured_log::capture();
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        let id = OperationId::from_uuid(Uuid::from_u128(0x274));
+        let earlier = SqliteStore::open(&database).await.expect("the log opens");
+        let queued = domain::execution::Operation::queue(
+            id,
+            OperationKind::Backup,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: None,
+                repository: None,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        earlier
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+        earlier.close().await;
+        // A value the row can't hold, which the store's own account of the
+        // row repeats: it is the row's, so nobody has checked it (I4).
+        let canary = "canary-7f3a-not-a-trigger";
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database)
+            .connect()
+            .await
+            .expect("a raw connection to the log");
+        sqlx::query("UPDATE operations SET trigger = ?")
+            .bind(canary)
+            .execute(&mut raw)
+            .await
+            .expect("the row is changed");
+        raw.close().await.expect("the connection closes");
+
+        let daemon = daemon_at(Some(config), Some(data), None)
+            .await
+            .map_err(|refused| refused.message)
+            .expect("an unreadable queued row doesn't refuse the start");
+        drop(daemon);
+
+        let said: Vec<_> = super::captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("can't be read, and stays queued"))
+            .collect();
+        assert!(
+            said.iter()
+                .any(|(level, line)| *level == log::Level::Warn && line.contains("store-corrupt")),
+            "the row is logged with the store's code: {said:?}"
+        );
+        assert!(
+            said.iter().all(|(_, line)| !line.contains(canary)),
+            "the row's own text never reaches the log: {said:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_close_that_ends_within_its_bound_is_waited_for_and_says_nothing() {
         super::captured_log::capture();
         let database = std::path::Path::new("/srv/demo/closes-in-time/ladderback.db");
@@ -3412,6 +3677,159 @@ mod tests {
         cancel.expect("a cancel in the start window is accepted");
     }
 
+    /// A runner as [`runner_at_a_gate`] makes it, whose log holds a backup of
+    /// "home" queued under `id`, over a configuration that can no longer be
+    /// read. Also the queued backup, and the scratch folder.
+    async fn a_queued_backup_over_a_spoiled_configuration(
+        id: OperationId,
+    ) -> (PlanRunner, domain::execution::Operation, tempfile::TempDir) {
+        let (runner, _entered, _gate, scratch) = runner_at_a_gate().await;
+        let queued = domain::execution::Operation::queue(
+            id,
+            OperationKind::Backup,
+            Trigger::Manual,
+            domain::execution::Target {
+                plan: Some(domain::PlanId::parse("home").expect("a plan ID")),
+                repository: None,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        runner
+            .store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+        std::fs::write(
+            scratch.path().join("config").join("config.toml"),
+            "not = [toml",
+        )
+        .expect("the configuration is spoiled");
+        (runner, queued, scratch)
+    }
+
+    async fn status_of(runner: &PlanRunner, id: OperationId) -> OperationStatus {
+        runner
+            .store
+            .get(id)
+            .await
+            .expect("the log reads")
+            .expect("the backup is in the log")
+            .record
+            .status
+    }
+
+    /// A queued backup whose job can't be built at the restart ends as
+    /// failed, and the log says why (decision 73): left queued, it would
+    /// show as queued with nothing to run it until the next start. Here the
+    /// configuration becomes unreadable between the background task's read
+    /// and the runner's own.
+    #[tokio::test]
+    async fn a_queued_backup_ends_as_daemon_stopped_when_the_configuration_cannot_be_read() {
+        super::captured_log::capture();
+        let id = OperationId::from_uuid(Uuid::from_u128(0x2741));
+        let (runner, queued, _scratch) = a_queued_backup_over_a_spoiled_configuration(id).await;
+
+        PlanRuns::resume(&runner, queued).await;
+
+        assert_eq!(
+            status_of(&runner, id).await,
+            OperationStatus::Failed {
+                reason: FailureReason::DaemonStopped
+            }
+        );
+        let hyphenated = id.as_uuid().hyphenated().to_string();
+        let said = super::captured_log::lines();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains(&hyphenated)
+                && line.contains("the configuration can't be read")),
+            "the log says why the backup ended: {said:?}"
+        );
+    }
+
+    /// The same when the background task's own read of the configuration
+    /// fails: no job can be built, so every queued backup ends as failed,
+    /// and the log says why.
+    #[tokio::test]
+    async fn the_queue_ends_as_daemon_stopped_when_the_background_task_cannot_read_the_configuration()
+     {
+        super::captured_log::capture();
+        let id = OperationId::from_uuid(Uuid::from_u128(0x2742));
+        let (runner, queued, _scratch) = a_queued_backup_over_a_spoiled_configuration(id).await;
+
+        super::resume_queued(
+            vec![OperationRecord::of(&queued, None)],
+            runner.config.as_ref(),
+            Arc::clone(&runner.store),
+            &runner,
+        )
+        .await;
+
+        assert_eq!(
+            status_of(&runner, id).await,
+            OperationStatus::Failed {
+                reason: FailureReason::DaemonStopped
+            }
+        );
+        let said = super::captured_log::lines();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains("the configuration can't be read, so any operation queued")),
+            "the log says why the queue ended: {said:?}"
+        );
+        let hyphenated = id.as_uuid().hyphenated().to_string();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains(&hyphenated)
+                && line.contains("ConfigUnreadable")),
+            "the log names the backup that ended, and why: {said:?}"
+        );
+    }
+
+    /// A queued backup whose plan now backs up to another repository than
+    /// the one it was queued for isn't run there under the old record: it
+    /// ends as failed, and the log says why (decision 73).
+    #[tokio::test]
+    async fn a_queued_backup_whose_plan_moved_to_another_repository_ends_as_daemon_stopped() {
+        super::captured_log::capture();
+        let id = OperationId::from_uuid(Uuid::from_u128(0x2743));
+        let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let queued = domain::execution::Operation::queue(
+            id,
+            OperationKind::Backup,
+            Trigger::Schedule,
+            domain::execution::Target {
+                plan: Some(domain::PlanId::parse("home").expect("a plan ID")),
+                repository: Some(
+                    domain::RepositoryId::parse(&"b".repeat(64)).expect("a repository ID"),
+                ),
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        runner
+            .store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+
+        PlanRuns::resume(&runner, queued).await;
+
+        assert_eq!(
+            status_of(&runner, id).await,
+            OperationStatus::Failed {
+                reason: FailureReason::DaemonStopped
+            }
+        );
+        let hyphenated = id.as_uuid().hyphenated().to_string();
+        let said = super::captured_log::lines();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains(&hyphenated)
+                && line.contains("another repository")),
+            "the log says why the backup ended: {said:?}"
+        );
+    }
+
     /// An engine for a repository that holds no snapshots: it names the
     /// repository when asked to identify it, and lists nothing for any other
     /// job.
@@ -3628,6 +4046,7 @@ mod tests {
             config: Arc::clone(&runner.config),
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -3702,6 +4121,7 @@ mod tests {
             config: Arc::clone(&runner.config),
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -3794,6 +4214,7 @@ mod tests {
                 Arc::new(report),
             )),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -3894,11 +4315,11 @@ mod tests {
 
     #[async_trait]
     impl OperationStore for GatedSaves {
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             reason: &FailureReason,
-        ) -> Result<u64, app::ports::StoreError> {
-            self.inner.fail_unfinished(reason).await
+        ) -> Result<app::ports::Recovered, app::ports::StoreError> {
+            self.inner.recover(reason).await
         }
 
         async fn save(
@@ -4080,11 +4501,11 @@ mod tests {
 
     #[async_trait]
     impl OperationStore for Held {
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             reason: &FailureReason,
-        ) -> Result<u64, app::ports::StoreError> {
-            self.inner.fail_unfinished(reason).await
+        ) -> Result<app::ports::Recovered, app::ports::StoreError> {
+            self.inner.recover(reason).await
         }
 
         async fn save(
@@ -4445,6 +4866,7 @@ mod tests {
             config: Arc::clone(&runner.config),
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         let mut jobs = 0;
         let mut nothing_from = |read: &str, heard: &mut Heard| {
@@ -4584,11 +5006,11 @@ mod tests {
 
     #[async_trait]
     impl OperationStore for RefusingSaves {
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             reason: &FailureReason,
-        ) -> Result<u64, app::ports::StoreError> {
-            self.inner.fail_unfinished(reason).await
+        ) -> Result<app::ports::Recovered, app::ports::StoreError> {
+            self.inner.recover(reason).await
         }
 
         async fn save(
@@ -5068,11 +5490,11 @@ mod tests {
 
     #[async_trait]
     impl OperationStore for HeldAnswer {
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             reason: &FailureReason,
-        ) -> Result<u64, app::ports::StoreError> {
-            self.inner.fail_unfinished(reason).await
+        ) -> Result<app::ports::Recovered, app::ports::StoreError> {
+            self.inner.recover(reason).await
         }
 
         async fn save(
@@ -7547,8 +7969,55 @@ mod repository_service_tests {
             config,
             engine,
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         (catalog, scratch)
+    }
+
+    /// The plans list carries the scheduler's planned run of each scheduled
+    /// plan, and none for a plan without a schedule, even where a run is
+    /// still kept for it (§5, #195).
+    #[tokio::test]
+    async fn the_plans_list_carries_the_planned_run_of_each_scheduled_plan() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let file = scratch.path().join("config.toml");
+        std::fs::write(
+            &file,
+            "schema = 1\n\n[repositories.demo]\nrepository = \"/srv/demo\"\npassword = \"canary\"\n\n\
+             [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [\"/home/demo\"]\n\
+             schedule = { cron = \"0 3 * * *\" }\n\n\
+             [[plans]]\nid = \"docs\"\nrepository = \"demo\"\nsources = [\"/home/demo\"]\n",
+        )
+        .expect("the config file");
+        let schedules = Arc::new(app::fakes::InMemoryScheduleStore::new());
+        for (plan, second) in [("home", 1_794_200_400), ("docs", 1_794_200_000)] {
+            schedules
+                .plan_run(&app::ports::PlannedRun {
+                    plan: PlanId::try_from(plan.to_owned()).expect("a plan ID"),
+                    at: domain::Timestamp::from_second(second).expect("a time"),
+                })
+                .await
+                .expect("the run is kept");
+        }
+        let catalog = ConfigCatalog {
+            config: Arc::new(FileConfigStore::new(file, Arc::new(SystemClock))),
+            engine: engine(),
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules,
+        };
+        let listed = catalog.plans().await.expect("the plans");
+        let shown: Vec<(&str, bool, Option<&str>)> = listed
+            .plans
+            .iter()
+            .map(|plan| (plan.id.as_str(), plan.scheduled, plan.next_run.as_deref()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                ("home", true, Some("2026-11-09T05:00:00Z")),
+                ("docs", false, None),
+            ]
+        );
     }
 
     /// A listing whose password command fails with the other secrets of the
@@ -7908,6 +8377,7 @@ mod repository_service_tests {
                 config: Arc::new(Broken(error.clone())),
                 engine: engine(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+                schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             };
             let expected = CatalogError::Unavailable {
                 code,
@@ -7938,6 +8408,7 @@ mod repository_service_tests {
                 config: config.clone(),
                 engine: scripted.clone(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+                schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             };
             let runner = PlanRunner {
                 config,
@@ -8060,6 +8531,7 @@ mod repository_service_tests {
             config,
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         let listed = catalog.repositories().await.expect("the list");
         // In the order of the aliases, one row each.
@@ -8129,10 +8601,10 @@ mod repository_service_tests {
             Err(no_log())
         }
 
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             _reason: &FailureReason,
-        ) -> Result<u64, app::ports::StoreError> {
+        ) -> Result<app::ports::Recovered, app::ports::StoreError> {
             Err(no_log())
         }
     }
@@ -8191,6 +8663,7 @@ mod repository_service_tests {
             config,
             engine: engine(),
             operations,
+            schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
         };
         let listed = catalog.repositories().await.expect("the list");
         listed

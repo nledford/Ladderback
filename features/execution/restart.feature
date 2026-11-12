@@ -1,9 +1,11 @@
 Feature: Restarting after a crash
   A crash, a kill or a power cut leaves operations in the log that no
-  process is running. The next start ends each of them as failed, with the
-  reason that the daemon stopped, before it accepts a request, and a
-  maintenance operation it ended stops holding its repository. One daemon at
-  a time serves a data folder: a second one is refused and touches nothing.
+  process is running. The next start ends each running one as failed, with
+  the reason that the daemon stopped, before it accepts a request, and a
+  maintenance operation it ended stops holding its repository. A queued
+  backup never started, so the persistent queue runs it once the daemon
+  serves, under its own ID. One daemon at a time serves a data folder: a
+  second one is refused and touches nothing.
 
   # A plan's after hook that waits until it is let go holds its backup
   # running: an operation has not ended until its ending hooks have, so the
@@ -25,6 +27,14 @@ Feature: Restarting after a crash
     When Ladderback is started again on the same folders
     Then the history, read once, shows the operation failed with the code "daemon-stopped"
     And a prune of the repository is accepted
+
+  @e2e
+  Scenario: A backup a stopped daemon left queued runs after the next start
+    Given Ladderback is serving on loopback with the plan "home"
+    And the daemon is killed
+    And the log, while the daemon is down, shows a queued backup of the plan "home"
+    When Ladderback is started again on the same folders
+    Then the history page shows the operation succeeded
 
   @e2e
   Scenario: A second daemon on a folder that is in use is refused and disturbs nothing

@@ -44,14 +44,100 @@ pub(crate) fn PageHeading(children: Children) -> impl IntoView {
     view! { <h1 node_ref=heading tabindex="-1">{children()}</h1> }
 }
 
-/// The start page, the route `/`.
+/// The start page, the route `/`: the configured plans, each with when it
+/// runs next on its schedule (§5), and the way to the operations page, where
+/// a backup is started by hand.
 #[component]
 pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_START_HEADING);
+    let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
+    let body = text(&localizer, msg::UI_START_PLANS_BODY);
+    let loading = text(&localizer, msg::UI_LOADING);
+    let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
+    let empty = text(&localizer, msg::UI_START_NO_PLANS);
+    let caption = text(&localizer, msg::UI_START_CAPTION);
+    let (plan_column, next_run_column) = (
+        text(&localizer, msg::UI_COLUMN_PLAN),
+        text(&localizer, msg::UI_COLUMN_NEXT_RUN),
+    );
+    let operations_link = text(&localizer, msg::UI_START_OPERATIONS_LINK);
+    let phase = RwSignal::new(Phase::Loading);
+    // The configured plans; `None` until the read answers.
+    let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
+    let url = format!("{}/api/v1/plans", ws::origin());
+    spawn_local(async move {
+        let read = ws::read::<PlansDto>(&url).await;
+        // The reader may have followed a link before the answer came: the
+        // page's signals went with it.
+        if phase.try_get_untracked().is_none() {
+            return;
+        }
+        match read {
+            Some(read) => {
+                plans.set(Some(read.plans));
+                phase.set(Phase::Ready);
+            }
+            None => phase.set(Phase::Unreachable),
+        }
+    });
+    // Each next run is written in the viewer's own zone, as every instant the
+    // page shows is (§8.4).
+    let viewer = l10n::viewer_zone();
     view! {
-        <PageHeading>{heading}</PageHeading>
-        <p>{text(&localizer, msg::UI_START_BODY)}</p>
+        <PageHeading>
+            {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+        </PageHeading>
+        <p>{body}</p>
+        {move || match phase.get() {
+            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
+            Phase::Ready => match plans.get() {
+                Some(plans) if !plans.is_empty() => {
+                    view! {
+                        <table class="plans">
+                            <caption class="text-muted">{caption.clone()}</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">{plan_column.clone()}</th>
+                                    <th scope="col">{next_run_column.clone()}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {plans
+                                    .into_iter()
+                                    .map(|plan| {
+                                        let (shown, title) = next_run_cell(&localizer, &plan, viewer.as_ref());
+                                        view! {
+                                            <tr>
+                                                <th scope="row">{plan.id}</th>
+                                                <td title=title>{shown}</td>
+                                            </tr>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </tbody>
+                        </table>
+                    }
+                        .into_any()
+                }
+                _ => view! { <p>{empty.clone()}</p> }.into_any(),
+            },
+        }}
+        <p><A href="/operations">{operations_link}</A></p>
     }
+}
+
+/// What the "Next run" cell of a plan on the start page says, and the instant
+/// it carries in its `title`, as the daemon sent it (UTC), when it shows one.
+/// A plan without a schedule runs only when it is started; a scheduled one
+/// the scheduler has planned no run for says so, never a blank cell.
+pub(crate) fn next_run_cell(
+    localizer: &Localizer,
+    plan: &PlanSummaryDto,
+    zone: Option<&api::IanaZone>,
+) -> (String, Option<String>) {
+    let _ = (localizer, plan, zone);
+    todo!()
 }
 
 /// How the operations table is ordered (§4.4). `History` is the order the
@@ -1780,6 +1866,44 @@ mod tests {
             "not-an-instant",
             "never a blank cell, never a guess"
         );
+    }
+
+    fn plan(scheduled: bool, next_run: Option<&str>) -> PlanSummaryDto {
+        PlanSummaryDto {
+            id: "demo-home".to_owned(),
+            repository: "demo".to_owned(),
+            scheduled,
+            next_run: next_run.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_planned_run_is_written_in_the_pages_locale_and_carries_its_instant() {
+        let localizer = Localizer::new(&[]);
+        let raw = "2026-11-13T03:00:00Z";
+        assert_eq!(
+            next_run_cell(&localizer, &plan(true, Some(raw)), None),
+            (instant(&localizer, raw, None), Some(raw.to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_scheduled_plan_without_a_planned_run_says_so() {
+        assert_eq!(
+            next_run_cell(&Localizer::new(&[]), &plan(true, None), None),
+            ("Not planned yet".to_owned(), None)
+        );
+    }
+
+    #[test]
+    fn a_plan_without_a_schedule_runs_when_started() {
+        let localizer = Localizer::new(&[]);
+        for next_run in [None, Some("2026-11-13T03:00:00Z")] {
+            assert_eq!(
+                next_run_cell(&localizer, &plan(false, next_run), None),
+                ("When started from Operations".to_owned(), None)
+            );
+        }
     }
 
     #[test]

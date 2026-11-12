@@ -1,0 +1,34 @@
+//! Randomness from the operating system (technical design §3.2).
+
+use std::hash::{BuildHasher, RandomState};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use app::ports::Random;
+use domain::execution::next_run::RandomDraw;
+
+/// How many draws were made, so no two draws hash the same input.
+static DRAWS: AtomicU64 = AtomicU64::new(0);
+
+/// The operating system's randomness. A draw is the standard library's
+/// randomly keyed hash of a count of draws: the keys come from the operating
+/// system once per thread, and each new hasher's differ from the last, so
+/// no two draws are the same hash of the same input. It spreads runs over
+/// their jitter (§5), which needs numbers no two agents share, not secrets.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OsRandom;
+
+impl Random for OsRandom {
+    fn draw(&self) -> RandomDraw {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn os_randomness_meets_the_random_contract() {
+        app::contract::random::run(&OsRandom);
+    }
+}

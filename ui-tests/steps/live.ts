@@ -68,12 +68,14 @@ function table(world: BrowserWorld, name: string): Locator {
 /** Writes the config of one or more demo plans and their repository into a
  *  scratch folder, starts a daemon on it, and points the scenario's pages at
  *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
- *  zone its clock runs in, which its workers inherit. */
+ *  zone its clock runs in, which its workers inherit. A plan `schedules`
+ *  names runs on that cron expression. */
 export async function serveDemoPlans(
   world: BrowserWorld,
   plans: readonly string[],
   size: keyof typeof SOURCE_FILES,
   env: Record<string, string> = {},
+  schedules: Readonly<Record<string, string>> = {},
 ): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
@@ -97,6 +99,7 @@ export async function serveDemoPlans(
       `id = ${JSON.stringify(plan)}`,
       'repository = "demo"',
       `sources = [${JSON.stringify(source)}]`,
+      ...(plan in schedules ? [`schedule = { cron = ${JSON.stringify(schedules[plan])} }`] : []),
       "",
     ]),
   ].join("\n");
@@ -138,6 +141,27 @@ Given(
   "two demo plans {string} and {string} with a scratch repository",
   async function (this: BrowserWorld, first: string, second: string) {
     await serveDemoPlans(this, [first, second], "small");
+  },
+);
+
+/** The run the daemon's plans list says `plan` has planned, if any. */
+async function plannedRun(world: BrowserWorld, plan: string): Promise<string | null> {
+  assert.ok(world.baseUrl, "this scenario's daemon was never started");
+  const response = await fetch(new URL("/api/v1/plans", world.baseUrl), {
+    headers: { Origin: new URL(world.baseUrl).origin },
+  });
+  if (!response.ok) return null;
+  const { plans } = (await response.json()) as { plans: { id: string; "next-run": string | null }[] };
+  return plans.find((listed) => listed.id === plan)?.["next-run"] ?? null;
+}
+
+// The scheduler plans a plan it first finds as the daemon starts; the Given
+// waits until it has, so the page opened next has a planned run to show.
+Given(
+  "a demo plan {string} on the schedule {string} and a demo plan {string} without one",
+  async function (this: BrowserWorld, scheduled: string, cron: string, unscheduled: string) {
+    await serveDemoPlans(this, [scheduled, unscheduled], "tiny", {}, { [scheduled]: cron });
+    await until(() => plannedRun(this, scheduled), UPDATE_PATIENCE_MS, `the daemon planned no run of ${scheduled}`);
   },
 );
 
@@ -443,6 +467,16 @@ Then("the table {string} has the row {string}", async function (this: BrowserWor
   await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
 });
 
+// For a page in a pseudolocale, whose tables' names the catalog transformed:
+// the row is found by its header alone, which is data and stays as it is.
+Then("the page shows the row {string}", async function (this: BrowserWorld, row: string) {
+  await this.page
+    .getByRole("row")
+    .filter({ has: this.page.getByRole("rowheader", { name: namePattern(row) }) })
+    .first()
+    .waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+});
+
 /** What a reader hears of the cell of `row` under the column header `column`,
  *  once the row is there: its text without bidi isolation marks. */
 export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
@@ -635,6 +669,28 @@ Given("the plan {string} holds snapshots taken at:", function (this: BrowserWorl
     });
   });
 });
+
+// The cell of a plan's next run carries in its `title` the run the daemon
+// planned, in UTC as the plans list sends it, and shows that instant read in
+// the browser's own zone.
+Then(
+  "the row {string} of the table {string} shows its planned run in its {string} column in the time zone {string}",
+  async function (this: BrowserWorld, row: string, name: string, column: string, zone: string) {
+    const planned = await plannedRun(this, row);
+    assert.ok(planned, `the daemon lists no planned run of ${row}`);
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+    const found = rowNamed(this, name, row).first();
+    await found.waitFor({ state: "visible", timeout: UPDATE_PATIENCE_MS });
+    const [title, shown] = await found.evaluate((tr: HTMLTableRowElement, at) => {
+      const cell = tr.cells[at];
+      if (cell === undefined) throw new Error(`the row has no cell ${at}`);
+      return [cell.title, cell.textContent ?? ""] as const;
+    }, index);
+    assert.equal(title, planned, `the ${column} cell of ${row} doesn't carry the run the daemon planned`);
+    assert.equal(fold(shown), writtenIn(zone)(planned), `the ${column} cell of ${row} is not in ${zone}`);
+  },
+);
 
 // The table answers a press of its sort button by reordering the rows, so the
 // step waits for the order as it waits for any update.

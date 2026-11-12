@@ -98,11 +98,32 @@ impl FakeClock {
         state.wake_due();
     }
 
-    /// How many sleepers are waiting for time to move. A test driving a
-    /// manual clock waits for one before each [`advance`](Self::advance):
-    /// moving time before the sleeper registers would skip its deadline.
+    /// How many sleepers are waiting for time to move; one whose sleep was
+    /// dropped waits for nothing. A test driving a manual clock waits for
+    /// one before each [`advance`](Self::advance): moving time before the
+    /// sleeper registers would skip its deadline.
     pub fn sleepers(&self) -> usize {
-        self.lock().sleepers.len()
+        let mut state = self.lock();
+        state.sleepers.retain(|(_, wake)| !wake.is_canceled());
+        state.sleepers.len()
+    }
+
+    /// How long until the first waiting sleeper's deadline, as
+    /// [`advance`](Self::advance) counts it; `None` when nothing waits. A
+    /// test that moves time by this much wakes that sleeper and no other
+    /// with a later deadline, so it can step a loop that sleeps on the
+    /// clock from one wake to the next.
+    pub fn until_next_sleeper(&self) -> Option<SignedDuration> {
+        let mut state = self.lock();
+        state.sleepers.retain(|(_, wake)| !wake.is_canceled());
+        state
+            .sleepers
+            .iter()
+            .map(|(deadline, _)| match *deadline {
+                Deadline::Wall(at) => at.duration_since(state.now),
+                Deadline::Monotonic(at) => at.saturating_sub(state.monotonic),
+            })
+            .min()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {

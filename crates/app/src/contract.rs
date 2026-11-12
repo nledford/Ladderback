@@ -10,5 +10,7 @@ pub mod network;
 pub mod operation_store;
 pub mod power;
 pub mod profiles;
+pub mod random;
+pub mod schedule_store;
 pub mod secrets;
 pub mod service;

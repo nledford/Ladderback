@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use app::execution::{Finished, RunOperation};
+use app::execution::{Finished, Queued, RunOperation};
 use app::fakes::{FakeClock, InMemoryOperationStore};
 use app::log_write::SAVE_BOUND;
 use app::ports::{
@@ -239,11 +239,11 @@ impl Journal {
 
 #[async_trait]
 impl OperationStore for Journal {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(
@@ -299,11 +299,11 @@ impl Flaky {
 
 #[async_trait]
 impl OperationStore for Flaky {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(
@@ -357,11 +357,11 @@ impl Stalled {
 
 #[async_trait]
 impl OperationStore for Stalled {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(
@@ -524,6 +524,41 @@ fn warning() -> Warning {
         during: "backup".to_owned(),
         detail: "odd".to_owned(),
     }
+}
+
+#[tokio::test]
+async fn a_queued_operation_taken_up_from_the_log_runs_under_its_id_and_is_not_recorded_again() {
+    let journal = Arc::new(Journal::default());
+    let queued = Operation::queue(
+        id(),
+        OperationKind::Backup,
+        Trigger::Schedule,
+        Target::default(),
+        t(-60),
+    );
+    journal.inner.save(&queued, None).await.unwrap();
+    let use_case = RunOperation::new(
+        Arc::new(Scripted::new(vec![started(), succeeded()])),
+        Arc::new(FakeClock::new(t(0))),
+        journal.clone(),
+    );
+    let finished = use_case
+        .run_queued(Queued::resumed(queued, fake_job(None)), future::pending())
+        .await;
+    assert_eq!(finished.operation.id(), id());
+    assert_eq!(finished.operation.status(), &OperationStatus::Succeeded);
+    assert_eq!(finished.operation.trigger(), Trigger::Schedule);
+    assert_eq!(
+        journal.writes(),
+        vec![OperationStatus::Running, OperationStatus::Succeeded],
+        "a run taken up from the log writes no second queued row"
+    );
+    let detail = logged(&journal.inner).await;
+    assert_eq!(
+        detail.record.queued_at,
+        t(-60),
+        "it keeps when it was queued"
+    );
 }
 
 #[tokio::test]
@@ -1308,11 +1343,11 @@ struct Slow {
 
 #[async_trait]
 impl OperationStore for Slow {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(

@@ -110,10 +110,17 @@ impl WakeWatch {
     pub async fn next_wake(&mut self) -> Wake {
         loop {
             self.clock.sleep(WAKE_CHECK_EVERY).await;
-            if let Some(wake) = self.detector.sample(sample(self.clock.as_ref())) {
+            if let Some(wake) = self.check() {
                 return wake;
             }
         }
+    }
+
+    /// Samples the clocks now, and returns the wake the sample shows since
+    /// the one before: for a loop that sleeps on its own timers, as the
+    /// scheduler does, and samples at least every [`WAKE_CHECK_EVERY`].
+    pub fn check(&mut self) -> Option<Wake> {
+        self.detector.sample(sample(self.clock.as_ref()))
     }
 }
 

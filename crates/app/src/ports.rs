@@ -8,7 +8,9 @@ mod hooks;
 mod operation_store;
 mod platform;
 mod profiles;
+mod random;
 mod retention;
+mod schedule_store;
 mod secrets;
 mod service;
 mod sources;
@@ -31,14 +33,16 @@ pub use hooks::{
 };
 pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
-    OperationStore, PageSize, Start, StoreError, maintained_repository,
+    OperationStore, PageSize, Recovered, Start, StoreError, maintained_repository,
 };
 pub use platform::{Network, PlatformError, PowerSupply};
 pub use profiles::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
     ProfileReader, ProfileWriter, RenderedProfile,
 };
+pub use random::Random;
 pub use retention::{Retention, RetentionError};
+pub use schedule_store::{PlannedRun, ScheduleStore};
 pub use secrets::{Resolved, SecretResolver};
 pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 pub use sources::{NormalizeSources, SourcesError};

@@ -1738,10 +1738,10 @@ mod record_tests {
 
     #[async_trait]
     impl OperationStore for Stalled {
-        async fn fail_unfinished(
+        async fn recover(
             &self,
             _reason: &domain::execution::FailureReason,
-        ) -> Result<u64, StoreError> {
+        ) -> Result<crate::ports::Recovered, StoreError> {
             futures::future::pending().await
         }
 
@@ -1830,7 +1830,7 @@ mod record_tests {
     async fn a_stalled_log_never_answers_a_recovery_either() {
         let answered = tokio::time::timeout(
             std::time::Duration::from_millis(100),
-            Stalled.fail_unfinished(&domain::execution::FailureReason::DaemonStopped),
+            Stalled.recover(&domain::execution::FailureReason::DaemonStopped),
         )
         .await;
         assert!(answered.is_err(), "a stalled log answers nothing");
