@@ -26,8 +26,8 @@ use app::ports::{
 };
 use app::recovery::RecoverOperations;
 use app::repositories::{
-    ConnectRepository, CreateOffers, InitRepository, Recording, RepositoryError, SavedEntryError,
-    TestRepository,
+    ConfigWrites, ConnectRepository, CreateOffers, InitRepository, RecordOpened, Recording,
+    RepositoryError, SavedEntryError, TestRepository,
 };
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
@@ -38,7 +38,7 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::{Maintenance, RepositoryField, RepositorySettings};
+use domain::planning::{Maintenance, NotRecorded, RepositoryField, RepositorySettings};
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SourceName, Template, TemplateError,
@@ -248,10 +248,19 @@ async fn state_over(
         workers = workers.with_cache_root(dir);
     }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
-    let engine: Arc<dyn Engine> = Arc::new(EventEngine {
-        inner: Arc::new(workers),
-        bus: Arc::clone(&bus),
-    });
+    // One lock for every write of the configuration the daemon makes: a
+    // connection, a creation and the record of an opened repository's ID
+    // (§6.1, decision 57).
+    let writes = Arc::new(ConfigWrites::default());
+    let engine: Arc<dyn Engine> = Arc::new(RecordOpened::new(
+        Arc::new(EventEngine {
+            inner: Arc::new(workers),
+            bus: Arc::clone(&bus),
+        }),
+        Arc::clone(&config),
+        Arc::clone(&writes),
+        Arc::new(log_recording),
+    ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
     let operations: Arc<dyn Operations> = Arc::new(PlanRunner {
         config: Arc::clone(&config),
@@ -270,6 +279,7 @@ async fn state_over(
         resolve.as_ref().clone(),
         Arc::clone(&config),
         Arc::clone(&store),
+        writes,
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
         config,
@@ -314,9 +324,46 @@ fn workers_cache(dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> 
 }
 
 /// Says in the log what became of the ID of a repository a job opened,
-/// whose entry recorded none.
-fn log_recording(_recording: Recording) {
-    todo!()
+/// whose entry recorded none. It names the entry by its alias and the
+/// repository by its ID, neither of which opens it (I4).
+fn log_recording(recording: Recording) {
+    match recording {
+        Recording::Recorded { alias, id } => log::info!(
+            "recorded the repository ID {} in the entry {} of the configuration: a job opened it",
+            id.as_str(),
+            alias.as_str()
+        ),
+        Recording::NotRecorded {
+            alias,
+            id,
+            why: NotRecorded::SameRepository { other },
+        } => log::warn!(
+            "did not record the repository ID {} in the entry {} of the configuration: the entry {} records it, so the two entries are one repository; remove one of them",
+            id.as_str(),
+            alias.as_str(),
+            other.as_str()
+        ),
+        Recording::NotRecorded { alias, id, why } => log::info!(
+            "did not record the repository ID {} in the entry {} of the configuration ({why:?}); the next job that opens it tries again",
+            id.as_str(),
+            alias.as_str()
+        ),
+        Recording::NotInPlace { alias, id, why } => log::warn!(
+            "did not record the repository ID {} in the entry {} of the configuration: it can't be added without changing something else in the file ({why:?}); the next job that opens it tries again",
+            id.as_str(),
+            alias.as_str()
+        ),
+        Recording::Busy { alias, id } => log::info!(
+            "did not record the repository ID {} in the entry {} of the configuration: another change to it was being saved; the next job that opens it tries again",
+            id.as_str(),
+            alias.as_str()
+        ),
+        Recording::Failed { alias, id, error } => log::warn!(
+            "did not record the repository ID {} in the entry {} of the configuration ({error:?}); the next job that opens it tries again",
+            id.as_str(),
+            alias.as_str()
+        ),
+    }
 }
 
 /// Waits for `close`, the closing of the operation log at `database`, for
@@ -580,14 +627,15 @@ impl Operations for PlanRunner {
         let repository = config
             .repository(&plan.repository)
             .ok_or(StartError::UnknownPlan)?;
-        let mut resolved = self
+        // The engine opens only the repository the configuration recorded,
+        // when it recorded one (§7.3), and the job carries the entry it was
+        // made from, so the ID it opens is recorded in an entry that records
+        // none (§6.1, decision NN).
+        let resolved = self
             .resolve
-            .resolve(&repository.settings)
+            .resolve_saved(&plan.repository, repository)
             .await
             .map_err(|_| StartError::Unavailable)?;
-        // The engine opens only the repository the configuration recorded,
-        // when it recorded one (§7.3).
-        resolved.access.id = repository.id.clone();
         let job = Job::Backup(BackupJob {
             repository: resolved.access,
             sources: plan.sources.iter().map(|s| s.as_str().to_owned()).collect(),
@@ -1368,8 +1416,9 @@ struct RepositoryService {
     /// The operation log, which says whether a saved repository's row
     /// offers Create (decision 53).
     operations: Arc<dyn OperationStore>,
-    /// Held across a use case's read-modify-write of the configuration.
-    writes: tokio::sync::Mutex<()>,
+    /// Held across a use case's read-modify-write of the configuration, and
+    /// shared with the record of an opened repository's ID.
+    writes: Arc<ConfigWrites>,
 }
 
 impl RepositoryService {
@@ -1379,6 +1428,7 @@ impl RepositoryService {
         resolve: ResolveRepository,
         config: Arc<dyn ConfigStore>,
         operations: Arc<dyn OperationStore>,
+        writes: Arc<ConfigWrites>,
     ) -> Self {
         Self {
             clock,
@@ -1386,7 +1436,7 @@ impl RepositoryService {
             resolve,
             config,
             operations,
-            writes: tokio::sync::Mutex::new(()),
+            writes,
         }
     }
 }
@@ -5301,6 +5351,7 @@ mod repository_service_tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config,
             Arc::new(app::fakes::InMemoryOperationStore::new()),
+            Arc::default(),
         )
     }
 
@@ -5464,6 +5515,7 @@ mod repository_service_tests {
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),
+            Arc::default(),
         )
         .connect(connect("demo", settings))
         .await;
@@ -5549,6 +5601,7 @@ mod repository_service_tests {
                 ResolveRepository::new(Arc::new(secrets)),
                 config.clone(),
                 Arc::new(app::fakes::InMemoryOperationStore::new()),
+                Arc::default(),
             );
             service
                 .connect(connect("demo", settings))
@@ -5810,6 +5863,7 @@ mod repository_service_tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
             Arc::new(NoLog),
+            Arc::default(),
         );
         service
             .connect(connect("demo", settings_dto()))
@@ -5906,6 +5960,7 @@ mod repository_service_tests {
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),
+            Arc::default(),
         )
         .connect(connect("demo", settings))
         .await

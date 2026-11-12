@@ -722,7 +722,9 @@ impl RunMaintenance {
 
     /// The access to the repository `alias` names in `config`. The access
     /// names the repository ID the configuration recorded for it, when it
-    /// recorded one, so the engine opens that repository or none (§7.3).
+    /// recorded one, so the engine opens that repository or none (§7.3),
+    /// and the entry it was made from, so the ID it opens is recorded in an
+    /// entry that records none (§6.1, decision NN).
     async fn open(
         &self,
         config: &AgentConfig,
@@ -731,14 +733,12 @@ impl RunMaintenance {
         let repository = config
             .repository(alias)
             .ok_or(MaintenanceError::UnknownRepository)?;
-        let mut access = self
+        Ok(self
             .resolve
-            .resolve(&repository.settings)
+            .resolve_saved(alias, repository)
             .await
             .map_err(MaintenanceError::Resolve)?
-            .access;
-        access.id = repository.id.clone();
-        Ok(access)
+            .access)
     }
 
     /// As [`open`](Self::open), with the access naming the repository's ID,
