@@ -27,8 +27,10 @@ pub fn power_condition(
     schedule: &Schedule,
     power: Option<PowerSource>,
 ) -> Result<(), UnmetCondition> {
-    let _ = (schedule, power);
-    todo!()
+    match power {
+        Some(PowerSource::Battery) if schedule.on_ac_power() => Err(UnmetCondition::OnBattery),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

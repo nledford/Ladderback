@@ -50,8 +50,14 @@ impl WakeDetector {
     /// ran more than [`WAKE_GAP`] ahead of monotonic time since the sample
     /// before. A clock set back is no wake: no run was missed.
     pub fn sample(&mut self, now: ClockSample) -> Option<Wake> {
-        let _ = (now, self.last);
-        todo!()
+        let wall = now.wall.duration_since(self.last.wall);
+        let monotonic = now.monotonic.saturating_sub(self.last.monotonic);
+        self.last = now;
+        let slept = wall.saturating_sub(monotonic);
+        (slept > WAKE_GAP).then_some(Wake {
+            at: now.wall,
+            slept,
+        })
     }
 }
 

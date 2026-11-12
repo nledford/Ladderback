@@ -1,15 +1,16 @@
 //! The checks a scheduled run goes through before it starts (technical
 //! design §5): the plan's AC power condition, the wait for the network that
 //! a catch-up run after a wake makes, and the watch that notices a wake. The
-//! scheduler that runs them is #274's; each check is bounded, so none can
-//! hold a run back for good.
+//! scheduler that runs them is #274's; the network wait is bounded here,
+//! whatever the platform does, so it can't hold a run back for good.
 
 use std::sync::Arc;
 
 use domain::SignedDuration;
-use domain::execution::conditions::UnmetCondition;
-use domain::execution::wake::Wake;
+use domain::execution::conditions::{UnmetCondition, power_condition};
+use domain::execution::wake::{ClockSample, WAKE_CHECK_EVERY, Wake, WakeDetector};
 use domain::planning::Schedule;
+use futures::future::{Either, select};
 
 use crate::ports::{Clock, Network, PlatformError, PowerSupply};
 
@@ -34,15 +35,23 @@ pub enum PowerCheck {
 impl PowerCheck {
     /// Whether the run starts.
     pub fn lets_run(&self) -> bool {
-        todo!()
+        !matches!(self, Self::Unmet(_))
     }
 }
 
 /// Checks the AC power condition of `schedule`. A plan that doesn't ask for
 /// AC power never asks the platform.
 pub async fn check_power(schedule: &Schedule, power: &dyn PowerSupply) -> PowerCheck {
-    let _ = (schedule, power);
-    todo!()
+    if !schedule.on_ac_power() {
+        return PowerCheck::Met;
+    }
+    match power.source().await {
+        Ok(source) => match power_condition(schedule, Some(source)) {
+            Ok(()) => PowerCheck::Met,
+            Err(unmet) => PowerCheck::Unmet(unmet),
+        },
+        Err(error) => PowerCheck::Unknown(error),
+    }
 }
 
 /// How the wait for the network ended. Whatever the end, the run goes ahead:
@@ -62,27 +71,56 @@ pub enum NetworkWait {
 /// monotonic time, asking every [`NETWORK_CHECK_EVERY`]. A check that hangs
 /// is given up at the bound too.
 pub async fn wait_for_network(clock: &dyn Clock, network: &dyn Network) -> NetworkWait {
-    let _ = (clock, network);
-    todo!()
+    let start = clock.monotonic();
+    let remaining = || NETWORK_WAIT.saturating_sub(clock.monotonic().saturating_sub(start));
+    loop {
+        let left = remaining();
+        if left <= SignedDuration::ZERO {
+            return NetworkWait::GaveUp;
+        }
+        match select(network.is_online(), clock.sleep(left)).await {
+            Either::Left((Ok(true), _)) => {
+                return NetworkWait::Online {
+                    waited: clock.monotonic().saturating_sub(start),
+                };
+            }
+            Either::Left((Ok(false), _)) => {}
+            Either::Left((Err(error), _)) => return NetworkWait::Unknown(error),
+            Either::Right(((), _)) => return NetworkWait::GaveUp,
+        }
+        clock.sleep(NETWORK_CHECK_EVERY.min(remaining())).await;
+    }
 }
 
 /// Notices the machine waking from sleep, sampling the clocks every
-/// [`WAKE_CHECK_EVERY`](domain::execution::wake::WAKE_CHECK_EVERY).
+/// [`WAKE_CHECK_EVERY`] of monotonic time.
 pub struct WakeWatch {
     clock: Arc<dyn Clock>,
+    detector: WakeDetector,
 }
 
 impl WakeWatch {
     /// Starts watching from the clocks' current reading.
     pub fn new(clock: Arc<dyn Clock>) -> Self {
-        let _ = clock;
-        todo!()
+        let detector = WakeDetector::new(sample(clock.as_ref()));
+        Self { clock, detector }
     }
 
     /// Returns at the first sample that shows a wake.
     pub async fn next_wake(&mut self) -> Wake {
-        let _ = &self.clock;
-        todo!()
+        loop {
+            self.clock.sleep(WAKE_CHECK_EVERY).await;
+            if let Some(wake) = self.detector.sample(sample(self.clock.as_ref())) {
+                return wake;
+            }
+        }
+    }
+}
+
+fn sample(clock: &dyn Clock) -> ClockSample {
+    ClockSample {
+        wall: clock.now(),
+        monotonic: clock.monotonic(),
     }
 }
 
