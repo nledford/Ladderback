@@ -4,6 +4,8 @@
 // writes, an oracle independent of ICU4X, apart from the one place CLDR and V8
 // differ (below). Run it from anywhere: `node generate.ts`. Node 22.18 or later
 // (it strips the types); the table was made with Node 26.13 (V8 14.6, ICU 78.3, CLDR 48).
+// The browser lane holds an instant to the running Intl's text and the table's numbers,
+// since Node may run another ICU (technical design §8.4, "Tests").
 //
 // What it mirrors of the daemon:
 //   - A number literal's decimals are its minimum fraction digits, and a

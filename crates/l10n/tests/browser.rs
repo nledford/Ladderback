@@ -9,14 +9,21 @@
 //! U+202F before AM and PM and U+00A0 elsewhere, so both sides of every
 //! comparison are folded to U+0020 first. The catalogs here are the tests' own,
 //! so the wording of the real catalog is not under test.
+//!
+//! Node may be built with another ICU than the one that wrote the table, so an
+//! instant is held to what the running `Intl` writes for the case and to the
+//! table's numbers, not to the table's text (technical design §8.4, "Tests").
 #![cfg(all(target_arch = "wasm32", feature = "browser-intl"))]
 
 #[path = "expectations/mod.rs"]
 mod expectations;
 
 use api::{IanaZone, MsgArg};
+use js_sys::{Array, Function, Object, Reflect};
 use l10n::catalog::{Catalog, Source};
 use l10n::{Localizer, MessageId};
+use serde_json::{Map, Value};
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 
 const EN: Catalog = Catalog {
@@ -96,22 +103,138 @@ fn the_table_holds(locale: &str) {
         "{locale} has {} cases",
         outcomes.len()
     );
-    let wrong: Vec<String> = outcomes
-        .into_iter()
-        .map(|outcome| expectations::Outcome {
-            expected: fold(&outcome.expected),
-            shown: fold(&outcome.shown),
-            ..outcome
-        })
-        .filter(|outcome| !outcome.holds())
-        .map(|outcome| outcome.describe())
-        .collect();
+    let wrong: Vec<String> = outcomes.into_iter().filter_map(differs).collect();
     assert!(
         wrong.is_empty(),
         "{} cases of {locale} differ:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// How a case went wrong, or `None` when it holds. A number, count, size or
+/// duration is the table's text. An instant is the running `Intl`'s text,
+/// with the table's numbers in it.
+fn differs(outcome: expectations::Outcome) -> Option<String> {
+    let case: Map<String, Value> = serde_json::from_str(&outcome.case).expect("a case is JSON");
+    let table = fold(&outcome.expected);
+    let outcome = expectations::Outcome {
+        expected: match case.get("instant") {
+            Some(_) => fold(&intl_writes(&case)),
+            None => table.clone(),
+        },
+        shown: fold(&outcome.shown),
+        ..outcome
+    };
+    let (shown, pinned) = (numbers(&outcome.shown), numbers(&table));
+    (!outcome.holds() || shown != pinned).then(|| {
+        format!(
+            "{}\n    table    {table:?}\n    numbers  {shown:?}, the table's {pinned:?}",
+            outcome.describe()
+        )
+    })
+}
+
+/// What the running `Intl` writes for an instant case, as `generate.ts`
+/// wrote the table: the case's options, or a medium date and a short time
+/// when it has none, in the case's zone, or in UTC when there is none or
+/// `Intl` doesn't have it.
+fn intl_writes(case: &Map<String, Value>) -> String {
+    let text = |value: &Value| value.as_str().map(str::to_owned);
+    let option = |name: &str| case.get("options").and_then(|options| text(&options[name]));
+    let options = Object::new();
+    let set = |name: &str, value: &str| {
+        Reflect::set(&options, &name.into(), &value.into()).unwrap();
+    };
+    let zone_name = option("timeZoneName").is_some();
+    if zone_name {
+        set("timeZoneName", "short");
+    } else if option("dateStyle").is_none() && option("timeStyle").is_none() {
+        set("dateStyle", "medium");
+        set("timeStyle", "short");
+    } else {
+        for name in ["dateStyle", "timeStyle"] {
+            if let Some(style) = option(name) {
+                set(name, &style);
+            }
+        }
+    }
+    let instant = &case["instant"];
+    let formatter = text(&instant["zone"])
+        .and_then(|zone| date_time_format(&case["locale"], &options, &zone))
+        .or_else(|| date_time_format(&case["locale"], &options, "UTC"))
+        .unwrap_or_else(|| panic!("Intl refuses the options of {case:?}"));
+    let utc_ms = JsValue::from_f64(instant["utcMs"].as_f64().unwrap());
+    let method = |name: &str| -> JsValue {
+        Reflect::get(&formatter, &name.into())
+            .unwrap()
+            .unchecked_into::<Function>()
+            .call1(&formatter, &utc_ms)
+            .unwrap_or_else(|error| panic!("Intl can't write {case:?}: {error:?}"))
+    };
+    if !zone_name {
+        return method("format").as_string().unwrap();
+    }
+    method("formatToParts")
+        .unchecked_into::<Array>()
+        .iter()
+        .find(|part| {
+            Reflect::get(part, &"type".into())
+                .unwrap()
+                .as_string()
+                .as_deref()
+                == Some("timeZoneName")
+        })
+        .and_then(|part| Reflect::get(&part, &"value".into()).unwrap().as_string())
+        .unwrap_or_else(|| panic!("Intl writes no zone name for {case:?}"))
+}
+
+/// `new Intl.DateTimeFormat(locale, { ...options, timeZone: zone })`, or
+/// `None` when `Intl` refuses the zone.
+fn date_time_format(locale: &Value, options: &Object, zone: &str) -> Option<JsValue> {
+    let options = Object::assign(&Object::new(), options);
+    Reflect::set(&options, &"timeZone".into(), &zone.into()).unwrap();
+    let intl = Reflect::get(&js_sys::global(), &"Intl".into()).unwrap();
+    let constructor: Function = Reflect::get(&intl, &"DateTimeFormat".into())
+        .unwrap()
+        .unchecked_into();
+    let locale = JsValue::from_str(locale.as_str().unwrap());
+    Reflect::construct(&constructor, &Array::of2(&locale, &options)).ok()
+}
+
+/// The zero of each script of digits the table's locales write: Latin,
+/// Arabic-Indic, Persian, Devanagari, Bengali and Thai.
+const ZEROS: [char; 6] = ['0', '\u{660}', '\u{6f0}', '\u{966}', '\u{9e6}', '\u{e50}'];
+
+/// The numbers a text writes, in order, as Latin digits without the zeros
+/// that lead them: `08:30` and `٠٨:٣٠` are both `["8", "30"]`.
+fn numbers(text: &str) -> Vec<String> {
+    let mut numbers = Vec::new();
+    let mut run = String::new();
+    for c in text.chars() {
+        let digit = ZEROS.iter().find_map(|&zero| {
+            let value = u32::from(c).checked_sub(u32::from(zero))?;
+            char::from_digit(value, 10)
+        });
+        match digit {
+            Some('0') if run.is_empty() => run.push('0'),
+            Some(digit) if run == "0" => run = digit.to_string(),
+            Some(digit) => run.push(digit),
+            None => {
+                assert!(
+                    !c.is_numeric(),
+                    "{c:?} in {text:?} is a digit no script here has"
+                );
+                if !run.is_empty() {
+                    numbers.push(std::mem::take(&mut run));
+                }
+            }
+        }
+    }
+    if !run.is_empty() {
+        numbers.push(run);
+    }
+    numbers
 }
 
 #[wasm_bindgen_test]
