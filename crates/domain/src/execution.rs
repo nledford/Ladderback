@@ -274,7 +274,7 @@ pub struct Operation {
     warning_count: u64,
     /// The alias this agent gave the repository a maintenance operation runs
     /// on, as it stood when the run started: a repository renamed since keeps
-    /// its old name in the log (§16, decision NN). `None` for a backup, which
+    /// its old name in the log (§16, decision 52). `None` for a backup, which
     /// its plan names, and for an operation an earlier build logged.
     #[serde(default)]
     repository_alias: Option<RepositoryAlias>,
