@@ -160,11 +160,15 @@ jobs:
         run: just test
         env:
           NEXTEST_PROFILE: ci
+      # Kept 14 days, not the repository's default of 90: a report is read
+      # while its failure is fresh, and two weeks still covers a run looked at
+      # after a week away. The same holds for both `mutants.out` uploads below.
       - if: always() && needs.changes.outputs.docs-only != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-${{ matrix.os }}
           path: target/nextest/ci/junit.xml
+          retention-days: 14
 
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
@@ -387,6 +391,7 @@ jobs:
         with:
           name: mutants.out
           path: mutants.out
+          retention-days: 14
 
   # A scheduled run notifies no one, so a failure opens an issue, or comments
   # on the one already open, rather than going unseen.
@@ -415,6 +420,7 @@ jobs:
         with:
           name: mutants.out
           path: mutants.out
+          retention-days: 14
       # Only on a failure of this job's own steps (a timeout counts), not on
       # a cancel. The title is fixed, so a second failure finds the open issue.
       - if: failure()
