@@ -449,6 +449,20 @@ impl Redactor {
         self.mask(text, text.strip_suffix(mark).map(str::len))
     }
 
+    /// `text` masked with the secrets of every one of `redactors` at once,
+    /// as one redactor of all their secrets would mask it: a secret of one
+    /// that holds or overlaps a secret of another is masked whole, where
+    /// masking with each in turn leaves what the first one's mask broke up
+    /// of the other's (#287). One of them that masks everything masks every
+    /// text that isn't empty whole.
+    pub fn redact_together<'a>(
+        redactors: impl IntoIterator<Item = &'a Redactor>,
+        text: &str,
+    ) -> String {
+        let _ = (redactors, text);
+        todo!()
+    }
+
     /// `text` with every needle in it replaced. When `cut` is given, the
     /// text was cut after its first `cut` bytes, and the end of those from
     /// where it is the start of a needle on (the earliest start of a secret
@@ -946,10 +960,78 @@ mod tests {
         assert_eq!(redactor.redact("x Ab%2fC x"), "x *** x");
     }
 
+    /// A library that logs a value with `{:?}` prints a secret in it escaped:
+    /// rustic logs the command it starts rclone with so, the location last
+    /// (#330).
+    #[test]
+    fn a_secret_is_replaced_as_a_debug_form_escapes_it() {
+        let secret = "CANARY\"quote\\slash\ttab\u{1}e\u{301}";
+        let whole = redactor(&[secret]);
+        let command = ["rclone", &format!(":s3,secret_access_key={secret}:b")];
+        assert_eq!(
+            whole.redact(&format!("starting rclone via {command:?}")),
+            r#"starting rclone via ["rclone", ":s3,secret_access_key=***:b"]"#
+        );
+        assert_eq!(whole.redact(&format!("{secret:#?}")), r#""***""#);
+        // Its other raw forms too: without the white space around it, and
+        // each line of one that spans lines.
+        let key = "CANARY\"line-one\nCANARY\\line-two\n";
+        let by_line = redactor(&[key]);
+        for logged in [key.trim(), "CANARY\"line-one", "CANARY\\line-two"] {
+            assert_eq!(by_line.redact(&format!("{logged:?}")), r#""***""#);
+        }
+    }
+
     #[test]
     fn a_secret_containing_another_is_replaced_whole() {
         let redactor = redactor(&["abc", "abcdef"]);
         assert_eq!(redactor.redact("xabcdefx abc"), "x***x ***");
+    }
+
+    /// Masked with each in turn, the mask of `CANARY-reused` would leave
+    /// `-tail` of `CANARY-reused-tail`, and that one's mask would leave `-on`
+    /// of `reused-tail-on`, or the other way round `CANARY-` of it.
+    #[test]
+    fn redactors_masking_together_replace_a_secret_of_one_holding_one_of_another_whole() {
+        let short = redactor(&["CANARY-reused"]);
+        let long = redactor(&["CANARY-reused-tail"]);
+        let overlapping = redactor(&["reused-tail-on"]);
+        for (redactors, text, masked) in [
+            ([&short, &long], "x CANARY-reused-tail y", "x *** y"),
+            ([&long, &short], "x CANARY-reused-tail y", "x *** y"),
+            (
+                [&long, &overlapping],
+                "x CANARY-reused-tail-on y",
+                "x *** y",
+            ),
+            (
+                [&overlapping, &long],
+                "x CANARY-reused-tail-on y",
+                "x *** y",
+            ),
+            ([&short, &long], "x CANARY-reused y", "x *** y"),
+            ([&short, &long], "nothing secret", "nothing secret"),
+        ] {
+            assert_eq!(Redactor::redact_together(redactors, text), masked);
+        }
+        assert_eq!(
+            Redactor::redact_together([], "nothing to mask"),
+            "nothing to mask"
+        );
+    }
+
+    #[test]
+    fn redactors_masking_together_mask_every_text_whole_where_one_masks_everything() {
+        let everything = Redactor::masking_everything();
+        let some = redactor(&["CANARY-some"]);
+        for redactors in [
+            [&some, &everything],
+            [&everything, &some],
+            [&everything, &everything],
+        ] {
+            assert_eq!(Redactor::redact_together(redactors, "plain text"), REDACTED);
+            assert_eq!(Redactor::redact_together(redactors, ""), "");
+        }
     }
 
     #[test]

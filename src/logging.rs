@@ -18,7 +18,16 @@ const DEFAULT_LEVEL: LevelFilter = LevelFilter::Info;
 /// stays, and nothing is changed or reported.
 pub(crate) fn install(plain: bool) {
     let rust_log = std::env::var("RUST_LOG").ok();
-    let logger = logger(rust_log.as_deref(), Target::Stderr, write_style(plain));
+    set(logger(
+        rust_log.as_deref(),
+        Target::Stderr,
+        write_style(plain),
+    ));
+}
+
+/// Makes `logger` the process's logger, once, at the level it filters at.
+/// Where a logger is set already, that one stays.
+fn set(logger: Logger) {
     let level = logger.filter();
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
         log::set_max_level(level);
@@ -58,6 +67,8 @@ pub(crate) fn write_style(plain: bool) -> WriteStyle {
 
 #[cfg(test)]
 mod tests {
+    mod in_process_open;
+
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex, PoisonError};
 
@@ -76,10 +87,10 @@ mod tests {
 
     /// What a logger wrote to its pipe.
     #[derive(Clone, Default)]
-    struct Pipe(Arc<Mutex<Vec<u8>>>);
+    pub(super) struct Pipe(Arc<Mutex<Vec<u8>>>);
 
     impl Pipe {
-        fn text(&self) -> String {
+        pub(super) fn text(&self) -> String {
             let written = self.0.lock().unwrap_or_else(PoisonError::into_inner);
             String::from_utf8_lossy(&written).into_owned()
         }
