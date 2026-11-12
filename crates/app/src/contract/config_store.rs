@@ -3,11 +3,12 @@ use std::collections::BTreeMap;
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
-    Hostname, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RepositoryConfig,
-    RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
+    Hostname, Interval, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Overlap, Plan,
+    RepositoryConfig, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, ScheduleZone,
+    Source, SourceFilter,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
-use domain::{PlanId, RepositoryAlias, RepositoryId, SignedDuration};
+use domain::{PlanId, RepositoryAlias, RepositoryId, SignedDuration, TimeZoneDatabase};
 
 use crate::ports::ConfigStore;
 
@@ -29,6 +30,12 @@ fn strings_by_name(items: &[(&str, &str)]) -> BTreeMap<String, String> {
         .iter()
         .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
         .collect()
+}
+
+/// The schedule zone `name` names in the database built in: the store's
+/// adapter looks the name up in the system's, and zones are equal by name.
+fn zone(name: &str) -> Option<ScheduleZone> {
+    ScheduleZone::new(name, TimeZoneDatabase::bundled().get(name).ok()?).ok()
 }
 
 /// Run against an empty store: the first check is that it loads the empty
@@ -249,11 +256,13 @@ fn rich() -> Option<AgentConfig> {
         tags: vec![tag("demo")?, tag("laptop")?, tag("Home Dir")?],
         schedule: Some(
             Schedule::new(CronExpression::parse("0 3 * * 1-5").ok()?)
+                .with_zone(zone("Europe/Berlin")?)
                 .with_jitter(SignedDuration::from_millis(90_250))
                 .ok()?
                 .with_catch_up(false)
                 .with_on_ac_power(true),
         ),
+        overlap: Overlap::Queue,
         retry: Some(RetryPolicy::new(3, SignedDuration::from_millis(600_500)).ok()?),
         filter: SourceFilter {
             globs: strings(&["*.tmp", "!keep.tmp", "# not a comment", "say \"hi\""]),
@@ -327,16 +336,25 @@ fn rich() -> Option<AgentConfig> {
         schedule: Some(Schedule::new(CronExpression::parse("@daily").ok()?)),
         ..Plan::new(
             plan_id("photos")?,
-            cloud,
+            cloud.clone(),
             vec![source("/home/demo/photos")?, source("/home/demo/video")?],
         )
+    };
+
+    // A schedule that runs every so often, in a zone that plays no part.
+    let mail = Plan {
+        schedule: Some(
+            Schedule::new(Interval::new(SignedDuration::from_mins(90)).ok()?)
+                .with_zone(zone("UTC")?),
+        ),
+        ..Plan::new(plan_id("mail")?, cloud, vec![source("/home/demo/mail")?])
     };
 
     AgentConfig::new(
         agent_settings,
         agent_hooks,
         repositories,
-        vec![home, work, photos],
+        vec![home, work, photos, mail],
     )
     .ok()
 }

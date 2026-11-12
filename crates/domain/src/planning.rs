@@ -25,13 +25,15 @@ pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub use local_paths::{RepositoryField, is_relative_location};
 pub use names::{GlobFile, Hostname, Locale, Source};
-pub use plan::{Plan, RetryPolicy};
+pub use plan::{Overlap, Plan, RetryPolicy};
 pub use repository::{
     GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,
     check_options, masked_options,
 };
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
-pub use schedule::{Cadence, CronExpression, Interval, MIN_INTERVAL, NoNextRun, Schedule};
+pub use schedule::{
+    Cadence, CronExpression, Interval, MIN_INTERVAL, NoNextRun, Schedule, ScheduleZone,
+};
 
 /// What a value the model refuses was meant to be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,8 +49,14 @@ pub enum ValueKind {
     Nice,
     Cron,
     Duration,
-    /// A schedule's `every`, shorter than a minute or longer than 366 days.
+    /// A schedule's `every`: not a length of time, or shorter than a minute
+    /// or longer than 366 days.
     Interval,
+    /// A schedule's `timezone`: not `UTC` nor a name in the IANA time zone
+    /// database.
+    TimeZone,
+    /// A plan's `overlap`: not `skip` nor `queue`.
+    Overlap,
     Attempts,
     KeepCount,
     KeepWithin,

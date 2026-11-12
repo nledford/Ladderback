@@ -15,7 +15,8 @@ mod sources;
 
 pub use clock::Clock;
 pub use config_store::{
-    ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem, RecordError,
+    CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,
+    RecordError,
 };
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,

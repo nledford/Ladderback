@@ -67,6 +67,34 @@ impl RetryPolicy {
     }
 }
 
+/// The overlap policy (§5): what a plan does when its next run comes due
+/// while its last run is still going. It skips that run, the default, or
+/// queues it to start once the last one ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overlap {
+    #[default]
+    Skip,
+    Queue,
+}
+
+impl Overlap {
+    /// Reads `skip` or `queue`, in lower case.
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        match text {
+            "skip" => Ok(Self::Skip),
+            "queue" => Ok(Self::Queue),
+            _ => Err(InvalidValue::new(ValueKind::Overlap, text)),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Queue => "queue",
+        }
+    }
+}
+
 /// One plan of an agent's config. Each part has been checked by its own type;
 /// what only the whole configuration can check (a unique ID, a repository
 /// that exists, at least one source) is checked by
@@ -87,6 +115,8 @@ pub struct Plan {
     pub tags: Vec<UserTag>,
     /// When it runs. A plan without one runs only when asked to.
     pub schedule: Option<Schedule>,
+    /// What it does when a run comes due while its last one is still going.
+    pub overlap: Overlap,
     pub retry: Option<RetryPolicy>,
     pub filter: SourceFilter,
     pub retention: RetentionPolicy,
@@ -106,6 +136,7 @@ impl Plan {
             sources,
             tags: Vec::new(),
             schedule: None,
+            overlap: Overlap::Skip,
             retry: None,
             filter: SourceFilter::default(),
             retention: RetentionPolicy::default(),
@@ -270,5 +301,27 @@ mod tests {
     fn without_either_there_is_no_snapshot_host_and_the_engine_chooses() {
         let plan = plan_with_host(None);
         assert_eq!(plan.snapshot_host(&agent_with_hostname(None)), None);
+    }
+
+    #[test]
+    fn an_overlap_policy_is_skip_or_queue() {
+        for (text, overlap) in [("skip", Overlap::Skip), ("queue", Overlap::Queue)] {
+            assert_eq!(Overlap::parse(text), Ok(overlap));
+            assert_eq!(overlap.as_str(), text);
+        }
+        for text in ["", "Skip", "QUEUE", "wait", "skip "] {
+            assert_eq!(
+                Overlap::parse(text),
+                Err(invalid(ValueKind::Overlap, text)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plan_skips_a_run_that_comes_due_while_its_last_is_going_unless_told_otherwise() {
+        assert_eq!(Overlap::default(), Overlap::Skip);
+        let plan = plan_with_host(None);
+        assert_eq!(plan.overlap.as_str(), "skip");
     }
 }

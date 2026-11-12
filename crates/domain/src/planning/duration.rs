@@ -17,15 +17,20 @@ pub const MAX_DURATION: SignedDuration = SignedDuration::from_hours(366 * 24);
 /// length, so it is refused, and so is a time below zero or above
 /// [`MAX_DURATION`].
 pub fn parse_duration(text: &str) -> Result<SignedDuration, InvalidValue> {
-    let refused = || InvalidValue::new(ValueKind::Duration, text);
-    let span = Span::from_str(text).map_err(|_| refused())?;
+    length_of(text)
+        .and_then(|duration| within_limits(duration).ok())
+        .ok_or_else(|| InvalidValue::new(ValueKind::Duration, text))
+}
+
+/// The length of time `text` writes, with no limit but that it isn't below
+/// zero; `None` for text that is no length of time, or a month or a year,
+/// which have no fixed length.
+pub(crate) fn length_of(text: &str) -> Option<SignedDuration> {
+    let span = Span::from_str(text).ok()?;
     if span.is_negative() {
-        return Err(refused());
+        return None;
     }
-    let duration = span
-        .to_duration(SpanRelativeTo::days_are_24_hours())
-        .map_err(|_| refused())?;
-    within_limits(duration).map_err(|_| refused())
+    span.to_duration(SpanRelativeTo::days_are_24_hours()).ok()
 }
 
 /// `duration` if it is a length of time a jitter may be: not below zero and

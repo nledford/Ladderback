@@ -600,6 +600,23 @@ fn api_refused(agent: &mut Agent, status: u16, code: String) {
     assert_eq!(json["code"], serde_json::json!(code), "the refusal: {json}");
 }
 
+/// A `config-invalid` refusal that says where the setting is and nothing of
+/// the parser's own words: the setting's code says what is wrong with it.
+#[then(expr = "the refusal names the config setting {string} on line {int}, and nothing more")]
+fn api_refusal_names_config_setting(agent: &mut Agent, setting: String, line: u32) {
+    let (_, json) = api_answer(agent);
+    assert_eq!(
+        json["args"]["line"],
+        serde_json::json!({"type": "text", "value": line.to_string()}),
+        "the refusal: {json}"
+    );
+    assert_eq!(
+        json["detail"],
+        serde_json::json!(setting),
+        "the refusal: {json}"
+    );
+}
+
 #[then(expr = "the refusal names the setting {string}")]
 fn api_refusal_names_setting(agent: &mut Agent, setting: String) {
     let (_, json) = api_answer(agent);

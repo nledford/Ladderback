@@ -4,14 +4,14 @@
 
 use std::collections::BTreeMap;
 
-use app::ports::{ConfigError, PasswordProblem, Problem};
+use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Problem};
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
-    Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
-    RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule,
-    Source, SourceFilter, ValueKind, Violation, check_location, check_option_value, check_options,
-    parse_duration,
+    AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
+    Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice,
+    OnFailure, Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings,
+    RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, ValueKind, Violation,
+    check_location, check_option_value, check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -21,6 +21,7 @@ use crate::tables::{
     AgentTable, FileTable, HookEntryTable, HookValue, HooksTable, PlanTable, RepositoryTable,
     RetentionTable, RetryTable, ScheduleTable,
 };
+use crate::zone::schedule_zone;
 
 /// Where an error is: which file, and which text the places refer to.
 pub(crate) struct Reader<'a, 'i> {
@@ -379,6 +380,11 @@ fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
         .schedule
         .map(|schedule| schedule_of(reader, &path.key("schedule"), schedule))
         .transpose()?;
+    let overlap = table
+        .overlap
+        .map(|text| reader.value(&path.key("overlap"), Overlap::parse(&text)))
+        .transpose()?
+        .unwrap_or_default();
     let retry = table
         .retry
         .map(|retry| retry_of(reader, &path.key("retry"), retry))
@@ -409,6 +415,7 @@ fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
         sources,
         tags,
         schedule,
+        overlap,
         retry,
         filter,
         retention,
@@ -431,11 +438,27 @@ fn glob_files(
 }
 
 fn schedule_of(reader: &Reader<'_, '_>, path: &Path, table: ScheduleTable) -> Read<Schedule> {
-    let cron = reader.required(path, "cron", table.cron)?;
-    let cron = reader.value(&path.key("cron"), CronExpression::parse(&cron))?;
-    let mut schedule = Schedule::new(cron)
+    let cadence = match (table.cron, table.every) {
+        (Some(cron), None) => {
+            Cadence::Cron(reader.value(&path.key("cron"), CronExpression::parse(&cron))?)
+        }
+        (None, Some(every)) => {
+            Cadence::Every(reader.value(&path.key("every"), Interval::parse(&every))?)
+        }
+        (None, None) => return Err(reader.refuse(path, Problem::Cadence(CadenceProblem::Missing))),
+        (Some(_), Some(_)) => {
+            return Err(reader.refuse(path, Problem::Cadence(CadenceProblem::Several)));
+        }
+    };
+    let mut schedule = Schedule::new(cadence)
         .with_catch_up(table.catch_up.unwrap_or(true))
         .with_on_ac_power(table.on_ac_power.unwrap_or(false));
+    if let Some(name) = table.timezone {
+        // The system's copy of the time zone database, or the one built in
+        // where the system has none.
+        let zone = schedule_zone(&name, jiff::tz::db());
+        schedule = schedule.with_zone(reader.value(&path.key("timezone"), zone)?);
+    }
     if let Some(text) = table.jitter {
         let jitter_path = path.key("jitter");
         let jitter = reader.value(&jitter_path, parse_duration(&text))?;

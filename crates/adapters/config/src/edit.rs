@@ -478,14 +478,15 @@ mod tests {
 
     use domain::planning::{
         AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks,
-        Hostname, KeepCount, Maintenance, Plan, RepositoryConfig, RepositorySettings,
+        Hostname, KeepCount, Maintenance, Overlap, Plan, RepositoryConfig, RepositorySettings,
         RetentionPolicy, Schedule, Source,
     };
     use domain::secrets::SecretRef;
-    use domain::{PlanId, RepositoryAlias};
+    use domain::{PlanId, RepositoryAlias, TimeZoneDatabase};
 
     use super::saved;
     use crate::schema::{CURRENT_SCHEMA, MAX_CONFIG_BYTES, Schemas, parse, render_as};
+    use crate::zone::schedule_zone;
 
     const FILE: &str = "config.toml";
 
@@ -699,6 +700,28 @@ keep-daily = 7
             Some(WRITTEN.replace(
                 "schedule = { cron = \"0 * * * *\", jitter = \"5 minutes\" }",
                 "schedule = { cron = \"0 2 * * *\", jitter = \"5m\" }"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_zone_a_save_gives_a_schedule_rewrites_it_and_an_overlap_policy_is_added_to_the_plan() {
+        let saved = changed(WRITTEN, |parts| {
+            let home = plan_mut(parts, "home");
+            let berlin =
+                schedule_zone("Europe/Berlin", &TimeZoneDatabase::bundled()).expect("a zone");
+            home.schedule = home
+                .schedule
+                .take()
+                .map(|schedule| schedule.with_zone(berlin));
+            home.overlap = Overlap::Queue;
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "schedule = { cron = \"0 * * * *\", jitter = \"5 minutes\" }\n",
+                "schedule = { cron = \"0 * * * *\", timezone = \"Europe/Berlin\", jitter = \"5m\" }\n\
+                 overlap = \"queue\"\n"
             ))
         );
     }
