@@ -33,6 +33,8 @@ signal-hook.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
+# The Basic credentials an `rclone:` repository is read with (tests/retention.rs).
+base64.workspace = true
 tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

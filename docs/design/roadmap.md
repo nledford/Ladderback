@@ -32,7 +32,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | Risk | Mitigation |
 |---|---|
 | `rustic_core` is pre-1.0, so its API changes | Pin one revision for both crates. All usage goes through the `engine` crate. Contract tests run against a temp repo in CI |
-| The pinned revision is unreleased code | Move to the first release with `Progress::error`. Until then, upgrade the pin only deliberately, with the kill test and contract tests green |
+| The pinned revision is unreleased code | Move to the first release with `Progress::error`. Until then, upgrade the pin only deliberately, with the kill test and contract tests green, and the engine's start of an `rclone:` server compared with rustic's `rclone.rs` (decision 58) |
 | A `rustic_core` upgrade adds or changes option fields | Ladderback-owned option types with a parity test per mapped struct (§6.1) |
 | Divergence from rustic CLI profile semantics (list replacement, hook levels, `use-profiles`) | Golden tests: parse the rustic repo's `config/*.toml` examples and compare against expected plans; export round-trip test (§6.2) |
 | rustic CLI behaviour Ladderback's export relies on changes (e.g. `[forget] filter-*` starts working, `[snapshot-filter]` semantics change) | Export golden test runs against the rustic CLI version CI pins |
