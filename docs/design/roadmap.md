@@ -133,6 +133,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [72](decisions/72-a-schedule-s-interval-and-time-zone-and-a-plan-s-overlap-policy.md) | A schedule's interval and time zone, and a plan's overlap policy |
 | [73](decisions/73-the-persistent-queue-and-the-scheduler-loop.md) | The persistent queue and the scheduler loop |
 | [75](decisions/75-the-overlap-policy-and-the-concurrency-limit.md) | The overlap policy and the concurrency limit |
+| [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
 
 ## 17. Open questions
 

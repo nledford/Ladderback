@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 mod command;
+mod go_print;
 mod inline;
 mod options;
 mod outcome;
@@ -619,54 +620,19 @@ fn go_quoted(secret: &str) -> Option<String> {
     (quoted != secret).then_some(quoted)
 }
 
-/// The characters Rust's `Debug` escapes that are neither control, format,
-/// separator, private-use nor unassigned characters, and so print in Go:
-/// the default-ignorable marks and letters (the combining grapheme joiner,
-/// variation selectors, the Hangul fillers), which `Debug` escapes in newer
-/// Rust versions (1.99 does; 1.97 printed them).
-const DEBUG_ESCAPES_GO_PRINTS: [std::ops::RangeInclusive<char>; 9] = [
-    '\u{34f}'..='\u{34f}',
-    '\u{115f}'..='\u{1160}',
-    '\u{17b4}'..='\u{17b5}',
-    '\u{180b}'..='\u{180d}',
-    '\u{180f}'..='\u{180f}',
-    '\u{3164}'..='\u{3164}',
-    '\u{fe00}'..='\u{fe0f}',
-    '\u{ffa0}'..='\u{ffa0}',
-    '\u{e0100}'..='\u{e01ef}',
-];
-
 /// Whether Go's `strconv.Quote` writes `c` as it is (`"` and `\` aside):
 /// whether `unicode.IsPrint` takes it, a letter, mark, number, punctuation
-/// or symbol, or the space. Rust's `Debug` leaves the characters of those
-/// categories unescaped (its `core::unicode::printable` tables), apart from
-/// three escapes of its own: `'`, which `str::escape_debug` escapes; the
-/// characters of [`DEBUG_ESCAPES_GO_PRINTS`]; and a grapheme extender (a
-/// combining character among them), which `str::escape_debug` escapes only
-/// at the start of a text, so `c` is asked after a space. Both read the
-/// categories from Unicode's tables, so this is Go's answer wherever the
-/// two Unicode versions agree; a character one version has assigned and
-/// the other not is printed by one and escaped by the other, and then a
-/// secret holding it is not masked as Go quotes it (technical design
-/// §10.2).
+/// or symbol, or the space, by the Unicode version of the Go that rclone
+/// is built with. [`go_print::GO_PRINT`] holds those characters, generated
+/// from that version's tables, so the answer is Go's whatever Rust
+/// toolchain builds Ladderback (technical design §10.2).
 fn go_prints(c: char) -> bool {
-    if c == '\''
-        || DEBUG_ESCAPES_GO_PRINTS
-            .iter()
-            .any(|range| range.contains(&c))
-    {
-        return true;
-    }
-    let mut pair = [b' '; 5];
-    let Some(after) = pair.get_mut(1..) else {
-        return false;
-    };
-    // Four bytes hold any character.
-    let len = c.encode_utf8(after).len();
-    match pair.get(..=len).map(std::str::from_utf8) {
-        Some(Ok(text)) => text.escape_debug().skip(1).eq([c]),
-        _ => false,
-    }
+    let code = u32::from(c);
+    // The first range that doesn't end before `c` holds it, if any does.
+    let at = go_print::GO_PRINT.partition_point(|&(_, last)| last < code);
+    go_print::GO_PRINT
+        .get(at)
+        .is_some_and(|&(first, _)| first <= code)
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -1161,12 +1127,25 @@ mod tests {
         assert_eq!(go_quoted("CANARY\u{1}"), Some(r"CANARY\x01".to_owned()));
     }
 
+    /// A character is quoted as Go quotes it whatever Rust toolchain builds
+    /// Ladderback: Rust 1.100's `Debug` escapes a combining mark even after
+    /// a letter, and prints U+0558, which Unicode 17, Go 1.27's, hasn't
+    /// assigned (#406).
+    #[test]
+    fn a_character_is_quoted_as_go_quotes_it_whatever_the_toolchain() {
+        // Nonspacing, enclosing and spacing marks.
+        assert_eq!(go_quoted("CANARY e\u{301}\u{489}\u{9be}"), None);
+        assert_eq!(go_quoted("CANARY\u{558}"), Some(r"CANARY\u0558".to_owned()));
+    }
+
     /// Every character is quoted as Go 1.27.3's `strconv.Quote` quotes it
     /// (Unicode 17): the count of characters Go escapes and an FNV-1a hash
     /// of every quoted form, each followed by a line break, in order, are
-    /// Go's own. [`go_prints`] asks Rust's `Debug`, whose tables change with
-    /// the toolchain: when this fails, quote every character with Go again
-    /// and correct [`DEBUG_ESCAPES_GO_PRINTS`] (technical design §10.2).
+    /// Go's own. [`go_prints`] reads a table generated from Unicode's tables,
+    /// so this holds whatever Rust toolchain builds Ladderback; when rclone's
+    /// Go moves to a new Unicode version, regenerate the table, quote every
+    /// character with that Go again and pin its answer (technical design
+    /// §10.2).
     #[test]
     fn every_character_is_quoted_as_go_quotes_it() {
         let mut escaped = 0_u32;
