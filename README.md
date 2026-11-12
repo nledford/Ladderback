@@ -109,7 +109,7 @@ toolbox create ladderback && toolbox enter ladderback
 sudo dnf install nss atk at-spi2-core libdrm libxkbcommon libXcomposite libXdamage libXfixes libXrandr mesa-libgbm alsa-lib
 ```
 
-Outside a container, Workstation and Server take the same list with `sudo dnf install`; an atomic host can layer it with `rpm-ostree install`, which needs a reboot. This list is what headless Chromium needs to launch on Fedora 45. `just msrv` uses `podman` when `docker` is missing; `DOCKER=podman just msrv` picks it.
+Outside a container, Workstation and Server take the same list with `sudo dnf install`; an atomic host can layer it with `rpm-ostree install`, which needs a reboot. This list is what headless Chromium needs to launch on Fedora 45.
 
 ## License
 
