@@ -148,6 +148,7 @@ dependencies = [
  "cucumber",
  "domain",
  "futures",
+ "testkit",
  "tokio",
  "uuid",
 ]

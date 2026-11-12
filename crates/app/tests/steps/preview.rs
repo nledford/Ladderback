@@ -243,7 +243,7 @@ async fn confirm(agent: &mut Agent, kind: MaintenanceKind, op: OperationId, job:
                     async move { runner.execute(prepared, futures::future::pending()).await },
                 );
             wait_for_job(agent, job).await;
-            agent.forget.release().notify_waiters();
+            agent.forget.release_hold();
             agent.finished = Some(running.await.expect("the run ends"));
         }
         Err(error) => agent.forget.set_refused(Some(error)),
@@ -252,7 +252,7 @@ async fn confirm(agent: &mut Agent, kind: MaintenanceKind, op: OperationId, job:
 
 /// Waits until the scripted engine was given a job of this kind.
 async fn wait_for_job(agent: &Agent, name: &str) {
-    for _ in 0..400 {
+    for _ in 0..2000 {
         if agent.forget.jobs().contains(&name) {
             return;
         }

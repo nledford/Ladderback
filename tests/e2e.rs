@@ -15,10 +15,11 @@ use cucumber::World;
 use domain::execution::{Operation, Trigger};
 use domain::{AgentId, OperationId, Uuid};
 use engine::WorkerEngine;
-use futures::StreamExt;
 use futures::channel::oneshot;
+use futures::{FutureExt, StreamExt};
 use platform::SystemClock;
 use store::SqliteStore;
+use testkit::scenario_watch::ScenarioWatch;
 
 #[path = "steps/backup.rs"]
 mod backup_steps;
@@ -297,9 +298,26 @@ async fn main() {
     let name = cli.re_filter.take();
     let tags = cli.tags_filter.take();
     let worst_stall = Cell::new(Duration::ZERO);
+    let scenarios = ScenarioWatch::start("e2e runner", SCENARIO_LIMIT);
+    let _slowest = scenarios.report_slowest();
+    let (begun, ended) = (scenarios.clone(), scenarios);
     let run = Agent::cucumber()
         .with_cli(cli)
         .fail_on_skipped()
+        .before(move |feature, _, scenario, _| {
+            let name = ScenarioWatch::describe(
+                &scenario.name,
+                scenario.position.line,
+                feature.path.as_deref(),
+                &feature.name,
+            );
+            begun.began(scenario, name);
+            futures::future::ready(()).boxed_local()
+        })
+        .after(move |_, _, scenario, _, _| {
+            ended.ended(scenario);
+            futures::future::ready(()).boxed_local()
+        })
         // Each backup runs a worker process that uses every core, so more
         // scenarios at once than a few only make the runner's own thread
         // wait for the processor: 64 at once (cucumber's default) held it
@@ -371,6 +389,14 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) 
 /// a run that blocks nothing and shares the machine with its workers sees (up
 /// to 1.2 s on ten cores, with 4 scenarios at once).
 const MAX_STALL: Duration = Duration::from_secs(8);
+
+/// The longest a scenario may run before the run stops, naming it. The whole
+/// runner takes about 71 s on CI's macOS runner and 44 s on Linux, and its
+/// slowest scenario (rustic's dry-run forget beside Ladderback's) took 13.7 s
+/// on a ten-core Mac; the limit is several times that, so a step that waits
+/// for something that never comes (#246) fails within two minutes, not when
+/// CI cancels the job.
+const SCENARIO_LIMIT: Duration = Duration::from_secs(120);
 
 /// Says how long the runner's thread was unavailable at worst when the run
 /// ends, also when a failed step ends it: the figure belongs to a failure
