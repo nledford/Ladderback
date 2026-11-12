@@ -267,6 +267,43 @@ When("the daemon gives the answer it held back", async function (this: BrowserWo
   await scripted(this).answerTheHeld();
 });
 
+Given("the daemon queues each backup the page starts", function (this: BrowserWorld) {
+  scripted(this).answerStarts();
+});
+
+Given("the daemon accepts each cancel the page asks for, and the run goes on", function (this: BrowserWorld) {
+  scripted(this).acceptCancels();
+});
+
+When("the daemon has accepted the cancel of the backup of {string}", async function (this: BrowserWorld, plan: string) {
+  await scripted(this).untilCancelAccepted(plan);
+});
+
+// A page the reader has left listens no more and reads nothing more: its
+// events stream closes, and neither a reconnect nor a settle-poll asks the
+// daemon anything after it (#300). A read or an opening asked for just before
+// the page went may still be on its way, so the watch starts a moment later,
+// and lasts longer than a first reconnect's back-off (one second) and many of
+// a settle-poll's rounds (a quarter of a second each).
+Then("the page stops listening to the daemon", async function (this: BrowserWorld) {
+  const daemon = scripted(this);
+  await daemon.untilStreamsOpen(0);
+  await sleep(500);
+  const [reads, opened] = [daemon.historyReads, daemon.streamsOpened];
+  await sleep(2_000);
+  assert.equal(daemon.historyReads - reads, 0, "the page read the history after the reader left it");
+  assert.equal(daemon.streamsOpened - opened, 0, "the page opened an events stream after the reader left it");
+});
+
+// One stream, and still one a moment later: a page that kept an old stream,
+// or opened a second, has more.
+Then("the page has one events stream open", async function (this: BrowserWorld) {
+  const daemon = scripted(this);
+  await daemon.untilStreamsOpen(1);
+  await sleep(1_000);
+  assert.equal(daemon.openStreams, 1, `the page has ${daemon.openStreams} events streams open, not one`);
+});
+
 When("the daemon has stopped", async function (this: BrowserWorld) {
   const own = this.ownServer;
   assert.ok(own, "this scenario's daemon was never started");
