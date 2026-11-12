@@ -902,22 +902,41 @@ fn retries_started_at(agent: &mut Agent, name: String, times: String) {
 #[then(expr = "the agent announced retry {int} of {int} of the plan {string} for {string}")]
 fn announced_retry(agent: &mut Agent, attempt: u32, attempts: u32, name: String, at: String) {
     let published = agent.scheduler.events.published();
+    let started = agent.scheduler.runs.started();
+    // The run that failed: a run of the fake is numbered by its start, and
+    // the first retry follows a run the schedule started, each later one a
+    // retry.
+    let failed = |operation: &str| {
+        uuid::Uuid::try_parse(operation)
+            .ok()
+            .and_then(|id| usize::try_from(id.as_u128()).ok())
+            .and_then(|number| started.get(number.checked_sub(1)?))
+            .is_some_and(|run| {
+                run.plan.as_str() == name
+                    && run.at < time(&at)
+                    && (run.trigger == Trigger::Retry) == (attempt > 1)
+            })
+    };
     let announced = published.iter().any(|event| {
         matches!(
             event,
             UiEvent::BackupRetrying {
+                operation,
                 plan,
                 attempt: said,
                 attempts: of,
                 at: when,
-                ..
             } if *plan == name
                 && *said == attempt
                 && *of == attempts
                 && when.parse::<Timestamp>().ok() == Some(time(&at))
+                && failed(operation)
         )
     });
-    assert!(announced, "the agent announced {published:?}");
+    assert!(
+        announced,
+        "the agent announced {published:?} after {started:?}"
+    );
 }
 
 #[then(expr = "the agent announced {int} retry/retries of the plan {string}")]
