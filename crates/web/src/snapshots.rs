@@ -26,7 +26,7 @@ use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
 use crate::repositories::{Sentence, repository_notes};
-use crate::routes::{Empty, PageHeading, refusal, short_id, snapshot_time, text_with};
+use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
@@ -128,13 +128,12 @@ impl Page {
     /// it: those are English whatever the language of the page, and are
     /// marked so.
     fn refused_sentence(self, refused: &Refusal) -> Sentence {
-        let text = refusal(
+        refused_sentence(
             &self.localizer.get_value(),
             refused.code,
             &refused.args,
             refused.detail.as_deref(),
-        );
-        Sentence::new(&text, refused.detail.as_deref())
+        )
     }
 
     /// Notes whether a request got an answer at all: any answer, a refusal

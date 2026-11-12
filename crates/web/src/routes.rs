@@ -17,6 +17,7 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
+    sentence_view,
 };
 use crate::live::{reply, say};
 use crate::operations::{self, Name};
@@ -26,7 +27,7 @@ use crate::repositories::{
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
     rereads_list, row_refusal,
 };
-use crate::ws::{self, Phase, Posted};
+use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
 
 /// The `<h1>` of a page, with `tabindex="-1"` so that focus can move to it.
@@ -135,9 +136,21 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let page = Pausable::new(ops, phase);
     let plans_url = format!("{base}/api/v1/plans");
     let plans_ops = ops;
+    // A list of plans the daemon refused, as a configuration with a mistake
+    // in it is: said where the plans' buttons would be (#347).
+    let plans_refused = RwSignal::<Option<Sentence>>::new(None);
+    let plans_localizer = Arc::clone(&localizer);
     spawn_local(async move {
-        if let Some(read) = ws::read::<PlansDto>(&plans_url).await {
-            plans.set(Some(read.plans));
+        match ws::get::<PlansDto>(&plans_url).await {
+            Some(Got::Read(read)) => plans.set(Some(read.plans)),
+            Some(Got::Refused(code, args, detail)) => plans_refused.set(Some(refused_sentence(
+                &plans_localizer,
+                code,
+                &args,
+                detail.as_deref(),
+            ))),
+            // No answer at all: the page's phase says that its own way.
+            None => {}
         }
         let _ = plans_ops;
     });
@@ -225,6 +238,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             on_resume=on_resume
         />
         {move || error.get().map(|text| view! { <p role="alert">{text}</p> })}
+        {move || {
+            plans_refused
+                .get()
+                .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+        }}
         // The plans sit outside the connection's phases: a reader can start a
         // backup while the history is still on its way. Their buttons are a
         // row of actions, as a dialog's are, so each stands apart from the
@@ -827,12 +845,12 @@ pub(crate) fn refusal(
 /// A refusal as [`refusal`] writes it, with the sender's own words marked:
 /// they are English whatever the page's language (§8.4).
 pub(crate) fn refused_sentence(
-    _localizer: &Localizer,
-    _code: ErrorCode,
-    _args: &[(String, MsgArg)],
-    _detail: Option<&str>,
-) -> crate::repositories::Sentence {
-    todo!()
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(String, MsgArg)],
+    detail: Option<&str>,
+) -> Sentence {
+    Sentence::new(&refusal(localizer, code, args, detail), detail)
 }
 
 /// What a person has typed into the Repositories form, one signal per field,
@@ -970,12 +988,28 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let phase = RwSignal::new(Phase::Loading);
     // The configured repositories; `None` until the first read answers.
     let rows = RwSignal::<Option<Vec<RepositoryDto>>>::new(None);
+    // A list the daemon refused, as a configuration with a mistake in it is:
+    // said in the list's place, naming where the mistake is (#347).
+    let refused = RwSignal::<Option<Sentence>>::new(None);
+    let load_localizer = Arc::clone(&localizer);
     let load = Callback::new(move |()| {
         let url = format!("{}/api/v1/repositories", base.get_value());
+        let localizer = Arc::clone(&load_localizer);
         spawn_local(async move {
-            match ws::read::<RepositoriesDto>(&url).await {
-                Some(read) => {
+            match ws::get::<RepositoriesDto>(&url).await {
+                Some(Got::Read(read)) => {
+                    refused.set(None);
                     rows.set(Some(read.repositories));
+                    phase.set(Phase::Ready);
+                }
+                Some(Got::Refused(code, args, detail)) => {
+                    refused.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    rows.set(None);
                     phase.set(Phase::Ready);
                 }
                 None => phase.set(Phase::Unreachable),
@@ -1078,8 +1112,11 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => match rows.get() {
-                Some(rows) if !rows.is_empty() => {
+            Phase::Ready => match (refused.get(), rows.get()) {
+                (Some(sentence), _) => {
+                    view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                }
+                (None, Some(rows)) if !rows.is_empty() => {
                     let localizer = Arc::clone(&list_localizer);
                     let base = base.get_value();
                     view! {
