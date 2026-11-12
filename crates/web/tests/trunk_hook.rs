@@ -21,9 +21,10 @@ const PACKAGE: &str = env!("CARGO_MANIFEST_DIR");
 const LOCKFILE: &str = "{\"lockfileVersion\": 3, \"packages\": {\"node_modules/@tailwindcss/cli\": {\"version\": \"4.1.0\"}}}\n";
 const BUMPED_LOCKFILE: &str = "{\"lockfileVersion\": 3, \"packages\": {\"node_modules/@tailwindcss/cli\": {\"version\": \"4.1.1\"}}}\n";
 
-/// Logs its arguments. `npm ci` replaces node_modules with the packages, as
-/// npm does; with `FAKE_NPM_FAILS` set it fails having changed node_modules
-/// without replacing it, as an install that stops part way does.
+/// Logs its arguments. `npm ci` replaces node_modules with the packages and,
+/// last, npm's own record of them, as npm does; with `FAKE_NPM_FAILS` set it
+/// fails having changed node_modules without replacing it, as an install
+/// that stops part way does.
 const FAKE_NPM: &str = r#"#!/bin/sh
 echo "npm $*" >> "$FAKE_LOG"
 [ "$1" = ci ] || exit 2
@@ -33,6 +34,7 @@ if [ -n "${FAKE_NPM_FAILS:-}" ]; then
 fi
 rm -rf node_modules
 mkdir -p node_modules/@tailwindcss/cli
+echo '{}' > node_modules/.package-lock.json
 "#;
 
 const FAKE_NPX: &str = r#"#!/bin/sh
@@ -160,6 +162,52 @@ fn assert_succeeded(output: &Output) {
         "the hook failed: {}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_first_build_installs_the_packages_before_tailwind_runs() {
+    let checkout = Checkout::new();
+
+    assert_succeeded(&checkout.build());
+
+    assert_eq!(checkout.calls(), ["npm ci", "npx --no-install"]);
+}
+
+#[test]
+fn a_build_with_the_lockfile_unchanged_installs_nothing() {
+    let checkout = Checkout::new();
+    assert_succeeded(&checkout.build());
+
+    assert_succeeded(&checkout.build());
+
+    assert_eq!(
+        checkout.calls(),
+        ["npm ci", "npx --no-install", "npx --no-install"]
+    );
+}
+
+/// npm reads its own record of node_modules (`node_modules/.package-lock.json`)
+/// instead of the whole tree only while that file is no older than the
+/// folder, so the hook's own record, written into the folder after npm's,
+/// mustn't leave npm's looking out of date.
+#[test]
+fn npm_s_own_record_of_node_modules_stays_current_after_an_install() {
+    let checkout = Checkout::new();
+
+    assert_succeeded(&checkout.build());
+
+    let modified = |path: &str| {
+        fs::metadata(checkout.web().join(path))
+            .unwrap()
+            .modified()
+            .unwrap()
+    };
+    let npm_record = modified("node_modules/.package-lock.json");
+    let folder = modified("node_modules");
+    assert!(
+        npm_record >= folder,
+        "npm's record {npm_record:?} is older than node_modules {folder:?}"
     );
 }
 
