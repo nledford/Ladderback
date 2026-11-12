@@ -1,6 +1,8 @@
 //! The hooks adapter: a [`HookRunner`] that spawns each hook's command as a
 //! process, without a shell, in a process group of its own, with the
-//! worker's scrubbed environment (components.md §4.1, security.md §10.2).
+//! worker's scrubbed environment (components.md §4.1, security.md §10.2),
+//! through the spawn gate (decision 58), so a hook inherits no other child's
+//! pipes and no other child inherits its pipes.
 //!
 //! A hook that outlives its timeout is stopped with SIGTERM to its group and
 //! SIGKILL after a grace, the sequence the password-command runner
