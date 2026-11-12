@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,7 +33,11 @@ use crate::{FileReader, SystemSecrets};
 /// The contract's harness over a scratch directory, the real environment
 /// reader and files, real commands and a keyring in memory.
 struct RealHarness {
-    directory: TempDir,
+    /// Holds the scratch directory until the harness is dropped.
+    _directory: TempDir,
+    /// The scratch directory resolved to a plain path: a `$TMPDIR` holding `..` would
+    /// keep the credentials directory from being trusted (security.md §10.2).
+    root: PathBuf,
     environment: Mutex<BTreeMap<String, String>>,
     keyring: Arc<Memory>,
     commands: AtomicUsize,
@@ -41,8 +45,11 @@ struct RealHarness {
 
 impl RealHarness {
     fn new() -> Self {
+        let directory = TempDir::new().unwrap();
+        let root = fs::canonicalize(directory.path()).unwrap();
         Self {
-            directory: TempDir::new().unwrap(),
+            _directory: directory,
+            root,
             environment: Mutex::default(),
             keyring: Arc::default(),
             commands: AtomicUsize::new(0),
@@ -50,7 +57,7 @@ impl RealHarness {
     }
 
     fn path(&self, name: &str) -> String {
-        self.directory.path().join(name).display().to_string()
+        self.root.join(name).display().to_string()
     }
 
     fn next(&self) -> usize {
