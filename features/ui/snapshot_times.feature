@@ -48,3 +48,29 @@ Feature: The time a listed snapshot was taken
     Then the table "Snapshots of plan home" shows these times in its "Time" column:
       | 11/10/26, 11:30:00 PM           |
       | 11/10/26, 12:30:00 AM UTC+13:00 |
+
+  Scenario: Someone in the zone the snapshots were taken in sees no offset
+    Given a demo plan "home" with a tiny scratch repository on a machine whose clock runs in "America/Chicago"
+    And the browser is in the time zone "America/Chicago"
+    And the plan "home" has been backed up 1 times
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the table "Snapshots of plan home" has 1 rows
+    And the table "Snapshots of plan home" shows its "Time" column in the time zone "America/Chicago"
+
+  # The offset compared is the viewer's at the moment each snapshot was taken:
+  # the night daylight saving time ends in Chicago, a viewer there sees both
+  # snapshots without an offset, though their offsets differ.
+  Scenario: A viewer whose clock changed for daylight saving time between two snapshots sees no offset
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" holds snapshots taken at:
+      | 2026-11-01 23:30:00-06:00 |
+      | 2026-11-01 00:30:00-05:00 |
+    And the browser is in the time zone "America/Chicago"
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the table "Snapshots of plan home" shows these times in its "Time" column:
+      | 11/1/26, 11:30:00 PM |
+      | 11/1/26, 12:30:00 AM |
