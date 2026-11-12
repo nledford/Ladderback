@@ -300,10 +300,11 @@ jobs:
   # The dependency tree against deny.toml: RustSec advisories, licences, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
   # schedule, because an advisory can appear with no change to the code; a
-  # scheduled run notifies no one, so a failed one opens an issue, as
-  # `mutants-nightly` does. Not a required check: the maintainer may add it to
-  # the ruleset once it has proved stable. It fetches the advisory database,
-  # so a GitHub outage can fail it for a reason that isn't a dependency's.
+  # scheduled run notifies no one, so a failed one opens an issue (`deny-report`
+  # below), as `mutants-nightly` does. Not a required check: the maintainer may
+  # add it to the ruleset once it has proved stable. It fetches the advisory
+  # database, so a GitHub outage can fail it for a reason that isn't a
+  # dependency's.
   deny:
     name: Dependencies (cargo-deny)
     needs: changes
@@ -312,11 +313,6 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # `issues: write` is for the nightly report below; a pull request from a
-    # fork gets a read-only token whatever this says.
-    permissions:
-      contents: read
-      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -328,10 +324,27 @@ jobs:
         with:
           tool: just,cargo-deny
       - run: just deny
-      # Only on the nightly run, and only on a failure of this job's own
-      # steps. The title is fixed, so a second failure finds the open issue.
-      - if: failure() && github.event_name == 'schedule'
-        env:
+
+  # A failed nightly `deny` opens an issue, or comments on the open one. A job
+  # of its own, as release-builds.yml's `report` is, so only it holds
+  # `issues: write`, and `deny`, which runs a pull request's code (its
+  # Cargo.lock and deny.toml), doesn't. Its name matches no required check.
+  deny-report:
+    name: Report a failed nightly dependency check
+    needs: deny
+    # Only on the nightly run, and only when `deny` failed, not when it was
+    # cancelled. The title is fixed, so a second failure finds the open issue.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # One report at a time, so two failed runs don't both open an issue.
+    concurrency:
+      group: ci-deny-report
+      cancel-in-progress: false
+    permissions:
+      issues: write # to open or comment on the issue; no checkout, so no contents
+    steps:
+      - env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
