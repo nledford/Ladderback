@@ -26,6 +26,6 @@ pub mod snapshot;
 pub use ids::{
     AgentId, IdKind, InvalidId, OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId,
 };
-pub use jiff::tz::{TimeZone, TimeZoneDatabase};
+pub use jiff::tz::{Offset, TimeZone, TimeZoneDatabase};
 pub use jiff::{SignedDuration, Timestamp};
 pub use uuid::Uuid;

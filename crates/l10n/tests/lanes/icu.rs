@@ -371,3 +371,10 @@ fn a_localizer_with_formatters_is_shared_between_threads() {
         }
     });
 }
+
+#[test]
+fn the_daemon_writes_the_instants_of_every_locale_it_speaks() {
+    for locale in ["en-US", "de"] {
+        assert!(speaking(locale).writes_instants(), "{locale}");
+    }
+}

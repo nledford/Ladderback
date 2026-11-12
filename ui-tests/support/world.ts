@@ -165,6 +165,9 @@ export class BrowserWorld extends World {
   /** A daemon the scenario plays itself, whose answers and events the page
    *  gets in place of the real daemon's; `null` is the real daemon's. */
   scriptedDaemon: ScriptedDaemon | null = null;
+  /** Routes a Given sets on the next page's context, before it opens: an
+   *  answer of the real daemon's that the step changes on its way. */
+  contextRoutes: Array<(context: BrowserContext) => Promise<void>> = [];
   /** The daemon this scenario started, when its Given did; `null` shares the
    *  run's own daemon. */
   ownServer: OwnServer | null = null;
@@ -188,6 +191,7 @@ export class BrowserWorld extends World {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
     this.context = await browser.newContext(this.contextOptions);
     await this.scriptedDaemon?.install(this.context);
+    for (const install of this.contextRoutes) await install(this.context);
     if (this.answerDelayMs > 0) {
       await this.context.route("**/api/v1/**", async (route) => {
         await new Promise((done) => setTimeout(done, this.answerDelayMs));
@@ -222,6 +226,7 @@ Before(function (this: BrowserWorld) {
   this.readerStyles = [];
   this.answerDelayMs = 0;
   this.scriptedDaemon = null;
+  this.contextRoutes = [];
   this.scriptErrors = [];
   this.policyBlocks = [];
   this.expectsPolicyBlocks = false;

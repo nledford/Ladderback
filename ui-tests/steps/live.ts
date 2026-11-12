@@ -10,7 +10,7 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { After, Given, Then, When } from "@cucumber/cucumber";
+import { After, type DataTable, Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
@@ -67,8 +67,14 @@ function table(world: BrowserWorld, name: string): Locator {
 
 /** Writes the config of one or more demo plans and their repository into a
  *  scratch folder, starts a daemon on it, and points the scenario's pages at
- *  that daemon. */
-export async function serveDemoPlans(world: BrowserWorld, plans: readonly string[], size: keyof typeof SOURCE_FILES): Promise<void> {
+ *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
+ *  zone its clock runs in, which its workers inherit. */
+export async function serveDemoPlans(
+  world: BrowserWorld,
+  plans: readonly string[],
+  size: keyof typeof SOURCE_FILES,
+  env: Record<string, string> = {},
+): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const source = path.join(scratch, "source");
@@ -101,6 +107,7 @@ export async function serveDemoPlans(world: BrowserWorld, plans: readonly string
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
     LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
+    ...env,
   });
   world.ownServer = { child, scratch };
   world.baseUrl = url;
@@ -530,14 +537,13 @@ Given("the browser is in the time zone {string}", function (this: BrowserWorld, 
   this.contextOptions.timezoneId = zone;
 });
 
-// Each cell carries the instant it shows in its `title`, in UTC. What it shows
-// is that instant read in the browser's own zone, as the browser's `Intl`
-// writes it: the default of the formatter is UTC, so a page that didn't pass
-// the zone would show the title's own hours.
-Then("the table {string} shows its {string} column in the time zone {string}", async function (this: BrowserWorld, name: string, column: string, zone: string) {
-  const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+/** The cells of the named column, each as the instant its `title` carries (in
+ *  UTC) and what a reader hears of it: its text, without bidi isolation marks
+ *  and with the narrow and no-break spaces V8 and CLDR differ on folded. */
+async function timeCells(world: BrowserWorld, name: string, column: string): Promise<Array<readonly [string, string]>> {
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
-  const cells = await table(this, name)
+  const cells = await table(world, name)
     .locator("tbody tr")
     .evaluateAll(
       (rows: HTMLTableRowElement[], at) =>
@@ -548,12 +554,78 @@ Then("the table {string} shows its {string} column in the time zone {string}", a
         }),
       index,
     );
-  assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
-  const fold = (text: string) => text.replace(/[\u202f\u00a0]/g, " ");
+  return cells.map(([raw, shown]) => [raw, fold(shown)] as const);
+}
+
+const fold = (text: string) => text.replace(/[\u2066-\u2069]/g, "").replace(/[\u202f\u00a0]/g, " ");
+
+/** An instant as the page's `ui-instant` writes it in en-US, read in `zone`. */
+const writtenIn = (zone: string) => {
   const written = new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "medium", timeZone: zone });
+  return (raw: string) => fold(written.format(new Date(raw)));
+};
+
+// Each cell carries the instant it shows in its `title`, in UTC. What it shows
+// is that instant read in the browser's own zone, as the browser's `Intl`
+// writes it: the default of the formatter is UTC, so a page that didn't pass
+// the zone would show the title's own hours.
+Then("the table {string} shows its {string} column in the time zone {string}", async function (this: BrowserWorld, name: string, column: string, zone: string) {
+  const cells = await timeCells(this, name, column);
+  assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
+  const written = writtenIn(zone);
   for (const [raw, shown] of cells) {
-    assert.equal(fold(shown), fold(written.format(new Date(raw))), `the ${column} cell of ${raw} is not in ${zone}`);
+    assert.equal(shown, written(raw), `the ${column} cell of ${raw} is not in ${zone}`);
   }
+});
+
+// A snapshot time is what the clock that took it read (§16, decision 56): the
+// cell's instant read in the zone that clock ran in, then that clock's offset,
+// which a viewer whose own offset differs is told.
+Then(
+  "the table {string} shows its {string} column as a clock in {string} read it, with the offset {string}",
+  async function (this: BrowserWorld, name: string, column: string, zone: string, offset: string) {
+    const cells = await timeCells(this, name, column);
+    assert.ok(cells.length > 0, `the table ${name} has no rows to read`);
+    const written = writtenIn(zone);
+    for (const [raw, shown] of cells) {
+      assert.equal(shown, `${written(raw)} ${offset}`, `the ${column} cell of ${raw} is not as a clock in ${zone} read it`);
+    }
+  },
+);
+
+Then("the table {string} shows these times in its {string} column:", async function (this: BrowserWorld, name: string, column: string, expected: DataTable) {
+  const shown = (await timeCells(this, name, column)).map(([, text]) => text);
+  assert.deepEqual(shown, expected.raw().map(([text]) => text), `the ${column} column of ${name}`);
+});
+
+// The snapshots a plan's group lists, in place of the real daemon's: each is
+// a time and the offset of the clock that took it, as a snapshot file records
+// it (`2026-11-10 23:30:00-10:00`), newest first. The rest of the answer is
+// the real daemon's.
+Given("the plan {string} holds snapshots taken at:", function (this: BrowserWorld, plan: string, taken: DataTable) {
+  const snapshots = taken.raw().map(([recorded], n) => {
+    const parts = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})$/.exec(recorded ?? "");
+    if (parts === null) throw new Error(`not a recorded time: ${recorded}`);
+    const [, date, time, offset] = parts;
+    return {
+      id: (n + 1).toString(16).padStart(64, "0"),
+      time: new Date(`${date}T${time}${offset}`).toISOString().replace(".000Z", "Z"),
+      offset,
+      hostname: "demo-host",
+      label: "",
+      tags: [`ladderback-plan:${plan}`],
+      paths: ["/home/demo"],
+    };
+  });
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/repositories/demo/groups", async (route) => {
+      const answer = await route.fetch();
+      const body = (await answer.json()) as { plans: Array<{ plan: string; count: number; snapshots: unknown[] }> };
+      const group = { plan, count: snapshots.length, snapshots };
+      body.plans = [...body.plans.filter((listed) => listed.plan !== plan), group];
+      await route.fulfill({ response: answer, json: body });
+    });
+  });
 });
 
 // The table answers a press of its sort button by reordering the rows, so the

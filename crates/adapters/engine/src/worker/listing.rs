@@ -80,6 +80,7 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
     Ok(SnapshotResult {
         id: snapshot_id(&snapshot.id)?,
         time: snapshot.time.timestamp(),
+        offset_seconds: clock_offset(&snapshot.time),
         hostname: cut(&snapshot.hostname).0,
         label: cut(&snapshot.label).0,
         tags,
@@ -87,6 +88,12 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
         paths_truncated,
         tags_truncated,
     })
+}
+
+/// The offset of the clock that took a snapshot, in seconds east of UTC:
+/// the one its time was recorded with (§3.1, §16 decision 56).
+fn clock_offset(time: &jiff::Zoned) -> i32 {
+    todo!("{time}")
 }
 
 /// The snapshots of a repository as a listing is sent: newest first, in
@@ -150,6 +157,7 @@ mod tests {
         SnapshotResult {
             id: SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"),
             time: Timestamp::from_second(n).expect("a time"),
+            offset_seconds: 0,
             hostname: "demo-host".to_owned(),
             label: label.to_owned(),
             tags: Vec::new(),
@@ -358,6 +366,29 @@ mod tests {
         assert_eq!(result.hostname.len(), MAX_LISTED_TEXT_BYTES);
         assert_eq!(result.label.len(), MAX_LISTED_TEXT_BYTES);
         assert!(result.hostname.ends_with('…') && result.label.ends_with('…'));
+    }
+
+    /// A snapshot file records its time with the offset of the clock that
+    /// took it, and rustic reads it back in that fixed offset (§16, decision
+    /// 56): the listing carries the offset, and the instant is unchanged.
+    #[test]
+    fn a_snapshot_carries_the_offset_its_time_was_recorded_with() {
+        for (recorded, seconds) in [
+            ("2026-11-10T23:30:00-06:00[-06:00]", -6 * 3600),
+            ("2026-11-10T00:30:00+13:00[+13:00]", 13 * 3600),
+            ("2026-11-11T05:30:00+00:00[+00:00]", 0),
+            ("2026-11-11T11:15:00+05:45[+05:45]", 5 * 3600 + 45 * 60),
+            ("2026-11-01T00:30:00-05:00[America/Chicago]", -5 * 3600),
+        ] {
+            let time: jiff::Zoned = recorded.parse().expect("a recorded time");
+            let snapshot = SnapshotFile {
+                time: time.clone(),
+                ..SnapshotFile::default()
+            };
+            let result = snapshot_result(&snapshot).expect("converts");
+            assert_eq!(result.offset_seconds, seconds, "{recorded}");
+            assert_eq!(result.time, time.timestamp(), "{recorded}");
+        }
     }
 
     #[test]

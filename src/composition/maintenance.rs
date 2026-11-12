@@ -514,6 +514,7 @@ mod tests {
         Snapshot {
             id: SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"),
             time: "2026-11-09T10:15:00Z".parse().expect("a time"),
+            offset: domain::Offset::from_seconds(-6 * 3600).expect("an offset"),
             hostname: "demo-host".to_owned(),
             label: "home".to_owned(),
             tags: vec!["demo".to_owned()],
@@ -533,6 +534,9 @@ mod tests {
             Some(api::SnapshotDto {
                 id: format!("{:064x}", 1),
                 time: "2026-11-09T10:15:00Z".to_owned(),
+                offset: Some(api::ClockOffset::new(
+                    domain::Offset::from_seconds(-6 * 3600).expect("an offset")
+                )),
                 hostname: "demo-host".to_owned(),
                 label: "home".to_owned(),
                 tags: vec!["demo".to_owned()],

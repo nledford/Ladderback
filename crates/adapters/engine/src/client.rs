@@ -737,6 +737,12 @@ fn weight(snapshot: &SnapshotSummary) -> usize {
     texts.saturating_add(256)
 }
 
+/// The offset a worker reported, in seconds east of UTC, or `None` when no
+/// clock can run at it (beyond ±25:59:59).
+fn offset_of(seconds: i32) -> Option<domain::Offset> {
+    todo!("{seconds}")
+}
+
 /// What a [`Listing`] made of one event of the worker's.
 enum Absorbed {
     /// A batch, kept; nothing to tell the job's owner yet.
@@ -758,19 +764,26 @@ impl Listing {
                         "worker listing longer than {MAX_LISTED_SNAPSHOTS} snapshots"
                     ));
                 }
-                let batch: Vec<SnapshotSummary> = snapshots
-                    .into_iter()
-                    .map(|s| SnapshotSummary {
+                let mut batch = Vec::with_capacity(snapshots.len());
+                for s in snapshots {
+                    let Some(offset) = offset_of(s.offset_seconds) else {
+                        return Absorbed::Refused(format!(
+                            "worker listed a snapshot at an offset of {} seconds, which no clock has",
+                            s.offset_seconds
+                        ));
+                    };
+                    batch.push(SnapshotSummary {
                         id: s.id,
                         time: s.time,
+                        offset,
                         hostname: s.hostname,
                         label: s.label,
                         tags: s.tags,
                         paths: s.paths,
                         paths_truncated: s.paths_truncated,
                         tags_truncated: s.tags_truncated,
-                    })
-                    .collect();
+                    });
+                }
                 let bytes = batch
                     .iter()
                     .fold(self.bytes, |all, s| all.saturating_add(weight(s)));
@@ -3230,6 +3243,7 @@ mod tests {
         crate::job::SnapshotResult {
             id: domain::SnapshotId::parse(&format!("{n:064x}")).unwrap(),
             time: domain::Timestamp::from_second(i64::try_from(n).unwrap()).unwrap(),
+            offset_seconds: 0,
             hostname: "demo-host".to_owned(),
             label: format!("label {n}"),
             tags: vec!["tag".to_owned()],
@@ -3376,6 +3390,51 @@ mod tests {
             listing.absorb(event.clone()),
             Absorbed::Passed(passed) if passed == event
         ));
+    }
+
+    #[test]
+    fn a_listed_snapshot_keeps_the_offset_of_the_clock_that_took_it() {
+        let mut listing = Listing::default();
+        let at = |n: u128, seconds: i32| crate::job::SnapshotResult {
+            offset_seconds: seconds,
+            ..listed(n)
+        };
+        let batch = WorkerEvent::Snapshots {
+            snapshots: vec![
+                at(0, -6 * 3600),
+                at(1, 13 * 3600),
+                at(2, 93_599),
+                at(3, -93_599),
+            ],
+        };
+        assert!(matches!(listing.absorb(batch), Absorbed::Kept));
+        let Absorbed::Complete(all) =
+            listing.absorb(WorkerEvent::Result(OpResult::Snapshots { count: 4 }))
+        else {
+            panic!("the listing is complete");
+        };
+        let offsets: Vec<i32> = all.iter().map(|s| s.offset.seconds()).collect();
+        assert_eq!(offsets, [-21_600, 46_800, 93_599, -93_599]);
+    }
+
+    #[test]
+    fn a_listing_with_an_offset_no_clock_has_is_refused() {
+        for seconds in [93_600, -93_600, i32::MAX, i32::MIN] {
+            let mut listing = Listing::default();
+            let batch = WorkerEvent::Snapshots {
+                snapshots: vec![
+                    listed(0),
+                    crate::job::SnapshotResult {
+                        offset_seconds: seconds,
+                        ..listed(1)
+                    },
+                ],
+            };
+            let Absorbed::Refused(detail) = listing.absorb(batch) else {
+                panic!("an offset of {seconds} seconds is refused");
+            };
+            assert!(detail.contains(&seconds.to_string()), "{detail}");
+        }
     }
 
     fn access() -> app::ports::RepositoryAccess {

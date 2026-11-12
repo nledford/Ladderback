@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::execution::plan_tags;
 use crate::planning::{AgentSettings, Maintenance, Plan, RetentionPolicy};
-use crate::{AgentId, PlanId, SnapshotId, Timestamp};
+use crate::{AgentId, Offset, PlanId, SnapshotId, Timestamp};
 
 mod other_hosts;
 #[cfg(test)]
@@ -32,6 +32,9 @@ pub struct Snapshot {
     pub id: SnapshotId,
     /// When the snapshot was taken.
     pub time: Timestamp,
+    /// The offset of the clock that took it: with `time`, the snapshot time
+    /// (§3.1).
+    pub offset: Offset,
     pub hostname: String,
     pub label: String,
     /// The snapshot's tags, as the listing reports them.
@@ -567,6 +570,7 @@ mod tests {
         Snapshot {
             id: SnapshotId::parse(&format!("{number:064x}")).expect("a snapshot ID"),
             time: at(second_back(number)),
+            offset: Offset::UTC,
             hostname: "demo-host".to_owned(),
             label: String::new(),
             tags: tags.to_vec(),

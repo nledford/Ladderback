@@ -1288,6 +1288,7 @@ fn selected(summary: &SnapshotSummary) -> Snapshot {
     Snapshot {
         id: summary.id.clone(),
         time: summary.time,
+        offset: summary.offset,
         hostname: summary.hostname.clone(),
         label: summary.label.clone(),
         tags: summary.tags.clone(),

@@ -146,6 +146,7 @@ mod tests {
             id: SnapshotId::parse(&format!("{n:0>64}"))
                 .unwrap_or_else(|e| panic!("64 hex digits: {e:?}")),
             time: Timestamp::from_second(at).unwrap_or_else(|e| panic!("a valid instant: {e:?}")),
+            offset: domain::Offset::UTC,
             hostname: "demo-host".to_owned(),
             label: label.to_owned(),
             tags: Vec::new(),

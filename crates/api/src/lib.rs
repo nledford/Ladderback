@@ -1573,14 +1573,20 @@ pub const MAX_SNAPSHOT_PATHS: usize = 64;
 pub const MAX_SNAPSHOT_TAGS: usize = 64;
 
 /// One snapshot of a repository's list, as the daemon tells the web UI:
-/// what a list view needs — id, when it was taken (RFC 3339), which host,
-/// its label, tags and paths.
+/// what a list view needs — id, when it was taken (RFC 3339) and by a clock
+/// at which offset, which host, its label, tags and paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotDto {
     /// 64 hex digits, as rustic writes a snapshot's ID.
     pub id: String,
     /// RFC 3339, UTC.
     pub time: String,
+    /// The offset of the clock that took the snapshot: with `time`, the
+    /// snapshot time (§3.1), whose day is the one a calendar retention rule
+    /// counts the snapshot on (§16, decision 56). Absent from a daemon older
+    /// than the field, which said only the instant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<ClockOffset>,
     pub hostname: String,
     /// Empty when the snapshot carries no label.
     pub label: String,
@@ -1595,6 +1601,66 @@ pub struct SnapshotDto {
     /// of.
     #[serde(default)]
     pub tags_truncated: bool,
+}
+
+/// The offset from UTC of the clock that took a snapshot. On the wire it is
+/// written as RFC 3339 writes an offset, `-06:00` or `+00:00`, with seconds
+/// (`+00:19:32`) only when it has some, and read back only in that form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ClockOffset(jiff::tz::Offset);
+
+/// The text is not an offset as RFC 3339 writes one, or is beyond the range
+/// of an offset (±25:59:59).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidOffset;
+
+impl std::fmt::Display for InvalidOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not an offset from UTC")
+    }
+}
+
+impl std::error::Error for InvalidOffset {}
+
+impl ClockOffset {
+    pub const fn new(offset: jiff::tz::Offset) -> Self {
+        Self(offset)
+    }
+
+    pub const fn get(self) -> jiff::tz::Offset {
+        self.0
+    }
+}
+
+impl std::str::FromStr for ClockOffset {
+    type Err = InvalidOffset;
+
+    /// `±HH:MM` or `±HH:MM:SS`, nothing else: no `Z`, no zone name, no
+    /// space.
+    fn from_str(text: &str) -> Result<Self, InvalidOffset> {
+        todo!("{text}")
+    }
+}
+
+impl std::fmt::Display for ClockOffset {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+impl TryFrom<String> for ClockOffset {
+    type Error = InvalidOffset;
+
+    fn try_from(text: String) -> Result<Self, InvalidOffset> {
+        text.parse()
+    }
+}
+
+impl From<ClockOffset> for String {
+    fn from(offset: ClockOffset) -> String {
+        offset.to_string()
+    }
 }
 
 /// Why a snapshot DTO can't be: an ID that isn't 64 hex digits, a time that
@@ -1646,6 +1712,7 @@ impl SnapshotDto {
         Ok(Self {
             id,
             time,
+            offset: None,
             hostname,
             label,
             tags,
@@ -1663,7 +1730,16 @@ impl SnapshotDto {
         self.tags_truncated = tags;
         self
     }
+
+    /// The snapshot with the offset of the clock that took it, which the
+    /// engine read from the snapshot file.
+    #[must_use]
+    pub fn taken_at_offset(mut self, offset: jiff::tz::Offset) -> Self {
+        self.offset = Some(ClockOffset::new(offset));
+        self
+    }
 }
+
 /// One live update the daemon pushes to a connected page over the events
 /// WebSocket (technical design §4.4): what an operation reported, or that an
 /// agent came or went. Identifiers are text, counts are numbers, and times
@@ -1721,12 +1797,17 @@ pub enum UiEvent {
 
 #[cfg(test)]
 mod snapshot_tests {
-    use super::{InvalidSnapshot, MAX_SNAPSHOT_PATHS, MAX_SNAPSHOT_TAGS, SnapshotDto};
+    use super::{
+        ClockOffset, InvalidOffset, InvalidSnapshot, MAX_SNAPSHOT_PATHS, MAX_SNAPSHOT_TAGS,
+        SnapshotDto,
+    };
+    use jiff::tz::Offset;
 
     fn dto() -> SnapshotDto {
         SnapshotDto {
             id: "ab".repeat(32),
             time: "2026-11-09T10:15:00Z".to_owned(),
+            offset: None,
             hostname: "demo-host".to_owned(),
             label: "home".to_owned(),
             tags: vec!["ladderback-plan:demo-home".to_owned()],
@@ -1734,6 +1815,75 @@ mod snapshot_tests {
             paths_truncated: false,
             tags_truncated: false,
         }
+    }
+
+    fn offset(seconds: i32) -> Offset {
+        Offset::from_seconds(seconds).unwrap()
+    }
+
+    /// The contract of the field (§12.1): a daemon that knows the offset
+    /// sends it as RFC 3339 writes one, and a listing from one older than the
+    /// field, which never sends it, reads as having none.
+    #[test]
+    fn the_offset_travels_as_rfc_3339_writes_it_and_is_absent_from_an_older_daemon() {
+        for (seconds, written) in [
+            (-6 * 3600, "-06:00"),
+            (0, "+00:00"),
+            (13 * 3600, "+13:00"),
+            (5 * 3600 + 45 * 60, "+05:45"),
+            (-(9 * 3600 + 30 * 60), "-09:30"),
+            (19 * 60 + 32, "+00:19:32"),
+            (-(25 * 3600 + 59 * 60 + 59), "-25:59:59"),
+        ] {
+            let taken = dto().taken_at_offset(offset(seconds));
+            assert_eq!(taken.offset, Some(ClockOffset::new(offset(seconds))));
+            let json = serde_json::to_string(&taken).unwrap();
+            assert!(json.contains(&format!(r#""offset":"{written}""#)), "{json}");
+            assert_eq!(serde_json::from_str::<SnapshotDto>(&json).unwrap(), taken);
+        }
+        let older = r#"{"id":"abababababababababababababababababababababababababababababababab","time":"2026-11-09T10:15:00Z","hostname":"h","label":"","tags":[],"paths":[]}"#;
+        assert_eq!(
+            serde_json::from_str::<SnapshotDto>(older).unwrap().offset,
+            None
+        );
+        let json = serde_json::to_string(&dto()).unwrap();
+        assert!(!json.contains("offset"), "{json}");
+    }
+
+    #[test]
+    fn an_offset_is_read_only_as_rfc_3339_writes_one() {
+        assert_eq!("-00:00".parse(), Ok(ClockOffset::new(Offset::UTC)));
+        assert_eq!("+25:59:59".parse(), Ok(ClockOffset::new(offset(93_599))));
+        for refused in [
+            "",
+            "Z",
+            "UTC",
+            "-0600",
+            "-06",
+            "+6:00",
+            "-06:0",
+            "06:00",
+            " -06:00",
+            "-06:00 ",
+            "\u{2212}06:00",
+            "+26:00",
+            "+06:60",
+            "+06:00:60",
+            "+06:00:0",
+            "+06:00:00:00",
+            "+0a:00",
+            "+0::00",
+            "+06-00",
+            "-06:00[America/Chicago]",
+        ] {
+            assert_eq!(
+                refused.parse::<ClockOffset>(),
+                Err(InvalidOffset),
+                "{refused:?}"
+            );
+        }
+        let hostile = r#"{"id":"abababababababababababababababababababababababababababababababab","time":"2026-11-09T10:15:00Z","offset":"America/Chicago","hostname":"h","label":"","tags":[],"paths":[]}"#;
+        assert!(serde_json::from_str::<SnapshotDto>(hostile).is_err());
     }
 
     #[test]
@@ -3235,6 +3385,7 @@ mod maintenance_dto_tests {
         SnapshotDto {
             id: "ab".repeat(32),
             time: "2026-11-09T10:15:00Z".to_owned(),
+            offset: None,
             hostname: "demo-host".to_owned(),
             label: "home".to_owned(),
             tags: vec!["ladderback-plan:demo-home".to_owned()],

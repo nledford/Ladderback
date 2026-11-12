@@ -340,6 +340,7 @@ impl ForgetWorld {
         self.snapshots.push(SnapshotSummary {
             id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
             time,
+            offset: domain::Offset::UTC,
             hostname: host.to_owned(),
             label: String::new(),
             tags: tags.to_vec(),

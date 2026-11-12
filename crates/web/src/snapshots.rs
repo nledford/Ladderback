@@ -620,6 +620,17 @@ fn plan_view(page: Page, index: usize, plan: PlanGroupDto) -> impl IntoView {
     }
 }
 
+/// The offset of the viewer's own clock at `at`, as the browser reads it:
+/// `Date.prototype.getTimezoneOffset`, the minutes it runs behind UTC then.
+/// A listed snapshot's time names its clock's offset only when it differs
+/// from this one (`routes::taken`, §16, decision 56). The browser knows the
+/// zone it reads its own clock in even where `jiff`'s copy of the zones has
+/// no such name. It runs only in a browser: `formatting.rs` tests it in
+/// `just test-wasm`.
+pub(crate) fn viewer_offset(at: jiff::Timestamp) -> jiff::tz::Offset {
+    todo!("{at}")
+}
+
 /// A list of snapshots: the table of the ones listed, newest first as the
 /// daemon names them, and what is left out; or the empty state.
 fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows: Rows) -> AnyView {

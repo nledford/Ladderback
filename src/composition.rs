@@ -2296,6 +2296,7 @@ mod tests {
         SnapshotSummary {
             id: domain::SnapshotId::parse(&"ab".repeat(32)).expect("a snapshot ID"),
             time: domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+            offset: domain::Offset::UTC,
             hostname: "demo-host".to_owned(),
             label: "home".to_owned(),
             tags: vec!["demo".to_owned()],
@@ -2314,6 +2315,18 @@ mod tests {
         let dto = snapshot_dto(&listed(false, false)).expect("a valid snapshot");
         assert!(!dto.paths_truncated && !dto.tags_truncated);
         assert_eq!(dto.label, "home");
+    }
+
+    #[test]
+    fn a_listed_snapshot_tells_the_page_the_offset_of_the_clock_that_took_it() {
+        let chicago = domain::Offset::from_seconds(-6 * 3600).expect("an offset");
+        let dto = snapshot_dto(&SnapshotSummary {
+            offset: chicago,
+            ..listed(false, false)
+        })
+        .expect("a valid snapshot");
+        assert_eq!(dto.offset, Some(api::ClockOffset::new(chicago)));
+        assert_eq!(dto.time, "2027-01-15T08:00:00Z", "the instant, in UTC");
     }
 
     /// A succeeded operation of `kind` as the log keeps it, with `result`

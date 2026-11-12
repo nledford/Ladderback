@@ -387,6 +387,9 @@ pub enum OpResult {
 pub struct SnapshotResult {
     pub id: SnapshotId,
     pub time: Timestamp,
+    /// The offset of the clock that took the snapshot, in seconds east of
+    /// UTC, as the snapshot file records it.
+    pub offset_seconds: i32,
     pub hostname: String,
     pub label: String,
     pub tags: Vec<String>,

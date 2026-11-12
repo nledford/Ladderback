@@ -104,6 +104,7 @@ fn snapshots() -> impl Strategy<Value = Vec<Snapshot>> {
                 |(number, (tags, second, hostname, label, paths))| Snapshot {
                     id: snapshot_id(number),
                     time: Timestamp::from_second(1_800_000_000 + second).expect("a time in range"),
+                    offset: crate::Offset::UTC,
                     hostname: hostname.to_owned(),
                     label: label.to_owned(),
                     tags,

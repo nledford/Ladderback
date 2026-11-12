@@ -406,3 +406,21 @@ fn the_viewers_zone_is_the_zone_the_browser_reads_its_own_clock_in() {
         "the viewer's zone and the default are told apart"
     );
 }
+
+/// A locale the browser has no data for leaves its instants to the plain
+/// text, which says UTC, and the localizer tells a page so.
+#[wasm_bindgen_test]
+fn the_browser_writes_the_instants_only_of_the_locales_it_has() {
+    assert!(speaking("en-US").writes_instants());
+    assert!(speaking("de").writes_instants());
+    const KLINGON: Catalog = Catalog {
+        tag: "tlh",
+        sources: &[Source {
+            name: "tlh.ftl",
+            text: "at = { $when }\n",
+        }],
+    };
+    let unknown = Localizer::from_catalogs(&[tag("tlh")], &[KLINGON, EN]);
+    assert_eq!(unknown.locales().first(), Some(&tag("tlh")));
+    assert!(!unknown.writes_instants());
+}

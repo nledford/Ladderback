@@ -78,6 +78,8 @@ pub(crate) enum Summary {
 pub(crate) struct Snapshot {
     pub id: SnapshotId,
     pub time: Timestamp,
+    /// The offset of the clock that took it, in seconds east of UTC.
+    pub offset_seconds: i32,
     pub hostname: String,
     pub label: String,
     pub tags: Vec<String>,
@@ -139,6 +141,7 @@ impl From<&EngineResult> for Summary {
                     .map(|s| Snapshot {
                         id: s.id.clone(),
                         time: s.time,
+                        offset_seconds: s.offset.seconds(),
                         hostname: s.hostname.clone(),
                         label: s.label.clone(),
                         tags: s.tags.clone(),
@@ -233,6 +236,11 @@ impl From<Summary> for EngineResult {
                     .map(|s| SnapshotSummary {
                         id: s.id,
                         time: s.time,
+                        // No row holds a listing (above), and an offset no
+                        // clock has is read as UTC, as rustic reads a time
+                        // with none.
+                        offset: domain::Offset::from_seconds(s.offset_seconds)
+                            .unwrap_or(domain::Offset::UTC),
                         hostname: s.hostname,
                         label: s.label,
                         tags: s.tags,
