@@ -123,3 +123,29 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the page doesn't scroll sideways
     And nothing in the table "Operations" runs outside its cell
     And no text is clipped
+
+  # Each plan's start button stands apart from the next one's, as the
+  # controls of every other row of actions do, so a reader aiming at one plan's
+  # button doesn't press the other's. On a small screen with larger text their
+  # labels grow with the text, and the buttons wrap, one under the other, and
+  # still stand apart.
+
+  Scenario: Each plan's start button stands apart from the next one's
+    Given the daemon reports running backups of "demo-home" and "demo-docs"
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    And the table "Operations" has 2 rows
+    Then the buttons "Start backup of demo-home" and "Start backup of demo-docs" stand apart
+    And the page has no accessibility violations
+
+  Scenario: The start buttons' labels grow on a small screen with larger text and the buttons stand apart
+    Given the daemon reports running backups of "demo-home" and "demo-docs"
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the address "/operations"
+    And the table "Operations" has 2 rows
+    Then the label of the button "Start backup of demo-home" is as large as the page's text
+    And the buttons "Start backup of demo-home" and "Start backup of demo-docs" stand apart
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations

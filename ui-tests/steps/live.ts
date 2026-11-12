@@ -333,6 +333,32 @@ Then(
   },
 );
 
+// Two buttons side by side, or one under the other once they wrap, are two
+// targets only with a gap between them: their boxes are at least APART_REM
+// apart, beside each other or above each other, so a reader aiming at one
+// doesn't press the other. The buttons may come from an answer of their own
+// (the start buttons from the plans, not the history), so each is awaited.
+Then("the buttons {string} and {string} stand apart", async function (this: BrowserWorld, first: string, second: string) {
+  const box = async (name: string) => {
+    const control = this.page.getByRole("button", { name: namePattern(name) });
+    await expect(control, `the button "${name}" is not on the page once`).toHaveCount(1);
+    const shown = await control.boundingBox();
+    assert.ok(shown, `the button "${name}" is not shown`);
+    return shown;
+  };
+  const a = await box(first);
+  const b = await box(second);
+  const gap = Math.max(
+    b.x - (a.x + a.width),
+    a.x - (b.x + b.width),
+    b.y - (a.y + a.height),
+    a.y - (b.y + b.height),
+  );
+  const root = await this.page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  const apart = APART_REM * root;
+  assert.ok(gap >= apart - 0.5, `the buttons "${first}" and "${second}" are ${gap.toFixed(1)}px apart, less than ${apart}px`);
+});
+
 // A table whose columns have fixed shares lets a cell's content run past the
 // cell when it can't fit: it draws over the next column, which neither the
 // page's width nor a clipped box shows. Every box and every line of text in a

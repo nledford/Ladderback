@@ -10,7 +10,7 @@ import { Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
-import { journey } from "../support/keyboard.ts";
+import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
@@ -155,6 +155,18 @@ Then("the checkbox {string} is not checked", async function (this: BrowserWorld,
 // aria-describedby.
 Then("the checkbox {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
   await expect(this.page.getByRole("checkbox", { name, exact: true })).toHaveAccessibleDescription(description);
+});
+
+// A browser draws a form control's text in its own fixed size (13.33 px in
+// Chromium) unless the page says otherwise, so the label stays put when the
+// reader's text size doubles the rest of the page (1.4.4). Compared with the
+// body's text, the size every page's text starts from.
+Then("the label of the button {string} is as large as the page's text", async function (this: BrowserWorld, name: string) {
+  const sizes = await this.page.getByRole("button", { name: namePattern(name) }).evaluate((button) => ({
+    label: getComputedStyle(button).fontSize,
+    page: getComputedStyle(button.ownerDocument.body).fontSize,
+  }));
+  assert.equal(sizes.label, sizes.page, `the label of "${name}" is ${sizes.label}, the page's text ${sizes.page}`);
 });
 
 Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
