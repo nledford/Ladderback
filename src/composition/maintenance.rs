@@ -472,7 +472,9 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
-        F::SecretsTooLargeToMask { .. } => todo!(),
+        F::SecretsTooLargeToMask { field, limit } => {
+            MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
+        }
         // Only an operation of the log can be ended by a stopped daemon, and a
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.

@@ -187,7 +187,20 @@ pub(crate) fn encode_failure(
                 .unwrap_or_default(),
             None,
         ),
-        FailureReason::SecretsTooLargeToMask { .. } => todo!(),
+        FailureReason::SecretsTooLargeToMask { field, limit } => (
+            "secrets-too-large-to-mask",
+            std::iter::once((
+                "limit",
+                MsgArg::Bytes(u64::try_from(*limit).unwrap_or(u64::MAX)),
+            ))
+            .chain(
+                field
+                    .as_deref()
+                    .map(|field| ("field", MsgArg::Text(field.to_owned()))),
+            )
+            .collect(),
+            None,
+        ),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
     };
     Ok(FailureColumns {
@@ -244,6 +257,10 @@ pub(crate) fn decode_failure(
         "hook-failed" => Ok(FailureReason::HookFailed {
             exit_code: exit_code(&args)?,
         }),
+        "secrets-too-large-to-mask" => Ok(FailureReason::SecretsTooLargeToMask {
+            field: field(&args)?,
+            limit: limit(&args)?,
+        }),
         other => Err(bad(
             "error_code",
             format!("{} is not an error code of this version", shown(other)),
@@ -255,6 +272,24 @@ fn argument<'a>(args: &'a [(String, MsgArg)], name: &str) -> Option<&'a MsgArg> 
     args.iter()
         .find(|(arg, _)| arg == name)
         .map(|(_, value)| value)
+}
+
+/// `field` is left out when the job's own secrets passed the cap.
+fn field(args: &[(String, MsgArg)]) -> Result<Option<String>, BadColumn> {
+    match argument(args, "field") {
+        None => Ok(None),
+        Some(MsgArg::Text(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(bad("error_args", "field is not text")),
+    }
+}
+
+fn limit(args: &[(String, MsgArg)]) -> Result<usize, BadColumn> {
+    match argument(args, "limit") {
+        None => Err(bad("error_args", "has no limit")),
+        Some(MsgArg::Bytes(bytes)) => usize::try_from(*bytes)
+            .map_err(|_| bad("error_args", format!("limit {bytes} is out of range"))),
+        Some(_) => Err(bad("error_args", "limit is not a number of bytes")),
+    }
 }
 
 /// `exit_code` is left out when no exit status is known.
@@ -361,11 +396,11 @@ mod tests {
             let columns = encode_failure(&reason).expect("the failure encodes");
             assert_eq!(columns.code, "secrets-too-large-to-mask");
             assert_eq!(columns.detail, None);
-            let back =
-                match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
-                    Ok(reason) => reason,
-                    Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
-                };
+            let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail)
+            {
+                Ok(reason) => reason,
+                Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+            };
             assert_eq!(back, reason);
         }
     }

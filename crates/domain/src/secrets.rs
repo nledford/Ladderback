@@ -132,28 +132,85 @@ pub struct TooMuchToMask;
 
 impl MaskedSecrets {
     /// Counts a secret: the password, or what a reference resolved to.
-    pub fn secret(&mut self, _secret: &SecretValue) -> Result<(), TooMuchToMask> {
-        todo!()
+    pub fn secret(&mut self, secret: &SecretValue) -> Result<(), TooMuchToMask> {
+        self.count(secret.expose())
     }
 
     /// Counts the secrets a location holds: the password of its URL, and
     /// the credentials of an rclone connection string.
-    pub fn location(&mut self, _location: &str) -> Result<(), TooMuchToMask> {
-        todo!()
+    pub fn location(&mut self, location: &str) -> Result<(), TooMuchToMask> {
+        location_secrets(location)
+            .iter()
+            .try_for_each(|secret| self.secret(secret))
     }
 
     /// Counts the secrets an option holds: the password of a URL in it, and
     /// its whole value when its name says it holds a credential.
-    pub fn option(&mut self, _name: &str, _value: &str) -> Result<(), TooMuchToMask> {
-        todo!()
+    pub fn option(&mut self, name: &str, value: &str) -> Result<(), TooMuchToMask> {
+        option_secrets(name, value)
+            .iter()
+            .try_for_each(|secret| self.secret(secret))
     }
 
     /// Counts every secret of a repository that a redactor for it masks
     /// ([`Redactor::for_repository`]): where a job is run, its secrets are
     /// counted again, with whatever else is masked beside them.
-    pub fn repository(&mut self, _secrets: RepositorySecrets<'_>) -> Result<(), TooMuchToMask> {
-        todo!()
+    pub fn repository(&mut self, secrets: RepositorySecrets<'_>) -> Result<(), TooMuchToMask> {
+        let RepositorySecrets {
+            repository,
+            repo_hot,
+            password,
+            options,
+            options_hot,
+            options_cold,
+            resolved,
+        } = secrets;
+        self.secret(password)?;
+        std::iter::once(repository)
+            .chain(repo_hot)
+            .try_for_each(|location| self.location(location))?;
+        [options, options_hot, options_cold]
+            .into_iter()
+            .flatten()
+            .try_for_each(|(name, value)| self.option(name, value))?;
+        resolved.iter().try_for_each(|secret| self.secret(secret))
     }
+
+    /// Counts `value` once, as [`Redactor::new`] does: nothing for an empty
+    /// one or one counted already. Nothing more is kept once the count is
+    /// past the cap, which it then stays.
+    fn count(&mut self, value: &str) -> Result<(), TooMuchToMask> {
+        if self.bytes <= MAX_MASKED_BYTES && !value.is_empty() && !self.distinct.contains(value) {
+            self.bytes = self.bytes.saturating_add(value.len());
+            if self.bytes <= MAX_MASKED_BYTES {
+                self.distinct.insert(value.to_owned());
+            }
+        }
+        if self.bytes > MAX_MASKED_BYTES {
+            Err(TooMuchToMask)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// What a location holds that a redactor masks: the password of a URL in
+/// it, and each credential of an rclone connection string.
+fn location_secrets(location: &str) -> Vec<SecretValue> {
+    let mut secrets = url_passwords(location);
+    secrets.extend(rclone_credentials(location));
+    secrets
+}
+
+/// What an option holds that a redactor masks: the password of a URL in its
+/// value, and the whole value when its name says it holds a credential
+/// ([`is_secret_option`]), even one written inline.
+fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
+    let mut secrets = url_passwords(value);
+    if is_secret_option(name) {
+        secrets.push(SecretValue::new(value));
+    }
+    secrets
 }
 
 /// Replaces every known secret value, raw or as a URL parser writes it
@@ -168,8 +225,9 @@ impl MaskedSecrets {
 #[derive(Clone, Default)]
 pub struct Redactor {
     needles: Vec<Needle>,
-    /// A needle was longer than one can be (`Needle::new`): every text is
-    /// masked whole, which masks more than a secret, never less (I4).
+    /// Every text is masked whole, which masks more than a secret, never
+    /// less (I4): the secrets came to more than [`MAX_MASKED_BYTES`], or a
+    /// needle was longer than one can be (`Needle::new`).
     whole: bool,
 }
 
@@ -257,11 +315,25 @@ impl std::fmt::Debug for Redactor {
 }
 
 impl Redactor {
+    /// A redactor for `secrets`, each counted once. When they come to more
+    /// than [`MAX_MASKED_BYTES`], none of their forms is built (each about
+    /// 50 times the secret's size): the redactor masks every text whole.
     pub fn new<'a>(secrets: impl IntoIterator<Item = &'a SecretValue>) -> Self {
-        let mut needles: Vec<String> = secrets
+        let mut values: Vec<&str> = secrets
             .into_iter()
             .map(SecretValue::expose)
             .filter(|value| !value.is_empty())
+            .collect();
+        values.sort_unstable();
+        values.dedup();
+        let bytes = values
+            .iter()
+            .try_fold(0_usize, |sum, value| sum.checked_add(value.len()));
+        if bytes.is_none_or(|bytes| bytes > MAX_MASKED_BYTES) {
+            return Self::masking_everything();
+        }
+        let mut needles: Vec<String> = values
+            .into_iter()
             .flat_map(|value| {
                 #[cfg(test)]
                 FORMED.with(|count| count.set(count.get() + 1));
@@ -286,12 +358,15 @@ impl Redactor {
     /// that come to more than [`MAX_MASKED_BYTES`], or that were not all
     /// read. It masks more than a secret, never less (I4).
     pub fn masking_everything() -> Self {
-        todo!()
+        Self {
+            needles: Vec::new(),
+            whole: true,
+        }
     }
 
     /// Whether this redactor masks every text that isn't empty whole.
     pub fn masks_everything(&self) -> bool {
-        todo!()
+        self.whole
     }
 
     /// A redactor for everything that gives access to a repository: its
@@ -314,33 +389,17 @@ impl Redactor {
             options_cold,
             resolved,
         } = repository;
-        let option_sets = [options, options_hot, options_cold];
-        let url_passwords: Vec<SecretValue> = std::iter::once(repository)
+        let derived: Vec<SecretValue> = std::iter::once(repository)
             .chain(repo_hot)
+            .flat_map(location_secrets)
             .chain(
-                option_sets
+                [options, options_hot, options_cold]
                     .iter()
-                    .flat_map(|set| set.values().map(String::as_str)),
+                    .flat_map(|set| set.iter())
+                    .flat_map(|(name, value)| option_secrets(name, value)),
             )
-            .flat_map(url_passwords)
             .collect();
-        let rclone: Vec<SecretValue> = std::iter::once(repository)
-            .chain(repo_hot)
-            .flat_map(rclone_credentials)
-            .collect();
-        let credentials: Vec<SecretValue> = option_sets
-            .iter()
-            .flat_map(|set| set.iter())
-            .filter(|(name, _)| is_secret_option(name))
-            .map(|(_, value)| SecretValue::new(value.as_str()))
-            .collect();
-        Self::new(
-            std::iter::once(password)
-                .chain(&url_passwords)
-                .chain(&rclone)
-                .chain(&credentials)
-                .chain(resolved),
-        )
+        Self::new(std::iter::once(password).chain(&derived).chain(resolved))
     }
 
     /// `text` with every needle in it replaced by [`REDACTED`]. Needles that
@@ -2153,7 +2212,8 @@ mod tests {
         };
         let counted = |settings: &Settings| MaskedSecrets::default().repository(settings.secrets());
         assert_eq!(counted(&at_the_cap()), Ok(()));
-        let parts: [(&str, fn(&mut Settings)); 7] = [
+        type Add = fn(&mut Settings);
+        let parts: [(&str, Add); 7] = [
             ("password", |s| s.password = SecretValue::new("p1")),
             ("repository", |s| {
                 s.repository = "rest:https://demo:p2@nas/".to_owned();

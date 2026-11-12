@@ -40,8 +40,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::planning::{Maintenance, RepositoryField, RepositorySettings};
 use domain::secrets::{
-    FileRead, KeyringEntry, Part, Redactor, RepositorySecrets, SecretRef, SecretValue, SourceName,
-    Template, TemplateError,
+    FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
+    SecretValue, SourceName, Template, TemplateError,
 };
 use domain::{AgentId, OperationId, PlanId};
 use engine::WorkerEngine;
@@ -1225,25 +1225,31 @@ impl Catalog for ConfigCatalog {
             repository.id.as_ref(),
         )
         .await;
+        // A secret: its code and the words a command or the platform gave,
+        // masked of every secret of the repository, in the log as in the
+        // answer (I4).
+        let refused = |refusal: SecretRefusal| {
+            log::warn!(
+                "the snapshots of {} could not be listed: {:?}{}",
+                alias.as_str(),
+                refusal.code,
+                refusal
+                    .detail
+                    .as_deref()
+                    .map(|detail| format!(" ({detail})"))
+                    .unwrap_or_default()
+            );
+            SnapshotsError::SecretRefused(refusal)
+        };
         let listed = match listing {
             Ok(listed) => listed,
-            // A secret: its code and the words a command or the platform
-            // gave, masked of every secret of the repository, in the log
-            // as in the answer (I4).
             Err(SnapshotError::Resolve(error)) => {
-                let refusal =
-                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await;
-                log::warn!(
-                    "the snapshots of {} could not be listed: {:?}{}",
-                    alias.as_str(),
-                    refusal.code,
-                    refusal
-                        .detail
-                        .as_deref()
-                        .map(|detail| format!(" ({detail})"))
-                        .unwrap_or_default()
-                );
-                return Err(SnapshotsError::SecretRefused(refusal));
+                return Err(refused(
+                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
+                ));
+            }
+            Err(SnapshotError::Engine(EngineError::SecretsTooLargeToMask { field, limit })) => {
+                return Err(refused(too_much_to_mask(field, limit)));
             }
             Err(error) => {
                 let said = failure_redactor(&repository.settings, &SystemSecrets::default())
@@ -1579,10 +1585,28 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::Engine(EngineError::StartTimedOut) => {
             unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None)
         }
-        RepositoryError::Engine(EngineError::SecretsTooLargeToMask { .. }) => todo!(),
+        RepositoryError::Engine(EngineError::SecretsTooLargeToMask { field, limit }) => {
+            RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
+        }
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
         RepositoryError::TimedOut => unavailable(ErrorCode::RepositoryTimedOut, Vec::new(), None),
+    }
+}
+
+/// Secrets that come to more than a job masks, as the secret refusal the
+/// routes answer with: the cap, and the setting where they passed it, when
+/// one is known (§10.2). Neither is a secret or tells one (I4).
+pub(crate) fn too_much_to_mask(field: Option<String>, limit: usize) -> SecretRefusal {
+    let mut args = vec![(
+        "limit",
+        MsgArg::Bytes(u64::try_from(limit).unwrap_or(u64::MAX)),
+    )];
+    args.extend(field.map(|field| ("field", MsgArg::Text(field))));
+    SecretRefusal {
+        code: ErrorCode::SecretsTooLargeToMask,
+        args,
+        detail: None,
     }
 }
 
@@ -1672,7 +1696,7 @@ async fn secret_refusal(
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
-        Cause::TooMuchToMask { .. } => todo!(),
+        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(field_name(&error.field)), *limit),
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
@@ -1738,17 +1762,23 @@ async fn read_again(resolver: &dyn SecretResolver, secret: &SecretRef) -> Option
 /// `resolver`. A failed resolution stops at the first fault, so the other
 /// secrets of the repository were not read yet: they are read again here, so
 /// that a command that prints one of them in its error doesn't show it. A
-/// command is not run a second time.
+/// command is not run a second time. Once what was read again passes what a
+/// redactor masks, nothing more is read and the redactor masks every text
+/// whole, since a secret not read could be in it (I4).
 async fn failure_redactor(
     settings: &RepositorySettings,
     resolver: &dyn SecretResolver,
 ) -> Redactor {
     let mut resolved = Vec::new();
+    let mut masked = MaskedSecrets::default();
     if matches!(
         settings.password,
         SecretRef::Env(_) | SecretRef::File { .. }
     ) && let Some(value) = read_again(resolver, &settings.password).await
     {
+        if masked.secret(&value).is_err() {
+            return Redactor::masking_everything();
+        }
         resolved.push(value);
     }
     let texts = std::iter::once(&settings.repository)
@@ -1769,6 +1799,9 @@ async fn failure_redactor(
     }
     for reference in references {
         if let Some(value) = read_again(resolver, &reference.secret_ref()).await {
+            if masked.secret(&value).is_err() {
+                return Redactor::masking_everything();
+            }
             resolved.push(value);
         }
     }
@@ -1828,7 +1861,9 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => RepositoriesError::NotFound,
-        F::SecretsTooLargeToMask { .. } => todo!(),
+        F::SecretsTooLargeToMask { field, limit } => {
+            RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
+        }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
     }
 }

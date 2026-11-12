@@ -205,6 +205,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretCommandTimedOut
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
+        | ErrorCode::SecretsTooLargeToMask
         | ErrorCode::TemplateInvalid
         | ErrorCode::LocationTooManyCredentials
         | ErrorCode::RepositoryPathRelative => {

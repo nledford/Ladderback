@@ -78,7 +78,12 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
         F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
         F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
-        F::SecretsTooLargeToMask { .. } => todo!(),
+        F::SecretsTooLargeToMask { field, limit } => (
+            ErrorCode::SecretsTooLargeToMask,
+            std::iter::once(MsgArg::Bytes(u64::try_from(*limit).unwrap_or(u64::MAX)))
+                .chain(field.as_deref().map(|field| MsgArg::Text(field.to_owned())))
+                .collect(),
+        ),
         F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
     }
 }

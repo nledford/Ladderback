@@ -70,8 +70,13 @@ pub enum EngineError {
 /// What an operation the engine never started failed with.
 impl From<EngineError> for FailureReason {
     fn from(error: EngineError) -> Self {
-        let _ = error;
-        todo!()
+        match error {
+            EngineError::Unavailable { detail } => Self::EngineUnavailable { detail },
+            EngineError::StartTimedOut => Self::EngineStartTimedOut,
+            EngineError::SecretsTooLargeToMask { field, limit } => {
+                Self::SecretsTooLargeToMask { field, limit }
+            }
+        }
     }
 }
 

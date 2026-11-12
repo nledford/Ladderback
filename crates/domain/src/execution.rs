@@ -128,7 +128,7 @@ impl FailureReason {
             Self::EngineStartTimedOut => "engine-start-timed-out",
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
-            Self::SecretsTooLargeToMask { .. } => todo!(),
+            Self::SecretsTooLargeToMask { .. } => "secrets-too-large-to-mask",
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",

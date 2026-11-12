@@ -1006,15 +1006,8 @@ impl RunMaintenance {
             let running = match self.engine.run(operation.id(), job).await {
                 Ok(running) => running,
                 Err(error) => {
-                    let reason = match error {
-                        EngineError::Unavailable { detail } => {
-                            FailureReason::EngineUnavailable { detail }
-                        }
-                        EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
-                        EngineError::SecretsTooLargeToMask { .. } => todo!(),
-                    };
                     note_partial(&mut operation, done.as_ref(), total);
-                    let _ = operation.fail(reason, self.clock.now());
+                    let _ = operation.fail(FailureReason::from(error), self.clock.now());
                     break;
                 }
             };
@@ -1366,8 +1359,9 @@ async fn within_read_timeout<T>(
 fn engine_error(error: EngineError) -> MaintenanceError {
     match error {
         EngineError::Unavailable { detail } => MaintenanceError::Engine { detail },
-        EngineError::StartTimedOut => MaintenanceError::Failed(FailureReason::EngineStartTimedOut),
-        EngineError::SecretsTooLargeToMask { .. } => todo!(),
+        error @ (EngineError::StartTimedOut | EngineError::SecretsTooLargeToMask { .. }) => {
+            MaintenanceError::Failed(FailureReason::from(error))
+        }
     }
 }
 

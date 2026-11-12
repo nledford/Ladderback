@@ -17,7 +17,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
-use domain::secrets::{Redactor, RepositorySecrets, SecretValue};
+use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -217,8 +217,10 @@ impl Engine for WorkerEngine {
             _ => None,
         };
         // What the worker starts with, and so what its proxy settings are:
-        // a proxy URL's credentials are masked like the job's own secrets.
+        // a proxy URL's credentials are masked like the job's own secrets,
+        // and a job past what is masked is not started (§10.2).
         let environment = environment::scrubbed(self.base_environment());
+        refuse_too_much_to_mask(&job, &environment)?;
         let redactor = job_redactor(&job, environment::proxy_credentials(&environment));
         let spec = serde_json::to_vec(&JobSpec {
             op_id: op,
@@ -1259,19 +1261,56 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     }
 }
 
+/// The repository a job opens, and so the secrets it holds; a fake job
+/// opens none.
+fn access_of(job: &Job) -> Option<&RepositoryAccess> {
+    match job {
+        Job::Fake(_) => None,
+        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => Some(access),
+        Job::Backup(job) => Some(&job.repository),
+        Job::Forget(job) => Some(&job.repository),
+        Job::Rewrite(job) => Some(&job.repository),
+        Job::Prune(job) | Job::PrunePlan(job) => Some(&job.repository),
+        Job::Check(job) => Some(&job.repository),
+    }
+}
+
+/// Refuses a job whose secrets, with the proxy credentials of the worker's
+/// `environment`, come to more than a redactor masks: its redactor would
+/// mask every text whole, so a worker would run with nothing it says
+/// readable (§10.2). They are counted before any redactor is built, the
+/// job's own first, then each proxy variable's, and the refusal names the
+/// variable at which they passed the cap, or none when the job's own did.
+fn refuse_too_much_to_mask(
+    job: &Job,
+    environment: &[(OsString, OsString)],
+) -> Result<(), EngineError> {
+    let too_much = |field: Option<&str>| EngineError::SecretsTooLargeToMask {
+        field: field.map(str::to_owned),
+        limit: MAX_MASKED_BYTES,
+    };
+    let mut masked = MaskedSecrets::default();
+    if let Some(access) = access_of(job) {
+        masked
+            .repository(access.known_secrets())
+            .map_err(|_| too_much(None))?;
+    }
+    for (variable, credentials) in environment::proxy_credentials_by_variable(environment) {
+        credentials
+            .iter()
+            .try_for_each(|credential| masked.secret(credential))
+            .map_err(|_| too_much(Some(variable)))?;
+    }
+    Ok(())
+}
+
 /// What masks the job's secrets: the worker's stderr is logged through it,
 /// and so are the events. `extra` is what else must not show, the proxy
 /// credentials of the worker's environment. A fake job has no secrets of its
 /// own.
 fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
-    let access = match job {
-        Job::Fake(_) => return Redactor::new(&extra),
-        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access,
-        Job::Backup(job) => &job.repository,
-        Job::Forget(job) => &job.repository,
-        Job::Rewrite(job) => &job.repository,
-        Job::Prune(job) | Job::PrunePlan(job) => &job.repository,
-        Job::Check(job) => &job.repository,
+    let Some(access) = access_of(job) else {
+        return Redactor::new(&extra);
     };
     let resolved: Vec<SecretValue> = access.secrets.iter().cloned().chain(extra).collect();
     Redactor::for_repository(RepositorySecrets {

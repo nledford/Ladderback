@@ -329,8 +329,8 @@ error-secret-expansion-too-long = The repository's { $field } is longer than { $
 # $limit (bytes): the most they may come to together.
 # $field (text): the setting at which they passed the limit: one of the repository's, such as password or options.note, or a proxy variable of the daemon's environment, such as HTTPS_PROXY. The sender leaves it out when the repository's own secrets passed it where the engine counted them, and the program then supplies the text none.
 error-secrets-too-large-to-mask = { $field ->
-    [none] The repository's secrets come to more than { $limit } together, which is more than a job can hide in everything it shows, so none of its jobs can run. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
-   *[other] The repository's secrets, with any credentials in the daemon's proxy settings, come to more than { $limit } together, which is more than a job can hide in everything it shows, so none of its jobs can run. They passed it at the setting { $field }. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
+    [none] The repository's secrets come to more than { $limit } together, which is more than a job can hide in everything it shows, so its jobs cannot run. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
+   *[other] The repository's secrets, with any credentials in the daemon's proxy settings, come to more than { $limit } together, which is more than a job can hide in everything it shows, so its jobs cannot run. They passed it at the setting { $field }. Refer to fewer or shorter secrets: a backend that reads a key from a file can be given the file's path instead of its contents.
   }
 
 # A setting is not a valid template.
