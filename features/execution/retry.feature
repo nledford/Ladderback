@@ -69,6 +69,21 @@ Feature: Retries of a failed backup
     Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:10+00:00"
     And the plan "home" has no pending retry
 
+  Scenario: A retry waiting its turn when a person cancels a run of the plan is not retried again
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "docs" is scheduled "5 3 * * *"
+    And the plan "home" is scheduled "0 3 * * *"
+    And a run of the plan "docs" takes 30 minutes
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And every run of the plan "home" fails
+    When the agent serves until "2026-06-10 03:15+00:00"
+    And a person starts a backup of the plan "home"
+    And the person cancels that backup while it waits for its turn
+    And the agent serves until "2026-06-10 04:30+00:00"
+    Then the retries of the plan "home" started at "2026-06-10 03:35+00:00"
+    And the agent announced 1 retry of the plan "home"
+    And the plan "home" has no pending retry
+
   Scenario: A backup started by hand that fails is not retried
     Given the agent starts at "2026-06-10 03:30+00:00"
     And the plan "home" is scheduled "0 3 * * *"

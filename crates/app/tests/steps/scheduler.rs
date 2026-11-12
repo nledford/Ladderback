@@ -7,6 +7,7 @@
 //! queue, then as long as the scenario says, and ends as it says.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use api::UiEvent;
@@ -32,7 +33,8 @@ use domain::{
     OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, TimeZone, Timestamp,
 };
 use futures::FutureExt;
-use futures::future::BoxFuture;
+use futures::channel::oneshot;
+use futures::future::{BoxFuture, Either, select};
 use futures::stream::BoxStream;
 
 use super::Agent;
@@ -96,6 +98,9 @@ pub struct RecordingRuns {
     to_read: Mutex<Option<RunEnds>>,
     /// The runs not ended yet, which the steps poll beside the loop.
     going: Mutex<Vec<BoxFuture<'static, ()>>>,
+    /// What cancels each run a person started, while it waits for its
+    /// turn, the last started last.
+    by_hand: Mutex<Vec<oneshot::Sender<()>>>,
 }
 
 /// How a plan's runs end: the listed ones in order, then every other one
@@ -118,6 +123,7 @@ impl RecordingRuns {
             ends,
             to_read: Mutex::new(Some(to_read)),
             going: Mutex::default(),
+            by_hand: Mutex::default(),
         }
     }
 
@@ -171,31 +177,40 @@ impl RecordingRuns {
             .insert(plan, how_long);
     }
 
-    /// Polls every run not ended yet, again while one ends: a run that ends
-    /// gives the next its turn. Says whether a run ended.
-    fn poll_going(&self, context: &mut std::task::Context<'_>) -> bool {
-        let mut any = false;
-        loop {
-            let mut going =
-                std::mem::take(&mut *self.going.lock().unwrap_or_else(PoisonError::into_inner));
-            let before = going.len();
-            going.retain_mut(|run| run.poll_unpin(context).is_pending());
-            let ended = going.len() < before;
-            self.going
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .append(&mut going);
-            if !ended {
-                return any;
-            }
-            any = true;
-        }
+    /// Starts a run of `plan` as a person does, in `place`: they may cancel
+    /// it while it waits for its turn ([`Self::cancel_by_hand`]).
+    fn start_by_hand(&self, plan: &PlanId, place: Place) {
+        let (cancel, cancelled) = oneshot::channel();
+        self.by_hand
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(cancel);
+        self.run(plan, Trigger::Manual, place, Some(cancelled));
     }
-}
 
-#[async_trait]
-impl PlanRuns for RecordingRuns {
-    async fn start(&self, plan: &PlanId, trigger: Trigger, mut place: Place) {
+    /// Cancels the run a person started last, which waits for its turn.
+    fn cancel_by_hand(&self) {
+        let cancel = self
+            .by_hand
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop()
+            .expect("a person started a run");
+        cancel
+            .send(())
+            .expect("the run a person started waits for its turn");
+    }
+
+    /// Runs `plan` in `place`, once its turn comes, as long as the scenario
+    /// says, and says how it ended; or, cancelled through `cancel` before
+    /// its turn, gives up its place and says it was cancelled.
+    fn run(
+        &self,
+        plan: &PlanId,
+        trigger: Trigger,
+        mut place: Place,
+        cancel: Option<oneshot::Receiver<()>>,
+    ) {
         let clock = Arc::clone(&self.clock);
         let started = Arc::clone(&self.started);
         let outcomes = Arc::clone(&self.outcomes);
@@ -209,7 +224,34 @@ impl PlanRuns for RecordingRuns {
             .copied()
             .unwrap_or(SignedDuration::ZERO);
         let run = async move {
-            place.turn().await;
+            let cancelled = match cancel {
+                None => {
+                    place.turn().await;
+                    false
+                }
+                Some(cancel) => match select(pin!(place.turn()), cancel).await {
+                    Either::Left(((), _)) => false,
+                    Either::Right((Ok(()), _)) => true,
+                    // Nobody can cancel it any more: it waits for its turn.
+                    Either::Right((Err(_), turn)) => {
+                        turn.await;
+                        false
+                    }
+                },
+            };
+            if cancelled {
+                // It never started: it leaves the queue and says it was
+                // cancelled, as a run of the daemon's cancelled while it
+                // waits does.
+                drop(place);
+                ends.send(RunEnd {
+                    operation: OperationId::from_uuid(uuid::Uuid::from_u128(u128::MAX)),
+                    plan,
+                    trigger,
+                    outcome: RunOutcome::Cancelled,
+                });
+                return;
+            }
             let number = {
                 let mut started = started.lock().unwrap_or_else(PoisonError::into_inner);
                 started.push(Started {
@@ -243,6 +285,34 @@ impl PlanRuns for RecordingRuns {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(run.boxed());
+    }
+
+    /// Polls every run not ended yet, again while one ends: a run that ends
+    /// gives the next its turn. Says whether a run ended.
+    fn poll_going(&self, context: &mut std::task::Context<'_>) -> bool {
+        let mut any = false;
+        loop {
+            let mut going =
+                std::mem::take(&mut *self.going.lock().unwrap_or_else(PoisonError::into_inner));
+            let before = going.len();
+            going.retain_mut(|run| run.poll_unpin(context).is_pending());
+            let ended = going.len() < before;
+            self.going
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .append(&mut going);
+            if !ended {
+                return any;
+            }
+            any = true;
+        }
+    }
+}
+
+#[async_trait]
+impl PlanRuns for RecordingRuns {
+    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
+        self.run(plan, trigger, place, None);
     }
 
     async fn resume(&self, operation: Operation) {
@@ -795,9 +865,16 @@ async fn retry_pending(agent: &mut Agent, attempt: u32, name: String, at: String
 #[when(expr = "a person starts a backup of the plan {string}")]
 async fn person_starts(agent: &mut Agent, name: String) {
     let plan = plan_id(&name);
-    let place = agent.scheduler.queue.push(&plan, agent.scheduler.concurrency);
-    let runs = Arc::clone(&agent.scheduler.runs);
-    runs.start(&plan, Trigger::Manual, place).await;
+    let place = agent
+        .scheduler
+        .queue
+        .push(&plan, agent.scheduler.concurrency);
+    agent.scheduler.runs.start_by_hand(&plan, place);
+}
+
+#[when("the person cancels that backup while it waits for its turn")]
+fn person_cancels(agent: &mut Agent) {
+    agent.scheduler.runs.cancel_by_hand();
 }
 
 #[then(expr = "the retries of the plan {string} started at {string}")]
@@ -832,6 +909,16 @@ fn announced_retry(agent: &mut Agent, attempt: u32, attempts: u32, name: String,
         )
     });
     assert!(announced, "the agent announced {published:?}");
+}
+
+#[then(expr = "the agent announced {int} retry/retries of the plan {string}")]
+fn announced_retries(agent: &mut Agent, count: usize, name: String) {
+    let published = agent.scheduler.events.published();
+    let announced = published
+        .iter()
+        .filter(|event| matches!(event, UiEvent::BackupRetrying { plan, .. } if *plan == name))
+        .count();
+    assert_eq!(announced, count, "the agent announced {published:?}");
 }
 
 fn said_retries_ended(agent: &Agent, name: &str, why: NoRetry) {

@@ -145,6 +145,9 @@ enum Retrying {
     /// Started, in a place of the queue: how its run ends decides what
     /// follows.
     Started(RetryScheduled),
+    /// Started, and its series ended since by another run of the plan that
+    /// succeeded or was cancelled: its run's end plans nothing more.
+    Stopped,
 }
 
 /// What the loop holds between its turns.
@@ -157,7 +160,7 @@ struct Plans {
     kept: Option<BTreeMap<PlanId, Timestamp>>,
     /// The retry policy of each plan that has one, scheduled or not.
     policies: BTreeMap<PlanId, RetryPolicy>,
-    /// Each plan's retry, pending or started.
+    /// Each plan's retry, pending, started or stopped.
     retries: BTreeMap<PlanId, Retrying>,
 }
 
@@ -419,7 +422,7 @@ impl Scheduler {
             .iter()
             .filter_map(|(plan, retrying)| match retrying {
                 Retrying::Pending(retry) if retry.at <= now => Some((plan.clone(), *retry)),
-                Retrying::Pending(_) | Retrying::Started(_) => None,
+                Retrying::Pending(_) | Retrying::Started(_) | Retrying::Stopped => None,
             })
             .collect();
         for (plan, retry) in due {
@@ -460,6 +463,7 @@ impl Scheduler {
                 self.drop_retry(&end.plan).await;
                 None
             }
+            Some(Retrying::Stopped) => todo!("decision 76: a stopped retry"),
             Some(Retrying::Started(_)) | None => None,
         };
         if end.outcome != RunOutcome::Failed {
@@ -594,7 +598,7 @@ impl Scheduler {
             .map(|next| next.at);
         let pending = retries.values().filter_map(|retrying| match retrying {
             Retrying::Pending(retry) => Some(retry.at),
-            Retrying::Started(_) => None,
+            Retrying::Started(_) | Retrying::Stopped => None,
         });
         runs.chain(pending)
             .map(|at| now.duration_until(at))
@@ -647,7 +651,7 @@ mod tests {
         RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, ScheduleZone, Source,
     };
     use domain::secrets::{FileRead, SecretRef};
-    use domain::{PlanId, RepositoryAlias, SignedDuration, TimeZone, Timestamp};
+    use domain::{OperationId, PlanId, RepositoryAlias, SignedDuration, TimeZone, Timestamp};
 
     use futures::FutureExt;
 
@@ -659,6 +663,7 @@ mod tests {
     };
     use crate::ports::{PendingRetry, PlatformError};
     use crate::queue::{Place, RunQueue};
+    use crate::retry::{RunEnd, RunOutcome};
 
     /// The runs the scheduler starts, in order, each holding its place as a
     /// run that never ends, and what it said.
@@ -1021,6 +1026,91 @@ mod tests {
         assert_eq!(
             scheduler.schedules.pending_retries().await.unwrap(),
             vec![pending(home())]
+        );
+    }
+
+    /// How a run of `home` that `trigger` started ended.
+    fn home_ended(trigger: Trigger, outcome: RunOutcome) -> RunEnd {
+        RunEnd {
+            operation: OperationId::from_uuid(uuid::Uuid::from_u128(1)),
+            plan: home(),
+            trigger,
+            outcome,
+        }
+    }
+
+    /// What the loop holds: `home` retries a failed backup 3 times, 10
+    /// minutes apart at first, and its retry is `retrying`.
+    fn home_retrying(retrying: Retrying) -> Plans {
+        Plans {
+            policies: BTreeMap::from([(
+                home(),
+                RetryPolicy::new(3, SignedDuration::from_mins(10)).unwrap(),
+            )]),
+            retries: BTreeMap::from([(home(), retrying)]),
+            ..Plans::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn another_run_that_ends_the_series_stops_its_started_retry() {
+        let scheduler = scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()));
+        for trigger in [Trigger::Manual, Trigger::Schedule] {
+            for outcome in [RunOutcome::Succeeded, RunOutcome::Cancelled] {
+                for retrying in [
+                    Retrying::Started(retry_at("2026-06-10T03:10:00Z")),
+                    Retrying::Stopped,
+                ] {
+                    let mut plans = home_retrying(retrying);
+                    scheduler
+                        .ended(&mut plans, home_ended(trigger, outcome))
+                        .await;
+                    assert_eq!(
+                        plans.retries.get(&home()),
+                        Some(&Retrying::Stopped),
+                        "{retrying:?} after a {trigger:?} run ended {outcome:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stopped_retry_that_ends_plans_nothing_more() {
+        let runs = Arc::new(Started::default());
+        let scheduler = scheduler("2026-06-10T03:20:00Z", Arc::clone(&runs));
+        for outcome in [
+            RunOutcome::Failed,
+            RunOutcome::Succeeded,
+            RunOutcome::Cancelled,
+        ] {
+            let mut plans = home_retrying(Retrying::Stopped);
+            scheduler
+                .ended(&mut plans, home_ended(Trigger::Retry, outcome))
+                .await;
+            assert_eq!(plans.retries.get(&home()), None, "{outcome:?}");
+        }
+        assert_eq!(scheduler.schedules.pending_retries().await.unwrap(), vec![]);
+        assert_eq!(runs.reports(), vec![]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_scheduled_run_begins_a_series_after_a_stopped_retry() {
+        let scheduler = scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()));
+        let mut plans = home_retrying(Retrying::Stopped);
+        scheduler
+            .ended(
+                &mut plans,
+                home_ended(Trigger::Schedule, RunOutcome::Failed),
+            )
+            .await;
+        assert_eq!(
+            plans.retries.get(&home()),
+            Some(&Retrying::Pending(RetryScheduled {
+                attempt: 1,
+                at: at("2026-06-10T03:30:00Z"),
+                until: None,
+            }))
         );
     }
 
