@@ -68,6 +68,23 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the daemon opens the events stream it held back
     Then the row "demo-home" of the table "Operations" shows "Running" in its "Status" column
 
+  # A run can warn before the page listens: a before-hook's warning, which no
+  # event tells, is in the history while the run goes on (#328). The page
+  # reads the history once its stream is open, and the run ends on the page
+  # as it ended in the history, with its warnings, told once.
+  Scenario: A backup that warned before the page's events stream opened ends with its warnings
+    Given the daemon reports a running backup of "demo-home"
+    And the daemon holds back the opening of the page's events stream
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And a before-hook of the backup of "demo-home" warns before the page's events stream is open
+    And the daemon opens the events stream it held back
+    And the page has read the history again since its events stream opened
+    And the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the row "demo-home" of the table "Operations" shows "Succeeded with warnings" in its "Status" column
+    And the polite region reads "Backup finished."
+    And the polite region keeps reading "Backup finished."
+
   # The table's columns keep the widths they open with: a run that starts,
   # shows its progress and ends changes what its row says, never where the
   # columns are, so the table doesn't jump under the reader's eyes. The sort

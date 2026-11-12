@@ -52,6 +52,9 @@ export class ScriptedDaemon {
   #holdTheOpening = false;
   /** Opens the events stream held back, once the page has asked for one. */
   #openTheHeld: (() => void) | null = null;
+  /** The readings of the history the page asked for, and was answered,
+   *  since its events stream last opened. */
+  #readsSinceTheOpening = 0;
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -96,8 +99,10 @@ export class ScriptedDaemon {
         this.#held = () => route.fulfill({ json });
         return;
       }
-      if (this.#held !== null && this.#stream !== null) this.#readsBesideTheHeld += 1;
+      const open = this.#stream;
+      if (this.#held !== null && open !== null) this.#readsBesideTheHeld += 1;
       await route.fulfill({ json });
+      if (open !== null && open === this.#stream) this.#readsSinceTheOpening += 1;
     });
     await context.route("**/api/v1/plans", (route) =>
       route.fulfill({
@@ -118,6 +123,7 @@ export class ScriptedDaemon {
         await promise;
       }
       this.#stream = stream;
+      this.#readsSinceTheOpening = 0;
     });
   }
 
@@ -144,12 +150,31 @@ export class ScriptedDaemon {
     open?.();
   }
 
+  /** Waits until the page has asked for the history, and been answered, since
+   *  its events stream last opened: the history it read is the one it had
+   *  then, whatever the steps after this change. */
+  async untilReadSinceTheOpening(): Promise<void> {
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (this.#readsSinceTheOpening === 0) {
+      if (Date.now() > end) throw new Error("the page never read the history after its events stream opened");
+      await sleep(50);
+    }
+  }
+
   /** The backup of `plan` starts while the page has asked for its events
    *  stream and it is not open yet: the history says so, and the news goes
    *  to no page. */
   async startsUnheard(plan: string, startedAt: string): Promise<void> {
     await this.#untilAStreamIsHeld();
     this.#begin(plan, startedAt);
+  }
+
+  /** A before-hook of the backup of `plan` warns while the page has asked for
+   *  its events stream and it is not open yet: the run's start write puts the
+   *  warning in the history, and no event tells of it, then or later. */
+  async warnsUnheard(plan: string): Promise<void> {
+    await this.#untilAStreamIsHeld();
+    this.#backupOf(plan)["warning-codes"].push("hook-warning");
   }
 
   /** The history has the backup of `plan` running since `startedAt`. */
@@ -232,11 +257,13 @@ export class ScriptedDaemon {
 
   /** The backup of `plan` succeeds: its log has the end and what the backup
    *  went through, `files` files, before the page is told, as the daemon's
-   *  own run tells of an end only after its last write to the log. The event
-   *  carries no result: the page has to read the history again to show it. */
+   *  own run tells of an end only after its last write to the log. A backup
+   *  that recorded a warning ends with warnings, in the log as in the daemon.
+   *  The event carries no result: the page has to read the history again to
+   *  show it. */
   async succeeds(plan: string, files: number, finishedAt: string): Promise<void> {
     const backup = this.#backupOf(plan);
-    backup.status = "succeeded";
+    backup.status = backup["warning-codes"].length === 0 ? "succeeded" : "succeeded-with-warnings";
     backup["finished-at"] = finishedAt;
     backup.result = { type: "backup", files, bytes: 4096, "duration-ms": 1000 };
     await this.#tell({ type: "operation-succeeded", operation: backup.id, finished_at: finishedAt });

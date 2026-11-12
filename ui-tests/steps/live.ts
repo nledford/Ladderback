@@ -192,8 +192,16 @@ When("the backup of {string} starts before the page's events stream is open", as
   await scripted(this).startsUnheard(plan, "2026-11-09T10:00:05Z");
 });
 
+When("a before-hook of the backup of {string} warns before the page's events stream is open", async function (this: BrowserWorld, plan: string) {
+  await scripted(this).warnsUnheard(plan);
+});
+
 When("the daemon opens the events stream it held back", async function (this: BrowserWorld) {
   await scripted(this).openTheHeldStream();
+});
+
+When("the page has read the history again since its events stream opened", async function (this: BrowserWorld) {
+  await scripted(this).untilReadSinceTheOpening();
 });
 
 When("the daemon reports {int} steps of progress of the backup of {string}", async function (this: BrowserWorld, steps: number, plan: string) {
