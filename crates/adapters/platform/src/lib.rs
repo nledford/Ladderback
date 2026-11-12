@@ -16,6 +16,7 @@ pub mod data_dir_lock;
 pub mod dirs;
 pub mod network;
 pub mod power;
+mod source;
 
 use app::ports::Clock;
 use async_trait::async_trait;
@@ -32,7 +33,15 @@ impl Clock for SystemClock {
     }
 
     fn monotonic(&self) -> SignedDuration {
-        todo!()
+        // `Instant` is CLOCK_MONOTONIC on Linux and CLOCK_UPTIME_RAW on
+        // macOS: neither counts time the machine spends asleep. That is the
+        // standard library's choice, not its promise (its `Instant` docs
+        // leave time asleep to the platform), and a toolchain whose
+        // `Instant` counted it would hide every wake (decision 63).
+        static START: std::sync::LazyLock<std::time::Instant> =
+            std::sync::LazyLock::new(std::time::Instant::now);
+        let start = *START;
+        SignedDuration::try_from(start.elapsed()).unwrap_or(SignedDuration::MAX)
     }
 
     async fn sleep_until(&self, deadline: Timestamp) {
@@ -53,8 +62,12 @@ impl Clock for SystemClock {
     }
 
     async fn sleep(&self, duration: SignedDuration) {
-        let _ = duration;
-        todo!()
+        // tokio timers run on the same clock as `Instant`.
+        if let Ok(duration) = std::time::Duration::try_from(duration)
+            && !duration.is_zero()
+        {
+            tokio::time::sleep(duration).await;
+        }
     }
 }
 

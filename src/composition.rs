@@ -21,8 +21,8 @@ use app::ports::Retention;
 use app::ports::SecretResolver;
 use app::ports::{
     BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, ExportRefusal, HookRunner, HookSetup, Job, OperationRecord, OperationStore,
-    ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
+    EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network, OperationRecord, OperationStore,
+    PowerSupply, ProfileError, ProfileNotice, ProgressEvent, RunningJob, SnapshotSummary,
 };
 use app::recovery::RecoverOperations;
 use app::repositories::{
@@ -122,14 +122,37 @@ fn location_kind(rclone: bool) -> MsgArg {
     text(if rclone { "rclone" } else { "url" })
 }
 
-/// What `serve` runs: the router's state, the operation log it writes, and
-/// the hold on the data folder that keeps every other process off it. The
-/// caller closes the log once it has stopped serving, and keeps the lock
-/// until the daemon is gone (§9).
+/// What `serve` runs: the router's state, the operation log it writes, the
+/// hold on the data folder that keeps every other process off it, and what
+/// a scheduled run asks the machine before it starts. The caller closes the
+/// log once it has stopped serving, and keeps the lock until the daemon is
+/// gone (§9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
     pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
+    pub(crate) conditions: RunConditions,
+}
+
+/// What the conditions before a scheduled run ask the machine (§5): what
+/// powers it and whether it is online.
+#[expect(
+    dead_code,
+    reason = "the scheduler (#274) is the first to ask them; until then the daemon only builds them"
+)]
+pub(crate) struct RunConditions {
+    pub(crate) power: Arc<dyn PowerSupply>,
+    pub(crate) network: Arc<dyn Network>,
+}
+
+impl RunConditions {
+    /// This machine's.
+    fn system() -> Self {
+        Self {
+            power: platform::power::system_power(),
+            network: platform::network::system_network(),
+        }
+    }
 }
 
 /// How long the daemon waits for the operation log to close once it stops
@@ -205,7 +228,12 @@ async fn daemon_at(
     // Every refusal from here on closes the log first: the refused daemon
     // leaves it as tidy as one that served and stopped.
     match state_over(config, &data_dir, cache_dir, &log).await {
-        Ok(state) => Ok(Daemon { state, log, lock }),
+        Ok(state) => Ok(Daemon {
+            state,
+            log,
+            lock,
+            conditions: RunConditions::system(),
+        }),
         Err(refused) => {
             log.close().await;
             Err(refused)
