@@ -53,6 +53,10 @@ kind = \"ntfy\"
 url-env = \"DEMO_TOPIC_URL\"
 username = \"demo-user\"
 password-env = \"DEMO_TOPIC_PASSWORD\"
+
+[notifications.channels.archive]
+kind = \"webhook\"
+url-file = \"/run/secrets/demo-archive-url\"
 ";
 
 const RULES: &str = "
@@ -114,6 +118,18 @@ fn expected() -> Notifications {
                     username: Username::parse("demo-user").expect("a username"),
                     password: SecretRef::Env("DEMO_TOPIC_PASSWORD".to_owned()),
                 }),
+            )
+            .expect("a channel"),
+        ),
+        (
+            channel_name("archive"),
+            Channel::new(
+                ChannelKind::Webhook,
+                SecretRef::File {
+                    path: "/run/secrets/demo-archive-url".to_owned(),
+                    read: FileRead::FirstLine,
+                },
+                None,
             )
             .expect("a channel"),
         ),
@@ -433,6 +449,7 @@ fn notifications_are_written_and_read_back_as_they_were() {
         .expect("rules for the plans the file has");
     let text = render(Path::new(FILE), &config).expect("renders");
     for header in [
+        "[notifications.channels.archive]",
         "[notifications.channels.home-check]",
         "[notifications.channels.ops]",
         "[notifications.rules.everything]",
