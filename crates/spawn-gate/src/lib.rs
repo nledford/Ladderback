@@ -40,7 +40,7 @@
     clippy::unreachable
 )]
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError, TryLockError};
 
 /// The gate: one per process, as the descriptor table is.
 static GATE: Mutex<()> = Mutex::new(());
@@ -58,8 +58,12 @@ pub fn hold<T>(start: impl FnOnce() -> T) -> T {
 /// running `start`, while another call holds it. A gate that a panicked
 /// `start` left counts as free.
 pub fn try_hold<T>(start: impl FnOnce() -> T) -> Option<T> {
-    let _ = start;
-    todo!("#283: take the gate only if it is free")
+    let _held = match GATE.try_lock() {
+        Ok(held) => held,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => return None,
+    };
+    Some(start())
 }
 
 /// [`hold`] on tokio's blocking pool: waiting for the gate, and a start whose

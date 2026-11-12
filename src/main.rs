@@ -231,7 +231,7 @@ fn run_daemon(
         }
     };
     let code: io::Result<ExitCode> = runtime.block_on(async {
-        let listener = match tokio::net::TcpListener::bind(listen).await {
+        let listener = match http_adapter::GatedListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
                 say(

@@ -1,12 +1,15 @@
-//! The daemon's listener: it accepts each connection through the spawn gate
-//! (technical design §16, decision 66).
+//! The daemon's listener: where the platform has no `accept4`, it accepts
+//! each connection through the spawn gate (technical design §16, decision
+//! 66).
 //!
 //! A child inherits every descriptor of its parent that is not close-on-exec
 //! when it starts. Where the platform has no `accept4` (macOS), a connection
 //! is accepted in two steps, `accept` and then `fcntl` for close-on-exec, so
 //! a worker, a hook or a password command that another thread starts in
 //! between holds the browser's connection open for as long as it runs. An
-//! accept that holds the gate cannot overlap a start (decision 58).
+//! accept that holds the gate cannot overlap a start (decision 58). Linux
+//! makes the connection close-on-exec in the one step, so it accepts as
+//! tokio does and never waits for a start.
 //!
 //! An accept takes the gate where it is free at once, on the runtime's
 //! thread. While a start holds it, as one whose `exec` stalls can for long,
@@ -14,10 +17,11 @@
 //! on one of the runtime's threads, which serve every other request
 //! meanwhile.
 
+use std::future::poll_fn;
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener};
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
@@ -36,8 +40,8 @@ const IN_TWO_STEPS: bool = cfg!(not(any(
     target_os = "freebsd"
 )));
 
-/// A TCP listener whose every accept holds the spawn gate, for
-/// `axum::serve`.
+/// A TCP listener whose every accept holds the spawn gate where the
+/// platform accepts in two steps, for `axum::serve`.
 pub struct GatedListener {
     listener: Arc<TcpListener>,
     accept: Accept,
@@ -50,13 +54,23 @@ impl GatedListener {
     ///
     /// The address can't be listened on.
     pub async fn bind(address: SocketAddr) -> io::Result<Self> {
-        let _ = (address, AFTER_FAILURE, Self::with_accept, IN_TWO_STEPS);
-        todo!("#283: listen through the gate")
+        // The listening socket is made in two steps as well where there is
+        // no `SOCK_CLOEXEC` (macOS): a child that held it would keep the
+        // address taken after the daemon stopped.
+        let listener = if IN_TWO_STEPS {
+            spawn_gate::hold_blocking(move || StdListener::bind(address)).await??
+        } else {
+            StdListener::bind(address)?
+        };
+        Self::with_accept(listener, TcpListener::poll_accept)
     }
 
     fn with_accept(listener: StdListener, accept: Accept) -> io::Result<Self> {
-        let _ = (listener, accept, Arc::<()>::default);
-        todo!("#283: a listener that accepts through the gate")
+        listener.set_nonblocking(true)?;
+        Ok(Self {
+            listener: Arc::new(TcpListener::from_std(listener)?),
+            accept,
+        })
     }
 
     /// Where it listens.
@@ -68,15 +82,50 @@ impl GatedListener {
         self.listener.local_addr()
     }
 
-    /// The next connection, accepted while the spawn gate is held.
+    /// The next connection, accepted while the spawn gate is held where the
+    /// platform accepts in two steps.
+    ///
+    /// Dropped while it waits for the gate on the blocking pool, as at
+    /// shutdown, it leaves that wait running: until the gate's holder lets
+    /// go, the socket stays open, and a connection that comes meanwhile is
+    /// accepted and closed at once.
     ///
     /// # Errors
     ///
     /// The accept failed, or the runtime shut down while it waited for the
     /// gate.
     pub async fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        let _ = (self.accept, is_lost_connection);
-        todo!("#283: accept through the gate")
+        let accept = self.accept;
+        if !IN_TWO_STEPS {
+            return poll_fn(|cx| accept(&self.listener, cx)).await;
+        }
+        loop {
+            let at_once = poll_fn(
+                |cx| match spawn_gate::try_hold(|| accept(&self.listener, cx)) {
+                    Some(Poll::Ready(accepted)) => Poll::Ready(Some(accepted)),
+                    Some(Poll::Pending) => Poll::Pending,
+                    None => Poll::Ready(None),
+                },
+            )
+            .await;
+            if let Some(accepted) = at_once {
+                return accepted;
+            }
+            // Another holds the gate: a start until its `exec`, which can
+            // stall, or longer (an `rclone` backend until it serves, #319).
+            // Wait for it, and accept, on the blocking pool. Nothing there
+            // waits for the socket, so the waker is no one's; a connection
+            // that isn't there yet is waited for here again, with this
+            // task's.
+            let listener = Arc::clone(&self.listener);
+            let waited = spawn_gate::hold_blocking(move || {
+                accept(&listener, &mut Context::from_waker(Waker::noop()))
+            })
+            .await?;
+            if let Poll::Ready(accepted) = waited {
+                return accepted;
+            }
+        }
     }
 }
 
@@ -89,7 +138,19 @@ impl axum::serve::Listener for GatedListener {
     /// a daemon out of descriptors, the accept is tried again
     /// [`AFTER_FAILURE`] later, as `axum::serve` does with its own listener.
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        todo!("#283: serve through the gate")
+        loop {
+            match Self::accept(self).await {
+                Ok(accepted) => return accepted,
+                Err(error) if is_lost_connection(&error) => {}
+                Err(error) => {
+                    log::error!(
+                        "a connection could not be accepted: {error}; trying again in {} s",
+                        AFTER_FAILURE.as_secs()
+                    );
+                    tokio::time::sleep(AFTER_FAILURE).await;
+                }
+            }
+        }
     }
 
     fn local_addr(&self) -> io::Result<Self::Addr> {
