@@ -7,7 +7,7 @@ use jiff::civil::DateTime;
 use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
 use jiff::{SignedDuration, Timestamp};
 
-use super::duration::within_limits;
+use super::duration::{length_of, within_limits};
 use super::{InvalidValue, MAX_DURATION, ValueKind, format_duration};
 
 /// The most bytes a cron expression takes. Every value of every field, listed
@@ -156,7 +156,9 @@ impl Interval {
     /// [`Interval::new`] holds, are each refused as
     /// [`ValueKind::Interval`], with the text as written.
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        todo!("{text}")
+        length_of(text)
+            .and_then(|length| Self::new(length).ok())
+            .ok_or_else(|| InvalidValue::new(ValueKind::Interval, text))
     }
 
     pub fn get(self) -> SignedDuration {
@@ -242,16 +244,20 @@ impl ScheduleZone {
     /// or the database's "unknown", names no zone, and `written`, the text
     /// it was read from, is refused as [`ValueKind::TimeZone`].
     pub fn new(written: &str, zone: TimeZone) -> Result<Self, InvalidValue> {
-        todo!("{written} {zone:?}")
+        let name = zone
+            .iana_name()
+            .ok_or_else(|| InvalidValue::new(ValueKind::TimeZone, written))?
+            .to_owned();
+        Ok(Self { name, zone })
     }
 
     /// The zone's name as the database spells it, which is how it is written.
     pub fn name(&self) -> &str {
-        todo!("{}", self.name)
+        &self.name
     }
 
     pub fn zone(&self) -> &TimeZone {
-        todo!("{:?}", self.zone)
+        &self.zone
     }
 }
 
@@ -282,7 +288,10 @@ impl Schedule {
     /// Reads the cron expression on the wall clock of `zone` rather than the
     /// machine's local time (§5).
     pub fn with_zone(self, zone: ScheduleZone) -> Self {
-        todo!("{zone:?} {self:?}")
+        Self {
+            zone: Some(zone),
+            ..self
+        }
     }
 
     /// Spreads runs over up to `jitter` after the expression's moment, so
@@ -325,7 +334,7 @@ impl Schedule {
     /// The time zone the schedule names; `None` for the machine's local
     /// time.
     pub fn zone(&self) -> Option<&ScheduleZone> {
-        todo!("{self:?}")
+        self.zone.as_ref()
     }
 
     pub fn jitter(&self) -> Option<SignedDuration> {

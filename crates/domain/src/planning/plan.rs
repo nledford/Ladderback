@@ -80,11 +80,18 @@ pub enum Overlap {
 impl Overlap {
     /// Reads `skip` or `queue`, in lower case.
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        todo!("{text}")
+        match text {
+            "skip" => Ok(Self::Skip),
+            "queue" => Ok(Self::Queue),
+            _ => Err(InvalidValue::new(ValueKind::Overlap, text)),
+        }
     }
 
     pub fn as_str(self) -> &'static str {
-        todo!("{self:?}")
+        match self {
+            Self::Skip => "skip",
+            Self::Queue => "queue",
+        }
     }
 }
 
