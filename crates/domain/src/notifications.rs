@@ -69,11 +69,12 @@ pub enum Ping {
 
 impl EventKind {
     /// Every event, in the order rules list them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::BackupStarted,
         Self::BackupSucceeded,
         Self::BackupWarning,
         Self::BackupFailed,
+        Self::BackupRetrying,
         Self::ForgetFailed,
         Self::PruneFailed,
         Self::CheckFailed,
@@ -87,7 +88,7 @@ impl EventKind {
             Self::BackupSucceeded => "backup.succeeded",
             Self::BackupWarning => "backup.warning",
             Self::BackupFailed => "backup.failed",
-            Self::BackupRetrying => todo!("the name of backup.retrying"),
+            Self::BackupRetrying => "backup.retrying",
             Self::ForgetFailed => "forget.failed",
             Self::PruneFailed => "prune.failed",
             Self::CheckFailed => "check.failed",
@@ -107,10 +108,11 @@ impl EventKind {
         match self {
             Self::BackupStarted => Ping::Start,
             Self::BackupSucceeded | Self::BackupWarning => Ping::Success,
-            Self::BackupFailed | Self::ForgetFailed | Self::PruneFailed | Self::CheckFailed => {
-                Ping::Fail
-            }
-            Self::BackupRetrying => todo!("the ping of backup.retrying"),
+            Self::BackupFailed
+            | Self::BackupRetrying
+            | Self::ForgetFailed
+            | Self::PruneFailed
+            | Self::CheckFailed => Ping::Fail,
         }
     }
 
@@ -212,8 +214,15 @@ impl Event {
     /// failure's, as the operation's status records it. Only a backup is
     /// retried.
     pub fn retrying(subject: Subject<'_>, attempt: Attempt, at: Timestamp) -> Option<Self> {
-        let _ = (subject, attempt, at);
-        todo!("the event of a retry")
+        (subject.kind == OperationKind::Backup).then(|| Self {
+            attempt: Some(attempt),
+            ..Self::of(
+                EventKind::BackupRetrying,
+                subject,
+                failed(subject.status),
+                at,
+            )
+        })
     }
 
     fn of(

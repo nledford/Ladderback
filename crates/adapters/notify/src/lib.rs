@@ -235,6 +235,8 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
         "repository": event.repository.as_ref().map(|repository| repository.as_str()),
         "code": event.code,
         "time": event.at.to_string(),
+        "attempt": event.attempt.map(|attempt| attempt.number),
+        "attempts": event.attempt.map(|attempt| attempt.of),
     })
 }
 
@@ -267,7 +269,28 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
             msg::NOTIFY_BACKUP_FAILED,
             vec![("plan", MsgArg::Text(plan)), ("code", MsgArg::Text(code))],
         ),
-        EventKind::BackupRetrying => todo!("the default text of backup.retrying"),
+        EventKind::BackupRetrying => {
+            // Every `backup.retrying` has its attempt; one without says 0.
+            let (attempt, attempts) = event
+                .attempt
+                .map_or((0, 0), |attempt| (attempt.number, attempt.of));
+            (
+                msg::NOTIFY_BACKUP_RETRYING,
+                vec![
+                    ("plan", MsgArg::Text(plan)),
+                    ("code", MsgArg::Text(code)),
+                    ("attempt", MsgArg::Count(attempt.into())),
+                    ("attempts", MsgArg::Count(attempts.into())),
+                    (
+                        "at",
+                        MsgArg::Timestamp {
+                            utc_ms: event.at.as_millisecond(),
+                            zone: None,
+                        },
+                    ),
+                ],
+            )
+        }
         EventKind::ForgetFailed => (
             msg::NOTIFY_FORGET_FAILED,
             vec![

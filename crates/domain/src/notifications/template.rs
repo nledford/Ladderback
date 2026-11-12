@@ -2,7 +2,8 @@
 //! facts of the event. Not localized: it says what the user wrote.
 //!
 //! A placeholder is a name in braces, `{plan}`, from a closed list:
-//! `{event}`, `{plan}`, `{repository}`, `{operation}`, `{code}` and `{time}`.
+//! `{event}`, `{plan}`, `{repository}`, `{operation}`, `{code}`, `{time}`,
+//! and a retry's `{attempt}` and `{attempts}`.
 //! None of them can hold a secret (I4), and a name not on the list is
 //! refused when the template is read, so a template can never ask for one.
 //! `{{` and `}}` write a brace.
@@ -30,6 +31,10 @@ enum Placeholder {
     Code,
     /// When it happened, in RFC 3339, UTC.
     Time,
+    /// Which retry a `backup.retrying` tells of.
+    Attempt,
+    /// How many retries its plan makes.
+    Attempts,
 }
 
 impl Placeholder {
@@ -41,6 +46,8 @@ impl Placeholder {
             "operation" => Self::Operation,
             "code" => Self::Code,
             "time" => Self::Time,
+            "attempt" => Self::Attempt,
+            "attempts" => Self::Attempts,
             _ => return None,
         })
     }
@@ -137,6 +144,16 @@ impl Template {
                     }
                 }
                 Part::Value(Placeholder::Time) => message.push_str(&event.at.to_string()),
+                Part::Value(Placeholder::Attempt) => {
+                    if let Some(attempt) = event.attempt {
+                        message.push_str(&attempt.number.to_string());
+                    }
+                }
+                Part::Value(Placeholder::Attempts) => {
+                    if let Some(attempt) = event.attempt {
+                        message.push_str(&attempt.of.to_string());
+                    }
+                }
             }
         }
         message
