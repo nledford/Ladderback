@@ -197,7 +197,7 @@ fn export(location: &str) -> Option<PlanExport> {
             hooks: Hooks::default(),
         },
         agent_hooks: Hooks::default(),
-        agent_hostname: None,
+        agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(plan_id, AgentId::from_uuid(Uuid::from_u128(1))),
     })
 }

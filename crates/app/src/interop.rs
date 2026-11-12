@@ -279,7 +279,7 @@ impl ExportProfile {
                 plan: found.clone(),
                 repository: repository.clone(),
                 agent_hooks: config.hooks().clone(),
-                agent_hostname: config.agent().hostname.clone(),
+                agent: config.agent().clone(),
                 tags: PlanTags::new(found.id.clone(), self.agent),
             })
             .map_err(ExportError::Render)?;

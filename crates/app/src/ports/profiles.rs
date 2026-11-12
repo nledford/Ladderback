@@ -3,7 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use domain::RepositoryAlias;
 use domain::execution::plan_tags::PlanTags;
-use domain::planning::{Hooks, Hostname, Plan, RepositoryConfig};
+use domain::planning::{AgentSettings, Hooks, Plan, RepositoryConfig};
 
 use super::Position;
 
@@ -180,8 +180,9 @@ pub struct PlanExport {
     pub repository: RepositoryConfig,
     /// The agent's hooks, which become `[global.hooks]`.
     pub agent_hooks: Hooks,
-    /// The host name the plan's snapshots carry when the plan names none.
-    pub agent_hostname: Option<Hostname>,
+    /// The agent's settings: its hostname is the plan's snapshot host when
+    /// the plan names none ([`Plan::snapshot_host`]).
+    pub agent: AgentSettings,
     /// The two tags that make a snapshot this plan's, and that the profile's
     /// forget is scoped by.
     pub tags: PlanTags,

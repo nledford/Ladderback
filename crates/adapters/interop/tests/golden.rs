@@ -89,7 +89,7 @@ fn export() -> PlanExport {
             hooks: quiet(),
         },
         agent_hooks: quiet(),
-        agent_hostname: None,
+        agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(id, AgentId::from_uuid(Uuid::from_u128(1))),
     }
 }

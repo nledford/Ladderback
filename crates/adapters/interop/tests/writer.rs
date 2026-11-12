@@ -67,7 +67,7 @@ fn export() -> PlanExport {
             hooks: Hooks::default(),
         },
         agent_hooks: Hooks::default(),
-        agent_hostname: None,
+        agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(id("home"), agent()),
     }
 }
@@ -124,7 +124,7 @@ fn refused(export: &PlanExport) -> ExportRefusal {
 #[test]
 fn a_plan_is_written_as_this_profile_exactly() {
     let mut export = export();
-    export.agent_hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
+    export.agent.hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
     export.agent_hooks.run_before = vec![entry("echo agent")];
     export.repository.hooks.run_before = vec![entry("echo repository")];
     export
@@ -262,7 +262,7 @@ fn the_host_is_the_plans_own_else_the_agents_else_none() {
     let host = |text: &str| Some(Hostname::parse(text).expect("a hostname"));
     let mut export = export();
     assert_hasnt(&text(&export), "backup.snapshots.0.host");
-    export.agent_hostname = host("agent-host");
+    export.agent.hostname = host("agent-host");
     assert_has(
         &text(&export),
         "backup.snapshots.0.host",
@@ -1109,7 +1109,7 @@ fn a_tag_with_a_comma_is_refused_naming_the_tag() {
 #[tokio::test]
 async fn the_reader_reads_the_plan_back_apart_from_ladderbacks_own_tags() {
     let mut export = export();
-    export.agent_hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
+    export.agent.hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
     export.agent_hooks.run_before = vec![entry("echo agent")];
     export.repository.hooks.run_after = vec![entry("echo repository")];
     export
@@ -1135,7 +1135,7 @@ async fn the_reader_reads_the_plan_back_apart_from_ladderbacks_own_tags() {
     assert_eq!(read.plans.len(), 1);
     let mut expected = export.plan.clone();
     // The agent's hostname is the plan's host, the profile having no other.
-    expected.host = export.agent_hostname.clone();
+    expected.host = export.agent.hostname.clone();
     assert_eq!(read.plans[0], expected);
     assert_eq!(read.repository.settings, export.repository.settings);
     assert_eq!(read.repository.hooks, export.repository.hooks);
@@ -1162,7 +1162,7 @@ fn every_key_written_is_a_key_rustic_has() {
     // The reader's lists of rustic 0.11.4's keys are pinned against
     // `rustic_core` by its own parity test.
     let mut export = export();
-    export.agent_hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
+    export.agent.hostname = Some(Hostname::parse("demo-laptop").expect("a hostname"));
     export.agent_hooks.run_before = vec![entry("echo agent")];
     export.repository.hooks.run_before = vec![entry("echo repository")];
     export.repository.settings.repo_hot = Some("/hot".to_owned());
