@@ -33,6 +33,7 @@ async fn listed(engine: &WorkerEngine, access: &RepositoryAccess) -> Vec<Snapsho
         .map(|snapshot| Snapshot {
             id: snapshot.id.clone(),
             time: snapshot.time,
+            offset: snapshot.offset,
             hostname: snapshot.hostname.clone(),
             label: snapshot.label.clone(),
             tags: snapshot.tags.clone(),
@@ -113,6 +114,7 @@ async fn an_error_never_carries_the_repository_credentials() {
     let group = vec![Snapshot {
         id: SnapshotId::parse(&"07".repeat(32)).unwrap(),
         time: Timestamp::from_second(1_800_000_000).unwrap(),
+        offset: domain::Offset::UTC,
         hostname: "demo-host".to_owned(),
         label: String::new(),
         tags: Vec::new(),
@@ -144,6 +146,7 @@ fn one_snapshot() -> Vec<Snapshot> {
     vec![Snapshot {
         id: SnapshotId::parse(&"07".repeat(32)).unwrap(),
         time: Timestamp::from_second(1_800_000_000).unwrap(),
+        offset: domain::Offset::UTC,
         hostname: "demo-host".to_owned(),
         label: String::new(),
         tags: Vec::new(),

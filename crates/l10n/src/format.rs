@@ -237,6 +237,13 @@ pub(crate) type Active = crate::icu::Icu;
 #[cfg(not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32"))))]
 pub(crate) type Active = NoHost;
 
+/// Whether host `H` writes the instants of `locale` itself, rather than
+/// leaving them to [`plain_instant`], which reads every instant in UTC and
+/// says so.
+pub(crate) fn writes_instants<H: Host>(locale: &LanguageIdentifier) -> bool {
+    H::Instants::new(locale, Style::DEFAULT).is_some()
+}
+
 #[cfg(any(
     test,
     not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32")))
@@ -1203,5 +1210,16 @@ again = { DATETIME(DATETIME($when, dateStyle: \"long\")) }
         assert!(<Nothing as InstantFormatter>::new(&tag("de"), Style::DEFAULT).is_none());
         assert_eq!(NumberFormatter::format(&Nothing, 1.5), None);
         assert_eq!(InstantFormatter::format(&Nothing, WINTER, None), None);
+    }
+
+    #[test]
+    fn only_a_host_that_builds_a_formatter_of_instants_writes_them() {
+        assert!(!writes_instants::<NoHost>(&tag("en-US")));
+        // A test build has ICU4X's host, except for wasm32 with the browser's
+        // (`tests/browser.rs` has that one).
+        #[cfg(not(all(feature = "browser-intl", target_arch = "wasm32")))]
+        for locale in ["en-US", "de"] {
+            assert!(writes_instants::<crate::icu::Icu>(&tag(locale)), "{locale}");
+        }
     }
 }

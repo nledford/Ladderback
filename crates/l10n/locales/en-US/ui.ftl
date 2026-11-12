@@ -481,6 +481,14 @@ ui-backup-started = Backup started.
 # An instant, as the page's locale writes it.
 ui-instant = { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
 
+# When a listed snapshot was taken, as the clock that took it read it, with
+# that clock's offset from UTC after it: shown where the viewer's clock was
+# at another offset then (§16, decision 56). `when` is the reading, already
+# written as the page's locale writes `ui-instant`; `offset` is the offset as
+# RFC 3339 writes one ("-06:00"). "UTC" is a string literal: a locale may
+# name the reference otherwise ("GMT"), and a pseudolocale leaves it as it is.
+ui-snapshot-time-offset = { $when } { "UTC" }{ $offset }
+
 # The heading a live page shows when the daemon cannot be reached at all.
 ui-unreachable-heading = Cannot reach { -brand-name }
 

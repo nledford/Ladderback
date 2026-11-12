@@ -151,6 +151,15 @@ Given("a demo plan {string} with a tiny scratch repository", async function (thi
   await serveDemoPlans(this, [plan], "tiny");
 });
 
+// The daemon's machine keeps its clock in `zone`, so each snapshot its backups
+// take records that clock's offset (§16, decision 56).
+Given(
+  "a demo plan {string} with a tiny scratch repository on a machine whose clock runs in {string}",
+  async function (this: BrowserWorld, plan: string, zone: string) {
+    await serveDemoPlans(this, [plan], "tiny", { TZ: zone });
+  },
+);
+
 Given("the plan {string} has been backed up {int} times", async function (this: BrowserWorld, plan: string, times: number) {
   for (let done = 0; done < times; done += 1) {
     await backUp(this, plan);

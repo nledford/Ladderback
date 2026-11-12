@@ -151,6 +151,42 @@ async fn a_repository_with_three_snapshots(agent: &mut Agent) {
     three_snapshots(agent).await;
 }
 
+/// Initialises a scratch repository and makes one snapshot in it, recorded
+/// at `time`: a date, a time of day and the offset of the clock that took
+/// it, read as rustic reads the time of a snapshot file.
+#[given(expr = "a repository with a snapshot taken at {string}")]
+async fn a_repository_with_a_snapshot_taken_at(agent: &mut Agent, time: String) {
+    let cold = agent.scratch().join("repo");
+    init(&cold).await;
+    let source = agent.scratch().join("source");
+    fs::create_dir_all(&source).expect("the source folder");
+    fs::write(source.join("a.txt"), b"hello").expect("a file to back up");
+    let when = rustic_core::repofile::RusticTime::parse_utc(&time).expect("a time");
+    let at = cold.clone();
+    blocking(move || {
+        let repo = repository(&at)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .to_indexed_ids()
+            .expect("the scratch repository indexes");
+        let paths = PathList::from_iter([&source])
+            .sanitize()
+            .expect("the paths");
+        let options = SnapshotOptions::default()
+            .host("demo-host".to_owned())
+            .time(Some(when));
+        repo.backup(
+            &BackupOptions::default(),
+            &paths,
+            options.to_snapshot().expect("the snapshot options"),
+        )
+        .expect("a plain rustic backup");
+    })
+    .await;
+    agent.snapshots.cold = Some(cold.clone());
+    agent.snapshot_settings().repository = text(&cold);
+}
+
 #[given("a repository with no snapshots")]
 async fn a_repository_with_no_snapshots(agent: &mut Agent) {
     let cold = agent.scratch().join("repo");
@@ -220,6 +256,23 @@ async fn shows_three_newest_first(agent: &mut Agent) {
     }
     let labels: Vec<&str> = listed.iter().map(|s| s.label.as_str()).collect();
     assert_eq!(labels, ["third", "second", "first"]);
+}
+
+#[then(expr = "the listing shows the snapshot at {string} with the offset {string}")]
+fn shows_the_snapshot_with_its_offset(agent: &mut Agent, instant: String, offset: String) {
+    let listed = agent
+        .snapshots
+        .listed
+        .take()
+        .expect("the listing ran")
+        .expect("the listing succeeds");
+    let [snapshot] = listed.as_slice() else {
+        panic!("one snapshot listed: {listed:?}");
+    };
+    let instant: domain::Timestamp = instant.parse().expect("an RFC 3339 instant");
+    let offset: api::ClockOffset = offset.parse().expect("an RFC 3339 offset");
+    assert_eq!(snapshot.time, instant, "the instant it was taken at");
+    assert_eq!(snapshot.offset, offset.get(), "the offset of its clock");
 }
 
 #[then("the listing is empty")]

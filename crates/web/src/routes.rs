@@ -703,6 +703,112 @@ pub(crate) fn instant(localizer: &Localizer, raw: &str, zone: Option<&api::IanaZ
     }
 }
 
+/// When a listed snapshot was taken, as a page shows it (§16, decision 56):
+/// what the clock that took it read, on the day a calendar retention rule
+/// counts it on, rather than the viewer's reading of the instant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Taken {
+    /// A time that isn't RFC 3339, shown as it came.
+    Unread,
+    /// A time without the offset of its clock, from a daemon older than the
+    /// field: the instant, read in the viewer's zone as before.
+    Instant(jiff::Timestamp),
+    /// What the snapshot's own clock read, at that clock's `offset`. The
+    /// offset is `named` when it differs from the viewer's at that instant,
+    /// so that someone in the zone the snapshot was taken in reads the time
+    /// as their own clock does.
+    Clock {
+        reading: jiff::civil::DateTime,
+        offset: jiff::tz::Offset,
+        named: bool,
+    },
+}
+
+/// When the snapshot whose time is `raw` (RFC 3339) was taken, by a clock at
+/// `offset`, for a viewer whose own clock is at `viewer(instant)` at that
+/// instant (the browser's, [`crate::snapshots::viewer_offset`]).
+pub(crate) fn taken(
+    raw: &str,
+    offset: Option<api::ClockOffset>,
+    viewer: impl FnOnce(jiff::Timestamp) -> jiff::tz::Offset,
+) -> Taken {
+    let Ok(at) = jiff::Timestamp::from_str(raw) else {
+        return Taken::Unread;
+    };
+    let Some(offset) = offset.map(api::ClockOffset::get) else {
+        return Taken::Instant(at);
+    };
+    Taken::Clock {
+        reading: offset.to_datetime(at),
+        offset,
+        named: viewer(at) != offset,
+    }
+}
+
+/// A listed snapshot's time as the page writes it ([`taken`]). The host
+/// writes the clock's reading as the locale does, with the offset after it
+/// when it is named. A build whose host doesn't write instants
+/// (`writes_instants` false) would write that reading as an instant in UTC
+/// and call it so; the reading is written plainly instead, and its offset
+/// always follows it, so nothing labels the reading of another clock UTC.
+/// A time without its clock's offset is the instant in the viewer's `zone`,
+/// as [`instant`] writes it.
+pub(crate) fn snapshot_time(
+    localizer: &Localizer,
+    raw: &str,
+    offset: Option<api::ClockOffset>,
+    zone: Option<&api::IanaZone>,
+    viewer: impl FnOnce(jiff::Timestamp) -> jiff::tz::Offset,
+    writes_instants: bool,
+) -> String {
+    let (reading, offset, named) = match taken(raw, offset, viewer) {
+        Taken::Unread => return raw.to_owned(),
+        Taken::Instant(_) => return instant(localizer, raw, zone),
+        Taken::Clock {
+            reading,
+            offset,
+            named,
+        } => (reading, offset, named),
+    };
+    // The host writes the reading as it writes an instant read in UTC, which
+    // shows no zone. A reading past the last instant is no instant to hand it.
+    let hosted = jiff::tz::TimeZone::UTC
+        .to_timestamp(reading)
+        .ok()
+        .filter(|_| writes_instants);
+    let (when, named) = match hosted {
+        Some(as_if_utc) => (
+            text_with(
+                localizer,
+                msg::UI_INSTANT,
+                &[(
+                    "when",
+                    MsgArg::Timestamp {
+                        utc_ms: as_if_utc.as_millisecond(),
+                        zone: None,
+                    },
+                )],
+            ),
+            named,
+        ),
+        None => (reading.strftime("%Y-%m-%d %H:%M:%S").to_string(), true),
+    };
+    if !named {
+        return when;
+    }
+    text_with(
+        localizer,
+        msg::UI_SNAPSHOT_TIME_OFFSET,
+        &[
+            ("when", MsgArg::Text(when)),
+            (
+                "offset",
+                MsgArg::Text(api::ClockOffset::new(offset).to_string()),
+            ),
+        ],
+    )
+}
+
 /// A refusal the daemon answered with, as the catalog writes it (§8.4): a
 /// typed code with its arguments, never a bare status number.
 pub(crate) fn refusal(
@@ -1712,6 +1818,245 @@ mod tests {
         assert!(
             !announces_end("succeeded", "failed"),
             "history does not move"
+        );
+    }
+
+    fn clock(seconds: i32) -> Option<api::ClockOffset> {
+        Some(api::ClockOffset::new(
+            jiff::tz::Offset::from_seconds(seconds).unwrap(),
+        ))
+    }
+
+    fn zone(name: &str) -> Option<api::IanaZone> {
+        Some(api::IanaZone::new(name).unwrap())
+    }
+
+    /// The offset of a viewer's clock in the zone `name` at each instant, as
+    /// the browser gives it.
+    fn in_zone(name: &str) -> impl Fn(jiff::Timestamp) -> jiff::tz::Offset {
+        let zone = jiff::tz::TimeZone::get(name).unwrap();
+        move |at| zone.to_offset(at)
+    }
+
+    /// What the clock at `offset` read when it took the snapshot at `raw`,
+    /// and whether the viewer in `viewer` is told the offset.
+    fn read(raw: &str, offset: i32, viewer: &str) -> (String, bool) {
+        match taken(raw, clock(offset), in_zone(viewer)) {
+            Taken::Clock {
+                reading,
+                offset: read_at,
+                named,
+            } => {
+                assert_eq!(read_at.seconds(), offset, "{raw}");
+                (reading.to_string(), named)
+            }
+            other => panic!("{raw} at {offset} is a clock's reading: {other:?}"),
+        }
+    }
+
+    /// Decision 56's examples: a container whose clock runs in UTC, a late
+    /// evening in Chicago, and a laptop flown from Auckland to Hawaii.
+    #[test]
+    fn a_snapshot_is_shown_as_its_own_clock_read_it_with_an_offset_the_viewer_lacks() {
+        let chicago = -6 * 3600;
+        assert_eq!(
+            read("2026-11-11T05:30:00Z", 0, "America/Chicago"),
+            ("2026-11-11T05:30:00".to_owned(), true),
+            "a container's clock in UTC, seen from Chicago"
+        );
+        assert_eq!(
+            read("2026-11-11T05:30:00Z", chicago, "America/Chicago"),
+            ("2026-11-10T23:30:00".to_owned(), false),
+            "late evening in Chicago, seen from Chicago"
+        );
+        assert_eq!(
+            read("2026-11-11T05:30:00Z", chicago, "America/New_York"),
+            ("2026-11-10T23:30:00".to_owned(), true),
+            "late evening in Chicago, seen from New York the next day"
+        );
+        assert_eq!(
+            read("2026-11-09T11:30:00Z", 13 * 3600, "Pacific/Honolulu"),
+            ("2026-11-10T00:30:00".to_owned(), true),
+            "the laptop in Auckland, seen from Hawaii"
+        );
+        assert_eq!(
+            read("2026-11-11T09:30:00Z", -10 * 3600, "Pacific/Honolulu"),
+            ("2026-11-10T23:30:00".to_owned(), false),
+            "the laptop in Hawaii, seen from Hawaii"
+        );
+    }
+
+    /// The offset compared is the viewer's at the moment the snapshot was
+    /// taken: the night daylight saving time ends in Chicago, both sides of
+    /// it are the viewer's own, and a clock that kept the summer's offset
+    /// after it is not.
+    #[test]
+    fn the_viewers_offset_is_the_one_in_force_when_the_snapshot_was_taken() {
+        assert_eq!(
+            read("2026-11-01T05:30:00Z", -5 * 3600, "America/Chicago"),
+            ("2026-11-01T00:30:00".to_owned(), false)
+        );
+        assert_eq!(
+            read("2026-11-02T05:30:00Z", -6 * 3600, "America/Chicago"),
+            ("2026-11-01T23:30:00".to_owned(), false)
+        );
+        assert_eq!(
+            read("2026-11-02T04:30:00Z", -5 * 3600, "America/Chicago"),
+            ("2026-11-01T23:30:00".to_owned(), true)
+        );
+        assert_eq!(
+            read("2026-07-01T05:30:00Z", -6 * 3600, "America/Chicago"),
+            ("2026-06-30T23:30:00".to_owned(), true)
+        );
+    }
+
+    /// The viewer's offset is asked for at the instant the snapshot was
+    /// taken, and only it decides: a viewer at a fixed offset (a browser in
+    /// UTC, or one without zone names) is told every other offset.
+    #[test]
+    fn the_viewers_offset_is_read_at_the_snapshots_instant() {
+        let raw = "2026-11-11T05:30:00Z";
+        let named = |offset: i32, viewer: i32| {
+            let viewer = jiff::tz::Offset::from_seconds(viewer).unwrap();
+            match taken(raw, clock(offset), |at| {
+                assert_eq!(at, raw.parse().unwrap());
+                viewer
+            }) {
+                Taken::Clock { named, .. } => named,
+                other => panic!("a clock's reading: {other:?}"),
+            }
+        };
+        assert!(!named(0, 0));
+        assert!(named(-6 * 3600, 0));
+        assert!(named(0, 5 * 3600 + 45 * 60));
+        assert!(!named(5 * 3600 + 45 * 60, 5 * 3600 + 45 * 60));
+    }
+
+    #[test]
+    fn a_time_without_its_clocks_offset_is_the_instant_in_the_viewers_zone_as_before() {
+        let localizer = Localizer::new(&[]);
+        let raw = "2026-11-11T05:30:00Z";
+        let viewer = zone("America/Chicago");
+        assert_eq!(
+            taken(raw, None, in_zone("America/Chicago")),
+            Taken::Instant(raw.parse().unwrap())
+        );
+        for host in [true, false] {
+            assert_eq!(
+                snapshot_time(
+                    &localizer,
+                    raw,
+                    None,
+                    viewer.as_ref(),
+                    in_zone("America/Chicago"),
+                    host
+                ),
+                instant(&localizer, raw, viewer.as_ref())
+            );
+        }
+    }
+
+    #[test]
+    fn a_time_that_is_not_rfc_3339_is_shown_as_it_came() {
+        let localizer = Localizer::new(&[]);
+        let utc = |_| jiff::tz::Offset::UTC;
+        assert_eq!(taken("yesterday", clock(0), utc), Taken::Unread);
+        assert_eq!(taken("yesterday", None, utc), Taken::Unread);
+        for host in [true, false] {
+            assert_eq!(
+                snapshot_time(&localizer, "yesterday", clock(0), None, utc, host),
+                "yesterday"
+            );
+        }
+    }
+
+    /// The host writes the reading as it writes an instant in UTC, which
+    /// shows no zone, and the offset follows only when it is named.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_host_writes_the_reading_and_the_offset_only_when_the_viewer_lacks_it() {
+        let localizer = Localizer::new(&[]);
+        if !localizer.writes_instants() {
+            testkit::skip!("this build's l10n has no host that writes instants");
+        }
+        let raw = "2026-11-11T05:30:00Z";
+        let reading = instant(&localizer, "2026-11-10T23:30:00Z", None);
+        let shown = |offset: i32, viewer: &str| {
+            snapshot_time(
+                &localizer,
+                raw,
+                clock(offset),
+                zone(viewer).as_ref(),
+                in_zone(viewer),
+                localizer.writes_instants(),
+            )
+        };
+        assert_eq!(
+            shown(-6 * 3600, "America/New_York"),
+            format!("{reading} UTC-06:00")
+        );
+        assert_eq!(shown(-6 * 3600, "America/Chicago"), reading);
+        assert_eq!(
+            shown(0, "America/Chicago"),
+            format!("{} UTC+00:00", instant(&localizer, raw, None))
+        );
+    }
+
+    /// Without a host, `DATETIME` writes an instant in UTC and says "UTC":
+    /// the reading of another clock is written plainly instead, and its
+    /// offset always follows, even where the viewer's is the same.
+    #[test]
+    fn without_a_host_the_reading_is_written_plainly_and_never_called_utc() {
+        let localizer = Localizer::new(&[]);
+        let raw = "2026-11-11T05:30:00Z";
+        let shown = |offset: i32, viewer: &str| {
+            snapshot_time(
+                &localizer,
+                raw,
+                clock(offset),
+                zone(viewer).as_ref(),
+                in_zone(viewer),
+                false,
+            )
+        };
+        for viewer in ["America/Chicago", "America/New_York"] {
+            assert_eq!(
+                shown(-6 * 3600, viewer),
+                "2026-11-10 23:30:00 UTC-06:00",
+                "{viewer}"
+            );
+        }
+        assert_eq!(shown(0, "UTC"), "2026-11-11 05:30:00 UTC+00:00");
+        assert_eq!(
+            snapshot_time(
+                &localizer,
+                raw,
+                clock(19 * 60 + 32),
+                None,
+                |_| jiff::tz::Offset::UTC,
+                false
+            ),
+            "2026-11-11 05:49:32 UTC+00:19:32"
+        );
+    }
+
+    /// A reading past the last instant (late on 30 December 9999, UTC) can't
+    /// be handed to the host as one; it is written plainly, as it read.
+    #[test]
+    fn a_reading_past_the_last_instant_is_written_plainly() {
+        let localizer = Localizer::new(&[]);
+        let raw = "9999-12-30T22:00:00Z";
+        let latest = 25 * 3600 + 59 * 60 + 59;
+        assert_eq!(
+            snapshot_time(
+                &localizer,
+                raw,
+                clock(latest),
+                None,
+                |_| jiff::tz::Offset::UTC,
+                true
+            ),
+            "9999-12-31 23:59:59 UTC+25:59:59"
         );
     }
 }

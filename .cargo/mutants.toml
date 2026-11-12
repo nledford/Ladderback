@@ -34,7 +34,9 @@
 # nothing to say (an unmanaged group's paths when it has none, the sentence
 # that no plan could adopt it when it has no plan to offer, and the
 # maintenance and adoption buttons of a repository the daemon says this agent
-# does not maintain, with the sentence that says why in their place). The
+# does not maintain, with the sentence that says why in their place); and
+# reading the offset of the viewer's clock from the browser's `Date`
+# (`viewer_offset`, which `formatting.rs` tests in `just test-wasm`). The
 # maintenance journeys of `features/ui/maintenance.feature` check it in
 # Chromium. Everything the page
 # decides is decided on the host and mutated there: the request and the review

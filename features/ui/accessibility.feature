@@ -221,7 +221,9 @@ Feature: Accessibility of the app shell
     And the table "Snapshots of plan demo-home" shows its "Time" column newest first
     And the page has no accessibility violations
 
-  Scenario: The snapshots page writes each time in the zone of the browser
+  # A listed snapshot's time is the one its own clock read, not the viewer's
+  # (features/ui/snapshot_times.feature).
+  Scenario: The operations page writes each time in the zone of the browser
     Given a demo plan "demo-home" with a scratch repository
     And the browser is in the time zone "Pacific/Auckland"
     When I open the address "/operations"
@@ -229,11 +231,6 @@ Feature: Accessibility of the app shell
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
     Then the table "Operations" shows its "Started" column in the time zone "Pacific/Auckland"
-    When I open the address "/snapshots"
-    And I press Tab until focus is on the button "Snapshots of demo"
-    And I press Enter
-    Then the table "Snapshots of plan demo-home" has 1 rows
-    And the table "Snapshots of plan demo-home" shows its "Time" column in the time zone "Pacific/Auckland"
 
   Scenario: The operations page announces its empty state
     Given a demo plan "demo-home" with a scratch repository

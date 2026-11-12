@@ -7689,6 +7689,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "testkit",
  "toml",
  "wasm-bindgen-test",
  "web-sys",

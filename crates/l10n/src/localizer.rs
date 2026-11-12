@@ -80,6 +80,9 @@ impl fmt::Display for Formatted {
 pub struct Localizer {
     locales: Vec<LanguageIdentifier>,
     bundles: Vec<Bundle>,
+    /// Whether the host the bundles were built with writes a locale's
+    /// instants ([`format::writes_instants`]).
+    writes: fn(&LanguageIdentifier) -> bool,
 }
 
 impl fmt::Debug for Localizer {
@@ -102,6 +105,15 @@ impl Localizer {
     /// own. Without an `en-US` catalog among them nothing ends the chain, and
     /// a message no locale has is shown as its ID.
     pub fn from_catalogs(preferences: &[LanguageIdentifier], catalogs: &[Catalog]) -> Self {
+        Self::on::<format::Active>(preferences, catalogs)
+    }
+
+    /// The same, with host `H` writing numbers and instants: a test builds a
+    /// localizer without one.
+    pub(crate) fn on<H: format::Host>(
+        preferences: &[LanguageIdentifier],
+        catalogs: &[Catalog],
+    ) -> Self {
         let known: Vec<(LanguageIdentifier, &Catalog)> = catalogs
             .iter()
             .filter_map(|catalog| Some((catalog.tag.parse().ok()?, catalog)))
@@ -115,14 +127,18 @@ impl Localizer {
                 // A pseudolocale is looked up where `en-US` would be, ahead of
                 // it. Without an `en-US` catalog there is nothing to transform.
                 if let Some(pseudo) = pseudo.filter(|_| locale == source()) {
-                    bundles.push(pseudo_bundle(pseudo, &locale, catalog));
+                    bundles.push(pseudo_bundle::<H>(pseudo, &locale, catalog));
                     locales.push(pseudo.tag());
                 }
-                bundles.push(new_bundle(&locale, catalog));
+                bundles.push(new_bundle::<H>(&locale, catalog));
                 locales.push(locale);
             }
         }
-        Self { locales, bundles }
+        Self {
+            locales,
+            bundles,
+            writes: format::writes_instants::<H>,
+        }
     }
 
     /// Whether a value put into a message is wrapped in Unicode isolation
@@ -156,6 +172,19 @@ impl Localizer {
     /// page's `dir` attribute.
     pub fn direction(&self) -> Direction {
         Direction::of(&self.language())
+    }
+
+    /// Whether the host (the browser's `Intl`, or ICU4X) writes the
+    /// instants of every locale this localizer looks messages up in. Where
+    /// it doesn't, an instant is written plainly, read in UTC and labelled
+    /// so (§8.4): a page that shows a clock reading rather than an instant
+    /// writes that reading itself there (§16, decision 56).
+    pub fn writes_instants(&self) -> bool {
+        // A pseudolocale's bundle is in the locale of its source.
+        self.bundles
+            .iter()
+            .flat_map(|bundle| &bundle.locales)
+            .all(|locale| (self.writes)(locale))
     }
 
     /// The message `id`, with `args` for its variables. At most 32 arguments
@@ -357,13 +386,13 @@ impl Localizer {
     }
 }
 
-fn new_bundle(locale: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
+fn new_bundle<H: format::Host>(locale: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
     let mut bundle = FluentBundle::new_concurrent(vec![locale.clone()]);
     bundle.set_use_isolating(false);
     // `NUMBER` keeps a count numeric, so plural selectors work. An error only
     // means it was already added.
     let _ = bundle.add_builtins();
-    format::install::<format::Active, _>(&mut bundle);
+    format::install::<H, _>(&mut bundle);
     for source in catalog.sources {
         // The catalog tests keep every file clean. A bundle in the field
         // takes what parses, and the first of an ID defined twice.
@@ -377,8 +406,27 @@ fn new_bundle(locale: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
 /// The bundle of a pseudolocale: the catalog of the source locale, in that
 /// locale, so that its plural rules are English's, with every text of it run
 /// through the pseudolocale's transform.
-fn pseudo_bundle(pseudo: Pseudo, source: &LanguageIdentifier, catalog: &Catalog) -> Bundle {
-    let mut bundle = new_bundle(source, catalog);
+fn pseudo_bundle<H: format::Host>(
+    pseudo: Pseudo,
+    source: &LanguageIdentifier,
+    catalog: &Catalog,
+) -> Bundle {
+    let mut bundle = new_bundle::<H>(source, catalog);
     bundle.set_transform(Some(pseudo.transform()));
     bundle
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Without a host, an instant is written plainly, read in UTC, and the
+    /// localizer says so, for a page that shows another clock's reading.
+    #[test]
+    fn a_localizer_whose_host_writes_no_instants_says_so() {
+        let en_us = vec![source()];
+        let plain = Localizer::on::<format::NoHost>(&en_us, crate::catalog::catalogs());
+        assert!(!plain.writes_instants());
+        assert!(Localizer::from_catalogs(&en_us, crate::catalog::catalogs()).writes_instants());
+    }
 }

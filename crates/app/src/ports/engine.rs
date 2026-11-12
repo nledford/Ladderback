@@ -7,7 +7,9 @@ use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
 use domain::planning::{Hostname, RepositoryConfig, SourceFilter, masked_options};
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
-use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp};
+use domain::{
+    Offset, OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp,
+};
 use futures::stream::BoxStream;
 
 /// Runs operations against a repository and reports what happens as a stream
@@ -510,6 +512,9 @@ pub struct SnapshotSummary {
     pub id: SnapshotId,
     /// When the snapshot was taken.
     pub time: Timestamp,
+    /// The offset of the clock that took it, as the snapshot file records
+    /// it: with `time`, the snapshot time (§3.1).
+    pub offset: Offset,
     pub hostname: String,
     pub label: String,
     pub tags: Vec<String>,

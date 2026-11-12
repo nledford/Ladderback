@@ -218,6 +218,7 @@ mod tests {
         Snapshot {
             id: SnapshotId::parse(&format!("{number:064x}")).expect("a snapshot ID"),
             time: now(),
+            offset: crate::Offset::UTC,
             hostname: hostname.to_owned(),
             label: String::new(),
             tags: Vec::new(),

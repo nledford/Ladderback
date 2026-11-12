@@ -78,6 +78,8 @@ pub(crate) enum Summary {
 pub(crate) struct Snapshot {
     pub id: SnapshotId,
     pub time: Timestamp,
+    /// The offset of the clock that took it, in seconds east of UTC.
+    pub offset_seconds: i32,
     pub hostname: String,
     pub label: String,
     pub tags: Vec<String>,
@@ -139,6 +141,7 @@ impl From<&EngineResult> for Summary {
                     .map(|s| Snapshot {
                         id: s.id.clone(),
                         time: s.time,
+                        offset_seconds: s.offset.seconds(),
                         hostname: s.hostname.clone(),
                         label: s.label.clone(),
                         tags: s.tags.clone(),
@@ -233,6 +236,11 @@ impl From<Summary> for EngineResult {
                     .map(|s| SnapshotSummary {
                         id: s.id,
                         time: s.time,
+                        // No row holds a listing (above), and an offset no
+                        // clock has is read as UTC, as rustic reads a time
+                        // with none.
+                        offset: domain::Offset::from_seconds(s.offset_seconds)
+                            .unwrap_or(domain::Offset::UTC),
                         hostname: s.hostname,
                         label: s.label,
                         tags: s.tags,
@@ -243,5 +251,55 @@ impl From<Summary> for EngineResult {
                     .collect(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listing(offset: domain::Offset) -> EngineResult {
+        EngineResult::Snapshots(vec![SnapshotSummary {
+            id: SnapshotId::parse(&"ab".repeat(32)).expect("a valid snapshot ID"),
+            time: Timestamp::from_second(1_794_375_000).expect("an instant"),
+            offset,
+            hostname: "demo-host".to_owned(),
+            label: String::new(),
+            tags: Vec::new(),
+            paths: Vec::new(),
+            paths_truncated: false,
+            tags_truncated: false,
+        }])
+    }
+
+    fn round_trip(result: &EngineResult) -> EngineResult {
+        let json = serde_json::to_string(&Summary::from(result)).expect("a summary writes");
+        serde_json::from_str::<Summary>(&json)
+            .expect("a summary reads")
+            .into()
+    }
+
+    /// A listing keeps the offset of each snapshot's clock (§16, decision
+    /// 56): Chicago's, and one with seconds, as rustic records them.
+    #[test]
+    fn a_listing_keeps_each_snapshots_offset() {
+        for seconds in [-6 * 3600, 19 * 60 + 32] {
+            let result = listing(domain::Offset::from_seconds(seconds).expect("an offset"));
+            assert_eq!(round_trip(&result), result);
+        }
+    }
+
+    /// An offset no clock has (beyond ±25:59:59) is read as UTC, as rustic
+    /// reads a time with none.
+    #[test]
+    fn an_offset_no_clock_has_is_read_as_utc() {
+        let written = serde_json::to_string(&Summary::from(&listing(domain::Offset::UTC)))
+            .expect("a summary writes");
+        assert!(written.contains("\"offset_seconds\":0,"), "{written}");
+        let json = written.replace("\"offset_seconds\":0,", "\"offset_seconds\":93600,");
+        let read: EngineResult = serde_json::from_str::<Summary>(&json)
+            .expect("a summary reads")
+            .into();
+        assert_eq!(read, listing(domain::Offset::UTC));
     }
 }

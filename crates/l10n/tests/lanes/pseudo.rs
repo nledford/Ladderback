@@ -287,8 +287,14 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 // upside down), and `ui-instant` is a `DATETIME` call
                 // through and through: the host's format is not the
                 // catalog's to transform (§8.4). `the_helpers_that_write_...`
-                // has them.
-                if id == msg::SIZE || id == msg::DURATION || id == msg::UI_INSTANT {
+                // has them. `ui-snapshot-time-offset` holds only its two
+                // values and "UTC", a string literal a pseudolocale leaves
+                // as it is: there is no text of the catalog's to transform.
+                if id == msg::SIZE
+                    || id == msg::DURATION
+                    || id == msg::UI_INSTANT
+                    || id == msg::UI_SNAPSHOT_TIME_OFFSET
+                {
                     continue;
                 }
                 let unchanged = plain.message(id, &args);

@@ -45,6 +45,10 @@ leptos.workspace = true
 leptos_router.workspace = true
 web-sys.workspace = true
 
+# A host test that needs a formatter skips, visibly, in a build without one.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+testkit.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 api.workspace = true
 wasm-bindgen-test.workspace = true
