@@ -96,11 +96,45 @@ enum Command {
 fn parse(args: Vec<OsString>) -> Result<Cli, ExitCode> {
     let plain = output::asked_for_plain(&args);
     let mut command = Cli::command().color(output::clap_colour(plain));
-    let mut matches = command
-        .try_get_matches_from_mut(args)
-        .map_err(|error| output::parser_status(&error))?;
+    let mut matches = match command.try_get_matches_from_mut(&args) {
+        Ok(matches) => matches,
+        // Help is said again with the catalog's descriptions: the catalog is
+        // read only to say help, never on the start of the daemon or a worker.
+        Err(error) if says_help(&error) => {
+            let error = with_catalog_help(command)
+                .try_get_matches_from_mut(&args)
+                .err()
+                .unwrap_or(error);
+            return Err(output::parser_status(&error));
+        }
+        Err(error) => return Err(output::parser_status(&error)),
+    };
     Cli::from_arg_matches_mut(&mut matches)
         .map_err(|error| output::parser_status(&error.format(&mut command)))
+}
+
+/// Whether `clap` stopped to say help.
+fn says_help(error: &clap::Error) -> bool {
+    matches!(
+        error.kind(),
+        clap::error::ErrorKind::DisplayHelp
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    )
+}
+
+/// `command` with the descriptions the catalog has (`cli-help-*`), in the
+/// reader's language: those of the service commands (#299 moves the rest).
+fn with_catalog_help(command: clap::Command) -> clap::Command {
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    command.mut_subcommands(|subcommand| {
+        let id = match subcommand.get_name() {
+            "install-service" => msg::CLI_HELP_INSTALL_SERVICE,
+            "remove-service" => msg::CLI_HELP_REMOVE_SERVICE,
+            _ => return subcommand,
+        };
+        let about = localizer.message(id, &[]).text().to_owned();
+        subcommand.about(about)
+    })
 }
 
 fn main() -> ExitCode {
