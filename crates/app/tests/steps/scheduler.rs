@@ -820,6 +820,12 @@ async fn retries(agent: &mut Agent, name: String, attempts: i64, minutes: i64) {
     agent.scheduler.save().await;
 }
 
+#[when(expr = "the plan {string} no longer retries a failed backup")]
+async fn retries_no_more(agent: &mut Agent, name: String) {
+    agent.scheduler.plan(&name).retry = None;
+    agent.scheduler.save().await;
+}
+
 fn outcome(text: &str) -> RunOutcome {
     match text {
         "failed" => RunOutcome::Failed,

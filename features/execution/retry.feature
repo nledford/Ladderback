@@ -189,6 +189,22 @@ Feature: Retries of a failed backup
     And the agent said the retries of the plan "home" ran out
     And the plan "home" has no pending retry
 
+  Scenario: A retry going when its plan stops retrying is not retried again, even once retries are back
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "docs" is scheduled "*/5 * * * *"
+    And the plan "home" is scheduled "1 3 * * *"
+    And a run of the plan "home" takes 30 minutes
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And every run of the plan "home" fails
+    When the agent serves until "2026-06-10 03:45+00:00"
+    And the plan "home" no longer retries a failed backup
+    And the agent serves until "2026-06-10 03:50+00:00"
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And the agent serves until "2026-06-10 05:00+00:00"
+    Then the retries of the plan "home" started at "2026-06-10 03:41+00:00"
+    And the agent announced 1 retry of the plan "home"
+    And the plan "home" has no pending retry
+
   Scenario: A retry pending when the agent stopped gives way to the scheduled run that comes first
     Given the agent starts at "2026-06-10 04:30+00:00"
     And the plan "home" is scheduled "0 * * * *"
