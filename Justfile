@@ -121,7 +121,7 @@ msrv:
     if [ -z "$version" ]; then echo 'msrv: Cargo.toml declares no rust-version' >&2; exit 1; fi
     {{ container }} run --rm \
         -v '{{ root }}':/src:ro -v ladderback-msrv-target:/target -v ladderback-msrv-cargo:/cargo \
-        -e CARGO_TARGET_DIR=/target -e CARGO_HOME=/cargo -e CARGO_PROFILE_DEV_DEBUG=0 -w /src \
+        -e CARGO_TARGET_DIR=/target -e CARGO_HOME=/cargo -w /src \
         "docker.io/library/rust:$version" bash -euo pipefail -c '
             export RUSTUP_TOOLCHAIN="$(cd / && rustup default | cut -d " " -f 1)"
             rustup target add wasm32-unknown-unknown

@@ -63,6 +63,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [13.8 Pull requests and merging](development.md#138-pull-requests-and-merging)
   - [13.9 Dependencies, licence and fixtures](development.md#139-dependencies-licence-and-fixtures)
   - [13.10 Keeping AGENTS.md useful](development.md#1310-keeping-agentsmd-useful)
+  - [13.11 Build profiles](development.md#1311-build-profiles)
 - [14. Milestones](roadmap.md#14-milestones)
 - [15. Risks](roadmap.md#15-risks)
 - [16. Decisions](roadmap.md#16-decisions): the index; each decision is its own file in [decisions/](decisions/README.md)

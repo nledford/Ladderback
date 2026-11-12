@@ -32,8 +32,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Same build profile as ci.yml, see the comment there.
+  # Same as ci.yml, see the comment there.
   CARGO_INCREMENTAL: 0
+  # This job builds the pull request's first commit and its merge base, whose
+  # Cargo.toml can predate the dev profile's line tables (technical design
+  # §13.11); without this they would build everything with full debug info.
+  # On a tree that has the profile, it changes nothing.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:

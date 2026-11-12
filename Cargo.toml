@@ -185,6 +185,25 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Development builds carry line tables, not full debug info: a backtrace still
+# names the file and line of every Ladderback frame, while the target folder
+# shrinks and links go faster. Dependencies get none (their frames keep their
+# function names), whether built for the code or for a build script or proc
+# macro, so debug info never makes the two builds of a dependency differ. For
+# a debugger, build the `debugging` profile below. Technical design §13.11.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Ladderback's own build scripts get none either. `package."*"` doesn't reach
+# them, and Cargo drops their debug info in a host build only: a `--target
+# wasm32-unknown-unknown` build would give them line tables, a second build of
+# each script beside the host build's.
+[profile.dev.build-override]
+debug = false
+
 # Every test that opens a repository derives its key with scrypt, and
 # rustic encrypts and compresses every blob; unoptimized, these dominate
 # test time. Only these crates are optimized, so debugging Ladderback's own
@@ -208,14 +227,17 @@ opt-level = 3
 [profile.dev.package.zstd-sys]
 opt-level = 3
 
-# Build scripts, proc macros and their dependencies get no debug info, whatever
-# else a build contains. Left implicit, Cargo gives them the target crates'
-# debug info when the build also contains a target crate that needs the same
-# dependency, so a proc macro's dependencies hash differently for each set of
-# units a command asks for. `cargo test --doc` then rebuilt every proc macro,
-# and everything built with one, after `cargo nextest` had built them.
-[profile.dev.build-override]
-debug = false
+# A build to debug in: full debug info for Ladderback's crates and every
+# dependency, in its own folder (`target/debugging`), so switching to it and
+# back rebuilds neither. `cargo build --profile debugging`, or for tests `cargo
+# nextest run --cargo-profile debugging`. It keeps dev's other settings, the
+# optimized crates above included.
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+debug = true
 
 # The profile cargo-dist builds the release binaries with (dist-workspace.toml,
 # technical design §12.1): the release profile with thin LTO, dist's default.
