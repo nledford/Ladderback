@@ -953,6 +953,24 @@ mod tests {
     }
 
     #[test]
+    fn a_second_pass_over_a_secret_with_the_mask_character_never_reveals() {
+        // #287: it may mask more, but what is left besides masks is what the
+        // first pass left, in order, and never more of it.
+        let redactor = redactor(&["*?"]);
+        let once = redactor.redact("*??");
+        let twice = redactor.redact(&once);
+        assert!(!once.contains("??"), "{once:?}");
+        let mut first = once.chars().filter(|&c| c != '*');
+        assert!(
+            twice
+                .chars()
+                .filter(|&c| c != '*')
+                .all(|c| first.any(|f| f == c)),
+            "{once:?} then {twice:?}"
+        );
+    }
+
+    #[test]
     fn secrets_that_touch_are_replaced_as_one_span() {
         let redactor = redactor(&["abc", "def"]);
         assert_eq!(redactor.redact("abcdef ghi abc"), "*** ghi ***");
