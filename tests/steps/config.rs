@@ -12,11 +12,11 @@ use config_adapter::{FileConfigStore, MigrationError, Schemas};
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, GroupBy, Hooks, Maintenance, RepositoryConfig,
-    RepositorySettings, ValueKind,
+    AgentConfig, AgentSettings, Cadence, Concurrency, GroupBy, Hooks, Interval, Maintenance,
+    Overlap, Plan, RepositoryConfig, RepositorySettings, ValueKind,
 };
 use domain::secrets::SecretRef;
-use domain::{PlanId, RepositoryAlias};
+use domain::{PlanId, RepositoryAlias, SignedDuration};
 use platform::SystemClock;
 
 use super::Agent;
@@ -176,19 +176,19 @@ async fn saves(agent: &mut Agent) {
 /// Saves the configuration loaded, with its parts changed by `change`.
 async fn saves_changed(
     agent: &mut Agent,
-    change: impl FnOnce(&mut AgentSettings, &mut BTreeMap<RepositoryAlias, RepositoryConfig>),
+    change: impl FnOnce(
+        &mut AgentSettings,
+        &mut BTreeMap<RepositoryAlias, RepositoryConfig>,
+        &mut Vec<Plan>,
+    ),
 ) {
     let loaded = loaded(agent);
     let mut settings = loaded.agent().clone();
     let mut repositories = loaded.repositories().clone();
-    change(&mut settings, &mut repositories);
-    let config = AgentConfig::new(
-        settings,
-        loaded.hooks().clone(),
-        repositories,
-        loaded.plans().to_vec(),
-    )
-    .expect("a valid configuration");
+    let mut plans = loaded.plans().to_vec();
+    change(&mut settings, &mut repositories, &mut plans);
+    let config = AgentConfig::new(settings, loaded.hooks().clone(), repositories, plans)
+        .expect("a valid configuration");
     store(agent).save(&config).await.expect("the save");
 }
 
@@ -211,7 +211,7 @@ async fn saves_with_repository(agent: &mut Agent, alias: String, location: Strin
         hooks: Hooks::default(),
     };
     let alias = RepositoryAlias::parse(&alias).expect("an alias");
-    saves_changed(agent, |_, repositories| {
+    saves_changed(agent, |_, repositories, _| {
         repositories.insert(alias, entry);
     })
     .await;
@@ -220,18 +220,44 @@ async fn saves_with_repository(agent: &mut Agent, alias: String, location: Strin
 #[when(expr = "the agent saves the configuration it loaded with {int} operations at a time")]
 async fn saves_with_concurrency(agent: &mut Agent, concurrency: i64) {
     let concurrency = Concurrency::new(concurrency).expect("a concurrency");
-    saves_changed(agent, |settings, _| settings.concurrency = concurrency).await;
+    saves_changed(agent, |settings, _, _| settings.concurrency = concurrency).await;
 }
 
 #[when(expr = "the agent saves the configuration it loaded without the repository {string}")]
 async fn saves_without_repository(agent: &mut Agent, alias: String) {
     let alias = RepositoryAlias::parse(&alias).expect("an alias");
-    saves_changed(agent, |_, repositories| {
+    saves_changed(agent, |_, repositories, _| {
         repositories
             .remove(&alias)
             .expect("the repository was there");
     })
     .await;
+}
+
+#[when(
+    expr = "the agent saves the configuration it loaded with the plan {string} queueing a run that comes due while its last is still going"
+)]
+async fn saves_with_overlap_queue(agent: &mut Agent, id: String) {
+    let id = PlanId::parse(&id).expect("a plan ID");
+    saves_changed(agent, |_, _, plans| {
+        let plan = plans
+            .iter_mut()
+            .find(|plan| plan.id == id)
+            .expect("the plan was there");
+        plan.overlap = Overlap::Queue;
+    })
+    .await;
+}
+
+/// Writes the config file of the daemon a scenario started, as a person
+/// editing it while the daemon runs would.
+#[given("the config file Ladderback serves from is written as:")]
+fn daemon_config_written(agent: &mut Agent, step: &Step) {
+    let text = step.docstring.as_deref().expect("the step has a text");
+    let text = format!("{}\n", text.trim_start_matches('\n'));
+    let dir = super::events_steps::Events::config_dir(agent);
+    fs::create_dir_all(&dir).expect("the config folder");
+    fs::write(dir.join("config.toml"), text).expect("the config file");
 }
 
 #[then(expr = "the agent has the plan {string} backing up {string} into {string}")]
@@ -245,6 +271,40 @@ fn has_the_plan(agent: &mut Agent, id: String, source: String, repository: Strin
         "{source:?} isn't among {:?}",
         plan.sources
     );
+}
+
+fn loaded_plan<'a>(agent: &'a Agent, id: &str) -> &'a Plan {
+    loaded(agent)
+        .plan(&PlanId::parse(id).expect("a plan ID"))
+        .unwrap_or_else(|| panic!("the agent has no plan {id:?}"))
+}
+
+#[then(expr = "the plan {string} runs on the cron expression {string} in the time zone {string}")]
+fn runs_in_zone(agent: &mut Agent, id: String, cron: String, zone: String) {
+    let schedule = loaded_plan(agent, &id)
+        .schedule
+        .as_ref()
+        .expect("a schedule");
+    assert_eq!(
+        schedule.cron().map(|cron| cron.as_str()),
+        Some(cron.as_str())
+    );
+    assert_eq!(schedule.zone().map(|zone| zone.name()), Some(zone.as_str()));
+}
+
+#[then(expr = "the plan {string} runs every {int} minutes")]
+fn runs_every(agent: &mut Agent, id: String, minutes: i64) {
+    let schedule = loaded_plan(agent, &id)
+        .schedule
+        .as_ref()
+        .expect("a schedule");
+    let every = Interval::new(SignedDuration::from_mins(minutes)).expect("an interval");
+    assert_eq!(schedule.cadence(), &Cadence::Every(every));
+}
+
+#[then(expr = "the plan {string} has the overlap policy {string}")]
+fn has_overlap(agent: &mut Agent, id: String, overlap: String) {
+    assert_eq!(loaded_plan(agent, &id).overlap.as_str(), overlap);
 }
 
 #[then(expr = "the agent's hostname is {string}")]

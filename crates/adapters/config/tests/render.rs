@@ -9,11 +9,11 @@ use std::path::Path;
 use app::ports::Problem;
 use config_adapter::{Schemas, parse, render};
 use domain::planning::{
-    AgentConfig, AgentSettings, GroupBy, HookEntry, Hooks, Maintenance, OnFailure, Plan,
-    RepositoryConfig, RepositorySettings, Source,
+    AgentConfig, AgentSettings, CronExpression, GroupBy, HookEntry, Hooks, Interval, Maintenance,
+    OnFailure, Overlap, Plan, RepositoryConfig, RepositorySettings, Schedule, Source,
 };
 use domain::secrets::{FileRead, SecretRef, SecretValue};
-use domain::{PlanId, RepositoryAlias};
+use domain::{PlanId, RepositoryAlias, SignedDuration};
 use support::*;
 
 fn file() -> &'static Path {
@@ -110,6 +110,41 @@ fn a_schedule_writes_only_what_differs_from_its_defaults() {
     let config = config(SecretRef::Env("X".to_owned()), vec![plan], Hooks::default());
     let table = table_of(&render(file(), &config).expect("written"));
     assert_eq!(keys(&table["plans"][0]["schedule"]), ["cron"]);
+}
+
+#[test]
+fn a_schedules_zone_and_interval_and_a_plans_overlap_policy_are_written_after_its_schedule() {
+    let mut cron = home();
+    cron.schedule = Some(
+        Schedule::new(CronExpression::parse("30 2 * * *").expect("a cron"))
+            .with_zone(zone("europe/berlin")),
+    );
+    cron.overlap = Overlap::Queue;
+    let mut every = home();
+    every.id = PlanId::parse("mail").expect("an ID");
+    every.schedule = Some(Schedule::new(
+        Interval::new(SignedDuration::from_mins(90)).expect("an interval"),
+    ));
+    let config = config(
+        SecretRef::Env("X".to_owned()),
+        vec![cron, every],
+        Hooks::default(),
+    );
+    let text = render(file(), &config).expect("written");
+    assert!(
+        text.contains(
+            "sources = [\"/home/demo\"]\n\
+             schedule = { cron = \"30 2 * * *\", timezone = \"Europe/Berlin\" }\n\
+             overlap = \"queue\"\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("sources = [\"/home/demo\"]\nschedule = { every = \"1h 30m\" }\n"),
+        "the overlap policy at its default is not written: {text}"
+    );
+    let read = parse(file(), &text, &Schemas::production()).expect("read back");
+    assert_eq!(read.config, config);
 }
 
 #[test]

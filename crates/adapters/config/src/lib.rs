@@ -29,6 +29,7 @@ mod schema;
 mod store;
 mod tables;
 mod write;
+mod zone;
 
 pub use schema::{
     CURRENT_SCHEMA, KEPT_VERSIONS, MAX_CONFIG_BYTES, MigrationError, Parsed, Schemas, Step, parse,

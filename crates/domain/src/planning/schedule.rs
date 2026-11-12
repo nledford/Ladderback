@@ -151,6 +151,14 @@ impl Interval {
         }
     }
 
+    /// Reads an interval written as a length of time is (`6h`, `90 minutes`,
+    /// `1d 12h`). Text that is no length of time, and one out of the limits
+    /// [`Interval::new`] holds, are each refused as
+    /// [`ValueKind::Interval`], with the text as written.
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        todo!("{text}")
+    }
+
     pub fn get(self) -> SignedDuration {
         self.0
     }
@@ -201,13 +209,60 @@ impl std::fmt::Display for NoNextRun {
 
 impl std::error::Error for NoNextRun {}
 
+/// The time zone a schedule's cron expression is read in, when it isn't the
+/// machine's local time (§5): `UTC`, or a zone of the IANA time zone
+/// database by its name. An `every` schedule may name one too, and it plays
+/// no part there: an interval is real time (decision 60).
+///
+/// The domain reads no database: the adapter that read the name looks it up
+/// and hands over the zone it found, which keeps the name the database
+/// spells it with.
+///
+/// Two are equal when they name the same zone: the rules a zone was loaded
+/// with depend on the copy of the database that was read (the system's, or
+/// the one built in), and a configuration names the zone, not its rules.
+#[derive(Clone, Debug)]
+pub struct ScheduleZone {
+    name: String,
+    zone: TimeZone,
+}
+
+impl PartialEq for ScheduleZone {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for ScheduleZone {}
+
+impl ScheduleZone {
+    /// `zone` as a schedule's zone, under the name it has in the database it
+    /// was looked up in (`europe/berlin` was found as `Europe/Berlin`). A
+    /// zone with no such name, a fixed offset (`+02:00`), a POSIX TZ string
+    /// or the database's "unknown", names no zone, and `written`, the text
+    /// it was read from, is refused as [`ValueKind::TimeZone`].
+    pub fn new(written: &str, zone: TimeZone) -> Result<Self, InvalidValue> {
+        todo!("{written} {zone:?}")
+    }
+
+    /// The zone's name as the database spells it, which is how it is written.
+    pub fn name(&self) -> &str {
+        todo!("{}", self.name)
+    }
+
+    pub fn zone(&self) -> &TimeZone {
+        todo!("{:?}", self.zone)
+    }
+}
+
 /// When a plan runs, and how it behaves when the moment is missed or isn't
 /// convenient. Built from its cron expression or interval, with the defaults
-/// of §6.1 for the rest: no jitter, a run that was missed is made up for
-/// once, and any power source will do.
+/// of §6.1 for the rest: the machine's local time, no jitter, a run that was
+/// missed is made up for once, and any power source will do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Schedule {
     cadence: Cadence,
+    zone: Option<ScheduleZone>,
     jitter: Option<SignedDuration>,
     catch_up: bool,
     on_ac_power: bool,
@@ -217,10 +272,17 @@ impl Schedule {
     pub fn new(cadence: impl Into<Cadence>) -> Self {
         Self {
             cadence: cadence.into(),
+            zone: None,
             jitter: None,
             catch_up: true,
             on_ac_power: false,
         }
+    }
+
+    /// Reads the cron expression on the wall clock of `zone` rather than the
+    /// machine's local time (§5).
+    pub fn with_zone(self, zone: ScheduleZone) -> Self {
+        todo!("{zone:?} {self:?}")
     }
 
     /// Spreads runs over up to `jitter` after the expression's moment, so
@@ -260,6 +322,12 @@ impl Schedule {
         }
     }
 
+    /// The time zone the schedule names; `None` for the machine's local
+    /// time.
+    pub fn zone(&self) -> Option<&ScheduleZone> {
+        todo!("{self:?}")
+    }
+
     pub fn jitter(&self) -> Option<SignedDuration> {
         self.jitter
     }
@@ -275,6 +343,8 @@ impl Schedule {
 
 #[cfg(test)]
 mod tests {
+    use jiff::tz::TimeZoneDatabase;
+
     use super::*;
 
     fn cron(text: &str) -> CronExpression {
@@ -450,6 +520,105 @@ mod tests {
                 "{refused:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_interval_is_written_as_a_length_of_time() {
+        for (text, length) in [
+            ("6h", SignedDuration::from_hours(6)),
+            ("1m", MIN_INTERVAL),
+            ("90 minutes", SignedDuration::from_mins(90)),
+            ("1d 12h", SignedDuration::from_hours(36)),
+            ("366 days", MAX_DURATION),
+        ] {
+            assert_eq!(Interval::parse(text).unwrap().get(), length, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_interval_that_is_no_length_of_time_or_out_of_its_limits_is_refused_as_an_interval() {
+        for text in [
+            "",
+            "soon",
+            "1 parsec",
+            "-6h",
+            "1 month",
+            "59s",
+            "0s",
+            "366 days 1ns",
+            "367 days",
+            "1000000 years",
+        ] {
+            assert_eq!(
+                Interval::parse(text),
+                Err(InvalidValue::new(ValueKind::Interval, text)),
+                "{text:?}"
+            );
+        }
+    }
+
+    fn named(name: &str) -> ScheduleZone {
+        let zone = TimeZoneDatabase::bundled().get(name).unwrap();
+        ScheduleZone::new(name, zone).unwrap()
+    }
+
+    #[test]
+    fn a_schedule_zone_keeps_the_name_its_zone_has_in_the_database() {
+        for (written, name) in [
+            ("utc", "UTC"),
+            ("europe/BERLIN", "Europe/Berlin"),
+            (
+                "America/Argentina/Buenos_Aires",
+                "America/Argentina/Buenos_Aires",
+            ),
+            ("Etc/GMT+5", "Etc/GMT+5"),
+        ] {
+            let zone = TimeZoneDatabase::bundled().get(written).unwrap();
+            let found = ScheduleZone::new(written, zone).unwrap();
+            assert_eq!(found.name(), name, "{written:?}");
+            assert_eq!(found.zone().iana_name(), Some(name), "{written:?}");
+        }
+        let utc = ScheduleZone::new("UTC", TimeZone::UTC).unwrap();
+        assert_eq!((utc.name(), utc.zone()), ("UTC", &TimeZone::UTC));
+    }
+
+    #[test]
+    fn a_zone_with_no_name_in_the_database_is_refused() {
+        for (written, zone) in [
+            ("+02:00", TimeZone::fixed(Offset::constant(2))),
+            (
+                "EST5EDT,M3.2.0,M11.1.0",
+                TimeZone::posix("EST5EDT,M3.2.0,M11.1.0").unwrap(),
+            ),
+            ("Etc/Unknown", TimeZone::unknown()),
+        ] {
+            assert_eq!(
+                ScheduleZone::new(written, zone),
+                Err(InvalidValue::new(ValueKind::TimeZone, written)),
+                "{written:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_schedule_zones_are_equal_when_they_name_the_same_zone() {
+        assert_eq!(named("Europe/Berlin"), named("europe/berlin"));
+        assert_ne!(named("Europe/Berlin"), named("Europe/Paris"));
+    }
+
+    #[test]
+    fn a_schedule_runs_on_the_machines_local_time_unless_it_names_a_zone() {
+        let local = Schedule::new(cron("30 2 * * *"));
+        assert_eq!(local.zone(), None);
+        let berlin = named("Europe/Berlin");
+        let zoned = local.with_zone(berlin.clone());
+        assert_eq!(zoned.zone(), Some(&berlin));
+        assert_eq!(zoned.cron(), Some(&cron("30 2 * * *")));
+        assert!(zoned.catch_up());
+        // An interval keeps the zone it names, which plays no part in it.
+        let every = Schedule::new(Interval::new(SignedDuration::from_hours(6)).unwrap())
+            .with_zone(berlin.clone());
+        assert_eq!(every.zone(), Some(&berlin));
     }
 
     #[test]

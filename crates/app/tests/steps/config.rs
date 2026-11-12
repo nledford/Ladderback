@@ -10,9 +10,9 @@ use app::ports::ConfigStore;
 use cucumber::{given, then, when};
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
-    Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
-    RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, Source, ValueKind, Violation,
-    parse_duration,
+    Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure,
+    Overlap, Plan, RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, Source, ValueKind,
+    Violation, parse_duration,
 };
 use domain::secrets::SecretRef;
 use domain::{InvalidId, PlanId, RepositoryAlias, SignedDuration};
@@ -69,6 +69,8 @@ impl From<InvalidValue> for Refusal {
             ValueKind::Cron => "cron",
             ValueKind::Duration => "duration",
             ValueKind::Interval => "interval",
+            ValueKind::TimeZone => "time-zone",
+            ValueKind::Overlap => "overlap",
             ValueKind::Attempts => "attempts",
             ValueKind::KeepCount => "keep-count",
             ValueKind::KeepWithin => "keep-within",
@@ -208,10 +210,12 @@ fn read(kind: &str, text: &str) -> Result<Option<HookEntry>, Refusal> {
         "nice" => value(Nice::new(number(text))),
         "cron" => value(CronExpression::parse(text)),
         "duration" => value(parse_duration(text)),
+        "interval" => value(Interval::parse(text)),
         "attempts" => value(RetryPolicy::new(number(text), SignedDuration::from_mins(5))),
         "keep-count" => value(KeepCount::new(number(text))),
         "keep-within" => value(KeepWithin::parse(text)),
         "maintenance" => value(Maintenance::parse(text)),
+        "overlap" => value(Overlap::parse(text)),
         "group-by" => value(GroupBy::parse(text)),
         "on-failure" => value(OnFailure::parse(text)),
         "hook-command" | "hook-program" => HookEntry::parse(text).map(Some).map_err(Refusal::from),
@@ -418,6 +422,16 @@ fn runs_on_any_power(agent: &mut Agent, id: String) {
 #[then(expr = "the plan {string} adds no jitter")]
 fn adds_no_jitter(agent: &mut Agent, id: String) {
     assert_eq!(agent.config.schedule(&id).jitter(), None);
+}
+
+#[then(expr = "the plan {string} runs on the machine's local time")]
+fn runs_on_local_time(agent: &mut Agent, id: String) {
+    assert_eq!(agent.config.schedule(&id).zone(), None);
+}
+
+#[then(expr = "the plan {string} has the overlap policy {string}")]
+fn has_overlap(agent: &mut Agent, id: String, overlap: String) {
+    assert_eq!(agent.config.plan(&id).overlap.as_str(), overlap);
 }
 
 #[then(expr = "the plan {string} has no schedule")]

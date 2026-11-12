@@ -409,6 +409,7 @@ fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
         sources,
         tags,
         schedule,
+        overlap: domain::planning::Overlap::default(),
         retry,
         filter,
         retention,

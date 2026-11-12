@@ -7,7 +7,8 @@ pub mod model;
 use app::fakes::FakeClock;
 use app::ports::{ConfigError, PasswordProblem, Position, Problem};
 use config_adapter::{Parsed, Schemas, parse};
-use domain::Timestamp;
+use domain::planning::ScheduleZone;
+use domain::{TimeZoneDatabase, Timestamp};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,6 +21,15 @@ pub fn parsed(text: &str) -> Result<Parsed, ConfigError> {
 
 pub fn parsed_with(text: &str, schemas: &Schemas) -> Result<Parsed, ConfigError> {
     parse(Path::new(FILE), text, schemas)
+}
+
+/// The schedule zone `name` names in the database built in. Zones are equal
+/// by name, so it equals the one read from the system's database.
+pub fn zone(name: &str) -> ScheduleZone {
+    let found = TimeZoneDatabase::bundled()
+        .get(name)
+        .expect("a zone of the database");
+    ScheduleZone::new(name, found).expect("a zone with a name")
 }
 
 /// The fields of a [`ConfigError::Invalid`].

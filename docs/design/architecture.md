@@ -66,6 +66,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Next run | When a plan runs next: the schedule's next moment after the last run started (a cron expression's on the wall clock of its zone, or an `every` interval in real time), plus jitter; planned when a run starts and kept while the agent is away (§5) |
 | Jitter | How far after its moment a run may be put, so that machines on one schedule don't start at once; never as far as the schedule's following moment |
 | Wake | The machine waking from sleep, or its clock set forward: wall-clock time ran more than 2 min ahead of monotonic time between two samples of the clocks 30 s apart. A run missed meanwhile can catch up, and a catch-up run after a wake first waits up to 2 min for the network (§5) |
+| Overlap policy | What a plan does when its next run comes due while its last run is still going: `skip` it (the default) or `queue` it to start once the last one ends (`Overlap`, §5) |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
 
 **Bounded contexts.**

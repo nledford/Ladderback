@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
-    Hostname, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RepositoryConfig,
-    RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
+    Hostname, Interval, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Overlap, Plan,
+    RepositoryConfig, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source,
+    SourceFilter,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, SignedDuration};
@@ -184,11 +185,13 @@ pub fn expected() -> AgentConfig {
             .collect(),
         schedule: Some(
             Schedule::new(CronExpression::parse("0 3 * * 1-5").expect("a cron"))
+                .with_zone(super::zone("Europe/Berlin"))
                 .with_jitter(SignedDuration::from_secs(90))
                 .expect("a jitter")
                 .with_catch_up(false)
                 .with_on_ac_power(true),
         ),
+        overlap: Overlap::Queue,
         retry: Some(RetryPolicy::new(3, SignedDuration::from_secs(600)).expect("a retry")),
         filter: SourceFilter {
             globs: strings(&["*.tmp", "!keep.tmp"]),
@@ -245,6 +248,16 @@ pub fn expected() -> AgentConfig {
             vec![source("/home/demo/photos"), source("/home/demo/video")],
         )
     };
-    AgentConfig::new(agent, hooks, repositories, vec![home, work, photos])
+    let mail = Plan {
+        schedule: Some(Schedule::new(
+            Interval::new(SignedDuration::from_mins(90)).expect("an interval"),
+        )),
+        ..Plan::new(
+            PlanId::parse("mail").expect("an ID"),
+            alias("cloud"),
+            vec![source("/home/demo/mail")],
+        )
+    };
+    AgentConfig::new(agent, hooks, repositories, vec![home, work, photos, mail])
         .expect("the golden configuration agrees with itself")
 }

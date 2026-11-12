@@ -146,10 +146,22 @@ pub enum Problem {
     ReservedTag,
     /// The repository's password isn't given as the format needs.
     Password(PasswordProblem),
+    /// A schedule doesn't say what its moments are as the format needs.
+    Cadence(CadenceProblem),
     /// The settings are each valid, but they disagree with one another.
     Violation(Violation),
     /// The configuration can't be written in the format.
     Unwritable,
+}
+
+/// How a schedule's moments are wrongly given: it takes exactly one of
+/// `cron` and `every`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CadenceProblem {
+    /// Neither is there.
+    Missing,
+    /// Both are there.
+    Several,
 }
 
 /// How a repository's password is wrongly given: it takes exactly one of

@@ -3,12 +3,13 @@
 
 mod support;
 
-use app::ports::{ConfigError, PasswordProblem, Position, Problem};
+use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Position, Problem};
 use config_adapter::{MigrationError, Schemas};
 use domain::planning::{
-    AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname, KeepCount,
-    KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan, RetentionPolicy, RetryPolicy, Schedule,
-    Source, SourceFilter, ValueKind, Violation,
+    AgentSettings, Cadence, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
+    Interval, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Overlap, Plan,
+    RetentionPolicy, RetryPolicy, Schedule, ScheduleZone, Source, SourceFilter, ValueKind,
+    Violation,
 };
 use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS,
@@ -85,6 +86,12 @@ fn a_schedule_that_says_only_when_keeps_the_other_defaults() {
     assert_eq!(schedule.jitter(), None);
     assert!(schedule.catch_up(), "a missed run is made up for");
     assert!(!schedule.on_ac_power(), "any power source will do");
+    assert_eq!(schedule.zone(), None, "the machine's local time");
+    assert_eq!(
+        plan.overlap,
+        Overlap::Skip,
+        "a run that comes due while one runs is skipped"
+    );
     assert_eq!(plan.retry, None);
 }
 
@@ -108,6 +115,77 @@ fn a_schedule_and_a_retry_policy_are_read_in_full() {
         plan.retry,
         Some(RetryPolicy::new(3, SignedDuration::from_secs(600)).expect("a retry"))
     );
+}
+
+#[test]
+fn a_schedules_time_zone_and_interval_and_a_plans_overlap_policy_are_read() {
+    let plan = plan_of(&base_with(
+        "schedule = { cron = \"30 2 * * *\", timezone = \"europe/BERLIN\" }\noverlap = \"queue\"\n",
+    ));
+    let berlin = zone("Europe/Berlin");
+    assert_eq!(
+        plan.schedule,
+        Some(Schedule::new(CronExpression::parse("30 2 * * *").expect("a cron")).with_zone(berlin))
+    );
+    let zone = plan
+        .schedule
+        .as_ref()
+        .and_then(Schedule::zone)
+        .expect("a zone");
+    assert_eq!(
+        zone.name(),
+        "Europe/Berlin",
+        "written as the database spells it"
+    );
+    assert_eq!(plan.overlap, Overlap::Queue);
+
+    for (text, length) in [
+        ("90 minutes", SignedDuration::from_mins(90)),
+        ("1h 30m", SignedDuration::from_mins(90)),
+        ("6h", SignedDuration::from_hours(6)),
+    ] {
+        let plan = plan_of(&base_with(&format!(
+            "schedule = {{ every = \"{text}\", timezone = \"UTC\", jitter = \"1m\" }}\n"
+        )));
+        let schedule = plan.schedule.expect("a schedule");
+        assert_eq!(
+            schedule.cadence(),
+            &Cadence::Every(Interval::new(length).expect("an interval")),
+            "{text}"
+        );
+        assert_eq!(
+            schedule.zone().map(ScheduleZone::name),
+            Some("UTC"),
+            "{text}"
+        );
+        assert_eq!(
+            schedule.jitter(),
+            Some(SignedDuration::from_mins(1)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_schedule_needs_exactly_one_of_cron_and_every() {
+    for (lines, problem) in [
+        ("schedule = { jitter = \"5m\" }\n", CadenceProblem::Missing),
+        (
+            "schedule = { timezone = \"UTC\" }\n",
+            CadenceProblem::Missing,
+        ),
+        (
+            "schedule = { cron = \"@daily\", every = \"6h\" }\n",
+            CadenceProblem::Several,
+        ),
+    ] {
+        let text = base_with(lines);
+        let error = invalid(parsed(&text));
+        assert_eq!(error.problem, Problem::Cadence(problem), "{lines}");
+        assert_eq!(error.key.as_deref(), Some("plans[0].schedule"), "{lines}");
+        assert_eq!(error.at, Some(position_of(&text, "{ ")), "{lines}");
+        assert_eq!(error.detail, "", "{lines}");
+    }
 }
 
 #[test]
@@ -520,6 +598,42 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "plans[0].schedule.jitter",
             ValueKind::Duration,
             "\"5 parsecs\"",
+        ),
+        refused(
+            base_with("schedule = { every = \"30s\" }\n"),
+            "plans[0].schedule.every",
+            ValueKind::Interval,
+            "\"30s\"",
+        ),
+        refused(
+            base_with("schedule = { every = \"1 parsec\" }\n"),
+            "plans[0].schedule.every",
+            ValueKind::Interval,
+            "\"1 parsec\"",
+        ),
+        refused(
+            base_with("schedule = { every = \"367 days\" }\n"),
+            "plans[0].schedule.every",
+            ValueKind::Interval,
+            "\"367 days\"",
+        ),
+        refused(
+            base_with("schedule = { cron = \"@daily\", timezone = \"Mars/Olympus\" }\n"),
+            "plans[0].schedule.timezone",
+            ValueKind::TimeZone,
+            "\"Mars/Olympus\"",
+        ),
+        refused(
+            base_with("schedule = { every = \"6h\", timezone = \"+02:00\" }\n"),
+            "plans[0].schedule.timezone",
+            ValueKind::TimeZone,
+            "\"+02:00\"",
+        ),
+        refused(
+            base_with("overlap = \"sometimes\"\n"),
+            "plans[0].overlap",
+            ValueKind::Overlap,
+            "\"sometimes\"",
         ),
         refused(
             base_with("retry = { attempts = 0, backoff = \"10m\" }\n"),
@@ -1014,9 +1128,9 @@ fn an_unknown_key_is_reported_with_its_file_and_line() {
             Some("exclude-larger-than"),
         ),
         unknown(
-            base_with("schedule = { cron = \"@daily\", timezone = \"UTC\" }\n"),
-            "plans[0].schedule.timezone",
-            Some("timezone"),
+            base_with("schedule = { cron = \"@daily\", metered = false }\n"),
+            "plans[0].schedule.metered",
+            Some("metered"),
         ),
         unknown(
             repository_with("password-env = \"X\"\nprune-everything = true\n"),

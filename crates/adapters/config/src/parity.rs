@@ -210,6 +210,7 @@ fn a_plans_table_has_its_own_keys_and_the_mapped_ones_and_no_others() {
         "repository",
         "sources",
         "schedule",
+        "overlap",
         "retry",
         "hooks",
         "retention",

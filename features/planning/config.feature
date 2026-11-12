@@ -90,6 +90,8 @@ Feature: An agent's configuration
       And the plan "home" makes up for a run it missed
       And the plan "home" runs on any power source
       And the plan "home" adds no jitter
+      And the plan "home" runs on the machine's local time
+      And the plan "home" has the overlap policy "skip"
 
     Scenario: A plan without a schedule runs only when asked
       Given a repository "nas"
@@ -125,6 +127,10 @@ Feature: An agent's configuration
         | cron             | every day              |
         | cron             | 0 0 31 2 *             |
         | duration         | 5 parsecs              |
+        | interval         | 30s                    |
+        | interval         | 367 days               |
+        | interval         | 1 parsec               |
+        | overlap          | sometimes              |
         | attempts         | 0                      |
         | attempts         | 101                    |
         | keep-count       | -2                     |
@@ -151,6 +157,10 @@ Feature: An agent's configuration
         | nice             | 19                     |
         | cron             | @daily                 |
         | duration         | 366 days               |
+        | interval         | 1m                     |
+        | interval         | 366 days               |
+        | overlap          | skip                   |
+        | overlap          | queue                  |
         | attempts         | 100                    |
         | attempts         | 1                      |
         | keep-count       | -1                     |
@@ -496,6 +506,74 @@ Feature: An agent's configuration
         # password-env = "OLD_PASSWORD"
         """
 
+    Scenario: A schedule's time zone and interval and a plan's overlap policy are loaded as they were written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        schedule = { cron = "30 2 * * *", timezone = "europe/berlin" }
+        overlap = "queue"
+
+        [[plans]]
+        id = "mail"
+        repository = "nas"
+        sources = ["/home/demo/mail"]
+        schedule = { every = "90 minutes" }
+        """
+      When the agent loads the config file
+      Then the plan "home" runs on the cron expression "30 2 * * *" in the time zone "Europe/Berlin"
+      And the plan "home" has the overlap policy "queue"
+      And the plan "mail" runs every 90 minutes
+      And the plan "mail" has the overlap policy "skip"
+      And the config file is exactly as it was written
+
+    Scenario: An overlap policy a save adds follows the plan's last setting, and the comments stay
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        # The home folder, every night on Berlin's clock.
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        schedule = { cron = "30 2 * * *", timezone = "Europe/Berlin" }
+        retry = { attempts = 3, backoff = "10m" }
+        # The plans for the other folders go below.
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded with the plan "home" queueing a run that comes due while its last is still going
+      Then the config file reads:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        # The home folder, every night on Berlin's clock.
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        schedule = { cron = "30 2 * * *", timezone = "Europe/Berlin" }
+        retry = { attempts = 3, backoff = "10m" }
+        overlap = "queue"
+        # The plans for the other folders go below.
+        """
+
   @e2e
   Rule: A secret written in the file is pointed out when the daemon starts, by its setting and never its value
 
@@ -549,3 +627,36 @@ Feature: An agent's configuration
         | rest:https://backup.example.com:8000/nas@2026                       |
         | rclone:demo-remote:backups/token=2024                               |
         | rclone::sftp,host=nas.example.com,bypass_cache=true:/backups        |
+
+  @e2e
+  Rule: A schedule or an overlap policy the daemon can't use is refused through the API at its setting and line, past the ones it can use
+
+    Scenario Outline: A refused schedule or overlap policy names its setting and line, and nothing else
+      Given Ladderback is serving on loopback with no repositories
+      And the config file Ladderback serves from is written as:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        <accepted>
+        <refused>
+        """
+      When the client sends {} to "/api/v1/repositories/nas/init"
+      Then the refusal has status 503 and the typed code "config-invalid"
+      And the refusal names the config setting "<key>" on line 12, and nothing more
+
+      Examples:
+        | accepted                                      | refused                                                   | key                        |
+        | overlap = "queue"                             | schedule = { every = "30s" }                              | plans[0].schedule.every    |
+        | overlap = "queue"                             | schedule = { every = "1 parsec" }                         | plans[0].schedule.every    |
+        | overlap = "queue"                             | schedule = { cron = "@daily", timezone = "Mars/Olympus" } | plans[0].schedule.timezone |
+        | overlap = "queue"                             | schedule = { cron = "@daily", timezone = "+02:00" }       | plans[0].schedule.timezone |
+        | overlap = "queue"                             | schedule = { cron = "@daily", every = "6h" }              | plans[0].schedule          |
+        | schedule = { every = "6h", timezone = "UTC" } | overlap = "sometimes"                                     | plans[0].overlap           |

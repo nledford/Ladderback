@@ -49,7 +49,8 @@ host = "demo-laptop"
 label = "Demo \"home\" backup #1 – café"
 sources = ["/home/demo", "/srv/demo data/it's here", "/home/demo/é/日本"]
 tags = ["demo", "laptop", "Home Dir"]
-schedule = { cron = "0 3 * * 1-5", jitter = "90s", catch-up = false, on-ac-power = true }
+schedule = { cron = "0 3 * * 1-5", timezone = "Europe/Berlin", jitter = "90s", catch-up = false, on-ac-power = true }
+overlap = "queue"
 retry = { attempts = 3, backoff = "10m" }
 globs = ["*.tmp", "!keep.tmp"]
 iglobs = ["*.LOG"]
@@ -86,3 +87,9 @@ repository = "cloud"
 label = ""
 sources = ["/home/demo/photos", "/home/demo/video"]
 schedule = { cron = "@daily" }
+
+[[plans]]
+id = "mail"
+repository = "cloud"
+sources = ["/home/demo/mail"]
+schedule = { every = "1h 30m" }
