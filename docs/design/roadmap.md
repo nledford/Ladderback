@@ -7,11 +7,13 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | **M0** | Skeleton | Workspace in the §8.3 layout; CI with fmt, clippy, tests, the `domain` wasm build, banned-crate and banned-call checks; cucumber-rs runners, red-first check and `cargo mutants` job; fake clock and port fakes with contract-suite scaffold; worker protocol with a fake operation; daemon serving an embedded "hello" Leptos app; Node toolchain with the `@ui` runner, Playwright, axe-core and a keyboard-only journey on that app | 2–3 wks |
 | **M1a** | Engine | Pinned `rustic_core` revision; worker with `EventProgressBars`, warnings, SIGTERM handling, deadline watchdog and per-worker cache dir; identify, backup, prune and check jobs (prune and check so the kill test covers prune); cancel and deadline in `RunOperation`; a minimal `Redactor` over the job's password and repository URL credentials (full secret sources in M1b); agent ID and repository ID; `ladderback-*` tags and explicit parents with fallback; kill-at-random-points test (local + one OpenDAL backend); `*-tmp-*` cleanup | 2–3 wks |
 | **M1b** | Single machine MVP | Repo connect/init/test, including optional hot/cold repos; secret sources, `${…}` substitution and redaction (§10.2); plans in `config.toml` with schema version and migrations; hook levels; profile **import** and export with the golden test; manual backup with live progress in UI; snapshot list; unmanaged and orphaned groups with local adoption; op log and history; forget/prune/check run manually on the local owner; request checks (§10.1); `l10n` crate with the `en-US` catalog, error codes in the API, catalog tests and dev pseudolocales (§8.4); accessible component set (dialog, table, form field, status, progress, toast) with its gallery, the announcer, route focus handling, token contrast test, CLI `NO_COLOR`/`--plain`/`--json`, and the first Orca and VoiceOver pass (§4.5) | 4–5 wks |
-| **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates and plain-text forms; service install (systemd, launchd); optional auth with an accessible sign-in form (A5, A6); "Pause live updates"; macOS signing and Full Disk Access test | 2–3 wks |
-| **M3** | Browse, restore and automation | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; scoped API tokens (§10.1); the data-dir lock for `mcp --headless` (§9; `serve` took it in M1b); MCP server in connect, headless and scratch modes with the read, run and preview tools (§4.6) | 2–3 wks |
+| **M2** | Schedules and errors | Scheduler with catch-up, jitter, time zones, wake detection, network wait, persistent queue and retries; warnings vs failures; notifications (webhook, ntfy, healthchecks) with templates and plain-text forms; service install (systemd, launchd); optional auth with an accessible sign-in form (A5, A6); "Pause live updates" | 2–3 wks |
+| **M3** | Browse, restore and automation | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; scoped API tokens (§10.1); the data-dir lock for `mcp --headless` (§9; `serve` took it in M1b); MCP server in connect, headless and scratch modes with the read, run and preview tools (§4.6); on macOS, `just install` signing with a self-signed certificate, and the Full Disk Access tests (decision 71) | 2–3 wks |
 | **M4a** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 3–4 wks |
 | **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub); MCP connect mode against a hub, with an `agent` argument (§4.6) | 3–4 wks |
 | **M5** | Polish | Conditions (AC power / metered), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
+
+M2 ends with its release, `0.2.0`: after the tag, it runs on real machines before M3 starts, and what that run turns up is fixed or filed first. On macOS that run uses an ad-hoc-signed build from source, with Full Disk Access granted by hand (decision 71).
 
 | Milestone | Feature files |
 |---|---|
@@ -45,7 +47,7 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | Accessibility erodes as the UI grows | Invariants A1–A6 (§0); one component set with contract tests; role-and-name-only test locators; axe-core in CI; a screen-reader pass in each milestone's definition of done (§4.5) |
 | ICU4X data bloats the daemon binary | Measured in M1b: with every locale's data compiled in, ICU4X adds 1.1 MB (4%) to the stripped release daemon, so v1 doesn't trim it. Generate data for the shipped locales only if a later change makes it much larger (§8.4) |
 | The bundled time-zone data bloats the daemon binary | Measured at M1b: the copy of the IANA database adds 248 KB (0.7%) to the stripped release daemon and nothing to the web UI's wasm, which looks up no zone. Kept, because without it a host with no `tzdata` reads every zone as UTC (§16 decision 30) |
-| macOS TCC permissions | Signed, notarized builds; detect denials and link to the settings pane. Document this in setup |
+| macOS TCC permissions | A code signature that stays the same across upgrades (decision 71). Detect denials and link to the settings pane. Document this in setup |
 | Memory use on very large repos | Worker isolation. Restore and `dump` need the full index (`to_indexed()`); measure early with a large test repo. Document `--no-cache` and cache dir options |
 | Hub is a single point of control | Agents back up without the hub. Agent owner leases last 7 days without renewal, so an outage longer than that pauses agent-run maintenance; backups continue |
 | Test-first discipline erodes under schedule pressure | Red-first check, mutation testing on changed code and the definition of done (§13); no coverage gate to game |
@@ -120,10 +122,11 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [59](decisions/59-where-the-workers-keep-rustics-cache.md) | Where the workers keep rustic's cache |
 | [60](decisions/60-how-a-plan-s-next-run-is-worked-out.md) | How a plan's next run is worked out |
 | [69](decisions/69-a-save-edits-the-file-a-person-wrote.md) | A save edits the file a person wrote |
+| [71](decisions/71-signing-macos-builds-without-a-developer-id.md) | Signing macOS builds without a Developer ID |
 
 ## 17. Open questions
 
-To be answered by M1a/M2 experiments rather than by decision:
+To be answered by experiments in M1a to M3 rather than by decision:
 
 1. Does a SIGKILL during an S3, B2 or SFTP upload leave a partial object under a final pack name? The kill test (§4.1) must cover one OpenDAL backend.
 2. Does a Full Disk Access grant on the launchd-started daemon carry over to the worker child process, or does the worker need its own grant?
