@@ -30,6 +30,10 @@ const ROW_PATIENCE_MS = 120_000;
 // moment at most: this long, not as long as a real backup.
 const UPDATE_PATIENCE_MS = 5_000;
 
+// How long a page that holds still is watched: past the moment an update the
+// page heard would have shown, as long as a live region's silence is.
+const STILL_MS = 2_500;
+
 // The three sources a demo plan backs up: `tiny` ends at once, for journeys
 // that need several real snapshots; `small` runs long enough that its
 // Running row is there to be read (a second or two) and then ends; `big`
@@ -195,6 +199,10 @@ When(
     await scripted(this).succeeds(plan, files, "2026-11-09T10:05:00Z");
   },
 );
+
+When("the daemon reports that the backup of {string} has failed", async function (this: BrowserWorld, plan: string) {
+  await scripted(this).fails(plan, "2026-11-09T10:05:00Z");
+});
 
 When("the daemon holds back its answer to the next reading of the history", function (this: BrowserWorld) {
   scripted(this).holdTheNextRead();
@@ -451,6 +459,24 @@ Then(
     await untilCellShows(this, name, row, column, expected);
   },
 );
+
+// A paused page holds still (§4.5): the cell says what it said, and goes on
+// saying it for as long as an update would have taken to reach it and more.
+Then(
+  "the row {string} of the table {string} keeps showing {string} in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    const end = Date.now() + STILL_MS;
+    do {
+      const seen = await cellText(this, name, row, column);
+      assert.ok(seen.includes(expected), `the row ${row} of the table ${name} showed "${seen}" in its ${column} column, not "${expected}"`);
+      await sleep(100);
+    } while (Date.now() < end);
+  },
+);
+
+Then("the table {string} shows no progress bar", async function (this: BrowserWorld, name: string) {
+  await expect(table(this, name).getByRole("progressbar")).toHaveCount(0);
+});
 
 /** Waits until the cell of `row` under `column` holds a list with an item
  *  that says `expected`: a reader hears what a run did as a list, one fact an

@@ -1,7 +1,7 @@
 // Journey steps for the shared component set in the gallery (technical design
 // §4.5): the dialog, the data table, the form field, the checkbox, the
-// progress bar and the toast. Keyboard only, role-and-name locators, as
-// everywhere in steps/.
+// progress bar, the toast and the pause control. Keyboard only,
+// role-and-name locators, as everywhere in steps/.
 
 import assert from "node:assert/strict";
 
@@ -28,6 +28,54 @@ Then("focus is on the button {string}", async function (this: BrowserWorld, name
     journey(this.page).byRole("button", { name }),
     `the button ${JSON.stringify(name)}`,
   );
+});
+
+// A toggle button tells a screen reader its state with aria-pressed (WAI-ARIA
+// button pattern), and its name stays the same whichever state it is in.
+Then("the button {string} is pressed", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("button", { name, exact: true, pressed: true })).toHaveCount(1);
+});
+
+Then("the button {string} is not pressed", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("button", { name, exact: true, pressed: false })).toHaveCount(1);
+});
+
+// What a screen reader reads after the button's name and state: the banner
+// the button is described by while live updates are paused. Its numbers sit
+// in bidi isolation marks, which a reader never hears (§4.5).
+Then("the button {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
+  const marks = "[\\u2066-\\u2069]*";
+  const heard = [...description].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(marks);
+  await expect(this.page.getByRole("button", { name, exact: true })).toHaveAccessibleDescription(
+    new RegExp(`^${marks}${heard}${marks}$`),
+  );
+});
+
+// The banner sits beside the focused button, so an edge in the focus ring's
+// color would read as a second focus ring (2.4.7): its edge has the color of a
+// rule, not of focus.
+Then("the banner describing the button {string} is edged unlike its focus ring", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("button", { name, exact: true });
+  await expect(button).toBeFocused();
+  const [ring, edge] = await button.evaluate((el) => {
+    const banner = document.getElementById(el.getAttribute("aria-describedby") ?? "");
+    if (banner === null) {
+      throw new Error("the button is described by no banner");
+    }
+    const outline = getComputedStyle(el);
+    const border = getComputedStyle(banner);
+    return [
+      outline.outlineStyle === "none" ? null : outline.outlineColor,
+      border.borderTopStyle === "none" ? null : border.borderTopColor,
+    ];
+  });
+  assert.notEqual(ring, null, `the button ${JSON.stringify(name)} shows no focus ring`);
+  assert.notEqual(edge, null, "the banner has no edge");
+  assert.notEqual(edge, ring, `the banner's edge is ${edge}, the focus ring's color`);
+});
+
+Then("the button {string} has no description", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("button", { name, exact: true })).toHaveAccessibleDescription("");
 });
 
 Then("the table {string} is sorted by repository ascending", async function (this: BrowserWorld, name: string) {

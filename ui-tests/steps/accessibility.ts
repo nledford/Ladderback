@@ -8,7 +8,7 @@ import type { BrowserWorld } from "../support/world.ts";
 
 // More Tab presses than any page has stops: the gallery's, the longest, and
 // the skip link and the navigation's three links before it.
-const MAX_TABS = 20;
+const MAX_TABS = 30;
 
 // A polite message waits up to two seconds for company, and its text is set a
 // moment after the region is cleared (§4.5); five seconds is generous.
@@ -116,10 +116,11 @@ const textOf = async (found: Locator) => ((await found.textContent()) ?? "").tri
 Then("the {word} region reads {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
   const found = await region(this, politeness);
   const deadline = Date.now() + REGION_PATIENCE_MS;
-  let actual = await textOf(found);
+  // What a reader hears has no bidi isolation marks (§4.5).
+  let actual = (await textOf(found)).replace(ISOLATION_MARKS, "");
   while (actual !== expected && Date.now() < deadline) {
     await sleep(100);
-    actual = await textOf(found);
+    actual = (await textOf(found)).replace(ISOLATION_MARKS, "");
   }
   assert.equal(actual, expected, `the ${politeness} region`);
 });
@@ -146,6 +147,31 @@ Then("the {word} region comes to contain {string}", async function (this: Browse
 
 Then("the {word} region is empty", async function (this: BrowserWorld, politeness: string) {
   assert.equal(await textOf(await region(this, politeness)), "", `the ${politeness} region`);
+});
+
+// What a region keeps saying: the text is there now and stays, unchanged and
+// never cleared, past the merge window, so nothing else was said meanwhile.
+// The region is watched for every change rather than read now and then: a
+// rewrite clears it for a moment only, which a reading between two moments
+// would miss, and a rewrite of the same text is said again.
+Then("the {word} region keeps reading {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
+  const found = await region(this, politeness);
+  assert.equal((await textOf(found)).replace(ISOLATION_MARKS, ""), expected, `the ${politeness} region`);
+  const changes = await found.evaluate((el, ms) => {
+    const { promise, resolve } = Promise.withResolvers<number>();
+    let changes = 0;
+    const observer = new MutationObserver((records) => {
+      changes += records.length;
+    });
+    observer.observe(el, { childList: true, characterData: true, subtree: true });
+    setTimeout(() => {
+      observer.disconnect();
+      resolve(changes);
+    }, ms);
+    return promise;
+  }, SILENCE_MS);
+  assert.equal(changes, 0, `the ${politeness} region was written again`);
+  assert.equal((await textOf(found)).replace(ISOLATION_MARKS, ""), expected, `the ${politeness} region`);
 });
 
 // Silence is shown by waiting: a region that fills in later is not silent.
