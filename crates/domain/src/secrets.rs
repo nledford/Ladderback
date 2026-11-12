@@ -7,6 +7,8 @@ mod command;
 mod inline;
 mod options;
 mod outcome;
+#[cfg(test)]
+mod properties;
 mod source;
 mod template;
 
