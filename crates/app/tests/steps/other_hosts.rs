@@ -3,12 +3,13 @@
 //! other machines, ask this agent to maintain it, and read the other hosts
 //! the groups, a preview and a run warn of.
 
+use app::ports::Clock;
 use cucumber::{given, then};
 use domain::execution::WarningKind;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::maintenance::OtherHosts;
 use domain::planning::{Hostname, KeepCount, Maintenance, Plan, Source};
-use domain::{PlanId, RepositoryAlias};
+use domain::{PlanId, RepositoryAlias, SignedDuration};
 
 use super::Agent;
 use super::forget_steps::{other_agent, self_agent};
@@ -50,20 +51,68 @@ fn made_on(agent: &mut Agent, count: u64, host: String) {
     agent.forget.snapshots_on(count, &[], "/home/demo", &host);
 }
 
-#[given(
-    regex = r#"^the repository holds (\d+) snapshots? (this|another) agent's plan "([^"]+)" made on the host "([^"]+)"$"#
-)]
-fn made_by_agent_on(agent: &mut Agent, count: u64, whose: String, plan: String, host: String) {
+/// The tags of a backup of `plan` that `whose` (`this` or `another`) agent
+/// made.
+fn tags_of(whose: &str, plan: &str) -> [String; 2] {
     let by = if whose == "this" {
         self_agent()
     } else {
         other_agent()
     };
-    let tags = [
+    [
         format!("{PLAN_TAG_PREFIX}{plan}"),
         format!("{AGENT_TAG_PREFIX}{}", by.as_uuid().hyphenated()),
-    ];
+    ]
+}
+
+#[given(
+    regex = r#"^the repository holds (\d+) snapshots? (this|another) agent's plan "([^"]+)" made on the host "([^"]+)"$"#
+)]
+fn made_by_agent_on(agent: &mut Agent, count: u64, whose: String, plan: String, host: String) {
+    let tags = tags_of(&whose, &plan);
     agent.forget.snapshots_on(count, &tags, "/home/demo", &host);
+}
+
+/// Adds one snapshot `whose` agent's plan `plan` made on `host`, `age`
+/// before the scenario's clock reads now.
+fn made_ago(agent: &mut Agent, whose: &str, plan: &str, host: &str, age: SignedDuration) {
+    let time = agent.clock.now() - age;
+    agent
+        .forget
+        .snapshot_at(time, &tags_of(whose, plan), "/home/demo", host);
+}
+
+#[given(
+    regex = r#"^the repository holds 1 snapshot (this|another) agent's plan "([^"]+)" made on the host "([^"]+)" (\d+) days? ago$"#
+)]
+fn made_days_ago(agent: &mut Agent, whose: String, plan: String, host: String, days: i64) {
+    made_ago(
+        agent,
+        &whose,
+        &plan,
+        &host,
+        SignedDuration::from_hours(days * 24),
+    );
+}
+
+#[given(
+    regex = r#"^the repository holds 1 snapshot (this|another) agent's plan "([^"]+)" made on the host "([^"]+)" (\d+) days? and (\d+) seconds? ago$"#
+)]
+fn made_days_and_seconds_ago(
+    agent: &mut Agent,
+    whose: String,
+    plan: String,
+    host: String,
+    days: i64,
+    seconds: i64,
+) {
+    made_ago(
+        agent,
+        &whose,
+        &plan,
+        &host,
+        SignedDuration::from_hours(days * 24) + SignedDuration::from_secs(seconds),
+    );
 }
 
 #[then(expr = "the groups warn of snapshots from the other hosts {string}")]

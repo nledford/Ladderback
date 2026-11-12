@@ -578,6 +578,7 @@ mod tests {
             &alias(),
             &domain::AgentId::from_uuid(Uuid::from_u128(1)),
             "demo-laptop",
+            forged.time,
             [&forged],
         );
         let line = other_hosts_line(&alias(), &other_hosts, &l10n::Localizer::new(&[]));

@@ -328,18 +328,25 @@ impl ForgetWorld {
     /// on the host `host`. The first added is the newest.
     pub fn snapshots_on(&mut self, count: u64, tags: &[String], folder: &str, host: &str) {
         for _ in 0..count {
-            self.made += 1;
-            self.snapshots.push(SnapshotSummary {
-                id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
-                time: at(-i64::try_from(self.made * 3_600).expect("an hour")),
-                hostname: host.to_owned(),
-                label: String::new(),
-                tags: tags.to_vec(),
-                paths: vec![folder.to_owned()],
-                paths_truncated: false,
-                tags_truncated: false,
-            });
+            let time = at(-i64::try_from((self.made + 1) * 3_600).expect("an hour"));
+            self.snapshot_at(time, tags, folder, host);
         }
+    }
+
+    /// Adds one snapshot of `folder` carrying exactly `tags`, recorded on
+    /// the host `host` and taken at `time`.
+    pub fn snapshot_at(&mut self, time: Timestamp, tags: &[String], folder: &str, host: &str) {
+        self.made += 1;
+        self.snapshots.push(SnapshotSummary {
+            id: SnapshotId::parse(&format!("{:064x}", self.made)).expect("a snapshot ID"),
+            time,
+            hostname: host.to_owned(),
+            label: String::new(),
+            tags: tags.to_vec(),
+            paths: vec![folder.to_owned()],
+            paths_truncated: false,
+            tags_truncated: false,
+        });
         self.snapshots
             .sort_by_key(|snapshot| std::cmp::Reverse(snapshot.time));
     }
