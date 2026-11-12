@@ -38,23 +38,37 @@ impl FakeServiceManager {
 
     /// Makes the manager refuse what it is asked from now on, saying `words`.
     pub fn refuse(&self, words: &str) {
-        let _ = words;
-        todo!()
+        self.state().refusal = Some(words.to_owned());
     }
 
     /// Whether the service runs.
     pub fn runs(&self) -> bool {
-        todo!()
+        self.state().runs
     }
 
     /// The service file's text, or `None` when there is none.
     pub fn file_text(&self) -> Option<String> {
-        todo!()
+        self.state().file.clone()
     }
 
     /// How many times the manager was asked to start or stop the service.
     pub fn asked(&self) -> usize {
-        todo!()
+        self.state().asked
+    }
+
+    /// Counts a request of the manager, and refuses it when told to.
+    fn ask(&self, state: &mut State, command: &str) -> Result<(), ServiceError> {
+        state.asked += 1;
+        match &state.refusal {
+            Some(said) => Err(ServiceError {
+                file: self.file.clone(),
+                problem: ServiceProblem::ManagerRefused {
+                    command: command.to_owned(),
+                    said: said.clone(),
+                },
+            }),
+            None => Ok(()),
+        }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -65,16 +79,30 @@ impl FakeServiceManager {
 #[async_trait]
 impl ServiceManager for FakeServiceManager {
     async fn install(&self, program: &ServicePath) -> Result<Installed, ServiceError> {
-        let _ = (program, self.state(), &self.file);
-        let _: fn(String) -> ServiceProblem = |said| ServiceProblem::ManagerRefused {
-            command: String::new(),
-            said,
-        };
-        todo!()
+        let mut state = self.state();
+        let replaced = state.file.is_some();
+        state.file = Some(format!("{} serve", program.as_str()));
+        self.ask(&mut state, "start")?;
+        state.runs = true;
+        Ok(Installed {
+            file: self.file.clone(),
+            replaced,
+        })
     }
 
     async fn remove(&self) -> Result<Removed, ServiceError> {
-        todo!()
+        let mut state = self.state();
+        if state.file.is_none() {
+            return Ok(Removed::NotInstalled {
+                file: self.file.clone(),
+            });
+        }
+        self.ask(&mut state, "stop")?;
+        state.runs = false;
+        state.file = None;
+        Ok(Removed::Removed {
+            file: self.file.clone(),
+        })
     }
 }
 
