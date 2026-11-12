@@ -7,7 +7,7 @@
 A self-hosted backup manager for [rustic](https://rustic.cli.rs): plans, schedules and one dashboard for every machine.
 
 > [!WARNING]
-> **Ladderback is early in development: its current release runs backups only by hand, with no scheduler and no restore.** Don't rely on it for backups until the [roadmap](#roadmap) shows a usable release. Until then, use the `rustic` CLI directly or [Backrest](https://github.com/garethgeorge/backrest); the `rustic` CLI also restores from a repository Ladderback backs up to.
+> **Ladderback 0.2.0 runs scheduled backups, but it can't restore yet.** To get files back, use the `rustic` CLI, which restores from any repository Ladderback backs up to; try a restore with it before you rely on those backups. The snapshot browser and restores in Ladderback come in M3. Until the hub (M4a), each machine runs its own Ladderback with its own web UI. The [roadmap](#roadmap) has the order.
 
 ## What it will do
 
@@ -38,7 +38,7 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 
 **Backrest is the better choice if you:**
 
-- need something that **works today**. Backrest is mature; Ladderback hasn't reached its first usable release (M2) and has no scheduler or restore yet;
+- need **restores from the web UI** today. Backrest is mature; Ladderback's first usable release (M2, 0.2.0) runs scheduled backups, but its snapshot browser and restores come in M3, and until then you restore with the `rustic` CLI;
 - use **Windows**;
 - use **restic** and want to keep restic maintaining your repositories. Restic must never prune a repository Ladderback manages;
 - need **multiple user accounts** or a way to run **arbitrary repository commands** from the UI. Ladderback has neither;
@@ -48,7 +48,7 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Installation
 
-Install it to try it out, not to rely on it: the warning at the top still holds. Releases don't come with binaries yet, so you build one from source, on Linux or macOS.
+Releases don't come with binaries yet, so you build one from source, on Linux or macOS.
 
 You need:
 
@@ -74,18 +74,22 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 (cd crates/web && trunk build --release --no-default-features) && cargo install --locked --path . --no-default-features
 ```
 
-Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another loopback address or port. Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run `git fetch --tags`, the same `git checkout` line, and `just install` again, which replaces the installed binary.
+Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with sign-in, below). Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run `git fetch --tags`, the same `git checkout` line, and `just install` again, which replaces the installed binary.
 
-Without a password, anyone with an account on the machine can use Ladderback, and it listens on loopback only. To have it ask for a password, run `ladderback set-password` and start it again; it can then also listen beyond loopback, for a host name given with `--allowed-host` (put TLS in a reverse proxy in front of it). The rules are in [technical design §10.1](docs/design/security.md#101-web-ui).
+To run it in the background instead, from each login on, run `ladderback install-service` as yourself, not under `sudo`. On Linux it writes a systemd user unit and has systemd start it; on macOS it writes a launchd agent, which logs to `~/Library/Logs/ladderback.log`. The service runs `ladderback serve` with no options, so it listens on `http://127.0.0.1:9898`. On Linux a user's services stop when the user logs out, and the command says to run `loginctl enable-linger` to keep it running. After an update, run `ladderback install-service` again: it replaces the service and starts it on the new binary. `ladderback remove-service` stops the service and removes its file. [Decision 64](docs/design/decisions/64-installing-the-agent-as-a-user-service.md) says what the service file holds.
+
+On macOS, grant the installed `ladderback` Full Disk Access by hand, in System Settings → Privacy & Security, and again after each update: a build from source loses the grant when it is rebuilt ([technical design §12](docs/design/operations.md#12-packaging-and-deployment), [decision 71](docs/design/decisions/71-signing-macos-builds-without-a-developer-id.md)).
+
+Sign-in is off until you set an admin password with `ladderback set-password`, which turns it on the next time Ladderback starts (for the service, run `ladderback install-service` again). With sign-in off, anyone with an account on the machine can use Ladderback, so set a password on a machine others use. `ladderback serve --listen` takes an address beyond loopback only with sign-in on and at least one `--allowed-host`, the name the browser reaches Ladderback by; it serves plain HTTP, so put a reverse proxy with TLS in front of it. [Technical design §10.1](docs/design/security.md#101-web-ui) has the details.
 
 ## Roadmap
 
-The skeleton (M0), the backup engine (M1a) and the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) are in place: backups run by hand, with no scheduler yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
+The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) and schedules and errors (M2, released as [0.2.0](https://github.com/nledford/Ladderback/releases/tag/v0.2.0)) are in place: backups run on their schedules, with no restore in Ladderback yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. M2 is the first release worth using on your own machines; M3 adds browsing and restoring snapshots.
 
 - [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
 - [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
 - [x] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
-- [ ] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications; systemd and launchd service install; optional login. **First usable release.**
+- [x] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications to webhooks, ntfy and healthchecks; systemd and launchd service install; optional sign-in. **First usable release.**
 - [ ] **M3: Browse and restore.** Snapshot browser, restore into a new folder or in place, downloads as tar or zip, repository stats; on macOS, builds from source that keep their Full Disk Access across upgrades.
 - [ ] **M4a: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts.
 - [ ] **M4b: Hub, control and maintenance.** Repository ownership; forget, prune and check managed from the hub; remote run and cancel; opt-in restores from the hub.
