@@ -1184,6 +1184,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileRetentionEmpty
                 | WarningCode::ProfileSettingKept
                 | WarningCode::ProfileKeyringCommandMissing
+                // The daemon's notifier says it, never a worker.
+                | WarningCode::NotificationUndelivered
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),

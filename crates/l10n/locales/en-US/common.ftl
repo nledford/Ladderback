@@ -484,6 +484,19 @@ warning-profile-keyring-command-missing = { $program ->
    *[other] The profile reads the repository's password with { $program }, which is not on this computer's { "PATH" }, so rustic cannot read the password here. Run the profile where { $program } is on the { "PATH" }.
   }
 
+# A notification of an event was not delivered to its channel, and is not tried again.
+# $event (text): the event's name, such as backup.failed. Keep it as it is.
+# $rule (text): the rule's name in the configuration. Keep it as it is.
+# $channel (text): the channel's name in the configuration. Keep it as it is.
+# $reason (text): why: secret-unavailable, invalid-address, unreachable, timed-out or rejected.
+warning-notification-undelivered = { $reason ->
+    [secret-unavailable] The rule { $rule } did not send { $event } to { $channel }, because a secret of the channel (its URL, token or password) could not be read. Check where the configuration says it is.
+    [invalid-address] The rule { $rule } did not send { $event } to { $channel }, because the channel's URL is not an { "http" } or { "https" } address. Check the URL the channel reads.
+    [unreachable] The rule { $rule } could not reach { $channel } to send { $event }. Check that the channel's server is up and that this computer can reach it, through its proxy if it has one.
+    [timed-out] The rule { $rule } sent { $event } to { $channel }, but the channel did not answer in time.
+   *[other] The rule { $rule } sent { $event } to { $channel }, but the channel refused it. Check the channel's URL and its token or password.
+  }
+
 ## Command-line codes: what a command says when it cannot start (technical design §4.5)
 
 # The command has no folder to keep the configuration in.

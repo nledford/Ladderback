@@ -317,6 +317,13 @@ pub enum WarningCode {
     /// argument `program` is the program: `secret-tool`, or `security` on
     /// macOS.
     ProfileKeyringCommandMissing,
+    /// A notification of an event wasn't delivered to its channel (§11). It
+    /// is not tried again. The arguments: `event`, the event's name
+    /// (`backup.failed`); `rule` and `channel`, their names in the
+    /// configuration; and `reason`, why: `secret-unavailable`,
+    /// `invalid-address`, `unreachable`, `timed-out` or `rejected`. Never the
+    /// channel's URL, its token or what it answered (I4).
+    NotificationUndelivered,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -865,6 +872,28 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::NotificationUndelivered => &[
+                ArgSpec {
+                    name: "event",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "rule",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "channel",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "reason",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::SourceUnreadable
             | Self::CheckWarning
             | Self::CheckError

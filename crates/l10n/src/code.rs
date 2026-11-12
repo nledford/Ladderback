@@ -119,5 +119,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
     ProfileSettingKept => msg::WARNING_PROFILE_SETTING_KEPT,
     ProfileKeyringCommandMissing => msg::WARNING_PROFILE_KEYRING_COMMAND_MISSING,
+    NotificationUndelivered => msg::WARNING_NOTIFICATION_UNDELIVERED,
     Unknown => msg::WARNING_UNKNOWN,
 });
