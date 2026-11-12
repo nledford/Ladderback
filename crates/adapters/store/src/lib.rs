@@ -26,8 +26,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PlannedRun,
-    Recovered, ScheduleStore, Start, StoreError, maintained_repository,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PendingRetry,
+    PlannedRun, Recovered, ScheduleStore, Start, StoreError, maintained_repository,
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
@@ -523,5 +523,19 @@ impl ScheduleStore for SqliteStore {
             .await
             .map_err(unavailable)?;
         Ok(())
+    }
+
+    async fn pending_retries(&self) -> Result<Vec<PendingRetry>, StoreError> {
+        todo!()
+    }
+
+    async fn keep_retry(&self, retry: &PendingRetry) -> Result<(), StoreError> {
+        let _ = retry;
+        todo!()
+    }
+
+    async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError> {
+        let _ = plan;
+        todo!()
     }
 }

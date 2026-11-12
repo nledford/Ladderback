@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use domain::{PlanId, Timestamp};
 
-use crate::ports::{PlannedRun, ScheduleStore, StoreError};
+use crate::ports::{PendingRetry, PlannedRun, ScheduleStore, StoreError};
 
 /// The planned runs, kept in memory, for use-case tests and acceptance
 /// scenarios. It keeps what the real store keeps, to the millisecond.
@@ -48,5 +48,19 @@ impl ScheduleStore for InMemoryScheduleStore {
     async fn unplan(&self, plan: &PlanId) -> Result<(), StoreError> {
         self.kept().remove(plan);
         Ok(())
+    }
+
+    async fn pending_retries(&self) -> Result<Vec<PendingRetry>, StoreError> {
+        todo!()
+    }
+
+    async fn keep_retry(&self, retry: &PendingRetry) -> Result<(), StoreError> {
+        let _ = retry;
+        todo!()
+    }
+
+    async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError> {
+        let _ = plan;
+        todo!()
     }
 }

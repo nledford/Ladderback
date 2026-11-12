@@ -19,17 +19,19 @@ use domain::execution::Trigger;
 use domain::execution::conditions::UnmetCondition;
 use domain::execution::next_run::NextRun;
 use domain::execution::queue::Overlapping;
+use domain::execution::retry::{NoRetry, RetryScheduled};
 use domain::execution::wake::WAKE_CHECK_EVERY;
 use domain::planning::{AgentConfig, NoNextRun, Overlap, Schedule, ScheduleZone};
 use domain::{OperationId, PlanId, SignedDuration, TimeZone, Timestamp};
 
 use crate::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, Network, PlannedRun, PlatformError, PowerSupply, Random,
-    ScheduleStore, StoreError,
+    Clock, ConfigError, ConfigStore, EventBus, Network, PlannedRun, PlatformError, PowerSupply,
+    Random, ScheduleStore, StoreError,
 };
 use crate::queue::{Place, RunQueue};
 use crate::recovery::QueuedEnd;
+use crate::retry::RunEnds;
 
 /// What starts the runs the scheduler and the queue decide on: the
 /// composition root's backups of a plan, each on a task of its own. Not a
@@ -85,6 +87,11 @@ pub enum ScheduleReport {
         kind: OperationKind,
         why: QueuedEnd,
     },
+    /// A plan's backup failed, and the plan retries it as `retry` says.
+    Retrying { plan: PlanId, retry: RetryScheduled },
+    /// A plan's retries ended without a success: the failed backup isn't
+    /// retried, or a retry planned didn't run, and why.
+    RetriesEnded { plan: PlanId, why: NoRetry },
 }
 
 /// The loop that runs scheduled plans (§5). It owns nothing but its ports;
@@ -103,6 +110,11 @@ pub struct Scheduler {
     /// The machine's time zone, which a cron schedule that names none is
     /// read in.
     pub zone: TimeZone,
+    /// How each backup ended, as its run says it: the scheduler retries a
+    /// failed one (§5).
+    pub ends: RunEnds,
+    /// Where the scheduler announces a retry it plans (`backup.retrying`).
+    pub events: Arc<dyn EventBus>,
 }
 
 /// A scheduled plan, as the loop holds it.
@@ -480,6 +492,8 @@ mod tests {
             runs,
             queue: Arc::new(RunQueue::new()),
             zone: TimeZone::UTC,
+            ends: crate::retry::run_ends().1,
+            events: Arc::new(crate::fakes::InMemoryEventBus::new()),
         }
     }
 

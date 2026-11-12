@@ -7,6 +7,7 @@ pub mod plan_tags;
 #[cfg(test)]
 mod properties;
 pub mod queue;
+pub mod retry;
 pub mod wake;
 
 use serde::{Deserialize, Serialize};

@@ -28,6 +28,7 @@ pub mod ports;
 pub mod queue;
 pub mod recovery;
 pub mod repositories;
+pub mod retry;
 pub mod schedule;
 pub mod secrets;
 pub mod snapshots;

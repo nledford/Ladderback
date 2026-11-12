@@ -1937,6 +1937,17 @@ pub enum UiEvent {
         args: Vec<MsgArg>,
         finished_at: String,
     },
+    /// A plan's backup failed, and the agent retries it (`backup.retrying`,
+    /// §5, §11): `operation` is the run that failed, `attempt` which of the
+    /// plan's `attempts` retries this is, and `at` when it runs. Told once,
+    /// when the retry is planned.
+    BackupRetrying {
+        operation: String,
+        plan: String,
+        attempt: u32,
+        attempts: u32,
+        at: String,
+    },
     /// An agent joined the fleet.
     AgentOnline { agent: String, at: String },
     /// An agent left the fleet.

@@ -169,6 +169,9 @@ pub(crate) struct Background {
     schedules: Arc<dyn ScheduleStore>,
     store: Arc<dyn OperationStore>,
     conditions: RunConditions,
+    /// How each backup ended, which the scheduler reads to retry a failed
+    /// one (§5).
+    ends: app::retry::RunEnds,
 }
 
 impl Background {
@@ -177,6 +180,7 @@ impl Background {
     /// dropped.
     pub(crate) async fn run(self, random: Arc<dyn Random>) {
         let queue = Arc::clone(&self.runner.queue);
+        let events = Arc::clone(&self.runner.events);
         let runs: Arc<dyn PlanRuns> = self.runner;
         resume_queued(self.queued, self.config.as_ref(), self.store, runs.as_ref()).await;
         Scheduler {
@@ -189,6 +193,8 @@ impl Background {
             runs,
             queue,
             zone: domain::TimeZone::system(),
+            ends: self.ends,
+            events,
         }
         .run()
         .await;
@@ -419,6 +425,7 @@ async fn state_over(
         Arc::new(log_recording),
     ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
+    let (run_ends, ends) = app::retry::run_ends();
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         resolve: Arc::clone(&resolve),
@@ -430,6 +437,7 @@ async fn state_over(
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
+        ends: run_ends,
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -453,6 +461,7 @@ async fn state_over(
         schedules,
         store,
         conditions,
+        ends,
     };
     Ok((
         AppState {
@@ -907,6 +916,9 @@ struct PlanRunner {
     /// The agent's one queue of backups, which the scheduler shares: every
     /// backup takes its turn in it (§5, the concurrency limit).
     queue: Arc<RunQueue>,
+    /// Where each backup's run says how it ended, so the scheduler can
+    /// retry a failed one (§5).
+    ends: app::retry::RunEndSender,
 }
 
 impl PlanRunner {
@@ -1167,6 +1179,22 @@ impl PlanRuns for PlanRunner {
             } => log::warn!(
                 "the queued {kind:?} {} can't run again, and ends as failed ({why:?})",
                 operation.as_uuid().hyphenated()
+            ),
+            ScheduleReport::Retrying { plan, retry } => log::info!(
+                "the backup of plan {} failed, and retry {} runs at {}",
+                plan.as_str(),
+                retry.attempt,
+                retry.at
+            ),
+            ScheduleReport::RetriesEnded { plan, why } => log::info!(
+                "the retries of plan {} ended without a success: {}",
+                plan.as_str(),
+                match why {
+                    domain::execution::retry::NoRetry::Exhausted => "its attempts are spent",
+                    domain::execution::retry::NoRetry::NextRun =>
+                        "its next scheduled run comes first",
+                    domain::execution::retry::NoRetry::RunGoing => "a run of it is going",
+                }
             ),
         }
     }
@@ -3852,6 +3880,7 @@ mod tests {
             hooks: Arc::new(hooks),
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
+            ends: app::retry::run_ends().0,
         };
         (runner, entered, open_gate, scratch)
     }
@@ -8725,6 +8754,7 @@ mod repository_service_tests {
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
+                ends: app::retry::run_ends().0,
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -8768,6 +8798,7 @@ mod repository_service_tests {
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
+                ends: app::retry::run_ends().0,
             };
 
             let place = runner
