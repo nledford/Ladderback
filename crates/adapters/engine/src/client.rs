@@ -1043,9 +1043,13 @@ async fn read_log_line(
 /// text: one of those secrets the cut went through leaves nothing behind.
 fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
     Some(match event {
-        WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started {
+        WorkerEvent::Started {
             index_read_at,
-            repository: None,
+            repository,
+            ..
+        } => EngineEvent::Started {
+            index_read_at,
+            repository,
         },
         WorkerEvent::ProgressStart { key, kind, prefix } => {
             EngineEvent::Progress(ProgressEvent::Begin {
@@ -3340,6 +3344,7 @@ mod tests {
             op_id: OperationId::from_uuid(Uuid::from_u128(1)),
             pid: 1,
             index_read_at: domain::Timestamp::from_second(1_800_000_000).unwrap(),
+            repository: None,
         })
         .unwrap();
         let head =
@@ -3701,6 +3706,7 @@ mod tests {
             op_id: OperationId::from_uuid(Uuid::from_u128(1)),
             pid: 1,
             index_read_at: domain::Timestamp::from_second(1_800_000_000).unwrap(),
+            repository: None,
         })
         .unwrap()
     }

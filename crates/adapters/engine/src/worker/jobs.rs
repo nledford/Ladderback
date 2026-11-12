@@ -27,10 +27,9 @@ use crate::job::{RewriteJobSpec, RewriteResult};
 
 pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
-    ctx.start(None)?;
-    Ok(Done::Result(OpResult::Repository {
-        id: repository_id(&repository)?,
-    }))
+    let id = repository_id(&repository)?;
+    ctx.start(None, Some(&id))?;
+    Ok(Done::Result(OpResult::Repository { id }))
 }
 
 /// Lists the repository's snapshots, newest first. A read: it emits `Started`
@@ -38,7 +37,7 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
 /// `snapshots` events, then one final result that counts them (§4.1).
 pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = open(ctx, spec)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&repository_id(&repository)?))?;
     let snapshots = repository.get_all_snapshots()?;
     let count = listing::send(&snapshots, |snapshots| {
         ctx.events.emit(&WorkerEvent::Snapshots { snapshots })
@@ -63,7 +62,7 @@ pub(crate) fn forget(ctx: &Context, job: &ForgetJobSpec) -> Result<Done, JobErro
         .collect::<Result<_, _>>()?;
     let repository = open(ctx, &job.repo)?;
     let repository_id = repository_id(&repository)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&repository_id))?;
     repository.delete_snapshots(&ids)?;
     let removed = ids.iter().map(snapshot_id).collect::<Result<_, _>>()?;
     Ok(Done::Result(OpResult::Forget(ForgetResult {
@@ -98,7 +97,7 @@ pub(crate) fn rewrite(ctx: &Context, job: &RewriteJobSpec) -> Result<Done, JobEr
     })?;
     let repository = open(ctx, &job.repo)?;
     let repository_id = repository_id(&repository)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&repository_id))?;
     let originals = repository.get_snapshots(&job.ids)?;
     if originals.len() != ids.len() {
         return Err(JobError::failed(
@@ -169,8 +168,9 @@ fn copy_of(
 pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
     let repository = new_repository(ctx, spec)?;
     // The deadline counts from here: the backends are open, so this is the
-    // step that can now take its time, as `identify` does.
-    ctx.start(None)?;
+    // step that can now take its time, as `identify` does. It names no
+    // repository opened: its result names the one it makes.
+    ctx.start(None, None)?;
     let repository = repository
         .init(
             &Credentials::password(spec.password.expose()),
@@ -250,7 +250,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     );
 
     // The deadline counts from here: the index read is what comes next.
-    ctx.start(Some(job.deadline_budget))?;
+    ctx.start(Some(job.deadline_budget), Some(&id))?;
     let repository = repository.to_indexed_ids()?;
     let Some(snapshot) = ctx
         .cancel()
@@ -271,7 +271,7 @@ pub(crate) fn prune(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError>
     let options = prune_options(job.keep_delete)?;
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&id))?;
     let plan = repository.prune_plan(&options)?;
     let result = prune_result(id, &plan.stats);
     repository.prune(&options, plan)?;
@@ -284,7 +284,7 @@ pub(crate) fn prune_plan(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobE
     let options = prune_options(job.keep_delete)?;
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&id))?;
     let plan = repository.prune_plan(&options)?;
     Ok(Done::Result(OpResult::PrunePlan(prune_plan_result(
         id,
@@ -299,7 +299,7 @@ pub(crate) fn prune_plan(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobE
 pub(crate) fn check(ctx: &Context, job: &CheckJobSpec) -> Result<Done, JobError> {
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
-    ctx.start(None)?;
+    ctx.start(None, Some(&id))?;
     let results = repository.check(CheckOptions::default().read_data(job.read_data))?;
     for (code, finding) in errors_first(&results.0) {
         ctx.events.emit(&WorkerEvent::Warning {

@@ -214,6 +214,7 @@ mod tests {
                 op_id: OperationId::from_uuid(domain::Uuid::from_u128(1)),
                 pid: 1,
                 index_read_at: domain::Timestamp::from_second(1_800_000_000).unwrap(),
+                repository: None,
             })
             .unwrap();
     }

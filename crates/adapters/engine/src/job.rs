@@ -278,11 +278,15 @@ pub enum FakeEndSpec {
 pub enum WorkerEvent {
     /// The job began its work. Nothing but a log line precedes it, and
     /// `index_read_at` is when the worker started reading the repository
-    /// index, which is what a deadline counts from.
+    /// index, which is what a deadline counts from. `repository` is the ID
+    /// of the repository the job opened, and `None` for a job that opens
+    /// none: a fake one, and an initialisation, whose result names the new
+    /// repository.
     Started {
         op_id: OperationId,
         pid: u32,
         index_read_at: Timestamp,
+        repository: Option<RepositoryId>,
     },
     ProgressStart {
         key: u32,
