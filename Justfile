@@ -20,10 +20,6 @@ mutants_packages := "--package domain --package app --package api --package l10n
 # artifacts change together.
 release_flags := "--no-default-features"
 
-# The container engine `msrv` runs: $DOCKER when set, else `docker` when it is
-# installed, else `podman`.
-container := env("DOCKER", `command -v docker >/dev/null && echo docker || echo podman`)
-
 # List available workflows.
 [group('help')]
 default:
@@ -102,33 +98,6 @@ architecture:
 [group('quality')]
 deny:
     cargo deny --locked --all-features --workspace check
-
-# Builds the workspace with the oldest compiler it claims to support (technical
-# design §8.2, decision 47), which CI doesn't: CI builds with stable. It runs in
-# Docker, in the official image of the `rust-version` Cargo.toml declares, on
-# Linux because macOS 27 can't load the proc-macro libraries 1.94 builds.
-# RUSTUP_TOOLCHAIN names the image's own toolchain: rust-toolchain.toml would
-# otherwise swap in stable, and the check would prove nothing. The target folder
-# and the Cargo home are named volumes, so a second run is quick; `docker volume
-# rm ladderback-msrv-target ladderback-msrv-cargo` frees them. It uses `docker`
-# when present and `podman` otherwise (Fedora); `DOCKER=podman just msrv` picks
-# one. The image is named in full because podman won't guess a registry.
-[doc('Build the workspace, wasm32 included, with the MSRV in a container (decision 47).')]
-[group('quality')]
-msrv:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
-    if [ -z "$version" ]; then echo 'msrv: Cargo.toml declares no rust-version' >&2; exit 1; fi
-    {{ container }} run --rm \
-        -v '{{ root }}':/src:ro -v ladderback-msrv-target:/target -v ladderback-msrv-cargo:/cargo \
-        -e CARGO_TARGET_DIR=/target -e CARGO_HOME=/cargo -w /src \
-        "docker.io/library/rust:$version" bash -euo pipefail -c '
-            export RUSTUP_TOOLCHAIN="$(cd / && rustup default | cut -d " " -f 1)"
-            rustup target add wasm32-unknown-unknown
-            rustc --version
-            cargo check --locked --workspace --all-targets
-            cargo check --locked --package web --target wasm32-unknown-unknown'
 
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test

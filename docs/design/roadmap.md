@@ -107,7 +107,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [44](decisions/44-reviewing-maintenance-before-it-runs.md) | Reviewing maintenance before it runs |
 | [45](decisions/45-masking-a-text-cut-at-a.md) | Masking a text cut at a cap |
 | [46](decisions/46-the-toolings-language.md) | The tooling's language |
-| [47](decisions/47-msrv-1-94.md) | MSRV 1.94 |
+| [47](decisions/47-msrv-1-94.md) | MSRV 1.94 (superseded by decision 78) |
 | [48](decisions/48-who-maintains-a-saved-repository.md) | Who maintains a saved repository |
 | [49](decisions/49-one-name-per-repository.md) | One name per repository |
 | [50](decisions/50-a-cancelled-backup-keeps-its-packs-indexed.md) | A cancelled backup keeps its packs indexed |
@@ -134,6 +134,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [73](decisions/73-the-persistent-queue-and-the-scheduler-loop.md) | The persistent queue and the scheduler loop |
 | [75](decisions/75-the-overlap-policy-and-the-concurrency-limit.md) | The overlap policy and the concurrency limit |
 | [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
+| [78](decisions/78-the-rust-toolchain-is-pinned.md) | The Rust toolchain is pinned, and the MSRV is the pin |
 
 ## 17. Open questions
 
