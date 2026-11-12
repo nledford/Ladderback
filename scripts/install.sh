@@ -1,3 +1,586 @@
 #!/usr/bin/env bash
-# Installs Ladderback from source: not written yet.
-exit 1
+# Installs Ladderback from source, and updates an installation made this way:
+#
+#   curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
+#
+# It checks the tools the build needs, installs the ones that need no
+# administrator rights (rustup, just, trunk) after asking once, clones
+# Ladderback's source into a folder of its own or updates it there, checks out
+# the newest release and installs it with `just install`. It never runs sudo:
+# a missing C compiler, git or Node.js is named with the command that
+# installs it, and nothing is changed. Decision 79
+# (docs/design/decisions/79-a-from-source-install-script.md) says why;
+# `features/cli/install_script.feature` specifies it. `--help` lists the
+# options.
+#
+# The whole script is a set of functions, and the last line calls `main`: a
+# download cut short defines nothing it then runs.
+#
+# LADDERBACK_INSTALL_TTY names the terminal the one question is asked on
+# (default /dev/tty, as standard input is the script itself when it is piped
+# into bash). The scenarios point it at a file, or at nothing.
+
+set -euo pipefail
+
+readonly LADDERBACK_URL="https://github.com/nledford/Ladderback.git"
+readonly SCRIPT_URL="https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh"
+readonly README_URL="https://github.com/nledford/Ladderback#installation"
+readonly RUSTUP_URL="https://sh.rustup.rs"
+
+usage() {
+    cat <<EOF
+Usage: install.sh [--yes] [--dir <folder>] [-- <options for just install>]
+
+Builds the newest release of Ladderback from source and installs it with
+\`just install\`. Running it again updates to the newest release.
+
+Options:
+  -y, --yes         install missing tools (rustup, just, trunk) without asking
+      --dir <folder>
+                    where to keep Ladderback's source (default:
+                    \${XDG_DATA_HOME:-~/.local/share}/ladderback/source)
+  -h, --help        show this help
+  --                what follows goes to \`just install\`, which passes it to
+                    \`cargo install\`: \`-- --root ~/.local\` installs into
+                    ~/.local/bin
+
+Piped into bash, options follow \`bash -s --\`:
+  curl -fsSL $SCRIPT_URL | bash -s -- --yes
+EOF
+}
+
+say() {
+    printf '%s\n' "$*"
+}
+
+warn() {
+    printf '%s\n' "$*" >&2
+}
+
+die() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+# Whether version $1 is at least $2: dot-separated numbers, compared from the
+# left; anything after a `-` or `+` is ignored.
+version_at_least() {
+    local have=${1%%[-+]*} want=${2%%[-+]*}
+    local h w
+    while [ -n "$want" ]; do
+        h=${have%%.*}
+        w=${want%%.*}
+        [[ $h =~ ^[0-9]+$ ]] || h=0
+        [[ $w =~ ^[0-9]+$ ]] || w=0
+        if ((10#$h > 10#$w)); then return 0; fi
+        if ((10#$h < 10#$w)); then return 1; fi
+        if [ "$have" = "${have#*.}" ]; then have=''; else have=${have#*.}; fi
+        if [ "$want" = "${want#*.}" ]; then want=''; else want=${want#*.}; fi
+    done
+    return 0
+}
+
+# The version a tool reports: the first word of its `--version` that starts
+# with a digit, after an optional `v`.
+tool_version() {
+    local out word words=()
+    out=$("$@" 2>/dev/null) || true
+    read -r -a words <<<"${out%%$'\n'*}" || true
+    for word in ${words[@]+"${words[@]}"}; do
+        word=${word#v}
+        if [[ $word =~ ^[0-9] ]]; then
+            printf '%s\n' "$word"
+            return 0
+        fi
+    done
+    return 0
+}
+
+has() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# The package manager whose command is printed for a missing tool.
+package_manager() {
+    if [ "$os" = Darwin ]; then
+        if has brew; then say brew; else say macos; fi
+    elif has apt-get; then
+        say apt
+    elif has dnf; then
+        say dnf
+    elif has pacman; then
+        say pacman
+    else
+        say other
+    fi
+}
+
+# How to install what this script never installs, for this system.
+how_cc() {
+    case $1 in
+        brew | macos) say "xcode-select --install" ;;
+        apt) say "sudo apt install build-essential" ;;
+        dnf) say "sudo dnf install gcc" ;;
+        pacman) say "sudo pacman -S --needed base-devel" ;;
+        *) say "install gcc or clang with your system's package manager" ;;
+    esac
+}
+
+how_git() {
+    case $1 in
+        brew | macos) say "xcode-select --install" ;;
+        apt) say "sudo apt install git" ;;
+        dnf) say "sudo dnf install git" ;;
+        pacman) say "sudo pacman -S --needed git" ;;
+        *) say "install git with your system's package manager" ;;
+    esac
+}
+
+how_node() {
+    case $1 in
+        brew) say "brew install node" ;;
+        apt) say "sudo apt install nodejs npm (if your release's Node.js is older than 20, take it from https://nodejs.org)" ;;
+        dnf) say "sudo dnf install nodejs npm" ;;
+        pacman) say "sudo pacman -S --needed nodejs npm" ;;
+        *) say "take it from https://nodejs.org" ;;
+    esac
+}
+
+# Whether the terminal the question is asked on can be opened.
+have_terminal() {
+    (: <"$tty") 2>/dev/null
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -y | --yes) yes=1 ;;
+            --dir)
+                if [ $# -lt 2 ] || [ -z "$2" ]; then
+                    warn "error: --dir needs a folder"
+                    usage >&2
+                    exit 2
+                fi
+                dir=$2
+                shift
+                ;;
+            --dir=*)
+                dir=${1#--dir=}
+                if [ -z "$dir" ]; then
+                    warn "error: --dir needs a folder"
+                    usage >&2
+                    exit 2
+                fi
+                ;;
+            -h | --help)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                forward=("$@")
+                return 0
+                ;;
+            *)
+                warn "error: unknown option: $1"
+                usage >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+}
+
+# Checks the tools the build needs. What needs administrator rights, or can't
+# be installed without rustup, is named with how to install it, and the script
+# stops before changing anything. What it can install goes into `install_rust`
+# and `install_tools`.
+check_tools() {
+    local pm missing=() version
+    pm=$(package_manager)
+
+    if [ "$os" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
+        # Every Mac has /usr/bin/cc and /usr/bin/git, which without the
+        # Command Line Tools only offer to install them.
+        missing+=("Apple's Command Line Tools, with a C compiler and git: xcode-select --install")
+    else
+        if ! has git; then
+            missing+=("git: $(how_git "$pm")")
+        fi
+        if ! has cc; then
+            missing+=("a C compiler: $(how_cc "$pm")")
+        fi
+    fi
+    if ! has node || ! has npm; then
+        missing+=("Node.js 20 or newer, with npm: $(how_node "$pm")")
+    else
+        version=$(tool_version node --version)
+        if ! version_at_least "${version:-0}" 20; then
+            missing+=("Node.js 20 or newer, with npm (found ${version:-an unknown version}): $(how_node "$pm")")
+        fi
+    fi
+
+    if has rustup; then
+        rustup=1
+    elif has cargo && has rustc; then
+        rustup=0
+    else
+        rustup=1
+        install_rust=1
+        if ! has curl; then
+            missing+=("curl, to download rustup's installer: install it with your system's package manager")
+        fi
+    fi
+
+    version=''
+    if has just; then
+        version=$(tool_version just --version)
+    fi
+    if [ -z "$version" ] || ! version_at_least "$version" 1.40; then
+        if [ "$rustup" = 1 ]; then
+            install_tools+=(just)
+        else
+            missing+=("just 1.40 or newer: take a prebuilt release from https://github.com/casey/just/releases, or install Rust with rustup (https://rustup.rs) and run this again")
+        fi
+    fi
+    if ! has trunk; then
+        if [ "$rustup" = 1 ]; then
+            install_tools+=(trunk)
+        else
+            missing+=("trunk: take a prebuilt release from https://github.com/trunk-rs/trunk/releases, or install Rust with rustup (https://rustup.rs) and run this again")
+        fi
+    fi
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        warn "error: Ladderback's build needs these, which this script doesn't install:"
+        local line
+        for line in "${missing[@]}"; do
+            warn "  - $line"
+        done
+        warn "Install them, then run this again. Nothing was changed."
+        exit 1
+    fi
+}
+
+# Refuses a source folder this script must not touch: one that holds
+# something other than a clone of Ladderback, or a clone with changes.
+check_source_folder() {
+    if [ ! -e "$dir" ]; then
+        return 0
+    fi
+    if [ ! -d "$dir" ]; then
+        die "$dir isn't a folder. Nothing was changed; choose another with --dir."
+    fi
+    if is_empty_folder "$dir"; then
+        return 0
+    fi
+    local top url
+    top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)
+    url=$(git -C "$dir" config --get remote.origin.url 2>/dev/null || true)
+    if [ "$top" != "$(cd "$dir" && pwd -P)" ] || ! is_ladderback_url "$url"; then
+        die "$dir isn't a clone of Ladderback's repository. Nothing in it was changed; choose another folder with --dir."
+    fi
+    if [ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]; then
+        die "$dir has changes that aren't committed. Nothing was changed; commit or stash them (git -C '$dir' stash), then run this again."
+    fi
+    update=1
+}
+
+# Whether folder $1 holds nothing, hidden files included.
+is_empty_folder() {
+    (
+        shopt -s nullglob dotglob
+        entries=("$1"/*)
+        [ "${#entries[@]}" -eq 0 ]
+    )
+}
+
+# Whether the clone's `origin` is Ladderback's repository, by any of the
+# addresses GitHub gives it.
+is_ladderback_url() {
+    local url=$1 matched=1
+    shopt -s nocasematch
+    case $url in
+        https://github.com/nledford/ladderback | https://github.com/nledford/ladderback.git | \
+            git@github.com:nledford/ladderback | git@github.com:nledford/ladderback.git | \
+            ssh://git@github.com/nledford/ladderback | ssh://git@github.com/nledford/ladderback.git)
+            matched=0
+            ;;
+    esac
+    shopt -u nocasematch
+    return "$matched"
+}
+
+# Installs rustup, just and trunk where they are missing, after asking once.
+install_missing_tools() {
+    if [ "$install_rust" = 0 ] && [ "${#install_tools[@]}" -eq 0 ]; then
+        return 0
+    fi
+    warn "Ladderback's build needs tools that aren't installed. This script will install:"
+    if [ "$install_rust" = 1 ]; then
+        warn "  - Rust, with rustup's installer from $RUSTUP_URL$([ "$yes" = 1 ] && printf ' (with -y: its defaults, no questions)' || printf ' (it asks its own questions)')"
+    fi
+    if [ "${#install_tools[@]}" -gt 0 ]; then
+        warn "  - ${install_tools[*]}, built from source with: cargo +stable install --locked ${install_tools[*]}"
+    fi
+    if [ "$yes" = 0 ]; then
+        if ! have_terminal; then
+            warn "error: there is no terminal to ask on. Nothing was installed. To install them without asking, run:"
+            warn "  curl -fsSL $SCRIPT_URL | bash -s -- --yes"
+            exit 1
+        fi
+        local answer=''
+        printf 'Install them? [y/N] ' >&2
+        read -r answer <"$tty" || answer=''
+        case $answer in
+            [yY] | [yY][eE][sS]) ;;
+            *)
+                warn "Nothing was installed."
+                exit 1
+                ;;
+        esac
+    fi
+
+    local cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+    if [ "$install_rust" = 1 ]; then
+        say "Installing Rust with rustup's installer"
+        curl --proto '=https' --tlsv1.2 -sSf "$RUSTUP_URL" -o "$scratch/rustup-init.sh"
+        if [ "$yes" = 1 ]; then
+            sh "$scratch/rustup-init.sh" -y
+        else
+            sh "$scratch/rustup-init.sh" <"$tty"
+        fi
+    fi
+    # What rustup and cargo install goes here; first on the PATH, so this run
+    # finds what it just installed.
+    PATH="$cargo_bin:$PATH"
+    if [ "${#install_tools[@]}" -gt 0 ]; then
+        say "Installing ${install_tools[*]}"
+        cargo +stable install --locked "${install_tools[@]}"
+    fi
+    local version
+    version=$(tool_version just --version)
+    if ! version_at_least "${version:-0}" 1.40 || ! has trunk; then
+        die "just 1.40 or newer and trunk were installed into $cargo_bin, but this run doesn't find them there: put $cargo_bin first on your PATH and run this again"
+    fi
+}
+
+# Clones Ladderback, or fetches its new releases, and checks out the newest
+# release, leaving out release candidates (vX.Y.Z-rc.N) as the README does.
+checkout_newest_release() {
+    if [ "$update" = 1 ]; then
+        say "Fetching Ladderback's releases into $dir"
+        git -C "$dir" fetch --tags
+    else
+        say "Cloning Ladderback into $dir"
+        mkdir -p "${dir%/*}/"
+        git clone --quiet -- "$LADDERBACK_URL" "$dir"
+    fi
+    local tags tag
+    tags=$(git -C "$dir" tag --list 'v*' --sort=-v:refname)
+    release=''
+    while IFS= read -r tag; do
+        case $tag in
+            '' | *-*) ;;
+            *)
+                release=$tag
+                break
+                ;;
+        esac
+    done <<<"$tags"
+    if [ -z "$release" ]; then
+        die "Ladderback has no release to install yet (no vX.Y.Z tag in $dir)."
+    fi
+    say "Checking out $release"
+    git -C "$dir" -c advice.detachedHead=false checkout --quiet "$release"
+}
+
+# Without rustup nothing installs the Rust the checkout names, so the one
+# on the PATH must be new enough and have the WebAssembly target.
+check_rust_without_rustup() {
+    local msrv='' line version sysroot
+    local pattern='^rust-version *= *"([0-9.]+)"'
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ $line =~ $pattern ]]; then
+            msrv=${BASH_REMATCH[1]}
+            break
+        fi
+    done <"$dir/Cargo.toml"
+    version=$(tool_version rustc --version)
+    if [ -n "$msrv" ] && ! version_at_least "${version:-0}" "$msrv"; then
+        die "Rust ${version:-of an unknown version} is older than $msrv, the oldest $release builds with. Install Rust with rustup (https://rustup.rs), or a newer Rust, and run this again."
+    fi
+    sysroot=$(rustc --print sysroot)
+    if [ ! -d "$sysroot/lib/rustlib/wasm32-unknown-unknown" ]; then
+        die "this Rust has no wasm32-unknown-unknown target, which the web UI is built for. Install the target, or Rust with rustup (https://rustup.rs), and run this again."
+    fi
+}
+
+# On 64-bit ARM Linux with a glibc older than 2.38, the wasm-bindgen trunk
+# downloads doesn't run; the version the checkout pins is built instead, and
+# trunk finds it on the PATH (README, "Installation").
+build_wasm_bindgen_if_needed() {
+    local machine glibc
+    machine=$(uname -m)
+    if [ "$os" != Linux ] || { [ "$machine" != aarch64 ] && [ "$machine" != arm64 ]; }; then
+        return 0
+    fi
+    glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+    glibc=${glibc#glibc }
+    if [ -z "$glibc" ] || version_at_least "$glibc" 2.38; then
+        return 0
+    fi
+    local version
+    version=$(cd "$dir" && just _wasm-bindgen-version)
+    say "Building wasm-bindgen $version: the one trunk downloads doesn't run with glibc $glibc"
+    cargo install --locked wasm-bindgen-cli --version "$version"
+}
+
+# The web UI's build regenerates its stylesheet, `crates/web/tw-out.css`,
+# which the repository tracks: it is put back, so the next run doesn't refuse
+# the source folder as changed.
+restore_stylesheet() {
+    local css=crates/web/tw-out.css
+    if git -C "$dir" ls-files --error-unmatch -- "$css" >/dev/null 2>&1; then
+        git -C "$dir" checkout --quiet -- "$css"
+    fi
+}
+
+# Where `cargo install` puts the binary: `--root` among the options, else
+# CARGO_INSTALL_ROOT, else CARGO_HOME, else ~/.cargo. A relative root is
+# relative to the source folder, where `just install` runs.
+install_root() {
+    local root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}" next=0 arg
+    for arg in ${forward[@]+"${forward[@]}"}; do
+        if [ "$next" = 1 ]; then
+            root=$arg
+            next=0
+            continue
+        fi
+        case $arg in
+            --root) next=1 ;;
+            --root=*) root=${arg#--root=} ;;
+        esac
+    done
+    case $root in
+        /*) ;;
+        *) root="$dir/$root" ;;
+    esac
+    say "$root"
+}
+
+# Where command $1 is on the PATH this was started with, if it is.
+on_start_path() {
+    local PATH=$start_path
+    command -v "$1" 2>/dev/null || true
+}
+
+report() {
+    local bin_dir binary version
+    bin_dir="$(install_root)/bin"
+    binary="$bin_dir/ladderback"
+    if [ ! -x "$binary" ] && has ladderback; then
+        binary=$(command -v ladderback)
+        bin_dir=${binary%/*}
+    fi
+    say ""
+    if [ -x "$binary" ]; then
+        version=$("$binary" --version)
+        say "Installed $version as $binary."
+    else
+        say "Installed $release; cargo's configuration put it in a folder this script didn't find."
+    fi
+    if [ "$(on_start_path ladderback)" != "$binary" ]; then
+        if [ "$install_rust" = 1 ] && [ "$bin_dir" = "${CARGO_HOME:-$HOME/.cargo}/bin" ]; then
+            say "Open a new terminal before you go on: rustup's installer put $bin_dir on the PATH of new ones."
+        else
+            say "Your PATH doesn't lead to it: put $bin_dir first on your PATH, or run it by its full path."
+        fi
+    fi
+    say ""
+    say "Next:"
+    say "  ladderback serve              starts it; open the address it prints"
+    say "  ladderback install-service    runs it in the background, from each login on"
+    if [ "$os" = Darwin ]; then
+        say ""
+        say "On macOS, grant $binary Full Disk Access in System Settings → Privacy & Security,"
+        say "and again after each update: $README_URL"
+    fi
+    say ""
+    say "To update, run the same command again."
+}
+
+main() {
+    # The PATH this was started with: the one the person's shell has.
+    start_path=$PATH
+
+    # Standard input is the script itself when it is piped into bash: nothing
+    # this runs may read it.
+    exec </dev/null
+
+    yes=0
+    dir=''
+    forward=()
+    rustup=1
+    install_rust=0
+    install_tools=()
+    update=0
+    release=''
+    tty=${LADDERBACK_INSTALL_TTY:-/dev/tty}
+
+    parse_args "$@"
+
+    os=$(uname -s)
+    case $os in
+        Linux | Darwin) ;;
+        *) die "Ladderback builds on Linux and macOS; this is $os." ;;
+    esac
+
+    if [ -z "$dir" ]; then
+        dir="${XDG_DATA_HOME:-$HOME/.local/share}/ladderback/source"
+    fi
+    case $dir in
+        \~) dir=$HOME ;;
+        \~/*) dir="$HOME/${dir:2}" ;;
+    esac
+    case $dir in
+        /*) ;;
+        *) dir="$PWD/$dir" ;;
+    esac
+    while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do
+        dir=${dir%/}
+    done
+
+    # rustup's folder comes first, as its installer puts it in new shells: its
+    # cargo before one the system's packages installed, and Rust that rustup
+    # installed before found in a shell that hasn't picked up its PATH yet.
+    local cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+    if [ -d "$cargo_bin" ]; then
+        PATH="$cargo_bin:$PATH"
+    fi
+
+    check_tools
+    check_source_folder
+
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+
+    install_missing_tools
+    checkout_newest_release
+    if [ "$rustup" = 0 ]; then
+        check_rust_without_rustup
+    fi
+    build_wasm_bindgen_if_needed
+
+    say "Building and installing Ladderback $release (several minutes)"
+    local status=0
+    (cd "$dir" && just install ${forward[@]+"${forward[@]}"}) || status=$?
+    restore_stylesheet
+    if [ "$status" != 0 ]; then
+        die "\`just install\` failed in $dir. Fix what it names, then run this again."
+    fi
+
+    report
+}
+
+main "$@"
