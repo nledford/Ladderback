@@ -268,6 +268,8 @@ pub struct SchedulerWorld {
     power: Arc<FakePower>,
     network: Arc<FakeNetwork>,
     runs: Arc<RecordingRuns>,
+    /// The queue the scheduler's runs and a person's take their turns in.
+    queue: Arc<RunQueue>,
     /// What the scheduler announced.
     events: Arc<RecordingEvents>,
     /// The agent's concurrency limit.
@@ -286,6 +288,7 @@ impl Default for SchedulerWorld {
         let clock = Arc::new(FakeClock::new(time("2026-06-10 00:00+00:00")));
         Self {
             runs: Arc::new(RecordingRuns::new(clock.clone())),
+            queue: Arc::new(RunQueue::new()),
             concurrency: Concurrency::default(),
             clock,
             zone: TimeZone::UTC,
@@ -336,7 +339,7 @@ impl SchedulerWorld {
                 power: self.power.clone(),
                 network: self.network.clone(),
                 runs: self.runs.clone(),
-                queue: Arc::new(RunQueue::new()),
+                queue: self.queue.clone(),
                 zone: self.zone.clone(),
                 ends: self.runs.ends(),
                 events: self.events.clone(),
@@ -787,6 +790,14 @@ async fn retry_pending(agent: &mut Agent, attempt: u32, name: String, at: String
         })
         .await
         .expect("the schedule store keeps the retry");
+}
+
+#[when(expr = "a person starts a backup of the plan {string}")]
+async fn person_starts(agent: &mut Agent, name: String) {
+    let plan = plan_id(&name);
+    let place = agent.scheduler.queue.push(&plan, agent.scheduler.concurrency);
+    let runs = Arc::clone(&agent.scheduler.runs);
+    runs.start(&plan, Trigger::Manual, place).await;
 }
 
 #[then(expr = "the retries of the plan {string} started at {string}")]

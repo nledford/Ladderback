@@ -1,14 +1,16 @@
 Feature: Retries of a failed backup
-  A plan may retry a failed backup: `retry = { attempts, backoff }` retries it
-  at most `attempts` times, the first after `backoff` and each after twice
-  the wait before it, at most an hour. Retries stop at the plan's next
-  scheduled run, as it was planned when the failed run ended, and a success
-  or a cancel ends them. A retry waits its turn in the persistent queue, as
-  any backup does, under the agent's concurrency limit; it is skipped when a
-  run of its plan is still going, whatever the plan's overlap policy, since
-  that run takes its place. The agent announces each retry it plans, and a
-  retry it planned is kept across a restart (technical design §5). Times
-  here are written with their offset from UTC.
+  A plan may retry a failed backup the schedule started: `retry = { attempts,
+  backoff }` retries it at most `attempts` times, the first after `backoff`
+  and each after twice the wait before it, at most an hour. Retries stop at
+  the plan's next scheduled run, as it was planned when the failed run ended,
+  and a success or a cancel ends them. A backup a person started is theirs:
+  its failure starts no retries and leaves the plan's own as they were. A
+  retry waits its turn in the persistent queue, as any backup does, under the
+  agent's concurrency limit; it is skipped when a run of its plan is still
+  going, whatever the plan's overlap policy, since that run takes its place.
+  The agent announces each retry it plans, and a retry it planned is kept
+  across a restart (technical design §5). Times here are written with their
+  offset from UTC.
 
   Scenario: A failed backup is retried after the back-off
     Given the agent starts at "2026-06-10 02:50+00:00"
@@ -66,6 +68,29 @@ Feature: Retries of a failed backup
     When the agent serves until "2026-06-10 05:00+00:00"
     Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:10+00:00"
     And the plan "home" has no pending retry
+
+  Scenario: A backup started by hand that fails is not retried
+    Given the agent starts at "2026-06-10 03:30+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And every run of the plan "home" fails
+    When the agent serves until "2026-06-10 03:30+00:00"
+    And a person starts a backup of the plan "home"
+    And the agent serves until "2026-06-10 04:30+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:30+00:00"
+    And the plan "home" has no pending retry
+
+  Scenario: A backup started by hand that fails leaves the retry the schedule's failed run planned
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And every run of the plan "home" fails
+    When the agent serves until "2026-06-10 03:05+00:00"
+    And a person starts a backup of the plan "home"
+    And the agent serves until "2026-06-10 03:20+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:05+00:00, 2026-06-10 03:10+00:00"
+    And the retries of the plan "home" started at "2026-06-10 03:10+00:00"
+    And the agent announced retry 2 of 3 of the plan "home" for "2026-06-10 03:30+00:00"
 
   Scenario: A retry waits its turn under the concurrency limit
     Given the agent starts at "2026-06-10 02:50+00:00"

@@ -5,6 +5,7 @@
 
 use crate::SignedDuration;
 use crate::Timestamp;
+use crate::execution::Trigger;
 use crate::planning::RetryPolicy;
 
 /// A retry a plan has planned after a failed backup: which of the policy's
@@ -88,6 +89,14 @@ impl RetrySchedule {
         retry.until.is_some_and(|until| until <= now)
     }
 
+    /// Whether a failed run that `trigger` started is retried: one the
+    /// schedule started, on time or to catch up, or a retry of one. A run a
+    /// person or another program asked for is theirs to retry: they see it
+    /// fail and decide (decision 76).
+    pub fn retried(trigger: Trigger) -> bool {
+        todo!("whether a failed run that {trigger:?} started is retried")
+    }
+
     /// Retry `attempt`, waiting after a failure at `failed_at`, unless it
     /// would run at or after `until` or past the last instant there is.
     fn planned(
@@ -109,6 +118,7 @@ impl RetrySchedule {
 #[cfg(test)]
 mod tests {
     use super::{NoRetry, RetrySchedule, RetryScheduled};
+    use crate::execution::Trigger;
     use crate::planning::RetryPolicy;
     use crate::{SignedDuration, Timestamp};
 
@@ -118,6 +128,16 @@ mod tests {
 
     fn at(minutes: i64) -> Timestamp {
         Timestamp::constant(1_800_000_000 + minutes * 60, 0)
+    }
+
+    #[test]
+    fn only_a_run_the_schedule_started_is_retried() {
+        for trigger in [Trigger::Schedule, Trigger::CatchUp, Trigger::Retry] {
+            assert!(RetrySchedule::retried(trigger), "{trigger:?}");
+        }
+        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp] {
+            assert!(!RetrySchedule::retried(trigger), "{trigger:?}");
+        }
     }
 
     #[test]
