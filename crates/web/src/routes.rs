@@ -17,6 +17,7 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
+    sentence_view,
 };
 use crate::live::{reply, say};
 use crate::operations::{self, Name};
@@ -26,7 +27,7 @@ use crate::repositories::{
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
     rereads_list, row_refusal,
 };
-use crate::ws::{self, Phase, Posted};
+use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
 
 /// The `<h1>` of a page, with `tabindex="-1"` so that focus can move to it.
@@ -125,7 +126,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let ops = RwSignal::new(OperationsState::default());
     let phase = RwSignal::new(Phase::Loading);
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
-    let error = RwSignal::<Option<String>>::new(None);
+    // A start or a cancel the daemon refused, its own words marked (§8.4).
+    let error = RwSignal::<Option<Sentence>>::new(None);
     let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
     ws::watch(&base, ops, phase);
@@ -135,9 +137,21 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let page = Pausable::new(ops, phase);
     let plans_url = format!("{base}/api/v1/plans");
     let plans_ops = ops;
+    // A list of plans the daemon refused, as a configuration with a mistake
+    // in it is: said where the plans' buttons would be (#347).
+    let plans_refused = RwSignal::<Option<Sentence>>::new(None);
+    let plans_localizer = Arc::clone(&localizer);
     spawn_local(async move {
-        if let Some(read) = ws::read::<PlansDto>(&plans_url).await {
-            plans.set(Some(read.plans));
+        match ws::get::<PlansDto>(&plans_url).await {
+            Some(Got::Read(read)) => plans.set(Some(read.plans)),
+            Some(Got::Refused(code, args, detail)) => plans_refused.set(Some(refused_sentence(
+                &plans_localizer,
+                code,
+                &args,
+                detail.as_deref(),
+            ))),
+            // No answer at all: the page's phase says that its own way.
+            None => {}
         }
         let _ = plans_ops;
     });
@@ -224,7 +238,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             on_pause=on_pause
             on_resume=on_resume
         />
-        {move || error.get().map(|text| view! { <p role="alert">{text}</p> })}
+        {move || error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })}
+        {move || {
+            plans_refused
+                .get()
+                .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+        }}
         // The plans sit outside the connection's phases: a reader can start a
         // backup while the history is still on its way. Their buttons are a
         // row of actions, as a dialog's are, so each stands apart from the
@@ -273,7 +292,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
-                                                    error.set(Some(refusal(
+                                                    error.set(Some(refused_sentence(
                                                         &error_localizer,
                                                         code,
                                                         &args,
@@ -405,7 +424,7 @@ fn row_view(
     page: Pausable,
     cancelled: StoredValue<HashSet<String>>,
     id: String,
-    error: RwSignal<Option<String>>,
+    error: RwSignal<Option<Sentence>>,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     // Its refusals are worded in the same language as the rest of it.
@@ -550,7 +569,7 @@ fn row_view(
                                                     cancelled.update_value(|cancelled| {
                                                         cancelled.remove(&operation);
                                                     });
-                                                    error.set(Some(refusal(
+                                                    error.set(Some(refused_sentence(
                                                         &error_localizer,
                                                         code,
                                                         &args,
@@ -824,6 +843,17 @@ pub(crate) fn refusal(
     localizer.error(code, &args, detail).into_text()
 }
 
+/// A refusal as [`refusal`] writes it, with the sender's own words marked:
+/// they are English whatever the page's language (§8.4).
+pub(crate) fn refused_sentence(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(String, MsgArg)],
+    detail: Option<&str>,
+) -> Sentence {
+    Sentence::new(&refusal(localizer, code, args, detail), detail)
+}
+
 /// What a person has typed into the Repositories form, one signal per field,
 /// and whether they asked this agent to maintain the repository.
 #[derive(Clone, Copy)]
@@ -959,12 +989,28 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let phase = RwSignal::new(Phase::Loading);
     // The configured repositories; `None` until the first read answers.
     let rows = RwSignal::<Option<Vec<RepositoryDto>>>::new(None);
+    // A list the daemon refused, as a configuration with a mistake in it is:
+    // said in the list's place, naming where the mistake is (#347).
+    let refused = RwSignal::<Option<Sentence>>::new(None);
+    let load_localizer = Arc::clone(&localizer);
     let load = Callback::new(move |()| {
         let url = format!("{}/api/v1/repositories", base.get_value());
+        let localizer = Arc::clone(&load_localizer);
         spawn_local(async move {
-            match ws::read::<RepositoriesDto>(&url).await {
-                Some(read) => {
+            match ws::get::<RepositoriesDto>(&url).await {
+                Some(Got::Read(read)) => {
+                    refused.set(None);
                     rows.set(Some(read.repositories));
+                    phase.set(Phase::Ready);
+                }
+                Some(Got::Refused(code, args, detail)) => {
+                    refused.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    rows.set(None);
                     phase.set(Phase::Ready);
                 }
                 None => phase.set(Phase::Unreachable),
@@ -1067,8 +1113,11 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => match rows.get() {
-                Some(rows) if !rows.is_empty() => {
+            Phase::Ready => match (refused.get(), rows.get()) {
+                (Some(sentence), _) => {
+                    view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                }
+                (None, Some(rows)) if !rows.is_empty() => {
                     let localizer = Arc::clone(&list_localizer);
                     let base = base.get_value();
                     view! {
@@ -1763,6 +1812,24 @@ mod tests {
         );
         let without = refusal(&localizer, ErrorCode::OperationFailed, &[], None);
         assert_eq!(without, "The operation failed.");
+    }
+
+    #[test]
+    fn a_mistake_in_the_configuration_is_said_with_its_line_and_its_setting_marked_as_sent() {
+        let sentence = refused_sentence(
+            &Localizer::new(&[]),
+            ErrorCode::ConfigInvalid,
+            &[
+                ("file".to_owned(), MsgArg::Text("/c/config.toml".to_owned())),
+                ("line".to_owned(), MsgArg::Text("6".to_owned())),
+            ],
+            Some("repositories.demo.colour"),
+        );
+        let said = sentence.plain().replace(['\u{2068}', '\u{2069}'], "");
+        assert!(said.contains("/c/config.toml"), "{said}");
+        assert!(said.contains("line 6: repositories.demo.colour"), "{said}");
+        let (detail, _) = sentence.detail.expect("the setting is marked as sent");
+        assert_eq!(detail, "repositories.demo.colour");
     }
 
     #[test]

@@ -39,10 +39,10 @@ use crate::announce::{announce_end, announce_start};
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    CheckJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, EventBus,
-    ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob, RepositoryAccess,
-    Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary, SourcesError, Start,
-    StoreError,
+    CheckJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
+    EventBus, ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob,
+    RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
+    SourcesError, Start, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 use domain::execution::deadline::KeepDelete;
@@ -108,8 +108,10 @@ pub enum MaintenanceError {
     /// This agent doesn't maintain the repository: its entry doesn't ask for
     /// `local` (I1, §7.3). Refused before the engine is asked anything.
     NotOwner,
-    /// The configuration couldn't be read.
-    Unavailable,
+    /// The configuration couldn't be read or used: the store's own report,
+    /// which says where a mistake is and never holds a value of the file,
+    /// so a route refuses it as a save of it is refused (#347).
+    Unavailable(Box<ConfigError>),
     Resolve(ResolveError),
     /// The repository couldn't be opened to learn its ID or list its
     /// snapshots. `detail` is the engine's own message.
@@ -706,7 +708,7 @@ impl RunMaintenance {
         self.config
             .load()
             .await
-            .map_err(|_| MaintenanceError::Unavailable)
+            .map_err(|error| MaintenanceError::Unavailable(Box::new(error)))
     }
 
     /// The configuration, once it shows that this agent maintains the
@@ -1832,6 +1834,95 @@ mod record_tests {
         )
         .await;
         assert!(answered.is_err(), "a stalled log answers nothing");
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "fakes")]
+mod config_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use domain::planning::RepositoryConfig;
+    use domain::{AgentId, OperationId, RepositoryId, Timestamp, Uuid};
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryOperationStore,
+    };
+    use crate::ports::RecordError;
+
+    /// A configuration file with a mistake in it, as the store reports it.
+    fn mistake() -> ConfigError {
+        ConfigError::SchemaMissing {
+            file: "/c/config.toml".to_owned(),
+        }
+    }
+
+    /// A configuration store whose file has a mistake in it.
+    struct Mistaken;
+
+    #[async_trait]
+    impl ConfigStore for Mistaken {
+        async fn load(&self) -> Result<AgentConfig, ConfigError> {
+            Err(mistake())
+        }
+
+        async fn save(&self, _config: &AgentConfig) -> Result<(), ConfigError> {
+            Err(mistake())
+        }
+
+        async fn record_id(
+            &self,
+            _alias: &RepositoryAlias,
+            _read: &RepositoryConfig,
+            _id: &RepositoryId,
+        ) -> Result<(), RecordError> {
+            Err(RecordError::Store(mistake()))
+        }
+    }
+
+    fn use_case() -> RunMaintenance {
+        RunMaintenance::new(
+            Arc::new(crate::fakes::SimulatedEngine::new(Arc::new(
+                FakeClock::auto_advancing(Timestamp::UNIX_EPOCH),
+            ))),
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(Mistaken),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    /// A read, a preview and a run all refuse a configuration they can't
+    /// use with the store's own report of it, so the route can say where
+    /// the mistake is (#347).
+    #[tokio::test]
+    async fn a_configuration_that_cannot_be_used_is_refused_with_the_stores_report() {
+        let (use_case, op) = (use_case(), OperationId::from_uuid(Uuid::from_u128(1)));
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let expected = Some(MaintenanceError::Unavailable(Box::new(mistake())));
+        assert_eq!(use_case.groups(op, &alias).await.err(), expected);
+        assert_eq!(
+            use_case
+                .preview(op, &alias, &MaintenanceKind::Check)
+                .await
+                .err(),
+            expected
+        );
+        assert_eq!(
+            use_case
+                .assess(op, &alias, MaintenanceKind::Check)
+                .await
+                .err(),
+            expected
+        );
     }
 }
 

@@ -617,6 +617,64 @@ fn api_refusal_names_config_setting(agent: &mut Agent, setting: String, line: u3
     );
 }
 
+/// Asks the daemon for something that reads its configuration: one of its
+/// lists, a backup of a plan, a repository's snapshots, or a check of one
+/// previewed or started, remembering the answer as any other.
+#[when(regex = r"^the client asks to (.+)$")]
+async fn api_asks_to(agent: &mut Agent, request: String) {
+    let (method, path, body) = match request.as_str() {
+        "list the plans" => ("GET", "/api/v1/plans", ""),
+        "list the repositories" => ("GET", "/api/v1/repositories", ""),
+        r#"start a backup of the plan "nightly""# => {
+            ("POST", "/api/v1/operations", r#"{"plan":"nightly"}"#)
+        }
+        r#"list the snapshots of "demo""# => ("GET", "/api/v1/repositories/demo/snapshots", ""),
+        r#"list the snapshots of "demo" by owner"# => {
+            ("GET", "/api/v1/repositories/demo/groups", "")
+        }
+        r#"preview a check of "demo""# => (
+            "POST",
+            "/api/v1/repositories/demo/maintenance/preview",
+            r#"{"kind":"check"}"#,
+        ),
+        r#"start a check of "demo""# => (
+            "POST",
+            "/api/v1/repositories/demo/maintenance",
+            r#"{"kind":"check"}"#,
+        ),
+        other => panic!("the client has no way to {other}"),
+    };
+    let addr = agent.events.addr();
+    let (status, answer) = blocking(move || exchange_at(addr, method, path, body)).await;
+    agent.repositories.api_answers.push(answer.clone());
+    agent.repositories.api_last = Some((status, answer));
+}
+
+/// The refusal says where the mistake is, as a save's does: the daemon's
+/// config file, the line, and the setting at the start of its detail.
+#[then(expr = "the refusal names the daemon's config file, line {int} and the setting {string}")]
+fn api_refusal_names_config_line(agent: &mut Agent, line: u32, setting: String) {
+    let (_, json) = api_answer(agent);
+    let file = super::events_steps::Events::config_dir(agent).join("config.toml");
+    let text = |value: String| serde_json::json!({"type": "text", "value": value});
+    assert_eq!(
+        json["args"]["file"],
+        text(file.display().to_string()),
+        "the refusal: {json}"
+    );
+    assert_eq!(
+        json["args"]["line"],
+        text(line.to_string()),
+        "the refusal: {json}"
+    );
+    assert!(
+        json["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.starts_with(&setting)),
+        "the refusal's detail names {setting:?}: {json}"
+    );
+}
+
 #[then(expr = "the refusal names the setting {string}")]
 fn api_refusal_names_setting(agent: &mut Agent, setting: String) {
     let (_, json) = api_answer(agent);

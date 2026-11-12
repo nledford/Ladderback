@@ -133,9 +133,16 @@ pub enum StartError {
     /// setting with a reference that is not valid: the refusal says which,
     /// as the repository routes and the snapshot listing tell it.
     SecretRefused(SecretRefusal),
-    /// A plan is there but cannot be started just now, for example because
-    /// its configuration cannot be read.
-    Unavailable,
+    /// A plan may be there but cannot be started just now, because its
+    /// configuration cannot be read or used: `code` is the `config-*` code
+    /// a save of it is refused with, `args` the arguments it declares and
+    /// `detail` the store's own words, as [`CatalogError::Unavailable`]
+    /// carries them.
+    Unavailable {
+        code: api::ErrorCode,
+        args: Vec<(&'static str, api::MsgArg)>,
+        detail: Option<String>,
+    },
 }
 
 /// The catalog the API asks of the daemon (§4.2): the plans the operations
@@ -154,10 +161,18 @@ pub trait Catalog: Send + Sync {
 }
 
 /// Why a catalog request couldn't be answered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CatalogError {
-    /// The configuration cannot be read, so nothing is known.
-    Unavailable,
+    /// The configuration cannot be read or used, so nothing is known: `code`
+    /// is the `config-*` code a save of it is refused with, `args` the
+    /// arguments it declares (a mistake's file and line), and `detail` the
+    /// store's own words (the setting and what is wrong with it), which
+    /// never hold a value of the file (I4).
+    Unavailable {
+        code: api::ErrorCode,
+        args: Vec<(&'static str, api::MsgArg)>,
+        detail: Option<String>,
+    },
 }
 
 /// Why a snapshot listing couldn't be answered.
@@ -168,9 +183,15 @@ pub enum SnapshotsError {
     /// The repository's secrets cannot be resolved, or a setting with a
     /// reference is not valid: the refusal says which.
     SecretRefused(SecretRefusal),
-    /// The repository is there but its snapshots cannot be read just now,
-    /// for example because the engine cannot be started.
-    Unavailable,
+    /// The snapshots cannot be read just now: the configuration cannot be
+    /// read or used (its `config-*` code, arguments and the store's words,
+    /// as [`CatalogError::Unavailable`] carries them), or the engine cannot
+    /// be started (`engine-unavailable`, its words only in the log).
+    Unavailable {
+        code: api::ErrorCode,
+        args: Vec<(&'static str, api::MsgArg)>,
+        detail: Option<String>,
+    },
 }
 
 /// Why a history request couldn't be answered.
@@ -422,10 +443,7 @@ async fn run_plan(
             vec![("plan", api::MsgArg::Text(plan))],
         ),
         Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(StartError::Unavailable) => refused(
-            StatusCode::SERVICE_UNAVAILABLE,
-            api::ErrorCode::ConfigUnavailable,
-        ),
+        Err(StartError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
@@ -507,10 +525,7 @@ async fn cancel_operation(
 async fn list_plans(State(state): State<AppState>) -> Response {
     match state.catalog.plans().await {
         Ok(plans) => (StatusCode::OK, axum::Json(plans)).into_response(),
-        Err(CatalogError::Unavailable) => refused(
-            StatusCode::SERVICE_UNAVAILABLE,
-            api::ErrorCode::ConfigUnavailable,
-        ),
+        Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
@@ -519,11 +534,19 @@ async fn list_plans(State(state): State<AppState>) -> Response {
 async fn list_repositories(State(state): State<AppState>) -> Response {
     match state.catalog.repositories().await {
         Ok(repositories) => (StatusCode::OK, axum::Json(repositories)).into_response(),
-        Err(CatalogError::Unavailable) => refused(
-            StatusCode::SERVICE_UNAVAILABLE,
-            api::ErrorCode::ConfigUnavailable,
-        ),
+        Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
+}
+
+/// What the daemon can't answer just now, as the configuration or the engine
+/// stands: 503 with the code, its arguments and the store's words. A
+/// configuration is refused as a save of it is, wherever it is read.
+fn unavailable(
+    code: api::ErrorCode,
+    args: Vec<(&'static str, api::MsgArg)>,
+    detail: Option<String>,
+) -> Response {
+    refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
 }
 
 /// One repository's snapshots, newest first, fetched live (§9): a read is
@@ -540,10 +563,7 @@ async fn list_snapshots(
             vec![("alias", api::MsgArg::Text(alias))],
         ),
         Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(SnapshotsError::Unavailable) => refused(
-            StatusCode::SERVICE_UNAVAILABLE,
-            api::ErrorCode::EngineUnavailable,
-        ),
+        Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
@@ -786,6 +806,10 @@ mod tests {
                     ],
                     detail: Some("no such entry".to_owned()),
                 })),
+                "mistaken" => {
+                    let (code, args, detail) = mistake();
+                    Err(StartError::Unavailable { code, args, detail })
+                }
                 _ => Ok("018f0000-0000-7000-8000-000000000001".to_owned()),
             }
         }
@@ -955,12 +979,16 @@ mod tests {
         }
 
         async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError> {
-            if alias == "missing" {
-                Err(SnapshotsError::Unknown)
-            } else {
-                Ok(api::SnapshotsDto {
+            match alias.as_str() {
+                "missing" => Err(SnapshotsError::Unknown),
+                "engine-down" => Err(SnapshotsError::Unavailable {
+                    code: api::ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: None,
+                }),
+                _ => Ok(api::SnapshotsDto {
                     snapshots: vec![demo_snapshot()],
-                })
+                }),
             }
         }
     }
@@ -1855,6 +1883,102 @@ mod tests {
             body(repositories).await,
             r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true}]}"#
         );
+    }
+
+    /// A catalog whose configuration has a mistake on line 6: both lists and
+    /// every repository's snapshots are refused as a save of it is.
+    struct MistakenCatalog;
+
+    /// The code, the arguments and the detail a mistake on line 6 of the
+    /// configuration is refused with.
+    fn mistake() -> (
+        api::ErrorCode,
+        Vec<(&'static str, api::MsgArg)>,
+        Option<String>,
+    ) {
+        (
+            api::ErrorCode::ConfigInvalid,
+            vec![
+                (
+                    "file",
+                    api::MsgArg::Text("/etc/ladderback/config.toml".to_owned()),
+                ),
+                ("line", api::MsgArg::Text("6".to_owned())),
+            ],
+            Some("repositories.demo.colour".to_owned()),
+        )
+    }
+
+    #[async_trait]
+    impl Catalog for MistakenCatalog {
+        async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
+            let (code, args, detail) = mistake();
+            Err(CatalogError::Unavailable { code, args, detail })
+        }
+
+        async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
+            let (code, args, detail) = mistake();
+            Err(CatalogError::Unavailable { code, args, detail })
+        }
+
+        async fn snapshots(&self, _alias: String) -> Result<api::SnapshotsDto, SnapshotsError> {
+            let (code, args, detail) = mistake();
+            Err(SnapshotsError::Unavailable { code, args, detail })
+        }
+    }
+
+    /// Every route that reads the configuration refuses a mistake in it with
+    /// its code, its file, its line and its setting (#347). The maintenance
+    /// routes carry theirs through `MaintenanceRefusal::Unavailable`, tested
+    /// with the other refusals of maintenance.
+    #[tokio::test]
+    async fn a_configuration_that_cannot_be_used_is_refused_with_its_code_and_where_it_is() {
+        for (method, path, sent) in [
+            (Method::GET, "/api/v1/plans", ""),
+            (Method::GET, "/api/v1/repositories", ""),
+            (Method::GET, "/api/v1/repositories/demo/snapshots", ""),
+            (Method::POST, "/api/v1/operations", r#"{"plan":"mistaken"}"#),
+        ] {
+            let state = AppState {
+                catalog: Arc::new(MistakenCatalog),
+                ..state()
+            };
+            let response = router(ui(), RequestChecks::default(), state)
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header(header::HOST, "localhost:9898")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(sent))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::json!({
+                    "code": "config-invalid",
+                    "args": {
+                        "file": {"type": "text", "value": "/etc/ladderback/config.toml"},
+                        "line": {"type": "text", "value": "6"},
+                    },
+                    "detail": "repositories.demo.colour",
+                }),
+                "{path}"
+            );
+        }
+    }
+
+    /// An engine that can't be started is told by its code alone: its words
+    /// may hold a location, and go to the log.
+    #[tokio::test]
+    async fn a_listing_the_engine_cannot_start_is_refused_with_its_code_alone() {
+        let response = get("/api/v1/repositories/engine-down/snapshots").await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body(response).await, r#"{"code":"engine-unavailable"}"#);
     }
 
     #[tokio::test]

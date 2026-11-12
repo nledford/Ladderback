@@ -463,6 +463,19 @@ fn newer_schema(agent: &mut Agent) {
     std::fs::write(dir.join("config.toml"), "schema = 999999\n").expect("the config file");
 }
 
+/// A person edits the running daemon's config.toml by hand: the daemon reads
+/// the file on every request, so the next one reads this text.
+#[given("the daemon's config file is edited by hand to hold:")]
+fn edited_by_hand(agent: &mut Agent, step: &cucumber::gherkin::Step) {
+    let text = step.docstring.as_deref().expect("the step has a text");
+    // As `a config file holding:` writes it: without the newline after the
+    // opening quotes, and with the one an editor ends a file with.
+    let text = format!("{}\n", text.trim_start_matches('\n'));
+    let dir = Events::config_dir(agent);
+    std::fs::create_dir_all(&dir).expect("the config folder");
+    std::fs::write(dir.join("config.toml"), text).expect("the config file");
+}
+
 #[when("Ladderback is asked to serve")]
 async fn asked_to_serve(agent: &mut Agent) {
     let outcome = start(agent).await;

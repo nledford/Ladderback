@@ -384,11 +384,8 @@ async fn refusal(
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
-        // The use case reports a configuration it couldn't read without
-        // naming the file, and so does this.
-        MaintenanceError::Unavailable => {
-            unavailable(ErrorCode::ConfigUnavailable, Vec::new(), None)
-        }
+        // The configuration is refused as a save of it is (#347).
+        MaintenanceError::Unavailable(error) => super::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
         MaintenanceError::Engine { detail } => {
             unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
@@ -422,15 +419,16 @@ async fn refusal(
 
 /// A secret of `repository`'s settings that couldn't be resolved, as the
 /// refusal the route answers with. A configuration that can't be read now is
-/// told without naming the file, as the use case tells it, and a repository
-/// the configuration no longer holds is unknown.
+/// refused as a save of it is (#347), and a repository the configuration no
+/// longer holds is unknown.
 async fn secret_refused(
     config: &dyn ConfigStore,
     repository: &RepositoryAlias,
     error: &ResolveError,
 ) -> MaintenanceRefusal {
-    let Ok(loaded) = config.load().await else {
-        return unavailable(ErrorCode::ConfigUnavailable, Vec::new(), None);
+    let loaded = match config.load().await {
+        Ok(loaded) => loaded,
+        Err(unusable) => return super::config_unusable(unusable, unavailable),
     };
     match loaded.repository(repository) {
         Some(found) => MaintenanceRefusal::SecretRefused(
@@ -927,10 +925,6 @@ mod tests {
                 MaintenanceRefusal::UnknownRepository,
             ),
             (
-                MaintenanceError::Unavailable,
-                unavailable_with(ErrorCode::ConfigUnavailable, Vec::new(), None),
-            ),
-            (
                 MaintenanceError::Engine {
                     detail: "no worker program".to_owned(),
                 },
@@ -1002,6 +996,27 @@ mod tests {
         for (error, expected) in cases {
             let said = format!("{error:?}");
             assert_eq!(refusal(&config, &alias(), error).await, expected, "{said}");
+        }
+    }
+
+    /// A configuration that a read, a preview or a run can't use is refused as
+    /// a save of it is (#347): a mistake names its file, its line and its
+    /// setting.
+    #[tokio::test]
+    async fn a_configuration_that_cannot_be_used_is_told_as_a_save_of_it_is() {
+        for (error, code, args, detail) in
+            super::super::repository_service_tests::unusable_configurations()
+        {
+            assert_eq!(
+                refusal(
+                    &InMemoryConfigStore::new(),
+                    &alias(),
+                    MaintenanceError::Unavailable(Box::new(error.clone()))
+                )
+                .await,
+                unavailable_with(code, args, detail),
+                "{error:?}"
+            );
         }
     }
 
@@ -1180,7 +1195,7 @@ mod tests {
 
     /// A secret whose repository the configuration cannot name now is told as
     /// the configuration is: unknown when the repository was removed since,
-    /// unavailable, without naming the file, when the file cannot be read.
+    /// and as a save of it is refused when the file cannot be read (#347).
     #[tokio::test]
     async fn a_secret_is_told_by_the_configuration_when_it_cannot_name_the_repository() {
         let error = || {
@@ -1195,7 +1210,11 @@ mod tests {
         );
         assert_eq!(
             refusal(&Unreadable, &alias(), error()).await,
-            unavailable_with(ErrorCode::ConfigUnavailable, Vec::new(), None)
+            unavailable_with(
+                ErrorCode::ConfigUnavailable,
+                vec![("file", text("config.toml"))],
+                Some("permission denied")
+            )
         );
     }
 

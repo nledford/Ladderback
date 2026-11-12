@@ -394,3 +394,16 @@ Feature: Repositories page
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
+
+  Scenario: A mistake in the configuration file is shown where it is, by keyboard alone
+    Given a daemon with a scratch demo repository and no repositories
+    And someone has written a setting the daemon does not know on line 6 of its configuration file
+    When I open the web UI
+    And I press Tab until focus is on the link "Repositories"
+    And I press Enter
+    Then focus is on the main heading "Repositories"
+    And the page shows an alert containing "did not accept its configuration file"
+    And the page shows an alert containing "line 6: repositories.demo.colour"
+    And the alert marks the sender's words as English
+    And the page doesn't show "demo-password"
+    And the page has no accessibility violations

@@ -26,7 +26,7 @@ use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
 use crate::repositories::{Sentence, repository_notes};
-use crate::routes::{Empty, PageHeading, refusal, short_id, snapshot_time, text_with};
+use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
@@ -128,13 +128,12 @@ impl Page {
     /// it: those are English whatever the language of the page, and are
     /// marked so.
     fn refused_sentence(self, refused: &Refusal) -> Sentence {
-        let text = refusal(
+        refused_sentence(
             &self.localizer.get_value(),
             refused.code,
             &refused.args,
             refused.detail.as_deref(),
-        );
-        Sentence::new(&text, refused.detail.as_deref())
+        )
     }
 
     /// Notes whether a request got an answer at all: any answer, a refusal
@@ -351,10 +350,14 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     // the one shown is picked again; that only asks for its history again.
     let shown_alias = Memo::new(move |_| chosen.get());
     let picks = RwSignal::new(0_u32);
+    // A list the daemon refused, as a configuration with a mistake in it is:
+    // said where the repositories to pick from would be (#347).
+    let refused = RwSignal::<Option<Sentence>>::new(None);
+    let refused_localizer = Arc::clone(&localizer);
     let repositories_url = format!("{}/api/v1/repositories", ws::origin());
     spawn_local(async move {
-        match ws::read::<RepositoriesDto>(&repositories_url).await {
-            Some(read) => {
+        match ws::get::<RepositoriesDto>(&repositories_url).await {
+            Some(Got::Read(read)) => {
                 unreachable.set(unreachable_after(true));
                 repositories.set(Some(
                     read.repositories
@@ -362,6 +365,16 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                         .map(|row| (row.alias, row.maintained_here))
                         .collect(),
                 ));
+            }
+            Some(Got::Refused(code, args, detail)) => {
+                unreachable.set(unreachable_after(true));
+                refused.set(Some(refused_sentence(
+                    &refused_localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                )));
+                repositories.set(Some(Vec::new()));
             }
             None => unreachable.set(unreachable_after(false)),
         }
@@ -376,6 +389,11 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             unreachable
                 .get()
                 .then(|| view! { <p>{unreachable_body.clone()}</p> })
+        }}
+        {move || {
+            refused
+                .get()
+                .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
         }}
         {move || match repositories.get() {
             None => view! { <p>{loading.clone()}</p> }.into_any(),
