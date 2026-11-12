@@ -163,16 +163,18 @@ impl OperationLog {
 
 /// What the daemon's router runs against (§4.2), or why it cannot.
 pub(crate) async fn daemon() -> Result<Daemon, Refused> {
-    daemon_at(dirs::config_dir(), dirs::data_dir()).await
+    daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await
 }
 
 /// [`daemon`] with the folders supplied, for tests. The data folder is locked
 /// before anything else is read or opened (§9), and what an earlier run left
 /// unfinished is ended before the state is handed over, so nothing serves or
-/// listens until both are done.
+/// listens until both are done. The cache folder is no reason to refuse:
+/// without one, the workers run without a cache.
 async fn daemon_at(
     config_dir: Option<std::path::PathBuf>,
     data_dir: Option<std::path::PathBuf>,
+    cache_dir: Option<std::path::PathBuf>,
 ) -> Result<Daemon, Refused> {
     let config_dir = config_dir.ok_or_else(|| plain(msg::CLI_NO_CONFIG_DIR))?;
     let data_dir = data_dir.ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
@@ -202,7 +204,7 @@ async fn daemon_at(
     };
     // Every refusal from here on closes the log first: the refused daemon
     // leaves it as tidy as one that served and stopped.
-    match state_over(config, &data_dir, &log).await {
+    match state_over(config, &data_dir, cache_dir, &log).await {
         Ok(state) => Ok(Daemon { state, log, lock }),
         Err(refused) => {
             log.close().await;
@@ -216,6 +218,7 @@ async fn daemon_at(
 async fn state_over(
     config: Arc<dyn ConfigStore>,
     data_dir: &std::path::Path,
+    cache_dir: Option<std::path::PathBuf>,
     log: &OperationLog,
 ) -> Result<AppState, Refused> {
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
@@ -240,9 +243,13 @@ async fn state_over(
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
         args: vec![("detail", text(detail))],
     })?;
+    let mut workers = WorkerEngine::new(program, ["worker"]);
+    if let Some(dir) = workers_cache(cache_dir) {
+        workers = workers.with_cache_root(dir);
+    }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
     let engine: Arc<dyn Engine> = Arc::new(EventEngine {
-        inner: Arc::new(WorkerEngine::new(program, ["worker"])),
+        inner: Arc::new(workers),
         bus: Arc::clone(&bus),
     });
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
@@ -275,6 +282,35 @@ async fn state_over(
         catalog,
         repositories,
     })
+}
+
+/// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
+/// the daemon's user alone when it isn't there yet. `None`, said once in the
+/// log, when there is no such folder, it can't be made or files can't be
+/// made in it: the workers then run without a cache, which costs each job
+/// time and nothing else, instead of each job warning about it again.
+fn workers_cache(dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let Some(dir) = dir else {
+        log::warn!(
+            "workers run without a cache: there is no home directory to keep one under; set LADDERBACK_CACHE_DIR to give them one"
+        );
+        return None;
+    };
+    if let Err(error) = dirs::create_private_dir(&dir) {
+        log::warn!(
+            "workers run without a cache: the cache folder {} can't be made: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    if let Err(error) = dirs::probe_writable(&dir) {
+        log::warn!(
+            "workers run without a cache: the cache folder {} can't be written to: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    Some(dir)
 }
 
 /// Waits for `close`, the closing of the operation log at `database`, for
@@ -2483,11 +2519,88 @@ mod tests {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
         // An agent that was never configured has nothing to do, and starts.
-        let state = daemon_at(Some(config), Some(data)).await;
+        let state = daemon_at(Some(config), Some(data), None).await;
         assert!(
             state.is_ok(),
             "an empty configuration serves: {:?}",
             state.err().map(|refused| refused.message)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_workers_cache_folder_is_made_for_the_daemons_user_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let dir = scratch.path().join("cache").join("ladderback");
+        assert_eq!(workers_cache(Some(dir.clone())), Some(dir.clone()));
+        let mode = std::fs::metadata(&dir)
+            .expect("the folder is made")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "{mode:o}");
+    }
+
+    #[test]
+    fn a_cache_folder_that_cannot_be_made_is_said_once_and_left_out() {
+        captured_log::capture();
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let file = scratch.path().join("a-file");
+        std::fs::write(&file, b"").expect("the file in the way");
+        let dir = file.join("cache");
+        assert_eq!(workers_cache(Some(dir.clone())), None);
+        let shown = dir.display().to_string();
+        let said: Vec<_> = captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains(&shown))
+            .collect();
+        let [(level, line)] = said.as_slice() else {
+            panic!("one line names the folder: {said:?}");
+        };
+        assert_eq!(*level, log::Level::Warn);
+        assert!(line.contains("without a cache"), "{line}");
+    }
+
+    /// A folder that is there but can't be written to (another user's, or
+    /// read-only) is found once at start, not by every job.
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_folder_that_cannot_be_written_to_is_said_once_with_the_reason_and_left_out() {
+        use std::os::unix::fs::PermissionsExt;
+
+        captured_log::capture();
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let dir = scratch.path().join("ladderback");
+        std::fs::create_dir(&dir).expect("the cache folder");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500))
+            .expect("a read-only cache folder");
+        assert_eq!(workers_cache(Some(dir.clone())), None);
+        let shown = dir.display().to_string();
+        let said: Vec<_> = captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains(&shown))
+            .collect();
+        let [(level, line)] = said.as_slice() else {
+            panic!("one line names the folder: {said:?}");
+        };
+        assert_eq!(*level, log::Level::Warn);
+        assert!(line.contains("can't be written to"), "{line}");
+        // EACCES, the OS's reason, as the OS words it.
+        let reason = std::io::Error::from_raw_os_error(13).to_string();
+        assert!(line.contains(&reason), "{line}");
+    }
+
+    #[test]
+    fn without_a_cache_folder_the_workers_run_without_one() {
+        captured_log::capture();
+        assert_eq!(workers_cache(None), None);
+        assert!(
+            captured_log::lines()
+                .iter()
+                .any(|(level, line)| *level == log::Level::Warn
+                    && line.contains("LADDERBACK_CACHE_DIR")),
+            "the log says how to give the workers one"
         );
     }
 
@@ -2506,7 +2619,7 @@ mod tests {
             .expect("the running backup is saved");
         earlier.close().await;
 
-        let daemon = daemon_at(Some(config), Some(data))
+        let daemon = daemon_at(Some(config), Some(data), None)
             .await
             .map_err(|refused| refused.message)
             .expect("the daemon starts");
@@ -2576,7 +2689,7 @@ mod tests {
         let id = OperationId::from_uuid(Uuid::from_u128(1));
         a_log_that_refuses_changes(&database, id).await;
 
-        let refused = daemon_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data), None)
             .await
             .err()
             .expect("a log that cannot be changed refuses the start");
@@ -2604,7 +2717,7 @@ mod tests {
         let database = data.join("ladderback.db");
         a_log_that_refuses_changes(&database, OperationId::from_uuid(Uuid::from_u128(1))).await;
 
-        let refused = daemon_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data), None)
             .await
             .err()
             .expect("a log that cannot be changed refuses the start");
@@ -2669,7 +2782,7 @@ mod tests {
         let (config, data) = own_folders(scratch.path());
         // Held as another process holds it, before any log exists.
         let held = DataDirLock::acquire(&data).expect("the folder is free");
-        let refused = daemon_at(Some(config), Some(data.clone()))
+        let refused = daemon_at(Some(config), Some(data.clone()), None)
             .await
             .err()
             .expect("a data folder another process holds refuses");
@@ -2686,7 +2799,7 @@ mod tests {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
         std::fs::write(config.join("config.toml"), "schema = 999999\n").expect("the config file");
-        let refused = daemon_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data), None)
             .await
             .err()
             .expect("a newer schema refuses to start");
@@ -2703,11 +2816,11 @@ mod tests {
     async fn a_second_daemon_on_a_data_folder_is_refused_naming_the_first() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
-        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+        let first = daemon_at(Some(config.clone()), Some(data.clone()), None)
             .await
             .map_err(|refused| refused.message)
             .expect("the first daemon starts");
-        let refused = daemon_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data), None)
             .await
             .err()
             .expect("a data folder another daemon holds refuses");
@@ -2726,7 +2839,7 @@ mod tests {
     async fn a_daemon_refused_the_data_folder_has_not_read_the_configuration() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
-        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+        let first = daemon_at(Some(config.clone()), Some(data.clone()), None)
             .await
             .map_err(|refused| refused.message)
             .expect("the first daemon starts");
@@ -2734,7 +2847,7 @@ mod tests {
         // would refuse it for that, and one that migrated an older file would
         // rewrite what the first daemon runs on.
         std::fs::write(config.join("config.toml"), "schema = 999999\n").expect("the config file");
-        let refused = daemon_at(Some(config), Some(data))
+        let refused = daemon_at(Some(config), Some(data), None)
             .await
             .err()
             .expect("a data folder another daemon holds refuses");
@@ -2746,12 +2859,12 @@ mod tests {
     async fn a_data_folder_is_free_again_once_its_daemon_is_gone() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let (config, data) = own_folders(scratch.path());
-        let first = daemon_at(Some(config.clone()), Some(data.clone()))
+        let first = daemon_at(Some(config.clone()), Some(data.clone()), None)
             .await
             .map_err(|refused| refused.message)
             .expect("the first daemon starts");
         drop(first);
-        let second = daemon_at(Some(config), Some(data)).await;
+        let second = daemon_at(Some(config), Some(data), None).await;
         assert!(
             second.is_ok(),
             "a folder nobody holds is served: {:?}",

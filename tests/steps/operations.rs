@@ -259,30 +259,7 @@ pub(crate) fn start_backup(agent: &mut Agent, plan: &str) -> String {
 /// Reads the history page until the operation `id` has ended.
 pub(crate) async fn wait_ended(agent: &Agent, id: &str) {
     let started = Instant::now();
-    loop {
-        let page = history_page(agent, "limit=50").await;
-        let terminal = [
-            "succeeded",
-            "succeeded-with-warnings",
-            "failed",
-            "cancelled",
-        ];
-        let found = page
-            .get("operations")
-            .and_then(|ops| ops.as_array())
-            .and_then(|ops| {
-                ops.iter().find_map(|op| {
-                    (op.get("id").and_then(serde_json::Value::as_str) == Some(id))
-                        .then(|| op.get("status").and_then(serde_json::Value::as_str))
-                        .flatten()
-                })
-            });
-
-        if let Some(status) = found
-            && terminal.contains(&status)
-        {
-            return;
-        }
+    while !has_ended(agent, id).await {
         assert!(
             started.elapsed() < STATE_TIMEOUT,
             "operation {id} never ended within {} s",
@@ -290,6 +267,28 @@ pub(crate) async fn wait_ended(agent: &Agent, id: &str) {
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// Whether the history page shows the operation `id` ended.
+pub(crate) async fn has_ended(agent: &Agent, id: &str) -> bool {
+    let page = history_page(agent, "limit=50").await;
+    let terminal = [
+        "succeeded",
+        "succeeded-with-warnings",
+        "failed",
+        "cancelled",
+    ];
+    let found = page
+        .get("operations")
+        .and_then(|ops| ops.as_array())
+        .and_then(|ops| {
+            ops.iter().find_map(|op| {
+                (op.get("id").and_then(serde_json::Value::as_str) == Some(id))
+                    .then(|| op.get("status").and_then(serde_json::Value::as_str))
+                    .flatten()
+            })
+        });
+    found.is_some_and(|status| terminal.contains(&status))
 }
 
 /// The typed code of a refusal body, when the body is one.

@@ -8,14 +8,15 @@
 //! developer's real operation log.
 //!
 //! Each test here runs one of those targets' compiled test binaries, with
-//! `HOME`, `XDG_DATA_HOME` and `XDG_CONFIG_HOME` pointing into a scratch
-//! folder, so the folder the platform would pick for the daemon is a scratch
-//! one, and fails when the run left anything there. Where the platform keeps
-//! the config, the folder holds a `config.toml` from a newer schema too: a
-//! daemon that reads the platform's config instead of its own folder's, which
-//! leaves no file behind, refuses to start and fails its test. The binaries are run as
-//! they are, not through `cargo test`: changing `HOME` under Cargo and the
-//! toolchain's own wrappers rebuilds and writes to that folder as well.
+//! `HOME` and the XDG data, config and cache folders pointing into a scratch
+//! folder, so the folders the platform would pick for the daemon (its cache
+//! folder too) are scratch ones, and fails when the run left anything there.
+//! Where the platform keeps the config, the folder holds a `config.toml` from
+//! a newer schema too: a daemon that reads the platform's config instead of
+//! its own folder's, which leaves no file behind, refuses to start and fails
+//! its test. The binaries are run as they are, not through `cargo test`:
+//! changing `HOME` under Cargo and the toolchain's own wrappers rebuilds and
+//! writes to that folder as well.
 //!
 //! The `@ui` journeys start the daemon from Node, with scratch folders of
 //! their own (`ui-tests/support/world.ts`); they are not run here.
@@ -112,10 +113,12 @@ fn left_in_the_platforms_folders_by(target: &str) -> Vec<String> {
         .env("HOME", home.path())
         .env("XDG_DATA_HOME", home.path().join(".local/share"))
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("XDG_CACHE_HOME", home.path().join(".cache"))
         // These name the folders before the platform's do: a caller that has
         // them set would hide a daemon that ignores them.
         .env_remove("LADDERBACK_CONFIG_DIR")
         .env_remove("LADDERBACK_DATA_DIR")
+        .env_remove("LADDERBACK_CACHE_DIR")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -166,6 +169,6 @@ fn no_test_that_runs_the_daemon_touches_the_platforms_folders() {
         offenders.is_empty(),
         "these test targets wrote to the platform's folders, which a developer's \
          real daemon uses; every daemon a test starts needs folders of its own \
-         (LADDERBACK_DATA_DIR, LADDERBACK_CONFIG_DIR): {offenders:#?}"
+         (LADDERBACK_DATA_DIR, LADDERBACK_CONFIG_DIR, LADDERBACK_CACHE_DIR): {offenders:#?}"
     );
 }

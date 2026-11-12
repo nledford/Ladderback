@@ -184,6 +184,7 @@ Given(
     const { child, url } = await startServer({
       LADDERBACK_CONFIG_DIR: configDir,
       LADDERBACK_DATA_DIR: path.join(machine, "data"),
+      LADDERBACK_CACHE_DIR: path.join(machine, "cache"),
     });
     try {
       await backUp({ baseUrl: url }, plan);

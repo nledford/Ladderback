@@ -40,6 +40,7 @@ Given("a daemon with a scratch demo repository and no repositories", async funct
   const { child, url } = await startServer({
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
+    LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
   });
   this.ownServer = { child, scratch };
   this.baseUrl = url;
@@ -91,6 +92,7 @@ Given(
     const { child, url } = await startServer({
       LADDERBACK_CONFIG_DIR: configDir,
       LADDERBACK_DATA_DIR: dataDir,
+      LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
     });
     this.ownServer = { child, scratch };
     this.baseUrl = url;

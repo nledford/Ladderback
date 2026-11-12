@@ -125,6 +125,7 @@ BeforeAll(async function () {
   const started = await startServer({
     LADDERBACK_CONFIG_DIR: path.join(serverScratch, "config"),
     LADDERBACK_DATA_DIR: path.join(serverScratch, "data"),
+    LADDERBACK_CACHE_DIR: path.join(serverScratch, "cache"),
   });
   server = started.child;
   baseUrl = started.url;

@@ -349,7 +349,7 @@ fn no_time_left(agent: &mut Agent) {
 }
 
 #[given("the repository's ID is known")]
-async fn id_known(agent: &mut Agent) {
+pub(crate) async fn id_known(agent: &mut Agent) {
     let folders = agent.repository();
     let id = blocking(move || {
         let opened = repository(&folders)

@@ -112,8 +112,8 @@ impl WorkerEngine {
     }
 
     /// Gives each worker of a repository with a known ID its own rustic cache
-    /// under `root/ladderback/<repository id>/<slot>`. Without a root, workers
-    /// run without a cache.
+    /// under `root/<repository id>/<slot>`, where `root` is Ladderback's own
+    /// cache folder. Without a root, workers run without a cache.
     #[must_use]
     pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.cache_root = Some(root.into());
@@ -1478,11 +1478,7 @@ struct CacheSlots {
 impl CacheSlots {
     /// `None` when every slot is taken: that worker runs without a cache.
     fn acquire(self: &Arc<Self>, root: &Path, repository: &RepositoryId) -> Option<CacheSlot> {
-        let directory = |number: u32| {
-            root.join("ladderback")
-                .join(repository.as_str())
-                .join(number.to_string())
-        };
+        let directory = |number: u32| root.join(repository.as_str()).join(number.to_string());
         let mut in_use = self.in_use.lock().unwrap_or_else(PoisonError::into_inner);
         let taken = in_use.entry(repository.as_str().to_owned()).or_default();
         let number = (0..MAX_CACHE_SLOTS)
@@ -1858,10 +1854,10 @@ mod tests {
         RepositoryId::parse(&byte.repeat(32)).unwrap()
     }
 
+    /// A slot's folder: straight under the root, which is Ladderback's own
+    /// cache folder (`~/.cache/ladderback`), not the platform's.
     fn cache_dir(root: &Path, id: &RepositoryId, slot: u32) -> PathBuf {
-        root.join("ladderback")
-            .join(id.as_str())
-            .join(slot.to_string())
+        root.join(id.as_str()).join(slot.to_string())
     }
 
     #[test]
@@ -1918,6 +1914,31 @@ mod tests {
             freed
         });
         assert!(freed, "the slot of a worker that is gone stayed taken");
+    }
+
+    /// A user who clears their caches while the daemon runs removes the
+    /// cache folder too: the next job's slot makes it again, and every
+    /// folder on the way, for the daemon's user alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_folder_removed_while_the_daemon_runs_is_made_again_for_its_user_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = |dir: &Path| std::fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        let slots = Arc::new(CacheSlots::default());
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let id = repository("ab");
+        drop(slots.acquire(&root, &id).unwrap());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        let slot = slots.acquire(&root, &id).unwrap();
+        assert_eq!(slot.dir, cache_dir(&root, &id, 0));
+        for dir in [root.clone(), root.join(id.as_str()), slot.dir.clone()] {
+            assert_eq!(mode(&dir), 0o700, "{}", dir.display());
+        }
     }
 
     fn fake_job() -> Job {

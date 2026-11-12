@@ -20,10 +20,11 @@ pub(crate) struct CacheLock {
 }
 
 impl CacheLock {
-    /// Makes `dir` if it doesn't exist and locks it. Fails with
+    /// Makes `dir`, and every folder missing above it, if it doesn't exist
+    /// (see [`create_private_dir`]) and locks it. Fails with
     /// [`io::ErrorKind::WouldBlock`] when another process holds the lock.
     pub(crate) fn acquire(dir: &Path) -> io::Result<Self> {
-        fs::create_dir_all(dir)?;
+        create_private_dir(dir)?;
         let directory = File::open(dir)?;
         match directory.try_lock() {
             Ok(()) => Ok(Self {
@@ -33,6 +34,18 @@ impl CacheLock {
             Err(TryLockError::Error(error)) => Err(error),
         }
     }
+}
+
+/// Makes `dir`, and every folder missing above it, readable and writable by
+/// the daemon's user alone (mode 0700): rustic's files then sit under a
+/// private folder even when the cache root is wider, as a systemd
+/// `CacheDirectory=` is (0755). A folder already there is left as it is.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 #[cfg(test)]
@@ -74,5 +87,21 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let _first = CacheLock::acquire(&root.path().join("0")).unwrap();
         let _second = CacheLock::acquire(&root.path().join("1")).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_folders_a_lock_makes_are_the_owners_alone_under_a_wider_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = |dir: &Path| fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let repository = root.path().join("ab");
+        let slot = repository.join("0");
+        let _lock = CacheLock::acquire(&slot).unwrap();
+        assert_eq!(mode(&repository), 0o700, "the repository's folder");
+        assert_eq!(mode(&slot), 0o700, "the slot");
+        assert_eq!(mode(root.path()), 0o755, "the root is left as it was");
     }
 }

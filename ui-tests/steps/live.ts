@@ -96,6 +96,7 @@ export async function serveDemoPlans(world: BrowserWorld, plans: readonly string
   const { child, url } = await startServer({
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
+    LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
   });
   world.ownServer = { child, scratch };
   world.baseUrl = url;
