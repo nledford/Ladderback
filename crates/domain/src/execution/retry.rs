@@ -92,8 +92,7 @@ impl RetrySchedule {
     /// Whether `retry` is past `policy`'s attempts: they were lowered since
     /// it was planned, and it doesn't run (decision 76).
     pub fn spent(policy: &RetryPolicy, retry: &RetryScheduled) -> bool {
-        let _ = (policy, retry);
-        todo!("decision 76: a retry past lowered attempts")
+        retry.attempt > policy.attempts()
     }
 
     /// Whether a failed run that `trigger` started is retried: one the

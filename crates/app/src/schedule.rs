@@ -249,9 +249,11 @@ impl Scheduler {
     /// first found is planned (from its kept run on start, else from now), a
     /// plan whose cadence, time zone or jitter changed is planned again from
     /// now, and a plan no longer scheduled is forgotten. A plan that no
-    /// longer retries a failed backup forgets its retry. The queue runs as
-    /// many backups at once as it says from then on, the runs already
-    /// waiting included. A configuration that can't be read changes nothing.
+    /// longer retries a failed backup forgets its retry, and one whose
+    /// attempts went down drops a pending retry past them: its series ran
+    /// out. The queue runs as many backups at once as it says from then on,
+    /// the runs already waiting included. A configuration that can't be
+    /// read changes nothing.
     async fn refresh(&self, plans: &mut Plans) {
         let config = match self.config.load().await {
             Ok(config) => config,
@@ -327,6 +329,25 @@ impl Scheduler {
             if let Some(Retrying::Pending(_)) = plans.retries.remove(&plan) {
                 self.drop_retry(&plan).await;
             }
+        }
+        let spent: Vec<PlanId> = plans
+            .retries
+            .iter()
+            .filter(
+                |(plan, retrying)| match (retrying, plans.policies.get(*plan)) {
+                    (Retrying::Pending(retry), Some(policy)) => RetrySchedule::spent(policy, retry),
+                    _ => false,
+                },
+            )
+            .map(|(plan, _)| plan.clone())
+            .collect();
+        for plan in spent {
+            plans.retries.remove(&plan);
+            self.drop_retry(&plan).await;
+            self.runs.report(ScheduleReport::RetriesEnded {
+                plan,
+                why: NoRetry::Exhausted,
+            });
         }
     }
 
