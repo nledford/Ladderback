@@ -19,7 +19,8 @@ pub struct OsRandom;
 
 impl Random for OsRandom {
     fn draw(&self) -> RandomDraw {
-        todo!()
+        let count = DRAWS.fetch_add(1, Ordering::Relaxed);
+        RandomDraw::new(RandomState::new().hash_one(count))
     }
 }
 

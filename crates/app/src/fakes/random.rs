@@ -20,6 +20,6 @@ impl SeededRandom {
 
 impl Random for SeededRandom {
     fn draw(&self) -> RandomDraw {
-        todo!()
+        RandomDraw::new(self.next.fetch_add(1, Ordering::Relaxed))
     }
 }

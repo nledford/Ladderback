@@ -28,16 +28,25 @@ impl InMemoryScheduleStore {
 #[async_trait]
 impl ScheduleStore for InMemoryScheduleStore {
     async fn planned_runs(&self) -> Result<Vec<PlannedRun>, StoreError> {
-        todo!()
+        Ok(self
+            .kept()
+            .iter()
+            .map(|(plan, at)| PlannedRun {
+                plan: plan.clone(),
+                at: *at,
+            })
+            .collect())
     }
 
     async fn plan_run(&self, run: &PlannedRun) -> Result<(), StoreError> {
-        let _ = run;
-        todo!()
+        // Cut to the millisecond, as the real store keeps it.
+        let at = Timestamp::from_millisecond(run.at.as_millisecond()).unwrap_or(run.at);
+        self.kept().insert(run.plan.clone(), at);
+        Ok(())
     }
 
     async fn unplan(&self, plan: &PlanId) -> Result<(), StoreError> {
-        let _ = plan;
-        todo!()
+        self.kept().remove(plan);
+        Ok(())
     }
 }

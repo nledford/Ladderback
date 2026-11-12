@@ -451,45 +451,77 @@ impl OperationStore for SqliteStore {
     }
 
     async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
-        // Not the persistent queue yet: the queued operations end with the
-        // running ones, as before it, and none is handed back. The daemon
-        // still starts, so the scenarios fail at their own steps.
         let failure = codec::encode_failure(reason).map_err(encoding)?;
         let _call = self.call().await;
-        let mut ended = 0;
-        for status in [OperationStatus::Queued, OperationStatus::Running] {
-            ended += sqlx::query(sql::FAIL_RUNNING)
-                .bind(codec::FAILED)
-                .bind(failure.code)
-                .bind(failure.args.as_str())
-                .bind(failure.detail)
-                .bind(codec::status_text(&status))
-                .execute(&self.pool)
-                .await
-                .map_err(unavailable)?
-                .rows_affected();
-        }
-        Ok(Recovered {
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        // One transaction under the write lock: every running row ends or
+        // none does, and no save lands between the ends and the read of the
+        // queue. Dropped before the commit, it rolls back.
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let ended = sqlx::query(sql::FAIL_RUNNING)
+            .bind(codec::FAILED)
+            .bind(failure.code)
+            .bind(failure.args.as_str())
+            .bind(failure.detail)
+            .bind(codec::status_text(&OperationStatus::Running))
+            .execute(&mut *tx)
+            .await
+            .map_err(unavailable)?
+            .rows_affected();
+        let rows = sqlx::query(sql::LIST_QUEUED)
+            .persistent(true)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        tx.commit().await.map_err(unavailable)?;
+        // A queued row that can't be read is no reason to refuse the start:
+        // it is reported, and stays queued as it is.
+        let mut recovered = Recovered {
             ended,
             ..Recovered::default()
-        })
+        };
+        for row in &rows {
+            match row::record(row) {
+                Ok(record) => recovered.queued.push(record),
+                Err(error) => recovered.unreadable.push(error),
+            }
+        }
+        Ok(recovered)
     }
 }
 
 #[async_trait]
 impl ScheduleStore for SqliteStore {
     async fn planned_runs(&self) -> Result<Vec<PlannedRun>, StoreError> {
-        // No run planned yet, so the plans list still answers.
-        Ok(Vec::new())
+        let _call = self.call().await;
+        let rows = sqlx::query(sql::PLANNED_RUNS)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        rows.iter().map(row::planned_run).collect()
     }
 
     async fn plan_run(&self, run: &PlannedRun) -> Result<(), StoreError> {
-        let _ = run;
-        todo!()
+        let _call = self.call().await;
+        sqlx::query(sql::PLAN_RUN)
+            .bind(run.plan.as_str())
+            .bind(run.at.as_millisecond())
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 
     async fn unplan(&self, plan: &PlanId) -> Result<(), StoreError> {
-        let _ = plan;
-        todo!()
+        let _call = self.call().await;
+        sqlx::query(sql::UNPLAN)
+            .bind(plan.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 }

@@ -124,7 +124,20 @@ impl OperationStore for InMemoryOperationStore {
     }
 
     async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
-        let _ = reason;
-        todo!()
+        let mut recovered = Recovered::default();
+        // The map is in ID order, which is time order: the oldest first.
+        for detail in self.stored().values_mut() {
+            match detail.record.status {
+                OperationStatus::Running => {
+                    detail.record.status = OperationStatus::Failed {
+                        reason: reason.clone(),
+                    };
+                    recovered.ended += 1;
+                }
+                OperationStatus::Queued => recovered.queued.push(detail.record.clone()),
+                _ => {}
+            }
+        }
+        Ok(recovered)
     }
 }
