@@ -55,6 +55,8 @@ mod forget_steps;
 mod interop_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
+#[path = "steps/notifications.rs"]
+mod notifications_steps;
 #[path = "steps/plan_settings.rs"]
 mod plan_settings_steps;
 #[path = "steps/repositories.rs"]
@@ -67,8 +69,6 @@ mod service_steps;
 mod shutdown_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
-#[path = "steps/notifications.rs"]
-mod notifications_steps;
 
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 

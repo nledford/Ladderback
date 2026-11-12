@@ -722,11 +722,15 @@ impl contract::notifier::NotifierHarness for FakeNotifierHarness {
                         notification.event.kind.name().to_owned()
                     },
                     message: match notification.message {
-                        Message::Default => format!("default text of {}", notification.event.kind.name()),
+                        Message::Default => {
+                            format!("default text of {}", notification.event.kind.name())
+                        }
                         Message::Custom(text) => text,
                     },
                     auth: notification.destination.auth.map(|auth| match auth {
-                        Credentials::Bearer(token) => ReceivedAuth::Bearer(token.expose().to_owned()),
+                        Credentials::Bearer(token) => {
+                            ReceivedAuth::Bearer(token.expose().to_owned())
+                        }
                         Credentials::Basic { username, password } => ReceivedAuth::Basic {
                             username: username.as_str().to_owned(),
                             password: password.expose().to_owned(),

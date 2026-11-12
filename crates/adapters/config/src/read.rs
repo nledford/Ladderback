@@ -6,6 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Problem};
 use domain::execution::plan_tags::UserTag;
+use domain::notifications::{
+    Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName, Template,
+    Username,
+};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
     Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice,
@@ -13,18 +17,13 @@ use domain::planning::{
     RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, ValueKind, Violation,
     check_location, check_option_value, check_options, parse_duration,
 };
-use domain::notifications::{
-    Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName, Template,
-    Username,
-};
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
 
 use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
-    NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable, RuleTable,
-    ScheduleTable,
+    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, NotificationsTable,
+    PlanTable, RepositoryTable, RetentionTable, RetryTable, RuleTable, ScheduleTable,
 };
 use crate::zone::schedule_zone;
 
@@ -400,7 +399,12 @@ fn notifications(
     for (name, table) in table.channels.unwrap_or_default() {
         let path = path.key("channels").key(&name);
         let name = ChannelName::parse(&name).map_err(|invalid| {
-            reader.error(&path, Spot::Key, Problem::Value(invalid.kind), String::new())
+            reader.error(
+                &path,
+                Spot::Key,
+                Problem::Value(invalid.kind),
+                String::new(),
+            )
         })?;
         channels.insert(name, channel(reader, &path, table)?);
     }
@@ -408,7 +412,12 @@ fn notifications(
     for (name, table) in table.rules.unwrap_or_default() {
         let path = path.key("rules").key(&name);
         let name = RuleName::parse(&name).map_err(|invalid| {
-            reader.error(&path, Spot::Key, Problem::Value(invalid.kind), String::new())
+            reader.error(
+                &path,
+                Spot::Key,
+                Problem::Value(invalid.kind),
+                String::new(),
+            )
         })?;
         rules.insert(name, rule(reader, &path, table)?);
     }
@@ -461,7 +470,13 @@ fn channel(reader: &Reader<'_, '_>, path: &Path, table: ChannelTable) -> Read<Ch
     )?;
     let password = secret(
         "password",
-        [None, password_command, password_keyring, password_file, password_env],
+        [
+            None,
+            password_command,
+            password_keyring,
+            password_file,
+            password_env,
+        ],
     )?;
     let several = || reader.refuse(path, Problem::Secret(PasswordProblem::Several));
     let auth = match (token, username, password) {
@@ -485,7 +500,11 @@ fn channel(reader: &Reader<'_, '_>, path: &Path, table: ChannelTable) -> Read<Ch
 fn rule(reader: &Reader<'_, '_>, path: &Path, table: RuleTable) -> Read<Rule> {
     let events_path = path.key("events");
     let mut events = BTreeSet::new();
-    for (index, text) in reader.required(path, "events", table.events)?.iter().enumerate() {
+    for (index, text) in reader
+        .required(path, "events", table.events)?
+        .iter()
+        .enumerate()
+    {
         events.insert(reader.value(&events_path.index(index), EventKind::parse(text))?);
     }
     let channel = reader.required(path, "channel", table.channel)?;

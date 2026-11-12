@@ -191,7 +191,12 @@ impl Event {
         Some(Self::of(kind, subject, code, at))
     }
 
-    fn of(kind: EventKind, subject: Subject<'_>, code: Option<&'static str>, at: Timestamp) -> Self {
+    fn of(
+        kind: EventKind,
+        subject: Subject<'_>,
+        code: Option<&'static str>,
+        at: Timestamp,
+    ) -> Self {
         Self {
             kind,
             operation: subject.operation,
@@ -311,7 +316,10 @@ impl Username {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Auth {
     Bearer(SecretRef),
-    Basic { username: Username, password: SecretRef },
+    Basic {
+        username: Username,
+        password: SecretRef,
+    },
 }
 
 /// Where a channel sends: its kind, the secret that holds its URL, and how
@@ -337,7 +345,11 @@ pub enum ChannelError {
 }
 
 impl Channel {
-    pub fn new(kind: ChannelKind, url: SecretRef, auth: Option<Auth>) -> Result<Self, ChannelError> {
+    pub fn new(
+        kind: ChannelKind,
+        url: SecretRef,
+        auth: Option<Auth>,
+    ) -> Result<Self, ChannelError> {
         let auth_secret = auth.as_ref().map(|auth| match auth {
             Auth::Bearer(token) => token,
             Auth::Basic { password, .. } => password,
@@ -417,7 +429,10 @@ impl Rule {
     pub fn matches(&self, event: &Event) -> bool {
         self.events.contains(&event.kind)
             && (self.plans.is_empty()
-                || event.plan.as_ref().is_some_and(|plan| self.plans.contains(plan)))
+                || event
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| self.plans.contains(plan)))
     }
 }
 

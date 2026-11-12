@@ -35,7 +35,13 @@ fn a_server_on_the_local_network_over_plain_http_is_an_address() {
 
 #[test]
 fn a_url_that_is_not_http_with_a_host_is_no_address() {
-    for url in ["ftp://127.0.0.1/demo", "file:///etc/hosts", "not a url", "", "http://"] {
+    for url in [
+        "ftp://127.0.0.1/demo",
+        "file:///etc/hosts",
+        "not a url",
+        "",
+        "http://",
+    ] {
         assert_eq!(address(url), Err(NotifyError::InvalidAddress), "{url:?}");
     }
 }
@@ -56,7 +62,11 @@ fn only_a_success_status_is_a_delivery() {
         assert_eq!(status(code), Ok(()), "{code}");
     }
     for code in [100, 199, 300, 301, 307, 400, 404, 500] {
-        assert_eq!(status(code), Err(NotifyError::Rejected { status: code }), "{code}");
+        assert_eq!(
+            status(code),
+            Err(NotifyError::Rejected { status: code }),
+            "{code}"
+        );
     }
 }
 
@@ -68,7 +78,10 @@ fn a_check_is_pinged_at_its_url_or_at_start_or_fail_of_it() {
     assert_eq!(pinged(base, Ping::Success), base);
     assert_eq!(pinged(base, Ping::Start), format!("{base}/start"));
     assert_eq!(pinged(base, Ping::Fail), format!("{base}/fail"));
-    assert_eq!(pinged(&format!("{base}/"), Ping::Fail), format!("{base}/fail"));
+    assert_eq!(
+        pinged(&format!("{base}/"), Ping::Fail),
+        format!("{base}/fail")
+    );
     assert_eq!(
         pinged(&format!("{base}?create=1"), Ping::Start),
         format!("{base}/start?create=1")
@@ -108,16 +121,34 @@ fn a_fact_the_event_lacks_is_null_in_a_webhook_body() {
 fn a_default_message_names_the_plan_or_the_repository_and_the_code() {
     let localizer = localizer();
     let says = |kind| default_message(&localizer, &event(kind));
-    assert_eq!(says(EventKind::BackupStarted), "The backup of demo-plan started.");
-    assert_eq!(says(EventKind::BackupSucceeded), "The backup of demo-plan succeeded.");
-    assert!(says(EventKind::BackupWarning).starts_with("The backup of demo-plan succeeded with warnings."));
-    assert_eq!(says(EventKind::BackupFailed), "The backup of demo-plan failed (operation-failed).");
+    assert_eq!(
+        says(EventKind::BackupStarted),
+        "The backup of demo-plan started."
+    );
+    assert_eq!(
+        says(EventKind::BackupSucceeded),
+        "The backup of demo-plan succeeded."
+    );
+    assert!(
+        says(EventKind::BackupWarning)
+            .starts_with("The backup of demo-plan succeeded with warnings.")
+    );
+    assert_eq!(
+        says(EventKind::BackupFailed),
+        "The backup of demo-plan failed (operation-failed)."
+    );
     assert_eq!(
         says(EventKind::ForgetFailed),
         "Forgetting old snapshots in demo-repo failed (operation-failed)."
     );
-    assert_eq!(says(EventKind::PruneFailed), "The prune of demo-repo failed (operation-failed).");
-    assert_eq!(says(EventKind::CheckFailed), "The check of demo-repo failed (operation-failed).");
+    assert_eq!(
+        says(EventKind::PruneFailed),
+        "The prune of demo-repo failed (operation-failed)."
+    );
+    assert_eq!(
+        says(EventKind::CheckFailed),
+        "The check of demo-repo failed (operation-failed)."
+    );
 }
 
 #[test]
@@ -154,7 +185,10 @@ fn the_notifier_writes_default_messages_without_isolation_marks() {
         event: event(EventKind::BackupStarted),
         message: Message::Default,
     };
-    assert_eq!(notifier.text(&notification), "The backup of demo-plan started.");
+    assert_eq!(
+        notifier.text(&notification),
+        "The backup of demo-plan started."
+    );
 }
 
 #[test]

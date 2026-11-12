@@ -9,18 +9,17 @@
 //! table, so the file is laid out here, with `toml` writing each value.
 
 use app::ports::{ConfigError, Problem};
+use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
     KeepWithin, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy,
     Schedule, format_duration,
 };
-use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::secrets::{FileRead, SecretRef};
 
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
-    NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable,
-    RuleTable, ScheduleTable,
+    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, NotificationsTable,
+    PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable, RuleTable, ScheduleTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -241,10 +240,19 @@ fn channel_table(channel: &Channel) -> Result<ChannelTable, &'static str> {
 
 fn rule_table(rule: &Rule) -> RuleTable {
     RuleTable {
-        events: Some(rule.events().iter().map(|event| event.name().to_owned()).collect()),
+        events: Some(
+            rule.events()
+                .iter()
+                .map(|event| event.name().to_owned())
+                .collect(),
+        ),
         channel: Some(rule.channel().as_str().to_owned()),
-        plans: (!rule.plans().is_empty())
-            .then(|| rule.plans().iter().map(|plan| plan.as_str().to_owned()).collect()),
+        plans: (!rule.plans().is_empty()).then(|| {
+            rule.plans()
+                .iter()
+                .map(|plan| plan.as_str().to_owned())
+                .collect()
+        }),
         template: rule.template().map(|template| template.as_str().to_owned()),
     }
 }

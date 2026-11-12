@@ -95,7 +95,9 @@ pub async fn run(harness: &dyn NotifierHarness) {
 fn event(kind: EventKind) -> Event {
     Event {
         kind,
-        operation: OperationId::from_uuid(Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0001)),
+        operation: OperationId::from_uuid(Uuid::from_u128(
+            0x0193_0000_0000_7000_8000_0000_0000_0001,
+        )),
         plan: PlanId::parse("demo-plan").ok(),
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).unwrap_or(Timestamp::UNIX_EPOCH),

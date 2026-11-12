@@ -74,7 +74,9 @@ impl NotifierHarness for LoopbackHarness {
         let port = self.port;
         match behaviour {
             Behaviour::Accepts => format!("http://127.0.0.1:{port}/accept/{number}"),
-            Behaviour::Answers(status) => format!("http://127.0.0.1:{port}/status/{status}/{number}"),
+            Behaviour::Answers(status) => {
+                format!("http://127.0.0.1:{port}/status/{status}/{number}")
+            }
             Behaviour::Hangs => format!("http://127.0.0.1:{port}/hang/{number}"),
             Behaviour::Refuses => {
                 // A port that was free a moment ago, and that nothing listens at.
@@ -184,7 +186,10 @@ async fn answer(mut stream: TcpStream, served: Arc<Served>) {
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
         Some("status") => {
-            let status = parts.next().and_then(|status| status.parse().ok()).unwrap_or(500);
+            let status = parts
+                .next()
+                .and_then(|status| status.parse().ok())
+                .unwrap_or(500);
             respond(&mut stream, status).await;
         }
         Some("accept") => {

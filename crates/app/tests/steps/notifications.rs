@@ -144,7 +144,14 @@ impl NotificationsWorld {
         self.channels.insert(channel_name(name), channel);
     }
 
-    fn rule(&mut self, name: &str, events: &str, channel: &str, plan: Option<&str>, template: Option<&str>) {
+    fn rule(
+        &mut self,
+        name: &str,
+        events: &str,
+        channel: &str,
+        plan: Option<&str>,
+        template: Option<&str>,
+    ) {
         let events: BTreeSet<EventKind> = events
             .split(", ")
             .map(|event| EventKind::parse(event).expect("the scenario's event is one"))
@@ -253,7 +260,9 @@ fn plans(agent: &mut Agent, first: String, second: String, repository: String) {
 
 #[given(expr = "a webhook channel {string}")]
 fn a_webhook(agent: &mut Agent, name: String) {
-    agent.notifications.channel(&name, ChannelKind::Webhook, None);
+    agent
+        .notifications
+        .channel(&name, ChannelKind::Webhook, None);
 }
 
 #[given(expr = "an ntfy channel {string}")]
@@ -299,7 +308,13 @@ fn a_rule(agent: &mut Agent, name: String, events: String, channel: String) {
 }
 
 #[given(expr = "a rule {string} that sends {string} to {string} for the plan {string}")]
-fn a_rule_for_a_plan(agent: &mut Agent, name: String, events: String, channel: String, plan: String) {
+fn a_rule_for_a_plan(
+    agent: &mut Agent,
+    name: String,
+    events: String,
+    channel: String,
+    plan: String,
+) {
     agent
         .notifications
         .rule(&name, &events, &channel, Some(&plan), None);
@@ -395,7 +410,10 @@ fn sent_for_a_plan(agent: &mut Agent, channel: String, event: String, plan: Stri
             )
         })
         .collect();
-    assert_eq!(told, [(event.as_str(), Some(plan.as_str()), Some(code.as_str()))]);
+    assert_eq!(
+        told,
+        [(event.as_str(), Some(plan.as_str()), Some(code.as_str()))]
+    );
 }
 
 #[then(expr = "{string} is sent {string} for the repository {string} with the code {string}")]
@@ -421,7 +439,12 @@ fn sent_for_a_repository(
         .collect();
     assert_eq!(
         told,
-        [(event.as_str(), None, Some(repository.as_str()), Some(code.as_str()))]
+        [(
+            event.as_str(),
+            None,
+            Some(repository.as_str()),
+            Some(code.as_str())
+        )]
     );
 }
 
@@ -434,7 +457,11 @@ fn sent_only(agent: &mut Agent, channel: String, event: String, plan: String) {
         .map(|notification| {
             (
                 notification.event.kind.name(),
-                notification.event.plan.as_ref().map(|id| id.as_str().to_owned()),
+                notification
+                    .event
+                    .plan
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
             )
         })
         .collect();
@@ -513,7 +540,9 @@ fn config_reported(agent: &mut Agent, events: usize) {
     );
 }
 
-#[then(expr = "the configuration is refused because the rule {string} sends to no channel {string}")]
+#[then(
+    expr = "the configuration is refused because the rule {string} sends to no channel {string}"
+)]
 fn refused(agent: &mut Agent, rule: String, channel: String) {
     let world = &agent.notifications;
     let refused = Notifications::new(world.channels.clone(), world.rules.clone());

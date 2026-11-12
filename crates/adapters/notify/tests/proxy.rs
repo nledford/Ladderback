@@ -21,7 +21,8 @@ use domain::{OperationId, Timestamp, Uuid};
 use l10n::Localizer;
 use notify_adapter::HttpNotifier;
 
-const NAME: &str = "a_channel_is_sent_through_the_proxy_the_environment_names_unless_no_proxy_names_it";
+const NAME: &str =
+    "a_channel_is_sent_through_the_proxy_the_environment_names_unless_no_proxy_names_it";
 /// Set in the copy: what it expects of its delivery.
 const EXPECT: &str = "LADDERBACK_NOTIFY_PROXY_TEST_EXPECT";
 /// Set in the copy: the channel's URL.
@@ -75,17 +76,25 @@ fn a_channel_is_sent_through_the_proxy_the_environment_names_unless_no_proxy_nam
 
     run_copy(&channel, &[("HTTP_PROXY", &proxy_url)], "through-proxy");
     let heads = seen.lock().unwrap_or_else(PoisonError::into_inner).clone();
-    assert_eq!(heads.len(), 1, "the proxy is sent the notification once: {heads:?}");
+    assert_eq!(
+        heads.len(),
+        1,
+        "the proxy is sent the notification once: {heads:?}"
+    );
     let head = heads.first().cloned().unwrap_or_default();
     assert_eq!(
         head.first().map(String::as_str),
         Some(format!("POST {channel} HTTP/1.1").as_str()),
         "the proxy is asked for the channel's URL"
     );
-    let signed_in = head
-        .iter()
-        .any(|line| line.to_ascii_lowercase().starts_with("proxy-authorization: basic "));
-    assert!(signed_in, "the proxy's credentials are sent to it: {head:?}");
+    let signed_in = head.iter().any(|line| {
+        line.to_ascii_lowercase()
+            .starts_with("proxy-authorization: basic ")
+    });
+    assert!(
+        signed_in,
+        "the proxy's credentials are sent to it: {head:?}"
+    );
 
     run_copy(
         &channel,
@@ -93,7 +102,10 @@ fn a_channel_is_sent_through_the_proxy_the_environment_names_unless_no_proxy_nam
         "direct",
     );
     let after = seen.lock().unwrap_or_else(PoisonError::into_inner).len();
-    assert_eq!(after, 1, "a host NO_PROXY names is not sent through the proxy");
+    assert_eq!(
+        after, 1,
+        "a host NO_PROXY names is not sent through the proxy"
+    );
 }
 
 /// Runs this test again with `variables` as the only proxy variables set,

@@ -9,13 +9,13 @@ use std::path::Path;
 
 use app::ports::{ConfigStore, PasswordProblem, Problem};
 use config_adapter::{parse, render};
+use domain::PlanId;
 use domain::notifications::{
     Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName, Template,
     Username,
 };
 use domain::planning::{AgentConfig, ValueKind, Violation};
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef};
-use domain::PlanId;
 use support::*;
 
 fn channel_name(name: &str) -> ChannelName {
@@ -187,11 +187,15 @@ fn a_channels_url_is_never_written_in_the_file() {
     assert_eq!(error.key.as_deref(), Some("notifications.channels.ops.url"));
     assert!(!format!("{error:?}").contains("demo.example.com"));
 
-    let text =
-        with("[notifications.channels.ops]\nkind = \"ntfy\"\nurl-env = \"DEMO\"\ntoken = \"demo\"\n");
+    let text = with(
+        "[notifications.channels.ops]\nkind = \"ntfy\"\nurl-env = \"DEMO\"\ntoken = \"demo\"\n",
+    );
     let error = invalid(parsed(&text));
     assert_eq!(error.problem, Problem::UnknownKey);
-    assert_eq!(error.key.as_deref(), Some("notifications.channels.ops.token"));
+    assert_eq!(
+        error.key.as_deref(),
+        Some("notifications.channels.ops.token")
+    );
 }
 
 #[test]
@@ -217,7 +221,10 @@ fn a_channel_needs_exactly_one_url_source_and_at_most_one_token_source() {
     let text =
         with("[notifications.channels.ops]\nkind = \"webhook\"\nurl-file = \"relative/url\"\n");
     let relative = invalid(parsed(&text));
-    assert_eq!(relative.problem, Problem::Secret(PasswordProblem::RelativeFile));
+    assert_eq!(
+        relative.problem,
+        Problem::Secret(PasswordProblem::RelativeFile)
+    );
     assert_eq!(
         relative.key.as_deref(),
         Some("notifications.channels.ops.url-file")
@@ -227,7 +234,11 @@ fn a_channel_needs_exactly_one_url_source_and_at_most_one_token_source() {
 
 #[test]
 fn a_ping_url_signs_in_with_nothing() {
-    for key in ["token-env = \"B\"", "username = \"demo-user\"", "password-env = \"B\""] {
+    for key in [
+        "token-env = \"B\"",
+        "username = \"demo-user\"",
+        "password-env = \"B\"",
+    ] {
         let text = with(&format!(
             "[notifications.channels.check]\nkind = \"healthchecks\"\nurl-env = \"A\"\n{key}\n"
         ));
@@ -251,9 +262,17 @@ fn a_channel_signs_in_with_a_token_or_a_name_and_password_never_both() {
     assert_eq!(both.problem, Problem::Secret(PasswordProblem::Several));
     assert_eq!(both.key.as_deref(), Some("notifications.channels.ops"));
 
-    let no_password = invalid(parsed(&with(&format!("{channel}username = \"demo-user\"\n"))));
-    assert_eq!(no_password.problem, Problem::Secret(PasswordProblem::Missing));
-    assert_eq!(no_password.key.as_deref(), Some("notifications.channels.ops"));
+    let no_password = invalid(parsed(&with(&format!(
+        "{channel}username = \"demo-user\"\n"
+    ))));
+    assert_eq!(
+        no_password.problem,
+        Problem::Secret(PasswordProblem::Missing)
+    );
+    assert_eq!(
+        no_password.key.as_deref(),
+        Some("notifications.channels.ops")
+    );
 
     let no_name = invalid(parsed(&with(&format!("{channel}password-env = \"C\"\n"))));
     assert_eq!(no_name.problem, Problem::MissingKey);
@@ -271,10 +290,7 @@ fn a_channel_signs_in_with_a_token_or_a_name_and_password_never_both() {
         "{channel}username = \"demo:user\"\npassword-env = \"C\"\n"
     ));
     let bad_name = invalid(parsed(&text));
-    assert_eq!(
-        bad_name.problem,
-        Problem::Value(ValueKind::ChannelUsername)
-    );
+    assert_eq!(bad_name.problem, Problem::Value(ValueKind::ChannelUsername));
     assert_eq!(
         bad_name.key.as_deref(),
         Some("notifications.channels.ops.username")
@@ -385,8 +401,12 @@ fn notifications_are_written_and_read_back_as_they_were() {
     ] {
         assert!(text.contains(header), "{header} in:\n{text}");
     }
-    let read = parse(Path::new(FILE), &text, &config_adapter::Schemas::production())
-        .expect("the written file reads");
+    let read = parse(
+        Path::new(FILE),
+        &text,
+        &config_adapter::Schemas::production(),
+    )
+    .expect("the written file reads");
     assert_eq!(read.config, config);
 }
 

@@ -454,7 +454,9 @@ async fn notify_over(
     let localizer = localizer();
     tokio::spawn(async move {
         notify
-            .run(news, |report| log::warn!("{}", report_line(&localizer, &report)))
+            .run(news, |report| {
+                log::warn!("{}", report_line(&localizer, &report))
+            })
             .await;
     });
 }
@@ -475,12 +477,10 @@ fn report_line(localizer: &l10n::Localizer, report: &Report) -> String {
             let message = localizer.warning(WarningCode::NotificationUndelivered, &args, None);
             format!("{:?}: {message}", WarningCode::NotificationUndelivered)
         }
-        Report::ConfigUnavailable(error) => {
-            config_unusable(error.clone(), |code, args, detail| {
-                let message = localizer.error(code, &args, detail.as_deref());
-                format!("no notification was sent for an event: {code:?}: {message}")
-            })
-        }
+        Report::ConfigUnavailable(error) => config_unusable(error.clone(), |code, args, detail| {
+            let message = localizer.error(code, &args, detail.as_deref());
+            format!("no notification was sent for an event: {code:?}: {message}")
+        }),
     }
 }
 

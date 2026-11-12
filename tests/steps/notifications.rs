@@ -124,7 +124,9 @@ async fn the_webhook_is_told(agent: &mut Agent, event: String, plan: String) {
             assert_eq!(body["event"], event.as_str(), "{body}");
             assert_eq!(body["plan"], plan.as_str(), "{body}");
             assert!(
-                body["message"].as_str().is_some_and(|text| !text.is_empty()),
+                body["message"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
                 "a message: {body}"
             );
             return;

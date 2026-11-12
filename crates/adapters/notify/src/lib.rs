@@ -101,13 +101,19 @@ impl HttpNotifier {
             ChannelKind::Ntfy => self
                 .client
                 .post(url)
-                .header(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"))
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain; charset=utf-8"),
+                )
                 .header("Title", HeaderValue::from_static(event.kind.name()))
                 .body(text),
             ChannelKind::Healthchecks => self
                 .client
                 .post(ping_url(url, event.kind.ping()))
-                .header(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"))
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain; charset=utf-8"),
+                )
                 .body(text),
         };
         match &notification.destination.auth {
@@ -214,26 +220,42 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
         .map_or_else(operation, |repository| repository.as_str().to_owned());
     let code = event.code.unwrap_or("none").to_owned();
     let (id, args): (MessageId, Vec<(&str, MsgArg)>) = match event.kind {
-        EventKind::BackupStarted => (msg::NOTIFY_BACKUP_STARTED, vec![("plan", MsgArg::Text(plan))]),
-        EventKind::BackupSucceeded => {
-            (msg::NOTIFY_BACKUP_SUCCEEDED, vec![("plan", MsgArg::Text(plan))])
-        }
-        EventKind::BackupWarning => (msg::NOTIFY_BACKUP_WARNING, vec![("plan", MsgArg::Text(plan))]),
+        EventKind::BackupStarted => (
+            msg::NOTIFY_BACKUP_STARTED,
+            vec![("plan", MsgArg::Text(plan))],
+        ),
+        EventKind::BackupSucceeded => (
+            msg::NOTIFY_BACKUP_SUCCEEDED,
+            vec![("plan", MsgArg::Text(plan))],
+        ),
+        EventKind::BackupWarning => (
+            msg::NOTIFY_BACKUP_WARNING,
+            vec![("plan", MsgArg::Text(plan))],
+        ),
         EventKind::BackupFailed => (
             msg::NOTIFY_BACKUP_FAILED,
             vec![("plan", MsgArg::Text(plan)), ("code", MsgArg::Text(code))],
         ),
         EventKind::ForgetFailed => (
             msg::NOTIFY_FORGET_FAILED,
-            vec![("repository", MsgArg::Text(repository)), ("code", MsgArg::Text(code))],
+            vec![
+                ("repository", MsgArg::Text(repository)),
+                ("code", MsgArg::Text(code)),
+            ],
         ),
         EventKind::PruneFailed => (
             msg::NOTIFY_PRUNE_FAILED,
-            vec![("repository", MsgArg::Text(repository)), ("code", MsgArg::Text(code))],
+            vec![
+                ("repository", MsgArg::Text(repository)),
+                ("code", MsgArg::Text(code)),
+            ],
         ),
         EventKind::CheckFailed => (
             msg::NOTIFY_CHECK_FAILED,
-            vec![("repository", MsgArg::Text(repository)), ("code", MsgArg::Text(code))],
+            vec![
+                ("repository", MsgArg::Text(repository)),
+                ("code", MsgArg::Text(code)),
+            ],
         ),
     };
     localizer.message(id, &args).text().to_owned()

@@ -1450,7 +1450,8 @@ mod tests {
 
     #[tokio::test]
     async fn recording_a_created_repositorys_id_keeps_the_notification_rules_and_channels() {
-        let (_, config, use_case) = saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
+        let (_, config, use_case) =
+            saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
         with_notifications(&config).await;
         use_case
             .init_saved(op(), &alias(), &found_none().await)
@@ -1461,7 +1462,9 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(
-            after.repository(&alias()).and_then(|entry| entry.id.clone()),
+            after
+                .repository(&alias())
+                .and_then(|entry| entry.id.clone()),
             Some(id()),
             "the ID is recorded"
         );

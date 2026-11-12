@@ -46,6 +46,8 @@ mod secrets_steps;
 mod hooks_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/notifications.rs"]
+mod notifications_steps;
 #[path = "steps/recovery.rs"]
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
@@ -54,8 +56,6 @@ mod repositories_steps;
 mod schedule_steps;
 #[path = "steps/scheduler.rs"]
 mod scheduler_steps;
-#[path = "steps/notifications.rs"]
-mod notifications_steps;
 
 #[derive(World)]
 #[world(init = Self::new)]

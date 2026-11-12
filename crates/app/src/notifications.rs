@@ -228,7 +228,11 @@ impl Notify {
     }
 
     async fn secret(&self, secret: &SecretRef) -> Option<SecretValue> {
-        self.secrets.resolve(secret).await.ok().map(|resolved| resolved.value)
+        self.secrets
+            .resolve(secret)
+            .await
+            .ok()
+            .map(|resolved| resolved.value)
     }
 }
 

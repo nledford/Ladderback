@@ -94,7 +94,13 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
 
 #[test]
 fn a_name_that_is_no_event_is_refused() {
-    for text in ["", "backup", "Backup.Failed", "backup.retrying", "backup.failed "] {
+    for text in [
+        "",
+        "backup",
+        "Backup.Failed",
+        "backup.retrying",
+        "backup.failed ",
+    ] {
         let refused = EventKind::parse(text).unwrap_err();
         assert_eq!(refused.kind, ValueKind::NotificationEvent, "{text:?}");
     }
@@ -135,7 +141,11 @@ fn only_a_backup_tells_its_start() {
 fn a_backup_tells_each_ending_and_maintenance_only_its_failure() {
     use Outcome::{Failed, Succeeded, SucceededWithWarnings};
     let told = [
-        (OperationKind::Backup, Succeeded, Some(EventKind::BackupSucceeded)),
+        (
+            OperationKind::Backup,
+            Succeeded,
+            Some(EventKind::BackupSucceeded),
+        ),
         (
             OperationKind::Backup,
             SucceededWithWarnings,
@@ -153,7 +163,11 @@ fn a_backup_tells_each_ending_and_maintenance_only_its_failure() {
         (OperationKind::Identify, Failed, None),
     ];
     for (kind, outcome, event) in told {
-        assert_eq!(EventKind::ended(kind, outcome), event, "{kind:?} {outcome:?}");
+        assert_eq!(
+            EventKind::ended(kind, outcome),
+            event,
+            "{kind:?} {outcome:?}"
+        );
     }
 }
 
@@ -196,7 +210,10 @@ fn a_maintenance_failure_names_its_repository_by_alias() {
     prune.fail(FailureReason::DeadlinePassed, at()).unwrap();
     let event = Event::ended(Subject::of(&prune), Outcome::Failed, at()).unwrap();
     assert_eq!(event.kind, EventKind::PruneFailed);
-    assert_eq!(event.repository, Some(RepositoryAlias::parse("nas").unwrap()));
+    assert_eq!(
+        event.repository,
+        Some(RepositoryAlias::parse("nas").unwrap())
+    );
     assert_eq!(event.code, Some("deadline-passed"));
 }
 
@@ -285,7 +302,11 @@ fn a_channel_never_holds_its_url_token_or_password_as_text() {
         Err(ChannelError::InlineSecret)
     );
     assert_eq!(
-        Channel::new(ChannelKind::Ntfy, env("DEMO_TOPIC_URL"), Some(basic(inline()))),
+        Channel::new(
+            ChannelKind::Ntfy,
+            env("DEMO_TOPIC_URL"),
+            Some(basic(inline()))
+        ),
         Err(ChannelError::InlineSecret)
     );
     let ntfy = Channel::new(
@@ -319,7 +340,12 @@ fn a_ping_url_signs_in_with_nothing() {
 
 #[test]
 fn a_username_is_short_plain_text_without_a_colon() {
-    for good in ["demo-user", "Demo User", "ü", &"a".repeat(MAX_USERNAME_BYTES)] {
+    for good in [
+        "demo-user",
+        "Demo User",
+        "ü",
+        &"a".repeat(MAX_USERNAME_BYTES),
+    ] {
         assert_eq!(Username::parse(good).unwrap().as_str(), good);
     }
     for bad in [
@@ -366,8 +392,14 @@ fn a_rule_must_send_to_a_channel_the_configuration_has() {
         BTreeMap::from([(channel_name("ops"), webhook())]),
         BTreeMap::from([
             (rule_name("a"), rule(&[EventKind::BackupFailed], "ops", &[])),
-            (rule_name("b"), rule(&[EventKind::BackupFailed], "pager", &[])),
-            (rule_name("c"), rule(&[EventKind::BackupFailed], "other", &[])),
+            (
+                rule_name("b"),
+                rule(&[EventKind::BackupFailed], "pager", &[]),
+            ),
+            (
+                rule_name("c"),
+                rule(&[EventKind::BackupFailed], "other", &[]),
+            ),
         ]),
     )
     .unwrap_err();
@@ -384,11 +416,23 @@ fn a_rule_must_send_to_a_channel_the_configuration_has() {
 fn matching_gives_each_rule_that_sends_the_event_in_name_order_with_its_channel() {
     let pager = Channel::new(ChannelKind::Ntfy, env("DEMO_TOPIC_URL"), None).unwrap();
     let notifications = Notifications::new(
-        BTreeMap::from([(channel_name("ops"), webhook()), (channel_name("pager"), pager.clone())]),
         BTreeMap::from([
-            (rule_name("z-failures"), rule(&[EventKind::BackupFailed], "pager", &[])),
-            (rule_name("a-failures"), rule(&[EventKind::BackupFailed], "ops", &["home"])),
-            (rule_name("starts"), rule(&[EventKind::BackupStarted], "ops", &[])),
+            (channel_name("ops"), webhook()),
+            (channel_name("pager"), pager.clone()),
+        ]),
+        BTreeMap::from([
+            (
+                rule_name("z-failures"),
+                rule(&[EventKind::BackupFailed], "pager", &[]),
+            ),
+            (
+                rule_name("a-failures"),
+                rule(&[EventKind::BackupFailed], "ops", &["home"]),
+            ),
+            (
+                rule_name("starts"),
+                rule(&[EventKind::BackupStarted], "ops", &[]),
+            ),
         ]),
     )
     .unwrap();
@@ -399,7 +443,10 @@ fn matching_gives_each_rule_that_sends_the_event_in_name_order_with_its_channel(
         .collect();
     assert_eq!(
         matched,
-        [("a-failures", "ops", &webhook()), ("z-failures", "pager", &pager)]
+        [
+            ("a-failures", "ops", &webhook()),
+            ("z-failures", "pager", &pager)
+        ]
     );
     let other = backup_event(EventKind::BackupFailed, Some("work"));
     let names: Vec<&str> = notifications
@@ -441,7 +488,10 @@ fn a_rule_must_be_for_plans_the_configuration_has() {
     let with = |plans: &[&str]| {
         Notifications::new(
             BTreeMap::from([(channel_name("ops"), webhook())]),
-            BTreeMap::from([(rule_name("failures"), rule(&[EventKind::BackupFailed], "ops", plans))]),
+            BTreeMap::from([(
+                rule_name("failures"),
+                rule(&[EventKind::BackupFailed], "ops", plans),
+            )]),
         )
         .unwrap()
     };
@@ -483,7 +533,10 @@ mod templates {
             template.render(&failed_event()),
             "Backup {home} failed: operation-failed. } done"
         );
-        assert_eq!(template.as_str(), "Backup {{{plan}}} failed: {code}. }} done");
+        assert_eq!(
+            template.as_str(),
+            "Backup {{{plan}}} failed: {code}. }} done"
+        );
     }
 
     #[test]
@@ -497,8 +550,7 @@ mod templates {
     fn a_template_can_name_no_secret_nor_any_other_unlisted_fact() {
         // I4: the list is closed, so no template can ask for a secret.
         for name in [
-            "password", "token", "url", "secret", "address", "detail", "env", "PLAN", "plan ",
-            "",
+            "password", "token", "url", "secret", "address", "detail", "env", "PLAN", "plan ", "",
         ] {
             let refused = Template::parse(&format!("before {{{name}}} after")).unwrap_err();
             assert_eq!(refused.kind, ValueKind::NotificationTemplate, "{name:?}");
