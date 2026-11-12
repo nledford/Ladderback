@@ -86,6 +86,13 @@ Then("the page doesn't scroll sideways", async function (this: BrowserWorld) {
 //     more than 1 px of rounding, in either direction;
 //  2. any rendered text sits partly beyond the left or right edge of the
 //     viewport, where a reader can't reach it without scrolling sideways.
+// Text hidden from sight on purpose is left out: a box that `clip-path:
+// inset(50%)` clips to nothing, as the live regions of index.html are (§4.5).
+// It is a screen reader's alone and no one sees it at any size, so nothing in
+// it is clipped from a reader; its words are checked by the region steps.
+// Counting it made the check depend on when the region was last written: the
+// announcer writes it a moment after a press or an event, and its one line
+// never fits the region's 1 px box.
 Then("no text is clipped", async function (this: BrowserWorld) {
   const clipped = await this.page.evaluate(async () => {
     await document.fonts.ready;
@@ -96,10 +103,14 @@ Then("no text is clipped", async function (this: BrowserWorld) {
     const describe = (el: Element) => `<${el.localName}> "${(el.textContent ?? "").trim().slice(0, 40)}"`;
     const viewportWidth = document.documentElement.clientWidth;
     const hides = (value: string) => value === "hidden" || value === "clip";
+    const unseenBoxes = [...document.body.querySelectorAll("*")].filter(
+      (el) => getComputedStyle(el).clipPath === "inset(50%)",
+    );
+    const seen = (el: Element) => !unseenBoxes.some((box) => box.contains(el));
 
     for (const el of document.body.querySelectorAll("*")) {
       const style = getComputedStyle(el);
-      if (style.display === "none" || !(el.textContent ?? "").trim()) continue;
+      if (style.display === "none" || !(el.textContent ?? "").trim() || !seen(el)) continue;
       if (hides(style.overflowX) && el.scrollWidth > el.clientWidth + 1) {
         problems.push(`${describe(el)} clips ${el.scrollWidth - el.clientWidth}px sideways`);
       }
@@ -111,7 +122,8 @@ Then("no text is clipped", async function (this: BrowserWorld) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const parent = node.parentElement;
-      if (!(node.textContent ?? "").trim() || parent === null || getComputedStyle(parent).display === "none") continue;
+      if (!(node.textContent ?? "").trim() || parent === null || !seen(parent)) continue;
+      if (getComputedStyle(parent).display === "none") continue;
       const range = document.createRange();
       range.selectNodeContents(node);
       for (const rect of range.getClientRects()) {
