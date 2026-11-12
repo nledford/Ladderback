@@ -419,6 +419,27 @@ keep-daily = 7
         assert_eq!(saved.as_deref(), Some(WRITTEN));
     }
 
+    /// A table back at its defaults is not in the daemon's layout: a save
+    /// removes it from the file with its comment.
+    #[test]
+    fn agent_and_hooks_back_at_their_defaults_go_from_the_file() {
+        let written = WRITTEN.replace(
+            "nice    =   10\n",
+            "nice    =   10\n\n# Say so first.\n[hooks]\nrun-before = [\"echo one\"]\n",
+        );
+        let saved = changed(&written, |parts| {
+            parts.agent = AgentSettings::default();
+            parts.hooks = Hooks::default();
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "[agent]\nconcurrency = 1        # how many operations run at once\nnice    =   10\n\n",
+                ""
+            ))
+        );
+    }
+
     #[test]
     fn the_last_repository_and_plan_a_save_removes_leave_the_rest() {
         let saved = changed(WRITTEN, |parts| {
@@ -468,6 +489,13 @@ keep-daily = 7
     fn a_plan_a_save_adds_follows_the_last_plan_and_its_retention() {
         let saved = changed(WRITTEN, |parts| parts.plans.push(docs()));
         assert_eq!(saved, Some(format!("{WRITTEN}{DOCS}")));
+    }
+
+    #[test]
+    fn the_first_plan_a_save_adds_follows_the_last_table() {
+        let written = "# By hand.\nschema = 1\n\n[repositories.nas]\nrepository = \"/srv/demo-repo\"   # the NAS\npassword-env = \"DEMO_PASSWORD\"\n";
+        let saved = changed(written, |parts| parts.plans.push(docs()));
+        assert_eq!(saved, Some(format!("{written}{DOCS}")));
     }
 
     /// A file that writes options as tables of their own has more tables
