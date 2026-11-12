@@ -84,7 +84,7 @@ Decide by what the code knows about. The full layout is §8.3; the rule behind i
 |---|---|
 | Rules only: no I/O, no async, no clock | `crates/domain` |
 | Use cases, and the ports they call | `crates/app` (port traits in `crates/app/src/ports/`) |
-| Time or randomness | Nowhere directly in `domain` or `app`: the `Clock` port, and the `Random` port §3.2 designs (not built yet); clippy bans the ambient calls there |
+| Time or randomness | Nowhere directly in `domain` or `app`: the `Clock` and `Random` ports (§3.2); clippy bans the ambient calls there |
 | `rustic_core` types | `crates/adapters/engine` only |
 | Rustic profile TOML | `crates/adapters/interop` only |
 | A secret source: command, keyring, file, environment | `crates/adapters/secrets` only, behind the `SecretResolver` port; `crates/adapters/engine` hands workers a scrubbed environment (§10.2, §4.1) |
