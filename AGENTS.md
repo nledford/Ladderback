@@ -110,6 +110,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 - Use the ubiquitous language from §3.1 exactly, in code, tests, UI copy and docs. A new domain term goes into the glossary first.
 - Respect the bounded contexts and aggregates in §3.1. Invariants live on the aggregate or domain service that owns them, not in adapters or handlers.
+- Parse outside input into domain types once, where it enters (an adapter or `api`); the core takes those types, never raw strings, and a type that can't hold an invalid value beats a check plus its test (§3.1).
 - Keep the hexagonal dependency rule (§3.2): `app` depends only on `domain`, which has no I/O, no async and no ambient time or randomness; time and randomness reach `app` through the `Clock` and `Random` ports. Foreign models stay behind their anti-corruption layers (the table above).
 - The core returns typed errors and codes, never user-facing sentences. Text is produced through `l10n` (§8.4).
 
