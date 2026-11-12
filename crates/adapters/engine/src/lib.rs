@@ -20,8 +20,10 @@ mod cache_lock;
 mod client;
 mod environment;
 pub mod job;
+mod log_masking;
 mod retention;
 pub mod worker;
 
 pub use client::WorkerEngine;
+pub use log_masking::Masked;
 pub use retention::{RusticRetention, RusticSources};

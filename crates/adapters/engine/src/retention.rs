@@ -41,15 +41,15 @@ impl Retention for RusticRetention {
     }
 }
 
-/// Runs `work` on a blocking thread. What the thread panics with is masked
-/// like any other text of the open: the panic message may quote what the
-/// open was reading (I4).
+/// Runs `work` on a blocking thread, with a copy of `redactor` of its own.
+/// What the thread panics with is masked like any other text of the open:
+/// the panic message may quote what the open was reading (I4).
 async fn blocking<T: Send + 'static>(
     redactor: &domain::secrets::Redactor,
-    work: impl FnOnce(&domain::secrets::Redactor) -> Result<T, RetentionError> + Send + 'static,
+    work: impl FnOnce(domain::secrets::Redactor) -> Result<T, RetentionError> + Send + 'static,
 ) -> Result<T, RetentionError> {
     let owned = redactor.clone();
-    tokio::task::spawn_blocking(move || work(&owned))
+    tokio::task::spawn_blocking(move || work(owned))
         .await
         .map_err(|error| engine(redactor, error))?
 }
@@ -84,10 +84,17 @@ impl RepositorySpec {
 /// would — and names the ones the policy lets go.
 fn evaluate(
     spec: &RepositorySpec,
-    redactor: &domain::secrets::Redactor,
+    redactor: domain::secrets::Redactor,
     policy: &RetentionPolicy,
     wanted: &std::collections::HashSet<String>,
 ) -> Result<Vec<SnapshotId>, RetentionError> {
+    // What the open logs, rustic's naming of the location and what rclone
+    // writes among it, goes to the daemon's log: masked with this
+    // repository's secrets until the guard goes, which is after the
+    // backends, and the rclone and the threads they started, are gone
+    // (declared first, so dropped last, however this returns).
+    let masking = crate::log_masking::Masking::of(redactor);
+    let redactor = masking.redactor();
     let backends = BackendOptions::default()
         .repository(spec.repository.clone())
         .options(spec.options.clone())

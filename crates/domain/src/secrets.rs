@@ -346,7 +346,12 @@ impl Redactor {
             .flat_map(|value| {
                 #[cfg(test)]
                 FORMED.with(|count| count.set(count.get() + 1));
-                url_needles(value).into_iter().chain(partial_needles(value))
+                let raw = partial_needles(value);
+                let escaped: Vec<String> = std::iter::once(value)
+                    .chain(raw.iter().map(String::as_str))
+                    .filter_map(debug_escaped)
+                    .collect();
+                url_needles(value).into_iter().chain(raw).chain(escaped)
             })
             .collect();
         needles.sort_unstable();
@@ -449,7 +454,32 @@ impl Redactor {
         self.mask(text, text.strip_suffix(mark).map(str::len))
     }
 
-    /// `text` with every needle in it replaced. When `cut` is given, the
+    /// `text` masked with the secrets of every one of `redactors` at once,
+    /// as one redactor of all their secrets would mask it: a secret of one
+    /// that holds or overlaps a secret of another is masked whole, where
+    /// masking with each in turn leaves what the first one's mask broke up
+    /// of the other's (#287). One of them that masks everything masks every
+    /// text that isn't empty whole.
+    pub fn redact_together<'a>(
+        redactors: impl IntoIterator<Item = &'a Redactor>,
+        text: &str,
+    ) -> String {
+        let mut whole = false;
+        let mut needles = Vec::new();
+        for redactor in redactors {
+            whole |= redactor.whole;
+            needles.extend(&redactor.needles);
+        }
+        Self::mask_with(needles, whole, text, None)
+    }
+
+    /// `text` masked with this redactor's needles ([`Redactor::mask_with`]).
+    fn mask(&self, text: &str, cut: Option<usize>) -> String {
+        Self::mask_with(&self.needles, self.whole, text, cut)
+    }
+
+    /// `text` with every one of `needles` in it replaced, or the whole of it
+    /// where `everything` says so and it isn't empty. When `cut` is given, the
     /// text was cut after its first `cut` bytes, and the end of those from
     /// where it is the start of a needle on (the earliest start of a secret
     /// the cut could have gone through) is part of the same spans.
@@ -458,15 +488,20 @@ impl Redactor {
     /// at most twice with a byte of the needle, however long and repetitive
     /// both are. A needle and a valid text are UTF-8, so what matches starts
     /// and ends between characters.
-    fn mask(&self, text: &str, cut: Option<usize>) -> String {
-        if self.whole && !text.is_empty() {
+    fn mask_with<'a>(
+        needles: impl IntoIterator<Item = &'a Needle>,
+        everything: bool,
+        text: &str,
+        cut: Option<usize>,
+    ) -> String {
+        if everything && !text.is_empty() {
             return REDACTED.to_owned();
         }
         let bytes = text.as_bytes();
         // The longest span, of a needle or of the cut, that ends at each byte:
         // at most a needle's length, which a `u32` holds.
         let mut spans = vec![0_u32; bytes.len()];
-        for needle in &self.needles {
+        for needle in needles {
             let whole = needle.text.as_bytes();
             let mut matched = 0;
             for (at, (&byte, span)) in bytes.iter().zip(spans.iter_mut()).enumerate() {
@@ -531,6 +566,21 @@ fn partial_needles(secret: &str) -> Vec<String> {
         );
     }
     needles
+}
+
+/// A secret, or a raw form of it, as its `Debug` form prints it between the
+/// quotes (`"` and `\` escaped, a control or combining character as
+/// `\u{…}`), where that differs from it: a library that logs a value with
+/// `{:?}` prints a secret in it so, as rustic logs the command it starts
+/// rclone with, the location last (#330). `Debug` escapes each character on
+/// its own, so this form is in the printed text wherever the secret is in
+/// the text printed. The encoded forms of a secret are not escaped: they
+/// would add up to as many needles again, for a secret that a parser would
+/// first have to encode and a library then print with `{:?}`.
+fn debug_escaped(secret: &str) -> Option<String> {
+    let quoted = format!("{secret:?}");
+    let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
+    (inner != secret).then(|| inner.to_owned())
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -946,10 +996,78 @@ mod tests {
         assert_eq!(redactor.redact("x Ab%2fC x"), "x *** x");
     }
 
+    /// A library that logs a value with `{:?}` prints a secret in it escaped:
+    /// rustic logs the command it starts rclone with so, the location last
+    /// (#330).
+    #[test]
+    fn a_secret_is_replaced_as_a_debug_form_escapes_it() {
+        let secret = "CANARY\"quote\\slash\ttab\u{1}e\u{301}";
+        let whole = redactor(&[secret]);
+        let command = ["rclone", &format!(":s3,secret_access_key={secret}:b")];
+        assert_eq!(
+            whole.redact(&format!("starting rclone via {command:?}")),
+            r#"starting rclone via ["rclone", ":s3,secret_access_key=***:b"]"#
+        );
+        assert_eq!(whole.redact(&format!("{secret:#?}")), r#""***""#);
+        // Its other raw forms too: without the white space around it, and
+        // each line of one that spans lines.
+        let key = "CANARY\"line-one\nCANARY\\line-two\n";
+        let by_line = redactor(&[key]);
+        for logged in [key.trim(), "CANARY\"line-one", "CANARY\\line-two"] {
+            assert_eq!(by_line.redact(&format!("{logged:?}")), r#""***""#);
+        }
+    }
+
     #[test]
     fn a_secret_containing_another_is_replaced_whole() {
         let redactor = redactor(&["abc", "abcdef"]);
         assert_eq!(redactor.redact("xabcdefx abc"), "x***x ***");
+    }
+
+    /// Masked with each in turn, the mask of `CANARY-reused` would leave
+    /// `-tail` of `CANARY-reused-tail`, and that one's mask would leave `-on`
+    /// of `reused-tail-on`, or the other way round `CANARY-` of it.
+    #[test]
+    fn redactors_masking_together_replace_a_secret_of_one_holding_one_of_another_whole() {
+        let short = redactor(&["CANARY-reused"]);
+        let long = redactor(&["CANARY-reused-tail"]);
+        let overlapping = redactor(&["reused-tail-on"]);
+        for (redactors, text, masked) in [
+            ([&short, &long], "x CANARY-reused-tail y", "x *** y"),
+            ([&long, &short], "x CANARY-reused-tail y", "x *** y"),
+            (
+                [&long, &overlapping],
+                "x CANARY-reused-tail-on y",
+                "x *** y",
+            ),
+            (
+                [&overlapping, &long],
+                "x CANARY-reused-tail-on y",
+                "x *** y",
+            ),
+            ([&short, &long], "x CANARY-reused y", "x *** y"),
+            ([&short, &long], "nothing secret", "nothing secret"),
+        ] {
+            assert_eq!(Redactor::redact_together(redactors, text), masked);
+        }
+        assert_eq!(
+            Redactor::redact_together([], "nothing to mask"),
+            "nothing to mask"
+        );
+    }
+
+    #[test]
+    fn redactors_masking_together_mask_every_text_whole_where_one_masks_everything() {
+        let everything = Redactor::masking_everything();
+        let some = redactor(&["CANARY-some"]);
+        for redactors in [
+            [&some, &everything],
+            [&everything, &some],
+            [&everything, &everything],
+        ] {
+            assert_eq!(Redactor::redact_together(redactors, "plain text"), REDACTED);
+            assert_eq!(Redactor::redact_together(redactors, ""), "");
+        }
     }
 
     #[test]
