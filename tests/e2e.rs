@@ -289,6 +289,11 @@ impl Engine for Watched {
 
 #[tokio::main]
 async fn main() {
+    // Started again as the holder of a pipe a backup waits on.
+    if let Some(place) = std::env::var_os(operations_steps::HOLD_PIPE_ENV) {
+        operations_steps::hold_pipe(std::path::Path::new(&place));
+        return;
+    }
     // See crates/app/tests/acceptance.rs: nothing to list for libtest.
     if std::env::args().any(|a| a == "--list") {
         return;

@@ -24,8 +24,7 @@ use super::Agent;
 /// How long a page may wait for an operation to reach the expected state.
 const STATE_TIMEOUT: Duration = Duration::from_secs(120);
 /// How many more demo files a "many more files" source holds, so a backup
-/// runs long enough for what a scenario does while it runs: cancel it, look
-/// at its cache slot, start another beside it.
+/// runs long enough for another to start beside it.
 const MANY_FILES: usize = 3000;
 
 /// What the operation-lifecycle scenarios keep between steps.
@@ -37,6 +36,8 @@ pub struct Ops {
     refusal: Option<String>,
     /// The page that holds a live-updates connection.
     page: Option<Page>,
+    /// The file in the plan's source the backup waits on, until it is let go.
+    waited_on: Option<WaitedOn>,
 }
 
 impl std::fmt::Debug for Ops {
@@ -57,74 +58,6 @@ struct Page {
 
 fn hook_mark(agent: &Agent) -> PathBuf {
     agent.scratch().join("hook-ran")
-}
-
-/// The plan's source folder, as the serving step made it.
-fn source(agent: &Agent) -> PathBuf {
-    agent.scratch().join("source")
-}
-
-/// Writes the daemon's configuration again, with `hooks` around every
-/// operation and the repository's password from `password`: the same
-/// repository, plan and source the serving step chose.
-async fn save_config(
-    agent: &Agent,
-    run_finally: Option<String>,
-    password: domain::secrets::SecretRef,
-) {
-    let repository = agent
-        .backup
-        .repository
-        .clone()
-        .expect("a repository the plan backs up into");
-    let source = source(agent);
-    let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
-    let mut hooks = domain::planning::Hooks::default();
-    if let Some(command) = run_finally {
-        hooks.run_finally =
-            vec![domain::planning::HookEntry::parse(&command).expect("a hook command")];
-    }
-    let config = domain::planning::AgentConfig::new(
-        domain::planning::AgentSettings::default(),
-        hooks,
-        std::collections::BTreeMap::from([(
-            alias.clone(),
-            domain::planning::RepositoryConfig {
-                id: None,
-                settings: domain::planning::RepositorySettings {
-                    repository: repository.to_str().expect("a UTF-8 path").to_owned(),
-                    repo_hot: None,
-                    password,
-                    options: Default::default(),
-                    options_hot: Default::default(),
-                    options_cold: Default::default(),
-                },
-                maintenance: domain::planning::Maintenance::None,
-                group_by: Default::default(),
-                hooks: Default::default(),
-            },
-        )]),
-        vec![domain::planning::Plan::new(
-            domain::PlanId::parse("home").expect("a plan ID"),
-            alias,
-            vec![
-                domain::planning::Source::parse(source.to_str().expect("a UTF-8 path"))
-                    .expect("a source"),
-            ],
-        )],
-    )
-    .expect("a valid configuration");
-    let dir = super::events_steps::Events::config_dir(agent);
-    std::fs::create_dir_all(&dir).expect("the config folder");
-    app::ports::ConfigStore::save(
-        &config_adapter::FileConfigStore::new(
-            dir.join("config.toml"),
-            std::sync::Arc::new(platform::SystemClock),
-        ),
-        &config,
-    )
-    .await
-    .expect("the config saves");
 }
 
 /// Sends `request` over a new connection and reads one response: status and
@@ -325,7 +258,7 @@ impl Ops {
 
 #[given("the plan's source holds many more files")]
 async fn many_more_files(agent: &mut Agent) {
-    let source = source(agent);
+    let source = agent.backup.source.clone().expect("a plan source");
     // Thousands of writes: on a blocking thread, as the runner's is shared.
     super::blocking(move || {
         for n in 1..=MANY_FILES {
@@ -347,15 +280,10 @@ async fn a_finally_hook(agent: &mut Agent) {
         "touch {}",
         mark.to_str().expect("a hook mark path without spaces")
     );
-    save_config(agent, Some(command), inline_password()).await;
-}
-
-/// The password the serving step's repository was made with, written in the
-/// configuration.
-fn inline_password() -> domain::secrets::SecretRef {
-    domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
-        super::backup_steps::PASSWORD,
-    ))
+    // The agent's hooks run around every operation, the plan's among them.
+    agent.backup.agent_hooks.run_finally =
+        vec![domain::planning::HookEntry::parse(&command).expect("a hook command")];
+    super::events_steps::save_daemon_config(agent, None).await;
 }
 
 #[given(
@@ -367,7 +295,8 @@ async fn a_failing_password_command(agent: &mut Agent, printed: String, said: St
     let script = format!("printf '%s\\n' '{printed}'; printf '%s\\n' '{said}' >&2; exit 3");
     let command = domain::secrets::CommandLine::new("/bin/sh", ["-c".to_owned(), script])
         .expect("a command line");
-    save_config(agent, None, domain::secrets::SecretRef::Command(command)).await;
+    agent.backup.password = Some(domain::secrets::SecretRef::Command(command));
+    super::events_steps::save_daemon_config(agent, None).await;
 }
 
 #[when(expr = "the client starts a backup of the plan {string}")]
@@ -439,6 +368,204 @@ async fn an_after_hook_that_waits(agent: &mut Agent) {
 #[when("the plan's after hook is let go")]
 fn the_after_hook_is_let_go(agent: &mut Agent) {
     std::fs::remove_file(after_hook_hold(agent)).expect("the after hook was held");
+}
+
+/// The name of the file in the plan's source that the backup waits on: one
+/// of the plan's custom ignore files.
+const WAITED_ON: &str = ".waited-on";
+
+/// The variable that makes the e2e runner's binary the holder of a pipe
+/// a backup waits on (see [`hold_pipe`]), naming the pipe's place in the
+/// plan's source.
+pub(crate) const HOLD_PIPE_ENV: &str = "LADDERBACK_E2E_HOLD_PIPE";
+
+/// How long the holder may take to let every reader of the pipe go: a
+/// reader that keeps it open longer than that never reads it to its end.
+const LET_GO_LIMIT: Duration = Duration::from_secs(10);
+
+/// A named pipe in the plan's source that a backup of the plan waits on.
+/// Its name is one of the plan's custom ignore files, which rustic reads in
+/// each folder it walks into before it lists anything there, so the walk
+/// waits on it at the source's own folder: after the worker has started and
+/// locked its cache slot, before the backup has saved anything. The pipe's
+/// one writer is a process of its own, the holder ([`hold_pipe`]), which
+/// writes nothing, so a read of it waits until the holder lets it go. A
+/// backup of the plan is certain to be running until then, however fast the
+/// machine; the engine has no part of it left to finish.
+///
+/// The holder lets go when its stdin ends: when the scenario lets it go,
+/// ends or fails, and when the runner exits without ending the scenario (its
+/// time limit, a signal), as the kernel closes the runner's end then. It
+/// leads a process group of its own, so a terminal's signals don't end it
+/// before it has let go, and its stdout and stderr are pipes, never the
+/// terminal, which would stop it for writing from the background.
+struct WaitedOn {
+    /// The holder, its stdin still open; `None` once it has been let go.
+    holder: Option<std::process::Child>,
+}
+
+impl WaitedOn {
+    /// Lets the backup's walk go on, and waits until the holder has: the
+    /// folder then leaves nothing out, and no read of the pipe waits.
+    async fn let_go(mut self) {
+        let mut holder = self.holder.take().expect("a holder not yet let go");
+        let stdin = holder.stdin.take();
+        // Closed through the spawn gate: a start in flight may have copied
+        // it into a child that has not run `exec` yet, and that copy would
+        // keep the holder waiting (decision 58).
+        spawn_gate::hold_blocking(move || drop(stdin))
+            .await
+            .expect("the spawn gate");
+        let ended = super::blocking(move || holder.wait_with_output())
+            .await
+            .expect("the holder exits");
+        assert!(
+            ended.status.success(),
+            "the holder let the pipe go: {}\n{}",
+            ended.status,
+            String::from_utf8_lossy(&ended.stderr)
+        );
+    }
+}
+
+impl Drop for WaitedOn {
+    /// A scenario that ends, or fails, without letting go lets go here. The
+    /// holder is reaped on a thread of its own: the runner's is shared.
+    fn drop(&mut self) {
+        if let Some(mut holder) = self.holder.take() {
+            drop(holder.stdin.take());
+            std::thread::spawn(move || {
+                let _ = holder.wait_with_output();
+            });
+        }
+    }
+}
+
+/// What the e2e runner's binary does as a pipe's holder, `place` the pipe's
+/// place in the plan's source: it makes the pipe in a folder of its own,
+/// links it at `place`, opens it for reading and writing (which doesn't
+/// wait for a reader: Linux documents it, macOS does it too) and says
+/// `held`. Then it waits for its stdin to end, and lets go:
+///
+/// 1. An empty file takes the pipe's place, so a walk that comes to the
+///    folder from then on reads that. A source already gone needs none.
+/// 2. It closes its writer, so the pipe has none.
+/// 3. Until no reader is left, it opens the pipe for writing again and
+///    closes it. On macOS a read that finds the pipe without writers ends
+///    only the first waiting read; the next one waits again until another
+///    writer has come and gone. Linux ends them all at once. An open that
+///    finds no reader is refused (`ENXIO`), and then none waits.
+///
+/// Its own folder goes with it, so it leaves nothing behind.
+pub(crate) fn hold_pipe(place: &std::path::Path) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let own = tempfile::tempdir().expect("the holder's own folder");
+    let pipe = own.path().join("pipe");
+    nix::unistd::mkfifo(&pipe, nix::sys::stat::Mode::S_IRWXU).expect("the pipe is made");
+    std::fs::hard_link(&pipe, place).expect("the pipe is linked into the source");
+    let writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&pipe)
+        .expect("the pipe opens");
+    let mut out = std::io::stdout();
+    writeln!(out, "held")
+        .and_then(|()| out.flush())
+        .expect("the holder says it holds the pipe");
+    // Ends when the runner closes its end, or exits.
+    let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+    let spare = own.path().join("spare");
+    // A failure here is reported only once every reader has been let go:
+    // a panic before that would leave a read waiting for good on macOS.
+    let placed = std::fs::write(&spare, b"")
+        .and_then(|()| std::fs::rename(&spare, place))
+        .or_else(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => Ok(()),
+            _ => Err(error),
+        });
+    drop(writer);
+    let deadline = Instant::now() + LET_GO_LIMIT;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(nix::fcntl::OFlag::O_NONBLOCK.bits())
+            .open(&pipe)
+        {
+            Err(error) if error.raw_os_error() == Some(nix::errno::Errno::ENXIO as i32) => break,
+            Err(error) => panic!("the pipe opens for writing: {error}"),
+            Ok(writer) => drop(writer),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a reader still holds the pipe after {LET_GO_LIMIT:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    placed.expect("the empty file takes the pipe's place");
+}
+
+#[given("the plan's source holds a file the backup waits on until it is let go")]
+async fn a_file_the_backup_waits_on(agent: &mut Agent) {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    let pipe = agent
+        .backup
+        .source
+        .clone()
+        .expect("a plan source")
+        .join(WAITED_ON);
+    let mut command =
+        std::process::Command::new(std::env::current_exe().expect("the runner's binary"));
+    command
+        .env(HOLD_PIPE_ENV, &pipe)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut holder = spawn_gate::hold_blocking(move || command.spawn())
+        .await
+        .expect("the spawn gate")
+        .expect("the pipe's holder starts");
+    let stdout = holder.stdout.take().expect("the holder's stdout");
+    // Kept from here, so that a step failing below still lets it go.
+    let mut waited_on = WaitedOn {
+        holder: Some(holder),
+    };
+    let said = super::blocking(move || {
+        let mut line = String::new();
+        BufReader::new(stdout).read_line(&mut line).map(|_| line)
+    })
+    .await
+    .expect("the holder's stdout reads");
+    if said != "held\n" {
+        let holder = waited_on.holder.take().expect("the holder");
+        let ended = super::blocking(move || holder.wait_with_output())
+            .await
+            .expect("the holder exits");
+        panic!(
+            "the holder made the pipe and opened it, not {said:?}: {}\n{}",
+            ended.status,
+            String::from_utf8_lossy(&ended.stderr)
+        );
+    }
+    agent.ops.waited_on = Some(waited_on);
+    agent
+        .backup
+        .filter
+        .custom_ignorefiles
+        .push(WAITED_ON.to_owned());
+    super::events_steps::save_daemon_config(agent, None).await;
+}
+
+#[when("the file the backup waits on is let go")]
+async fn the_waited_on_file_is_let_go(agent: &mut Agent) {
+    agent
+        .ops
+        .waited_on
+        .take()
+        .expect("the plan's source holds a file the backup waits on")
+        .let_go()
+        .await;
 }
 
 #[when(expr = "the daemon starts a backup of the plan {string}")]

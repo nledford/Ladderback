@@ -10,11 +10,14 @@ Feature: A repository's cache
     Given Ladderback is serving on loopback with the plan "home"
     And the configuration records the repository's ID
 
+  # A file in the plan's source that the backup waits on holds the worker
+  # running, its slot locked, until the file is let go.
   Scenario: A backup keeps its cache slot to itself while it runs
-    Given the plan's source holds many more files
+    Given the plan's source holds a file the backup waits on until it is let go
     When the daemon starts a backup of the plan "home"
     Then the repository's cache slot 0 is held while the backup runs
-    And the repository's cache slot 0 is free once the backup has ended
+    When the file the backup waits on is let go
+    Then the repository's cache slot 0 is free once the backup has ended
 
   Scenario: The next backup of the repository reads the cache the last one left
     When the daemon has finished 1 backup of the plan "home"

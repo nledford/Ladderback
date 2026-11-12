@@ -32,8 +32,14 @@ Feature: The operation lifecycle
     And the history page filtered to the plan "home" lists all three
     And a history page asked for 1000 operations answers, not refuses
 
+  # A file in the plan's source that the backup waits on holds the backup
+  # itself running: its worker reads that file before it saves anything,
+  # and the read waits until the file is let go, which this scenario never
+  # does. The cancel finds the backup running however fast the machine. A
+  # worker already waiting there can't wind down, so the daemon ends it once
+  # its 10 s grace is over; cancel.feature covers the polite wind-down.
   Scenario: Cancelling a running backup stops it
-    Given the plan's source holds many more files
+    Given the plan's source holds a file the backup waits on until it is let go
     And the plan runs a finally hook that notes it ran
     When the daemon starts a backup of the plan "home"
     And the operation is cancelled
