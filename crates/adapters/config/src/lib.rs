@@ -23,6 +23,7 @@ mod locate;
 #[cfg(test)]
 mod parity;
 mod read;
+mod record;
 mod schema;
 mod store;
 mod tables;

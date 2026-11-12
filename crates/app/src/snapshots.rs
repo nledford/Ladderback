@@ -6,13 +6,12 @@
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
-use domain::planning::RepositorySettings;
-use domain::{OperationId, RepositoryId};
+use domain::planning::RepositoryConfig;
+use domain::{OperationId, RepositoryAlias};
 use futures::StreamExt;
 
 use crate::ports::{
-    Engine, EngineError, EngineEvent, EngineResult, Job, RepositoryAccess, RunningJob,
-    SnapshotSummary,
+    Engine, EngineError, EngineEvent, EngineResult, Job, RunningJob, SnapshotSummary,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
@@ -37,35 +36,28 @@ impl ListSnapshots {
         Self { engine, resolve }
     }
 
-    /// Lists the repository's snapshots, newest first. `recorded` is the
-    /// repository ID the configuration holds for it, when it holds one: the
-    /// engine then lists that repository or none (§7.3).
+    /// Lists the snapshots of the repository the configuration's entry
+    /// `entry`, saved under `alias`, names, newest first. The engine lists
+    /// the repository the entry records the ID of, or none (§7.3), and the
+    /// daemon records the ID of the one it opened in an entry that records
+    /// none (§6.1, decision 57).
     pub async fn list(
         &self,
         op: OperationId,
-        settings: &RepositorySettings,
-        recorded: Option<&RepositoryId>,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
     ) -> Result<Vec<SnapshotSummary>, SnapshotError> {
-        let mut access = access(&self.resolve, settings).await?;
-        access.id = recorded.cloned();
+        let access = self
+            .resolve
+            .resolve_saved(alias, entry)
+            .await
+            .map_err(SnapshotError::Resolve)?
+            .access;
         let job = Job::Ls(access);
         let mut snapshots = run(self.engine.as_ref(), op, job).await?;
         snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
         Ok(snapshots)
     }
-}
-
-/// The settings with every reference resolved, ready for a job.
-#[allow(clippy::result_large_err)]
-async fn access(
-    resolve: &ResolveRepository,
-    settings: &RepositorySettings,
-) -> Result<RepositoryAccess, SnapshotError> {
-    Ok(resolve
-        .resolve(settings)
-        .await
-        .map_err(SnapshotError::Resolve)?
-        .access)
 }
 
 /// Runs the listing job to its end and returns its list.
@@ -97,14 +89,15 @@ mod tests {
 
     use async_trait::async_trait;
     use domain::execution::FailureReason;
+    use domain::planning::{Maintenance, RepositoryConfig};
     use domain::secrets::{SecretRef, SecretValue};
-    use domain::{OperationId, RepositoryId, SnapshotId, Timestamp, Uuid};
+    use domain::{OperationId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
     use std::collections::BTreeMap;
 
     use super::{ListSnapshots, SnapshotError};
     use crate::fakes::FakeSecrets;
     use crate::ports::{
-        Engine, EngineError, EngineResult, Job, JobControl, RunningJob, SnapshotSummary,
+        Engine, EngineError, EngineResult, Job, JobControl, RunningJob, SavedEntry, SnapshotSummary,
     };
     use crate::secrets::ResolveRepository;
 
@@ -177,6 +170,22 @@ mod tests {
         OperationId::from_uuid(Uuid::from_u128(0x5eed))
     }
 
+    #[allow(clippy::panic)]
+    fn alias() -> RepositoryAlias {
+        RepositoryAlias::parse("demo").unwrap_or_else(|e| panic!("an alias: {e:?}"))
+    }
+
+    /// The configuration's entry for the repository, recording `id`.
+    fn entry(id: Option<RepositoryId>) -> RepositoryConfig {
+        RepositoryConfig {
+            settings: settings(),
+            id,
+            maintenance: Maintenance::None,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        }
+    }
+
     // Fixed demo values; the `panic` they guard never happens, and a helper
     // outside a test body is production code to clippy.
     #[allow(clippy::panic)]
@@ -199,7 +208,7 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
         );
         let listed = use_case
-            .list(op(), &settings(), Some(&repository()))
+            .list(op(), &alias(), &entry(Some(repository())))
             .await
             .unwrap_or_else(|e| panic!("the listing: {e:?}"));
         assert_eq!(
@@ -220,6 +229,37 @@ mod tests {
         }
     }
 
+    /// The listing's job carries the entry it was made from, as it was read,
+    /// so the daemon can record in it the ID of the repository the job opens
+    /// (§6.1, decision 57).
+    #[tokio::test]
+    async fn a_listing_carries_the_entry_it_was_made_from() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(Vec::new())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let use_case = ListSnapshots::new(
+            engine.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        );
+        use_case
+            .list(op(), &alias(), &entry(None))
+            .await
+            .unwrap_or_else(|e| panic!("the listing: {e:?}"));
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(Job::Ls(access)) = seen.first() else {
+            panic!("listing runs Job::Ls, got {seen:?}");
+        };
+        assert_eq!(access.id, None);
+        assert_eq!(
+            access.entry,
+            Some(SavedEntry {
+                alias: alias(),
+                entry: entry(None),
+            })
+        );
+    }
+
     #[tokio::test]
     async fn a_repository_that_cannot_be_opened_fails_the_listing() {
         let reason = FailureReason::EngineFailed {
@@ -232,7 +272,7 @@ mod tests {
         let use_case =
             ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())));
         assert_eq!(
-            use_case.list(op(), &settings(), None).await,
+            use_case.list(op(), &alias(), &entry(None)).await,
             Err(SnapshotError::Failed(reason))
         );
     }

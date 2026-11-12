@@ -115,6 +115,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [54](decisions/54-early-release-builds.md) | Early release builds |
 | [55](decisions/55-a-backup-stopped-at-its-deadline-winds-down.md) | A backup stopped at its deadline winds down |
 | [56](decisions/56-the-calendar-a-retention-rule-counts-on.md) | The calendar a retention rule counts on |
+| [57](decisions/57-recording-the-id-of-a-repository-a-job-opened.md) | Recording the ID of a repository a job opened |
 | [58](decisions/58-one-child-starts-at-a-time.md) | One child starts at a time |
 | [59](decisions/59-where-the-workers-keep-rustics-cache.md) | Where the workers keep rustic's cache |
 

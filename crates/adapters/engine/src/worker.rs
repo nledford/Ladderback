@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use api::ErrorCode;
 use domain::execution::deadline::Deadline;
-use domain::{OperationId, SignedDuration, Timestamp};
+use domain::{OperationId, RepositoryId, SignedDuration, Timestamp};
 
 use crate::cache_lock::CacheLock;
 use crate::job::{
@@ -222,16 +222,22 @@ impl Context {
         Ok(())
     }
 
-    /// Reports that the job began its work, and arms the deadline watchdog
-    /// when the job has a budget. Called right before the repository index
-    /// is read, because the deadline counts from there. A deadline that has
-    /// passed already ends the process before this returns.
-    pub(crate) fn start(&self, budget: Option<SignedDuration>) -> io::Result<()> {
+    /// Reports that the job began its work on `repository`, the one it
+    /// opened, if any, and arms the deadline watchdog when the job has a
+    /// budget. Called right before the repository index is read, because
+    /// the deadline counts from there. A deadline that has passed already
+    /// ends the process before this returns.
+    pub(crate) fn start(
+        &self,
+        budget: Option<SignedDuration>,
+        repository: Option<&RepositoryId>,
+    ) -> io::Result<()> {
         let index_read_at = (self.process.clock)();
         self.events.emit(&WorkerEvent::Started {
             op_id: self.op_id,
             pid: self.pid,
             index_read_at,
+            repository: repository.cloned(),
         })?;
         if let Some(budget) = budget {
             let watchdog = Watchdog::start(
@@ -643,7 +649,8 @@ mod tests {
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);
         let ctx = Context::new(events, &spec, 1, process);
-        ctx.start(Some(SignedDuration::from_secs(60))).unwrap();
+        ctx.start(Some(SignedDuration::from_secs(60)), None)
+            .unwrap();
         ctx.disarm();
         // The deadline passes, many watchdog intervals (10 ms) go by.
         seconds.fetch_add(120, std::sync::atomic::Ordering::SeqCst);

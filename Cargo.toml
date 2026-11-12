@@ -150,6 +150,10 @@ tokio-tungstenite = { version = "0.26.2", default-features = false, features = [
 # `preserve_order` keeps a table's keys in file order, so the first unknown key
 # the config adapter reports is the first one in the file.
 toml = { version = "1.2.1", features = ["preserve_order"] }
+# The config adapter adds a recorded repository ID to `config.toml` as the
+# person wrote it, keeping every other byte (decision 57); already in the
+# tree through `proc-macro-crate`.
+toml_edit = "0.25.19"
 tower = "0.5.3"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = "2.5.8"

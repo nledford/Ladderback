@@ -1,9 +1,10 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
-use domain::planning::AgentConfig;
+use domain::planning::{AgentConfig, RepositoryConfig};
+use domain::{RepositoryAlias, RepositoryId};
 
-use crate::ports::{ConfigError, ConfigStore};
+use crate::ports::{ConfigError, ConfigStore, RecordError};
 
 /// A configuration that lives in memory, for use-case tests and acceptance
 /// scenarios. It keeps what the real store keeps, and nothing else: it never
@@ -33,6 +34,22 @@ impl ConfigStore for InMemoryConfigStore {
 
     async fn save(&self, config: &AgentConfig) -> Result<(), ConfigError> {
         *self.saved() = Some(config.clone());
+        Ok(())
+    }
+
+    async fn record_id(
+        &self,
+        alias: &RepositoryAlias,
+        read: &RepositoryConfig,
+        id: &RepositoryId,
+    ) -> Result<(), RecordError> {
+        let mut saved = self.saved();
+        let empty = AgentConfig::default();
+        let current = saved.as_ref().unwrap_or(&empty);
+        let recorded = current
+            .record_id(alias, read, id)
+            .map_err(RecordError::NotRecorded)?;
+        *saved = Some(recorded);
         Ok(())
     }
 }

@@ -5,20 +5,23 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use domain::planning::RepositorySettings;
+use domain::RepositoryAlias;
+use domain::planning::{RepositoryConfig, RepositorySettings};
 use domain::secrets::{
     MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Reference,
     SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError, TooMuchToMask,
     has_reference, too_many_rclone_credentials,
 };
 
-use crate::ports::{RepositoryAccess, SecretResolver};
+use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
 
 /// A repository with every reference resolved, ready to hand to the engine.
 /// `access` masks its own secrets, so this one's `Debug` form is derived.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedRepository {
-    /// `id` is `None`: the caller knows whether the repository was seen.
+    /// `id` and `entry` are `None`: the caller knows whether the repository
+    /// was seen, and where its settings came from. [`ResolveRepository::resolve_saved`]
+    /// sets both from the entry it resolves.
     pub access: RepositoryAccess,
     /// What the user should know about how the secrets were read, each once.
     pub warnings: Vec<SecretWarning>,
@@ -136,9 +139,30 @@ impl ResolveRepository {
                 options_cold,
                 secrets: run.secrets,
                 id: None,
+                entry: None,
             },
             warnings: run.warnings,
         })
+    }
+
+    /// Resolves the settings of the configuration's entry `entry`, saved
+    /// under `alias`, as a job that opens a saved repository needs them: the
+    /// access names the repository ID the entry records, so the engine opens
+    /// that repository or none (§7.3), and the entry as it was read, so the
+    /// daemon can record the ID of the repository the job opens in an entry
+    /// that records none (§6.1, decision 57).
+    pub async fn resolve_saved(
+        &self,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        let mut resolved = self.resolve(&entry.settings).await?;
+        resolved.access.id = entry.id.clone();
+        resolved.access.entry = Some(SavedEntry {
+            alias: alias.clone(),
+            entry: entry.clone(),
+        });
+        Ok(resolved)
     }
 }
 

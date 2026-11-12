@@ -98,6 +98,10 @@ pub struct RepositoriesWorld {
     began: Option<Timestamp>,
     /// The saved repositories the agent offered to create, once it decided.
     offered: Option<BTreeSet<RepositoryAlias>>,
+    /// A job made from a saved entry that hasn't opened its repository yet.
+    read: Option<Job>,
+    /// What the last job that opened a saved repository reported.
+    ended: Option<Vec<EngineEvent>>,
 }
 
 impl Default for RepositoriesWorld {
@@ -123,6 +127,8 @@ impl Default for RepositoriesWorld {
             outcome: None,
             began: None,
             offered: None,
+            read: None,
+            ended: None,
         }
     }
 }
@@ -777,4 +783,189 @@ fn is_not_offered(agent: &mut super::Agent, name: String) {
         .as_ref()
         .expect("the agent decided");
     assert!(!offered.contains(&alias(&name)), "offered {offered:?}");
+}
+
+/// An engine that, for every job, opens the repository whose ID it holds
+/// and ends the job well.
+struct Opens(RepositoryId);
+
+impl Opens {
+    fn events(&self) -> Vec<EngineEvent> {
+        vec![
+            EngineEvent::Started {
+                index_read_at: Timestamp::from_second(1_800_000_000).expect("a time"),
+                repository: Some(self.0.clone()),
+            },
+            EngineEvent::Succeeded(EngineResult::Fake { steps_completed: 1 }),
+        ]
+    }
+}
+
+#[async_trait]
+impl Engine for Opens {
+    async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+        Ok(RunningJob {
+            events: Box::pin(futures::stream::iter(self.events())),
+            control: Box::new(Stop),
+        })
+    }
+}
+
+#[given(
+    expr = "the agent has the repository {string} configured with its settings, and {string} at another location"
+)]
+async fn configured_twice(agent: &mut super::Agent, name: String, other: String) {
+    let settings = agent.repositories.settings.clone();
+    let mut elsewhere = settings.clone();
+    elsewhere.repository = "/media/demo/cold".to_owned();
+    elsewhere.repo_hot = Some("/media/demo/hot".to_owned());
+    let entry = |settings: RepositorySettings| RepositoryConfig {
+        id: None,
+        settings,
+        maintenance: Default::default(),
+        group_by: Default::default(),
+        hooks: Default::default(),
+    };
+    let config = AgentConfig::new(
+        Default::default(),
+        Default::default(),
+        BTreeMap::from([
+            (alias(&name), entry(settings)),
+            (alias(&other), entry(elsewhere)),
+        ]),
+        Vec::new(),
+    )
+    .expect("a valid configuration");
+    agent
+        .repositories
+        .store
+        .save(&config)
+        .await
+        .expect("the configuration saves");
+}
+
+#[given(expr = "the repository {string} was set by hand to be maintained from this agent")]
+async fn maintained_by_hand(agent: &mut super::Agent, name: String) {
+    let config = saved(agent).await;
+    let mut repositories = config.repositories().clone();
+    repositories
+        .get_mut(&alias(&name))
+        .expect("the entry")
+        .maintenance = Maintenance::Local;
+    let edited = AgentConfig::new(
+        Default::default(),
+        Default::default(),
+        repositories,
+        config.plans().to_vec(),
+    )
+    .expect("a valid configuration");
+    agent
+        .repositories
+        .store
+        .save(&edited)
+        .await
+        .expect("the configuration saves");
+}
+
+/// The job of `kind` the agent makes from the saved entry `name`, as it is
+/// stored now.
+async fn job_of(agent: &super::Agent, kind: &str, name: &str) -> Job {
+    use app::ports::{BackupJob, CheckJob, PruneJob};
+    use domain::execution::deadline::KeepDelete;
+    use domain::execution::plan_tags::PlanTags;
+    let entry = saved(agent)
+        .await
+        .repository(&alias(name))
+        .cloned()
+        .expect("the entry");
+    let repository = ResolveRepository::new(Arc::new(FakeSecrets::new()))
+        .resolve_saved(&alias(name), &entry)
+        .await
+        .expect("the entry's settings resolve")
+        .access;
+    match kind {
+        "backup" => Job::Backup(BackupJob {
+            repository,
+            sources: vec!["/home/demo".to_owned()],
+            tags: PlanTags::new(
+                domain::PlanId::parse("demo-home").expect("a plan ID"),
+                domain::AgentId::from_uuid(Uuid::from_u128(1)),
+            ),
+            extra_tags: Vec::new(),
+            label: None,
+            host: None,
+            filter: Default::default(),
+            deadline_budget: domain::SignedDuration::from_hours(1),
+        }),
+        "check" => Job::Check(CheckJob {
+            repository,
+            read_data: false,
+        }),
+        "prune" => Job::Prune(PruneJob {
+            repository,
+            keep_delete: KeepDelete::MIN,
+        }),
+        "snapshot listing" => Job::Ls(repository),
+        other => panic!("no job {other:?}"),
+    }
+}
+
+/// Runs `job` through the engine the agent records opened repositories
+/// with, to its end.
+async fn open(agent: &mut super::Agent, job: Job) {
+    use app::repositories::{ConfigWrites, RecordOpened};
+    use futures::StreamExt;
+    let engine = RecordOpened::new(
+        Arc::new(Opens(agent.repositories.id.clone())),
+        agent.repositories.store.clone(),
+        Arc::new(ConfigWrites::new(())),
+        Arc::new(|_| {}),
+    );
+    let events = engine
+        .run(op(), job)
+        .await
+        .expect("the engine takes the job")
+        .events
+        .collect()
+        .await;
+    agent.repositories.ended = Some(events);
+}
+
+#[when(
+    regex = r#"^an? (backup|check|prune|snapshot listing) of the repository "([^"]+)" opens it$"#
+)]
+async fn job_opens(agent: &mut super::Agent, kind: String, name: String) {
+    let job = job_of(agent, &kind, &name).await;
+    open(agent, job).await;
+}
+
+#[given(expr = "a check of the repository {string} opened it")]
+async fn check_opened(agent: &mut super::Agent, name: String) {
+    let job = job_of(agent, "check", &name).await;
+    open(agent, job).await;
+}
+
+#[given(expr = "a check of the repository {string} read its entry")]
+async fn check_read(agent: &mut super::Agent, name: String) {
+    agent.repositories.read = Some(job_of(agent, "check", &name).await);
+}
+
+#[when("that check opens the repository")]
+async fn that_check_opens(agent: &mut super::Agent) {
+    let job = agent
+        .repositories
+        .read
+        .take()
+        .expect("a check read its entry");
+    open(agent, job).await;
+}
+
+#[then(regex = r"^the (backup|check|prune|snapshot listing) ended as the engine reported it$")]
+fn ended_as_reported(agent: &mut super::Agent, _kind: String) {
+    let reported = Opens(agent.repositories.id.clone()).events();
+    assert_eq!(
+        agent.repositories.ended.as_ref(),
+        Some(&reported),
+        "the job's events changed on the way"
+    );
 }

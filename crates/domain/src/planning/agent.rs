@@ -107,6 +107,25 @@ impl std::fmt::Display for Violation {
 
 impl Error for Violation {}
 
+/// Why [`AgentConfig::record_id`] recorded nothing. The daemon tries again
+/// the next time a job opens the repository, so none of these is a failure
+/// of the job.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NotRecorded {
+    /// The entry is gone, or is no longer the entry the job was made from:
+    /// edited by hand, re-imported, moved, or given an ID meanwhile. The ID
+    /// the job read may not be the repository the entry names now.
+    Changed,
+    /// The entry records an ID already. One recorded is never replaced: a
+    /// location that opens another repository is refused
+    /// (`repository-replaced`, §7.3), not recorded over.
+    Recorded,
+    /// Another entry records the ID: the two are one repository under two
+    /// aliases, which a configuration can't hold (decision 49), so recording
+    /// it would make the file one the daemon refuses to load.
+    SameRepository { other: RepositoryAlias },
+}
+
 /// What an agent is configured to do. It is whole or it isn't there: the only
 /// way to build one is [`AgentConfig::new`], which checks the rules that
 /// reach across its parts, and the default, which is empty.
@@ -212,6 +231,53 @@ impl AgentConfig {
             .iter()
             .find(|(_, entry)| entry.is(settings, id))
             .map(|(alias, _)| alias)
+    }
+
+    /// The configuration with `id`, the repository a job opened, recorded
+    /// as the repository ID of the entry `alias` (§6.1, decision 57), the
+    /// rest of it as it is. Recorded only while that entry is still `read`,
+    /// the entry as the job that opened the repository read it, and records
+    /// no ID; and only when no other entry is that repository, by the rule
+    /// [`AgentConfig::new`] checks, so the result is a configuration it
+    /// would build.
+    pub fn record_id(
+        &self,
+        alias: &RepositoryAlias,
+        read: &RepositoryConfig,
+        id: &RepositoryId,
+    ) -> Result<Self, NotRecorded> {
+        let entry = match self.repositories.get(alias) {
+            Some(entry) if entry == read => entry,
+            // An earlier job made from the same read recorded this ID.
+            Some(entry)
+                if entry.id.as_ref() == Some(id)
+                    && read.id.is_none()
+                    && RepositoryConfig {
+                        id: None,
+                        ..entry.clone()
+                    } == *read =>
+            {
+                return Err(NotRecorded::Recorded);
+            }
+            _ => return Err(NotRecorded::Changed),
+        };
+        if entry.id.is_some() {
+            return Err(NotRecorded::Recorded);
+        }
+        let same = self
+            .repositories
+            .iter()
+            .find(|(other, config)| *other != alias && config.is(&entry.settings, Some(id)));
+        if let Some((other, _)) = same {
+            return Err(NotRecorded::SameRepository {
+                other: other.clone(),
+            });
+        }
+        let mut recorded = self.clone();
+        if let Some(entry) = recorded.repositories.get_mut(alias) {
+            entry.id = Some(id.clone());
+        }
+        Ok(recorded)
     }
 }
 
@@ -788,6 +854,137 @@ mod tests {
                 second: alias("nas-2"),
             })
         );
+    }
+
+    /// An entry with no ID, alone in a configuration with a plan.
+    fn unrecorded() -> AgentConfig {
+        config(
+            BTreeMap::from([(alias("nas"), at("/srv/demo-repo", None))]),
+            vec![plan("home", "nas")],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_id_is_recorded_in_an_entry_that_is_as_the_job_read_it() {
+        let before = unrecorded();
+        let read = before.repository(&alias("nas")).unwrap().clone();
+        let recorded = before
+            .record_id(&alias("nas"), &read, &repository_id("07"))
+            .unwrap();
+        let mut expected = read;
+        expected.id = Some(repository_id("07"));
+        assert_eq!(recorded.repository(&alias("nas")), Some(&expected));
+        assert_eq!(recorded.plans(), before.plans());
+        assert_eq!(recorded.agent(), before.agent());
+        assert_eq!(recorded.hooks(), before.hooks());
+    }
+
+    #[test]
+    fn an_entry_edited_since_the_job_read_it_records_nothing() {
+        let before = unrecorded();
+        let mut read = before.repository(&alias("nas")).unwrap().clone();
+        read.maintenance = Maintenance::Local;
+        assert_eq!(
+            before.record_id(&alias("nas"), &read, &repository_id("07")),
+            Err(NotRecorded::Changed)
+        );
+    }
+
+    #[test]
+    fn an_entry_moved_since_the_job_read_it_records_nothing() {
+        let before = unrecorded();
+        for moved in [
+            at("/srv/elsewhere", None),
+            RepositoryConfig {
+                settings: RepositorySettings {
+                    repo_hot: Some("/srv/demo-hot".to_owned()),
+                    ..location("/srv/demo-repo")
+                },
+                ..at("/srv/demo-repo", None)
+            },
+        ] {
+            assert_eq!(
+                before.record_id(&alias("nas"), &moved, &repository_id("07")),
+                Err(NotRecorded::Changed),
+                "{moved:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_entry_removed_since_the_job_read_it_records_nothing() {
+        let before = unrecorded();
+        let read = before.repository(&alias("nas")).unwrap().clone();
+        assert_eq!(
+            before.record_id(&alias("cloud"), &read, &repository_id("07")),
+            Err(NotRecorded::Changed)
+        );
+    }
+
+    #[test]
+    fn an_entry_that_records_an_id_keeps_it() {
+        let before = config(
+            BTreeMap::from([(alias("nas"), at("/srv/demo-repo", Some("08")))]),
+            Vec::new(),
+        )
+        .unwrap();
+        let read = before.repository(&alias("nas")).unwrap().clone();
+        assert_eq!(
+            before.record_id(&alias("nas"), &read, &repository_id("07")),
+            Err(NotRecorded::Recorded)
+        );
+    }
+
+    #[test]
+    fn an_entry_that_records_the_id_the_job_opened_is_recorded_already() {
+        let before = unrecorded();
+        let read = before.repository(&alias("nas")).unwrap().clone();
+        let after = before
+            .record_id(&alias("nas"), &read, &repository_id("07"))
+            .unwrap();
+        assert_eq!(
+            after.record_id(&alias("nas"), &read, &repository_id("07")),
+            Err(NotRecorded::Recorded)
+        );
+        assert_eq!(
+            after.record_id(&alias("nas"), &read, &repository_id("08")),
+            Err(NotRecorded::Changed)
+        );
+        let mut moved = read;
+        moved.maintenance = Maintenance::Local;
+        assert_eq!(
+            after.record_id(&alias("nas"), &moved, &repository_id("07")),
+            Err(NotRecorded::Changed)
+        );
+    }
+
+    #[test]
+    fn an_id_another_entry_records_is_not_recorded_twice() {
+        for (other, ours) in [("laptop", "nas"), ("usb", "nas")] {
+            let before = config(
+                BTreeMap::from([
+                    (alias(other), at("sftp:demo@nas:/srv/repo", Some("07"))),
+                    (alias(ours), at("/Volumes/nas/repo", None)),
+                ]),
+                Vec::new(),
+            )
+            .unwrap();
+            let read = before.repository(&alias(ours)).unwrap().clone();
+            assert_eq!(
+                before.record_id(&alias(ours), &read, &repository_id("07")),
+                Err(NotRecorded::SameRepository {
+                    other: alias(other)
+                })
+            );
+            let recorded = before
+                .record_id(&alias(ours), &read, &repository_id("08"))
+                .unwrap();
+            assert_eq!(
+                recorded.repository(&alias(ours)).unwrap().id,
+                Some(repository_id("08"))
+            );
+        }
     }
 
     fn location(text: &str) -> RepositorySettings {

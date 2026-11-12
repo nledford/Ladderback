@@ -59,12 +59,14 @@ fn identify_job() -> Job {
         options_cold: BTreeMap::new(),
         secrets: Vec::new(),
         id: Some(repository()),
+        entry: None,
     })
 }
 
 fn started() -> EngineEvent {
     EngineEvent::Started {
         index_read_at: t(0),
+        repository: None,
     }
 }
 
@@ -695,6 +697,7 @@ async fn events_arriving_past_the_deadline_fail_it_and_stop_the_engine_before_a_
     let budget = Some(SignedDuration::from_secs(60));
     let mut events = vec![EngineEvent::Started {
         index_read_at: t(-120),
+        repository: None,
     }];
     events.extend(std::iter::repeat_n(EngineEvent::Warning(warning()), 100));
     events.push(EngineEvent::Succeeded(EngineResult::Fake {
@@ -728,6 +731,7 @@ async fn the_deadline_counts_from_the_index_read() {
     });
     engine.send(EngineEvent::Started {
         index_read_at: t(-30),
+        repository: None,
     });
     settle().await;
     clock.advance(SignedDuration::from_secs(30));
@@ -746,6 +750,7 @@ async fn an_engine_that_stops_itself_after_its_deadline_failed_the_deadline() {
     let budget = Some(SignedDuration::from_secs(60));
     let engine = Scripted::new(vec![EngineEvent::Started {
         index_read_at: t(-120),
+        repository: None,
     }]);
     let op = RunOperation::new(Arc::new(engine), Arc::new(FakeClock::new(t(0))), log())
         .run(id(), Trigger::Manual, fake_job(budget), future::pending())

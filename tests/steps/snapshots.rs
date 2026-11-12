@@ -183,9 +183,19 @@ async fn lists(agent: &mut Agent) {
         agent.engine.clone(),
         ResolveRepository::new(Arc::new(SystemSecrets::new())),
     );
+    // A repository the scenario gave, under an alias of its own, recording
+    // no ID: the listing opens whatever is at the location.
+    let entry = domain::planning::RepositoryConfig {
+        settings,
+        id: None,
+        maintenance: domain::planning::Maintenance::None,
+        group_by: Default::default(),
+        hooks: Default::default(),
+    };
+    let alias = domain::RepositoryAlias::parse("demo").expect("an alias");
     agent.snapshots.listed = Some(
         use_case
-            .list(agent.next_snapshot_op(), &settings, None)
+            .list(agent.next_snapshot_op(), &alias, &entry)
             .await,
     );
 }

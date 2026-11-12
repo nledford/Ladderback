@@ -9,7 +9,7 @@ use super::{Context, Done};
 use crate::job::{FakeEndSpec, FakeJobSpec, OpResult, ProgressKind, WorkerEvent};
 
 pub(crate) fn run(ctx: &Context, job: &FakeJobSpec) -> Result<Done, JobError> {
-    ctx.start(job.deadline_budget)?;
+    ctx.start(job.deadline_budget, None)?;
     let events = &ctx.events;
     events.emit(&WorkerEvent::ProgressStart {
         key: 0,

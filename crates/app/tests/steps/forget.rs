@@ -550,6 +550,7 @@ impl Engine for Scripted {
         }
         let started = EngineEvent::Started {
             index_read_at: at(0),
+            repository: None,
         };
         let events: Vec<EngineEvent> = match &job {
             Job::Forget(_) | Job::Rewrite(_) if change.is_some() && change == self.fail_at => {

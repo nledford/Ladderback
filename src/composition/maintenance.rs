@@ -1211,5 +1211,17 @@ mod tests {
                 detail: "permission denied".to_owned(),
             })
         }
+
+        async fn record_id(
+            &self,
+            _alias: &domain::RepositoryAlias,
+            _read: &domain::planning::RepositoryConfig,
+            _id: &domain::RepositoryId,
+        ) -> Result<(), app::ports::RecordError> {
+            Err(app::ports::RecordError::Store(ConfigError::Unavailable {
+                file: "config.toml".to_owned(),
+                detail: "permission denied".to_owned(),
+            }))
+        }
     }
 }
