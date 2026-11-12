@@ -2174,6 +2174,17 @@ mod ui_event_tests {
             finished_at: "2026-11-09T10:05:00Z".into(),
         }
     }
+
+    fn retrying() -> UiEvent {
+        UiEvent::BackupRetrying {
+            operation: "018f0000-0000-7000-8000-000000000001".into(),
+            plan: "home".into(),
+            attempt: 2,
+            attempts: 3,
+            at: "2026-11-09T10:20:00Z".into(),
+        }
+    }
+
     #[test]
     fn each_event_serializes_with_its_kebab_case_type() {
         for (event, kind) in [
@@ -2211,6 +2222,7 @@ mod ui_event_tests {
                 },
                 "agent-offline",
             ),
+            (retrying(), "backup-retrying"),
         ] {
             let wire = to_value(&event).unwrap();
             assert_eq!(
@@ -2250,6 +2262,18 @@ mod ui_event_tests {
         })
         .unwrap();
         assert_eq!(wire.get("total"), Some(&Value::Null));
+        let wire = to_value(retrying()).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "type": "backup-retrying",
+                "operation": "018f0000-0000-7000-8000-000000000001",
+                "plan": "home",
+                "attempt": 2,
+                "attempts": 3,
+                "at": "2026-11-09T10:20:00Z",
+            })
+        );
     }
 
     #[test]
@@ -2282,6 +2306,7 @@ mod ui_event_tests {
                 agent: "demo".into(),
                 at: "2026-11-09T10:00:00Z".into(),
             },
+            retrying(),
         ];
         for event in events {
             assert_eq!(
