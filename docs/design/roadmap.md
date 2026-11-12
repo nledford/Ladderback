@@ -126,6 +126,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [63](decisions/63-the-ports-for-the-conditions-before-a-run.md) | The ports for the conditions before a run |
 | [64](decisions/64-installing-the-agent-as-a-user-service.md) | Installing the agent as a user service |
 | [65](decisions/65-pausing-live-updates.md) | Pausing live updates |
+| [66](decisions/66-the-server-accepts-through-the-spawn-gate.md) | The server accepts through the spawn gate |
 | [68](decisions/68-the-start-of-an-operation-is-announced-from-the-run.md) | The start of an operation is announced from the run |
 | [69](decisions/69-a-save-edits-the-file-a-person-wrote.md) | A save edits the file a person wrote |
 | [71](decisions/71-signing-macos-builds-without-a-developer-id.md) | Signing macOS builds without a Developer ID |

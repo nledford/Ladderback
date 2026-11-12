@@ -16,7 +16,7 @@ Rejected: closing or marking every descriptor above 2 in the child before `exec`
 
 Not covered:
 
-- A descriptor a library makes in two steps outside a start, such as a connection the HTTP server accepts or a socket it opens on macOS, can still reach a child that starts in that moment.
+- A descriptor a library makes in two steps outside a start, such as a socket the daemon opens to a backend on macOS, can still reach a child that starts in that moment. The HTTP server's connections and its listening socket are made through the gate (decision 66).
 - A hook call that its caller drops, rather than one that returns, lets go of the pipes without the gate, since a drop can't wait (its unreaped hook is killed with its group).
 - A password command's pipes are let go without the gate when the call ends. A start that forks in that moment copies the read end and closes it unread at its `exec`; meanwhile a write of the command's own descendant can go through rather than fail. Nothing reads it, so no secret goes anywhere (I4).
 - A program an `rclone` started that still holds its output keeps the thread reading it, and so the evaluation, until it lets go: killing `rclone` doesn't stop its children, at the deadline as at the end of an evaluation. An `rclone` that has said where it serves, but then never answers, is bounded only by rustic's REST backend (a request's 10-minute timeout, and its retries), not by the start's deadline, and can outlive the read timeout.
