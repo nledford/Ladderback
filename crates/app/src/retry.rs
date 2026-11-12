@@ -36,8 +36,23 @@ pub struct RunEnd {
 impl RunEnd {
     /// How `operation` ended, when it is a backup of a plan that has ended.
     pub fn of(operation: &Operation) -> Option<Self> {
-        let _ = (operation, OperationKind::Backup, OperationStatus::Queued);
-        todo!()
+        if operation.kind() != OperationKind::Backup {
+            return None;
+        }
+        let outcome = match operation.status() {
+            OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings => {
+                RunOutcome::Succeeded
+            }
+            OperationStatus::Failed { .. } => RunOutcome::Failed,
+            OperationStatus::Cancelled => RunOutcome::Cancelled,
+            OperationStatus::Queued | OperationStatus::Running => return None,
+        };
+        Some(Self {
+            operation: operation.id(),
+            plan: operation.target().plan.clone()?,
+            trigger: operation.trigger(),
+            outcome,
+        })
     }
 }
 
@@ -60,14 +75,22 @@ pub struct RunEnds(Mutex<mpsc::UnboundedReceiver<RunEnd>>);
 impl RunEnds {
     /// An end said and not read yet, if there is one.
     pub fn try_next(&self) -> Option<RunEnd> {
-        let _ = (&self.0, PoisonError::<()>::new);
-        todo!()
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .try_recv()
+            .ok()
     }
 
     /// Waits for the next end; `None` once every sender is gone.
     pub async fn next(&self) -> Option<RunEnd> {
-        let _ = &self.0;
-        todo!()
+        futures::future::poll_fn(|context| {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .poll_next_unpin(context)
+        })
+        .await
     }
 }
 
