@@ -22,7 +22,7 @@ mod panic_hook;
 mod progress;
 mod repository;
 mod stdio;
-mod tmp_files;
+pub(crate) mod tmp_files;
 mod watchdog;
 
 use std::cell::RefCell;

@@ -17,6 +17,7 @@
 )]
 
 mod cache_lock;
+mod cache_tidy;
 mod client;
 mod environment;
 pub mod job;
@@ -25,6 +26,7 @@ mod rclone;
 mod retention;
 pub mod worker;
 
+pub use cache_tidy::{CacheTidying, NotRemoved, Recorded, Removed, RemovedKind, tidy_cache};
 pub use client::WorkerEngine;
 pub use log_masking::Masked;
 pub use retention::{RusticRetention, RusticSources};

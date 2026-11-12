@@ -54,6 +54,8 @@ pub struct Events {
 struct Daemon {
     child: Child,
     addr: SocketAddr,
+    /// What it logged until it said where it listens.
+    start_log: String,
 }
 
 impl Drop for Daemon {
@@ -96,6 +98,11 @@ impl Events {
     /// The process ID of the daemon that is serving.
     pub(crate) fn pid(&self) -> u32 {
         self.daemon().child.id()
+    }
+
+    /// What the daemon that is serving logged until it listened.
+    pub(crate) fn start_log(&self) -> &str {
+        &self.daemon().start_log
     }
 
     /// Kills the daemon with SIGKILL and waits for the process to be gone:
@@ -263,7 +270,14 @@ fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
                     }
                 }
             });
-            (Some(Daemon { child, addr }), Outcome::Listening(addr))
+            (
+                Some(Daemon {
+                    child,
+                    addr,
+                    start_log: log,
+                }),
+                Outcome::Listening(addr),
+            )
         }
         None => {
             let status = child.wait().expect("the daemon exits");
