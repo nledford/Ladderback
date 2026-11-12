@@ -467,7 +467,7 @@ Feature: An agent's configuration
         password-env = "DEMO_PASSWORD"
         """
 
-    Scenario: A repository a save removes goes with the comment written above it
+    Scenario: A repository a save removes goes with the comment directly above it, and what is above that stays
       Given a config file holding:
         """
         schema = 1
@@ -476,6 +476,7 @@ Feature: An agent's configuration
         [repositories.nas]
         repository = "/srv/demo-repo"
         password-env = "DEMO_PASSWORD"
+        # password-env = "OLD_PASSWORD"
 
         # The old USB drive, retired.
         [repositories.usb]
@@ -492,6 +493,7 @@ Feature: An agent's configuration
         [repositories.nas]
         repository = "/srv/demo-repo"
         password-env = "DEMO_PASSWORD"
+        # password-env = "OLD_PASSWORD"
         """
 
   @e2e

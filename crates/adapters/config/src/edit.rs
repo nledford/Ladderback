@@ -371,6 +371,47 @@ keep-daily = 7
         );
     }
 
+    /// Only the comment directly above a removed setting goes with it.
+    #[test]
+    fn a_setting_a_save_removes_leaves_what_is_written_above_its_comment() {
+        let written = WRITTEN.replace(
+            "  maintenance = \"none\"   # the hub may own it later\n  options = { timeout = \"60s\" }\n",
+            "  # password-env = \"OLD_PASSWORD\"\n\n  # Slow, so wait.\n  options = { timeout = \"60s\" }\n  maintenance = \"none\"   # the hub may own it later\n",
+        );
+        let saved = changed(&written, |parts| {
+            let nas = parts.repositories.get_mut(&alias("nas")).expect("nas");
+            nas.settings.options.clear();
+        });
+        assert_eq!(
+            saved,
+            Some(written.replace(
+                "  # Slow, so wait.\n  options = { timeout = \"60s\" }\n",
+                ""
+            ))
+        );
+    }
+
+    /// What is written above the comment of the last setting of a table
+    /// stays at the end of the table when the setting goes.
+    #[test]
+    fn the_last_setting_a_save_removes_leaves_what_is_written_above_its_comment() {
+        let written = WRITTEN.replace(
+            "  options = { timeout = \"60s\" }\n",
+            "  # timeout = \"30s\"\n\n  # Slow, so wait.\n  options = { timeout = \"60s\" }\n",
+        );
+        let saved = changed(&written, |parts| {
+            let nas = parts.repositories.get_mut(&alias("nas")).expect("nas");
+            nas.settings.options.clear();
+        });
+        assert_eq!(
+            saved,
+            Some(written.replace(
+                "  # Slow, so wait.\n  options = { timeout = \"60s\" }\n\n",
+                ""
+            ))
+        );
+    }
+
     #[test]
     fn a_value_written_another_way_is_kept_until_it_changes_then_written_the_daemons_way() {
         let saved = changed(WRITTEN, |parts| {
@@ -417,6 +458,79 @@ keep-daily = 7
             parts.repositories.remove(&alias("usb"));
         });
         assert_eq!(saved.as_deref(), Some(WRITTEN));
+    }
+
+    /// `WRITTEN` with a second repository, `usb`, after `nas`, whose last
+    /// line is one put out of use.
+    fn two_repositories() -> String {
+        WRITTEN.replace(
+            "  options = { timeout = \"60s\" }\n",
+            "  options = { timeout = \"60s\" }\n  # password-env = \"OLD_PASSWORD\"\n\n# The old USB drive, retired.\n[repositories.usb]\nrepository = \"/Volumes/demo-usb/repo\"\npassword-env = \"DEMO_PASSWORD\"\n",
+        )
+    }
+
+    /// Only the comment directly above a removed repository goes with it:
+    /// a line above the blank line before that comment is the one before's.
+    #[test]
+    fn a_repository_a_save_removes_leaves_what_is_written_above_its_comment() {
+        let saved = changed(&two_repositories(), |parts| {
+            parts.repositories.remove(&alias("usb"));
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "  options = { timeout = \"60s\" }\n",
+                "  options = { timeout = \"60s\" }\n  # password-env = \"OLD_PASSWORD\"\n"
+            ))
+        );
+    }
+
+    /// A line written at the end of a removed repository goes with it, and
+    /// the comment above the next one stays.
+    #[test]
+    fn a_repository_a_save_removes_goes_with_the_lines_written_at_its_end() {
+        let two = two_repositories();
+        let saved = changed(&two, |parts| {
+            parts.repositories.remove(&alias("nas"));
+            plan_mut(parts, "home").repository = alias("usb");
+        });
+        assert_eq!(
+            saved,
+            Some(
+                two.replace(
+                    "\n# The NAS in the hall cupboard.\n[repositories.nas]\n  repository = '/srv/demo-repo'\n  password-env = \"DEMO_PASSWORD\"\n  maintenance = \"none\"   # the hub may own it later\n  options = { timeout = \"60s\" }\n  # password-env = \"OLD_PASSWORD\"\n",
+                    ""
+                )
+                .replace("repository = \"nas\"", "repository = \"usb\"")
+            )
+        );
+    }
+
+    /// The blank line above a removed repository's comment stays when the
+    /// next table's header is written directly below its last line.
+    #[test]
+    fn a_repository_a_save_removes_leaves_the_blank_line_above_it_for_the_next_table() {
+        let written = WRITTEN.replace(
+            "  options = { timeout = \"60s\" }\n\n[[plans]]",
+            "  options = { timeout = \"60s\" }\n\n# The old USB drive, retired.\n[repositories.usb]\nrepository = \"/Volumes/demo-usb/repo\"\npassword-env = \"DEMO_PASSWORD\"\n[[plans]]",
+        );
+        let saved = changed(&written, |parts| {
+            parts.repositories.remove(&alias("usb"));
+        });
+        assert_eq!(saved.as_deref(), Some(WRITTEN));
+    }
+
+    /// What is written above the comment of a removed repository stays
+    /// when nothing follows it in the file.
+    #[test]
+    fn a_repository_a_save_removes_at_the_end_leaves_what_is_written_above_its_comment() {
+        let written = format!(
+            "{WRITTEN}# keep-weekly = 4\n\n# The old USB drive, retired.\n[repositories.usb]\nrepository = \"/Volumes/demo-usb/repo\"\npassword-env = \"DEMO_PASSWORD\"\n"
+        );
+        let saved = changed(&written, |parts| {
+            parts.repositories.remove(&alias("usb"));
+        });
+        assert_eq!(saved, Some(format!("{WRITTEN}# keep-weekly = 4\n")));
     }
 
     /// A table back at its defaults is not in the daemon's layout: a save
