@@ -428,8 +428,9 @@ async fn state_over(
 
 /// Tells the channels of the agent's notification rules of the news on `bus`
 /// for as long as the daemon runs (§11). A notification that wasn't delivered
-/// is said in the log by its warning code, never with a secret (I4). A client
-/// that can't be built is said once, and nothing is sent.
+/// is said in the log by its warning code, never with a secret (I4), and an
+/// event the configuration couldn't be read for by the configuration's error
+/// code. A client that can't be built is said once, and nothing is sent.
 async fn notify_over(
     bus: &dyn EventBus,
     config: Arc<dyn ConfigStore>,
@@ -5936,6 +5937,23 @@ mod tests {
             "permission denied",
         ] {
             assert!(line.contains(expected), "{expected} in {line}");
+        }
+    }
+
+    /// The notifier says an unusable configuration by the code, the arguments
+    /// and the detail every route refuses it with, whichever way it can't be
+    /// used.
+    #[test]
+    fn each_way_a_configuration_cant_be_used_is_logged_as_the_routes_refuse_it() {
+        for (error, code, args, detail) in
+            super::repository_service_tests::unusable_configurations()
+        {
+            let message = english().error(code, &args, detail);
+            assert_eq!(
+                report_line(&english(), &Report::ConfigUnavailable(error.clone())),
+                format!("no notification was sent for an event: {code:?}: {message}"),
+                "{error:?}"
+            );
         }
     }
 
