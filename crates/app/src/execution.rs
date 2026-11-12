@@ -10,7 +10,7 @@ use domain::{OperationId, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
-use crate::announce::announce_end;
+use crate::announce::{announce_end, announce_start};
 use crate::log_write::save_within_bound;
 use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
@@ -217,6 +217,12 @@ impl RunOperation {
                         return;
                     };
                     let is_start = matches!(event, EngineEvent::Started { .. });
+                    // The repository the engine says it opened, for the news
+                    // of the start: a first job knew none (decision 57).
+                    let opened = match &event {
+                        EngineEvent::Started { repository, .. } => repository.clone(),
+                        _ => None,
+                    };
                     if let EngineEvent::Started { index_read_at, .. } = &event
                         && let Some(budget) = budget
                         && timer.is_terminated()
@@ -264,8 +270,20 @@ impl RunOperation {
                             }
                         };
                         match written {
-                            Written::Saved(Ok(())) => {}
-                            Written::Saved(Err(error)) => run.recording_errors.push(error),
+                            // Told only once the log has it, or has refused
+                            // it: a page that reads the history on the news
+                            // finds the operation running there (#305).
+                            Written::Saved(saved) => {
+                                if let Err(error) = saved {
+                                    run.recording_errors.push(error);
+                                }
+                                announce_start(
+                                    self.events.as_deref(),
+                                    &run.operation,
+                                    opened.as_ref(),
+                                )
+                                .await;
+                            }
                             Written::Cancelled => {
                                 control.stop().await;
                                 self.cancel(run);

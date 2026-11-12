@@ -18,8 +18,19 @@ use crate::ports::EventBus;
 /// engine says it opened, for a job that knew no ID when it was made (a
 /// first job, decision 57). `None` for an operation that is not running.
 pub fn start_of(operation: &Operation, opened: Option<&RepositoryId>) -> Option<UiEvent> {
-    let _ = (operation, opened);
-    todo!()
+    if *operation.status() != OperationStatus::Running {
+        return None;
+    }
+    Some(UiEvent::OperationStarted {
+        operation: operation.id().as_uuid().hyphenated().to_string(),
+        repository: operation
+            .target()
+            .repository
+            .as_ref()
+            .or(opened)
+            .map(|id| id.as_str().to_owned()),
+        started_at: operation.started_at()?.to_string(),
+    })
 }
 
 /// Tells `events`, when a run has a bus, that `operation` started, as
@@ -32,8 +43,11 @@ pub(crate) async fn announce_start(
     operation: &Operation,
     opened: Option<&RepositoryId>,
 ) {
-    let _ = (events, operation, opened);
-    todo!()
+    if let Some(events) = events
+        && let Some(news) = start_of(operation, opened)
+    {
+        events.publish(news).await;
+    }
 }
 
 /// The news that `operation` ended: a success or a failure, with the time it

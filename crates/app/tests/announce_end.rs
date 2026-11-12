@@ -370,6 +370,39 @@ async fn a_start_the_log_refuses_is_announced_all_the_same() {
     assert_eq!(news, Some(started_at(t(0))));
 }
 
+/// A run cancelled while the log holds the write that says it is running
+/// tells the page nothing: not that it started, which the log never said,
+/// and not how it ended, as no cancelled run does.
+#[tokio::test]
+async fn a_run_cancelled_before_the_log_has_its_start_announces_nothing() {
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let store = Arc::new(Held::start());
+    let use_case = RunOperation::new(
+        Arc::new(Plays::then_waits(vec![started()])),
+        Arc::new(FakeClock::new(t(0))),
+        store.clone(),
+    )
+    .with_events(bus);
+    let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+    let running = tokio::spawn(async move {
+        use_case
+            .run(id(), Trigger::Manual, job(None), async {
+                let _ = cancelled.await;
+            })
+            .await
+    });
+
+    store.arrived().await;
+    cancel.send(()).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(5), running)
+        .await
+        .expect("the run ended on the cancel")
+        .unwrap();
+    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(heard_so_far(&mut page), []);
+}
+
 /// An operation log that refuses the write that says an operation is
 /// running, and takes every other.
 struct RefusesTheStart(InMemoryOperationStore);
@@ -531,7 +564,7 @@ impl HookRunner for NotesHooks {
     }
 }
 
-/// A bus that notes each end it is told of.
+/// A bus that notes each start and end it is told of.
 struct NotesNews {
     journal: Journal,
 }

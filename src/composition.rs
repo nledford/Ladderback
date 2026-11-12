@@ -503,12 +503,12 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
     }
 }
 
-/// The engine as the daemon runs it (§4.2): a job's start, progress and
-/// warnings go to the event bus as [`UiEvent`]s on their way through, in the
-/// order the engine reported them. The daemon never coalesces: that is the
-/// worker's, once (§4.1). How an operation ended is not announced here: the
-/// run that records it announces it once the log has it (§4.4), and the
-/// engine's jobs include reads that are no operation's end.
+/// The engine as the daemon runs it (§4.2): a job's progress and warnings go
+/// to the event bus as [`UiEvent`]s on their way through, in the order the
+/// engine reported them. The daemon never coalesces: that is the worker's,
+/// once (§4.1). How an operation started and ended is not announced here:
+/// the run that records it announces each once the log has it (§4.4,
+/// #305). A job that is no operation tells the pages nothing (#308).
 struct EventEngine {
     inner: Arc<dyn Engine>,
     bus: Arc<dyn EventBus>,
@@ -517,19 +517,13 @@ struct EventEngine {
 #[async_trait]
 impl Engine for EventEngine {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-        // What the started event can name: the repository's ID, when the job
-        // knows it already. A first job's entry records none yet (decision
-        // 57); its start names the repository the engine says it opened.
-        let repository = match &job {
-            Job::Backup(backup) => backup.repository.id.clone(),
-            _ => None,
+        if !is_operation(&job) {
+            return self.inner.run(op, job).await;
         }
-        .map(|id| id.as_str().to_owned());
         let operation = op.as_uuid().hyphenated().to_string();
         let running = self.inner.run(op, job).await?;
         let mut publish = Publish {
             operation,
-            repository,
             progress: HashMap::new(),
         };
         let bus = Arc::clone(&self.bus);
@@ -554,12 +548,29 @@ impl Engine for EventEngine {
     }
 }
 
+/// Whether the job is an operation, which the history has a row for, so a
+/// page can show its progress and warnings there (§4.4). The reads (the look
+/// that names a repository, a listing, a prune's plan) and the initialising
+/// of a repository answer their request and are written to no log (§9): a
+/// page told of their news would show it on no row, or on the row of the
+/// run that read, which keeps none of it (#308).
+fn is_operation(job: &Job) -> bool {
+    match job {
+        Job::Identify(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
+        Job::Fake(_)
+        | Job::Backup(_)
+        | Job::Forget(_)
+        | Job::Rewrite(_)
+        | Job::Prune(_)
+        | Job::Check(_) => true,
+    }
+}
+
 /// Turns one run's [`EngineEvent`]s into [`UiEvent`]s, but for how the run
-/// ended (§4.4). Progress bars are stateful: each key remembers where it is,
-/// so an `Advance` is a number the page can show.
+/// started and ended (§4.4). Progress bars are stateful: each key remembers
+/// where it is, so an `Advance` is a number the page can show.
 struct Publish {
     operation: String,
-    repository: Option<String>,
     progress: HashMap<u32, (u64, Option<u64>)>,
 }
 
@@ -567,17 +578,6 @@ impl Publish {
     fn ui(&mut self, event: &EngineEvent) -> Option<UiEvent> {
         use EngineEvent as E;
         match event {
-            E::Started {
-                index_read_at,
-                repository,
-            } => Some(UiEvent::OperationStarted {
-                operation: self.operation.clone(),
-                repository: self
-                    .repository
-                    .clone()
-                    .or_else(|| repository.as_ref().map(|id| id.as_str().to_owned())),
-                started_at: index_read_at.to_string(),
-            }),
             E::Progress(progress) => self.progress_ui(progress),
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
@@ -588,10 +588,11 @@ impl Publish {
                     .map(|item| vec![MsgArg::Text(item.clone())])
                     .unwrap_or_default(),
             }),
-            // The engine's end comes before the run's ending hooks and its
-            // final write to the log, so a page told of it could read a
-            // history that doesn't have it yet. The run announces the end.
-            E::Succeeded(_) | E::Failed(_) => None,
+            // The engine's start comes before the run's write that says the
+            // operation is running, and its end before the run's ending hooks
+            // and final write, so a page told of either could read a history
+            // that doesn't have it yet. The run announces both.
+            E::Started { .. } | E::Succeeded(_) | E::Failed(_) => None,
         }
     }
 
@@ -5525,7 +5526,6 @@ mod tests {
             assert_eq!(warning_code(kind), code);
             let mut publish = Publish {
                 operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
-                repository: None,
                 progress: HashMap::new(),
             };
             let found = EngineEvent::Warning(domain::execution::Warning {
