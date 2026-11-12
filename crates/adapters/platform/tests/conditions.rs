@@ -257,13 +257,22 @@ fn fifo(path: &Path) {
     assert!(made, "mkfifo makes {}", path.display());
 }
 
-/// Lets a reader stuck on `path` go, so the runtime can end.
-fn release(path: PathBuf) {
-    std::thread::spawn(move || {
-        if let Ok(mut pipe) = std::fs::OpenOptions::new().write(true).open(path) {
-            let _ = std::io::Write::write_all(&mut pipe, b"Mains\n");
-        }
-    });
+/// Lets the read given up on `path` go, so the runtime, which waits for its
+/// blocking tasks, can end. Opening the pipe for writing waits for its
+/// reader, so this returns once the reader has come to the pipe, and the
+/// scratch folder may go after that, never before: a writer that came to
+/// the pipe after its folder went could never reach the reader. Only a read
+/// given up is still running (the adapters answer anything else once the
+/// read has ended), so a read that answered holds no pipe to let go.
+fn release<T>(path: &Path, answer: &Result<T, PlatformError>) {
+    if !matches!(answer, Err(PlatformError::TimedOut { .. })) {
+        return;
+    }
+    let mut pipe = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("the read given up opens the pipe");
+    std::io::Write::write_all(&mut pipe, b"Mains\n").expect("a line for the reader");
 }
 
 #[tokio::test]
@@ -273,12 +282,15 @@ async fn a_read_that_stalls_is_given_up_at_the_bound() {
     fifo(&root.join("AC/type"));
     let started = Instant::now();
     let answer = SysfsPower::at(&root).with_timeout(SHORT).source().await;
+    let took = started.elapsed();
+    // Before the asserts: a test that panicked with the reader stalled
+    // would wait for it on unwinding, and never end.
+    release(&root.join("AC/type"), &answer);
     assert!(
         matches!(answer, Err(PlatformError::TimedOut { .. })),
         "{answer:?}"
     );
-    assert!(started.elapsed() < SHORT * 10);
-    release(root.join("AC/type"));
+    assert!(took < SHORT * 10, "gave up after {took:?}");
 
     let root = sysfs.machine(&[("eth0", &[])]);
     fifo(&root.join("eth0/flags"));
@@ -286,11 +298,11 @@ async fn a_read_that_stalls_is_given_up_at_the_bound() {
         .with_timeout(SHORT)
         .is_online()
         .await;
+    release(&root.join("eth0/flags"), &answer);
     assert!(
         matches!(answer, Err(PlatformError::TimedOut { .. })),
         "{answer:?}"
     );
-    release(root.join("eth0/flags"));
 }
 
 /// Network interfaces as the kernel lists them. `flags` holds what the
