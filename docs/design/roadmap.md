@@ -118,6 +118,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [57](decisions/57-recording-the-id-of-a-repository-a-job-opened.md) | Recording the ID of a repository a job opened |
 | [58](decisions/58-one-child-starts-at-a-time.md) | One child starts at a time |
 | [59](decisions/59-where-the-workers-keep-rustics-cache.md) | Where the workers keep rustic's cache |
+| [60](decisions/60-how-a-plan-s-next-run-is-worked-out.md) | How a plan's next run is worked out |
 
 ## 17. Open questions
 

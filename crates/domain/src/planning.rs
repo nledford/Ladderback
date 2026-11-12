@@ -31,7 +31,7 @@ pub use repository::{
     check_options, masked_options,
 };
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
-pub use schedule::{CronExpression, Schedule};
+pub use schedule::{Cadence, CronExpression, Interval, MIN_INTERVAL, NoNextRun, Schedule};
 
 /// What a value the model refuses was meant to be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +47,8 @@ pub enum ValueKind {
     Nice,
     Cron,
     Duration,
+    /// A schedule's `every`, shorter than a minute or longer than 366 days.
+    Interval,
     Attempts,
     KeepCount,
     KeepWithin,

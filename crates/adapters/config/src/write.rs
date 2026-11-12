@@ -278,7 +278,7 @@ fn plan(plan: &Plan) -> PlanTable {
 
 fn schedule(schedule: &Schedule) -> ScheduleTable {
     ScheduleTable {
-        cron: Some(schedule.cron().as_str().to_owned()),
+        cron: schedule.cron().map(|cron| cron.as_str().to_owned()),
         jitter: schedule.jitter().map(format_duration),
         catch_up: (!schedule.catch_up()).then_some(false),
         on_ac_power: schedule.on_ac_power().then_some(true),
