@@ -297,7 +297,16 @@ async fn an_rclone_that_never_serves_holds_up_no_other_start() {
     let outcome = evaluation.await.unwrap();
     other_start.join().unwrap();
     assert!(free, "another start waited for an rclone that never served");
-    outcome.expect_err("the stand-in exits without serving");
+    // Its output ends as it exits, which fails the open at once rather than
+    // at the start's deadline.
+    let error = outcome.expect_err("the stand-in exits without serving");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(
+        detail.contains("rclone exited before it could start"),
+        "{detail}"
+    );
 }
 
 /// An `rclone:` repository is read through the address its server says it

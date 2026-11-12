@@ -12,13 +12,17 @@
 //! alone: each start makes its pipes inside the call that starts the child,
 //! so they are close-on-exec once it lets go. Once the server says where it
 //! serves, the repository is rustic's own REST backend at that address,
-//! named `rclone:<path>`, as in rustic's.
+//! named `rclone:<path>`, as in rustic's. Unlike rustic's, the starts of
+//! one open have [`START_TIMEOUT`] to answer: an `rclone` that hasn't by
+//! then is killed and reaped, and the open fails (#326).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
-use std::process::{Child, ChildStderr, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use domain::secrets::{Redactor, SecretValue};
@@ -44,6 +48,22 @@ const MAX_LINE_BYTES: usize = 64 * 1024;
 /// environment; an older one would serve the repository to anyone on the
 /// machine, so rustic refuses it, and so does this.
 const OLDEST_VERSION: (u64, u64, u64) = (1, 52, 2);
+
+/// How long the `rclone` starts of one open have, from when the open
+/// begins, to serve: `rclone version`'s answer and each server's address.
+/// A start that hasn't by then is given up, and its `rclone` killed and
+/// reaped (#326). Longer than rclone's own connection timeout
+/// (`--contimeout`, a minute by default), so an `rclone` that can't reach
+/// its remote says so in its own words first.
+const START_TIMEOUT: Duration = Duration::from_secs(120);
+
+// The use case gives up on a read at its read timeout, and nothing stops
+// the thread it gave up on: so the starts end well before it, and no
+// `rclone` start of an evaluation outlives the read that waited for it.
+const _: () = assert!(
+    START_TIMEOUT.as_secs() < app::maintenance::READ_TIMEOUT.as_secs().unsigned_abs(),
+    "an rclone start must end before the read that waits for it gives up"
+);
 
 /// The user and password an `rclone` server is started with, and the
 /// repository read through it with: random, and secrets of their own, which
@@ -80,11 +100,23 @@ pub(crate) struct Backends {
 /// The backends of `of`, as its `to_backends` builds them: the cold half
 /// reads `options` and `options-cold`, the hot half `options` and
 /// `options-hot`, a half's own option replacing the shared one. A server
-/// is started with `credentials`, and its output logged through `redactor`.
+/// is started with `credentials`, and its output logged through `redactor`;
+/// the starts have [`START_TIMEOUT`] to serve.
 pub(crate) fn backends(
     of: &BackendOptions,
     credentials: &ServerCredentials,
     redactor: &Redactor,
+) -> RusticResult<Backends> {
+    backends_within(of, credentials, redactor, START_TIMEOUT)
+}
+
+/// [`backends`], with the `rclone` starts of the open given `within` to
+/// serve.
+fn backends_within(
+    of: &BackendOptions,
+    credentials: &ServerCredentials,
+    redactor: &Redactor,
+    within: Duration,
 ) -> RusticResult<Backends> {
     let mut servers = Vec::new();
     let repository = of.repository.as_ref().ok_or_else(|| {
@@ -96,6 +128,7 @@ pub(crate) fn backends(
     let mut serving = Serving {
         credentials,
         redactor,
+        deadline: Deadline::from_now(within),
         servers: &mut servers,
     };
     let mut options = of.options.clone();
@@ -115,32 +148,31 @@ pub(crate) fn backends(
     })
 }
 
-/// [`backends`], with the `rclone` starts of the open given `within` to
-/// serve.
-fn backends_within(
-    of: &BackendOptions,
-    credentials: &ServerCredentials,
-    redactor: &Redactor,
-    within: std::time::Duration,
-) -> RusticResult<Backends> {
-    let _ = (of, credentials, redactor, within);
-    todo!()
-}
-
 /// How long the `rclone` starts of one open have left to serve.
 #[derive(Clone, Copy)]
 struct Deadline {
-    since: std::time::Instant,
-    within: std::time::Duration,
+    since: Instant,
+    within: Duration,
 }
 
 impl Deadline {
     /// `within` from now.
-    fn from_now(within: std::time::Duration) -> Self {
+    fn from_now(within: Duration) -> Self {
         Self {
-            since: std::time::Instant::now(),
+            since: Instant::now(),
             within,
         }
+    }
+
+    /// What is left of it: none once it has passed.
+    fn left(self) -> Duration {
+        self.within.saturating_sub(self.since.elapsed())
+    }
+
+    /// A start that is still waiting when it passes is given up, with this.
+    fn missed(self, what: &'static str) -> Box<RusticError> {
+        RusticError::new(ErrorKind::ExternalCommand, what)
+            .attach_context("timeout", format!("{:?}", self.within))
     }
 }
 
@@ -149,6 +181,7 @@ impl Deadline {
 struct Serving<'a> {
     credentials: &'a ServerCredentials,
     redactor: &'a Redactor,
+    deadline: Deadline,
     servers: &'a mut Vec<Server>,
 }
 
@@ -193,10 +226,7 @@ impl Serving<'_> {
             None => true,
         };
         if use_password && rclone_command.is_none() {
-            supported_version(
-                Command::new("rclone"),
-                Deadline::from_now(std::time::Duration::MAX),
-            )?;
+            supported_version(Command::new("rclone"), self.deadline)?;
         }
         let mut rclone_command: CommandInput = rclone_command
             .map_or(DEFAULT_COMMAND, String::as_str)
@@ -230,15 +260,25 @@ impl Serving<'_> {
                 .attach_context("rclone_command", rclone_command.to_string())
             })?,
         };
-        let mut output = BufReader::new(server.child.stderr.take().ok_or_else(|| {
+        let output = BufReader::new(server.child.stderr.take().ok_or_else(|| {
             RusticError::new(
                 ErrorKind::ExternalCommand,
                 "Could not get stderr of rclone. Please check if rclone is installed and working correctly.",
             )
         })?);
-        let address = match options.get("rest-url") {
-            Some(address) => address.clone(),
-            None => served_at(&mut server.child, &mut output, self.redactor)?,
+        // The output is read on a thread of its own from the start, which
+        // hands over the address, so the wait for it can end at the
+        // deadline whatever the server does meanwhile.
+        let rest_url = options.get("rest-url").cloned();
+        let (said, heard) = sync_channel(1);
+        server.reader = Some(read_output(
+            output,
+            self.redactor.clone(),
+            rest_url.is_none().then_some(said),
+        )?);
+        let address = match rest_url {
+            Some(address) => address,
+            None => served_at(&mut server.child, &heard, self.deadline)?,
         };
         let url = if use_password {
             let Some(host) = address.strip_prefix("http://") else {
@@ -253,7 +293,6 @@ impl Serving<'_> {
             address
         };
         let rest = RestBackend::new(url, options)?;
-        server.reader = Some(keep_reading(output, self.redactor.clone())?);
         self.servers.push(server);
         Ok(Arc::new(Served {
             location: format!("rclone:{path}"),
@@ -343,37 +382,22 @@ impl Drop for Server {
 }
 
 /// Fails unless `rclone`, run as `rclone version`, is [`OLDEST_VERSION`] or
-/// newer. Its start holds the gate, the wait for its answer doesn't.
+/// newer, or when it hasn't answered by `deadline`. Its start holds the
+/// gate, the wait for its answer doesn't. Only its first line is read, and
+/// once it is, the version is killed if it is still running, and reaped.
 fn supported_version(mut rclone: Command, deadline: Deadline) -> RusticResult<()> {
-    let _ = deadline;
-    let failed = |error: std::io::Error| {
-        RusticError::with_source(
-            ErrorKind::ExternalCommand,
-            "Experienced an error while running `rclone version` command. Please check if rclone is installed correctly and is in your PATH.",
-            error,
-        )
-    };
     let _ = rclone
         .arg("version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = spawn_gate::hold(|| rclone.spawn()).map_err(failed)?;
-    let mut first = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        let mut stdout = BufReader::new(stdout);
-        let read = read_line(&mut stdout, &mut first);
-        // The rest of its output is not read: letting go of the pipe ends
-        // any write of it. Through the gate, so no start in flight holds a
-        // copy of its read end that would keep the write going (decision 58).
-        spawn_gate::hold(|| drop(stdout));
-        if let Err(error) = read {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(failed(error));
-        }
-    }
-    let _ = child.wait().map_err(failed)?;
+    let mut child = spawn_gate::hold(|| rclone.spawn()).map_err(version_failed)?;
+    let first = first_line(&mut child, deadline);
+    // What it does after its first line is not waited for. An `rclone
+    // version` that has exited already is only reaped.
+    let _ = child.kill();
+    let _ = child.wait().map_err(version_failed)?;
+    let first = first?;
     let first = String::from_utf8_lossy(&first);
     match version_of(&first) {
         Some(version) if version >= OLDEST_VERSION => Ok(()),
@@ -409,24 +433,95 @@ fn version_of(first_line: &str) -> Option<(u64, u64, u64)> {
     numbers.next().is_none().then_some(version)
 }
 
-/// Reads the server's output until it says where it serves, and returns
-/// that address. Each other line is logged, masked (I4).
-fn served_at(
-    child: &mut Child,
-    output: &mut BufReader<ChildStderr>,
-    redactor: &Redactor,
-) -> RusticResult<String> {
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        let read = read_line(output, &mut line).map_err(|error| {
+/// The failure of an `rclone version` that could not be run or read.
+fn version_failed(error: std::io::Error) -> Box<RusticError> {
+    RusticError::with_source(
+        ErrorKind::ExternalCommand,
+        "Experienced an error while running `rclone version` command. Please check if rclone is installed correctly and is in your PATH.",
+        error,
+    )
+}
+
+/// The first line `rclone version` writes, read on a thread of its own so
+/// the wait for it ends at `deadline`; a version still silent then is
+/// killed, which ends its output, and so the thread, which is joined before
+/// this returns. An output that ends first is an empty line.
+fn first_line(child: &mut Child, deadline: Deadline) -> RusticResult<Vec<u8>> {
+    let stdout = child.stdout.take().ok_or_else(|| {
+        RusticError::new(
+            ErrorKind::ExternalCommand,
+            "Could not get the output of `rclone version`. Please check if rclone is installed correctly and is in your PATH.",
+        )
+    })?;
+    let (said, heard) = sync_channel(1);
+    let reader = read_first_line(stdout, said)?;
+    let answer = heard.recv_timeout(deadline.left());
+    if answer.is_err() {
+        let _ = child.kill();
+    }
+    let _ = reader.join();
+    match answer {
+        Ok(read) => read.map_err(version_failed),
+        Err(RecvTimeoutError::Timeout) => Err(deadline.missed(
+            "`rclone version` did not answer within {timeout}. Please check if rclone is installed and working correctly.",
+        )),
+        // The thread ended without a word, which only a panic does.
+        Err(RecvTimeoutError::Disconnected) => Err(RusticError::new(
+            ErrorKind::Internal,
+            "Could not read the output of `rclone version`.",
+        )),
+    }
+}
+
+/// Reads the first line of `stdout` on a thread of its own and sends it
+/// through `said`.
+fn read_first_line(
+    stdout: ChildStdout,
+    said: SyncSender<std::io::Result<Vec<u8>>>,
+) -> RusticResult<JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("rclone-version".to_owned())
+        .spawn(move || {
+            let mut stdout = BufReader::new(stdout);
+            let mut first = Vec::new();
+            let read = read_line(&mut stdout, &mut first);
+            // Handed over first, so an answer that came in time is never
+            // late for waiting on the gate below.
+            let _ = said.send(read.map(|_| first));
+            // The rest of its output is not read: letting go of the pipe
+            // ends any write of it. Through the gate, so no start in flight
+            // holds a copy of its read end that would keep the write going
+            // (decision 58).
+            spawn_gate::hold(|| drop(stdout));
+        })
+        .map_err(|error| {
             RusticError::with_source(
-                ErrorKind::InputOutput,
-                "Experienced an error while reading rclone output. Please check if rclone is installed and working correctly.",
+                ErrorKind::Internal,
+                "Could not start reading the output of `rclone version`.",
                 error,
             )
-        })?;
-        let Some(cut) = read else {
+        })
+}
+
+/// Waits until the server says where it serves, and returns that address,
+/// for as long as `deadline` leaves. A server that hasn't said by then is
+/// given up, and stopped and reaped as its [`Server`] is dropped.
+fn served_at(
+    child: &mut Child,
+    heard: &Receiver<std::io::Result<String>>,
+    deadline: Deadline,
+) -> RusticResult<String> {
+    match heard.recv_timeout(deadline.left()) {
+        Ok(Ok(address)) => Ok(address),
+        Ok(Err(error)) => Err(RusticError::with_source(
+            ErrorKind::InputOutput,
+            "Experienced an error while reading rclone output. Please check if rclone is installed and working correctly.",
+            error,
+        )),
+        Err(RecvTimeoutError::Timeout) => Err(deadline.missed(
+            "rclone did not say where it serves within {timeout}. Please check if rclone can reach the repository and is working correctly.",
+        )),
+        Err(RecvTimeoutError::Disconnected) => {
             // Its output ended: it exited, or it never will say. Killing an
             // `rclone` that has exited keeps the status it exited with.
             let _ = child.kill();
@@ -437,16 +532,12 @@ fn served_at(
                     error,
                 )
             })?;
-            return Err(RusticError::new(
+            Err(RusticError::new(
                 ErrorKind::ExternalCommand,
                 "rclone exited before it could start the REST server: `{exit_status}`. Please check the exit status for more information.",
             )
-            .attach_context("exit_status", status.to_string()));
-        };
-        if let Some(address) = address_in(&String::from_utf8_lossy(&line)) {
-            return Ok(address);
+            .attach_context("exit_status", status.to_string()))
         }
-        log_line(&line, cut, redactor);
     }
 }
 
@@ -459,20 +550,46 @@ fn address_in(line: &str) -> Option<String> {
     Some(address.trim_end().trim_matches(['[', ']']).to_owned())
 }
 
-/// Reads the rest of the server's output on a thread of its own, so a full
-/// pipe never stops it, and logs each line, masked. The thread ends when the
-/// output does: when the server is stopped, unless a program it started
-/// still holds it; [`Server`]'s drop waits for that.
-fn keep_reading(
+/// Reads the server's output on a thread of its own, so a full pipe never
+/// stops it, and logs each line, masked (I4). Until `serving` has an
+/// address, the first line that says where the server serves goes to it,
+/// unlogged, as rustic leaves it, and so does a failure to read; with no
+/// `serving`, every line is logged. The thread ends when the output does:
+/// when the server is stopped, unless a program it started still holds it;
+/// [`Server`]'s drop waits for that.
+fn read_output(
     mut output: BufReader<ChildStderr>,
     redactor: Redactor,
+    mut serving: Option<SyncSender<std::io::Result<String>>>,
 ) -> RusticResult<JoinHandle<()>> {
     std::thread::Builder::new()
         .name("rclone-output".to_owned())
         .spawn(move || {
             let mut line = Vec::new();
-            while let Ok(Some(cut)) = read_line(&mut output, &mut line) {
-                log_line(&line, cut, &redactor);
+            loop {
+                match read_line(&mut output, &mut line) {
+                    Ok(Some(cut)) => {
+                        // Looked for only until it is handed over.
+                        let address = serving
+                            .as_ref()
+                            .and_then(|_| address_in(&String::from_utf8_lossy(&line)));
+                        match address {
+                            Some(address) => {
+                                if let Some(said) = serving.take() {
+                                    let _ = said.send(Ok(address));
+                                }
+                            }
+                            None => log_line(&line, cut, &redactor),
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        if let Some(said) = serving.take() {
+                            let _ = said.send(Err(error));
+                        }
+                        break;
+                    }
+                }
                 line.clear();
             }
         })

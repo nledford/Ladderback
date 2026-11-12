@@ -181,6 +181,14 @@ async fn open_logged(filter: Option<&str>, credential: &str) -> String {
             "the open's records reached the daemon's log: {log}"
         );
     }
+    // The line that says where the server serves is taken as its address,
+    // not logged as its output, as rustic's backend leaves it (at `debug`,
+    // the stand-in's command, logged as the command rclone starts with,
+    // quotes it).
+    assert!(
+        !log.contains("rclone output: Serving restic REST API"),
+        "the serving line was logged: {log}"
+    );
     log
 }
 
