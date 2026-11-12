@@ -884,6 +884,7 @@ dependencies = [
  "testkit",
  "tokio",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]
@@ -7081,6 +7082,7 @@ dependencies = [
  "indexmap 2.14.2",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

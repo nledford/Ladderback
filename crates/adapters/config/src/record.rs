@@ -7,23 +7,96 @@ use std::path::Path;
 use app::ports::{NotInPlace, RecordError};
 use domain::planning::AgentConfig;
 use domain::{RepositoryAlias, RepositoryId};
+use toml_edit::{DocumentMut, Item, Value};
 
-use crate::schema::Schemas;
+use crate::schema::{Schemas, over_cap, parse};
+
+/// The key an entry records its repository ID under.
+const KEY: &str = "repository-id";
+
+/// The byte order mark a file may start with.
+const BOM: &str = "\u{feff}";
 
 /// `text` with `repository-id` set to `id` in the entry `alias`, and nothing
-/// else in it changed.
+/// else in it changed. The edit is made on the text without a byte order
+/// mark and with `\n` line endings, which is what the editor keeps, and the
+/// file's own mark and line ending are put back: a file whose lines end
+/// both ways has no own ending, and isn't edited.
 pub(crate) fn with_id(
     text: &str,
     alias: &RepositoryAlias,
     id: &RepositoryId,
 ) -> Result<String, NotInPlace> {
-    let _ = (text, alias, id);
-    todo!()
+    let (bom, body) = text
+        .strip_prefix(BOM)
+        .map_or(("", text), |body| (BOM, body));
+    let lines = body.matches('\n').count();
+    let crlf = body.matches("\r\n").count();
+    let edited = if crlf == 0 {
+        added(body, alias, id)?
+    } else if crlf == lines {
+        added(&body.replace("\r\n", "\n"), alias, id)?.replace('\n', "\r\n")
+    } else {
+        return Err(NotInPlace::Form);
+    };
+    Ok(format!("{bom}{edited}"))
+}
+
+/// `text`, with `\n` line endings, with the key added to the entry `alias`
+/// after its last key and written as that key is: indented as it is in a
+/// table, and before what follows it in an inline table.
+fn added(text: &str, alias: &RepositoryAlias, id: &RepositoryId) -> Result<String, NotInPlace> {
+    let mut doc: DocumentMut = text.parse().map_err(|_| NotInPlace::Form)?;
+    let entry = doc
+        .get_mut("repositories")
+        .and_then(|repositories| repositories.as_table_like_mut())
+        .and_then(|repositories| repositories.get_mut(alias.as_str()))
+        .ok_or(NotInPlace::Form)?;
+    match entry {
+        Item::Table(table) if !table.contains_key(KEY) => {
+            let indent = table
+                .iter()
+                .filter(|(_, item)| item.is_value())
+                .last()
+                .and_then(|(key, _)| table.key(key))
+                .and_then(|key| key.leaf_decor().prefix())
+                .and_then(|prefix| prefix.as_str())
+                // The key's own line: the lines above it, blank or a comment,
+                // stay where they are.
+                .and_then(|prefix| prefix.rsplit('\n').next())
+                .map(str::to_owned);
+            table.insert(KEY, toml_edit::value(id.as_str()));
+            if let (Some(indent), Some(mut key)) = (indent, table.key_mut(KEY)) {
+                key.leaf_decor_mut().set_prefix(indent);
+            }
+        }
+        Item::Value(Value::InlineTable(table)) if !table.contains_key(KEY) => {
+            let last = table.iter().last().map(|(key, _)| key.to_owned());
+            let closing = last
+                .and_then(|key| table.get_mut(&key))
+                .map(|value| {
+                    let suffix = value
+                        .decor()
+                        .suffix()
+                        .and_then(|suffix| suffix.as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    value.decor_mut().set_suffix("");
+                    suffix
+                });
+            table.insert(KEY, id.as_str().into());
+            if let (Some(closing), Some(value)) = (closing, table.get_mut(KEY)) {
+                value.decor_mut().set_suffix(closing);
+            }
+        }
+        _ => return Err(NotInPlace::Form),
+    }
+    Ok(doc.to_string())
 }
 
 /// Whether `edited` may replace `original`: it is `original` with one run of
-/// text added and every other byte as it was, and it reads back, through the
-/// load the store makes, as `expected`.
+/// text added and every other byte as it was, it is no larger than the store
+/// reads, and it parses as `expected`, as the store's load would read it.
 pub(crate) fn reads_back(
     path: &Path,
     original: &str,
@@ -31,8 +104,30 @@ pub(crate) fn reads_back(
     expected: &AgentConfig,
     schemas: &Schemas,
 ) -> Result<(), RecordError> {
-    let _ = (path, original, edited, expected, schemas);
-    todo!()
+    let refused = Err(RecordError::NotInPlace(NotInPlace::ReadBack));
+    if !one_run_added(original.as_bytes(), edited.as_bytes()) {
+        return refused;
+    }
+    if over_cap(edited.len()) {
+        return Err(RecordError::NotInPlace(NotInPlace::TooLarge));
+    }
+    match parse(path, edited, schemas) {
+        Ok(parsed) if parsed.config == *expected => Ok(()),
+        _ => refused,
+    }
+}
+
+/// Whether `edited` is `original` with one run of bytes, at least one,
+/// added somewhere: it starts with what `original` has before the first
+/// byte they differ in, ends with the rest of `original`, and is longer.
+fn one_run_added(original: &[u8], edited: &[u8]) -> bool {
+    let before = original
+        .iter()
+        .zip(edited)
+        .take_while(|(was, is)| was == is)
+        .count();
+    let after = original.get(before..).unwrap_or_default();
+    edited.len() > original.len() && edited.ends_with(after)
 }
 
 #[cfg(test)]
@@ -74,7 +169,10 @@ password-env = \"DEMO_USB\"
         let config = parse(Path::new("config.toml"), FILE, &Schemas::production())
             .expect("the file parses")
             .config;
-        let read = config.repository(&alias("nas")).cloned().expect("the entry");
+        let read = config
+            .repository(&alias("nas"))
+            .cloned()
+            .expect("the entry");
         config
             .record_id(&alias("nas"), &read, &id())
             .expect("the rule records it")
@@ -105,10 +203,7 @@ password-env = \"DEMO_USB\"
 
     #[test]
     fn an_entry_that_is_not_there_is_not_added() {
-        assert_eq!(
-            with_id(FILE, &alias("cloud"), &id()),
-            Err(NotInPlace::Form)
-        );
+        assert_eq!(with_id(FILE, &alias("cloud"), &id()), Err(NotInPlace::Form));
         assert_eq!(
             with_id("schema = 1\n", &alias("nas"), &id()),
             Err(NotInPlace::Form)
@@ -118,7 +213,11 @@ password-env = \"DEMO_USB\"
             Err(NotInPlace::Form)
         );
         assert_eq!(
-            with_id("schema = 1\n[repositories]\nnas = 3\n", &alias("nas"), &id()),
+            with_id(
+                "schema = 1\n[repositories]\nnas = 3\n",
+                &alias("nas"),
+                &id()
+            ),
             Err(NotInPlace::Form)
         );
     }

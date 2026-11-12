@@ -3,12 +3,13 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use app::ports::{Clock, ConfigError, ConfigStore, Problem, RecordError};
+use app::ports::{Clock, ConfigError, ConfigStore, NotInPlace, Problem, RecordError};
 use async_trait::async_trait;
-use domain::planning::{AgentConfig, RepositoryConfig};
+use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
 
 use crate::files::{self, Contents};
+use crate::record::{reads_back, with_id};
 use crate::schema::{MAX_CONFIG_BYTES, Schemas, parse, render_as};
 
 /// The agent's configuration in a TOML file, with the earlier versions of the
@@ -113,17 +114,21 @@ impl Job {
         files::write(&self.path, text.as_bytes()).map_err(|error| self.unavailable(&error))
     }
 
-    fn load(&self) -> Result<AgentConfig, ConfigError> {
-        let Some(bytes) = self.current_bytes()? else {
-            return Ok(AgentConfig::default());
-        };
-        let text = String::from_utf8(bytes).map_err(|_| ConfigError::Invalid {
+    fn not_utf8(&self) -> ConfigError {
+        ConfigError::Invalid {
             file: self.name(),
             key: None,
             at: None,
             problem: Problem::NotUtf8,
             detail: String::new(),
-        })?;
+        }
+    }
+
+    fn load(&self) -> Result<AgentConfig, ConfigError> {
+        let Some(bytes) = self.current_bytes()? else {
+            return Ok(AgentConfig::default());
+        };
+        let text = String::from_utf8(bytes).map_err(|_| self.not_utf8())?;
         let parsed = parse(&self.path, &text, &self.schemas)?;
         if parsed.migrated {
             // The file is only replaced once it is known to be valid, and
@@ -151,8 +156,31 @@ impl Job {
         id: &RepositoryId,
         meanwhile: impl FnOnce(),
     ) -> Result<(), RecordError> {
-        let _ = (alias, read, id, meanwhile);
-        todo!()
+        let Some(bytes) = self.current_bytes().map_err(RecordError::Store)? else {
+            return Err(RecordError::NotRecorded(NotRecorded::Changed));
+        };
+        let text = std::str::from_utf8(&bytes).map_err(|_| RecordError::Store(self.not_utf8()))?;
+        let parsed = parse(&self.path, text, &self.schemas).map_err(RecordError::Store)?;
+        if parsed.migrated {
+            // A file in an older version is the load's to migrate, as a
+            // whole; a key added to it in place would be read in the old one.
+            return Err(RecordError::NotInPlace(NotInPlace::Form));
+        }
+        let expected = parsed
+            .config
+            .record_id(alias, read, id)
+            .map_err(RecordError::NotRecorded)?;
+        let edited = with_id(text, alias, id).map_err(RecordError::NotInPlace)?;
+        reads_back(&self.path, text, &edited, &expected, &self.schemas)?;
+        meanwhile();
+        // The gate keeps this store's own writes out; this catches a hand
+        // edit, or another process, that changed the file since it was read.
+        let now = self.current_bytes().map_err(RecordError::Store)?;
+        if now.as_deref() != Some(bytes.as_slice()) {
+            return Err(RecordError::NotInPlace(NotInPlace::ChangedMeanwhile));
+        }
+        self.replace(Some(&bytes), &edited)
+            .map_err(RecordError::Store)
     }
 }
 
@@ -173,8 +201,10 @@ impl ConfigStore for FileConfigStore {
         read: &RepositoryConfig,
         id: &RepositoryId,
     ) -> Result<(), RecordError> {
-        let _ = (alias, read, id);
-        todo!()
+        let (alias, read, id) = (alias.clone(), read.clone(), id.clone());
+        self.exclusively(move |job| Ok(job.record_id(&alias, &read, &id, || {})))
+            .await
+            .map_err(RecordError::Store)?
     }
 }
 
@@ -191,7 +221,8 @@ mod tests {
     use super::Job;
     use crate::schema::{Schemas, parse};
 
-    const FILE: &str = "schema = 1\n[repositories.nas]\nrepository = \"/srv/demo\"\npassword-env = \"DEMO\"\n";
+    const FILE: &str =
+        "schema = 1\n[repositories.nas]\nrepository = \"/srv/demo\"\npassword-env = \"DEMO\"\n";
 
     fn job_at(path: PathBuf, schemas: Schemas) -> Job {
         Job {
