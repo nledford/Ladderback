@@ -107,6 +107,30 @@ Feature: Retries of a failed backup
     And the retries of the plan "home" started at "2026-06-10 03:10+00:00"
     And the agent announced retry 2 of 3 of the plan "home" for "2026-06-10 03:30+00:00"
 
+  Scenario: A backup started by hand that succeeds ends the retries
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And the runs of the plan "home" end "failed, succeeded"
+    When the agent serves until "2026-06-10 03:05+00:00"
+    And a person starts a backup of the plan "home"
+    And the agent serves until "2026-06-10 04:00+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:05+00:00"
+    And the plan "home" has no pending retry
+
+  Scenario: A retry that comes due while a backup started by hand is going is skipped
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And a run of the plan "home" takes 30 minutes
+    And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
+    And every run of the plan "home" fails
+    When the agent serves until "2026-06-10 03:35+00:00"
+    And a person starts a backup of the plan "home"
+    And the agent serves until "2026-06-10 05:00+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:35+00:00"
+    And the agent said the retries of the plan "home" stopped because a run of it is going
+    And the plan "home" has no pending retry
+
   Scenario: A retry waits its turn under the concurrency limit
     Given the agent starts at "2026-06-10 02:50+00:00"
     And the plan "docs" is scheduled "5 3 * * *"
