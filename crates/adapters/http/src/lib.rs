@@ -525,7 +525,7 @@ async fn cancel_operation(
 async fn list_plans(State(state): State<AppState>) -> Response {
     match state.catalog.plans().await {
         Ok(plans) => (StatusCode::OK, axum::Json(plans)).into_response(),
-        Err(CatalogError::Unavailable { .. }) => todo!(),
+        Err(error) => catalog_refused(error),
     }
 }
 
@@ -534,7 +534,17 @@ async fn list_plans(State(state): State<AppState>) -> Response {
 async fn list_repositories(State(state): State<AppState>) -> Response {
     match state.catalog.repositories().await {
         Ok(repositories) => (StatusCode::OK, axum::Json(repositories)).into_response(),
-        Err(CatalogError::Unavailable { .. }) => todo!(),
+        Err(error) => catalog_refused(error),
+    }
+}
+
+/// A list the configuration can't answer: 503 with the `config-*` code, its
+/// arguments and the store's words, as a save of it is refused.
+fn catalog_refused(error: CatalogError) -> Response {
+    match error {
+        CatalogError::Unavailable { code, args, detail } => {
+            refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
+        }
     }
 }
 

@@ -1469,8 +1469,12 @@ impl Catalog for ConfigCatalog {
 }
 
 /// A configuration the lists can't read, refused as a save of it is.
-fn catalog_refusal(_error: ConfigError) -> CatalogError {
-    todo!()
+fn catalog_refusal(error: ConfigError) -> CatalogError {
+    config_unusable(error, |code, args, detail| CatalogError::Unavailable {
+        code,
+        args,
+        detail,
+    })
 }
 
 impl ConfigCatalog {
@@ -2075,10 +2079,21 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
     }
 }
 
-/// A configuration that couldn't be read or written, as the code and the
-/// arguments its message declares. The store never puts a value in what it
-/// reports (`ConfigError`), so its words can be shown.
+/// A configuration that couldn't be read or written, refused by a repository
+/// route.
 fn config_refusal(error: ConfigError) -> RepositoriesError {
+    config_unusable(error, unavailable)
+}
+
+/// A configuration that couldn't be read or written, as the code and the
+/// arguments its message declares, which `unavailable` makes a route's
+/// refusal of: every route that reads the file says the same of it (#347).
+/// The store never puts a value in what it reports (`ConfigError`), so its
+/// words can be shown.
+fn config_unusable<R>(
+    error: ConfigError,
+    unavailable: impl FnOnce(ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>) -> R,
+) -> R {
     match error {
         ConfigError::Unavailable { file, detail } => unavailable(
             ErrorCode::ConfigUnavailable,
