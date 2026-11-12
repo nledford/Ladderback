@@ -339,11 +339,15 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
 }
 
 /// Writes the daemon's config.toml: the scenario's scratch repository as
-/// `demo` and its plan over the scenario's source folder, with the plan's
-/// host, source filter and hooks and the agent's hostname the scenario set,
-/// keeping the last `keep_last` snapshots when given, and everything
-/// otherwise. The daemon reads its configuration on every request, so
-/// calling this again changes what a running daemon does next.
+/// `demo` and its plan over the scenario's source folder, with the agent's
+/// hooks and hostname, the repository's password, and the plan's host,
+/// source filter and hooks the scenario set, keeping the last `keep_last`
+/// snapshots when given, and everything otherwise. Every step that changes
+/// the hooks, password, hostname, host or source filter sets it on the
+/// scenario and calls this, so none undoes another's; `keep_last` is kept
+/// only by the call that passes it. The daemon reads its configuration on
+/// every request, so calling this again changes what a running daemon does
+/// next.
 pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
     let repository = agent.backup.repository.clone().expect("a repository");
     let source = agent.backup.source.clone().expect("a plan source");
@@ -370,7 +374,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
     };
     let config = domain::planning::AgentConfig::new(
         settings,
-        domain::planning::Hooks::default(),
+        agent.backup.agent_hooks.clone(),
         std::collections::BTreeMap::from([(
             alias,
             domain::planning::RepositoryConfig {
@@ -380,9 +384,11 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
                     repo_hot: None,
-                    password: domain::secrets::SecretRef::Inline(
-                        domain::secrets::SecretValue::new(super::backup_steps::PASSWORD),
-                    ),
+                    password: agent.backup.password.clone().unwrap_or_else(|| {
+                        domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
+                            super::backup_steps::PASSWORD,
+                        ))
+                    }),
                     options: Default::default(),
                     options_hot: Default::default(),
                     options_cold: Default::default(),

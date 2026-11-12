@@ -94,6 +94,10 @@ async fn the_configuration_records_the_id(agent: &mut Agent) {
     save_daemon_config(agent, None).await;
 }
 
+/// The backup's worker holds its slot's lock for as long as it runs, so the
+/// scenario holds the backup running (the plan's source holds a file the
+/// backup waits on): a backup that ended before the lock was looked at
+/// would have let it go already.
 #[then(expr = "the repository's cache slot {int} is held while the backup runs")]
 async fn held_while_it_runs(agent: &mut Agent, slot: u32) {
     let dir = slot_dir(agent, slot);
@@ -122,15 +126,10 @@ async fn held_while_it_runs(agent: &mut Agent, slot: u32) {
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let locked = held(&dir);
     assert!(
-        locked || has_ended(agent, &operation).await,
+        held(&dir),
         "the running backup's cache slot {} is not locked",
         dir.display()
-    );
-    assert!(
-        locked,
-        "the backup ended before its cache slot could be looked at: give it more files"
     );
 }
 

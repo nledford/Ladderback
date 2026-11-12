@@ -578,6 +578,12 @@ pub struct BackupSetup {
     pub filter: domain::planning::SourceFilter,
     /// The plan's own hooks, written to the daemon's configuration.
     pub plan_hooks: domain::planning::Hooks,
+    /// The hooks around every operation of the agent, written to the
+    /// daemon's configuration.
+    pub agent_hooks: domain::planning::Hooks,
+    /// Where the daemon's configuration says the repository's password
+    /// comes from; the inline [`PASSWORD`] when unset.
+    pub password: Option<domain::secrets::SecretRef>,
     /// The repository ID the job names as the one it must open (§7.3):
     /// what the configuration recorded when the repository was connected.
     pub id: Option<RepositoryId>,

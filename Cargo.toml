@@ -283,6 +283,7 @@ config-adapter.workspace = true
 domain.workspace = true
 futures.workspace = true
 log.workspace = true
+nix = { workspace = true, features = ["fs"] }
 platform.workspace = true
 rustic_backend.workspace = true
 hooks.workspace = true

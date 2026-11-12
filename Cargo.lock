@@ -3212,6 +3212,7 @@ dependencies = [
  "interop",
  "l10n",
  "log",
+ "nix 0.31.3",
  "platform",
  "rustic_backend",
  "rustic_core",
