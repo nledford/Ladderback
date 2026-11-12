@@ -3,9 +3,9 @@
 //! runs anything or waits: the scheduler in `app` starts each retry as this
 //! decides, in a place of the persistent queue.
 
+use crate::SignedDuration;
 use crate::Timestamp;
 use crate::planning::RetryPolicy;
-use crate::SignedDuration;
 
 /// A retry a plan has planned after a failed backup: which of the policy's
 /// attempts it is, when it runs, and the scheduled run its series stops at.
@@ -49,8 +49,10 @@ impl RetrySchedule {
     /// `backoff` × 2^(`attempt` − 1), at most [`Self::MAX_WAIT`]. Attempt 0
     /// waits as attempt 1 does.
     pub fn wait(policy: &RetryPolicy, attempt: u32) -> SignedDuration {
-        let _ = (policy, attempt);
-        todo!()
+        2_i32
+            .checked_pow(attempt.saturating_sub(1))
+            .and_then(|factor| policy.backoff().checked_mul(factor))
+            .map_or(Self::MAX_WAIT, |wait| wait.min(Self::MAX_WAIT))
     }
 
     /// The first retry after a backup that isn't a retry failed at
@@ -61,8 +63,7 @@ impl RetrySchedule {
         failed_at: Timestamp,
         next_run: Option<Timestamp>,
     ) -> Result<RetryScheduled, NoRetry> {
-        let _ = (policy, failed_at, next_run);
-        todo!()
+        Self::planned(policy, 1, failed_at, next_run)
     }
 
     /// The retry after `failed`, a retry of the series that failed at
@@ -72,16 +73,36 @@ impl RetrySchedule {
         failed: &RetryScheduled,
         failed_at: Timestamp,
     ) -> Result<RetryScheduled, NoRetry> {
-        let _ = (policy, failed, failed_at);
-        todo!()
+        let attempt = failed
+            .attempt
+            .checked_add(1)
+            .filter(|attempt| *attempt <= policy.attempts())
+            .ok_or(NoRetry::Exhausted)?;
+        Self::planned(policy, attempt, failed_at, failed.until)
     }
 
     /// Whether `retry`, due at `now`, is past the scheduled run its series
     /// stops at: that run has come, whether it ran, caught up, or was
     /// skipped while the agent was away.
     pub fn superseded(retry: &RetryScheduled, now: Timestamp) -> bool {
-        let _ = (retry, now);
-        todo!()
+        retry.until.is_some_and(|until| until <= now)
+    }
+
+    /// Retry `attempt`, waiting after a failure at `failed_at`, unless it
+    /// would run at or after `until` or past the last instant there is.
+    fn planned(
+        policy: &RetryPolicy,
+        attempt: u32,
+        failed_at: Timestamp,
+        until: Option<Timestamp>,
+    ) -> Result<RetryScheduled, NoRetry> {
+        let at = failed_at
+            .checked_add(Self::wait(policy, attempt))
+            .map_err(|_| NoRetry::NextRun)?;
+        if until.is_some_and(|until| at >= until) {
+            return Err(NoRetry::NextRun);
+        }
+        Ok(RetryScheduled { attempt, at, until })
     }
 }
 
