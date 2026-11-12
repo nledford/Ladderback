@@ -9,37 +9,21 @@ use domain::planning::AgentConfig;
 use domain::{RepositoryAlias, RepositoryId};
 use toml_edit::{DocumentMut, Item, Value};
 
+use crate::edit::as_written;
 use crate::schema::{Schemas, over_cap, parse};
 
 /// The key an entry records its repository ID under.
 const KEY: &str = "repository-id";
 
-/// The byte order mark a file may start with.
-const BOM: &str = "\u{feff}";
-
 /// `text` with `repository-id` set to `id` in the entry `alias`, and nothing
-/// else in it changed. The edit is made on the text without a byte order
-/// mark and with `\n` line endings, which is what the editor keeps, and the
-/// file's own mark and line ending are put back: a file whose lines end
-/// both ways has no own ending, and isn't edited.
+/// else in it changed, with the file's own byte order mark and line ending
+/// ([`as_written`]): a file whose lines end both ways isn't edited.
 pub(crate) fn with_id(
     text: &str,
     alias: &RepositoryAlias,
     id: &RepositoryId,
 ) -> Result<String, NotInPlace> {
-    let (bom, body) = text
-        .strip_prefix(BOM)
-        .map_or(("", text), |body| (BOM, body));
-    let lines = body.matches('\n').count();
-    let crlf = body.matches("\r\n").count();
-    let edited = if crlf == 0 {
-        added(body, alias, id)?
-    } else if crlf == lines {
-        added(&body.replace("\r\n", "\n"), alias, id)?.replace('\n', "\r\n")
-    } else {
-        return Err(NotInPlace::Form);
-    };
-    Ok(format!("{bom}{edited}"))
+    as_written(text, NotInPlace::Form, |body| added(body, alias, id))
 }
 
 /// `text`, with `\n` line endings, with the key added to the entry `alias`

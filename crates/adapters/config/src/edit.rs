@@ -1,12 +1,39 @@
-//! Saving over the file a person wrote (§6.1): the change a save makes is
-//! edited into the file as it is, and the rest of it, comments, blank lines
-//! and layout, stays as written.
+//! Editing the file a person wrote (§6.1): a change is made in the file as
+//! it is, and the rest of it, comments, blank lines and layout, stays as
+//! written. Recording a repository's ID adds one key this way (decision 57).
 
 use std::path::Path;
 
 use domain::planning::AgentConfig;
 
 use crate::schema::Schemas;
+
+/// The byte order mark a file may start with.
+const BOM: &str = "\u{feff}";
+
+/// `text` changed by `edit`, which is given it as the editor keeps it:
+/// without a byte order mark and with `\n` line endings. The file's own
+/// mark and line ending are put back; a file whose lines end both ways has
+/// no own ending, and is `mixed`, unedited.
+pub(crate) fn as_written<E>(
+    text: &str,
+    mixed: E,
+    edit: impl FnOnce(&str) -> Result<String, E>,
+) -> Result<String, E> {
+    let (bom, body) = text
+        .strip_prefix(BOM)
+        .map_or(("", text), |body| (BOM, body));
+    let lines = body.matches('\n').count();
+    let crlf = body.matches("\r\n").count();
+    let edited = if crlf == 0 {
+        edit(body)?
+    } else if crlf == lines {
+        edit(&body.replace("\r\n", "\n"))?.replace('\n', "\r\n")
+    } else {
+        return Err(mixed);
+    };
+    Ok(format!("{bom}{edited}"))
+}
 
 /// `text`, the file as it is, changed to hold `config`, whose text in the
 /// daemon's layout is `rendered`; `None` when it can't be.
