@@ -11,6 +11,10 @@ publish.workspace = true
 croner.workspace = true
 jiff.workspace = true
 serde.workspace = true
+# A session is kept by its token's SHA-256, and tokens are compared in
+# constant time (security §10.1).
+sha2.workspace = true
+subtle.workspace = true
 uuid.workspace = true
 
 [lints]

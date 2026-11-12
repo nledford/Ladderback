@@ -56,6 +56,8 @@ mod repositories_steps;
 mod schedule_steps;
 #[path = "steps/scheduler.rs"]
 mod scheduler_steps;
+#[path = "steps/sign_in.rs"]
+mod sign_in_steps;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -79,6 +81,7 @@ struct Agent {
     schedule: schedule_steps::ScheduleWorld,
     scheduler: scheduler_steps::SchedulerWorld,
     notifications: notifications_steps::NotificationsWorld,
+    sign_in: sign_in_steps::SignInWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -112,6 +115,7 @@ impl Agent {
             config: Default::default(),
             schedule: Default::default(),
             conditions: Default::default(),
+            sign_in: Default::default(),
             maintenance: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),

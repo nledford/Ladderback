@@ -55,7 +55,7 @@ use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
     AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Repositories,
-    RepositoriesError, SecretRefusal, SnapshotsError, StartError,
+    RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
 use notify_adapter::HttpNotifier;
@@ -421,6 +421,7 @@ async fn state_over(
             operations,
             catalog,
             repositories,
+            sign_in: SignIn::Off,
         },
         background,
     ))

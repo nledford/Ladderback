@@ -67,6 +67,8 @@ mod restart_steps;
 mod service_steps;
 #[path = "steps/shutdown.rs"]
 mod shutdown_steps;
+#[path = "steps/sign_in.rs"]
+mod sign_in_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
 
@@ -87,6 +89,7 @@ struct Agent {
     agent_id: AgentId,
     backup: backup_steps::BackupSetup,
     web: request_checks_steps::Web,
+    sign_in: sign_in_steps::SignInE2e,
     hooks: hooks_steps::HooksE2e,
     events: events_steps::Events,
     secrets: secrets_steps::SecretsSetup,
@@ -135,6 +138,7 @@ impl Agent {
             backup: backup_steps::BackupSetup::default(),
             hooks: hooks_steps::HooksE2e::new(),
             web: request_checks_steps::Web::default(),
+            sign_in: sign_in_steps::SignInE2e::default(),
             events: events_steps::Events::default(),
             secrets: secrets_steps::SecretsSetup::default(),
             ops: operations_steps::Ops::default(),

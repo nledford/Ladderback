@@ -12,6 +12,7 @@
     clippy::unreachable
 )]
 
+pub mod admin_password;
 pub mod agent_id;
 pub mod data_dir_lock;
 pub mod dirs;
@@ -20,6 +21,7 @@ pub mod power;
 pub mod random;
 pub mod service;
 mod source;
+pub mod terminal;
 
 use app::ports::Clock;
 use async_trait::async_trait;

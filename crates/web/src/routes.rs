@@ -27,6 +27,7 @@ use crate::repositories::{
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
     rereads_list, row_refusal,
 };
+use crate::sign_in::SignInOff;
 use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
@@ -47,7 +48,8 @@ pub(crate) fn PageHeading(children: Children) -> impl IntoView {
 
 /// The start page, the route `/`: the configured plans, each with when it
 /// runs next on its schedule (§5), and the way to the operations page, where
-/// a backup is started by hand.
+/// a backup is started by hand. With sign-in off it says so, and how to turn
+/// it on (security §10.1).
 #[component]
 pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_START_HEADING);
@@ -67,27 +69,29 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
     let url = format!("{}/api/v1/plans", ws::origin());
     spawn_local(async move {
-        let read = ws::read::<PlansDto>(&url).await;
+        let read = ws::get::<PlansDto>(&url).await;
         // The reader may have followed a link before the answer came: the
         // page's signals went with it.
         if phase.try_get_untracked().is_none() {
             return;
         }
         match read {
-            Some(read) => {
+            Some(Got::Read(read)) => {
                 plans.set(Some(read.plans));
                 phase.set(Phase::Ready);
             }
-            None => phase.set(Phase::Unreachable),
+            Some(Got::Refused(..)) | None => phase.set(Phase::Unreachable),
         }
     });
     // Each next run is written in the viewer's own zone, as every instant the
     // page shows is (§8.4).
     let viewer = l10n::viewer_zone();
+    let notice = Arc::clone(&localizer);
     view! {
         <PageHeading>
             {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
         </PageHeading>
+        <SignInOff localizer=notice />
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),

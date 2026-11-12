@@ -3,7 +3,8 @@
 use std::hash::{BuildHasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use app::ports::Random;
+use app::ports::{Random, RandomUnavailable};
+use domain::access::TOKEN_BYTES;
 use domain::execution::next_run::RandomDraw;
 
 /// How many draws were made, so no two draws hash the same input.
@@ -21,6 +22,10 @@ impl Random for OsRandom {
     fn draw(&self) -> RandomDraw {
         let count = DRAWS.fetch_add(1, Ordering::Relaxed);
         RandomDraw::new(RandomState::new().hash_one(count))
+    }
+
+    fn token(&self) -> Result<[u8; TOKEN_BYTES], RandomUnavailable> {
+        todo!()
     }
 }
 

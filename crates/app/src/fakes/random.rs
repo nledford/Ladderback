@@ -1,8 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use domain::access::TOKEN_BYTES;
 use domain::execution::next_run::RandomDraw;
 
-use crate::ports::Random;
+use crate::ports::{Random, RandomUnavailable};
 
 /// Randomness from a seed: each draw is the seed plus the number of draws
 /// before it, so a scenario's draws differ and repeat from run to run.
@@ -21,5 +22,9 @@ impl SeededRandom {
 impl Random for SeededRandom {
     fn draw(&self) -> RandomDraw {
         RandomDraw::new(self.next.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn token(&self) -> Result<[u8; TOKEN_BYTES], RandomUnavailable> {
+        todo!()
     }
 }

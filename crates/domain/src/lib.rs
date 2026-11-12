@@ -13,6 +13,7 @@
     clippy::unreachable
 )]
 
+pub mod access;
 pub mod execution;
 mod ids;
 pub mod maintenance;

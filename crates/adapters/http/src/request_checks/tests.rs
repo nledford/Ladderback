@@ -9,7 +9,7 @@ use async_trait::async_trait;
 
 /// A build without a web UI: every request that passes the checks reaches
 /// the UI router and gets its answer, never a refusal's JSON.
-struct NoUi;
+pub(crate) struct NoUi;
 
 impl AssetSource for NoUi {
     fn get(&self, _path: &str) -> Option<Asset> {
@@ -28,12 +28,13 @@ async fn send(request: Request<Body>) -> Response {
 }
 
 /// A state with the in-memory event bus: these tests only check the checks.
-fn test_state() -> AppState {
+pub(crate) fn test_state() -> AppState {
     AppState {
         events: Arc::new(app::fakes::InMemoryEventBus::new()),
         operations: Arc::new(NoOperations),
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
+        sign_in: crate::SignIn::Off,
     }
 }
 
@@ -139,7 +140,8 @@ impl crate::Operations for NoOperations {
         Err(crate::CancelError::Unknown)
     }
 }
-fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request<Body> {
+
+pub(crate) fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(path);
     for (name, value) in headers {
         builder = builder.header(*name, *value);
@@ -148,7 +150,7 @@ fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request<Body> 
 }
 
 /// The error code of a refusal, or `None` for any other response.
-async fn code(response: Response) -> Option<(StatusCode, String)> {
+pub(crate) async fn code(response: Response) -> Option<(StatusCode, String)> {
     let status = response.status();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
@@ -721,33 +723,59 @@ fn addr(text: &str) -> SocketAddr {
 }
 
 #[test]
-fn loopback_addresses_may_be_listened_on() {
+fn loopback_addresses_may_be_listened_on_with_sign_in_on_or_off() {
     for text in [
         "127.0.0.1:9898",
         "127.0.0.1:0",
         "127.1.2.3:9898",
         "[::1]:9898",
     ] {
-        assert_eq!(require_loopback(addr(text)), Ok(()), "{text}");
+        for on in [false, true] {
+            assert_eq!(
+                startup_rule(addr(text), on, &[]),
+                Ok(Exposure::Loopback),
+                "{text} {on}"
+            );
+        }
+    }
+}
+
+const OTHER_ADDRESSES: [&str; 9] = [
+    "0.0.0.0:9898",
+    "0.0.0.0:0",
+    "[::]:9898",
+    "192.168.1.5:9898",
+    "10.0.0.5:9898",
+    "128.0.0.1:9898",
+    "[fd00::1]:9898",
+    "[::ffff:192.168.1.5]:9898",
+    "[::ffff:127.0.0.1]:9898",
+];
+
+#[test]
+fn other_addresses_may_not_be_listened_on_with_sign_in_off() {
+    let hosts = ["nas.example.com".to_owned()];
+    for text in OTHER_ADDRESSES {
+        assert_eq!(
+            startup_rule(addr(text), false, &hosts),
+            Err(StartupRefusal::SignInOff(addr(text))),
+            "{text}"
+        );
     }
 }
 
 #[test]
-fn other_addresses_may_not_be_listened_on() {
-    for text in [
-        "0.0.0.0:9898",
-        "0.0.0.0:0",
-        "[::]:9898",
-        "192.168.1.5:9898",
-        "10.0.0.5:9898",
-        "128.0.0.1:9898",
-        "[fd00::1]:9898",
-        "[::ffff:192.168.1.5]:9898",
-        "[::ffff:127.0.0.1]:9898",
-    ] {
+fn other_addresses_need_sign_in_and_a_configured_host_name() {
+    let hosts = ["nas.example.com".to_owned()];
+    for text in OTHER_ADDRESSES {
         assert_eq!(
-            require_loopback(addr(text)),
-            Err(NonLoopbackBind(addr(text))),
+            startup_rule(addr(text), true, &[]),
+            Err(StartupRefusal::NoAllowedHost(addr(text))),
+            "{text}"
+        );
+        assert_eq!(
+            startup_rule(addr(text), true, &hosts),
+            Ok(Exposure::Network),
             "{text}"
         );
     }

@@ -7,6 +7,7 @@ use crate::ports::Random;
 
 pub fn run(random: &dyn Random) {
     draws_differ(random);
+    tokens_differ(random);
 }
 
 /// A hundred draws are a hundred different numbers: over every `u64`, a
@@ -18,5 +19,17 @@ fn draws_differ(random: &dyn Random) {
             seen.insert(random.draw()),
             "draw {draw} repeated an earlier one"
         );
+    }
+}
+
+/// A hundred tokens are a hundred different tokens, each one the platform
+/// gave.
+fn tokens_differ(random: &dyn Random) {
+    let mut seen = HashSet::new();
+    for draw in 0..100 {
+        let token = random.token();
+        assert!(token.is_ok(), "token {draw} gave no bytes: {token:?}");
+        let Ok(token) = token else { return };
+        assert!(seen.insert(token), "token {draw} repeated an earlier one");
     }
 }

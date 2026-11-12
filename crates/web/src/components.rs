@@ -73,7 +73,7 @@ pub fn ModalDialog(
 /// Shift-Tab from the first to the last), keeping keyboard focus inside the
 /// open dialog however the Tab key was pressed. The wrap decision is
 /// [`crate::focus::focus_wrap`], tested there; this is the DOM glue.
-fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardEvent) {
+pub(crate) fn trap_focus(dialog: &NodeRef<leptos::html::Dialog>, event: &web_sys::KeyboardEvent) {
     let Some(element) = dialog.get() else {
         return;
     };
@@ -339,7 +339,9 @@ pub fn FormField(
     error: RwSignal<Option<String>>,
     value: RwSignal<String>,
     #[prop(default = "text")] kind: &'static str,
+    #[prop(default = "off")] autocomplete: &'static str,
 ) -> impl IntoView {
+    let _ = autocomplete;
     let described_by = format!("{id}-description");
     let error_id = format!("{id}-error");
     // Clones for the reactive closures, which outlive this scope.

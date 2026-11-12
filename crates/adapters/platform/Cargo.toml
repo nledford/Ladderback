@@ -12,15 +12,17 @@ hostname = "0.4"
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
+argon2.workspace = true
 # The manager's command line as a person would type it, in a refusal.
 shell-words.workspace = true
 spawn-gate.workspace = true
-tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 
 [target.'cfg(unix)'.dependencies]
-# The user's ID: a launchd agent lives in the `gui/<uid>` domain.
-nix = { workspace = true, features = ["user"] }
+# `term`: the password prompt turns echo off. `user`: the user's ID, as a
+# launchd agent lives in the `gui/<uid>` domain.
+nix = { workspace = true, features = ["term", "user"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

@@ -5,7 +5,7 @@
 //! touches the browser's types, so a host run of mutants skips it and the
 //! browser journeys (`@ui`) cover it instead, the `live.rs` precedent.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -16,8 +16,13 @@ use crate::backend::{
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Kind, Next, Watch, Watched};
+use crate::session::{Answer, Lease, Resend, Signed, Stand, wait_ms};
 use crate::visit::Visit;
-use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
+use api::{
+    ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, SessionDto, SignInDto,
+    SignInStateDto, UiEvent,
+};
+use futures::channel::oneshot;
 use futures::{FutureExt, Sink, StreamExt};
 use gloo_net::http::Request;
 use gloo_net::websocket::futures::WebSocket;
@@ -26,6 +31,13 @@ use leptos::prelude::{RwSignal, Set, Update};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+/// The route that says where the page stands with sign-in, signs in and
+/// signs out (security §10.1).
+const SESSION_PATH: &str = "/api/v1/session";
+
+/// The header a changed request carries its session's CSRF token in.
+const CSRF_HEADER: &str = "x-csrf-token";
 
 /// Where a live page's reading of the daemon stands: still loading its first
 /// answer, ready (the table is the history), or unable to reach the daemon at
@@ -80,35 +92,241 @@ pub(crate) fn origin() -> String {
         .unwrap_or_default()
 }
 
-/// Reads `url` as typed JSON. `None` is anything but the answer: the daemon
-/// not answering, a refusal, or a body that isn't what was asked for — the
-/// caller's phase decides what that means.
-pub(crate) async fn read<T: DeserializeOwned>(url: &str) -> Option<T> {
-    let response = Request::get(url).send().await.ok()?;
-    if response.status() != 200 {
-        return None;
-    }
-    response.json::<T>().await.ok()
+/// What the page's requests need of its session (security §10.1): the CSRF
+/// token its changed requests carry, its lease and the timer that looks at
+/// it again, the signals that show the warning before it ends unused and the
+/// dialog asking to sign in again, the requests waiting for that sign-in,
+/// and whether the reader signed out, after which the sign-in page asks.
+#[derive(Default)]
+struct Session {
+    csrf: Option<String>,
+    lease: Option<Lease>,
+    timer: Option<gloo_timers::callback::Timeout>,
+    warning: Option<RwSignal<bool>>,
+    ended: Option<RwSignal<bool>>,
+    waiting: Vec<oneshot::Sender<bool>>,
+    signed_out: bool,
 }
 
-/// Reads `url` as `read` does, but gives up on an answer that takes longer
-/// than `patience`: the fetch is aborted, and that is `None` too.
-async fn read_within<T: DeserializeOwned>(url: &str, patience: Duration) -> Option<T> {
-    let controller = web_sys::AbortController::new().ok()?;
-    let signal = controller.signal();
-    let millis = u32::try_from(patience.as_millis()).unwrap_or(u32::MAX);
-    // Dropping the timer cancels it, so it ends with the read: an answer in
-    // time is never aborted.
-    let _deadline = gloo_timers::callback::Timeout::new(millis, move || controller.abort());
-    let response = Request::get(url)
-        .abort_signal(Some(&signal))
-        .send()
-        .await
-        .ok()?;
-    if response.status() != 200 {
+thread_local! {
+    static SESSION: RefCell<Session> = RefCell::new(Session::default());
+}
+
+/// The page's clock, in milliseconds since the epoch. It is the wall clock,
+/// which goes on while the computer sleeps, so a timer that fires late still
+/// sees how much time has passed.
+fn now_ms() -> i64 {
+    // `as` saturates: no clock is past what an `i64` counts.
+    js_sys::Date::now() as i64
+}
+
+/// The page shows the warning that its session is about to end unused while
+/// `warning` is `true`, and the dialog asking to sign in again while `ended`
+/// is; the session's lease and a request refused for want of a session set
+/// them.
+pub(crate) fn watch_session(warning: RwSignal<bool>, ended: RwSignal<bool>) {
+    SESSION.with_borrow_mut(|session| {
+        session.warning = Some(warning);
+        session.ended = Some(ended);
+    });
+}
+
+/// The page has a live session (none with sign-in off). Its changed requests
+/// carry its CSRF token, the page watches its lease, the requests that waited
+/// for it are sent again, as they were, and the dialog closes.
+pub(crate) fn signed_in(signed: Option<Signed>) {
+    let (waiting, ended) = SESSION.with_borrow_mut(|session| {
+        session.csrf = signed.as_ref().map(|signed| signed.csrf.clone());
+        session.lease = signed.map(|signed| signed.lease);
+        session.signed_out = false;
+        (std::mem::take(&mut session.waiting), session.ended)
+    });
+    look_again();
+    // Outside the borrow: what the signal or a request wakes may send again.
+    for request in waiting {
+        let _ = request.send(true);
+    }
+    if let Some(ended) = ended {
+        ended.try_set(false);
+    }
+}
+
+/// A request sent at `sent` used the session.
+fn used(sent: i64) {
+    let watched = SESSION.with_borrow_mut(|session| {
+        session.lease = session.lease.map(|lease| lease.used(sent));
+        session.lease.is_some()
+    });
+    if watched {
+        look_again();
+    }
+}
+
+/// Looks at where the session's lease stands now: says nothing until the
+/// moment it changes, warns that the session is about to end unused, or,
+/// once it has ended, forgets it and asks to sign in again. The decisions are
+/// `Lease::at`'s, host-tested.
+fn look_again() {
+    let now = now_ms();
+    let (stand, warning, ended) = SESSION.with_borrow_mut(|session| {
+        // Dropping the timer cancels it.
+        session.timer = None;
+        let stand = session.lease.map(|lease| lease.at(now));
+        if stand == Some(Stand::Ended) {
+            session.lease = None;
+        }
+        (stand, session.warning, session.ended)
+    });
+    let warn = |on: bool| {
+        if let Some(warning) = warning {
+            warning.try_set(on);
+        }
+    };
+    let until = match stand {
+        None => return warn(false),
+        Some(Stand::Quiet { until }) => {
+            warn(false);
+            until
+        }
+        Some(Stand::Warning { until }) => {
+            warn(true);
+            until
+        }
+        Some(Stand::Ended) => {
+            warn(false);
+            if let Some(ended) = ended {
+                ended.try_set(true);
+            }
+            return;
+        }
+    };
+    let timer = gloo_timers::callback::Timeout::new(wait_ms(now, until), look_again);
+    SESSION.with_borrow_mut(|session| session.timer = Some(timer));
+}
+
+/// The reader closed the dialog without signing in: the requests that waited
+/// for it end with the refusal they had, which their pages say.
+pub(crate) fn gave_up() {
+    let waiting = SESSION.with_borrow_mut(|session| std::mem::take(&mut session.waiting));
+    for request in waiting {
+        let _ = request.send(false);
+    }
+}
+
+/// A request was refused for want of a session: asks the reader to sign in
+/// again, and waits. `true` is a sign-in, after which the request is sent
+/// again; `false` is the reader closing the dialog, a page that shows none,
+/// or a reader who signed out: the sign-in page asks then, and a request
+/// still on its way when they did ends with its refusal.
+async fn session_ended() -> bool {
+    let (sender, signed_in) = oneshot::channel();
+    let (ended, warning) = SESSION.with_borrow_mut(|session| {
+        session.lease = None;
+        session.timer = None;
+        let ended = session.ended.filter(|_| !session.signed_out);
+        (
+            ended.inspect(|_| session.waiting.push(sender)),
+            session.warning,
+        )
+    });
+    if let Some(warning) = warning {
+        warning.try_set(false);
+    }
+    let Some(ended) = ended else {
+        return false;
+    };
+    ended.try_set(true);
+    signed_in.await.unwrap_or(false)
+}
+
+/// Who caused a request (security §10.1): a person, by opening a page, a
+/// form's action or "Stay signed in", or the page on its own, as a re-read
+/// after an event or a poll is. Only a person's request uses the session,
+/// so a page left open lets it end unused; the page marks its own with
+/// `api::BACKGROUND_HEADER` so the daemon doesn't count them either.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Asked {
+    ByPerson,
+    OnItsOwn,
+}
+
+/// Sends the request `make` builds, with the CSRF token and the abort signal
+/// it is given, and reads the answer's status and text. A refusal for want
+/// of a session waits for the reader to sign in again, then builds and sends
+/// the request anew, with the new session's token; a refusal of its CSRF
+/// token, as after signing in again in another tab, reads the session's
+/// current token and sends it once more. The daemon refused either before
+/// any route ran, so the request did nothing the first time
+/// (`Resend::after` decides). With `patience`, a send that takes longer is
+/// aborted, and that is `None`, as no answer is.
+async fn send(
+    patience: Option<Duration>,
+    asked: Asked,
+    make: impl Fn(Option<&str>, Option<&web_sys::AbortSignal>) -> Option<Request>,
+) -> Option<(u16, String)> {
+    let mut token_read = false;
+    loop {
+        let controller = match patience {
+            Some(_) => Some(web_sys::AbortController::new().ok()?),
+            None => None,
+        };
+        let signal = controller.as_ref().map(web_sys::AbortController::signal);
+        // Dropping the timer cancels it, so it ends with the send: an answer
+        // in time is never aborted.
+        let _deadline = patience.zip(controller).map(|(patience, controller)| {
+            let millis = u32::try_from(patience.as_millis()).unwrap_or(u32::MAX);
+            gloo_timers::callback::Timeout::new(millis, move || controller.abort())
+        });
+        let csrf = SESSION.with_borrow(|session| session.csrf.clone());
+        let sent = now_ms();
+        let response = make(csrf.as_deref(), signal.as_ref())?.send().await.ok()?;
+        let status = response.status();
+        let text = response.text().await.ok()?;
+        match Resend::after(status, &text, token_read) {
+            Resend::OnceSignedIn => {
+                if session_ended().await {
+                    continue;
+                }
+            }
+            Resend::WithFreshToken => {
+                token_read = true;
+                // Reading the session is a use, which gives the page the
+                // session's current token and lease; a session that has ended
+                // meanwhile is refused as such when the request is sent again.
+                if session().await.is_some() {
+                    continue;
+                }
+            }
+            Resend::No if asked == Asked::ByPerson => used(sent),
+            Resend::No => {}
+        }
+        return Some((status, text));
+    }
+}
+
+/// Reads `url` as typed JSON, `asked` by a person or by the page on its own,
+/// which marks the request so. `None` is anything but the answer: the daemon
+/// not answering, a refusal, or a body that isn't what was asked for — the
+/// caller's phase decides what that means; with `patience`, an answer that
+/// takes longer is aborted, and that is `None` too.
+async fn read_as<T: DeserializeOwned>(
+    url: &str,
+    asked: Asked,
+    patience: Option<Duration>,
+) -> Option<T> {
+    let (status, text) = send(patience, asked, |_, signal| {
+        let builder = Request::get(url).abort_signal(signal);
+        let builder = match asked {
+            Asked::OnItsOwn => builder.header(api::BACKGROUND_HEADER, "1"),
+            Asked::ByPerson => builder,
+        };
+        builder.build().ok()
+    })
+    .await?;
+    if status != 200 {
         return None;
     }
-    response.json::<T>().await.ok()
+    serde_json::from_str::<T>(&text).ok()
 }
 
 /// What a GET came back with: the typed answer, or a typed refusal, which
@@ -118,13 +336,11 @@ pub(crate) enum Got<T> {
     Refused(ErrorCode, Vec<(String, MsgArg)>, Option<String>),
 }
 
-/// Reads `url` as typed JSON like `read`, but tells a refusal from a daemon
+/// Reads `url` as typed JSON like `read_as`, but tells a refusal from a daemon
 /// that did not answer: `None` is the daemon not answering, or an answer that
 /// is neither the JSON asked for nor a typed refusal.
 pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
-    let response = Request::get(url).send().await.ok()?;
-    let status = response.status();
-    let text = response.text().await.ok()?;
+    let (status, text) = send(None, Asked::ByPerson, |_, _| Request::get(url).build().ok()).await?;
     if succeeded(status) {
         return serde_json::from_str::<T>(&text).ok().map(Got::Read);
     }
@@ -137,21 +353,115 @@ pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
 }
 
 /// Posts `body` as JSON to `url` (the JSON-body rule applies to every
-/// mutating method, §4.2) and sorts the answer.
+/// mutating method, §4.2), with the session's CSRF token when sign-in is on,
+/// and sorts the answer.
 pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
-    let request = Request::post(url).json(body).ok()?;
-    let response = request.send().await.ok()?;
-    let status = response.status();
-    let text = response.text().await.ok()?;
+    let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
+        let builder = Request::post(url);
+        let builder = match csrf {
+            Some(csrf) => builder.header(CSRF_HEADER, csrf),
+            None => builder,
+        };
+        builder.json(body).ok()
+    })
+    .await?;
+    sorted(status, &text)
+}
+
+/// A changed request's answer: done, with its text, or a typed refusal.
+fn sorted(status: u16, text: &str) -> Option<Posted> {
     if succeeded(status) {
-        return Some(Posted::Done(text));
+        return Some(Posted::Done(text.to_owned()));
     }
-    let refusal = serde_json::from_str::<Refusal>(&text).ok()?;
+    let refusal = serde_json::from_str::<Refusal>(text).ok()?;
     Some(Posted::Refused(
         refusal.code,
         refusal.args.into_iter().collect::<Vec<_>>(),
         refusal.detail,
     ))
+}
+
+/// Where the page stands with sign-in: `GET /api/v1/session`, which uses a
+/// live session. A live session's CSRF token and lease are the page's from
+/// then on. `None` is no answer the page could read.
+pub(crate) async fn session() -> Option<SessionDto> {
+    let sent = now_ms();
+    let response = Request::get(&format!("{}{SESSION_PATH}", origin()))
+        .send()
+        .await
+        .ok()?;
+    if response.status() != 200 {
+        return None;
+    }
+    let read = response.json::<SessionDto>().await.ok()?;
+    if let Some(signed) = Signed::of(&read, sent) {
+        signed_in(Some(signed));
+    }
+    Some(read)
+}
+
+/// The reader chose to stay signed in: asking where the page stands is a
+/// use, which keeps the session another 12 hours unused, up to its lifetime,
+/// and the warning closes. A session that ended meanwhile asks to sign in
+/// again. `false` is no answer: the warning stays, and says so.
+pub(crate) async fn stay_signed_in() -> bool {
+    let Some(read) = session().await else {
+        return false;
+    };
+    if read.sign_in == SignInStateDto::SignedOut {
+        SESSION.with_borrow_mut(|session| session.lease = None);
+        look_again();
+        if let Some(ended) = SESSION.with_borrow(|session| session.ended) {
+            ended.try_set(true);
+        }
+    }
+    true
+}
+
+/// Signs in with `password`: `POST /api/v1/session`. A session that starts
+/// gives its CSRF token to every changed request from then on.
+pub(crate) async fn sign_in(password: String) -> Answer {
+    let body = SignInDto { password };
+    let Ok(request) = Request::post(&format!("{}{SESSION_PATH}", origin())).json(&body) else {
+        return Answer::Unreadable;
+    };
+    let sent = now_ms();
+    let Ok(response) = request.send().await else {
+        return Answer::Unreadable;
+    };
+    let status = response.status();
+    let Ok(text) = response.text().await else {
+        return Answer::Unreadable;
+    };
+    Answer::of(status, &text, sent)
+}
+
+/// Signs out: `DELETE /api/v1/session`, a changed request, so it says its
+/// body is JSON (§4.2) and carries the session's CSRF token, read afresh
+/// once if the session has another (`send`). Once the daemon has ended the
+/// session, the page forgets its token and its lease. `false` is no answer:
+/// the session may still be live.
+pub(crate) async fn sign_out() -> bool {
+    let url = format!("{}{SESSION_PATH}", origin());
+    let answer = send(None, Asked::ByPerson, |csrf, _| {
+        let builder = Request::delete(&url).header("content-type", "application/json");
+        let builder = match csrf {
+            Some(csrf) => builder.header(CSRF_HEADER, csrf),
+            None => builder,
+        };
+        builder.build().ok()
+    })
+    .await;
+    if !answer.is_some_and(|(status, _)| succeeded(status)) {
+        return false;
+    }
+    SESSION.with_borrow_mut(|session| {
+        session.csrf = None;
+        session.lease = None;
+        session.signed_out = true;
+    });
+    look_again();
+    true
 }
 
 /// Reads the operations history from `base` (the page's own origin) into
@@ -186,8 +496,14 @@ pub(crate) fn watch(
                 // Shared by every round, so a reconnect never runs a second re-read
                 // beside one still out.
                 let rereads = Rc::new(Cell::new(Rereads::default()));
+                // The first read is the page opening; every later one, a reconnect's
+                // or a retry's, is the page's own.
+                let mut asked = Asked::ByPerson;
                 loop {
-                    match read::<OperationsPageDto>(&format!("{base}/api/v1/operations")).await {
+                    let url = format!("{base}/api/v1/operations");
+                    let read = read_as::<OperationsPageDto>(&url, asked, None).await;
+                    asked = Asked::OnItsOwn;
+                    match read {
                         Some(page) => {
                             attempt = 0;
                             phase.set(Phase::Ready);
@@ -270,7 +586,9 @@ fn reread(base: &str, state: RwSignal<OperationsState>, rereads: Rc<Cell<Rereads
             .clone()
             .during(async move {
                 loop {
-                    let page = read_within::<OperationsPageDto>(&url, REREAD_PATIENCE).await;
+                    let read =
+                        read_as::<OperationsPageDto>(&url, Asked::OnItsOwn, Some(REREAD_PATIENCE));
+                    let page = read.await;
                     let answered = page.is_some();
                     if let Some(page) = page {
                         state.update(|state| state.merge(page));
@@ -295,15 +613,17 @@ fn turn<T>(rereads: &Cell<Rereads>, step: impl FnOnce(&mut Rereads) -> T) -> T {
 }
 
 /// After a start or a cancel, polls the history into `state` until
-/// `operation` has ended: a start announces before the first event can
-/// arrive, and a cancelled run emits no `UiEvent` at all, so the page does
-/// not guess — it reads the store until the store says the run settled.
+/// `operation` has ended, as the page's own reads: the start or the cancel
+/// was the person's use of the session. A start announces before the first
+/// event can arrive, and a cancelled run emits no `UiEvent` at all, so the
+/// page does not guess — it reads the store until the store says the run
+/// settled.
 /// `false` is the budget running out with no end in sight: the caller says
 /// so, rather than leave the reader watching a row that stopped moving.
 pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operation: &str) -> bool {
     let url = format!("{base}/api/v1/operations");
     for _ in 0..(SETTLE_FOR_MS / POLL_EVERY_MS) {
-        if let Some(page) = read::<OperationsPageDto>(&url).await {
+        if let Some(page) = read_as::<OperationsPageDto>(&url, Asked::OnItsOwn, None).await {
             let settled = page
                 .operations
                 .iter()
@@ -318,10 +638,10 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
     false
 }
 
-/// Reads the operation of a maintenance run of `kind` until it has ended. The
-/// pace of the reads and the patience with a silent daemon are
-/// `maintenance::Watch`'s; `alive` says whether the page that waits is still
-/// there.
+/// Reads the operation of a maintenance run of `kind` until it has ended, as
+/// the page's own reads. The pace of the reads and the patience with a
+/// silent daemon are `maintenance::Watch`'s; `alive` says whether the page
+/// that waits is still there.
 pub(crate) async fn await_end(
     base: &str,
     operation: &str,
@@ -331,7 +651,7 @@ pub(crate) async fn await_end(
     let url = format!("{base}{}", maintenance::operation_path(operation));
     let mut watch = Watch::new(kind);
     while alive() {
-        let answer = read::<OperationDetailDto>(&url).await;
+        let answer = read_as::<OperationDetailDto>(&url, Asked::OnItsOwn, None).await;
         match watch.after(answer.as_ref()) {
             Next::Again(delay) => sleep(delay).await,
             Next::Ended(end, findings) => return Watched::Ended(end, findings),
