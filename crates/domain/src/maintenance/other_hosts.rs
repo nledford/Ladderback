@@ -56,9 +56,44 @@ impl OtherHosts {
         now: Timestamp,
         snapshots: impl IntoIterator<Item = &'a Snapshot>,
     ) -> Self {
-        let _ = (config, alias, agent, machine, now, BTreeSet::<()>::new());
-        let _ = (Ownership::owned_here, OTHER_AGENT_RECENCY, snapshots);
-        todo!()
+        let maintained_here = config
+            .repository(alias)
+            .is_some_and(|repository| Ownership::owned_here(repository.maintenance));
+        if !maintained_here {
+            return Self::default();
+        }
+        let this_host: BTreeSet<&str> = std::iter::once(machine)
+            .chain(config.agent().hostname.as_ref().map(|host| host.as_str()))
+            .chain(
+                config
+                    .plans()
+                    .iter()
+                    .filter_map(|plan| plan.host.as_ref().map(|host| host.as_str())),
+            )
+            .collect();
+        let own = agent.as_uuid().hyphenated().to_string();
+        // A `now` too near the start of time to go back from has no older
+        // snapshot to tell apart.
+        let recent_since = now
+            .checked_sub(OTHER_AGENT_RECENCY)
+            .unwrap_or(Timestamp::MIN);
+        let others: BTreeSet<&str> = snapshots
+            .into_iter()
+            .filter(|snapshot| match snapshot.agent() {
+                Some(tagger) if tagger == own => false,
+                Some(_) if snapshot.time >= recent_since => true,
+                _ => !this_host.contains(snapshot.hostname.as_str()),
+            })
+            .map(|snapshot| snapshot.hostname.as_str())
+            .collect();
+        Self {
+            named: others
+                .iter()
+                .take(MAX_NAMED_OTHER_HOSTS)
+                .map(|host| (*host).to_owned())
+                .collect(),
+            count: others.len(),
+        }
     }
 
     /// The first [`MAX_NAMED_OTHER_HOSTS`] of them, in order.
