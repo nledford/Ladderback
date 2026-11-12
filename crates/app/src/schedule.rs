@@ -19,7 +19,7 @@ use domain::execution::Trigger;
 use domain::execution::conditions::UnmetCondition;
 use domain::execution::next_run::NextRun;
 use domain::execution::wake::WAKE_CHECK_EVERY;
-use domain::planning::{AgentConfig, NoNextRun, Schedule};
+use domain::planning::{AgentConfig, NoNextRun, Schedule, ScheduleZone};
 use domain::{OperationId, PlanId, SignedDuration, TimeZone, Timestamp};
 
 use crate::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
@@ -120,7 +120,22 @@ impl Scheduler {
     /// the configuration again, checks for a wake, and starts the runs that
     /// are due.
     pub async fn run(&self) {
-        todo!()
+        let mut watch = WakeWatch::new(Arc::clone(&self.clock));
+        let mut plans = Plans {
+            planned: BTreeMap::new(),
+            kept: Some(self.kept_runs().await),
+        };
+        self.refresh(&mut plans).await;
+        loop {
+            self.start_due(&mut plans.planned).await;
+            self.clock.sleep(self.until_next(&plans.planned)).await;
+            self.refresh(&mut plans).await;
+            // Before anything due starts: a run missed while the machine
+            // slept is `NextRun::resume`'s to decide, not a run on time.
+            if watch.check().is_some() {
+                self.resume_all(&mut plans.planned).await;
+            }
+        }
     }
 
     async fn kept_runs(&self) -> BTreeMap<PlanId, Timestamp> {
@@ -317,16 +332,14 @@ fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, Schedule> {
 /// The zone a cron schedule is read in (§5): the one `schedule` names, else
 /// `machine`, the machine's local zone.
 fn zone_of<'a>(schedule: &'a Schedule, machine: &'a TimeZone) -> &'a TimeZone {
-    let _ = (schedule, machine);
-    todo!()
+    schedule.zone().map_or(machine, ScheduleZone::zone)
 }
 
 /// Whether two schedules put runs at the same times: the same cadence, time
 /// zone and jitter. Catch-up and the AC power condition don't move a planned
 /// run.
 fn same_runs(held: &Schedule, read: &Schedule) -> bool {
-    let _ = (held, read);
-    todo!()
+    held.cadence() == read.cadence() && held.zone() == read.zone() && held.jitter() == read.jitter()
 }
 
 #[cfg(test)]

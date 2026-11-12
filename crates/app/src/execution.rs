@@ -70,8 +70,15 @@ impl Queued {
     /// persistent queue (§5, decision 73). Nothing is recorded: the log has
     /// it as it was queued, so it keeps its ID, trigger and queue time.
     pub fn resumed(operation: Operation, job: Job) -> Self {
-        let _ = (operation, job);
-        todo!()
+        Self {
+            run: Run {
+                operation,
+                result: None,
+                recording_errors: Vec::new(),
+                stopped_by_hook: false,
+            },
+            job,
+        }
     }
 }
 

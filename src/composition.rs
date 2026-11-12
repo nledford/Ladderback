@@ -199,8 +199,18 @@ async fn resume_queued(
     store: Arc<dyn OperationStore>,
     runs: &dyn PlanRuns,
 ) {
-    let _ = (queued, config, store, runs);
-    todo!()
+    let config = match config.load().await {
+        Ok(config) => Some(config),
+        Err(error) => {
+            log::warn!(
+                "the configuration can't be read, so any operation queued before the start ends as failed: {error}"
+            );
+            None
+        }
+    };
+    RecoverOperations::new(store)
+        .resume(queued, config.as_ref(), runs, SystemClock.now())
+        .await;
 }
 
 /// How long the daemon waits for the operation log to close once it stops
@@ -926,9 +936,62 @@ impl PlanRuns for PlanRunner {
         }
     }
 
-    async fn resume(&self, operation: domain::execution::Operation) {
-        let _ = operation;
-        todo!()
+    async fn resume(&self, mut operation: domain::execution::Operation) {
+        let id = operation.id();
+        let built = match operation.target().plan.clone() {
+            Some(plan) => match self.config.load().await {
+                Ok(config) => self.backup_of(&config, &plan).await,
+                Err(error) => Err(config_unusable(error, |code, args, detail| {
+                    StartError::Unavailable { code, args, detail }
+                })),
+            },
+            None => Err(StartError::UnknownPlan),
+        };
+        let built = built
+            .map_err(|error| start_refused(&error))
+            .and_then(|(job, setup)| {
+                // The plan may have moved to another repository since the
+                // queue's own read: it isn't run there under a record of the old.
+                if operation.target().is_on(job.target().repository.as_ref()) {
+                    Ok((job, setup))
+                } else {
+                    Err("its plan now backs up to another repository".to_owned())
+                }
+            });
+        match built {
+            Ok((job, setup)) => {
+                let cancel = self.cancel_switch(id);
+                let use_case = self.backup_use_case(setup);
+                let registry = Arc::clone(&self.registry);
+                tokio::spawn(async move {
+                    let queued = app::execution::Queued::resumed(operation, job);
+                    let finished = use_case.run_queued(queued, cancel).await;
+                    registry.finish(&id);
+                    log_ended(&finished);
+                });
+            }
+            // The queue can't run it again, as decision 40 ended every
+            // queued operation: its plan or repository is gone or changed, a
+            // secret is refused, or the configuration can't be read. Left
+            // queued, it would show as queued with nothing to run it until
+            // the next start (decision 73).
+            Err(why) => {
+                let hyphenated = id.as_uuid().hyphenated();
+                log::warn!(
+                    "the queued backup {hyphenated} can't run again, and ends as failed: {why}"
+                );
+                if operation
+                    .fail(FailureReason::DaemonStopped, SystemClock.now())
+                    .is_ok()
+                    && let Err(refused) = self.store.save(&operation, None).await
+                {
+                    log::warn!(
+                        "operation {hyphenated}: a write to the operation log failed ({}); it stays queued",
+                        refused.code()
+                    );
+                }
+            }
+        }
     }
 
     fn report(&self, report: ScheduleReport) {

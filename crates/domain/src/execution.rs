@@ -277,8 +277,9 @@ impl Target {
     /// that names none was made before its repository's ID was known, so no
     /// repository can be told apart from it.
     pub fn is_on(&self, repository: Option<&RepositoryId>) -> bool {
-        let _ = (self, repository);
-        todo!()
+        self.repository
+            .as_ref()
+            .is_none_or(|named| Some(named) == repository)
     }
 }
 

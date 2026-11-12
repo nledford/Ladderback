@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use domain::Timestamp;
-use domain::execution::{FailureReason, OperationKind};
+use domain::execution::{FailureReason, OperationKind, Target};
 use domain::planning::AgentConfig;
 
 use crate::ports::{OperationRecord, OperationStore, Recovered, StoreError};
@@ -71,9 +71,52 @@ impl RecoverOperations {
         runs: &dyn PlanRuns,
         now: Timestamp,
     ) {
-        let _ = (queued, config, runs, now);
-        todo!()
+        for record in queued {
+            // Recovery hands back queued rows only; one that isn't is the
+            // log's fault, said and left as it is rather than run or ended.
+            let Some(mut operation) = record.queued_operation() else {
+                runs.report(ScheduleReport::Store(StoreError::Corrupt {
+                    detail: format!("operation {:?} came back as queued and isn't", record.id),
+                }));
+                continue;
+            };
+            let why = match (record.kind, config) {
+                (OperationKind::Backup, Some(config)) => match ended_why(&record.target, config) {
+                    None => {
+                        runs.resume(operation).await;
+                        continue;
+                    }
+                    Some(why) => why,
+                },
+                (OperationKind::Backup, None) => QueuedEnd::ConfigUnreadable,
+                _ => QueuedEnd::JobNotKept,
+            };
+            runs.report(ScheduleReport::QueuedEnded {
+                operation: record.id,
+                kind: record.kind,
+                why,
+            });
+            // A queued operation never ends otherwise: fail is allowed.
+            if operation.fail(FailureReason::DaemonStopped, now).is_ok()
+                && let Err(error) = self.store.save(&operation, None).await
+            {
+                runs.report(ScheduleReport::Store(error));
+            }
+        }
     }
+}
+
+/// Why a queued backup on `target` can't run again under `config`, or
+/// `None` when it can: its plan is configured, and backs up to the
+/// repository the backup was queued for.
+fn ended_why(target: &Target, config: &AgentConfig) -> Option<QueuedEnd> {
+    let Some(plan) = target.plan.as_ref().and_then(|plan| config.plan(plan)) else {
+        return Some(QueuedEnd::PlanGone);
+    };
+    let repository = config
+        .repository(&plan.repository)
+        .and_then(|repository| repository.id.as_ref());
+    (!target.is_on(repository)).then_some(QueuedEnd::RepositoryChanged)
 }
 
 #[cfg(test)]
