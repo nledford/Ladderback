@@ -448,25 +448,32 @@ impl Scheduler {
     }
 
     /// What follows a backup of `end.plan` that ended (§5). A success or a
-    /// cancel ends the plan's retries. A failure of a run the schedule
-    /// started is retried when the plan has a retry policy and no run of it
-    /// is going: the first retry of a series after a run that wasn't the
-    /// series' retry, else the next one. A failure of a run a person or
-    /// another program asked for leaves the plan's retries as they were.
+    /// cancel ends the plan's retries; one of another run while the plan's
+    /// retry is going stops that retry, whose end then plans nothing more.
+    /// A failure of a run the schedule started is retried when the plan has
+    /// a retry policy and no run of it is going: the next retry of the
+    /// series after its own retry, else the first of a new series. A
+    /// failure of a run a person or another program asked for leaves the
+    /// plan's retries as they were.
     async fn ended(&self, plans: &mut Plans, end: RunEnd) {
-        if end.outcome == RunOutcome::Failed && !RetrySchedule::retried(end.trigger) {
+        let failed = end.outcome == RunOutcome::Failed;
+        if failed && !RetrySchedule::retried(end.trigger) {
             return;
         }
         let series = match plans.retries.remove(&end.plan) {
             Some(Retrying::Started(retry)) if end.trigger == Trigger::Retry => Some(retry),
+            Some(Retrying::Stopped) if end.trigger == Trigger::Retry => return,
+            Some(Retrying::Started(_) | Retrying::Stopped) if !failed => {
+                plans.retries.insert(end.plan, Retrying::Stopped);
+                return;
+            }
             Some(Retrying::Pending(_)) => {
                 self.drop_retry(&end.plan).await;
                 None
             }
-            Some(Retrying::Stopped) => todo!("decision 76: a stopped retry"),
-            Some(Retrying::Started(_)) | None => None,
+            Some(Retrying::Started(_) | Retrying::Stopped) | None => None,
         };
-        if end.outcome != RunOutcome::Failed {
+        if !failed {
             return;
         }
         let Some(policy) = plans.policies.get(&end.plan) else {
