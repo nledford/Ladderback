@@ -111,6 +111,14 @@ impl BackupQueue {
         self.running.remove(&ticket);
         self.waiting.remove(&ticket);
     }
+
+    /// Whether a run of `plan` is going: running, or waiting for its turn.
+    pub fn is_going(&self, plan: &PlanId) -> bool {
+        self.running
+            .values()
+            .chain(self.waiting.values())
+            .any(|going| going == plan)
+    }
 }
 
 #[cfg(test)]
@@ -328,5 +336,21 @@ mod tests {
         assert_eq!(queue.start(), vec![by_hand]);
         queue.leave(by_hand);
         assert_eq!(queue.start(), vec![again]);
+    }
+
+    #[test]
+    fn a_plan_is_going_while_a_run_of_it_waits_or_runs() {
+        let mut queue = BackupQueue::new(limit(1));
+        let docs = queue.push(&plan("docs"));
+        let home = queue.push(&plan("home"));
+        assert!(!queue.is_going(&plan("photos")));
+        assert!(queue.is_going(&plan("docs")), "waiting");
+        assert_eq!(queue.start(), vec![docs]);
+        assert!(queue.is_going(&plan("docs")), "running");
+        assert!(queue.is_going(&plan("home")), "waiting behind the limit");
+        queue.leave(docs);
+        assert!(!queue.is_going(&plan("docs")));
+        queue.leave(home);
+        assert!(!queue.is_going(&plan("home")));
     }
 }
