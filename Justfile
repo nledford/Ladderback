@@ -67,6 +67,7 @@ clippy:
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), the journey lint, then the check that every path AGENTS.md
 # and CLAUDE.md name exists.
+[doc('Clippy on the host and the web UI, the TypeScript type check, the journey lint, and the AGENTS.md path check.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
