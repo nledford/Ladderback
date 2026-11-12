@@ -55,9 +55,9 @@ pub const MAX_OPTION_VALUE_BYTES: usize = MAX_SECRET_BYTES;
 pub const MAX_OPTIONS: usize = 64;
 
 /// The most bytes of secrets one redactor looks for, each counted once
-/// however many places hold it: a secret gives up to about 50 bytes of
-/// needles per byte of it, which take about 250 bytes of memory, so this
-/// keeps one redactor under about 64 MiB. The secrets of a real repository
+/// however many places hold it: a secret gives up to about 80 bytes of
+/// needles per byte of it, which take about 400 bytes of memory, so this
+/// keeps one redactor under about 100 MiB. The secrets of a real repository
 /// come to a few kilobytes (technical design §10.2).
 pub const MAX_MASKED_BYTES: usize = 256 * 1024;
 
@@ -326,7 +326,7 @@ impl std::fmt::Debug for Redactor {
 impl Redactor {
     /// A redactor for `secrets`, each counted once. When they come to more
     /// than [`MAX_MASKED_BYTES`], none of their forms is built (each about
-    /// 50 times the secret's size): the redactor masks every text whole.
+    /// 80 times the secret's size): the redactor masks every text whole.
     pub fn new<'a>(secrets: impl IntoIterator<Item = &'a SecretValue>) -> Self {
         let mut values: Vec<&str> = secrets
             .into_iter()
@@ -2422,7 +2422,7 @@ mod tests {
     }
 
     /// Up to the cap, a redactor masks each secret; past it, it builds no
-    /// form of any (each about 50 times its size) and masks every text
+    /// form of any (each about 80 times its size) and masks every text
     /// whole: more than a secret, never less (I4).
     #[test]
     fn a_redactor_builds_no_forms_of_secrets_past_the_cap() {
