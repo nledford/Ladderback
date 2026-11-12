@@ -26,10 +26,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use app::ports::{
-    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PlannedRun,
-    Recovered, ScheduleStore, Start, StoreError, maintained_repository,
+    EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PendingRetry,
+    PlannedRun, Recovered, ScheduleStore, Start, StoreError, maintained_repository,
 };
 use async_trait::async_trait;
+use domain::execution::retry::RetryScheduled;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
@@ -518,6 +519,39 @@ impl ScheduleStore for SqliteStore {
     async fn unplan(&self, plan: &PlanId) -> Result<(), StoreError> {
         let _call = self.call().await;
         sqlx::query(sql::UNPLAN)
+            .bind(plan.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
+    async fn pending_retries(&self) -> Result<Vec<PendingRetry>, StoreError> {
+        let _call = self.call().await;
+        let rows = sqlx::query(sql::PENDING_RETRIES)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        rows.iter().map(row::pending_retry).collect()
+    }
+
+    async fn keep_retry(&self, retry: &PendingRetry) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let RetryScheduled { attempt, at, until } = retry.retry;
+        sqlx::query(sql::KEEP_RETRY)
+            .bind(retry.plan.as_str())
+            .bind(i64::from(attempt))
+            .bind(at.as_millisecond())
+            .bind(until.map(|until| until.as_millisecond()))
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
+    async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        sqlx::query(sql::DROP_RETRY)
             .bind(plan.as_str())
             .execute(&self.pool)
             .await

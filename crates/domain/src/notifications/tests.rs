@@ -54,6 +54,7 @@ fn backup_event(kind: EventKind, plan_id: Option<&str>) -> Event {
         repository: Some(RepositoryAlias::parse("nas").unwrap()),
         at: at(),
         code: None,
+        attempt: None,
     }
 }
 
@@ -82,6 +83,7 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
             "backup.succeeded",
             "backup.warning",
             "backup.failed",
+            "backup.retrying",
             "forget.failed",
             "prune.failed",
             "check.failed",
@@ -98,7 +100,7 @@ fn a_name_that_is_no_event_is_refused() {
         "",
         "backup",
         "Backup.Failed",
-        "backup.retrying",
+        "backup.missed",
         "backup.failed ",
     ] {
         let refused = EventKind::parse(text).unwrap_err();
@@ -107,12 +109,13 @@ fn a_name_that_is_no_event_is_refused() {
 }
 
 #[test]
-fn a_start_pings_start_a_success_or_warning_pings_success_and_a_failure_pings_fail() {
+fn a_start_pings_start_a_success_or_warning_pings_success_and_a_failure_or_retry_pings_fail() {
     assert_eq!(EventKind::BackupStarted.ping(), Ping::Start);
     assert_eq!(EventKind::BackupSucceeded.ping(), Ping::Success);
     assert_eq!(EventKind::BackupWarning.ping(), Ping::Success);
     for kind in [
         EventKind::BackupFailed,
+        EventKind::BackupRetrying,
         EventKind::ForgetFailed,
         EventKind::PruneFailed,
         EventKind::CheckFailed,
@@ -240,6 +243,53 @@ fn a_failure_the_log_has_not_recorded_has_no_code_and_keeps_the_repository_it_is
     assert_eq!(event.kind, EventKind::BackupFailed);
     assert_eq!(event.code, None);
     assert_eq!(event.repository, Some(nas));
+}
+
+#[test]
+fn a_planned_retry_tells_the_failed_backups_plan_and_code_its_attempt_and_when_it_runs() {
+    let mut failed = operation(OperationKind::Backup, Some("home"))
+        .with_repository_alias(RepositoryAlias::parse("nas").unwrap());
+    failed
+        .fail(
+            FailureReason::EngineFailed {
+                detail: "canary-detail-text".to_owned(),
+            },
+            at(),
+        )
+        .unwrap();
+    let runs: Timestamp = "2026-11-12T09:35:00Z".parse().unwrap();
+    let attempt = Attempt { number: 2, of: 3 };
+    let event = Event::retrying(Subject::of(&failed), attempt, runs).unwrap();
+    assert_eq!(
+        event,
+        Event {
+            kind: EventKind::BackupRetrying,
+            operation: failed.id(),
+            plan: Some(plan("home")),
+            repository: Some(RepositoryAlias::parse("nas").unwrap()),
+            at: runs,
+            code: Some("operation-failed"),
+            attempt: Some(attempt),
+        }
+    );
+}
+
+#[test]
+fn only_a_backup_is_told_as_retrying() {
+    let attempt = Attempt { number: 1, of: 1 };
+    for kind in [
+        OperationKind::Forget,
+        OperationKind::Prune,
+        OperationKind::Check,
+    ] {
+        let mut failed = operation(kind, None);
+        failed.fail(FailureReason::DeadlinePassed, at()).unwrap();
+        assert_eq!(
+            Event::retrying(Subject::of(&failed), attempt, at()),
+            None,
+            "{kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -633,6 +683,24 @@ mod templates {
         let template = Template::parse("[{plan}] [{code}]").unwrap();
         let event = backup_event(EventKind::BackupSucceeded, None);
         assert_eq!(template.render(&event), "[] []");
+    }
+
+    #[test]
+    fn a_retrys_attempt_and_attempts_are_placeholders_and_empty_for_other_events() {
+        let template = Template::parse("{event} {attempt} of {attempts} at {time}").unwrap();
+        let retrying = Event {
+            kind: EventKind::BackupRetrying,
+            attempt: Some(Attempt { number: 2, of: 3 }),
+            ..failed_event()
+        };
+        assert_eq!(
+            template.render(&retrying),
+            "backup.retrying 2 of 3 at 2026-11-12T09:30:00Z"
+        );
+        assert_eq!(
+            template.render(&failed_event()),
+            "backup.failed  of  at 2026-11-12T09:30:00Z"
+        );
     }
 
     #[test]

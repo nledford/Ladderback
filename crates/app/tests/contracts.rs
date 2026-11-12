@@ -85,6 +85,11 @@ async fn in_memory_schedule_store_meets_the_schedule_store_contract() {
     contract::schedule_store::run(&InMemorySchedules::default()).await;
 }
 
+#[tokio::test]
+async fn in_memory_schedule_store_keeps_each_plans_pending_retry() {
+    contract::schedule_store::run_retries(&InMemorySchedules::default()).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));

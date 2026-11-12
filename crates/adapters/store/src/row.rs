@@ -8,7 +8,8 @@
 
 use std::fmt::Display;
 
-use app::ports::{EngineResult, OperationRecord, PlannedRun, StoreError};
+use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
+use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Warning};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
@@ -144,6 +145,37 @@ pub(crate) fn planned_run(row: &SqliteRow) -> Result<PlannedRun, StoreError> {
     Ok(PlannedRun {
         plan,
         at: reader.required_time("next_run")?,
+    })
+}
+
+/// A row of `retry_state`: a plan's pending retry. Its attempt counts from
+/// 1, as the store writes it.
+pub(crate) fn pending_retry(row: &SqliteRow) -> Result<PendingRetry, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "a pending retry".to_owned(),
+    };
+    let plan = reader
+        .id_of("plan_id", "plan ID", PlanId::parse)?
+        .ok_or_else(|| reader.corrupt("plan_id", "is NULL"))?;
+    let reader = Reader {
+        row,
+        scope: format!("the pending retry of {}", plan.as_str()),
+    };
+    let counted = reader
+        .integer("attempt")?
+        .ok_or_else(|| reader.corrupt("attempt", "is NULL"))?;
+    let attempt = u32::try_from(counted)
+        .ok()
+        .filter(|attempt| *attempt >= 1)
+        .ok_or_else(|| reader.corrupt("attempt", format!("{counted} is not an attempt")))?;
+    Ok(PendingRetry {
+        plan,
+        retry: RetryScheduled {
+            attempt,
+            at: reader.required_time("retry_at")?,
+            until: reader.time("until")?,
+        },
     })
 }
 

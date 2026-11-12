@@ -22,6 +22,14 @@ notify-backup-warning = The backup of { $plan } succeeded with warnings. Its his
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-backup-failed = The backup of { $plan } failed ({ $code }).
 
+# A backup failed, and the agent planned one of its retries.
+# $plan (text): the plan's ID, such as home, or the operation's ID when the backup has no plan.
+# $code (text): the failure's code, such as operation-failed, or none when it is unknown.
+# $attempt (number): which retry this is, such as 1.
+# $attempts (number): how many retries the plan makes at most, such as 3.
+# $at (instant): when the retry runs, read in UTC; the zone's name follows it.
+notify-backup-retrying = The backup of { $plan } failed ({ $code }). Retry { $attempt } of { $attempts } runs at { DATETIME($at) } { DATETIME($at, timeZoneName: "short") }.
+
 # A forget of old snapshots failed.
 # $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.

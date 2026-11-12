@@ -89,6 +89,21 @@ pub(crate) const PLAN_RUN: &str = concat!(
 /// Forgets a plan's planned run. Parameter: `plan_id`.
 pub(crate) const UNPLAN: &str = "DELETE FROM schedule_state WHERE plan_id = ?";
 
+/// Every plan's pending retry, in the order of the plans' IDs.
+pub(crate) const PENDING_RETRIES: &str =
+    "SELECT plan_id, attempt, retry_at, until FROM retry_state ORDER BY plan_id";
+
+/// Keeps a plan's pending retry, replacing the one kept before. Parameters:
+/// `plan_id`, `attempt`, `retry_at`, `until`.
+pub(crate) const KEEP_RETRY: &str = concat!(
+    "INSERT INTO retry_state (plan_id, attempt, retry_at, until) VALUES (?, ?, ?, ?) ",
+    "ON CONFLICT(plan_id) DO UPDATE SET attempt = excluded.attempt, ",
+    "retry_at = excluded.retry_at, until = excluded.until"
+);
+
+/// Forgets a plan's pending retry. Parameter: `plan_id`.
+pub(crate) const DROP_RETRY: &str = "DELETE FROM retry_state WHERE plan_id = ?";
+
 // History, newest first, in four statements: with or without a plan, and with
 // or without a cursor. The cursor is a term of its own, not an `IS NULL OR`
 // alternative, so a later page starts at its place in the index rather than

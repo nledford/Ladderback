@@ -169,6 +169,9 @@ pub(crate) struct Background {
     schedules: Arc<dyn ScheduleStore>,
     store: Arc<dyn OperationStore>,
     conditions: RunConditions,
+    /// How each backup ended, which the scheduler reads to retry a failed
+    /// one (§5).
+    ends: app::retry::RunEnds,
 }
 
 impl Background {
@@ -177,6 +180,7 @@ impl Background {
     /// dropped.
     pub(crate) async fn run(self, random: Arc<dyn Random>) {
         let queue = Arc::clone(&self.runner.queue);
+        let events = Arc::clone(&self.runner.events);
         let runs: Arc<dyn PlanRuns> = self.runner;
         resume_queued(self.queued, self.config.as_ref(), self.store, runs.as_ref()).await;
         Scheduler {
@@ -189,6 +193,8 @@ impl Background {
             runs,
             queue,
             zone: domain::TimeZone::system(),
+            ends: self.ends,
+            events,
         }
         .run()
         .await;
@@ -419,6 +425,7 @@ async fn state_over(
         Arc::new(log_recording),
     ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
+    let (run_ends, ends) = app::retry::run_ends();
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         resolve: Arc::clone(&resolve),
@@ -430,6 +437,7 @@ async fn state_over(
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
+        ends: run_ends,
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -453,6 +461,7 @@ async fn state_over(
         schedules,
         store,
         conditions,
+        ends,
     };
     Ok((
         AppState {
@@ -907,6 +916,9 @@ struct PlanRunner {
     /// The agent's one queue of backups, which the scheduler shares: every
     /// backup takes its turn in it (§5, the concurrency limit).
     queue: Arc<RunQueue>,
+    /// Where each backup's run says how it ended, so the scheduler can
+    /// retry a failed one (§5).
+    ends: app::retry::RunEndSender,
 }
 
 impl PlanRunner {
@@ -1011,6 +1023,7 @@ impl PlanRunner {
         // meanwhile (the client went away) strands neither.
         let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
+        let ends = self.ends.clone();
         tokio::spawn(async move {
             let queued = use_case.queue(operation, trigger, job).await;
             let _ = recorded.send(());
@@ -1019,6 +1032,7 @@ impl PlanRunner {
             let finished = use_case.run_in_turn(queued, place, cancel).await;
             registry.finish(&operation);
             log_ended(&finished);
+            say_how_it_ended(&ends, &finished);
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
@@ -1089,11 +1103,13 @@ impl PlanRuns for PlanRunner {
                 let cancel = self.cancel_switch(id);
                 let use_case = self.backup_use_case(setup);
                 let registry = Arc::clone(&self.registry);
+                let ends = self.ends.clone();
                 tokio::spawn(async move {
                     let queued = app::execution::Queued::resumed(operation, job);
                     let finished = use_case.run_in_turn(queued, place, cancel).await;
                     registry.finish(&id);
                     log_ended(&finished);
+                    say_how_it_ended(&ends, &finished);
                 });
             }
             // The queue can't run it again, as decision 40 ended every
@@ -1167,6 +1183,22 @@ impl PlanRuns for PlanRunner {
             } => log::warn!(
                 "the queued {kind:?} {} can't run again, and ends as failed ({why:?})",
                 operation.as_uuid().hyphenated()
+            ),
+            ScheduleReport::Retrying { plan, retry } => log::info!(
+                "the backup of plan {} failed, and retry {} runs at {}",
+                plan.as_str(),
+                retry.attempt,
+                retry.at
+            ),
+            ScheduleReport::RetriesEnded { plan, why } => log::info!(
+                "the retries of plan {} ended without a success: {}",
+                plan.as_str(),
+                match why {
+                    domain::execution::retry::NoRetry::Exhausted => "its attempts are spent",
+                    domain::execution::retry::NoRetry::NextRun =>
+                        "its next scheduled run comes first",
+                    domain::execution::retry::NoRetry::RunGoing => "a run of it is going",
+                }
             ),
         }
     }
@@ -1301,6 +1333,14 @@ impl Operations for PlanRunner {
         } else {
             Err(http_adapter::CancelError::NotRunning)
         }
+    }
+}
+
+/// Tells the scheduler how a backup's run ended, so that it can retry a
+/// failed one (§5). The run's place has left the queue by now.
+fn say_how_it_ended(ends: &app::retry::RunEndSender, finished: &Finished) {
+    if let Some(end) = app::retry::RunEnd::of(&finished.operation) {
+        ends.send(end);
     }
 }
 
@@ -3852,6 +3892,7 @@ mod tests {
             hooks: Arc::new(hooks),
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
+            ends: app::retry::run_ends().0,
         };
         (runner, entered, open_gate, scratch)
     }
@@ -3920,6 +3961,79 @@ mod tests {
             .cancel(second)
             .await
             .expect("the second run is cancelled");
+    }
+
+    /// The end the runner's next backup says, within a few seconds.
+    async fn said_end(ends: &app::retry::RunEnds) -> Option<app::retry::RunEnd> {
+        tokio::time::timeout(std::time::Duration::from_secs(5), ends.next())
+            .await
+            .expect("the run says how it ended")
+    }
+
+    /// A backup's run says how it ended, so the scheduler can retry a
+    /// failed one (§5): here one started by hand, which a person cancels.
+    #[tokio::test]
+    async fn a_backup_started_now_says_how_it_ended() {
+        let (mut runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
+        let (sender, ends) = app::retry::run_ends();
+        runner.ends = sender;
+        let started = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        let operation = operation_of(&started).expect("an operation ID");
+        entered.changed().await.expect("the run reaches its hooks");
+        open_gate.send(true).expect("the gate opens");
+        runner.cancel(started).await.expect("the run is cancelled");
+        assert_eq!(
+            said_end(&ends).await,
+            Some(app::retry::RunEnd {
+                operation,
+                plan: domain::PlanId::parse("home").expect("a plan ID"),
+                trigger: Trigger::Manual,
+                outcome: app::retry::RunOutcome::Cancelled,
+            })
+        );
+    }
+
+    /// The same for a backup the queue held from before the start.
+    #[tokio::test]
+    async fn a_resumed_backup_says_how_it_ended() {
+        let (mut runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
+        let (sender, ends) = app::retry::run_ends();
+        runner.ends = sender;
+        let operation = OperationId::from_uuid(Uuid::from_u128(0x7275));
+        let queued = domain::execution::Operation::queue(
+            operation,
+            OperationKind::Backup,
+            Trigger::Retry,
+            domain::execution::Target {
+                plan: Some(domain::PlanId::parse("home").expect("a plan ID")),
+                repository: None,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        );
+        runner
+            .store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+        PlanRuns::resume(&runner, queued).await;
+        entered.changed().await.expect("the run reaches its hooks");
+        open_gate.send(true).expect("the gate opens");
+        runner
+            .cancel(operation.as_uuid().hyphenated().to_string())
+            .await
+            .expect("the run is cancelled");
+        assert_eq!(
+            said_end(&ends).await,
+            Some(app::retry::RunEnd {
+                operation,
+                plan: domain::PlanId::parse("home").expect("a plan ID"),
+                trigger: Trigger::Retry,
+                outcome: app::retry::RunOutcome::Cancelled,
+            })
+        );
     }
 
     /// A runner as [`runner_at_a_gate`] makes it, whose log holds a backup of
@@ -8725,6 +8839,7 @@ mod repository_service_tests {
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
+                ends: app::retry::run_ends().0,
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -8768,6 +8883,7 @@ mod repository_service_tests {
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
+                ends: app::retry::run_ends().0,
             };
 
             let place = runner

@@ -81,6 +81,13 @@ impl RunQueue {
         }
     }
 
+    /// Whether a run of `plan` is going: it holds a place, running or
+    /// waiting for its turn.
+    pub fn is_going(&self, plan: &PlanId) -> bool {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.is_going(plan)
+    }
+
     /// Asks `take` for a ticket, and starts whatever may start now: the new
     /// run, or, under a limit `take` raised, runs that waited, whether or
     /// not `take` gave a ticket.
@@ -249,5 +256,19 @@ mod tests {
         ));
         drop(first);
         assert!(has_turn(&mut second));
+    }
+
+    #[test]
+    fn a_plan_is_going_while_it_holds_a_place() {
+        let queue = RunQueue::new();
+        let docs = queue.push(&plan("docs"), limit(1));
+        let home = queue.push(&plan("home"), limit(1));
+        assert!(queue.is_going(&plan("docs")));
+        assert!(queue.is_going(&plan("home")));
+        assert!(!queue.is_going(&plan("photos")));
+        drop(docs);
+        drop(home);
+        assert!(!queue.is_going(&plan("docs")));
+        assert!(!queue.is_going(&plan("home")));
     }
 }

@@ -76,3 +76,13 @@ async fn sqlite_store_meets_the_schedule_store_contract() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn sqlite_store_keeps_each_plans_pending_retry() {
+    within(
+        120,
+        "the pending retry contract suite",
+        contract::schedule_store::run_retries(&SqliteSchedules::default()),
+    )
+    .await;
+}

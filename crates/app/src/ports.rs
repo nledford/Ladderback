@@ -48,7 +48,7 @@ pub use profiles::{
 };
 pub use random::{Random, RandomUnavailable};
 pub use retention::{Retention, RetentionError};
-pub use schedule_store::{PlannedRun, ScheduleStore};
+pub use schedule_store::{PendingRetry, PlannedRun, ScheduleStore};
 pub use secrets::{Resolved, SecretResolver};
 pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 pub use sources::{NormalizeSources, SourcesError};

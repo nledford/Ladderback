@@ -135,6 +135,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [73](decisions/73-the-persistent-queue-and-the-scheduler-loop.md) | The persistent queue and the scheduler loop |
 | [74](decisions/74-how-notifications-are-configured-and-delivered.md) | How notifications are configured and delivered |
 | [75](decisions/75-the-overlap-policy-and-the-concurrency-limit.md) | The overlap policy and the concurrency limit |
+| [76](decisions/76-retries-of-a-failed-backup.md) | Retries of a failed backup |
 | [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
 | [78](decisions/78-the-rust-toolchain-is-pinned.md) | The Rust toolchain is pinned, and the MSRV is the pin |
 

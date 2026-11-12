@@ -13,7 +13,7 @@ use std::sync::Arc;
 use api::UiEvent;
 use domain::execution::OperationStatus;
 use domain::notifications::{
-    Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
+    Attempt, Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
 };
 use domain::planning::Locale;
 use domain::secrets::{SecretRef, SecretValue};
@@ -76,14 +76,17 @@ pub struct Notify {
     notifier: Arc<dyn Notifier>,
 }
 
-/// How the news says an operation went: started, or ended with an outcome.
+/// How the news says an operation went: started, ended with an outcome, or
+/// failed and is retried.
 enum Turn {
     Started,
     Ended(Outcome),
+    Retrying(Attempt),
 }
 
-/// The start or the end of an operation, as the news says it: the
-/// operation's ID, how it went and when, as the news writes them.
+/// The start or the end of an operation, or the retry planned after its
+/// failure, as the news says it: the operation's ID, how it went and when
+/// (for a retry, when the retry runs), as the news writes them.
 struct News {
     operation: String,
     turn: Turn,
@@ -91,8 +94,9 @@ struct News {
 }
 
 impl News {
-    /// What `news` says of an operation's start or end; `None` for news that
-    /// is no event (progress, a warning, an agent coming or going).
+    /// What `news` says of an operation's start or end, or of a retry
+    /// planned after it failed; `None` for news that is no event (progress,
+    /// a warning, an agent coming or going).
     fn of(news: UiEvent) -> Option<Self> {
         let (operation, turn, at) = match news {
             UiEvent::OperationStarted {
@@ -109,6 +113,20 @@ impl News {
                 finished_at,
                 ..
             } => (operation, Turn::Ended(Outcome::Failed), finished_at),
+            UiEvent::BackupRetrying {
+                operation,
+                attempt,
+                attempts,
+                at,
+                ..
+            } => (
+                operation,
+                Turn::Retrying(Attempt {
+                    number: attempt,
+                    of: attempts,
+                }),
+                at,
+            ),
             _ => return None,
         };
         Some(Self {
@@ -171,6 +189,7 @@ impl Notify {
         let at = at.parse::<Timestamp>().ok().or(match turn {
             Turn::Started => record.started_at,
             Turn::Ended(_) => record.finished_at,
+            Turn::Retrying(_) => None,
         });
         let Some(at) = at else {
             return Vec::new();
@@ -190,6 +209,7 @@ impl Notify {
         let event = match turn {
             Turn::Started => Event::started(subject, at),
             Turn::Ended(outcome) => Event::ended(subject, with_warnings(outcome, record), at),
+            Turn::Retrying(attempt) => Event::retrying(subject, attempt, at),
         };
         let Some(event) = event else {
             return Vec::new();
@@ -211,10 +231,11 @@ impl Notify {
     ///
     /// A subscriber's queue on the bus is short and loses its oldest events
     /// once it is full (§4.4), and a delivery can take its whole timeout. So
-    /// the starts and ends are read off the bus as they come, while a slow
-    /// channel is still being told, and wait their turn here: one per start
-    /// and end of a run, never per warning or progress, so a run's warnings
-    /// can't push another run's end out of the queue.
+    /// the starts, ends and planned retries are read off the bus as they
+    /// come, while a slow channel is still being told, and wait their turn
+    /// here: one per start and end of a run and per retry planned, never per
+    /// warning or progress, so a run's warnings can't push another run's end
+    /// out of the queue.
     pub async fn run(&self, news: BoxStream<'static, UiEvent>, mut report: impl FnMut(Report)) {
         let (waiting, mut turns) = mpsc::unbounded();
         let read = news

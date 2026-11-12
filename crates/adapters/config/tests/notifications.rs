@@ -184,6 +184,35 @@ fn channels_and_rules_are_read_from_their_named_tables() {
 }
 
 #[test]
+fn a_rule_may_send_the_retries_of_a_failed_backup_and_is_written_back_with_them() {
+    let text = with(
+        "[notifications.channels.ops]\nkind = \"webhook\"\nurl-env = \"DEMO_WEBHOOK_URL\"\n\n[notifications.rules.retries]\nevents = [\"backup.failed\", \"backup.retrying\"]\nchannel = \"ops\"\n",
+    );
+    let config = parsed(&text).expect("a valid file").config;
+    let rule = config
+        .notifications()
+        .rules()
+        .get(&rule_name("retries"))
+        .expect("the rule");
+    assert_eq!(
+        rule.events(),
+        &BTreeSet::from([EventKind::BackupFailed, EventKind::BackupRetrying])
+    );
+    let written = render(Path::new(FILE), &config).expect("renders");
+    assert!(
+        written.contains("\"backup.retrying\""),
+        "the rule's events in:\n{written}"
+    );
+    let read = parse(
+        Path::new(FILE),
+        &written,
+        &config_adapter::Schemas::production(),
+    )
+    .expect("the written file reads");
+    assert_eq!(read.config, config);
+}
+
+#[test]
 fn a_file_without_notifications_or_with_an_empty_table_has_none() {
     for text in [BASE.to_owned(), with("[notifications]\n")] {
         let parsed = parsed(&text).expect("a valid file");
@@ -365,11 +394,11 @@ fn a_value_a_channel_or_rule_refuses_is_reported_where_it_is_written() {
         ),
         (
             with(&format!(
-                "{channel}\n[notifications.rules.failures]\nevents = [\"backup.failed\", \"backup.retrying\"]\nchannel = \"ops\"\n"
+                "{channel}\n[notifications.rules.failures]\nevents = [\"backup.failed\", \"backup.missed\"]\nchannel = \"ops\"\n"
             )),
             "notifications.rules.failures.events[1]",
             ValueKind::NotificationEvent,
-            "\"backup.retrying\"",
+            "\"backup.missed\"",
         ),
         (
             with(&format!(
