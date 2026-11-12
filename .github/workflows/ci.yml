@@ -32,9 +32,14 @@ permissions:
 # On pull requests only a push (`synchronize`) may cancel a run; any other
 # pull request run (opened, reopened) gets a group of its own, so a required
 # check is never left cancelled on the commit being merged (see red-first.yml).
-# Pushes to main, the nightly run and manual runs share one group and queue.
+# The nightly run and manual runs get a group of their own too: GitHub keeps
+# one pending run per group and cancels the older one when another queues, so
+# sharing main's queue, nightly run 43208497343 (2026-11-12) was cancelled
+# before any job started, when a push to main queued behind it; and a running
+# nightly (the full mutation run takes up to 180 minutes) held main's push CI
+# behind it. Only pushes to main share one group, and queue.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && github.event.action != 'synchronize' && github.run_id || 'serial' }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ ((github.event_name == 'pull_request' && github.event.action != 'synchronize') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || 'serial' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
