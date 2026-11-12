@@ -376,12 +376,146 @@ mod tests {
             "rclone:nas:${NAME}",
             "rclone:${DEMO_REMOTE}",
             "rclone:nas${NAME}",
+            // rclone's on-the-fly backends other than `local` reach a remote.
+            "rclone::sftp:backups",
+            "rclone::s3,provider=AWS,env_auth:bucket/repo",
+            "rclone::sftp,host=nas.example.net,description='a/b:c,d':backups",
+            "rclone::local:/srv/demo-repo",
+            "rclone::local,nounc=true:/srv/demo-repo",
+            "rclone::local:${NAME}",
+            // Files a setting names by a full path, or one rclone expands.
+            "rclone::sftp,host=nas.example.net,key_file=/srv/keys/id:backups",
+            "rclone::sftp,host=nas.example.net,key_file=~/.ssh/id:backups",
+            "rclone::sftp,host=nas.example.net,key_file=:backups",
+            "rclone:nas,override.ca_cert=/etc/ssl/ca.pem:backups",
+            // A location written in a setting that is a remote or a full path.
+            "rclone::alias,remote=\"nas:backups\":repo",
+            "rclone::alias,remote='nas:backups':repo",
+            "rclone::crypt,remote=':sftp,host=nas.example.net:backups':",
+            "rclone::alias,remote=/srv/demo-repo:",
+            "rclone::union,upstreams='/srv/a nas:b:ro':",
+            "rclone::union,upstreams='\"/srv/my backups\" nas:b':",
+            "rclone::union,upstreams=:",
+            "rclone::combine,upstreams='a=nas:ro b=/srv/b':",
+            // A remote whose settings make it of a backend other than `local`,
+            // a setting a global flag reads that names no file, and a path
+            // that only looks like settings.
+            "rclone:nas,type=sftp:backups",
+            "rclone:nas,type=local,type=sftp:backups",
+            "rclone:nas,override.suffix=old:backups",
+            "rclone:nas:key_file=keys/id:backups",
+            // What rclone refuses: a backend name with a `/`, an empty name, a
+            // setting's name with a character a name can't hold.
+            "rclone::local/x:backups",
+            "rclone:,x:backups",
+            "rclone:,key_file=keys/id:backups",
+            "rclone::local,b@d=x:backups",
         ] {
             assert_eq!(at(location).relative_path(), None, "{location:?}");
             let mut hot = at("/srv/demo-repo");
             hot.repo_hot = Some(location.to_owned());
             assert_eq!(hot.relative_path(), None, "{location:?}");
         }
+    }
+
+    #[test]
+    fn a_remote_whose_settings_hold_a_slash_is_not_a_folder_here() {
+        // A `/` in a setting of a remote of rclone's configuration file, before
+        // the `:` that ends the remote's name, is part of the setting: the
+        // remote reaches no folder on this machine.
+        for location in [
+            "rclone:nas,root_folder_id=a/b:repo",
+            "rclone:nas,shared_with_me:backups/repo",
+            "rclone:nas,description='a/b':repo",
+        ] {
+            assert_eq!(at(location).relative_path(), None, "{location:?}");
+            assert!(!is_relative_location(location), "{location:?}");
+        }
+    }
+
+    /// rclone locations that name a file or folder on this machine by a
+    /// relative path, other than as a folder with no remote: the path of an
+    /// on-the-fly `local` backend, a setting of a connection string that
+    /// names a file, and a location written in a setting.
+    const RCLONE_RELATIVE: [&str; 26] = [
+        // rclone's `local` backend serves its path from the working directory.
+        "rclone::local:backups",
+        "rclone::local:",
+        "rclone::local:./repo",
+        "rclone::local:~/repo",
+        "rclone::local:nas:repo",
+        "rclone::local,nounc=true:backups",
+        "rclone::local,links:backups",
+        "rclone::local,description='a:b,c''d':backups",
+        // A `\` before any `:` leaves no remote, as a `/` does.
+        "rclone:nas\\x:repo",
+        // A remote its settings make a `local` one: rclone reads its type from
+        // them before its configuration file, the last when there are two.
+        "rclone:nas,type=local:backups",
+        "rclone:nas,type=local:",
+        "rclone:nas,type=sftp,type=local:backups",
+        "rclone::crypt,remote='nas,type=local:backups':",
+        // A setting that names a file here.
+        "rclone::sftp,host=nas.example.net,key_file=keys/id:backups",
+        "rclone::sftp,host=nas.example.net,known_hosts_file='hosts':backups",
+        "rclone::sftp,host=nas.example.net,ssh='bin/ssh -i id':backups",
+        "rclone:nas,service_account_file=sa.json:backups",
+        "rclone:nas,override.ca_cert=ca.pem:backups",
+        "rclone:nas,global.log_file=rclone.log:backups",
+        // A location written in a setting, at any level.
+        "rclone::alias,remote=backups:repo",
+        "rclone::crypt,remote=':local:backups',password=demo:",
+        "rclone::crypt,remote=':alias,remote=''backups'':':",
+        "rclone::union,upstreams='/srv/a backups:ro':",
+        "rclone::union,upstreams='/srv/a \"b c\"':",
+        "rclone::union,upstreams='\"/srv/a\" backups':",
+        "rclone::combine,upstreams='a=/srv/a b=backups':",
+    ];
+
+    #[test]
+    fn an_rclone_location_that_names_a_path_here_by_a_relative_one_is_found() {
+        for location in RCLONE_RELATIVE
+            .into_iter()
+            .map(str::to_owned)
+            .chain(["rclone::local:backups/${NAME}".to_owned()])
+        {
+            assert_eq!(
+                at(&location).relative_path(),
+                Some(RepositoryField::Repository),
+                "{location:?}"
+            );
+            let mut hot = at("/srv/demo-repo");
+            hot.repo_hot = Some(location.clone());
+            assert_eq!(
+                hot.relative_path(),
+                Some(RepositoryField::RepoHot),
+                "{location:?}"
+            );
+        }
+        // A job reads a location a reference supplied the same way.
+        for location in RCLONE_RELATIVE {
+            assert!(is_relative_location(location), "{location:?}");
+        }
+    }
+
+    #[test]
+    fn a_location_written_in_a_setting_is_read_four_levels_deep_and_found_deeper() {
+        // `levels` locations, each written in the `remote` of the one before,
+        // the last a full path.
+        let nested = |levels: usize| {
+            let mut location = "/srv/demo-repo".to_owned();
+            for _ in 1..levels {
+                location = format!(":alias,remote='{}':", location.replace('\'', "''"));
+            }
+            format!("rclone:{location}")
+        };
+        assert!(!is_relative_location(&nested(4)), "{:?}", nested(4));
+        assert_eq!(at(&nested(4)).relative_path(), None);
+        assert!(is_relative_location(&nested(5)), "{:?}", nested(5));
+        assert_eq!(
+            at(&nested(5)).relative_path(),
+            Some(RepositoryField::Repository)
+        );
     }
 
     #[test]
@@ -557,6 +691,92 @@ mod tests {
     }
 
     #[test]
+    fn an_rclone_flag_that_names_a_file_here_by_a_relative_path_is_found() {
+        let rclone = |command: &str| {
+            with_option("rclone:nas:backups", "rclone-command", command).relative_path()
+        };
+        for flags in [
+            "--log-file rclone.log",
+            "--log-file=logs/rclone.log",
+            "--cert tls/cert.pem",
+            "--key=tls/key.pem",
+            "--client-ca ca.pem",
+            "--htpasswd htpasswd",
+            "--ca-cert /etc/ssl/ca.pem --ca-cert ca.pem",
+            "--client-cert client.pem",
+            "--client-key=client.key",
+            "--cache-dir cache",
+            "--temp-dir=tmp",
+            "--exclude-from excludes.txt",
+            "--rc-htpasswd ~/htpasswd",
+            "--metrics-template=page.html",
+            // A program named by a relative path, as the first of the words.
+            "--password-command './get-pass --vault demo'",
+            "--password-command=bin/get-pass",
+            "--sftp-ssh '\"bin/my ssh\" -i id'",
+            "--sftp-ssh '\"\"\"/usr/bin/ssh\"'",
+            "--webdav-bearer-token-command 'bin/token'",
+            // A backend's file, or a location or upstream that is a folder here.
+            "--sftp-key-file keys/id",
+            "--s3-shared-credentials-file=aws/credentials",
+            "--smb-kerberos-ccache FILE:krb5cc",
+            "--alias-remote backups",
+            "--crypt-remote :local:backups",
+            "--backup-dir=old",
+            "--union-upstreams 'nas:a backups:ro'",
+            "--combine-upstreams 'a=nas:a b=backups'",
+            // A `--` ends nothing: pflag gives it to a flag before it that
+            // takes a value, and which of rclone's flags take one isn't known.
+            "--user-agent -- --log-file rclone.log",
+            "-- --log-file rclone.log",
+            // A server that listens on a socket named by a relative path.
+            "--addr unix://rclone.sock",
+        ] {
+            assert_eq!(
+                rclone(&format!("rclone serve restic {flags}")),
+                option("rclone-command"),
+                "{flags:?}"
+            );
+        }
+        for flags in [
+            "--log-file /var/log/rclone.log --cert=/etc/tls/cert.pem",
+            "--ca-cert /etc/ssl/ca.pem --client-ca=/etc/ssl/clients.pem",
+            // Not set, or standard input.
+            "--log-file= --cache-dir=",
+            "--exclude-from -",
+            // A program looked up on `PATH`, or named in full.
+            "--password-command 'pass show rclone'",
+            "--sftp-ssh '/usr/bin/ssh -i id'",
+            "--sftp-ssh '\"/usr/bin/ssh\" -i id'",
+            // A list rclone refuses, so runs nothing: a `"` inside a word, a
+            // word that goes on after its closing `"`, a `"` never closed.
+            "--sftp-ssh 'bin/s\"sh'",
+            "--sftp-ssh '\"bin/ssh\"x'",
+            "--sftp-ssh '\"bin/ssh'",
+            // rclone expands a leading `~` or variable in these itself.
+            "--sftp-key-file ~/.ssh/id",
+            "--drive-service-account-file=$HOME/sa.json",
+            // A remote, or a server that listens on an address or a full path.
+            "--alias-remote nas:backups",
+            "--crypt-remote=:sftp,host=nas.example.net:backups",
+            "--union-upstreams 'nas:a /srv/b:ro'",
+            "--combine-upstreams 'a=nas:ro'",
+            "--addr localhost:0",
+            "--rc-addr unix:///run/rclone.sock",
+            "--smb-kerberos-ccache DIR:/run/krb5",
+            // A flag that names no file.
+            "--verbose --log-level INFO --user-agent rclone.log",
+            "--sftp-host nas.example.net",
+        ] {
+            assert_eq!(
+                rclone(&format!("rclone serve restic {flags}")),
+                None,
+                "{flags:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_password_command_that_starts_a_program_by_a_relative_path_is_found() {
         let command = |text: &str| {
             let mut settings = at("/srv/demo-repo");
@@ -686,6 +906,8 @@ mod tests {
             "nas:backups/repo",
             "LOCAL:backups/repo",
             "s3:s3.example.net/demo-backups",
+            "rclone::sftp,host=nas.example.net:backups",
+            "rclone::local:/srv/demo-repo",
         ] {
             assert!(!is_relative_location(location), "{location:?}");
         }

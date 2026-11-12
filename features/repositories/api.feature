@@ -145,10 +145,12 @@ Feature: Repositories over HTTP
     And the daemon lists no repositories
 
     Examples:
-      | what                     | route                      | body                                                                                               | setting    |
-      | a relative location      | /api/v1/repositories/_test | {"settings":{"repository":"backups/repo","password":{"source":"inline","value":"p"}}}              | repository |
-      | a hot location under ~   | /api/v1/repositories/_init | {"settings":{"repository":"/x","repo-hot":"~/hot","password":{"source":"inline","value":"p"}}}     | repo-hot   |
-      | a relative password file | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}} | password   |
+      | what                          | route                      | body                                                                                                                                                 | setting                |
+      | a relative location           | /api/v1/repositories/_test | {"settings":{"repository":"backups/repo","password":{"source":"inline","value":"p"}}}                                                                | repository             |
+      | a hot location under ~        | /api/v1/repositories/_init | {"settings":{"repository":"/x","repo-hot":"~/hot","password":{"source":"inline","value":"p"}}}                                                       | repo-hot               |
+      | a relative password file      | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}}                                                   | password               |
+      | an rclone local folder        | /api/v1/repositories/_test | {"settings":{"repository":"rclone::local:backups","password":{"source":"inline","value":"p"}}}                                                       | repository             |
+      | an rclone flag's file         | /api/v1/repositories/_init | {"settings":{"repository":"rclone:demo-remote:backups","password":{"source":"inline","value":"p"},"options":{"rclone-command":"rclone serve restic --cert=tls/cert.pem"}}} | options.rclone-command |
 
   Scenario: A location a reference makes relative is refused at that setting once it is resolved, never showing what it held
     Given the file "{scratch}/demo-location" holds "CANARY-relative/repo"
