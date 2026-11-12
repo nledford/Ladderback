@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::notifications::{ChannelKind, Event, Username};
+use domain::planning::Locale;
 use domain::secrets::SecretValue;
 
 /// The longest one delivery takes, connecting, sending and reading the
@@ -38,7 +39,7 @@ pub struct Destination {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     /// The default text for the event, which the adapter writes from the
-    /// catalog in the agent's locale (§8.4).
+    /// catalog in the notification's locale (§8.4).
     Default,
     /// The rule's template, rendered: the user's own words, sent as they are.
     Custom(String),
@@ -50,6 +51,9 @@ pub struct Notification {
     pub destination: Destination,
     pub event: Event,
     pub message: Message,
+    /// The agent's locale (`[agent] locale`), when its configuration names
+    /// one: a default message is written in it, and else in the system's.
+    pub locale: Option<Locale>,
 }
 
 /// Why a notification wasn't delivered. None of them holds the channel's

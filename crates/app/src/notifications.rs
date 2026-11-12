@@ -15,6 +15,7 @@ use domain::execution::OperationStatus;
 use domain::notifications::{
     Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
 };
+use domain::planning::Locale;
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, Timestamp, Uuid};
 use futures::StreamExt;
@@ -193,9 +194,10 @@ impl Notify {
         let Some(event) = event else {
             return Vec::new();
         };
+        let locale = config.agent().locale.as_ref();
         let deliveries = notifications
             .matching(&event)
-            .map(|matched| self.send(matched, &event));
+            .map(|matched| self.send(matched, &event, locale));
         join_all(deliveries)
             .await
             .into_iter()
@@ -229,8 +231,14 @@ impl Notify {
         let (_, ()) = futures::join!(read, tell);
     }
 
-    /// Sends `event` to the channel of `matched`, or says why it wasn't.
-    async fn send(&self, matched: Matched<'_>, event: &Event) -> Option<Undelivered> {
+    /// Sends `event` to the channel of `matched`, a default message in the
+    /// agent's `locale`, or says why it wasn't.
+    async fn send(
+        &self,
+        matched: Matched<'_>,
+        event: &Event,
+        locale: Option<&Locale>,
+    ) -> Option<Undelivered> {
         let unsent = |reason| Undelivered {
             event: event.kind,
             rule: matched.rule.clone(),
@@ -248,6 +256,7 @@ impl Notify {
             destination,
             event: event.clone(),
             message,
+            locale: locale.cloned(),
         };
         self.notifier
             .deliver(&notification)

@@ -22,7 +22,7 @@ use domain::notifications::{
     Channel, ChannelKind, ChannelName, EventKind, Notifications, Ping, Rule, RuleName, Template,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, Plan, RepositoryConfig,
+    AgentConfig, AgentSettings, GroupBy, Hooks, Locale, Maintenance, Plan, RepositoryConfig,
     RepositorySettings, Source, Violation,
 };
 use domain::secrets::SecretRef;
@@ -49,6 +49,8 @@ pub struct NotificationsWorld {
     /// Whether the configuration can't be read: set by the step that says
     /// so, which `steps/recovery.rs` holds for both.
     pub(crate) unreadable: bool,
+    /// The agent's locale, when the scenario names one.
+    locale: Option<Locale>,
     next: u128,
 }
 
@@ -57,7 +59,10 @@ impl NotificationsWorld {
         let notifications = Notifications::new(self.channels.clone(), self.rules.clone())
             .expect("the scenario's rules send to its channels");
         let config = AgentConfig::new(
-            AgentSettings::default(),
+            AgentSettings {
+                locale: self.locale.clone(),
+                ..AgentSettings::default()
+            },
             Hooks::default(),
             self.repositories.clone(),
             self.plans.clone(),
@@ -499,6 +504,23 @@ fn sent_the_message(agent: &mut Agent, channel: String, message: String) {
         .map(|notification| notification.message)
         .collect();
     assert_eq!(messages, [Message::Custom(message)]);
+}
+
+#[given(expr = "the agent's locale is {string}")]
+fn the_agents_locale(agent: &mut Agent, locale: String) {
+    agent.notifications.locale = Some(Locale::parse(&locale).expect("the scenario's locale"));
+}
+
+#[then(expr = "{string} is sent the default message in the locale {string}")]
+fn sent_the_default_message(agent: &mut Agent, channel: String, locale: String) {
+    let sent: Vec<(Message, Option<Locale>)> = agent
+        .notifications
+        .sent_to(&channel)
+        .into_iter()
+        .map(|notification| (notification.message, notification.locale))
+        .collect();
+    let locale = Locale::parse(&locale).expect("the scenario's locale");
+    assert_eq!(sent, [(Message::Default, Some(locale))]);
 }
 
 #[then(expr = "nothing {string} is sent shows {string} or {string}")]

@@ -19,6 +19,8 @@ serde_json.workspace = true
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 base64.workspace = true
+# The pseudolocales, so a test can tell a message in another locale apart.
+l10n = { workspace = true, features = ["pseudo"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 
 [lints]

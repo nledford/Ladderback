@@ -57,6 +57,13 @@ Feature: Notification rules
       Then "ops" is sent the message "backup.failed home nas operation-failed"
       And nothing "ops" is sent shows "canary-url-secret" or "canary-engine-detail"
 
+    Scenario: A default message is written in the agent's locale
+      Given a webhook channel "ops"
+      And a rule "failures" that sends "backup.failed" to "ops"
+      And the agent's locale is "de-DE"
+      When the backup of "home" fails
+      Then "ops" is sent the default message in the locale "de-DE"
+
     Scenario: A channel that can't be reached is reported, and the next channel is still sent
       Given a webhook channel "down" that nothing answers at
       And a webhook channel "ops"

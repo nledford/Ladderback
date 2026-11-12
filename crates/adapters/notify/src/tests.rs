@@ -1,4 +1,5 @@
 use domain::notifications::{Event, EventKind, Ping};
+use domain::planning::Locale;
 use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
 
 use super::*;
@@ -184,11 +185,50 @@ fn the_notifier_writes_default_messages_without_isolation_marks() {
         },
         event: event(EventKind::BackupStarted),
         message: Message::Default,
+        locale: None,
     };
     assert_eq!(
         notifier.text(&notification),
         "The backup of demo-plan started."
     );
+}
+
+/// The default message of a backup's start, in the agent's `locale`, if any.
+fn default_for(locale: Option<&str>) -> Notification {
+    Notification {
+        destination: app::ports::Destination {
+            kind: ChannelKind::Webhook,
+            url: domain::secrets::SecretValue::new("http://127.0.0.1:9/demo"),
+            auth: None,
+        },
+        event: event(EventKind::BackupStarted),
+        message: Message::Default,
+        locale: locale.map(|locale| Locale::parse(locale).expect("a locale")),
+    }
+}
+
+#[test]
+fn a_default_message_is_written_in_the_agents_locale_and_else_in_the_systems() {
+    let notifier = HttpNotifier::new(localizer(), Duration::from_secs(1)).expect("a client");
+    let english = "The backup of demo-plan started.";
+    let pseudo = default_message(
+        &Localizer::new(&["en-XA".parse().expect("a locale")]),
+        &event(EventKind::BackupStarted),
+    );
+    assert_ne!(pseudo, english);
+    assert_eq!(notifier.text(&default_for(Some("en-XA"))), pseudo);
+    assert_eq!(notifier.text(&default_for(None)), english);
+    assert_eq!(notifier.text(&default_for(Some("en-XA"))), pseudo);
+    // A locale without a catalog falls to the system's.
+    assert_eq!(notifier.text(&default_for(Some("de-DE"))), english);
+}
+
+#[test]
+fn an_agents_locale_without_a_catalog_falls_back_to_the_systems() {
+    let system = Localizer::new(&["en-XA".parse().expect("a locale")]);
+    let pseudo = default_message(&system, &event(EventKind::BackupStarted));
+    let notifier = HttpNotifier::new(system, Duration::from_secs(1)).expect("a client");
+    assert_eq!(notifier.text(&default_for(Some("de-DE"))), pseudo);
 }
 
 #[test]
@@ -202,6 +242,7 @@ fn a_custom_message_is_sent_as_it_is_up_to_the_cap() {
         },
         event: event(EventKind::BackupStarted),
         message: Message::Custom(text),
+        locale: None,
     };
     let text = "a".repeat(MAX_MESSAGE_BYTES);
     assert_eq!(notifier.text(&notification(text.clone())), text);

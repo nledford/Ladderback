@@ -158,6 +158,7 @@ fn deliver_in_copy(expect: &str) {
                     code: Some("operation-failed"),
                 },
                 message: Message::Default,
+                locale: None,
             })
             .await
     });

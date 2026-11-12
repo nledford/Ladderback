@@ -120,6 +120,7 @@ fn notification(
         },
         event,
         message,
+        locale: None,
     }
 }
 

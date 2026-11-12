@@ -19,12 +19,14 @@
     clippy::unimplemented
 )]
 
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use api::MsgArg;
 use app::ports::{Credentials, Message, Notification, Notifier, NotifyError};
 use async_trait::async_trait;
 use domain::notifications::{ChannelKind, Event, EventKind, Ping};
+use domain::planning::Locale;
 use l10n::{Localizer, MessageId, msg};
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use reqwest::{Client, RequestBuilder, Url, redirect};
@@ -52,16 +54,22 @@ impl std::fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
-/// Delivers notifications over HTTP, writing a default message in the words
-/// of `localizer`.
+/// Delivers notifications over HTTP, writing a default message in the
+/// agent's locale when the notification names one, and else in the words
+/// of the system's localizer.
 pub struct HttpNotifier {
     client: Client,
-    localizer: Localizer,
+    system: Localizer,
+    /// The localizer of the agent's locale the last default message was
+    /// written in, kept so that the catalogs are read once a locale, not once
+    /// a message.
+    agents: Mutex<Option<(Locale, Localizer)>>,
 }
 
 impl HttpNotifier {
-    /// A notifier whose every delivery ends within `timeout`.
-    pub fn new(localizer: Localizer, timeout: Duration) -> Result<Self, ClientError> {
+    /// A notifier whose every delivery ends within `timeout`, writing in the
+    /// words of `system` when the agent names no locale of its own.
+    pub fn new(system: Localizer, timeout: Duration) -> Result<Self, ClientError> {
         // No `.no_proxy()`: the standard proxy variables are honoured, read
         // once here. TLS checks certificates with the platform's verifier.
         let client = Client::builder()
@@ -71,21 +79,44 @@ impl HttpNotifier {
             .referer(false)
             .build()
             .map_err(|_| ClientError)?;
+        // A localizer writes no isolation marks around a plan's ID or a
+        // repository's alias unless asked to: the text goes to a machine,
+        // not beside other text in a page.
         Ok(Self {
             client,
-            // A plan's ID or a repository's alias is sent to a machine, not
-            // shown beside other text: no isolation marks around it.
-            localizer: localizer.with_isolation(false),
+            system,
+            agents: Mutex::new(None),
         })
     }
 
     /// The text `notification` says, cut to [`MAX_MESSAGE_BYTES`].
     fn text(&self, notification: &Notification) -> String {
-        let text = match &notification.message {
-            Message::Custom(text) => text.clone(),
-            Message::Default => default_message(&self.localizer, &notification.event),
+        let text = match (&notification.message, &notification.locale) {
+            (Message::Custom(text), _) => text.clone(),
+            (Message::Default, None) => default_message(&self.system, &notification.event),
+            (Message::Default, Some(locale)) => {
+                let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+                let (_, localizer) = match agents.take() {
+                    Some(held) if held.0 == *locale => agents.insert(held),
+                    _ => agents.insert((locale.clone(), self.localizer(locale))),
+                };
+                default_message(localizer, &notification.event)
+            }
         };
         capped(text)
+    }
+
+    /// A localizer for the agent's `locale`, then the system's locales: a
+    /// locale without a catalog falls to them.
+    fn localizer(&self, locale: &Locale) -> Localizer {
+        let preferences: Vec<_> = locale
+            .as_str()
+            .parse()
+            .ok()
+            .into_iter()
+            .chain(self.system.locales().iter().cloned())
+            .collect();
+        Localizer::new(&preferences)
     }
 
     /// The request that delivers `notification` to `url`.
