@@ -10,8 +10,11 @@ use cucumber::{given, then, when};
 
 use app::announce::{end_of, start_of};
 use app::fakes::{FakeSecrets, InMemoryConfigStore, InMemoryOperationStore, RecordingNotifier};
-use app::notifications::{Notify, Undelivered};
-use app::ports::{ConfigStore, Message, Notification, NotifyError, OperationStore};
+use app::notifications::{Notify, Report};
+use app::ports::{
+    ConfigError, ConfigStore, Message, Notification, NotifyError, OperationStore, RecordError,
+};
+use async_trait::async_trait;
 use domain::execution::{
     FailureReason, Operation, OperationKind, Target, Trigger, Warning, WarningKind,
 };
@@ -23,7 +26,7 @@ use domain::planning::{
     RepositorySettings, Source, Violation,
 };
 use domain::secrets::SecretRef;
-use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
+use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
 use super::Agent;
 
@@ -42,7 +45,10 @@ pub struct NotificationsWorld {
     operations: Arc<InMemoryOperationStore>,
     /// Each plan's backup that has started and not yet ended.
     running: BTreeMap<String, Operation>,
-    undelivered: Vec<Undelivered>,
+    reports: Vec<Report>,
+    /// Whether the configuration can't be read: set by the step that says
+    /// so, which `steps/recovery.rs` holds for both.
+    pub(crate) unreadable: bool,
     next: u128,
 }
 
@@ -58,10 +64,15 @@ impl NotificationsWorld {
         )
         .and_then(|config| config.with_notifications(notifications))
         .expect("the scenario's configuration is valid");
-        let store = InMemoryConfigStore::new();
-        store.save(&config).await.expect("saved");
+        let store: Arc<dyn ConfigStore> = if self.unreadable {
+            Arc::new(Unreadable)
+        } else {
+            let store = InMemoryConfigStore::new();
+            store.save(&config).await.expect("saved");
+            Arc::new(store)
+        };
         Notify::new(
-            Arc::new(store),
+            store,
             self.operations.clone(),
             self.secrets.clone(),
             self.notifier.clone(),
@@ -98,8 +109,8 @@ impl NotificationsWorld {
             .await
             .expect("the log takes it");
         let news = start_of(operation, None).expect("a running operation has news");
-        let undelivered = self.notify().await.tell(&news).await;
-        self.undelivered.extend(undelivered);
+        let reports = self.notify().await.tell(&news).await;
+        self.reports.extend(reports);
     }
 
     async fn tell_end(&mut self, operation: &Operation) {
@@ -108,8 +119,8 @@ impl NotificationsWorld {
             .await
             .expect("the log takes it");
         let news = end_of(operation).expect("an ended operation has news");
-        let undelivered = self.notify().await.tell(&news).await;
-        self.undelivered.extend(undelivered);
+        let reports = self.notify().await.tell(&news).await;
+        self.reports.extend(reports);
     }
 
     /// The backup of `plan` that has started, or one that starts now.
@@ -178,6 +189,37 @@ fn rule_name(text: &str) -> RuleName {
 fn engine_failure(detail: &str) -> FailureReason {
     FailureReason::EngineFailed {
         detail: detail.to_owned(),
+    }
+}
+
+/// Why the scenario's configuration can't be read.
+fn unreadable() -> ConfigError {
+    ConfigError::Unavailable {
+        file: "/home/demo/.config/ladderback/config.toml".to_owned(),
+        detail: "permission denied".to_owned(),
+    }
+}
+
+/// A configuration store whose file can't be read.
+struct Unreadable;
+
+#[async_trait]
+impl ConfigStore for Unreadable {
+    async fn load(&self) -> Result<AgentConfig, ConfigError> {
+        Err(unreadable())
+    }
+
+    async fn save(&self, _config: &AgentConfig) -> Result<(), ConfigError> {
+        Err(unreadable())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &RepositoryAlias,
+        _read: &RepositoryConfig,
+        _id: &RepositoryId,
+    ) -> Result<(), RecordError> {
+        Err(RecordError::Store(unreadable()))
     }
 }
 
@@ -448,17 +490,27 @@ fn shows_neither(agent: &mut Agent, channel: String, first: String, second: Stri
 fn reported(agent: &mut Agent, event: String, channel: String, reason: String) {
     let reported: Vec<_> = agent
         .notifications
-        .undelivered
+        .reports
         .iter()
-        .map(|undelivered| {
-            (
+        .map(|report| match report {
+            Report::Undelivered(undelivered) => format!(
+                "{} {} {}",
                 undelivered.event.name(),
-                undelivered.channel.as_str().to_owned(),
-                undelivered.reason.reason(),
-            )
+                undelivered.channel.as_str(),
+                undelivered.reason.reason()
+            ),
+            Report::ConfigUnavailable(error) => format!("{error:?}"),
         })
         .collect();
-    assert_eq!(reported, [(event.as_str(), channel, reason.as_str())]);
+    assert_eq!(reported, [format!("{event} {channel} {reason}")]);
+}
+
+#[then(expr = "that the configuration can't be read is reported once for each of the {int} events")]
+fn config_reported(agent: &mut Agent, events: usize) {
+    assert_eq!(
+        agent.notifications.reports,
+        vec![Report::ConfigUnavailable(unreadable()); events]
+    );
 }
 
 #[then(expr = "the configuration is refused because the rule {string} sends to no channel {string}")]

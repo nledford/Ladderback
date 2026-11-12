@@ -73,6 +73,15 @@ Feature: Notification rules
       Then no channel is sent anything
       And the notification of "backup.failed" to "ops" is reported as "secret-unavailable"
 
+    Scenario: Each event that comes while the configuration can't be read is reported, and nothing is sent
+      Given a webhook channel "ops"
+      And a rule "failures" that sends "backup.failed" to "ops"
+      And the configuration can't be read
+      When the backup of "home" starts
+      And the backup of "home" fails
+      Then no channel is sent anything
+      And that the configuration can't be read is reported once for each of the 2 events
+
     Scenario: A prune that fails names its repository
       Given an ntfy channel "pager"
       And a rule "maintenance" that sends "prune.failed" to "pager"

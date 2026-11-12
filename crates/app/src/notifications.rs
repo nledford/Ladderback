@@ -22,8 +22,8 @@ use futures::future::join_all;
 use futures::stream::BoxStream;
 
 use crate::ports::{
-    ConfigStore, Credentials, Destination, Message, Notification, Notifier, NotifyError,
-    OperationRecord, OperationStore, SecretResolver,
+    ConfigError, ConfigStore, Credentials, Destination, Message, Notification, Notifier,
+    NotifyError, OperationRecord, OperationStore, SecretResolver,
 };
 
 /// Why a notification wasn't sent.
@@ -57,6 +57,15 @@ pub struct Undelivered {
     pub reason: Unsent,
 }
 
+/// What telling an event leaves for the daemon to say: a notification that
+/// wasn't delivered, or a configuration that couldn't be read when the event
+/// came, so none of its rules was told of it. Neither holds a secret (I4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Report {
+    Undelivered(Undelivered),
+    ConfigUnavailable(ConfigError),
+}
+
 /// Sends the notifications of the agent's rules.
 pub struct Notify {
     config: Arc<dyn ConfigStore>,
@@ -87,10 +96,11 @@ impl Notify {
     }
 
     /// Tells the channels of every rule that sends the event `news` is, and
-    /// returns the notifications that weren't delivered. News that is no
-    /// event (progress, a warning), and an operation the log doesn't have,
-    /// tell nothing.
-    pub async fn tell(&self, news: &UiEvent) -> Vec<Undelivered> {
+    /// returns what there is to report: each notification that wasn't
+    /// delivered, or, once, a configuration that couldn't be read. News that
+    /// is no event (progress, a warning), and an operation the log doesn't
+    /// have, tell nothing.
+    pub async fn tell(&self, news: &UiEvent) -> Vec<Report> {
         let (operation, turn, at) = match news {
             UiEvent::OperationStarted {
                 operation,
@@ -108,8 +118,9 @@ impl Notify {
             } => (operation, Turn::Ended(Outcome::Failed), finished_at),
             _ => return Vec::new(),
         };
-        let Ok(config) = self.config.load().await else {
-            return Vec::new();
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => return vec![Report::ConfigUnavailable(error)],
         };
         let notifications = config.notifications();
         if notifications.rules().is_empty() {
@@ -151,15 +162,20 @@ impl Notify {
         let deliveries = notifications
             .matching(&event)
             .map(|matched| self.send(matched, &event));
-        join_all(deliveries).await.into_iter().flatten().collect()
+        join_all(deliveries)
+            .await
+            .into_iter()
+            .flatten()
+            .map(Report::Undelivered)
+            .collect()
     }
 
     /// Tells each piece of `news` in turn until the stream ends, giving
-    /// `report` each notification that wasn't delivered.
-    pub async fn run(&self, mut news: BoxStream<'static, UiEvent>, mut report: impl FnMut(Undelivered)) {
+    /// `report` what there is to report of each.
+    pub async fn run(&self, mut news: BoxStream<'static, UiEvent>, mut report: impl FnMut(Report)) {
         while let Some(next) = news.next().await {
-            for undelivered in self.tell(&next).await {
-                report(undelivered);
+            for told in self.tell(&next).await {
+                report(told);
             }
         }
     }

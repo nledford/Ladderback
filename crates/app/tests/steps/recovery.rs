@@ -361,9 +361,12 @@ fn plan_moved(agent: &mut Agent, plan: String, repository: String) {
     agent.recovery.moved.push((plan, repository));
 }
 
+/// The agent's configuration can't be read, for the recovery and for the
+/// notifications alike.
 #[given("the configuration can't be read")]
 fn config_unreadable(agent: &mut Agent) {
     agent.recovery.unreadable = true;
+    agent.notifications.unreadable = true;
 }
 
 #[when("the daemon starts again")]

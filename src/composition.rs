@@ -18,7 +18,7 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 
 use app::conditions::NetworkWait;
-use app::notifications::{Notify, Undelivered};
+use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
 use app::ports::SecretResolver;
@@ -454,25 +454,34 @@ async fn notify_over(
     let localizer = localizer();
     tokio::spawn(async move {
         notify
-            .run(news, |undelivered| {
-                log::warn!("{}", undelivered_line(&localizer, &undelivered));
-            })
+            .run(news, |report| log::warn!("{}", report_line(&localizer, &report)))
             .await;
     });
 }
 
-/// A notification that wasn't delivered, as the log says it: the event, the
-/// rule, the channel and why, in the catalog's words.
-fn undelivered_line(localizer: &l10n::Localizer, undelivered: &Undelivered) -> String {
-    let args = [
-        ("event", text(undelivered.event.name())),
-        ("rule", text(undelivered.rule.as_str())),
-        ("channel", text(undelivered.channel.as_str())),
-        ("reason", text(undelivered.reason.reason())),
-    ];
-    localizer
-        .warning(WarningCode::NotificationUndelivered, &args, None)
-        .to_string()
+/// What telling an event left to report, as the log says it, by its code: a
+/// notification that wasn't delivered, with the event, the rule, the channel
+/// and why; or a configuration that couldn't be read, as its code's message
+/// says it.
+fn report_line(localizer: &l10n::Localizer, report: &Report) -> String {
+    match report {
+        Report::Undelivered(undelivered) => {
+            let args = [
+                ("event", text(undelivered.event.name())),
+                ("rule", text(undelivered.rule.as_str())),
+                ("channel", text(undelivered.channel.as_str())),
+                ("reason", text(undelivered.reason.reason())),
+            ];
+            let message = localizer.warning(WarningCode::NotificationUndelivered, &args, None);
+            format!("{:?}: {message}", WarningCode::NotificationUndelivered)
+        }
+        Report::ConfigUnavailable(error) => {
+            config_unusable(error.clone(), |code, args, detail| {
+                let message = localizer.error(code, &args, detail.as_deref());
+                format!("no notification was sent for an event: {code:?}: {message}")
+            })
+        }
+    }
 }
 
 /// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
@@ -5910,6 +5919,47 @@ mod tests {
         let shown = english().error(refusal.code, &refusal.args, refusal.detail.as_deref());
         assert!(shown.problems().is_empty(), "{:?}", shown.problems());
         shown.into_text()
+    }
+
+    #[test]
+    fn an_event_told_while_the_configuration_cant_be_read_is_logged_by_its_code() {
+        let line = report_line(
+            &english(),
+            &Report::ConfigUnavailable(ConfigError::Unavailable {
+                file: "/home/demo/.config/ladderback/config.toml".to_owned(),
+                detail: "permission denied".to_owned(),
+            }),
+        );
+        for expected in [
+            "ConfigUnavailable",
+            "/home/demo/.config/ladderback/config.toml",
+            "permission denied",
+        ] {
+            assert!(line.contains(expected), "{expected} in {line}");
+        }
+    }
+
+    #[test]
+    fn a_notification_not_delivered_is_logged_by_its_code() {
+        use domain::notifications::{ChannelName, EventKind, RuleName};
+        let line = report_line(
+            &english(),
+            &Report::Undelivered(app::notifications::Undelivered {
+                event: EventKind::BackupFailed,
+                rule: RuleName::parse("failures").expect("a rule name"),
+                channel: ChannelName::parse("ops").expect("a channel name"),
+                reason: app::notifications::Unsent::Delivery(app::ports::NotifyError::TimedOut),
+            }),
+        );
+        for expected in [
+            "NotificationUndelivered",
+            "backup.failed",
+            "failures",
+            "ops",
+            "did not answer in time",
+        ] {
+            assert!(line.contains(expected), "{expected} in {line}");
+        }
     }
 
     fn invalid(key: Option<&str>, at: Option<(usize, usize)>) -> ImportError {
