@@ -53,6 +53,15 @@ Feature: The operation lifecycle
     When a history page is asked for with the cursor "not-an-operation"
     Then the refusal is typed "invalid-cursor"
 
+  Scenario: Starting a backup whose password command fails is refused with that secret's problem
+    Given the plan's repository reads its password from a command that prints "CANARY-start-password" and then fails saying "no such entry"
+    When the client starts a backup of the plan "home"
+    Then the refusal has status 422 and the typed code "secret-command-failed"
+    And the refusal names the setting "password" and the command "/bin/sh"
+    And the refusal says the command said "no such entry"
+    And no answer shows "CANARY-start-password"
+    And the history page lists no operation
+
   Scenario: The events WebSocket answers a ping
     Given a page has a live-updates connection
     When the page pings the daemon
