@@ -17,6 +17,7 @@ mod maintenance;
 mod repositories;
 mod request_checks;
 mod response_headers;
+mod sign_in;
 
 use std::borrow::Cow;
 #[cfg(debug_assertions)]
@@ -34,12 +35,13 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
-pub use listener::GatedListener;
+pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
-    InvalidHostName, NonLoopbackBind, RequestChecks, require_loopback, validate_host_name,
+    Exposure, InvalidHostName, RequestChecks, StartupRefusal, startup_rule, validate_host_name,
 };
+pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 
 use api::UiEvent;
 use app::ports::EventBus;
@@ -61,6 +63,14 @@ pub struct AppState {
     pub catalog: Arc<dyn Catalog>,
     /// How a request tests, connects and initialises a repository.
     pub repositories: Arc<dyn Repositories>,
+    /// Whether sign-in is on, and the sessions it has started (§10.1).
+    pub sign_in: SignIn,
+}
+
+impl axum::extract::FromRef<AppState> for SignIn {
+    fn from_ref(state: &AppState) -> Self {
+        state.sign_in.clone()
+    }
 }
 
 /// The operations the API asks of the daemon (technical design §4.2): the
@@ -306,14 +316,25 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// history, one operation, cancel — the catalog routes the pages read: the
 /// plans, the repositories, one repository's snapshots — the routes that
 /// maintain a repository: its history by owner, a preview of each run and
-/// the start of one — and the routes that test, connect and initialise a
-/// repository. A request that fails `checks` never reaches a route, and
-/// neither does one whose body is over the limit of its class of route
-/// (§10.1). Every response, a refusal included, carries the security
-/// headers.
+/// the start of one — the routes that test, connect and initialise a
+/// repository, and the session route that signs in and out. A request that
+/// fails `checks` never reaches a route; with sign-in on, neither does an
+/// API request without a live session, or a changed one without its CSRF
+/// token; and neither does one whose body is over the limit of its class of
+/// route (§10.1). Every response, a refusal included, carries the security
+/// headers. Serve it with `into_make_service_with_connect_info::<PeerAddr>()`
+/// through a [`GatedListener`]: with sign-in on, a sign-in without its
+/// connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
+    let sign_in = state.sign_in.clone();
     Router::new()
-        .route("/api/v1/events", axum::routing::get(events))
+        .route(
+            sign_in::SESSION_PATH,
+            axum::routing::get(sign_in::current)
+                .post(sign_in::sign_in)
+                .delete(sign_in::sign_out),
+        )
+        .route(sign_in::EVENTS_PATH, axum::routing::get(events))
         .route(
             "/api/v1/operations",
             axum::routing::get(list_operations).post(run_plan),
@@ -363,6 +384,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             async move { serve(assets.as_ref(), &method, &uri) }
         })
         .layer(from_fn(body_limit::enforce))
+        .layer(from_fn_with_state(sign_in, sign_in::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce))
         .layer(from_fn(response_headers::add))
 }
@@ -372,26 +394,47 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
 /// 64 MiB would let a client make the daemon buffer that much.
 const EVENTS_CLIENT_MAX_MESSAGE: usize = 1024;
 
+/// How often an events stream opened with a session asks whether that
+/// session is still live: one that has ended (signed out, unused too long,
+/// or the admin password set anew) stops its stream within this long.
+const SESSION_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
 /// [`UiEvent`]s. It sends nothing until an event arrives — the first state
 /// comes over REST — and the client is dropped when a send fails. The
 /// request checks have already allowed this handshake: a foreign `Origin`
-/// never reaches here.
-async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+/// never reaches here. With sign-in on, the stream ends when the session
+/// that opened it does.
+async fn events(
+    upgrade: WebSocketUpgrade,
+    State(state): State<AppState>,
+    session: Option<axum::Extension<sign_in::SessionOf>>,
+) -> Response {
     let stream = state.events.subscribe().await;
+    let session = session.map(|axum::Extension(session)| session);
     upgrade
         .max_message_size(EVENTS_CLIENT_MAX_MESSAGE)
         .max_frame_size(EVENTS_CLIENT_MAX_MESSAGE)
-        .on_upgrade(move |socket| forward(socket, stream))
+        .on_upgrade(move |socket| forward(socket, stream, session))
 }
 
-/// Reads the bus and writes each event to the client, until the client goes
-/// or the daemon does. A client's `Ping` is answered with a `Pong`: the
-/// events stream never waits on the client, so the reply races fairly with
-/// the next event.
-async fn forward(mut socket: WebSocket, mut stream: BoxStream<'static, UiEvent>) {
+/// Reads the bus and writes each event to the client, until the client goes,
+/// the daemon does, or the session that opened the stream ends. A client's
+/// `Ping` is answered with a `Pong`: the events stream never waits on the
+/// client, so the reply races fairly with the next event.
+async fn forward(
+    mut socket: WebSocket,
+    mut stream: BoxStream<'static, UiEvent>,
+    session: Option<sign_in::SessionOf>,
+) {
+    let mut recheck = tokio::time::interval(SESSION_RECHECK);
     loop {
         tokio::select! {
+            _ = recheck.tick(), if session.is_some() => {
+                if session.as_ref().is_some_and(|session| session.access.peek(&session.token).is_none()) {
+                    break;
+                }
+            }
             event = stream.next() => {
                 let Some(event) = event else { break };
                 // An event that cannot be written is not retryable here: the
@@ -1001,6 +1044,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            sign_in: SignIn::Off,
         }
     }
 
@@ -1036,6 +1080,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            sign_in: SignIn::Off,
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2135,6 +2180,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
+            sign_in: SignIn::Off,
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

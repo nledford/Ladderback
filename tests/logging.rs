@@ -200,8 +200,12 @@ fn the_daemon_warns_at_load_of_a_password_written_in_its_config_and_never_repeat
 fn the_daemon_does_not_warn_of_a_password_it_reads_from_elsewhere() {
     let config = config_with("password-env = \"DEMO_PASSWORD\"");
     let lines = Daemon::start_with(None, Some(&config)).lines_until_it_listens();
+    // The daemon has no admin password, so it warns that sign-in is off; that
+    // warning is about sign-in, not the repository's password.
     assert!(
-        !lines.iter().any(|line| line.contains("WARN")),
+        !lines
+            .iter()
+            .any(|line| line.contains("WARN") && !line.contains("sign-in is off")),
         "a WARN line for a password that is no secret in the config: {lines:#?}"
     );
 }

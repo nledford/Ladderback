@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos::wasm_bindgen::JsCast;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_location;
@@ -59,6 +60,10 @@ mod repositories;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
 mod routes;
+// What the page's standing with sign-in is, decided on the host.
+mod session;
+// The sign-in page and dialog's DOM glue; `session.rs` decides for them.
+mod sign_in;
 // The Snapshots page's DOM glue; the decisions it sends and shows are
 // `maintenance.rs` and `wording.rs`.
 mod snapshots;
@@ -81,6 +86,8 @@ mod wording;
 mod toast;
 
 use routes::{NotFound, Operations, Repositories, Start};
+use session::{Standing, Title};
+use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut};
 use snapshots::Snapshots;
 
 /// The text of message `id` in the page's language.
@@ -115,22 +122,107 @@ fn Arrival(localizer: Arc<Localizer>) -> impl IntoView {
     });
 }
 
+/// The pages of the app, each at its path, shown with sign-in off or once
+/// the page has a session.
 #[component]
-fn App(localizer: Arc<Localizer>) -> impl IntoView {
+fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let not_found = Arc::clone(&localizer);
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
     let operations = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
-    let arrival = Arc::clone(&localizer);
-    let main = NodeRef::<leptos::html::Main>::new();
-    let (nav_label, operations_link, snapshots_link, repositories_link) = (
+    view! {
+        <Arrival localizer=localizer />
+        <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
+            <Route
+                path=path!("/")
+                view=move || view! { <Start localizer=Arc::clone(&start) /> }
+            />
+            <Route
+                path=path!("/_gallery")
+                view=move || gallery_page(Arc::clone(&gallery))
+            />
+            <Route
+                path=path!("/operations")
+                view=move || view! { <Operations localizer=Arc::clone(&operations) /> }
+            />
+            <Route
+                path=path!("/snapshots")
+                view=move || view! { <Snapshots localizer=Arc::clone(&snapshots) /> }
+            />
+            <Route
+                path=path!("/repositories")
+                view=move || view! { <Repositories localizer=Arc::clone(&repositories) /> }
+            />
+        </Routes>
+    }
+}
+
+/// The site's navigation, shown wherever the pages are; while the page has a
+/// session, it ends with the Sign out control.
+#[component]
+fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
+    let (label, operations, snapshots, repositories) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
         text(&localizer, msg::UI_NAV_SNAPSHOTS),
         text(&localizer, msg::UI_NAV_REPOSITORIES),
     );
+    view! {
+        <nav class="site-nav" aria-label=label>
+            <ul>
+                <li><A href="/operations">{operations}</A></li>
+                <li><A href="/snapshots">{snapshots}</A></li>
+                <li><A href="/repositories">{repositories}</A></li>
+                {move || {
+                    (standing.get() == Standing::SignedIn)
+                        .then(|| {
+                            view! {
+                                <li>
+                                    <SignOut localizer=Arc::clone(&localizer) standing=standing />
+                                </li>
+                            }
+                        })
+                }}
+            </ul>
+        </nav>
+    }
+}
+
+/// Asks the daemon where the page stands with sign-in (security §10.1), then
+/// shows the pages, or the sign-in page in their place. A request refused
+/// later for want of a session opens the dialog that asks to sign in again,
+/// over the page as it is.
+#[component]
+fn App(localizer: Arc<Localizer>) -> impl IntoView {
+    let standing = RwSignal::new(Standing::Asking);
+    // Only a change of standing redraws the page: a page shown stays as it is.
+    let shown = Memo::new(move |_| standing.get());
+    let warning = RwSignal::new(false);
+    let ended = RwSignal::new(false);
+    provide_context(standing);
+    ws::watch_session(warning, ended);
+    spawn_local(async move {
+        // A live session's CSRF token and lease are the page's once read.
+        let read = ws::session().await;
+        standing.set(Standing::of(read.as_ref()));
+    });
+    // The sign-in page has a title of its own; once signed in, the page asked
+    // for has the title its address names.
+    let titles = Arc::clone(&localizer);
+    Effect::new(move |previous: Option<Standing>| {
+        let now = shown.get();
+        if let Some(title) = Title::on(previous, now) {
+            page::retitle_as(&titles, title);
+        }
+        now
+    });
+    let navigation = Arc::clone(&localizer);
+    let pages = Arc::clone(&localizer);
+    let dialog = Arc::clone(&localizer);
+    let idle = Arc::clone(&localizer);
+    let main = NodeRef::<leptos::html::Main>::new();
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
         // there. The router takes any click on a same-origin link it was not
@@ -152,39 +244,35 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         <Router>
             <header class="site-header">
                 <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
-                <nav class="site-nav" aria-label=nav_label>
-                    <ul>
-                        <li><A href="/operations">{operations_link}</A></li>
-                        <li><A href="/snapshots">{snapshots_link}</A></li>
-                        <li><A href="/repositories">{repositories_link}</A></li>
-                    </ul>
-                </nav>
+                {move || {
+                    shown
+                        .get()
+                        .shows_pages()
+                        .then(|| {
+                            view! {
+                                <Navigation localizer=Arc::clone(&navigation) standing=standing />
+                            }
+                        })
+                }}
             </header>
             <main id="main" tabindex="-1" node_ref=main>
-                <Arrival localizer=arrival />
-                <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
-                    <Route
-                        path=path!("/")
-                        view=move || view! { <Start localizer=Arc::clone(&start) /> }
-                    />
-                    <Route
-                        path=path!("/_gallery")
-                        view=move || gallery_page(Arc::clone(&gallery))
-                    />
-                    <Route
-                        path=path!("/operations")
-                        view=move || view! { <Operations localizer=Arc::clone(&operations) /> }
-                    />
-                    <Route
-                        path=path!("/snapshots")
-                        view=move || view! { <Snapshots localizer=Arc::clone(&snapshots) /> }
-                    />
-                    <Route
-                        path=path!("/repositories")
-                        view=move || view! { <Repositories localizer=Arc::clone(&repositories) /> }
-                    />
-                </Routes>
+                {move || match shown.get() {
+                    Standing::Asking => ().into_any(),
+                    Standing::SignedOut => {
+                        view! { <SignInPage localizer=Arc::clone(&pages) standing=standing /> }
+                            .into_any()
+                    }
+                    Standing::Off | Standing::SignedIn | Standing::Unread => {
+                        view! { <Pages localizer=Arc::clone(&pages) /> }.into_any()
+                    }
+                }}
             </main>
+            {move || {
+                ended
+                    .get()
+                    .then(|| view! { <SessionEnded localizer=Arc::clone(&dialog) ended=ended /> })
+            }}
+            <IdleWarning localizer=idle warning=warning />
         </Router>
     }
 }

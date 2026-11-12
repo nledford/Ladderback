@@ -67,6 +67,9 @@ export class ScriptedDaemon {
    *  (`acceptCancels`), and the operations whose cancel it has accepted. */
   #acceptsCancels = false;
   #cancelsAccepted = new Set<string>();
+  /** For each reading of the history the page asked for, in order, whether
+   *  it marked the request as sent on its own. */
+  #backgroundMarks: boolean[] = [];
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -113,6 +116,7 @@ export class ScriptedDaemon {
       if (route.request().method() === "POST" && this.#answersStarts) return this.#start(route);
       if (route.request().method() !== "GET") return route.fallback();
       this.#historyReads += 1;
+      this.#backgroundMarks.push(route.request().headers()["x-ladderback-background"] !== undefined);
       const json = { operations: structuredClone(this.#operations), next: null };
       if (this.#holdNext) {
         this.#holdNext = false;
@@ -291,6 +295,12 @@ export class ScriptedDaemon {
    *  open, while one was held back. */
   get readsBesideTheHeld(): number {
     return this.#readsBesideTheHeld;
+  }
+
+  /** For each reading of the history the page asked for, in order, whether
+   *  it marked the request as sent on its own. */
+  get backgroundMarks(): readonly boolean[] {
+    return this.#backgroundMarks;
   }
 
   /** Answers the reading held back, with the history as it was when the page

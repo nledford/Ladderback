@@ -163,7 +163,21 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::ERROR_JSON_REQUIRED,
             &["Content-Type: application/json"],
         ),
-        (msg::CLI_REFUSE_NON_LOOPBACK, &["127.0.0.1", "::1"]),
+        (
+            msg::CLI_REFUSE_NON_LOOPBACK,
+            &["127.0.0.1", "::1", "ladderback set-password"],
+        ),
+        (
+            msg::CLI_REFUSE_NO_ALLOWED_HOST,
+            &["--allowed-host", "--allowed-host nas.example.com"],
+        ),
+        (
+            msg::CLI_ADMIN_PASSWORD_UNREADABLE,
+            &["ladderback set-password"],
+        ),
+        (msg::CLI_SET_PASSWORD_MISMATCH, &["ladderback set-password"]),
+        (msg::UI_SIGN_IN_PASSWORD_HINT, &["ladderback set-password"]),
+        (msg::UI_SIGN_IN_OFF, &["ladderback set-password"]),
         (
             msg::CLI_INVALID_ALLOWED_HOST,
             &[
@@ -183,6 +197,8 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("address", text("192.168.1.5:9898")),
         ("name", text("nas.example.com:9898")),
         ("alias", text("demo")),
+        ("path", text("/demo/data/admin-password")),
+        ("detail", text("permission denied")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

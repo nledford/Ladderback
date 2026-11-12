@@ -16,6 +16,7 @@ async-trait.workspace = true
 api.workspace = true
 axum.workspace = true
 base64.workspace = true
+domain.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 log.workspace = true

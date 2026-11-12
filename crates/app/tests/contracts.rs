@@ -660,6 +660,11 @@ async fn an_auto_advancing_fake_clock_jumps_to_a_monotonic_sleepers_time() {
 }
 
 #[tokio::test]
+async fn in_memory_admin_password_meets_the_admin_password_contract() {
+    contract::admin_password::run(&app::fakes::InMemoryAdminPassword::default()).await;
+}
+
+#[tokio::test]
 async fn fake_service_manager_meets_the_service_manager_contract() {
     let harness = FakeService(app::fakes::FakeServiceManager::new(PathBuf::from(
         "/home/demo/.config/systemd/user/ladderback.service",

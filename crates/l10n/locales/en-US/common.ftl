@@ -88,6 +88,27 @@ error-origin-not-allowed = { -brand-name } refused this request because it came 
 # `Content-Type: application/json` is a header, typed as it is: keep it a string literal.
 error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header { "Content-Type: application/json" }.
 
+# Sign-in is on and the request carries no live session: it was never signed in, or its session ended (unused for 12 hours, 30 days old, signed out, or the admin password was set anew).
+error-sign-in-required = Sign in to { -brand-name } with the admin password to go on. A session ends after 12 hours unused, after 30 days, and when the admin password is set again.
+
+# The password given at sign-in is not the admin password.
+error-sign-in-failed = That is not the admin password. Check it and try again.
+
+# A sign-in came too soon after failed ones from the same address, so the password was not checked.
+# $seconds (count): how many seconds are left to wait.
+error-sign-in-wait = { $seconds ->
+    [one] Wait 1 second before signing in again: sign-ins from this address failed, so the password was not checked.
+   *[other] Wait { $seconds } seconds before signing in again: sign-ins from this address failed, so the password was not checked.
+  }
+
+# A changed request of a signed-in browser didn't carry its session's token, which keeps other sites from sending requests in its name.
+error-csrf-token-invalid = { -brand-name } refused this request because it did not carry the token of its session. Reload the page and try again.
+
+# The admin password could not be checked, or no session could be started, so nobody was signed in.
+# $detail (text): the platform's message. It is shown as it came.
+error-sign-in-unavailable = { -brand-name } could not check the admin password, so nobody was signed in. Check the admin password file in the data folder, or set the password again with { "ladderback set-password" }.
+    .with-detail = { -brand-name } could not check the admin password ({ $detail }), so nobody was signed in. Check the admin password file in the data folder, or set the password again with { "ladderback set-password" }.
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.

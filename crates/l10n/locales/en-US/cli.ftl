@@ -27,7 +27,47 @@ cli-server-error = server error: { $detail }
 # Sign-in is off, so the daemon only listens on loopback addresses.
 # $address (text): the address it was asked to listen on, such as 192.168.1.5:9898.
 # `127.0.0.1` and `::1` are addresses, typed as they are: keep them string literals.
-cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" })
+cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" }). Set an admin password with { "ladderback set-password" } to listen beyond them.
+
+# Sign-in is on, but no host name was configured, so no browser on the network could use the web UI.
+# $address (text): the address it was asked to listen on, such as 0.0.0.0:9898.
+# `--allowed-host` and `nas.example.com` are typed as they are: keep them string literals.
+cli-refuse-no-allowed-host = refusing to listen on { $address }: beyond loopback, { -brand-name } needs the host name browsers reach it by. Give one with { "--allowed-host" }, such as { "--allowed-host nas.example.com" }.
+
+# The admin password file is there but can't be read, or isn't a password hash, so the daemon does not start: it never runs with sign-in off by mistake.
+# $path (text): the file. It is shown as it is.
+# $detail (text): the platform's message. It is shown as it came.
+cli-admin-password-unreadable = cannot read the admin password file { $path } ({ $detail }). Set the password again with { "ladderback set-password" }, or remove the file to turn sign-in off.
+
+# `ladderback set-password` asks for the new admin password at a terminal; what is typed is not shown. Printed without the program's name, and the answer follows on the same line.
+cli-set-password-prompt = New admin password:
+
+# `ladderback set-password` asks for the new admin password a second time, to catch a typing mistake no one could see.
+cli-set-password-prompt-again = Type the new admin password again:
+
+# The two passwords typed at the terminal differ.
+# `ladderback set-password` is typed as it is: keep it a string literal.
+cli-set-password-mismatch = the two passwords differ, so the admin password was not changed. Run { "ladderback set-password" } again.
+
+# The new admin password is too short.
+# $min (count): the fewest characters an admin password has, such as 8.
+cli-set-password-too-short = the admin password was not changed: it needs at least { $min } characters.
+
+# The new admin password is longer than any admin password may be.
+# $max (count): the most bytes an admin password has, such as 1024.
+cli-set-password-too-long = the admin password was not changed: it may be at most { $max } bytes long.
+
+# The password could not be read from the terminal or standard input: it was not UTF-8 text, was too long to be a password, or the terminal failed.
+# $detail (text): the operating system's message. It is shown as it came.
+cli-set-password-unreadable = cannot read the new admin password: { $detail }
+
+# The admin password's hash could not be written to the data folder.
+# $path (text): the file. It is shown as it is.
+# $detail (text): the platform's message. It is shown as it came.
+cli-set-password-unwritable = cannot keep the admin password in { $path }: { $detail }
+
+# The admin password is set, and sign-in is on from now. A daemon already running with sign-in on uses the new password at once and signs everyone out; one running with sign-in off turns sign-in on only when it starts again.
+cli-set-password-done = admin password set. Every session has ended: sign in again with the new password. A daemon running with sign-in off turns it on when it next starts.
 
 # `--allowed-host` was given a name that no Host header could ever match, which would lock the web UI out.
 # $name (text): the value as it was typed. It is shown as it is.

@@ -46,6 +46,10 @@ Feature: The shared components in the gallery
     And the field "Repository name" is described only by "The name of the repository to check."
     And the field "Repository name" is not marked invalid
 
+  Scenario: A form field with no known purpose turns the browser's autocomplete off
+    When I open the component gallery
+    Then the textbox "Repository name" has the autocomplete token "off"
+
   Scenario: A checkbox turns on and off by keyboard and is described by its hint
     When I open the component gallery
     And I press Tab until focus is on the checkbox "Send a demo notification"

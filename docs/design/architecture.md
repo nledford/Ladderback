@@ -74,6 +74,10 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Channel | Where a notification goes: a webhook, an ntfy topic or a healthchecks check, by its URL. The URL, and the token or password it signs in with, are secrets, read only when a notification is sent |
 | Template | A rule's own text for its messages, with placeholders for the event's facts (`{plan}`, `{code}`, …) and nothing else, so it can't hold a secret (I4). Without one, the message is the catalog's text in the agent's locale |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
+| Admin password | The one password that signs in to an agent's web UI and API. Set with `ladderback set-password`, at the terminal or from standard input; only its argon2id hash is kept (§10.1) |
+| Sign-in | Asking for the admin password before the web UI and API answer. **On** while an admin password is set, which the daemon decides when it starts; **off** otherwise, and then the agent listens on loopback only (§10.1) |
+| Session | What a sign-in starts: a cookie and the CSRF token its changed requests carry. It ends at sign-out, 12 hours after its last **use**, 30 days after it started, or when the admin password is set anew |
+| Background read | A request the web UI sends on its own, not because a person did something: a refresh after an event, opening the events stream. It never uses a session, so a page left open doesn't keep one alive (§10.1) |
 
 **Bounded contexts.**
 
@@ -87,7 +91,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | **Fleet** | Supporting | `Agent` (root; identity, hostname), `PairingToken` (single use, TTL), `HostnameRegistry` domain service | Unique hostnames; tokens used once; re-pairing reuses identity |
 | **Profile interop** | Supporting | Anti-corruption layer only (`adapters/interop`): translates rustic profiles to and from Planning | List replacement, hook order, `[snapshot-filter]` export rules (§6.2) |
 | **Secrets** | Generic | `SecretRef`, `Redactor` (replaces every resolved secret value, and its common encodings, with `***`) | No secret in logs, templates or sync messages (I4) |
-| **Notifications, auth** | Generic | `Notifications` (the channels and the rules, owned by `AgentConfig`), value objects `Channel`, `Rule`, `Template`, `EventKind`; sessions | A rule names a channel and plans the configuration has; a channel holds no secret as text and starts no program by a relative path; a template reads only an event's facts (I4) |
+| **Notifications, auth** | Generic | `Notifications` (the channels and the rules, owned by `AgentConfig`), value objects `Channel`, `Rule`, `Template`, `EventKind`; `Sessions` and `SignInWaits` (`domain::access`) | A rule names a channel and plans the configuration has; a channel holds no secret as text and starts no program by a relative path; a template reads only an event's facts (I4). A session ends unused or old, and with a new admin password; a changed request carries its session's CSRF token; failed sign-ins make the next one wait, never lock the admin out |
 
 **Context map.** Planning feeds Execution (plans become operations) and, through the hub, Maintenance (published plans carry retention). Execution emits domain events that Maintenance, notifications and the sync outbox consume. Two anti-corruption layers keep foreign models out: profile interop for rustic's TOML model, and the engine adapter for `rustic_core`'s types. The sync protocol in `api` is the published language between agent and hub; `app` speaks its own `AgentReport` and `HubCommand` types, and the sync adapter translates.
 
@@ -174,7 +178,8 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `ConfigStore` | Load (parsing and migrating old schemas), and atomically save `AgentConfig` | TOML file with version history | In-memory |
 | `SecretResolver` | Resolve a `SecretRef` | Command, keyring, file, env | Map-backed fake |
 | `Clock` | Wall-clock and monotonic time, `sleep_until` (wall-clock) and `sleep` (monotonic: time asleep doesn't count) | System clocks (`Instant`), tokio timers | Controllable fake clock that fires timers when advanced, and can `suspend` the machine (wall-clock time moves, monotonic time doesn't) |
-| `Random` | Jitter, UUIDv7 IDs, epochs, pairing tokens | OS randomness | Seeded |
+| `Random` | Jitter, session and CSRF tokens; later UUIDv7 IDs, epochs, pairing tokens | OS randomness | Seeded |
+| `AdminPassword` | Check an attempt against the admin password, set a new one, and a fingerprint that tells two kept passwords apart (§10.1) | argon2id hash file in the data dir, mode 0600 | In memory, as typed |
 | `Identity` | The agent's Ed25519 key: public key and signing | Key file in the data dir | Fixed test key |
 | `PowerSupply` | AC power or battery (§16, decision 63) | `/sys/class/power_supply` on Linux, `pmset -g batt` on macOS | Scripted fake |
 | `Network` | Whether the machine is online (§16, decision 63) | `/sys/class/net` on Linux, `scutil --nwi` on macOS | Scripted fake |

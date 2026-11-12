@@ -6,10 +6,11 @@
 
 use std::cell::Cell;
 
-use l10n::{BrowserLanguages, Localizer};
+use l10n::{BrowserLanguages, Localizer, msg};
 use web_sys::{HtmlElement, UrlSearchParams};
 
 use crate::routes;
+use crate::session::Title;
 
 /// The localizer of this page: the language its address asks for (`?locale=`,
 /// a development override), then the languages the browser lists, over the
@@ -69,6 +70,27 @@ pub(crate) fn declare(localizer: &Localizer) {
 pub(crate) fn retitle(localizer: &Localizer, path: &str) {
     if let Some(document) = web_sys::window().and_then(|window| window.document()) {
         document.set_title(&routes::title(localizer, path));
+    }
+}
+
+/// The page's standing with sign-in changed (security §10.1): the sign-in
+/// page has a title of its own, and once signed in the page takes the title
+/// its address names.
+pub(crate) fn retitle_as(localizer: &Localizer, title: Title) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    match title {
+        Title::SignIn => {
+            document.set_title(&localizer.message(msg::UI_SIGN_IN_TITLE, &[]).into_text())
+        }
+        Title::Address => {
+            let path = window.location().pathname().unwrap_or_default();
+            document.set_title(&routes::title(localizer, &path));
+        }
     }
 }
 

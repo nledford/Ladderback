@@ -5,7 +5,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -19,22 +19,28 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const LISTENING: &str = "listening on http://";
 
-/// What the request-check scenarios keep between steps.
+/// What the request-check and sign-in scenarios keep between steps.
 #[derive(Debug, Default)]
 pub struct Web {
-    server: Option<Server>,
-    request: Option<Request>,
-    response: Option<Response>,
+    pub(crate) server: Option<Server>,
+    pub(crate) request: Option<Request>,
+    pub(crate) response: Option<Response>,
     start: Option<Outcome>,
+    /// The log of the daemon started last.
+    log: Option<PathBuf>,
     /// Whether requests come from the UI's page, which sends an `Origin`.
     page: bool,
+    /// The folders `ladderback set-password` keeps the admin password in,
+    /// which every daemon the scenario starts then shares. Without it, each
+    /// daemon gets folders of its own.
+    pub(crate) home: Option<PathBuf>,
 }
 
 /// A running daemon, stopped when the scenario ends.
 #[derive(Debug)]
-struct Server {
+pub(crate) struct Server {
     child: Child,
-    addr: SocketAddr,
+    pub(crate) addr: SocketAddr,
 }
 
 impl Drop for Server {
@@ -45,51 +51,54 @@ impl Drop for Server {
 }
 
 #[derive(Debug)]
-enum Outcome {
+pub(crate) enum Outcome {
     Listening(SocketAddr),
     Exited(ExitStatus, String),
 }
 
 #[derive(Debug)]
-struct Request {
-    method: String,
-    path: String,
-    headers: Vec<String>,
+pub(crate) struct Request {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) headers: Vec<String>,
     /// Whether the request names the daemon's own address as its `Host`.
-    default_host: bool,
+    pub(crate) default_host: bool,
     /// What follows the headers, sent with a `Content-Length` of its size.
-    body: String,
+    pub(crate) body: String,
 }
 
 #[derive(Debug)]
-struct Response {
-    status: u16,
+pub(crate) struct Response {
+    pub(crate) status: u16,
     headers: Vec<(String, String)>,
-    body: String,
+    pub(crate) body: String,
 }
 
 static LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Starts `ladderback serve` with `args`, and waits until it listens or exits.
-/// The wait is on a blocking thread: see [`blocking`].
-async fn start(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
+/// The wait is on a blocking thread: see [`blocking`]. The daemon uses the
+/// folders under `home`, or folders of its own.
+async fn start(scratch: &Path, home: Option<&Path>, args: &[&str]) -> (Child, Outcome, PathBuf) {
     let scratch = scratch.to_owned();
+    let home = home.map(Path::to_owned);
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
     blocking(move || {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        spawn_daemon(&scratch, &args)
+        spawn_daemon(&scratch, home.as_deref(), &args)
     })
     .await
 }
 
-fn spawn_daemon(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
+fn spawn_daemon(scratch: &Path, home: Option<&Path>, args: &[&str]) -> (Child, Outcome, PathBuf) {
     let started = LOGS.fetch_add(1, Ordering::Relaxed);
     let log_path = scratch.join(format!("serve-{started}.log"));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
     let mut command = Command::new(LADDERBACK);
     // Folders of its own, not the platform's, and not those of another daemon
-    // this scenario started.
-    testkit::daemon::isolate(&mut command, &scratch.join(format!("daemon-{started}")));
+    // this scenario started, unless it shares the admin password's.
+    let own = scratch.join(format!("daemon-{started}"));
+    testkit::daemon::isolate(&mut command, home.unwrap_or(&own));
     command
         .arg("serve")
         .args(args)
@@ -110,10 +119,10 @@ fn spawn_daemon(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
             && rest.contains('\n')
             && let Some(addr) = rest.lines().next().and_then(|l| l.trim().parse().ok())
         {
-            return (child, Outcome::Listening(addr));
+            return (child, Outcome::Listening(addr), log_path);
         }
         if let Some(status) = child.try_wait().expect("the daemon's status") {
-            return (child, Outcome::Exited(status, text));
+            return (child, Outcome::Exited(status, text), log_path);
         }
         assert!(
             began.elapsed() < START_TIMEOUT,
@@ -152,7 +161,7 @@ fn header_is(line: &str, name: &str) -> bool {
 }
 
 /// Sends `request` over a new connection and reads one response.
-fn exchange(addr: SocketAddr, request: &Request) -> Response {
+pub(crate) fn exchange(addr: SocketAddr, request: &Request) -> Response {
     let mut stream = testkit::net::connect(addr).expect("a connection to the daemon");
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
@@ -211,7 +220,7 @@ fn exchange(addr: SocketAddr, request: &Request) -> Response {
 }
 
 impl Response {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case(name))
@@ -220,23 +229,24 @@ impl Response {
 }
 
 impl Web {
-    fn server(&self) -> &Server {
+    pub(crate) fn server(&self) -> &Server {
         self.server.as_ref().expect("Ladderback is serving")
     }
 
-    fn request(&mut self) -> &mut Request {
+    pub(crate) fn request(&mut self) -> &mut Request {
         self.request.as_mut().expect("a request is being built")
     }
 
-    fn response(&self) -> &Response {
+    pub(crate) fn response(&self) -> &Response {
         self.response.as_ref().expect("the request was sent")
     }
 }
 
 #[given(expr = "Ladderback is serving on loopback, configured for the host name {string}")]
 async fn serving(agent: &mut Agent, name: String) {
-    let (child, outcome) = start(
+    let (child, outcome, _) = start(
         agent.scratch(),
+        None,
         &["--listen", "127.0.0.1:0", "--allowed-host", &name],
     )
     .await;
@@ -252,7 +262,7 @@ fn from_the_page(agent: &mut Agent) {
 }
 
 #[given(expr = "a {string} request for {string}")]
-fn request_for(agent: &mut Agent, method: String, path: String) {
+pub(crate) fn request_for(agent: &mut Agent, method: String, path: String) {
     // A page's request carries its origin, which is the daemon's own address.
     let headers = if agent.web.page {
         vec!["Origin: http://localhost:{port}".to_owned()]
@@ -312,7 +322,7 @@ fn websocket(agent: &mut Agent) {
 }
 
 #[when("the request is sent")]
-fn send(agent: &mut Agent) {
+pub(crate) fn send(agent: &mut Agent) {
     let addr = agent.web.server().addr;
     let request = agent.web.request.as_ref().expect("a request is built");
     agent.web.response = Some(exchange(addr, request));
@@ -435,16 +445,54 @@ fn no_header(agent: &mut Agent, name: String) {
 #[when(expr = "Ladderback is started with the arguments {string}")]
 async fn started_with(agent: &mut Agent, arguments: String) {
     let args: Vec<&str> = arguments.split_whitespace().collect();
-    let (child, outcome) = start(agent.scratch(), &args).await;
+    let home = agent.web.home.clone();
+    let (child, outcome, log) = start(agent.scratch(), home.as_deref(), &args).await;
     if let Outcome::Listening(addr) = &outcome {
         // Stopped when the scenario ends, as the daemon from the Background.
         agent.web.server = Some(Server { child, addr: *addr });
     }
     agent.web.start = Some(outcome);
+    agent.web.log = Some(log);
+}
+
+/// Starts `ladderback serve` on a free loopback port with the scenario's
+/// shared folders, and keeps it as the daemon requests go to.
+pub(crate) async fn serve_on_loopback(agent: &mut Agent) {
+    let home = agent.web.home.clone();
+    let (child, outcome, log) = start(
+        agent.scratch(),
+        home.as_deref(),
+        &["--listen", "127.0.0.1:0"],
+    )
+    .await;
+    match outcome {
+        Outcome::Listening(addr) => agent.web.server = Some(Server { child, addr }),
+        Outcome::Exited(status, text) => panic!("ladderback exited with {status}: {text}"),
+    }
+    agent.web.log = Some(log);
+}
+
+#[then("Ladderback is listening")]
+fn listening(agent: &mut Agent) {
+    match agent.web.start.as_ref().expect("Ladderback was started") {
+        Outcome::Listening(_) => {}
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
+    }
+}
+
+#[then(expr = "its log warns {string}")]
+fn log_warns(agent: &mut Agent, words: String) {
+    let path = agent.web.log.as_ref().expect("Ladderback was started");
+    let log = std::fs::read_to_string(path).expect("the daemon's log");
+    assert!(
+        log.lines()
+            .any(|line| line.contains("WARN") && line.contains(&words)),
+        "no warning saying {words:?} in: {log}"
+    );
 }
 
 /// The daemon's exit status and log, when it didn't start listening.
-fn exited(agent: &Agent) -> (ExitStatus, &str) {
+pub(crate) fn exited(agent: &Agent) -> (ExitStatus, &str) {
     match agent.web.start.as_ref().expect("Ladderback was started") {
         Outcome::Listening(addr) => panic!("Ladderback is listening on {addr}"),
         Outcome::Exited(status, log) => (*status, log),

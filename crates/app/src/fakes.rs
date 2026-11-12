@@ -1,6 +1,7 @@
 //! In-memory port fakes for use-case tests and acceptance scenarios. Each
 //! one passes the same contract suite (`crate::contract`) as its real adapter.
 
+mod admin_password;
 mod clock;
 mod config_store;
 mod engine;
@@ -17,6 +18,7 @@ mod secrets;
 mod service;
 mod sources;
 
+pub use admin_password::InMemoryAdminPassword;
 pub use clock::FakeClock;
 pub use config_store::InMemoryConfigStore;
 pub use engine::SimulatedEngine;

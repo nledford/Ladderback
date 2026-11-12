@@ -107,22 +107,15 @@ Then(
     );
   },
 );
+// The field's own error is on screen and in its description; a form's error
+// summary may repeat the words as a link, so they are looked for among what
+// the field points at, not anywhere on the page.
 Then("the field {string} shows the error {string}", async function (this: BrowserWorld, name: string, error: string) {
-  await expect(this.page.getByText(error)).toBeVisible();
   const input = this.page.getByRole("textbox", { name });
-  const describedBy = await input.getAttribute("aria-describedby");
-  assert.ok(
-    describedBy?.split(/\s+/).some((id) => id) &&
-      (await Promise.all(
-        (describedBy ?? "")
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((id) => this.page.locator(`#${id}`).textContent()),
-      ))
-        .join(" ")
-        .includes(error),
-    `the field ${JSON.stringify(name)} is not described by ${JSON.stringify(error)} (aria-describedby=${describedBy})`,
-  );
+  const ids = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean);
+  await expect(
+    this.page.locator(ids.map((id) => `#${id}`).join(", ") || ":not(*)").filter({ hasText: error }),
+  ).toBeVisible();
 });
 
 Then("the field {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {

@@ -1031,3 +1031,55 @@ ui-repository-created-id = Its ID is { $id }.
 # Shown in a repository's row when creating it was refused because a repository is already where its entry says. Nothing was written.
 # $alias (text): the name the repository is saved under.
 ui-repository-already-there = There is already a repository at the location of { $alias }, so nothing was created.
+
+## Sign-in (security §10.1): the sign-in page, the dialog shown when a session
+## ends while the page is in use, and the start page's notice that sign-in is off.
+
+# The sign-in page's title, as the browser's tab and history show it.
+ui-sign-in-title = Sign in – { -brand-name }
+
+# The sign-in page's heading: the one main heading of the page.
+ui-sign-in-heading = Sign in to { -brand-name }
+
+# The label of the one field of the sign-in form, on the page and in the dialog.
+ui-sign-in-password-label = Admin password
+
+# The hint under that field. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-sign-in-password-hint = The password set with { "ladderback set-password" }. Paste and password managers work here.
+
+# The button that sends the admin password.
+ui-sign-in-submit = Sign in
+
+# Shown when the form is sent with the field empty, in the error summary and under the field.
+ui-sign-in-password-required = Enter the admin password.
+
+# The heading of the sign-in form's error summary, which takes focus when the form is refused.
+# $count (number): how many problems the list names.
+ui-sign-in-problems = { $count ->
+    [one] There is { $count } problem with the form
+   *[other] There are { $count } problems with the form
+  }
+
+# The name and heading of the dialog shown when the session ends while the page is in use.
+ui-session-ended-title = Sign in again
+
+# What that dialog says. The page under it stays as it was, so nothing typed there is lost; the request that found the session ended is sent again once signed in.
+ui-session-ended-body = Your session has ended. Sign in again to go on: what you typed on this page is kept, and what you asked for is done once you are signed in.
+
+# The start page's notice when no admin password is set: Ladderback then listens on loopback only, so anyone with an account on this machine can use it. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-sign-in-off = Sign-in is off: anyone on this machine can use { -brand-name }. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+
+# The name and heading of the warning shown 2 minutes before a session would end because the page has not used it for 12 hours (WCAG 2.2.1). It is not shown when the session's 30-day lifetime ends it first.
+ui-idle-warning-title = You will be signed out soon
+
+# What the warning says. Being signed out keeps what was typed on the page: the dialog that asks to sign in again opens over it.
+ui-idle-warning-body = This page has not been used for nearly 12 hours, so { -brand-name } will sign you out in 2 minutes. Choose Stay signed in to go on. If you are signed out, what you typed here is kept, and you can sign in again.
+
+# The warning's one button, which keeps the session another 12 hours unused, up to its 30-day lifetime. Escape keeps it too.
+ui-idle-warning-stay = Stay signed in
+
+# The control at the end of the navigation that ends the session, shown while sign-in is on and the page is signed in.
+ui-sign-out = Sign out
+
+# Shown beside Sign out, or in the warning, when the daemon did not answer the request, so the session is as it was.
+ui-session-unreachable = The daemon that serves this page did not answer, so nothing changed. Try again in a moment.

@@ -67,6 +67,9 @@ store = { path = "crates/adapters/store" }
 spawn-gate = { path = "crates/spawn-gate" }
 testkit = { path = "crates/testkit" }
 
+# The admin password's hash, argon2id (security §10.1, decision 70). `std`
+# brings the operating system's randomness, for its salt and session tokens.
+argon2 = { version = "0.5.3", features = ["std"] }
 async-trait = "0.1.92"
 # `ws` carries the live-updates WebSocket at `/api/v1/events` (§4.2).
 axum = { version = "0.8.9", features = ["ws"] }
@@ -152,7 +155,8 @@ rustic_backend = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe
 rustic_core = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-# Hashes the entry page's inline script (see `base64`).
+# Hashes the entry page's inline script (see `base64`), and a session's token
+# into the key its session is kept by (security §10.1).
 sha2 = "0.10.9"
 shell-words = "1.1.1"
 signal-hook = "0.4.6"
@@ -161,6 +165,8 @@ signal-hook = "0.4.6"
 # (de)serializing a database and unlock notification (for a shared cache,
 # which the store doesn't use): none of them is called.
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+# Compares a session's tokens in constant time (security §10.1, decision 70).
+subtle = "2.6.1"
 tempfile = "3.27.0"
 tokio = "1.54.1"
 # The e2e scenarios speak the events WebSocket with this client; no TLS: the
@@ -215,6 +221,10 @@ debug = false
 # rustic encrypts and compresses every blob; unoptimized, these dominate
 # test time. Only these crates are optimized, so debugging Ladderback's own
 # code is unaffected.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
 [profile.dev.package.scrypt]
 opt-level = 3
 [profile.dev.package.salsa20]

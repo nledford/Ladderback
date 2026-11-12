@@ -252,6 +252,24 @@ pub enum ErrorCode {
     /// The repository did not answer a read in time, so its history, or a
     /// preview of a maintenance run, could not be shown.
     RepositoryReadTimedOut,
+    /// Sign-in is on and the request carries no live session (§10.1): it
+    /// never reached its route. The session may have ended: unused for 12
+    /// hours, 30 days old, signed out, or started under an admin password
+    /// that has since been set anew.
+    SignInRequired,
+    /// The password given at sign-in is not the admin password.
+    SignInFailed,
+    /// A sign-in came too soon after failed ones from the same address, so
+    /// the password was not checked (§10.1). The argument `seconds` is how
+    /// long is left to wait.
+    SignInWait,
+    /// A changed request of a session didn't carry that session's CSRF
+    /// token (§10.1), so it never reached its route.
+    CsrfTokenInvalid,
+    /// The admin password could not be checked, or no session token could
+    /// be drawn, so nobody was signed in. The detail is the platform's own
+    /// message, never the password or its hash.
+    SignInUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -473,6 +491,11 @@ impl ErrorCode {
             Self::ConfigUnavailable | Self::ConfigSchemaMissing => &[ArgSpec {
                 name: "file",
                 kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::SignInWait => &[ArgSpec {
+                name: "seconds",
+                kind: ArgKind::Count,
                 optional: false,
             }],
             Self::BodyTooLarge => &[ArgSpec {
@@ -758,6 +781,10 @@ impl ErrorCode {
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
+            | Self::SignInRequired
+            | Self::SignInFailed
+            | Self::CsrfTokenInvalid
+            | Self::SignInUnavailable
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
@@ -1453,6 +1480,10 @@ mod tests {
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,
+            ErrorCode::SignInRequired,
+            ErrorCode::SignInFailed,
+            ErrorCode::CsrfTokenInvalid,
+            ErrorCode::SignInUnavailable,
             ErrorCode::ConfigFolderUnknown,
             ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,
@@ -1462,6 +1493,51 @@ mod tests {
         for code in [WarningCode::SourceUnreadable, WarningCode::Unknown] {
             assert!(code.args().is_empty(), "{code:?}");
         }
+    }
+
+    #[test]
+    fn a_sign_in_wait_names_the_seconds_left() {
+        assert_eq!(
+            ErrorCode::SignInWait.args(),
+            &[ArgSpec {
+                name: "seconds",
+                kind: ArgKind::Count,
+                optional: false,
+            }]
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::CsrfTokenInvalid).unwrap(),
+            r#""csrf-token-invalid""#
+        );
+    }
+
+    #[test]
+    fn a_session_answer_carries_its_csrf_token_and_limits_only_when_signed_in() {
+        let signed_in = SessionDto {
+            sign_in: SignInStateDto::SignedIn,
+            csrf_token: Some("ab".to_owned()),
+            idle_seconds: Some(43_200),
+            ends_in_seconds: Some(60),
+        };
+        assert_eq!(
+            serde_json::to_value(&signed_in).unwrap(),
+            serde_json::json!({
+                "sign-in": "signed-in",
+                "csrf-token": "ab",
+                "idle-seconds": 43_200,
+                "ends-in-seconds": 60
+            })
+        );
+        let off = SessionDto {
+            sign_in: SignInStateDto::Off,
+            csrf_token: None,
+            idle_seconds: None,
+            ends_in_seconds: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&off).unwrap(),
+            serde_json::json!({"sign-in": "off"})
+        );
     }
 
     #[test]
@@ -2505,6 +2581,57 @@ pub struct RepositoryIdDto {
     pub id: String,
 }
 
+/// The header that marks a request the web UI sent on its own, such as a
+/// re-read after an event or a poll, rather than one a person caused
+/// (§10.1). With sign-in on, a marked request never uses its session: only
+/// what a person does keeps one from ending unused. Its value is ignored.
+/// It can only shorten a session's life, so the daemon trusts it as sent.
+pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
+
+/// `GET /api/v1/session` and a sign-in's answer (§10.1): whether sign-in is
+/// on, and whether the request's session is live. A live session's answer
+/// carries the CSRF token its changed requests send as `x-csrf-token`, how
+/// long the session lasts unused (`idle-seconds`), and how long it has left
+/// however it is used (`ends-in-seconds`): the web UI warns before the
+/// first ends it (components §4.5).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SessionDto {
+    pub sign_in: SignInStateDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub csrf_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_in_seconds: Option<u64>,
+}
+
+/// Where a request stands with sign-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SignInStateDto {
+    /// No admin password is set: there is nothing to sign in to.
+    Off,
+    /// Sign-in is on and the request carries no live session.
+    SignedOut,
+    /// The request's session is live.
+    SignedIn,
+}
+
+/// `POST /api/v1/session`: the password, as typed. Never logged or shown
+/// (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SignInDto {
+    pub password: String,
+}
+
+impl std::fmt::Debug for SignInDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SignInDto { password: [hidden] }")
+    }
+}
+
 /// What initialising a repository answers: its ID, and whether it was saved
 /// into the configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3440,6 +3567,18 @@ mod repository_request_tests {
             }
         );
         assert!(file.contains("/etc/demo/pw"), "a path is no secret: {file}");
+    }
+
+    #[test]
+    fn debug_of_a_sign_in_names_it_but_never_the_password_typed() {
+        let shown = format!(
+            "{:?}",
+            super::SignInDto {
+                password: "demo-admin-pass".into()
+            }
+        );
+        assert!(!shown.contains("demo-admin-pass"), "{shown}");
+        assert!(shown.contains("SignInDto"), "the type helps: {shown}");
     }
 
     #[test]

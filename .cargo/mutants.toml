@@ -25,7 +25,18 @@
 # the end of a page's background work when the reader leaves (`visit.rs`).
 # `ws.rs` is only the glue around them: the fetch and WebSocket calls whose
 # results the journeys check, and the settle-poll's budget; every decision
-# a settle or a reconnect makes on those results lives in `backend.rs`.
+# a settle or a reconnect makes on those results lives in `backend.rs`. Its
+# session glue (the CSRF token a changed request carries, and a request
+# refused for want of a session waiting for the sign-in, then sent again)
+# acts on what `session.rs` decides: whether a refusal asks for sign-in.
+#
+# `crates/web/src/sign_in.rs` is the DOM glue of sign-in (security §10.1):
+# the sign-in page, the dialog that asks to sign in again, and the start
+# page's notice that sign-in is off. Where the page stands, what a sign-in
+# answer means, what the form lacks, which refusal is about the field and
+# which title the page takes are `session.rs`'s, mutated on the host; the
+# `@ui` scenarios of `features/security/sign_in.feature` run the glue in
+# Chromium.
 #
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
@@ -60,6 +71,7 @@ exclude_globs = [
     "crates/web/src/gallery.rs",
     "crates/web/src/ws.rs",
     "crates/web/src/snapshots.rs",
+    "crates/web/src/sign_in.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
@@ -80,6 +92,10 @@ exclude_re = [
     # `O_NONBLOCK` and `O_NOCTTY` are separate bits, so `|` and `^` give the
     # same flags. `&` (no flags, so opening a FIFO blocks) is caught.
     'crates/adapters/secrets/src/file\.rs.*: replace \| with \^ in read$',
+    # A token's byte is a high hex digit shifted left four bits and a low one
+    # below it: the two never share a bit, so `|` and `^` give the same byte.
+    # A token that parses to other bytes (`&`) is caught.
+    'crates/domain/src/access\.rs.*: replace \| with \^ in Token::parse$',
     # `Os::get` is the call to the session's own store (the macOS keychain,
     # the Secret Service); what its errors become is `failure`, which is
     # tested. Its test, `the_os_keyring_keeps_and_gives_back_a_secret`,

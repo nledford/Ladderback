@@ -1,5 +1,6 @@
 //! Outbound ports. Object-safe, used as `Arc<dyn Port>` (technical design §3.2).
 
+mod admin_password;
 mod clock;
 mod config_store;
 mod engine;
@@ -16,6 +17,7 @@ mod secrets;
 mod service;
 mod sources;
 
+pub use admin_password::{AdminPassword, AdminPasswordError};
 pub use clock::Clock;
 pub use config_store::{
     CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,
@@ -44,7 +46,7 @@ pub use profiles::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
     ProfileReader, ProfileWriter, RenderedProfile,
 };
-pub use random::Random;
+pub use random::{Random, RandomUnavailable};
 pub use retention::{Retention, RetentionError};
 pub use schedule_store::{PlannedRun, ScheduleStore};
 pub use secrets::{Resolved, SecretResolver};

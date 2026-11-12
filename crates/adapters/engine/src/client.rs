@@ -1309,6 +1309,11 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired
+                | ErrorCode::SignInRequired
+                | ErrorCode::SignInFailed
+                | ErrorCode::SignInWait
+                | ErrorCode::CsrfTokenInvalid
+                | ErrorCode::SignInUnavailable
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

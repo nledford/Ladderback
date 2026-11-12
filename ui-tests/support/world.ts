@@ -182,10 +182,16 @@ export class BrowserWorld extends World {
   /** Whether a script the page doesn't carry ran once added; set by the step
    *  that adds one. */
   injectedScriptRan: boolean | undefined;
+  /** Whether the page's timers run on a clock the steps can move on, set by
+   *  the Given that asks for one before the page opens. */
+  fakeClock = false;
   // Set by `open`, which every scenario's first page goes through before a
   // step reads them.
   context!: BrowserContext;
   page!: Page;
+  /** The scenario's first page while it works in a second tab of the same
+   *  browser, which shares its cookies; `null` while there is one tab. */
+  firstTab: Page | null = null;
 
   async open(pathname = "/"): Promise<void> {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
@@ -199,10 +205,10 @@ export class BrowserWorld extends World {
       });
     }
     this.page = await this.context.newPage();
-    this.page.on("pageerror", (error) => this.scriptErrors.push(error.message));
-    this.page.on("console", (message) => {
-      if (/Content Security Policy/i.test(message.text())) this.policyBlocks.push(message.text());
-    });
+    // Before the page loads, so every timer it sets runs on this clock. It
+    // keeps time as a real clock does until a step moves it on.
+    if (this.fakeClock) await this.page.clock.install();
+    this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
     await this.page.getByRole("heading", { level: 1 }).waitFor();
@@ -216,6 +222,33 @@ export class BrowserWorld extends World {
         document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
       }, content);
     }
+  }
+
+  /** Opens `pathname` in a second tab beside the first, which the steps then
+   *  act in until `backToFirstTab`. */
+  async openSecondTab(pathname: string): Promise<void> {
+    this.firstTab = this.page;
+    this.page = await this.context.newPage();
+    this.#watch(this.page);
+    await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
+    await this.page.getByRole("heading", { level: 1 }).waitFor();
+  }
+
+  /** The steps act in the first tab again, brought to the front. */
+  async backToFirstTab(): Promise<void> {
+    if (this.firstTab === null) throw new Error("there is no second tab to leave: no step opened one");
+    this.page = this.firstTab;
+    this.firstTab = null;
+    await this.page.bringToFront();
+  }
+
+  /** Keeps what `page`'s scripts throw and what its content security policy
+   *  refuses, for the steps and the After hook to check. */
+  #watch(page: Page): void {
+    page.on("pageerror", (error) => this.scriptErrors.push(error.message));
+    page.on("console", (message) => {
+      if (/Content Security Policy/i.test(message.text())) this.policyBlocks.push(message.text());
+    });
   }
 }
 
@@ -232,6 +265,8 @@ Before(function (this: BrowserWorld) {
   this.expectsPolicyBlocks = false;
   this.ownServer = null;
   this.baseUrl = null;
+  this.fakeClock = false;
+  this.firstTab = null;
 });
 
 After(async function (this: BrowserWorld) {

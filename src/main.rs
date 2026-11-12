@@ -21,14 +21,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use api::MsgArg;
+use app::ports::Random;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
+use platform::random::OsRandom;
 
 mod composition;
 mod logging;
 mod output;
 mod profiles;
 mod service;
+mod set_password;
 
 #[derive(Parser)]
 #[command(
@@ -49,8 +52,9 @@ struct Cli {
 enum Command {
     /// Run the agent and serve its web UI.
     Serve {
-        /// Loopback address to listen on, until sign-in exists. Port 0 picks
-        /// a free port; the address in use is printed on startup.
+        /// Address to listen on. Beyond loopback only with sign-in on and an
+        /// `--allowed-host`. Port 0 picks a free port; the address in use is
+        /// printed on startup.
         #[arg(long, default_value = "127.0.0.1:9898")]
         listen: SocketAddr,
         /// A host name or address, without a port, that the web UI answers to
@@ -80,6 +84,10 @@ enum Command {
         #[arg(long, value_name = "ID")]
         plan: String,
     },
+    /// Set the admin password, which turns sign-in on, and end every
+    /// session. It is typed twice at a terminal, without being shown, or
+    /// read as one line of standard input; never given as an argument.
+    SetPassword,
     // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
@@ -153,6 +161,7 @@ fn main() -> ExitCode {
             json,
         } => profiles::import_profile(file, repo_name, output::Report::asked(json)),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
+        Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
         Command::Worker => engine::worker::main(),
@@ -192,14 +201,43 @@ fn run_daemon(
             }
         }
     }
-    // Sign-in doesn't exist yet and there is no trusted-proxy mode (§10.1).
-    if let Err(refusal) = http_adapter::require_loopback(listen) {
-        say(
-            localizer,
-            msg::CLI_REFUSE_NON_LOOPBACK,
-            &[("address", text(refusal.0))],
-        )?;
-        return Ok(ExitCode::FAILURE);
+    // Sign-in is decided once, at start, by whether an admin password is
+    // kept (§10.1, decision 70); beyond loopback it needs one and a host name.
+    // The one source of randomness, for sign-in's tokens and the scheduler's
+    // jitter alike (§3.2).
+    let random: Arc<dyn Random> = Arc::new(OsRandom);
+    let sign_in = match composition::sign_in(Arc::clone(&random)) {
+        Ok(sign_in) => sign_in,
+        Err(refused) => {
+            say(localizer, refused.message, &refused.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let sign_in_on = matches!(sign_in, http_adapter::SignIn::On(_));
+    match http_adapter::startup_rule(listen, sign_in_on, &hosts) {
+        Ok(http_adapter::Exposure::Network) => log::warn!(
+            "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
+        ),
+        Ok(http_adapter::Exposure::Loopback) if !sign_in_on => log::warn!(
+            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
+        ),
+        Ok(http_adapter::Exposure::Loopback) => {}
+        Err(http_adapter::StartupRefusal::SignInOff(address)) => {
+            say(
+                localizer,
+                msg::CLI_REFUSE_NON_LOOPBACK,
+                &[("address", text(address))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
+            say(
+                localizer,
+                msg::CLI_REFUSE_NO_ALLOWED_HOST,
+                &[("address", text(address))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
     }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -221,7 +259,7 @@ fn run_daemon(
         log: operation_log,
         lock,
         background,
-    } = match runtime.block_on(composition::daemon()) {
+    } = match runtime.block_on(composition::daemon(sign_in)) {
         Ok(daemon) => daemon,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;
@@ -255,15 +293,18 @@ fn run_daemon(
         // The queue's leftovers and the scheduler start once the daemon
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
-        let scheduled = tokio::spawn(background.run());
+        let scheduled = tokio::spawn(background.run(random));
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(hosts),
             state,
         );
-        let served = axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await;
+        let served = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
         // No run starts once the daemon stops serving; one already started
         // ends as the runtime drops it, and the next start recovers it.
         scheduled.abort();

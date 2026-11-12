@@ -160,7 +160,7 @@ Then("no folder is where the profile's repository was moved to", async function 
 
 // {repo} is the scenario's scratch copy of the demo repository; {empty} and
 // {hot} are empty scratch folders, made when a step first names them.
-async function expand(world: BrowserWorld, text: string): Promise<string> {
+export async function expand(world: BrowserWorld, text: string): Promise<string> {
   const places = /\{(repo|empty|hot)\}/g;
   const named = [...text.matchAll(places)].map((match) => match[1] ?? "");
   if (named.length === 0) {

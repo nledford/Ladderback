@@ -198,20 +198,46 @@ fn refusal(code: ErrorCode) -> Response {
     (status, Json(Refusal { code })).into_response()
 }
 
-/// The startup rule of §10.1. Sign-in doesn't exist yet and there is no
-/// trusted-proxy mode, so the daemon may only listen on a loopback address.
-pub fn require_loopback(addr: SocketAddr) -> Result<(), NonLoopbackBind> {
+/// The startup rule of §10.1 (decision 70). A loopback address may always be
+/// listened on. Any other only with sign-in on, and only for a configured
+/// host name: the request checks then admit that name, and with none every
+/// request from the network would be refused anyway. There is no
+/// trusted-proxy mode.
+pub fn startup_rule(
+    addr: SocketAddr,
+    sign_in_on: bool,
+    allowed_hosts: &[String],
+) -> Result<Exposure, StartupRefusal> {
     if addr.ip().is_loopback() {
-        Ok(())
+        Ok(Exposure::Loopback)
+    } else if !sign_in_on {
+        Err(StartupRefusal::SignInOff(addr))
+    } else if allowed_hosts.is_empty() {
+        Err(StartupRefusal::NoAllowedHost(addr))
     } else {
-        Err(NonLoopbackBind(addr))
+        Ok(Exposure::Network)
     }
 }
 
-/// The daemon was asked to listen beyond loopback with sign-in off. It has no
+/// Who can reach the daemon at the address it listens on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exposure {
+    /// This machine only.
+    Loopback,
+    /// The network: what crosses it, the password included, is plain HTTP
+    /// unless a proxy in front adds TLS.
+    Network,
+}
+
+/// Why the daemon may not listen on an address beyond loopback. It has no
 /// words of its own: the caller says it from the catalog (§8.4).
 #[derive(Debug, PartialEq, Eq)]
-pub struct NonLoopbackBind(pub SocketAddr);
+pub enum StartupRefusal {
+    /// No admin password is set, so anyone who reached it could use it.
+    SignInOff(SocketAddr),
+    /// Sign-in is on, but no `--allowed-host` names what the browser asks for.
+    NoAllowedHost(SocketAddr),
+}
 
 /// Checks a host name for `--allowed-host`: a name or an address without a
 /// port, such as `nas.example.com`, `192.168.1.5` or `[fd00::1]`. A value the
@@ -229,4 +255,4 @@ pub fn validate_host_name(name: &str) -> Result<String, InvalidHostName> {
 pub struct InvalidHostName(pub String);
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
