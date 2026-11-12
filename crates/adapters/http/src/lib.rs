@@ -35,12 +35,11 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
-pub use listener::GatedListener;
+pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
-    Exposure, InvalidHostName, NonLoopbackBind, RequestChecks, StartupRefusal, require_loopback,
-    startup_rule, validate_host_name,
+    Exposure, InvalidHostName, RequestChecks, StartupRefusal, startup_rule, validate_host_name,
 };
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 

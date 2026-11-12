@@ -204,11 +204,19 @@ fn refusal(code: ErrorCode) -> Response {
 /// request from the network would be refused anyway. There is no
 /// trusted-proxy mode.
 pub fn startup_rule(
-    _addr: SocketAddr,
-    _sign_in_on: bool,
-    _allowed_hosts: &[String],
+    addr: SocketAddr,
+    sign_in_on: bool,
+    allowed_hosts: &[String],
 ) -> Result<Exposure, StartupRefusal> {
-    todo!()
+    if addr.ip().is_loopback() {
+        Ok(Exposure::Loopback)
+    } else if !sign_in_on {
+        Err(StartupRefusal::SignInOff(addr))
+    } else if allowed_hosts.is_empty() {
+        Err(StartupRefusal::NoAllowedHost(addr))
+    } else {
+        Ok(Exposure::Network)
+    }
 }
 
 /// Who can reach the daemon at the address it listens on.
@@ -245,21 +253,6 @@ pub fn validate_host_name(name: &str) -> Result<String, InvalidHostName> {
 /// has no words of its own: the caller says it from the catalog (§8.4).
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidHostName(pub String);
-
-/// The startup rule of §10.1. Sign-in doesn't exist yet and there is no
-/// trusted-proxy mode, so the daemon may only listen on a loopback address.
-pub fn require_loopback(addr: SocketAddr) -> Result<(), NonLoopbackBind> {
-    if addr.ip().is_loopback() {
-        Ok(())
-    } else {
-        Err(NonLoopbackBind(addr))
-    }
-}
-
-/// The daemon was asked to listen beyond loopback with sign-in off. It has no
-/// words of its own: the caller says it from the catalog (§8.4).
-#[derive(Debug, PartialEq, Eq)]
-pub struct NonLoopbackBind(pub SocketAddr);
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -23,10 +23,10 @@ use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
 use app::ports::SecretResolver;
 use app::ports::{
-    BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network, OperationRecord, OperationStore,
-    PowerSupply, ProfileError, ProfileNotice, ProgressEvent, RunningJob, ScheduleStore,
-    SnapshotSummary,
+    AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
+    EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
+    OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, ProgressEvent,
+    Random, RunningJob, ScheduleStore, SnapshotSummary,
 };
 use app::queue::{Place, RunQueue};
 use app::recovery::RecoverOperations;
@@ -60,8 +60,8 @@ use http_adapter::{
 use l10n::{MessageId, msg};
 use notify_adapter::HttpNotifier;
 use platform::SystemClock;
+use platform::admin_password::FileAdminPassword;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
-use platform::random::OsRandom;
 use platform::{agent_id, dirs};
 use secrets::SystemSecrets;
 use store::SqliteStore;
@@ -172,15 +172,16 @@ pub(crate) struct Background {
 }
 
 impl Background {
-    /// Runs the queue's leftovers, oldest first, then the scheduler, until
-    /// the future is dropped.
-    pub(crate) async fn run(self) {
+    /// Runs the queue's leftovers, oldest first, then the scheduler, with
+    /// `random` spreading its runs over their jitter, until the future is
+    /// dropped.
+    pub(crate) async fn run(self, random: Arc<dyn Random>) {
         let queue = Arc::clone(&self.runner.queue);
         let runs: Arc<dyn PlanRuns> = self.runner;
         resume_queued(self.queued, self.config.as_ref(), self.store, runs.as_ref()).await;
         Scheduler {
             clock: Arc::new(SystemClock),
-            random: Arc::new(OsRandom),
+            random,
             schedules: self.schedules,
             config: self.config,
             power: self.conditions.power,
@@ -248,9 +249,47 @@ impl OperationLog {
     }
 }
 
-/// What the daemon's router runs against (§4.2), or why it cannot.
-pub(crate) async fn daemon() -> Result<Daemon, Refused> {
-    daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await
+/// Whether sign-in is on (§10.1, decision 70), decided once as the daemon
+/// starts: on when the data folder keeps an admin password's hash, off when
+/// it keeps none. A hash file that can't be read, or isn't a hash this build
+/// checks, is a refusal to start, never sign-in off. Sessions draw their
+/// tokens from `random`.
+pub(crate) fn sign_in(random: Arc<dyn Random>) -> Result<SignIn, Refused> {
+    let data_dir = dirs::data_dir().ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
+    let kept = Arc::new(FileAdminPassword::in_data_dir(&data_dir));
+    match kept.is_set() {
+        Ok(false) => Ok(SignIn::Off),
+        Ok(true) => Ok(SignIn::On(Arc::new(app::access::Access::new(
+            kept,
+            random,
+            Arc::new(SystemClock),
+        )))),
+        Err(error) => {
+            // `is_set` never answers `NotSet`: no file is sign-in off.
+            let detail = match error {
+                AdminPasswordError::Unreadable(said) | AdminPasswordError::Unwritable(said) => said,
+                AdminPasswordError::NotSet => String::new(),
+            };
+            Err(Refused {
+                message: msg::CLI_ADMIN_PASSWORD_UNREADABLE,
+                args: vec![
+                    (
+                        "path",
+                        text(data_dir.join(platform::admin_password::FILE).display()),
+                    ),
+                    ("detail", text(detail)),
+                ],
+            })
+        }
+    }
+}
+
+/// What the daemon's router runs against (§4.2), with `sign_in` deciding who
+/// may use it, or why it cannot.
+pub(crate) async fn daemon(sign_in: SignIn) -> Result<Daemon, Refused> {
+    let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
+    daemon.state.sign_in = sign_in;
+    Ok(daemon)
 }
 
 /// [`daemon`] with the folders supplied, for tests. The data folder is locked

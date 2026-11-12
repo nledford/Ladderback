@@ -162,6 +162,31 @@ impl axum::serve::Listener for GatedListener {
 /// reason other than its client.
 const AFTER_FAILURE: Duration = Duration::from_secs(1);
 
+/// The client's address as the daemon's server hands it to a request
+/// (`axum::extract::ConnectInfo<PeerAddr>`). axum gives a `SocketAddr` only
+/// from its own `TcpListener`, so the daemon's [`GatedListener`] needs a type
+/// of its own; tokio's listener gives one too, for tests that serve through
+/// it. (One impl for every listener whose address is a `SocketAddr` would
+/// overlap axum's own impl for its tapped listeners.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeerAddr(pub SocketAddr);
+
+impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, GatedListener>>
+    for PeerAddr
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'_, GatedListener>) -> Self {
+        Self(*stream.remote_addr())
+    }
+}
+
+impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TcpListener>>
+    for PeerAddr
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'_, TcpListener>) -> Self {
+        Self(*stream.remote_addr())
+    }
+}
+
 /// Whether an accept failed for a connection its client gave up on, not for
 /// a reason of the daemon's own.
 fn is_lost_connection(error: &io::Error) -> bool {
@@ -192,6 +217,43 @@ mod tests {
 
     fn listening(accept: Accept) -> GatedListener {
         GatedListener::with_accept(StdListener::bind(loopback()).unwrap(), accept).unwrap()
+    }
+
+    /// A request served through the daemon's listener carries its client's
+    /// own address: the sign-in waits key on it (§10.1), and without it every
+    /// client would share the one wait of an unspecified address.
+    #[tokio::test]
+    async fn a_request_served_through_the_listener_knows_its_client_s_address() {
+        use axum::extract::ConnectInfo;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = GatedListener::bind(loopback()).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(|ConnectInfo(PeerAddr(peer)): ConnectInfo<PeerAddr>| async move {
+                peer.to_string()
+            }),
+        );
+        tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<PeerAddr>(),
+            )
+            .await;
+        });
+        let mut client = TcpStream::connect(address).await.unwrap();
+        let client_address = client.local_addr().unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut answer = String::new();
+        client.read_to_string(&mut answer).await.unwrap();
+        assert!(
+            answer.ends_with(&client_address.to_string()),
+            "the request saw another address than {client_address}: {answer}"
+        );
     }
 
     /// The tests of the gate, compiled only where the platform accepts in two

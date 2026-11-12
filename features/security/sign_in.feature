@@ -177,6 +177,10 @@ Feature: Sign-in
       When Ladderback is started with the arguments "--listen 0.0.0.0:0"
       Then Ladderback refuses to start
 
+    Scenario: With sign-in off, Ladderback refuses to listen on every address, even for a configured host name
+      When Ladderback is started with the arguments "--listen 0.0.0.0:0 --allowed-host nas.demo.test"
+      Then Ladderback refuses to start
+
     Scenario: With sign-in off, the log warns that anyone on this machine can use Ladderback
       When Ladderback is started with the arguments "--listen 127.0.0.1:0"
       Then Ladderback is listening
@@ -193,6 +197,11 @@ Feature: Sign-in
 
     Background:
       Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+
+    Scenario: The web UI's page is served without a session, so it can ask for the password
+      Given a "GET" request for "/"
+      When the request is sent
+      Then the request isn't refused by a request check
 
     Scenario Outline: A <method> request for <path> without a session is refused
       Given a "<method>" request for "<path>"

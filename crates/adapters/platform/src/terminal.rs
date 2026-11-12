@@ -1,21 +1,84 @@
 //! Reading a secret from standard input (technical design §10.1): at a
 //! terminal without showing what is typed, or one line from a pipe.
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, IsTerminal, Read};
 
 /// Whether standard input is a terminal a person types at.
 pub fn stdin_is_terminal() -> bool {
-    todo!()
+    io::stdin().is_terminal()
 }
 
 /// Reads one line of standard input, of at most `max` bytes, without its
-/// line ending.
-pub fn read_secret_line(_max: usize) -> io::Result<String> {
-    todo!()
+/// line ending. At a terminal, what is typed is not shown. A longer line is
+/// an `InvalidData` error and is never kept whole, and so is a line that is
+/// not UTF-8.
+pub fn read_secret_line(max: usize) -> io::Result<String> {
+    let _quiet = if stdin_is_terminal() {
+        Some(EchoOff::start()?)
+    } else {
+        None
+    };
+    read_line_from(&mut io::stdin().lock(), max)
 }
 
-fn read_line_from(_input: &mut impl BufRead, _max: usize) -> io::Result<String> {
-    todo!()
+fn read_line_from(input: &mut impl BufRead, max: usize) -> io::Result<String> {
+    let mut line = Vec::new();
+    // Room for the line ending, and one byte more to tell a line that is too
+    // long from one that fits.
+    let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(3);
+    input.take(limit).read_until(b'\n', &mut line)?;
+    if line.last() == Some(&b'\n') {
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+    }
+    if line.len() > max {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the line is longer than a password",
+        ));
+    }
+    String::from_utf8(line)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "the line is not UTF-8"))
+}
+
+/// The terminal's echo turned off until this is dropped; the line ending a
+/// person types is still shown, so the next line starts on its own.
+struct EchoOff {
+    #[cfg(unix)]
+    saved: nix::sys::termios::Termios,
+}
+
+impl EchoOff {
+    #[cfg(unix)]
+    fn start() -> io::Result<Self> {
+        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+        let saved = tcgetattr(io::stdin()).map_err(io::Error::from)?;
+        let mut quiet = saved.clone();
+        quiet.local_flags.remove(LocalFlags::ECHO);
+        quiet.local_flags.insert(LocalFlags::ECHONL);
+        tcsetattr(io::stdin(), SetArg::TCSAFLUSH, &quiet).map_err(io::Error::from)?;
+        Ok(Self { saved })
+    }
+
+    #[cfg(not(unix))]
+    fn start() -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this platform cannot hide what is typed",
+        ))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for EchoOff {
+    fn drop(&mut self) {
+        use nix::sys::termios::{SetArg, tcsetattr};
+        // Nothing more can be done for a terminal that won't take its own
+        // settings back.
+        let _ = tcsetattr(io::stdin(), SetArg::TCSANOW, &self.saved);
+    }
 }
 
 #[cfg(test)]

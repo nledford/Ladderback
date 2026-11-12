@@ -4,6 +4,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use app::ports::{Random, RandomUnavailable};
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use domain::access::TOKEN_BYTES;
 use domain::execution::next_run::RandomDraw;
 
@@ -15,6 +16,8 @@ static DRAWS: AtomicU64 = AtomicU64::new(0);
 /// system once per thread, and each new hasher's differ from the last, so
 /// no two draws are the same hash of the same input. It spreads runs over
 /// their jitter (§5), which needs numbers no two agents share, not secrets.
+/// A token is the operating system's random bytes, for secrets (§10.1): a
+/// platform that gives none is an error, never a panic.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OsRandom;
 
@@ -25,7 +28,11 @@ impl Random for OsRandom {
     }
 
     fn token(&self) -> Result<[u8; TOKEN_BYTES], RandomUnavailable> {
-        todo!()
+        let mut bytes = [0; TOKEN_BYTES];
+        OsRng
+            .try_fill_bytes(&mut bytes)
+            .map_err(|error| RandomUnavailable(error.to_string()))?;
+        Ok(bytes)
     }
 }
 

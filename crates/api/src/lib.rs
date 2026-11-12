@@ -493,6 +493,11 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::SignInWait => &[ArgSpec {
+                name: "seconds",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
             Self::BodyTooLarge => &[ArgSpec {
                 name: "limit",
                 kind: ArgKind::Bytes,
@@ -783,8 +788,7 @@ impl ErrorCode {
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
-            | Self::Unknown
-            | Self::SignInWait => &[],
+            | Self::Unknown => &[],
         }
     }
 }
@@ -2591,10 +2595,14 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// however it is used (`ends-in-seconds`): the web UI warns before the
 /// first ends it (components §4.5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
     pub sign_in: SignInStateDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub csrf_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_in_seconds: Option<u64>,
 }
 

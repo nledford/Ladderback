@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use app::fakes::{FakeClock, InMemoryAdminPassword, SeededRandom};
@@ -56,7 +57,9 @@ fn build(method: Method, path: &str, headers: &[(&str, &str)], body: &str) -> Re
         builder = builder.header(*name, *value);
     }
     let mut request = builder.body(Body::from(body.to_owned())).unwrap();
-    request.extensions_mut().insert(ConnectInfo(HOME));
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(crate::PeerAddr(HOME)));
     request
 }
 
@@ -407,7 +410,8 @@ async fn the_wait_is_kept_by_the_connections_address_never_a_forwarded_one() {
         "another forwarded address is the same client"
     );
     let mut away = sign_in_request(PASSWORD, &[]);
-    away.extensions_mut().insert(ConnectInfo(AWAY));
+    away.extensions_mut()
+        .insert(ConnectInfo(crate::PeerAddr(AWAY)));
     assert_eq!(
         send(&on, away).await.status(),
         StatusCode::OK,
@@ -660,7 +664,7 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
     tokio::spawn(async move {
         let _ = axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            app.into_make_service_with_connect_info::<crate::PeerAddr>(),
         )
         .await;
     });
