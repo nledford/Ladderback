@@ -69,6 +69,9 @@ mod time_zones;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod ws;
+// A reader's visit to a live page, which the page's background work lasts
+// for: host-tested, as `ws.rs`'s glue is not.
+mod visit;
 // What the Snapshots page says, decided on the host.
 mod wording;
 

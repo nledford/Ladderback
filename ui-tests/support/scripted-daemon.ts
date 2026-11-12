@@ -1,6 +1,6 @@
 // A daemon the journey plays itself (#124): what the operations page reads of
 // it, which is its history, its plans and its events stream, said as the steps
-// say.
+// say, and, when a step asks, its answers to a start and to a cancel.
 //
 // A real backup reports progress when it happens to. A journey that must hold
 // the reader's focus on a control while the row beside it updates cannot wait
@@ -10,9 +10,9 @@
 //
 // Only the daemon's answers are played. The page is the real one, served by the
 // run's own daemon, and a request this does not answer, such as a start or a
-// cancel, goes on to that daemon.
+// cancel unless a step asked, goes on to that daemon.
 
-import type { BrowserContext, WebSocketRoute } from "playwright";
+import type { BrowserContext, Route, WebSocketRoute } from "playwright";
 
 // How long a step waits for the page to open, or ask for, its events stream.
 const STREAM_PATIENCE_MS = 10_000;
@@ -38,7 +38,7 @@ export class ScriptedDaemon {
    *  them, newest first. */
   #operations: Operation[] = [];
   /** The events stream the page last opened, once it has one open; none
-   *  between a drop and the page's next one. */
+   *  between a drop, or the page's own close, and the page's next one. */
   #stream: WebSocketRoute | null = null;
   /** Whether the next reading of the history is held back. */
   #holdNext = false;
@@ -55,6 +55,18 @@ export class ScriptedDaemon {
   /** The readings of the history the page asked for, and was answered,
    *  since its events stream last opened. */
   #readsSinceTheOpening = 0;
+  /** The events streams the page has open, as this daemon sees them. */
+  #open = new Set<WebSocketRoute>();
+  /** How many events streams the page has opened, and how many times it has
+   *  read the history: what a page that is gone must stop adding to. */
+  #streamsOpened = 0;
+  #historyReads = 0;
+  /** Whether this daemon answers the page's starts itself (`answerStarts`). */
+  #answersStarts = false;
+  /** Whether this daemon accepts the page's cancels itself
+   *  (`acceptCancels`), and the operations whose cancel it has accepted. */
+  #acceptsCancels = false;
+  #cancelsAccepted = new Set<string>();
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -91,8 +103,16 @@ export class ScriptedDaemon {
 
   /** Answers a context's reads of the daemon with this script. */
   async install(context: BrowserContext): Promise<void> {
+    await context.route("**/api/v1/operations/*/cancel", async (route) => {
+      if (route.request().method() !== "POST" || !this.#acceptsCancels) return route.fallback();
+      const operation = new URL(route.request().url()).pathname.split("/").at(-2) ?? "";
+      this.#cancelsAccepted.add(operation);
+      await route.fulfill({ json: {} });
+    });
     await context.route("**/api/v1/operations", async (route) => {
+      if (route.request().method() === "POST" && this.#answersStarts) return this.#start(route);
       if (route.request().method() !== "GET") return route.fallback();
+      this.#historyReads += 1;
       const json = { operations: structuredClone(this.#operations), next: null };
       if (this.#holdNext) {
         this.#holdNext = false;
@@ -126,7 +146,73 @@ export class ScriptedDaemon {
       }
       this.#stream = stream;
       this.#readsSinceTheOpening = 0;
+      this.#open.add(stream);
+      this.#streamsOpened += 1;
+      // The page closing its stream; the daemon's own drop is `dropTheStream`.
+      // A step after it waits for the page's next stream, never this one.
+      stream.onClose(() => {
+        this.#open.delete(stream);
+        if (this.#stream === stream) this.#stream = null;
+      });
     });
+  }
+
+  /** Has this daemon answer each start the page asks for: the backup is
+   *  queued, and it never starts unless a step says so. */
+  answerStarts(): void {
+    this.#answersStarts = true;
+  }
+
+  /** Queues a backup of the plan the start names and answers with it, as the
+   *  daemon answers a start. */
+  async #start(route: Route): Promise<void> {
+    const { plan } = route.request().postDataJSON() as { plan: string };
+    this.addBackup(plan, "queued", { queuedAt: "2026-11-09T10:00:10Z" });
+    await route.fulfill({ status: 202, json: { operation: this.#backupOf(plan).id } });
+  }
+
+  /** Has this daemon accept each cancel the page asks for, as the daemon
+   *  does, while the run goes on: it ends only when a step says so. */
+  acceptCancels(): void {
+    this.#acceptsCancels = true;
+  }
+
+  /** Waits until this daemon has accepted the cancel of the backup of
+   *  `plan`. */
+  async untilCancelAccepted(plan: string): Promise<void> {
+    const operation = this.#backupOf(plan).id;
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (!this.#cancelsAccepted.has(operation)) {
+      if (Date.now() > end) throw new Error(`the page never asked to cancel the backup of ${plan}`);
+      await sleep(50);
+    }
+  }
+
+  /** How many events streams the page has open. */
+  get openStreams(): number {
+    return this.#open.size;
+  }
+
+  /** How many events streams the page has opened so far. */
+  get streamsOpened(): number {
+    return this.#streamsOpened;
+  }
+
+  /** How many times the page has read the history so far. */
+  get historyReads(): number {
+    return this.#historyReads;
+  }
+
+  /** Waits until the page has `count` events streams open, or says how many
+   *  it kept instead. */
+  async untilStreamsOpen(count: number): Promise<void> {
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (this.#open.size !== count) {
+      if (Date.now() > end) {
+        throw new Error(`the page has ${this.#open.size} events streams open, not ${count}`);
+      }
+      await sleep(50);
+    }
   }
 
   /** Holds back the opening of the next events stream the page asks for,
@@ -216,23 +302,28 @@ export class ScriptedDaemon {
     await held();
   }
 
-  /** Closes the events stream the page has open; the page opens its next one
-   *  after it has read the history again. */
+  /** Closes the events stream the page has open, once it has one; the page
+   *  opens its next one after it has read the history again. */
   async dropTheStream(): Promise<void> {
-    const stream = this.#stream;
-    if (stream === null) throw new Error("the page has no events stream open");
+    const stream = await this.#openStream();
     this.#stream = null;
+    this.#open.delete(stream);
     await stream.close();
   }
 
-  /** Tells the page `event` over its events stream, once it has one open. */
-  async #tell(event: Record<string, unknown>): Promise<void> {
+  /** The events stream the page has open, once it has one. */
+  async #openStream(): Promise<WebSocketRoute> {
     const end = Date.now() + STREAM_PATIENCE_MS;
     while (this.#stream === null) {
       if (Date.now() > end) throw new Error("the page never opened its events stream");
       await sleep(50);
     }
-    this.#stream.send(JSON.stringify(event));
+    return this.#stream;
+  }
+
+  /** Tells the page `event` over its events stream, once it has one open. */
+  async #tell(event: Record<string, unknown>): Promise<void> {
+    (await this.#openStream()).send(JSON.stringify(event));
   }
 
   /** The backup of `plan` begins: its log says it is running before the page

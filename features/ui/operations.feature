@@ -85,6 +85,47 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the polite region reads "Backup finished."
     And the polite region keeps reading "Backup finished."
 
+  # The page listens to the daemon only while the reader is on it: leaving it
+  # closes its events stream, ends the wait to reconnect a dropped one, and
+  # stops the polling of a run the page started or cancelled, so coming back
+  # opens one stream, never a second beside the first (#300).
+  Scenario: Leaving the Operations page closes its events stream, and coming back opens one
+    Given the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And I press Shift+Tab until focus is on the link "Repositories"
+    And I press Enter
+    Then the page stops listening to the daemon
+    When I press Shift+Tab until focus is on the link "Operations"
+    And I press Enter
+    Then the table "Operations" has a row "demo-home" that shows "Running"
+    And the page has one events stream open
+    When the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
+
+  Scenario: Leaving the Operations page while it waits on a run and on its events stream ends both waits
+    Given the daemon reports a running backup of "demo-home"
+    And the daemon queues each backup the page starts
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the polite region comes to contain "Backup started."
+    And the daemon's events stream drops
+    And I press Shift+Tab until focus is on the link "Repositories"
+    And I press Enter
+    Then the page stops listening to the daemon
+
+  Scenario: Leaving the Operations page while it waits on a cancelled run ends the wait
+    Given the daemon reports a running backup of "demo-home"
+    And the daemon accepts each cancel the page asks for, and the run goes on
+    When I open the address "/operations"
+    And I press Tab until focus is on the button "Cancel demo-home"
+    And I press Enter
+    And the daemon has accepted the cancel of the backup of "demo-home"
+    And I press Shift+Tab until focus is on the link "Repositories"
+    And I press Enter
+    Then the page stops listening to the daemon
+
   # The table's columns keep the widths they open with: a run that starts,
   # shows its progress and ends changes what its row says, never where the
   # columns are, so the table doesn't jump under the reader's eyes. The sort

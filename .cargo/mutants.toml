@@ -21,7 +21,8 @@
 # announcer's timing (`announcer.rs`), the page titles (`routes.rs`), the
 # focus wrap (`focus.rs`), the toast's arrival and lifetime (`toast.rs`) and
 # the live pages' state, event application, merge and back-off
-# (`backend.rs`), with the events URL and the statuses a run ends with.
+# (`backend.rs`), with the events URL and the statuses a run ends with, and
+# the end of a page's background work when the reader leaves (`visit.rs`).
 # `ws.rs` is only the glue around them: the fetch and WebSocket calls whose
 # results the journeys check, and the settle-poll's budget; every decision
 # a settle or a reconnect makes on those results lives in `backend.rs`.
