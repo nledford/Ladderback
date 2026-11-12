@@ -133,6 +133,10 @@ log = "0.4.35"
 mime_guess = "2.0.5"
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
 proc-macro2 = "1.0.107"
+# Property tests (technical design §13.3), a dev-dependency only. `std` alone:
+# the default `fork` and `timeout` features run each case in a child process,
+# which no property here needs, and pull in `rusty-fork` and `tempfile`.
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased
 # (technical design §2.1). The `engine` crate depends on them, and so do the

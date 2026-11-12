@@ -17,6 +17,8 @@ pub mod execution;
 mod ids;
 pub mod maintenance;
 pub mod planning;
+#[cfg(test)]
+mod properties;
 pub mod secrets;
 pub mod snapshot;
 

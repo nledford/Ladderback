@@ -20,6 +20,8 @@ use crate::planning::{Maintenance, Plan, RetentionPolicy};
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
 
 mod other_hosts;
+#[cfg(test)]
+mod properties;
 
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
 
