@@ -63,6 +63,12 @@ pub enum Cause {
     /// with this field's: more than a job masks, so the job can't run (I4).
     /// Nothing after this field is read.
     TooMuchToMask { limit: usize },
+    /// The field is a location that, resolved, names a folder on this machine
+    /// by a relative path
+    /// ([`is_relative_location`](domain::planning::is_relative_location)),
+    /// which rustic would read from wherever the daemon was started. Nothing
+    /// of what it resolved to is kept: a reference may hold a secret (I4).
+    RelativePath,
 }
 
 /// The first field that couldn't be resolved, tried in the order password,

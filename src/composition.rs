@@ -1806,6 +1806,7 @@ async fn secret_refusal(
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
+        Cause::RelativePath => todo!(),
         Cause::Invalid(template) => {
             let mut args = vec![field()];
             if let Some(at) = template_error_place(template) {
@@ -6994,6 +6995,38 @@ mod repository_service_tests {
         let error = unresolved(Field::Password, env_source("PW"), Problem::Missing);
         let _ = secret_refusal(&error, &settings, &secrets).await;
         assert_eq!(secrets.reads().len(), 2);
+    }
+
+    /// A location a reference made relative is refused as one written so is
+    /// at load and at the repository routes: `repository-path-relative`,
+    /// naming the setting. Nothing a reference held is in it, and it reads
+    /// no secret (I4, #247).
+    #[tokio::test]
+    async fn a_location_resolved_to_a_relative_path_is_refused_by_its_setting_alone() {
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.repository = "${DEMO_REPO}".to_owned();
+        settings.repo_hot = Some("local:${DEMO_HOT}".to_owned());
+        let secrets = FakeSecrets::new();
+        secrets.set_env("DEMO_REPO", "CANARY-relative/repo");
+        secrets.set_env("DEMO_HOT", "CANARY-relative/hot");
+        for (field, name) in [
+            (Field::Repository, "repository"),
+            (Field::RepoHot, "repo-hot"),
+        ] {
+            let error = ResolveError {
+                field,
+                cause: Cause::RelativePath,
+            };
+            assert_eq!(
+                secret_refusal(&error, &settings, &secrets).await,
+                SecretRefusal {
+                    code: ErrorCode::RepositoryPathRelative,
+                    args: vec![("field", MsgArg::Text(name.to_owned()))],
+                    detail: None,
+                },
+            );
+        }
+        assert_eq!(secrets.reads(), []);
     }
 
     /// What a command said, and what a platform said, is masked of every

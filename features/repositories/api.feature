@@ -149,3 +149,11 @@ Feature: Repositories over HTTP
       | a relative location      | /api/v1/repositories/_test | {"settings":{"repository":"backups/repo","password":{"source":"inline","value":"p"}}}              | repository |
       | a hot location under ~   | /api/v1/repositories/_init | {"settings":{"repository":"/x","repo-hot":"~/hot","password":{"source":"inline","value":"p"}}}     | repo-hot   |
       | a relative password file | /api/v1/repositories       | {"alias":"demo","settings":{"repository":"/x","password":{"source":"file","path":"password.txt"}}} | password   |
+
+  Scenario: A location a reference makes relative is refused at that setting once it is resolved, never showing what it held
+    Given the file "{scratch}/demo-location" holds "CANARY-relative/repo"
+    When the client sends {"settings":{"repository":"${file:{scratch}/demo-location}","password":{"source":"inline","value":"p"}}} to "/api/v1/repositories/_test"
+    Then the refusal has status 422 and the typed code "repository-path-relative"
+    And the refusal names the setting "repository"
+    And no answer shows "CANARY-relative"
+    And the daemon lists no repositories

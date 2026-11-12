@@ -74,6 +74,14 @@ impl RepositorySettings {
     }
 }
 
+/// Whether `location`, a repository location as a job resolved it (every
+/// reference replaced by what it held), names a folder on this machine by a
+/// relative path, read as [`RepositorySettings::relative_path`] reads a
+/// location all of which is known.
+pub fn is_relative_location(_location: &str) -> bool {
+    todo!()
+}
+
 /// Whether a program is named by a relative path: with a `/` in it, and not
 /// at its start. A name without one is looked up on `PATH`.
 pub(super) fn is_relative_program(program: &str) -> bool {
@@ -629,5 +637,52 @@ mod tests {
             settings.relative_path(),
             Some(RepositoryField::OptionHot("root".to_owned()))
         );
+    }
+
+    // A job resolves `${REPO}` before rustic opens it, and only then is the
+    // location known (#247). What a reference held is text: a `$` in it
+    // starts no reference.
+    #[test]
+    fn a_resolved_location_that_names_a_folder_here_by_a_relative_path_is_relative() {
+        for location in RELATIVE
+            .into_iter()
+            .map(str::to_owned)
+            .chain(RELATIVE.iter().map(|path| format!("local:{path}")))
+            .chain(
+                [
+                    "${HOME}/repo",
+                    " /srv/demo-repo",
+                    "rclone:backups/repo",
+                    "rclone:./repo",
+                    "rclone:~/repo",
+                    "rclone:repo",
+                    "rclone:backups/nas:repo",
+                ]
+                .map(str::to_owned),
+            )
+        {
+            assert!(is_relative_location(&location), "{location:?}");
+        }
+    }
+
+    #[test]
+    fn a_resolved_location_that_is_a_full_path_or_no_folder_here_is_not_relative() {
+        for location in [
+            "/srv/demo-repo",
+            "/",
+            "local:/srv/demo-repo",
+            "rclone:nas:backups/repo",
+            "rclone:/srv/demo-repo",
+            "rest:https://nas.example/repo",
+            "opendal:s3",
+            "opendal:fs",
+            "opendal:sftp:backups",
+            // What rustic reads as a backend it doesn't know, and refuses.
+            "nas:backups/repo",
+            "LOCAL:backups/repo",
+            "s3:s3.example.net/demo-backups",
+        ] {
+            assert!(!is_relative_location(location), "{location:?}");
+        }
     }
 }
