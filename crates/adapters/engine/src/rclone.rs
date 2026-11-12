@@ -115,6 +115,35 @@ pub(crate) fn backends(
     })
 }
 
+/// [`backends`], with the `rclone` starts of the open given `within` to
+/// serve.
+fn backends_within(
+    of: &BackendOptions,
+    credentials: &ServerCredentials,
+    redactor: &Redactor,
+    within: std::time::Duration,
+) -> RusticResult<Backends> {
+    let _ = (of, credentials, redactor, within);
+    todo!()
+}
+
+/// How long the `rclone` starts of one open have left to serve.
+#[derive(Clone, Copy)]
+struct Deadline {
+    since: std::time::Instant,
+    within: std::time::Duration,
+}
+
+impl Deadline {
+    /// `within` from now.
+    fn from_now(within: std::time::Duration) -> Self {
+        Self {
+            since: std::time::Instant::now(),
+            within,
+        }
+    }
+}
+
 /// What the backends of one repository are built with, and the servers
 /// started for them so far.
 struct Serving<'a> {
@@ -164,7 +193,10 @@ impl Serving<'_> {
             None => true,
         };
         if use_password && rclone_command.is_none() {
-            supported_version(Command::new("rclone"))?;
+            supported_version(
+                Command::new("rclone"),
+                Deadline::from_now(std::time::Duration::MAX),
+            )?;
         }
         let mut rclone_command: CommandInput = rclone_command
             .map_or(DEFAULT_COMMAND, String::as_str)
@@ -312,7 +344,8 @@ impl Drop for Server {
 
 /// Fails unless `rclone`, run as `rclone version`, is [`OLDEST_VERSION`] or
 /// newer. Its start holds the gate, the wait for its answer doesn't.
-fn supported_version(mut rclone: Command) -> RusticResult<()> {
+fn supported_version(mut rclone: Command, deadline: Deadline) -> RusticResult<()> {
+    let _ = deadline;
     let failed = |error: std::io::Error| {
         RusticError::with_source(
             ErrorKind::ExternalCommand,
@@ -548,24 +581,132 @@ mod tests {
         command
     }
 
+    /// What the tests below give a start that never answers: long enough
+    /// for the stand-in to say who it is on a loaded machine, and well short
+    /// of the 10 s it would take to give up by itself.
+    #[cfg(unix)]
+    const START: std::time::Duration = std::time::Duration::from_secs(3);
+
+    /// The deadline of a start that answers: a minute, so a loaded machine
+    /// never makes one late.
+    #[cfg(unix)]
+    fn in_time() -> Deadline {
+        Deadline::from_now(std::time::Duration::from_secs(60))
+    }
+
+    /// Whether the process whose id the stand-in wrote to `pid` is still
+    /// running, or exited but unreaped: `kill -0` finds both.
+    #[cfg(unix)]
+    fn alive(pid: &std::path::Path) -> bool {
+        let pid = std::fs::read_to_string(pid).expect("the stand-in wrote its process id");
+        let mut probe = Command::new("kill");
+        let _ = probe.args(["-0", pid.trim()]).stderr(Stdio::null());
+        spawn_gate::hold(|| probe.spawn())
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success()
+    }
+
+    /// An `rclone version` that never answers is given up at the start's
+    /// deadline, and killed and reaped, rather than waited for until it
+    /// exits by itself (#326).
+    #[cfg(unix)]
+    #[test]
+    fn an_rclone_version_that_never_answers_is_stopped_at_the_deadline() {
+        let scratch = tempfile::tempdir().unwrap();
+        let pid = scratch.path().join("pid");
+        // `version` follows the file as `$2`.
+        let mut command = rclone_version("echo $$ > \"$1\"; exec sleep 10");
+        let _ = command.arg(&pid);
+        let given_up = supported_version(command, Deadline::from_now(START))
+            .expect_err("a version that never answers is no version");
+        assert!(
+            given_up.to_string().contains("did not answer within 3s"),
+            "{given_up}"
+        );
+        assert!(
+            !alive(&pid),
+            "the rclone version stand-in is still running, or unreaped"
+        );
+    }
+
+    /// An `rclone version` that answers but never exits is not waited for
+    /// either: its first line is all that is read of it (#326).
+    #[cfg(unix)]
+    #[test]
+    fn an_rclone_version_that_answers_but_never_exits_is_stopped() {
+        let scratch = tempfile::tempdir().unwrap();
+        let pid = scratch.path().join("pid");
+        let mut command =
+            rclone_version("echo $$ > \"$1\"; echo \"rclone v1.65.0\"; exec sleep 10");
+        let _ = command.arg(&pid);
+        let since = std::time::Instant::now();
+        supported_version(command, Deadline::from_now(START)).unwrap();
+        assert!(
+            since.elapsed() < START,
+            "the answer was taken only once the stand-in exited"
+        );
+        assert!(
+            !alive(&pid),
+            "the rclone version stand-in is still running, or unreaped"
+        );
+    }
+
+    /// An `rclone` that never says where it serves is given up at the start's
+    /// deadline, killed and reaped, and the open ends: neither the thread
+    /// that opened the repository nor the one reading the server's output is
+    /// left waiting on it, and no `rclone` is left running (#326).
+    #[cfg(unix)]
+    #[test]
+    fn an_rclone_that_never_serves_is_stopped_at_the_deadline() {
+        let scratch = tempfile::tempdir().unwrap();
+        let pid = scratch.path().join("pid");
+        // rustic appends the repository's path as the last argument.
+        let stand_in = format!(
+            "sh -c 'echo $$ > \"$1\"; exec sleep 10' sh '{}'",
+            pid.display()
+        );
+        let options = BackendOptions::default()
+            .repository("rclone:demo-remote:repo".to_owned())
+            .options(BTreeMap::from([("rclone-command".to_owned(), stand_in)]));
+        let credentials = ServerCredentials::random();
+        let redactor = Redactor::new(credentials.secrets());
+        let Err(given_up) = backends_within(&options, &credentials, &redactor, START) else {
+            panic!("an rclone that never says where it serves serves nothing");
+        };
+        assert!(
+            given_up
+                .to_string()
+                .contains("did not say where it serves within 3s"),
+            "{given_up}"
+        );
+        assert!(
+            !alive(&pid),
+            "the rclone stand-in is still running, or unreaped"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_rclone_older_than_1_52_2_is_refused() {
-        let refused = supported_version(rclone_version("echo \"rclone v1.52.1\""))
+        let refused = supported_version(rclone_version("echo \"rclone v1.52.1\""), in_time())
             .expect_err("rclone 1.52.1 serves without a password");
         assert!(refused.to_string().contains("rclone v1.52.1"), "{refused}");
-        supported_version(rclone_version(
-            "echo \"rclone v1.52.2\"; echo \"- os/version: demo\"",
-        ))
+        supported_version(
+            rclone_version("echo \"rclone v1.52.2\"; echo \"- os/version: demo\""),
+            in_time(),
+        )
         .unwrap();
     }
 
     #[cfg(unix)]
     #[test]
     fn an_rclone_whose_version_is_not_one_is_refused() {
-        supported_version(rclone_version("echo \"rclone $1\""))
+        supported_version(rclone_version("echo \"rclone $1\""), in_time())
             .expect_err("`version` is no version");
-        supported_version(rclone_version("exit 0")).expect_err("no answer is no version");
+        supported_version(rclone_version("exit 0"), in_time())
+            .expect_err("no answer is no version");
     }
 
     /// The wait for `rclone version`'s answer holds up no other start: the
@@ -583,7 +724,7 @@ mod tests {
             ": > \"$1\"; n=0; while [ ! -e \"$2\" ] && [ $n -lt 600 ]; do sleep 0.05; n=$((n + 1)); done; echo \"rclone v1.65.0\"",
         );
         let _ = command.arg(&started).arg(&let_go);
-        let checking = std::thread::spawn(move || supported_version(command));
+        let checking = std::thread::spawn(move || supported_version(command, in_time()));
         let waiting_since = Instant::now();
         while !started.exists() {
             assert!(
