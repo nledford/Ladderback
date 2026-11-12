@@ -346,7 +346,12 @@ impl Redactor {
             .flat_map(|value| {
                 #[cfg(test)]
                 FORMED.with(|count| count.set(count.get() + 1));
-                url_needles(value).into_iter().chain(partial_needles(value))
+                let raw = partial_needles(value);
+                let escaped: Vec<String> = std::iter::once(value)
+                    .chain(raw.iter().map(String::as_str))
+                    .filter_map(debug_escaped)
+                    .collect();
+                url_needles(value).into_iter().chain(raw).chain(escaped)
             })
             .collect();
         needles.sort_unstable();
@@ -459,11 +464,22 @@ impl Redactor {
         redactors: impl IntoIterator<Item = &'a Redactor>,
         text: &str,
     ) -> String {
-        let _ = (redactors, text);
-        todo!()
+        let mut whole = false;
+        let mut needles = Vec::new();
+        for redactor in redactors {
+            whole |= redactor.whole;
+            needles.extend(&redactor.needles);
+        }
+        Self::mask_with(needles, whole, text, None)
     }
 
-    /// `text` with every needle in it replaced. When `cut` is given, the
+    /// `text` masked with this redactor's needles ([`Redactor::mask_with`]).
+    fn mask(&self, text: &str, cut: Option<usize>) -> String {
+        Self::mask_with(&self.needles, self.whole, text, cut)
+    }
+
+    /// `text` with every one of `needles` in it replaced, or the whole of it
+    /// where `everything` says so and it isn't empty. When `cut` is given, the
     /// text was cut after its first `cut` bytes, and the end of those from
     /// where it is the start of a needle on (the earliest start of a secret
     /// the cut could have gone through) is part of the same spans.
@@ -472,15 +488,20 @@ impl Redactor {
     /// at most twice with a byte of the needle, however long and repetitive
     /// both are. A needle and a valid text are UTF-8, so what matches starts
     /// and ends between characters.
-    fn mask(&self, text: &str, cut: Option<usize>) -> String {
-        if self.whole && !text.is_empty() {
+    fn mask_with<'a>(
+        needles: impl IntoIterator<Item = &'a Needle>,
+        everything: bool,
+        text: &str,
+        cut: Option<usize>,
+    ) -> String {
+        if everything && !text.is_empty() {
             return REDACTED.to_owned();
         }
         let bytes = text.as_bytes();
         // The longest span, of a needle or of the cut, that ends at each byte:
         // at most a needle's length, which a `u32` holds.
         let mut spans = vec![0_u32; bytes.len()];
-        for needle in &self.needles {
+        for needle in needles {
             let whole = needle.text.as_bytes();
             let mut matched = 0;
             for (at, (&byte, span)) in bytes.iter().zip(spans.iter_mut()).enumerate() {
@@ -545,6 +566,21 @@ fn partial_needles(secret: &str) -> Vec<String> {
         );
     }
     needles
+}
+
+/// A secret, or a raw form of it, as its `Debug` form prints it between the
+/// quotes (`"` and `\` escaped, a control or combining character as
+/// `\u{…}`), where that differs from it: a library that logs a value with
+/// `{:?}` prints a secret in it so, as rustic logs the command it starts
+/// rclone with, the location last (#330). `Debug` escapes each character on
+/// its own, so this form is in the printed text wherever the secret is in
+/// the text printed. The encoded forms of a secret are not escaped: they
+/// would add up to as many needles again, for a secret that a parser would
+/// first have to encode and a library then print with `{:?}`.
+fn debug_escaped(secret: &str) -> Option<String> {
+    let quoted = format!("{secret:?}");
+    let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
+    (inner != secret).then(|| inner.to_owned())
 }
 
 /// Every password the userinfo of the URL inside a repository string may

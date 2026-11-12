@@ -5,6 +5,9 @@
 //! stderr is forwarded as (target `ladderback::worker`), would be dropped.
 //!
 //! The daemon logs to stderr, at `info` unless `RUST_LOG` says otherwise.
+//! While the daemon opens a repository itself (to evaluate retention), the
+//! records of rustic and the crates under it reach this log too, and every
+//! record is masked with that repository's secrets (`engine::Masked`, I4).
 
 use env_logger::{Builder, Logger, Target, WriteStyle};
 use log::LevelFilter;
@@ -25,11 +28,12 @@ pub(crate) fn install(plain: bool) {
     ));
 }
 
-/// Makes `logger` the process's logger, once, at the level it filters at.
-/// Where a logger is set already, that one stays.
+/// Makes `logger` the process's logger, once, at the level it filters at,
+/// its records masked while the daemon has a repository open itself. Where
+/// a logger is set already, that one stays.
 fn set(logger: Logger) {
     let level = logger.filter();
-    if log::set_boxed_logger(Box::new(logger)).is_ok() {
+    if log::set_boxed_logger(Box::new(engine::Masked::new(logger))).is_ok() {
         log::set_max_level(level);
     }
 }

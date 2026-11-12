@@ -8,13 +8,17 @@
 //! correct.`), and an `rclone:` location holds rclone's settings, credentials
 //! among them; the rclone it starts writes to rustic's log what it was asked
 //! to serve (#330). So while an open runs, [`Masked`] masks every record with
-//! the secrets of that open, from before the open starts anything until each
-//! of its backends, and every thread they started, is gone.
+//! the secrets of that open, from before the open starts anything until its
+//! backends, the rclone they started and the thread reading its stderr are
+//! gone. OpenDAL's runtime outlives them, shared by the whole process: what
+//! a task of it might log after that is not masked, and no record of the
+//! open's is known to come so late.
 //!
 //! Every record is masked, whatever crate made it: the daemon's own, rustic's,
 //! and those of the crates under rustic (OpenDAL, the HTTP client), which
-//! share no target. With two opens running, a record is masked with the
-//! secrets of both, which masks more, never less (I4).
+//! share no target. With two opens running, a record is masked as one
+//! redactor of the secrets of both would mask it: more, never less (I4,
+//! #287).
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -33,7 +37,7 @@ pub struct Masked<L> {
 impl<L: Log> Masked<L> {
     /// `inner`, its records masked while an open runs.
     pub fn new(inner: L) -> Self {
-        todo!("{}", std::any::type_name_of_val(&inner))
+        Self { inner }
     }
 }
 
@@ -43,7 +47,30 @@ impl<L: Log> Log for Masked<L> {
     }
 
     fn log(&self, record: &Record<'_>) {
-        todo!("{:?}", record.level())
+        if !self.inner.enabled(record.metadata()) {
+            return;
+        }
+        // Copied out, so the lock isn't held while the record is written.
+        let open: Vec<Arc<Redactor>> = OPEN.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if open.is_empty() {
+            self.inner.log(record);
+            return;
+        }
+        // As one redactor of every open's secrets: masked with each in turn,
+        // one's mask could break up another's secret that holds it (#287).
+        let masked =
+            Redactor::redact_together(open.iter().map(Arc::as_ref), &record.args().to_string());
+        // The record as it was made, but for its message: its key-values
+        // are left out, since they are not masked.
+        self.inner.log(
+            &Record::builder()
+                .metadata(record.metadata().clone())
+                .args(format_args!("{masked}"))
+                .module_path(record.module_path())
+                .file(record.file())
+                .line(record.line())
+                .build(),
+        );
     }
 
     fn flush(&self) {
@@ -59,8 +86,18 @@ pub(crate) struct Masking {
 }
 
 impl Masking {
+    /// Masks every record with `redactor` from now on, until this is dropped.
     pub(crate) fn of(redactor: Redactor) -> Self {
-        todo!("{redactor:?}")
+        let redactor = Arc::new(redactor);
+        OPEN.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Arc::clone(&redactor));
+        Self { redactor }
+    }
+
+    /// The redactor every record is masked with while this is held.
+    pub(crate) fn redactor(&self) -> &Redactor {
+        &self.redactor
     }
 }
 
