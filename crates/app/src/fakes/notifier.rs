@@ -41,7 +41,32 @@ impl RecordingNotifier {
 #[async_trait]
 impl Notifier for RecordingNotifier {
     async fn deliver(&self, notification: &Notification) -> Result<(), NotifyError> {
-        let _ = notification;
-        todo!()
+        let url = notification.destination.url.expose();
+        if !is_http(url) {
+            return Err(NotifyError::InvalidAddress);
+        }
+        let failing = self
+            .failing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(url)
+            .copied();
+        if let Some(error) = failing {
+            return Err(error);
+        }
+        self.delivered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(notification.clone());
+        Ok(())
     }
+}
+
+/// Whether `url` is `http` or `https` with a host.
+fn is_http(url: &str) -> bool {
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"));
+    rest.and_then(|rest| rest.split(['/', '?', '#']).next())
+        .is_some_and(|host| !host.is_empty())
 }
