@@ -296,16 +296,18 @@ pub fn SortableTable(
                             if sorted.get() { "ascending" } else { "descending" }
                         }
                     >
-                        {column.clone()}
-                        <button
-                            type="button"
-                            on:click=move |_| {
-                                sorted.set(!sorted.get_untracked());
-                                say(Politeness::Polite, &message.with_value(String::clone));
-                            }
-                        >
-                            {sort_label}
-                        </button>
+                        <span class="sort-header">
+                            {column.clone()}
+                            <button
+                                type="button"
+                                on:click=move |_| {
+                                    sorted.set(!sorted.get_untracked());
+                                    say(Politeness::Polite, &message.with_value(String::clone));
+                                }
+                            >
+                                {sort_label}
+                            </button>
+                        </span>
                     </th>
                 </tr>
             </thead>

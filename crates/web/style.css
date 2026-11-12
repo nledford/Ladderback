@@ -187,12 +187,16 @@ main:focus {
   background-color: var(--badge-success-bg);
 }
 
-/* The demo progress bar: a filled track whose width follows aria-valuenow. */
+/* The demo progress bar: a filled track whose width follows aria-valuenow.
+   The track fills the room it is given, up to 16rem: in a table's cell it
+   never widens its column, so the column keeps its width as a run starts
+   and ends, and fits a small screen. */
 .progress-track {
   background-color: var(--surface);
   block-size: 0.5rem;
   border-radius: 9999px;
-  inline-size: 16rem;
+  inline-size: 100%;
+  max-inline-size: 16rem;
 }
 
 .progress-fill {
@@ -332,6 +336,71 @@ table.snapshots {
 
 table.snapshots th:first-child {
   inline-size: 45%;
+}
+
+/* The table of operations has fixed shares of the width, so a column never
+   resizes as a row changes: a run that starts, shows its progress and ends
+   changes what its row says, not where the columns are, and the table doesn't
+   jump. An automatic table resized every column whenever one cell's content
+   did, and the progress bar's 16rem made the page scroll sideways at 320 px.
+   The shares add up to the table's width, so the table never overflows it;
+   a word breaks inside only when it is wider than its column. Started has
+   room for its sort button beside its text on a wide screen, and Actions
+   for its button's label, the longest word in a row. */
+table.operations {
+  table-layout: fixed;
+}
+
+table.operations thead th:nth-child(1) {
+  inline-size: 20%;
+}
+
+table.operations thead th:nth-child(2) {
+  inline-size: 19%;
+}
+
+table.operations thead th:nth-child(3) {
+  inline-size: 22%;
+}
+
+table.operations thead th:nth-child(4) {
+  inline-size: 18%;
+}
+
+table.operations thead th:nth-child(5) {
+  inline-size: 21%;
+}
+
+/* A fixed column is as narrow as its share, and its content can't widen it:
+   what doesn't fit runs into the next column. At 320 px with 200 % text a
+   share is 46 to 56 px, and the space around the text (a cell's padding, a
+   badge's, a list's indent), all in rem, took 32 to 72 px of it, so not even
+   one letter fit, and a badge, a button and a header's text ran over their
+   neighbours. That space follows the screen's width here, not the text's
+   size: on a wide screen it is what the rem gives, and on a small one it
+   shrinks to leave a letter of the largest text room in every column. A
+   list's markers sit inside its items, in the line with their text: an
+   indent that shrinks with the screen can't hold a marker that grows with
+   the text, and one outside it was drawn over the column before. */
+table.operations :is(th, td),
+table.operations .badge {
+  padding-inline: min(0.5rem, 1.25vw);
+}
+
+table.operations td ul {
+  padding-inline-start: 0;
+  list-style-position: inside;
+}
+
+/* A sortable column's header: its text, then its sort button, apart by a gap
+   on the same line when there is room, and the button on a line of its own
+   below the text when there isn't. Inline, the two touched, and the button
+   read as part of the text. */
+.sort-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
 }
 
 th,
