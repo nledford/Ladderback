@@ -282,6 +282,14 @@ error-secret-missing = { -brand-name } found no secret in { $source }, which the
 error-secret-unreadable = { -brand-name } could not read { $source }, which the repository's { $field } refers to. Check that it is there and that the user { -brand-name } runs as may read it.
     .with-detail = { -brand-name } could not read { $source }, which the repository's { $field } refers to ({ $detail }). Check that it is there and that the user { -brand-name } runs as may read it.
 
+# A repository's secret is in a keyring entry, and this computer has no keyring service that can be asked for it: no Secret Service runs, there is no session bus to reach one by, or the service says its keyring is locked. A server, or a service that starts before anyone logs in, usually has none.
+# $field (text): where in the settings the secret is.
+# $source (text): the keyring entry, as service/name.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+# `password-file`, `password-command` and `password-env` are settings, typed as they are: keep them string literals.
+error-secret-keyring-unavailable = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because this computer has no keyring service it can use. A server, or a service that starts before anyone logs in, usually has none. Start a Secret Service in a session and unlock it, or keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
+    .with-detail = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because this computer has no keyring service it can use ({ $detail }). A server, or a service that starts before anyone logs in, usually has none. Start a Secret Service in a session and unlock it, or keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
+
 # A repository's secret is not text.
 # $field (text): where in the settings the secret is.
 # $source (text): where it is read from.
@@ -467,6 +475,14 @@ warning-profile-retention-empty = The plan keeps every snapshot, so the profile 
 # $repository (text): the repository's name in the configuration.
 # $setting (text): the setting, as the configuration names it: password, maintenance, group-by, options, options-hot, options-cold or hooks. Keep it as it is.
 warning-profile-setting-kept = The repository { $repository } was already configured, so the profile's plans were added to it, and it kept its own { $setting }: the profile sets it otherwise. Change { $setting } in the configuration if the profile's is the one you want.
+
+# An export wrote a profile that reads the repository's password from the keyring with a program that is not on this computer's PATH.
+# $program (text): the program: secret-tool, or security on macOS. Keep it as it is.
+# `secret-tool`, `libsecret`, `libsecret-tools` and `PATH` are what a person types, typed as they are: keep them string literals.
+warning-profile-keyring-command-missing = { $program ->
+    [secret-tool] The profile reads the repository's password with { "secret-tool" }, which is not on this computer's { "PATH" }, so rustic cannot read the password here. Install it where the profile will run: it comes in the { "libsecret" } package on Fedora, and in { "libsecret-tools" } on Debian and Ubuntu.
+   *[other] The profile reads the repository's password with { $program }, which is not on this computer's { "PATH" }, so rustic cannot read the password here. Run the profile where { $program } is on the { "PATH" }.
+  }
 
 ## Command-line codes: what a command says when it cannot start (technical design §4.5)
 

@@ -14,6 +14,8 @@
 #     `/_gallery` (the `web` feature `gallery`).
 #   - cargo-dist (`dist-workspace.toml`) builds the release archives with the
 #     release flags these checks use (technical design §12.1).
+#   - the build has one version of `dbus-secret-service`, the error type
+#     `secrets` downcasts `keyring`'s Secret Service failures to.
 # Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
 # support) may be a dev-dependency only.
 set -euo pipefail
@@ -120,6 +122,27 @@ if [[ -n $testkit_users ]]; then
 else
   echo "ok: testkit is a dev-dependency only"
 fi
+
+# On Linux `keyring` boxes a Secret Service failure as a
+# `dbus_secret_service::Error`, and `secrets` downcasts it to tell a keyring
+# with no service to ask from one that failed (security §10.2). With two
+# versions of `dbus-secret-service` in the build, `keyring` could box the
+# other's type, and the downcast would stop matching without a word: every
+# missing service would read as `secret-unreadable`. So the build has exactly
+# one. `Cargo.lock` lists the packages of every target, so this holds on any
+# host. The lock file is an argument, so the check can be tried on a copy.
+one_version() {
+  local crate=$1 lock=$2 versions count
+  versions=$(awk -v name="name = \"$crate\"" '$0 == name { getline; gsub(/^version = "|"$/, ""); print }' "$lock")
+  count=$(grep -c . <<<"$versions" || true)
+  if ((count != 1)); then
+    echo "error: $lock has $count versions of $crate (${versions//$'\n'/, }), not one: keyring's boxed error type must be the one secrets downcasts to" >&2
+    return 1
+  fi
+  echo "ok: one version of $crate ($versions)"
+}
+
+one_version dbus-secret-service Cargo.lock || status=1
 
 # The development pseudolocales stay out of a release build (technical design
 # §8.4). `ladderback` and `web` each pass their `pseudo` feature on to `l10n`,

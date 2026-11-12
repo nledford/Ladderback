@@ -5,6 +5,7 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, ProfileReader, ProfileWriter};
 use common::{Scratch, nas};
@@ -15,7 +16,7 @@ use domain::planning::{
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
-use interop::RusticProfileWriter;
+use interop::{KeyringCommand, RusticProfileWriter};
 
 const AGENT: &str = "00000000-0000-0000-0000-000000000001";
 
@@ -72,7 +73,8 @@ fn export() -> PlanExport {
 }
 
 fn render(export: &PlanExport) -> Result<app::ports::RenderedProfile, ExportRefusal> {
-    RusticProfileWriter::new().render(export)
+    RusticProfileWriter::new(KeyringCommand::of_this_platform(), Some(OsStr::new("")))
+        .render(export)
 }
 
 fn text(export: &PlanExport) -> String {
@@ -707,17 +709,19 @@ fn a_password_in_a_variable_is_read_with_printenv() {
     );
 }
 
+fn keyring_export() -> PlanExport {
+    let mut export = export();
+    export.repository.settings.password =
+        SecretRef::Keyring(KeyringEntry::parse("demo service/it's a name").expect("an entry"));
+    export.plan.retention.keep_last = Some(KeepCount::new(3).expect("a count"));
+    export
+}
+
 #[test]
-fn a_password_in_the_keyring_is_read_with_the_command_of_the_platform() {
-    let entry = KeyringEntry::parse("demo service/it's a name").expect("an entry");
-    let text = password_of(SecretRef::Keyring(entry));
-    let value = parsed(&text);
-    let command = at(&value, "repository.password-command")
-        .and_then(toml::Value::as_str)
-        .expect("a command");
-    let words = CommandLine::parse(command).expect("a command line");
-    let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+fn a_password_in_the_keyring_is_read_with_the_keyring_command_given() {
+    for (keyring, program, args) in [
         (
+            KeyringCommand::Security,
             "security",
             vec![
                 "find-generic-password",
@@ -727,9 +731,9 @@ fn a_password_in_the_keyring_is_read_with_the_command_of_the_platform() {
                 "it's a name",
                 "-w",
             ],
-        )
-    } else {
+        ),
         (
+            KeyringCommand::SecretTool,
             "secret-tool",
             vec![
                 "lookup",
@@ -738,10 +742,88 @@ fn a_password_in_the_keyring_is_read_with_the_command_of_the_platform() {
                 "username",
                 "it's a name",
             ],
-        )
-    };
-    assert_eq!(words.program(), program, "{command}");
-    assert_eq!(words.args(), args, "{command}");
+        ),
+    ] {
+        let written = RusticProfileWriter::new(keyring, Some(OsStr::new("")))
+            .render(&keyring_export())
+            .expect("the export is made");
+        let value = parsed(&written.text);
+        let command = at(&value, "repository.password-command")
+            .and_then(toml::Value::as_str)
+            .expect("a command");
+        let words = CommandLine::parse(command).expect("a command line");
+        assert_eq!(words.program(), program, "{command}");
+        assert_eq!(words.args(), args, "{command}");
+    }
+}
+
+/// A folder holding `names`, each a file that can be run when `runnable`.
+fn bin(names: &[&str], runnable: bool) -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    let folder = tempfile::tempdir().expect("a folder");
+    for name in names {
+        let file = folder.path().join(name);
+        std::fs::write(&file, "#!/bin/sh\n").expect("a file");
+        let mode = if runnable { 0o755 } else { 0o644 };
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).expect("a mode");
+    }
+    folder
+}
+
+/// The keyring command's notices for a profile exported under `PATH` set to
+/// `folders`.
+fn keyring_notices(keyring: KeyringCommand, folders: &[&std::path::Path]) -> Vec<ProfileNotice> {
+    let path = std::env::join_paths(folders).expect("a PATH");
+    RusticProfileWriter::new(keyring, Some(&path))
+        .render(&keyring_export())
+        .expect("the export is made")
+        .notices
+}
+
+#[test]
+fn a_keyring_command_no_folder_of_the_path_holds_is_a_notice_naming_it() {
+    let empty = bin(&[], true);
+    let other = bin(&["pass"], true);
+    for (keyring, program) in [
+        (KeyringCommand::SecretTool, "secret-tool"),
+        (KeyringCommand::Security, "security"),
+    ] {
+        for path in [&[][..], &[empty.path(), other.path()]] {
+            assert_eq!(
+                keyring_notices(keyring, path),
+                [ProfileNotice::KeyringCommandMissing {
+                    program: program.to_owned()
+                }]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_keyring_command_in_any_folder_of_the_path_is_no_notice() {
+    let empty = bin(&[], true);
+    let found = bin(&["secret-tool", "security"], true);
+    for keyring in [KeyringCommand::SecretTool, KeyringCommand::Security] {
+        let path = [empty.path(), found.path()];
+        assert_eq!(keyring_notices(keyring, &path), []);
+    }
+}
+
+/// A file of that name that can't be run, or a folder of that name, is not
+/// the command: rustic couldn't run it either.
+#[test]
+fn a_keyring_command_that_cannot_be_run_is_a_notice() {
+    let unrunnable = bin(&["secret-tool"], false);
+    let folder = tempfile::tempdir().expect("a folder");
+    std::fs::create_dir(folder.path().join("secret-tool")).expect("a folder");
+    for path in [unrunnable.path(), folder.path()] {
+        assert_eq!(
+            keyring_notices(KeyringCommand::SecretTool, &[path]),
+            [ProfileNotice::KeyringCommandMissing {
+                program: "secret-tool".to_owned()
+            }]
+        );
+    }
 }
 
 #[test]

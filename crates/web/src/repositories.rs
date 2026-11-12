@@ -198,6 +198,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
+        | ErrorCode::SecretKeyringUnavailable
         | ErrorCode::SecretNotText
         | ErrorCode::SecretTooLarge
         | ErrorCode::SecretCommandFailed
@@ -717,6 +718,17 @@ mod tests {
                 "{code:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_keyring_with_no_service_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(
+                ErrorCode::SecretKeyringUnavailable,
+                &[("field".into(), text("password"))]
+            ),
+            Some(Field::Password)
+        );
     }
 
     #[test]

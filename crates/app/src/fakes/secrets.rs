@@ -49,6 +49,8 @@ struct State {
     files: BTreeMap<String, File>,
     directories: BTreeSet<String>,
     keyring: BTreeMap<String, String>,
+    /// No keyring service to ask: every keyring read fails.
+    no_keyring_service: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
     /// Link path to what it leads to.
     links: BTreeMap<String, String>,
@@ -111,6 +113,12 @@ impl FakeSecrets {
         self.lock()
             .keyring
             .insert(entry.to_string(), secret.to_owned());
+    }
+
+    /// A machine with no keyring service to ask, as a server with no
+    /// Secret Service: every keyring entry fails as `KeyringUnavailable`.
+    pub fn remove_keyring_service(&self) {
+        self.lock().no_keyring_service = true;
     }
 
     /// What running `command` does. A command with no script can't be started.
@@ -229,6 +237,14 @@ impl SecretResolver for FakeSecrets {
                 let source = SourceName::Keyring {
                     entry: entry.to_string(),
                 };
+                if state.no_keyring_service {
+                    return Err(SecretError {
+                        source,
+                        problem: Problem::KeyringUnavailable {
+                            detail: "no session bus".to_owned(),
+                        },
+                    });
+                }
                 let secret = state
                     .keyring
                     .get(&entry.to_string())

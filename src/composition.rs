@@ -1231,6 +1231,10 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::ProfileSettingKept,
             vec![("repository", text(repository)), ("setting", text(setting))],
         ),
+        ProfileNotice::KeyringCommandMissing { program } => (
+            WarningCode::ProfileKeyringCommandMissing,
+            vec![("program", text(program))],
+        ),
     };
     Notice { code, args }
 }
@@ -1743,6 +1747,13 @@ async fn secret_refusal(
                 Problem::Missing => refusal(ErrorCode::SecretMissing, named, None),
                 Problem::Unreachable { detail } => refusal(
                     ErrorCode::SecretUnreadable,
+                    named,
+                    Some(masked_detail(&redactor, detail)),
+                ),
+                // The platform's words about the service, never about a
+                // secret it gave: none was read. Masked all the same.
+                Problem::KeyringUnavailable { detail } => refusal(
+                    ErrorCode::SecretKeyringUnavailable,
                     named,
                     Some(masked_detail(&redactor, detail)),
                 ),
@@ -5153,6 +5164,37 @@ mod tests {
         }
     }
 
+    /// A keyring command the export's PATH lacks is a warning that names it,
+    /// and for `secret-tool` the packages it comes in, by distribution.
+    #[test]
+    fn a_missing_keyring_command_is_a_warning_naming_its_package() {
+        for (program, expected) in [
+            (
+                "secret-tool",
+                &[
+                    "with secret-tool, which is not on this computer's PATH",
+                    "the libsecret package on Fedora",
+                    "libsecret-tools on Debian and Ubuntu",
+                ][..],
+            ),
+            (
+                "security",
+                &["with security, which is not on this computer's PATH"][..],
+            ),
+        ] {
+            let notice = profile_notice(ProfileNotice::KeyringCommandMissing {
+                program: program.to_owned(),
+            });
+            assert_eq!(notice.code, WarningCode::ProfileKeyringCommandMissing);
+            assert_eq!(notice.args, vec![("program", text(program))]);
+            let shown = english().warning(notice.code, &notice.args, None);
+            assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+            for expected in expected {
+                assert!(shown.text().contains(expected), "{expected}: {shown}");
+            }
+        }
+    }
+
     /// What a check found reaches the page and the operation's detail under
     /// the code of its level, not as a warning this version can't describe.
     #[test]
@@ -7220,6 +7262,48 @@ mod repository_service_tests {
             .expect("the words are kept");
         assert!(detail.ends_with('…'), "{detail}");
         assert!(!detail.contains("ca"), "{detail}");
+    }
+
+    /// A keyring with no service to ask is refused with a code of its own,
+    /// whose words say what is missing and what to use instead; what the
+    /// platform said is the detail, masked of the repository's secrets (I4).
+    #[tokio::test]
+    async fn a_keyring_with_no_service_is_refused_with_what_to_use_instead() {
+        use domain::secrets::{Problem, SourceName};
+        let mut settings = settings_of(settings_dto()).expect("settings");
+        settings.options = [("secret_access_key".to_owned(), "canary-inline".to_owned())].into();
+        let error = unresolved(
+            Field::Password,
+            SourceName::Keyring {
+                entry: "ladderback/nas".to_owned(),
+            },
+            Problem::KeyringUnavailable {
+                detail: "DBus error: no bus canary-inline".to_owned(),
+            },
+        );
+        let refusal = secret_refusal(&error, &settings, &SystemSecrets::default()).await;
+        assert_eq!(
+            refusal,
+            SecretRefusal {
+                code: ErrorCode::SecretKeyringUnavailable,
+                args: vec![
+                    ("field", MsgArg::Text("password".to_owned())),
+                    ("source", MsgArg::Text("ladderback/nas".to_owned())),
+                ],
+                detail: Some("DBus error: no bus ***".to_owned()),
+            }
+        );
+        let shown =
+            l10n::Localizer::new(&[]).error(refusal.code, &refusal.args, refusal.detail.as_deref());
+        assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+        let text = shown.text();
+        for expected in [
+            "could not read the keyring entry ladderback/nas",
+            "no keyring service it can use (DBus error: no bus ***)",
+            "keep the secret in a file, a command or an environment variable instead",
+        ] {
+            assert!(text.contains(expected), "{expected}: {text}");
+        }
     }
 
     /// A file or a keyring that doesn't answer in time is a source that

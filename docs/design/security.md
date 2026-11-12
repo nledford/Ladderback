@@ -57,7 +57,7 @@ Grammar and limits (`domain::secrets::Template`):
 | `${file:/abs/path}` | the whole contents minus one trailing `\n` (and a `\r` before it) | `Missing` |
 | `password-file` | the first line: up to the first `\n`, minus a `\r` before it (as rustic does) | `Missing` |
 | `password-command` | the first line of the command's output | the first line is empty or only white space: `Missing` |
-| `password-keyring` | the entry's secret | no such entry: `Missing` |
+| `password-keyring` | the entry's secret | no such entry: `Missing`. No keyring service to ask (on Linux: no Secret Service, no session bus to reach one, or a service that says its keyring is locked or whose unlock prompt was dismissed, told apart by the Secret Service's own error and the D-Bus error's name; any other failure of the service, a reply it couldn't decrypt or parse included, is `Unreachable`): `KeyringUnavailable`, refused as `secret-keyring-unavailable` with what to use instead |
 | Inline `password` | as written | — |
 
 Options accept only `${VAR}` and `${file:/abs/path}`; commands and the keyring are forms of the repository password. A missing variable or file is never an empty string (unlike Backrest). What a source gives, the whole file, output or value and not only the line taken from it, is limited to 64 KiB (`TooLarge`) and must be UTF-8 (`NotUnicode`). A source that exists but can't be read is `Unreachable`. A file or keyring read that outlives the resolver's limit (a keyring that waits for an unlock, a mount that has hung) fails as `TimedOut`, like a command; the blocked read can't be cancelled and ends when the system lets it go.

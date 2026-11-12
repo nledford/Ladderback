@@ -24,7 +24,7 @@ use app::interop::{ExportProfile, ImportProfile, Imported};
 use app::ports::ConfigStore;
 use config_adapter::FileConfigStore;
 use domain::{PlanId, RepositoryAlias};
-use interop::{FileProfileReader, RusticProfileWriter};
+use interop::{FileProfileReader, KeyringCommand, RusticProfileWriter};
 use l10n::{Localizer, PosixEnv, msg};
 use platform::{SystemClock, agent_id, dirs};
 
@@ -311,7 +311,11 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
         config_file.clone(),
         Arc::new(SystemClock),
     ));
-    let use_case = ExportProfile::new(Arc::new(RusticProfileWriter::new()), config, agent);
+    // The PATH the profile is exported under: where its keyring command is
+    // looked for.
+    let path = std::env::var_os("PATH");
+    let writer = RusticProfileWriter::new(KeyringCommand::of_this_platform(), path.as_deref());
+    let use_case = ExportProfile::new(Arc::new(writer), config, agent);
     match runtime.block_on(use_case.export(&plan_id)) {
         Ok(exported) => {
             for notice in exported.notices {

@@ -613,6 +613,61 @@ fn export_warns_keep_option(agent: &mut Agent) {
     assert_stderr_names(agent, "keep-*");
 }
 
+/// The keyring command an export on this platform names.
+fn keyring_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "security"
+    } else {
+        "secret-tool"
+    }
+}
+
+/// The commands run with `PATH` set to the scratch folder `bin/`, which holds
+/// what the scenario put there and nothing else.
+fn path_of_scratch_bin(agent: &mut Agent) -> PathBuf {
+    let bin = agent.scratch().join("bin");
+    fs::create_dir_all(&bin).expect("the bin folder");
+    agent
+        .interop
+        .env
+        .push(("PATH".to_owned(), bin.display().to_string()));
+    bin
+}
+
+#[given("the PATH holds no keyring command")]
+fn path_without_keyring_command(agent: &mut Agent) {
+    path_of_scratch_bin(agent);
+}
+
+#[given("the PATH holds the platform's keyring command")]
+fn path_with_keyring_command(agent: &mut Agent) {
+    use std::os::unix::fs::PermissionsExt;
+    let program = path_of_scratch_bin(agent).join(keyring_program());
+    fs::write(&program, "#!/bin/sh\nexit 1\n").expect("the command");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("its mode");
+}
+
+/// `secret-tool` comes in a package of its own on Linux, which the warning
+/// names; macOS's `security` comes with the system, and the warning names it.
+#[then(
+    "the export warns that the platform's keyring command isn't on the PATH, naming its package"
+)]
+fn export_warns_keyring_command(agent: &mut Agent) {
+    let program = keyring_program();
+    assert_stderr_names(agent, &format!("with {program}, which is not on"));
+    if program == "secret-tool" {
+        assert_stderr_names(agent, "libsecret package on Fedora");
+        assert_stderr_names(agent, "libsecret-tools on Debian and Ubuntu");
+    }
+}
+
+#[then("the export gives no warning")]
+fn export_gives_no_warning(agent: &mut Agent) {
+    assert_succeeded(agent);
+    let ran = ran(agent);
+    assert!(ran.stderr.is_empty(), "{}", ran.stderr);
+}
+
 #[then(expr = "rustic would have removed {int} snapshots")]
 fn rustic_would_remove(agent: &mut Agent, count: usize) {
     if agent.interop.rustic_missing {

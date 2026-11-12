@@ -1105,6 +1105,34 @@ async fn a_keyring_that_cannot_be_reached_is_unreachable_and_says_why() {
     );
 }
 
+struct NoService;
+
+impl KeyringStore for NoService {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::NoService("no session bus".to_owned()))
+    }
+}
+
+#[tokio::test]
+async fn a_keyring_with_no_service_to_ask_says_so_and_why() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let result = resolver(Duration::from_secs(1))
+        .with_keyring(Arc::new(NoService))
+        .resolve(&SecretRef::Keyring(entry))
+        .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: SourceName::Keyring {
+                entry: "ladderback-demo/nas".to_owned()
+            },
+            problem: Problem::KeyringUnavailable {
+                detail: "no session bus".to_owned()
+            },
+        })
+    );
+}
+
 /// A keyring that answers late, as one does that waits for the user to
 /// unlock it.
 struct Stuck(Duration);
@@ -1203,20 +1231,167 @@ fn the_os_keyring_is_used_only_when_it_is_asked_for() {
 }
 
 /// What the OS store's errors become. A value that is not text comes back
-/// with its bytes, which are a secret: they are dropped (I4).
+/// with its bytes, which are a secret: they are dropped (I4). A keychain that
+/// refuses is one that can't be reached.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn an_os_keyring_error_says_why_and_holds_no_secret() {
-    use crate::keyring_store::failure;
-    assert_eq!(failure(keyring::Error::NoEntry), Failure::NoEntry);
-    assert_eq!(
-        failure(keyring::Error::BadEncoding(b"hunter2\xff".to_vec())),
-        Failure::NotUnicode
-    );
+    use crate::keyring_store::{OsStore, failure};
+    for store in [OsStore::Keychain, OsStore::SecretService] {
+        assert_eq!(failure(keyring::Error::NoEntry, store), Failure::NoEntry);
+        assert_eq!(
+            failure(keyring::Error::BadEncoding(b"hunter2\xff".to_vec()), store),
+            Failure::NotUnicode
+        );
+    }
     let refused = || keyring::Error::NoStorageAccess("the keychain is locked".into());
     let said = refused().to_string();
     assert!(said.contains("the keychain is locked"), "{said}");
-    assert_eq!(failure(refused()), Failure::Unreachable(said));
+    assert_eq!(
+        failure(refused(), OsStore::Keychain),
+        Failure::Unreachable(said)
+    );
+}
+
+/// The Secret Service's failures to answer at all, as the `keyring` crate
+/// reports them on Linux, with the `dbus-secret-service` error it boxes: no
+/// session bus or no daemon on it (a D-Bus error, `PlatformFailure`), and a
+/// locked or missing collection or a dismissed unlock prompt
+/// (`NoStorageAccess`). Each is a store that isn't there to ask, in the
+/// platform's words, whatever the machine running the test has.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_secret_service_that_cannot_be_asked_is_no_keyring_service() {
+    use crate::keyring_store::{OsStore, failure};
+    use dbus_secret_service::Error;
+    let bus = |name: &str, message: &str| Error::Dbus(dbus::Error::new_custom(name, message));
+    let cases = [
+        keyring::Error::PlatformFailure(Box::new(bus(
+            "org.freedesktop.DBus.Error.NotSupported",
+            "Unable to autolaunch a dbus-daemon without a $DISPLAY for X11",
+        ))),
+        keyring::Error::PlatformFailure(Box::new(bus(
+            "org.freedesktop.DBus.Error.FileNotFound",
+            "Failed to connect to socket /run/user/1000/bus: No such file or directory",
+        ))),
+        keyring::Error::PlatformFailure(Box::new(bus(
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            "The name org.freedesktop.secrets was not provided by any .service files",
+        ))),
+        keyring::Error::PlatformFailure(Box::new(bus(
+            "org.freedesktop.Secret.Error.IsLocked",
+            "Cannot get secret of a locked object",
+        ))),
+        keyring::Error::PlatformFailure(Box::new(Error::Unavailable)),
+        keyring::Error::NoStorageAccess(Box::new(Error::Locked)),
+        keyring::Error::NoStorageAccess(Box::new(Error::NoResult)),
+        keyring::Error::NoStorageAccess(Box::new(Error::Prompt)),
+    ];
+    for error in cases {
+        let said = error.to_string();
+        assert_eq!(
+            failure(error, OsStore::SecretService),
+            Failure::NoService(said)
+        );
+    }
+}
+
+/// A Secret Service that answered and still gave no secret is unreadable,
+/// not missing: a reply it couldn't decrypt or parse, a bad object path, a
+/// secret that is not text, and a D-Bus call that failed once the service
+/// took it (no reply, access denied, the item gone).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_secret_service_that_answers_and_fails_is_unreadable() {
+    use crate::keyring_store::{OsStore, failure};
+    use dbus_secret_service::Error;
+    let bus = |name: &str, message: &str| Error::Dbus(dbus::Error::new_custom(name, message));
+    let cases = [
+        Error::Crypto("Unpad Error".into()),
+        Error::Parse,
+        Error::Path("invalid object path".into()),
+        Error::UnsupportedSecretFormat,
+        bus(
+            "org.freedesktop.DBus.Error.NoReply",
+            "Did not receive a reply",
+        ),
+        bus(
+            "org.freedesktop.DBus.Error.AccessDenied",
+            "Rejected send message",
+        ),
+        bus("org.freedesktop.Secret.Error.NoSuchObject", "No such item"),
+        bus(
+            "org.freedesktop.DBus.Error.UnknownObject",
+            "No such object path",
+        ),
+    ];
+    for error in cases {
+        let error = keyring::Error::PlatformFailure(Box::new(error));
+        let said = error.to_string();
+        assert_eq!(
+            failure(error, OsStore::SecretService),
+            Failure::Unreachable(said)
+        );
+    }
+}
+
+/// What the Secret Service says about an entry, rather than about itself, is
+/// not a missing service; nor is a failure whose cause is not the Secret
+/// Service's own error type, which says nothing of what went wrong.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_secret_service_that_refuses_an_entry_is_unreachable() {
+    use crate::keyring_store::{OsStore, failure};
+    let cases: [fn() -> keyring::Error; 3] = [
+        || keyring::Error::Invalid("service".into(), "cannot be empty".into()),
+        || {
+            keyring::Error::PlatformFailure(
+                "DBus error: The name org.freedesktop.secrets was not provided by any .service files"
+                    .into(),
+            )
+        },
+        || keyring::Error::NoStorageAccess("Secret Service: object locked".into()),
+    ];
+    for error in cases {
+        let said = error().to_string();
+        assert_eq!(
+            failure(error(), OsStore::SecretService),
+            Failure::Unreachable(said)
+        );
+    }
+}
+
+/// The D-Bus errors that say there is no bus or no Secret Service on it, or
+/// that its collection is locked, by name, and those of a call the service
+/// took and failed.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_bus_error_names_a_missing_bus_or_service() {
+    use crate::keyring_store::bus_or_service_missing;
+    for missing in [
+        "org.freedesktop.DBus.Error.NoServer",
+        "org.freedesktop.DBus.Error.FileNotFound",
+        "org.freedesktop.DBus.Error.NotSupported",
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+        "org.freedesktop.Secret.Error.IsLocked",
+    ] {
+        assert!(bus_or_service_missing(missing), "{missing}");
+    }
+    for answered in [
+        "org.freedesktop.DBus.Error.NoReply",
+        "org.freedesktop.DBus.Error.TimedOut",
+        "org.freedesktop.DBus.Error.AccessDenied",
+        "org.freedesktop.DBus.Error.UnknownObject",
+        "org.freedesktop.DBus.Error.UnknownMethod",
+        "org.freedesktop.DBus.Error.InvalidArgs",
+        "org.freedesktop.DBus.Error.Failed",
+        "org.freedesktop.Secret.Error.NoSuchObject",
+        "ServiceUnknown",
+        "org.example.Error.ServiceUnknown",
+    ] {
+        assert!(!bus_or_service_missing(answered), "{answered}");
+    }
 }
 
 /// The real store of the session. It needs one (an unlocked keychain, a
@@ -1238,7 +1413,9 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
         matches!(
             &before,
             Err(SecretError {
-                problem: Problem::Missing | Problem::Unreachable { .. },
+                problem: Problem::Missing
+                    | Problem::Unreachable { .. }
+                    | Problem::KeyringUnavailable { .. },
                 ..
             })
         ),

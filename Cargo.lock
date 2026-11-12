@@ -5919,6 +5919,8 @@ version = "0.1.1"
 dependencies = [
  "app",
  "async-trait",
+ "dbus",
+ "dbus-secret-service",
  "domain",
  "keyring",
  "nix 0.31.3",
