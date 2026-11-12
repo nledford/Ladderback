@@ -126,11 +126,13 @@ jobs:
       # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
       # code). Formatting, the wasm32 clippy, the journey and doc-path lints,
       # the architecture checks and the contrast gate give one answer
-      # anywhere, so they run on Linux alone; macOS needs no Node then.
+      # anywhere, so they run on Linux alone; macOS needs no Node then. Every
+      # setup-node reads Node's major version from ui-tests/.nvmrc, which a
+      # pull request of its own bumps (development.md §13.8).
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
           cache: npm
           cache-dependency-path: ui-tests/package-lock.json
       - if: needs.changes.outputs.docs-only != 'true'
@@ -186,7 +188,7 @@ jobs:
         continue-on-error: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
           cache: npm
           cache-dependency-path: ui-tests/package-lock.json
       # trunk downloads wasm-bindgen and wasm-opt (binaryen) from GitHub
@@ -235,7 +237,7 @@ jobs:
           cache-generation: v1-wasm
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just

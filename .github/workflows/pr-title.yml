@@ -24,12 +24,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/check-pr-title.ts
+          # The script, and the Node version every workflow uses.
+          sparse-checkout: |
+            scripts/check-pr-title.ts
+            ui-tests/.nvmrc
           sparse-checkout-cone-mode: false
       # Node runs the TypeScript directly, stripping its types.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
       # The title is untrusted input, so it reaches the script as an
       # environment variable, never inside the shell text.
       - run: node scripts/check-pr-title.ts "$PR_TITLE"
