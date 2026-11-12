@@ -201,16 +201,53 @@ fn plan_with_files(agent: &mut Agent, plan: String, count: usize) {
     source_with_files(agent, &plan, count);
 }
 
-#[given(expr = "a plan {string} backing up a folder with a 16 GiB file")]
-fn plan_with_large_file(agent: &mut Agent, plan: String) {
-    let source = new_source(agent, &plan);
-    // Sparse: costs no disk, yet rustic must read and hash all of it. Large
-    // enough that no runner finishes hashing before the cancel lands; the
-    // run is abandoned at the cancel, so a bigger file costs no test time.
-    fs::File::create(source.join("large.bin"))
+/// Sorts after the `data-{n}.bin` files of "N MiB of new data": rustic reads
+/// a folder in path order, so it saves the new data, and writes its packs,
+/// before it reaches this file. A scenario that stops the backup once the
+/// repository holds some packs relies on that; a name that sorted first
+/// could keep a backup on this file until the scenario's time limit.
+const LARGE_FILE: &str = "large.bin";
+
+/// A file of `gib` GiB in `source`. Sparse: costs no disk, yet rustic must
+/// read and hash all of it before it writes a snapshot, which keeps a
+/// backup of the folder from ending before a cancel or a deadline lands.
+/// The step that sets them off runs on the runner's thread, which may go
+/// unpolled for up to 8 s (`MAX_STALL` in `tests/e2e.rs`; 3 s seen in a
+/// full run, #252), and rustic's release build backs up 16 GiB of it in 6 s
+/// on a ten-core Mac: 128 GiB outlasts any stall the runner allows. The
+/// backup is abandoned at the cancel or deadline, so a bigger file costs no
+/// test time.
+fn add_large_file(source: &Path, gib: u64) {
+    // `set_len` leaves the file sparse on CI's filesystems (ext4, APFS); one
+    // that wrote the length out would fill the disk.
+    fs::File::create(source.join(LARGE_FILE))
         .unwrap()
-        .set_len(16 << 30)
+        .set_len(gib << 30)
         .unwrap();
+}
+
+#[given(expr = "a plan {string} backing up a folder with a {int} GiB file")]
+fn plan_with_large_file(agent: &mut Agent, plan: String, gib: u64) {
+    let source = new_source(agent, &plan);
+    add_large_file(&source, gib);
+}
+
+/// Keeps a backup that saves the folder's other data from ending before a
+/// cancel or a deadline that waits for its first packs, however soon it
+/// has saved the rest.
+#[given(expr = "the folder also holds a {int} GiB file")]
+fn also_a_large_file(agent: &mut Agent, gib: u64) {
+    add_large_file(&agent.source(), gib);
+}
+
+#[when(expr = "the {int} GiB file is removed from the folder")]
+fn large_file_removed(agent: &mut Agent, gib: u64) {
+    let file = agent.source().join(LARGE_FILE);
+    let len = fs::metadata(&file)
+        .expect("the folder holds the file")
+        .len();
+    assert_eq!(len, gib << 30, "the file is {len} bytes");
+    fs::remove_file(file).unwrap();
 }
 
 /// Data no chunk of which repeats, so a backup must save every byte of it:
