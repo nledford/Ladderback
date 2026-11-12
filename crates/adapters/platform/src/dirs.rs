@@ -57,24 +57,30 @@ pub fn cache_dir() -> Option<PathBuf> {
 
 /// [`cache_dir`] with the environment supplied, for wiring and tests.
 pub fn cache_dir_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
-    let _ = env;
-    todo!()
+    if let Some(dir) = env_dir(&env, "LADDERBACK_CACHE_DIR") {
+        return Some(dir);
+    }
+    platform_dir(&env, Folder::Cache)
 }
 
 /// Makes `dir`, and every folder missing above it, readable and writable by
 /// its owner only (mode 0700, as the XDG base directory specification asks of
 /// the folders it makes). A folder that is already there is left as it is.
 pub fn create_private_dir(dir: &Path) -> io::Result<()> {
-    let _ = dir;
-    todo!()
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 /// Whether files can be made in `dir`: makes a file of its own there and
 /// removes it again. A folder that is another user's, read-only or on a
 /// read-only disk fails with the OS's error.
 pub fn probe_writable(dir: &Path) -> io::Result<()> {
-    let _ = dir;
-    todo!()
+    let probe = dir.join(format!(".ladderback-probe-{}", std::process::id()));
+    std::fs::File::create(&probe)?;
+    std::fs::remove_file(&probe)
 }
 
 /// Where the stock `rustic` CLI keeps its profiles (§6.2), the folder
@@ -121,25 +127,35 @@ fn env_dir(env: &impl Fn(&str) -> Option<OsString>, var: &str) -> Option<PathBuf
 enum Folder {
     Config,
     Data,
+    Cache,
 }
 
 #[cfg(target_os = "macos")]
 fn platform_dir(env: &impl Fn(&str) -> Option<OsString>, folder: Folder) -> Option<PathBuf> {
-    // Both live in the application-support folder, the Mac's own place for
-    // an application's documents.
-    let _ = folder;
-    home(env).map(|home| home.join("Library/Application Support/ladderback"))
+    // Config and data live in the application-support folder, the Mac's own
+    // place for an application's documents; the cache in the user's caches
+    // folder, which backups and migrations leave out.
+    let under = match folder {
+        Folder::Config | Folder::Data => "Library/Application Support/ladderback",
+        Folder::Cache => "Library/Caches/ladderback",
+    };
+    home(env).map(|home| home.join(under))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn platform_dir(env: &impl Fn(&str) -> Option<OsString>, folder: Folder) -> Option<PathBuf> {
     // The XDG base directories: `config` for the configuration, `data` for
-    // the agent's own files.
+    // the agent's own files, `cache` for the workers' rustic caches.
     let (var, fallback) = match folder {
         Folder::Config => ("XDG_CONFIG_HOME", ".config"),
         Folder::Data => ("XDG_DATA_HOME", ".local/share"),
+        Folder::Cache => ("XDG_CACHE_HOME", ".cache"),
     };
-    if let Some(dir) = env_dir(env, var) {
+    // The specification: a relative path in these variables is invalid and
+    // ignored. Config and data take one as it is (an older choice, kept
+    // here); the cache folder follows the specification.
+    let set = env_dir(env, var).filter(|dir| !matches!(folder, Folder::Cache) || dir.is_absolute());
+    if let Some(dir) = set {
         return Some(dir.join("ladderback"));
     }
     home(env).map(|home| home.join(fallback).join("ladderback"))
