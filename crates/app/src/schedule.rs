@@ -415,7 +415,9 @@ impl Scheduler {
     /// IDs, in a place of the queue, where it waits its turn under the
     /// concurrency limit. A retry whose series' end has come is dropped, and
     /// so is one whose plan has a run going, running or waiting, whatever
-    /// its overlap policy: that run takes the retry's place.
+    /// its overlap policy: that run takes the retry's place. The store
+    /// forgets a retry that starts once its run is recorded, so a stop
+    /// before then leaves it pending.
     async fn start_retries(&self, retries: &mut BTreeMap<PlanId, Retrying>) {
         let now = self.clock.now();
         let due: Vec<(PlanId, RetryScheduled)> = retries
@@ -426,7 +428,6 @@ impl Scheduler {
             })
             .collect();
         for (plan, retry) in due {
-            self.drop_retry(&plan).await;
             let place = if RetrySchedule::superseded(&retry, now) {
                 Err(NoRetry::NextRun)
             } else {
@@ -438,9 +439,11 @@ impl Scheduler {
                 Ok(place) => {
                     retries.insert(plan.clone(), Retrying::Started(retry));
                     self.runs.start(&plan, Trigger::Retry, place).await;
+                    self.drop_retry(&plan).await;
                 }
                 Err(why) => {
                     retries.remove(&plan);
+                    self.drop_retry(&plan).await;
                     self.runs.report(ScheduleReport::RetriesEnded { plan, why });
                 }
             }
