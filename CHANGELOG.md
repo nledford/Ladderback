@@ -9,27 +9,14 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [0.2.0](https://github.com/nledford/Ladderback/compare/v0.1.1...v0.2.0) - 2026-11-12
 
+The first release worth using on your own machines: plans run on their schedules, with catch-up after sleep, cron in a time zone, a choice of skipping or queuing a run while the last one is going, a limit on how many run at once, and retries of a failed scheduled backup. Notifications go to webhooks, ntfy and healthchecks. Ladderback installs as a systemd user service or launchd agent, and an optional sign-in protects the web UI. There is still no restore: use the `rustic` CLI, and try a restore before relying on the backups. Restore comes in 0.3.
+
 ### Breaking
 
 - Run maintenance only on repositories this agent maintains ([#201](https://github.com/nledford/Ladderback/pull/201))
 - Refuse a second name for a configured repository ([#213](https://github.com/nledford/Ladderback/pull/213))
 - Refuse a relative glob file in a plan or an imported profile ([#242](https://github.com/nledford/Ladderback/pull/242))
-- Refuse a location or option over 64 KiB and more than 64 options, and mask in linear time ([#251](https://github.com/nledford/Ladderback/pull/251)): a config.toml whose repository or repo-hot is longer than
-64 KiB, whose option value is longer than 64 KiB, or whose options,
-options-hot or options-cold holds more than 64 options no longer loads, and
-the repository routes refuse such settings with invalid-body. Shorten the
-location or value (keep credentials in a secret reference or rclone's own
-config), and split or drop options.
-
-* docs: record the caps on locations and options, and what masking costs
-
-Security §10.2 says why a location, an option value and a table of options
-have caps, how long masking takes now that each byte of a text is compared
-at most twice per needle, with the before and after measurements, and the
-memory a redactor's needles take with `u32` borders. Configuration §6.1 and
-§6.2 say where each cap refuses a value: at load, at import (counting again
-once used profiles and rustic's variables are merged) and on the routes
-([#236](https://github.com/nledford/Ladderback/pull/236)).
+- Refuse a location or option over 64 KiB and more than 64 options, and mask in linear time ([#251](https://github.com/nledford/Ladderback/pull/251)): a `config.toml` whose `repository` or `repo-hot`, or one of whose option values, is longer than 64 KiB, or whose `options`, `options-hot` or `options-cold` holds more than 64 options, no longer loads, and the repository routes refuse such settings with `invalid-body`. Shorten the location or value (keep credentials in a secret reference or rclone's own config), and split or drop options.
 - Refuse a relative path a repository, a hook or a password command names ([#250](https://github.com/nledford/Ladderback/pull/250))
 
 ### Added
@@ -87,6 +74,10 @@ once used profiles and rustic's variables are merged) and on the routes
 - Show the warnings a run recorded before the Operations page was listening ([#389](https://github.com/nledford/Ladderback/pull/389))
 - Stop the Operations page's live updates when you leave it ([#392](https://github.com/nledford/Ladderback/pull/392))
 - Mask secrets as rclone quotes them whatever Rust toolchain builds Ladderback ([#407](https://github.com/nledford/Ladderback/pull/407))
+
+### Changed
+
+- Building Ladderback from source needs Rust 1.100.0 or newer, and the checkout pins that version for rustup ([#411](https://github.com/nledford/Ladderback/pull/411))
 
 ## [0.1.1](https://github.com/nledford/Ladderback/compare/v0.1.0...v0.1.1) - 2026-11-11
 
