@@ -7683,6 +7683,8 @@ dependencies = [
  "leptos_router",
  "serde",
  "serde_json",
+ "tempfile",
+ "toml",
  "wasm-bindgen-test",
  "web-sys",
 ]

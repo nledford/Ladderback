@@ -49,5 +49,11 @@ web-sys.workspace = true
 api.workspace = true
 wasm-bindgen-test.workspace = true
 
+# tests/trunk_hook.rs runs trunk's pre-build hook from Trunk.toml in a scratch
+# checkout; the hook is `sh`, so the test is Unix only.
+[target.'cfg(unix)'.dev-dependencies]
+tempfile.workspace = true
+toml.workspace = true
+
 [lints]
 workspace = true
