@@ -397,6 +397,15 @@ table.operations .badge {
   padding-inline: min(0.5rem, 1.25vw);
 }
 
+/* A button's label takes the page's text size (see the form controls rule),
+   so at 320 px with 200 % text one letter of it and the browser's own padding
+   (6 px a side) made the Cancel button a few pixels wider than its cell. Its
+   padding follows the screen's width the same way: the browser's 6 px on a
+   wide screen, less on a small one. */
+table.operations td button {
+  padding-inline: min(0.375rem, 1.25vw);
+}
+
 table.operations td ul {
   padding-inline-start: 0;
   list-style-position: inside;
