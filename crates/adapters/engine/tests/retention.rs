@@ -188,13 +188,12 @@ async fn an_error_never_carries_what_a_reference_resolved_to() {
     );
 }
 
-/// The `rclone` that rustic's backend starts for an `rclone:` repository
-/// inherits no descriptor another start in the daemon has open: the
-/// backends are built through the spawn gate, so it waits while a pipe that
-/// is not yet close-on-exec is open (decision 58). The stand-in for
-/// `rclone` writes the number of each of the pipe's ends it holds to a file
-/// before any redirection of its own can open one, then exits, so the open
-/// fails.
+/// The `rclone` that serves an `rclone:` repository inherits no descriptor
+/// another start in the daemon has open: it starts through the spawn gate,
+/// so it waits while a pipe that is not yet close-on-exec is open (decision
+/// 58). The stand-in for `rclone` writes the number of each of the pipe's
+/// ends it holds to a file before any redirection of its own can open one,
+/// then exits, so the open fails.
 #[cfg(unix)]
 #[tokio::test]
 async fn an_rclone_repository_s_server_inherits_no_pipe_another_start_has_open() {
@@ -207,17 +206,7 @@ async fn an_rclone_repository_s_server_inherits_no_pipe_another_start_has_open()
         "sh -c 'found=; for n in \"$1\" \"$2\"; do if [ -e /dev/fd/$n ]; then found=\"$found $n\"; fi; done; echo \"$found\" > \"$3\"' sh {read} {write} '{}'",
         found.display()
     );
-    let access = RepositoryAccess {
-        repository: "rclone:demo-remote:repo".to_owned(),
-        repo_hot: None,
-        password: domain::secrets::SecretValue::new(PASSWORD),
-        id: None,
-        entry: None,
-        options: [("rclone-command".to_owned(), stand_in)].into(),
-        options_hot: Default::default(),
-        options_cold: Default::default(),
-        secrets: Vec::new(),
-    };
+    let access = rclone_repository(stand_in);
     let error = RusticRetention
         .removes(
             &access,
@@ -237,4 +226,152 @@ async fn an_rclone_repository_s_server_inherits_no_pipe_another_start_has_open()
         "",
         "the rclone stand-in inherited another start's pipe"
     );
+}
+
+/// An `rclone:` repository whose `rclone` is started by `stand_in`, the
+/// `rclone-command` rustic runs in place of `rclone serve restic`, with the
+/// repository's path appended as its last argument.
+fn rclone_repository(stand_in: String) -> RepositoryAccess {
+    RepositoryAccess {
+        repository: "rclone:demo-remote:repo".to_owned(),
+        repo_hot: None,
+        password: domain::secrets::SecretValue::new(PASSWORD),
+        id: None,
+        entry: None,
+        options: [("rclone-command".to_owned(), stand_in)].into(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: Vec::new(),
+    }
+}
+
+/// An `rclone` that never says it is serving holds up no other start: the
+/// spawn gate is held while it starts, not while the daemon waits for it to
+/// serve (decision 58, #319). The stand-in marks that it has started, then
+/// waits in silence until the test lets it go, and exits without serving.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_rclone_that_never_serves_holds_up_no_other_start() {
+    use std::time::{Duration, Instant};
+    let scratch = tempfile::tempdir().unwrap();
+    let started = scratch.path().join("started");
+    let let_go = scratch.path().join("let-go");
+    // At most 30 s, so a run whose gate stays held still ends.
+    let stand_in = format!(
+        "sh -c ': > \"$1\"; n=0; while [ ! -e \"$2\" ] && [ $n -lt 600 ]; do sleep 0.05; n=$((n + 1)); done' sh '{}' '{}'",
+        started.display(),
+        let_go.display()
+    );
+    let access = rclone_repository(stand_in);
+    let evaluation = tokio::spawn(async move {
+        RusticRetention
+            .removes(
+                &access,
+                &RetentionPolicy {
+                    keep_last: Some(KeepCount::new(1).unwrap()),
+                    ..RetentionPolicy::default()
+                },
+                &one_snapshot(),
+            )
+            .await
+    });
+    let waiting_since = Instant::now();
+    while !started.exists() {
+        assert!(
+            waiting_since.elapsed() < Duration::from_secs(10),
+            "the rclone stand-in never started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Another start, as a hook's would: it takes the gate as soon as it is
+    // free. Nothing else in this test's process holds it, so a free gate is
+    // taken at once; 2 s is slack for a loaded machine.
+    let (taken, took) = std::sync::mpsc::channel();
+    let other_start = std::thread::spawn(move || {
+        spawn_gate::hold(|| {
+            let _ = taken.send(());
+        });
+    });
+    let free = took.recv_timeout(Duration::from_secs(2)).is_ok();
+    std::fs::write(&let_go, b"").unwrap();
+    let outcome = evaluation.await.unwrap();
+    other_start.join().unwrap();
+    assert!(free, "another start waited for an rclone that never served");
+    outcome.expect_err("the stand-in exits without serving");
+}
+
+/// An `rclone:` repository is read through the address its server says it
+/// serves on, as the user and with the password the server was handed in
+/// its environment, and the server is stopped once the evaluation ends.
+/// The stand-in names a listener of the test's, which answers that there
+/// is no such file, so the open fails.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_rclone_repository_is_read_where_its_server_serves_and_the_server_stops() {
+    use base64::Engine;
+    use std::io::{BufRead, BufReader, Write};
+    let scratch = tempfile::tempdir().unwrap();
+    let handed = scratch.path().join("handed");
+    let pid = scratch.path().join("pid");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (authorized, authorizations) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut request = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while request.read_line(&mut line).is_ok_and(|read| read > 2) {
+                if let Some(value) = line.trim_end().strip_prefix("authorization: ") {
+                    let _ = authorized.send(value.to_owned());
+                }
+                line.clear();
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            );
+        }
+    });
+    let stand_in = format!(
+        "sh -c 'echo \"$RCLONE_USER:$RCLONE_PASS\" > \"$1\"; echo $$ > \"$2\"; echo \"NOTICE: Serving restic REST API on [http://127.0.0.1:$3/]\" >&2; exec sleep 30' sh '{}' '{}' {port}",
+        handed.display(),
+        pid.display()
+    );
+    let mut access = rclone_repository(stand_in);
+    access
+        .options
+        .insert("retry".to_owned(), "false".to_owned());
+    RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("the listener has no repository");
+    let handed = std::fs::read_to_string(&handed).unwrap();
+    let (user, password) = handed.trim().split_once(':').unwrap();
+    assert!(!user.is_empty() && !password.is_empty() && user != password);
+    let expected = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(handed.trim())
+    );
+    let sent = authorizations
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the repository was read through the server's address");
+    assert_eq!(sent, expected);
+    let pid = std::fs::read_to_string(&pid).unwrap();
+    let mut probe = std::process::Command::new("kill");
+    probe
+        .args(["-0", pid.trim()])
+        .stderr(std::process::Stdio::null());
+    let alive = spawn_gate::hold(|| probe.spawn())
+        .unwrap()
+        .wait()
+        .unwrap()
+        .success();
+    assert!(!alive, "the rclone stand-in is still running, or unreaped");
 }
