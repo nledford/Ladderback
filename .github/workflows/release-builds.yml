@@ -59,7 +59,7 @@ jobs:
             os: ubuntu-22.04-arm
           # arm64 only: dist can't build a universal binary yet (dist #77).
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-26
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -120,7 +120,7 @@ jobs:
     name: Report a failed nightly release build
     needs: build
     if: failure() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     # One report at a time, so two failed runs don't both open an issue.
     concurrency:

@@ -45,7 +45,7 @@ jobs:
     # This name is a required status check (ruleset "Protect main"): don't rename it.
     name: Red-first check
     if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'behaviour')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
       # Node's version from ui-tests/.nvmrc at the commit this workflow runs,

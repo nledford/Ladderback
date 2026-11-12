@@ -22,7 +22,7 @@ jobs:
   release-pr:
     name: Open or update the release PR
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # RELEASE_PLZ_TOKEN is a secret of the `release` environment, whose only
     # deployment branch is main. An environment secret reaches only a job
@@ -49,7 +49,7 @@ jobs:
   release:
     name: Tag and publish the GitHub release
     if: github.event_name == 'push' && github.repository == 'nledford/Ladderback'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: write
