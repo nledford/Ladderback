@@ -109,7 +109,7 @@ impl NotificationsWorld {
             .await
             .expect("the log takes it");
         let news = start_of(operation, None).expect("a running operation has news");
-        let reports = self.notify().await.tell(&news).await;
+        let reports = self.notify().await.tell(news).await;
         self.reports.extend(reports);
     }
 
@@ -119,7 +119,7 @@ impl NotificationsWorld {
             .await
             .expect("the log takes it");
         let news = end_of(operation).expect("an ended operation has news");
-        let reports = self.notify().await.tell(&news).await;
+        let reports = self.notify().await.tell(news).await;
         self.reports.extend(reports);
     }
 

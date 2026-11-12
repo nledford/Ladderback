@@ -18,7 +18,8 @@ use domain::notifications::{
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, Timestamp, Uuid};
 use futures::StreamExt;
-use futures::future::join_all;
+use futures::channel::mpsc;
+use futures::future::{self, join_all};
 use futures::stream::BoxStream;
 
 use crate::ports::{
@@ -80,6 +81,43 @@ enum Turn {
     Ended(Outcome),
 }
 
+/// The start or the end of an operation, as the news says it: the
+/// operation's ID, how it went and when, as the news writes them.
+struct News {
+    operation: String,
+    turn: Turn,
+    at: String,
+}
+
+impl News {
+    /// What `news` says of an operation's start or end; `None` for news that
+    /// is no event (progress, a warning, an agent coming or going).
+    fn of(news: UiEvent) -> Option<Self> {
+        let (operation, turn, at) = match news {
+            UiEvent::OperationStarted {
+                operation,
+                started_at,
+                ..
+            } => (operation, Turn::Started, started_at),
+            UiEvent::OperationSucceeded {
+                operation,
+                finished_at,
+            } => (operation, Turn::Ended(Outcome::Succeeded), finished_at),
+            UiEvent::OperationFailed {
+                operation,
+                finished_at,
+                ..
+            } => (operation, Turn::Ended(Outcome::Failed), finished_at),
+            _ => return None,
+        };
+        Some(Self {
+            operation,
+            turn,
+            at,
+        })
+    }
+}
+
 impl Notify {
     pub fn new(
         config: Arc<dyn ConfigStore>,
@@ -100,24 +138,20 @@ impl Notify {
     /// delivered, or, once, a configuration that couldn't be read. News that
     /// is no event (progress, a warning), and an operation the log doesn't
     /// have, tell nothing.
-    pub async fn tell(&self, news: &UiEvent) -> Vec<Report> {
-        let (operation, turn, at) = match news {
-            UiEvent::OperationStarted {
-                operation,
-                started_at,
-                ..
-            } => (operation, Turn::Started, started_at),
-            UiEvent::OperationSucceeded {
-                operation,
-                finished_at,
-            } => (operation, Turn::Ended(Outcome::Succeeded), finished_at),
-            UiEvent::OperationFailed {
-                operation,
-                finished_at,
-                ..
-            } => (operation, Turn::Ended(Outcome::Failed), finished_at),
-            _ => return Vec::new(),
-        };
+    pub async fn tell(&self, news: UiEvent) -> Vec<Report> {
+        match News::of(news) {
+            Some(news) => self.told(news).await,
+            None => Vec::new(),
+        }
+    }
+
+    /// Tells the event `news` is, as [`Self::tell`] does.
+    async fn told(&self, news: News) -> Vec<Report> {
+        let News {
+            operation,
+            turn,
+            at,
+        } = news;
         let config = match self.config.load().await {
             Ok(config) => config,
             Err(error) => return vec![Report::ConfigUnavailable(error)],
@@ -126,7 +160,7 @@ impl Notify {
         if notifications.rules().is_empty() {
             return Vec::new();
         }
-        let Ok(id) = Uuid::try_parse(operation) else {
+        let Ok(id) = Uuid::try_parse(&operation) else {
             return Vec::new();
         };
         let Ok(Some(detail)) = self.operations.get(OperationId::from_uuid(id)).await else {
@@ -172,12 +206,27 @@ impl Notify {
 
     /// Tells each piece of `news` in turn until the stream ends, giving
     /// `report` what there is to report of each.
-    pub async fn run(&self, mut news: BoxStream<'static, UiEvent>, mut report: impl FnMut(Report)) {
-        while let Some(next) = news.next().await {
-            for told in self.tell(&next).await {
-                report(told);
+    ///
+    /// A subscriber's queue on the bus is short and loses its oldest events
+    /// once it is full (§4.4), and a delivery can take its whole timeout. So
+    /// the starts and ends are read off the bus as they come, while a slow
+    /// channel is still being told, and wait their turn here: one per start
+    /// and end of a run, never per warning or progress, so a run's warnings
+    /// can't push another run's end out of the queue.
+    pub async fn run(&self, news: BoxStream<'static, UiEvent>, mut report: impl FnMut(Report)) {
+        let (waiting, mut turns) = mpsc::unbounded();
+        let read = news
+            .filter_map(|next| future::ready(News::of(next).map(Ok)))
+            .forward(waiting);
+        let tell = async {
+            while let Some(next) = turns.next().await {
+                for told in self.told(next).await {
+                    report(told);
+                }
             }
-        }
+        };
+        // The reading can't fail: the turns are read until it ends.
+        let (_, ()) = futures::join!(read, tell);
     }
 
     /// Sends `event` to the channel of `matched`, or says why it wasn't.
