@@ -230,11 +230,16 @@ Feature: Install Ladderback with one command
       Then the command exits with status 0
       And the Rust the release pins was installed, with the components and targets it lists, before the release
 
-    Scenario: The Rust the release pins gets the WebAssembly target it lacks
-      Given rustup has the Rust the release pins without the WebAssembly target
+    Scenario Outline: The Rust the release pins gets <part> it lacks
+      Given rustup has the Rust the release pins without <part>
       When the owner runs the install script
       Then the command exits with status 0
       And the Rust the release pins was installed, with the components and targets it lists, before the release
+
+      Examples:
+        | part                   |
+        | the WebAssembly target |
+        | Clippy                 |
 
     Scenario: Running it again doesn't install the Rust the release pins again
       Given rustup doesn't have the Rust the release pins

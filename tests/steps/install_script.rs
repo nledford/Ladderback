@@ -144,13 +144,14 @@ case "$1" in
   toolchain)
     case "$2" in
       list)
-        none=1
+        # As the real one does, it marks the default toolchain: the first.
+        mark=' (default)'
         for file in "$toolchains"/*; do
           [ -f "$file" ] || continue
-          printf '%s\n' "${file##*/}"
-          none=0
+          printf '%s%s\n' "${file##*/}" "$mark"
+          mark=''
         done
-        [ "$none" = 0 ] || echo 'no installed toolchains'
+        [ -z "$mark" ] || echo 'no installed toolchains'
         ;;
       install)
         file="$toolchains/$3-$host"
@@ -315,15 +316,15 @@ fn pinned_rust(agent: &Agent) -> PathBuf {
 
 /// What `rustup component list --installed` lists for the Rust the release
 /// pins, with the components and targets its `rust-toolchain.toml` names,
-/// the WebAssembly target only when `wasm` says so.
-fn pinned_rust_components(wasm: bool) -> String {
-    let mut lines = ["cargo", "clippy", "rust-std", "rustc", "rustfmt"]
-        .map(|component| format!("{component}-{HOST}\n"))
-        .concat();
-    if wasm {
-        lines.push_str("rust-std-wasm32-unknown-unknown\n");
-    }
-    lines
+/// leaving out the line `without` names, if any.
+fn pinned_rust_components(without: Option<&str>) -> String {
+    ["cargo", "clippy", "rust-std", "rustc", "rustfmt"]
+        .map(|component| format!("{component}-{HOST}"))
+        .into_iter()
+        .chain(["rust-std-wasm32-unknown-unknown".to_owned()])
+        .filter(|line| Some(line.as_str()) != without)
+        .map(|line| line + "\n")
+        .collect()
 }
 
 /// `{home}` in a step's text stands for the scenario's home folder.
@@ -527,7 +528,7 @@ fn every_tool_installed(agent: &mut Agent) {
     set(agent, "uname-m", "x86_64");
     set(agent, "glibc", "2.39");
     fs::create_dir_all(state(agent).join("toolchains")).expect("rustup's toolchains");
-    fs::write(pinned_rust(agent), pinned_rust_components(true))
+    fs::write(pinned_rust(agent), pinned_rust_components(None))
         .expect("rustup has the Rust the release pins");
 }
 
@@ -607,9 +608,14 @@ fn no_pinned_rust(agent: &mut Agent) {
     fs::remove_file(pinned_rust(agent)).expect("rustup had the Rust the release pins");
 }
 
-#[given("rustup has the Rust the release pins without the WebAssembly target")]
-fn pinned_rust_without_wasm(agent: &mut Agent) {
-    fs::write(pinned_rust(agent), pinned_rust_components(false))
+#[given(regex = r"^rustup has the Rust the release pins without (the WebAssembly target|Clippy)$")]
+fn pinned_rust_without(agent: &mut Agent, part: String) {
+    let line = if part == "Clippy" {
+        format!("clippy-{HOST}")
+    } else {
+        "rust-std-wasm32-unknown-unknown".to_owned()
+    };
+    fs::write(pinned_rust(agent), pinned_rust_components(Some(&line)))
         .expect("rustup has the Rust the release pins");
 }
 
@@ -1031,7 +1037,7 @@ fn pinned_rust_installed(agent: &mut Agent) {
         "{calls:?}"
     );
     let has = fs::read_to_string(pinned_rust(agent)).expect("rustup has the Rust the release pins");
-    let wants = pinned_rust_components(true);
+    let wants = pinned_rust_components(None);
     let missing: Vec<&str> = wants
         .lines()
         .filter(|want| !has.lines().any(|line| line == *want))
