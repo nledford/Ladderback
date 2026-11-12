@@ -282,7 +282,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows an alert containing "The operation failed"
-    And the alert marks the engine's words as English
+    And the alert marks the sender's words as English
     And the page has no accessibility violations
 
   Scenario: The end of the last run is not shown once another review is asked for
@@ -441,4 +441,17 @@ Feature: Maintenance of a repository on the Snapshots page
     Then the dialog "Forget snapshots of demo" opens with focus inside it
     And the page doesn't scroll sideways
     And no text is clipped
+    And the page has no accessibility violations
+
+  Scenario: A mistake in the configuration file is shown on the Snapshots page where it is, by keyboard alone
+    Given a daemon with a scratch demo repository and no repositories
+    And someone has written a setting the daemon does not know on line 6 of its configuration file
+    When I open the web UI
+    And I press Tab until focus is on the link "Snapshots"
+    And I press Enter
+    Then focus is on the main heading "Snapshots"
+    And the page shows an alert containing "did not accept its configuration file"
+    And the page shows an alert containing "line 6: repositories.demo.colour"
+    And the alert marks the sender's words as English
+    And the page doesn't show "demo-password"
     And the page has no accessibility violations

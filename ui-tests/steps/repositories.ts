@@ -46,6 +46,29 @@ Given("a daemon with a scratch demo repository and no repositories", async funct
   this.baseUrl = url;
 });
 
+// Someone edits the running daemon's config.toml by hand and leaves a key
+// nobody knows, `colour`, in the repository `demo`, on line `line`: a note of
+// their own fills the lines before it. The daemon reads the file on every
+// request, so the next one finds the mistake.
+Given(
+  "someone has written a setting the daemon does not know on line {int} of its configuration file",
+  async function (this: BrowserWorld, line: number) {
+    const own = this.ownServer;
+    assert.ok(own, "this scenario's daemon is not its own: a Given must start one");
+    const head = [
+      "schema = 1",
+      "",
+      "[repositories.demo]",
+      `repository = ${JSON.stringify(path.join(own.scratch, "repo"))}`,
+      'password = "demo-password"',
+    ];
+    assert.ok(line > head.length, `the mistake can be no earlier than line ${head.length + 1}`);
+    const notes = Array.from({ length: line - head.length - 1 }, () => "# A note of the person's own.");
+    const file = [...head, ...notes, 'colour = "red"', ""].join("\n");
+    await writeFile(path.join(own.scratch, "config", "config.toml"), file);
+  },
+);
+
 // A daemon whose config holds only what `ladderback import-profile` added
 // from a rustic profile named after `alias`: its repository, at an empty
 // folder of the scratch, with its password in a file, and its plan

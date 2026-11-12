@@ -716,7 +716,7 @@ impl Operations for PlanRunner {
             .config
             .load()
             .await
-            .map_err(|_| StartError::Unavailable)?;
+            .map_err(|_| -> StartError { todo!() })?;
         let plan = config.plan(&id).ok_or(StartError::UnknownPlan)?;
         let repository = config
             .repository(&plan.repository)
@@ -1362,11 +1362,7 @@ struct ConfigCatalog {
 #[async_trait]
 impl Catalog for ConfigCatalog {
     async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
-        let config = self
-            .config
-            .load()
-            .await
-            .map_err(|_| CatalogError::Unavailable)?;
+        let config = self.config.load().await.map_err(catalog_refusal)?;
         Ok(api::PlansDto {
             plans: config
                 .plans()
@@ -1380,11 +1376,7 @@ impl Catalog for ConfigCatalog {
     }
 
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
-        let config = self
-            .config
-            .load()
-            .await
-            .map_err(|_| CatalogError::Unavailable)?;
+        let config = self.config.load().await.map_err(catalog_refusal)?;
         let offered = self.offers(&config).await;
         Ok(api::RepositoriesDto {
             repositories: config
@@ -1410,7 +1402,7 @@ impl Catalog for ConfigCatalog {
             .config
             .load()
             .await
-            .map_err(|_| SnapshotsError::Unavailable)?;
+            .map_err(|_| -> SnapshotsError { todo!() })?;
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
         let listing = ListSnapshots::new(
             Arc::clone(&self.engine),
@@ -1452,7 +1444,11 @@ impl Catalog for ConfigCatalog {
                     "the snapshots of {} could not be listed: {said}",
                     alias.as_str()
                 );
-                return Err(SnapshotsError::Unavailable);
+                return Err(SnapshotsError::Unavailable {
+                    code: ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: None,
+                });
             }
         };
         let snapshots = listed
@@ -1470,6 +1466,11 @@ impl Catalog for ConfigCatalog {
             .collect();
         Ok(api::SnapshotsDto { snapshots })
     }
+}
+
+/// A configuration the lists can't read, refused as a save of it is.
+fn catalog_refusal(_error: ConfigError) -> CatalogError {
+    todo!()
 }
 
 impl ConfigCatalog {
@@ -3521,7 +3522,8 @@ mod tests {
     /// One repository under two names never reaches the history view (I6,
     /// §7.3): a file with a second entry at the first one's location is not a
     /// configuration, so neither name's groups are read, and no plan of the
-    /// one can show as orphaned history adoptable into the other.
+    /// one can show as orphaned history adoptable into the other. The refusal
+    /// is the mistake's, as a save's is (#347).
     #[tokio::test]
     async fn a_repository_under_two_names_never_reaches_the_history_view() {
         let (mut runner, _entered, _gate, scratch) = runner_at_a_gate().await;
@@ -3545,7 +3547,7 @@ mod tests {
                 matches!(
                     refused,
                     Err(MaintenanceRefusal::Unavailable {
-                        code: ErrorCode::ConfigUnavailable,
+                        code: ErrorCode::ConfigInvalid,
                         ..
                     })
                 ),
@@ -7578,7 +7580,7 @@ mod repository_service_tests {
             catalog_with_a_password_command("engine-down", "echo not-a-real-password", engine)
                 .await;
         let refused = catalog.snapshots("engine-down".to_owned()).await;
-        assert_eq!(refused, Err(SnapshotsError::Unavailable));
+        assert_eq!(refused, Err(engine_unavailable()));
         let logged = logged_about("engine-down").join("\n");
         assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
         assert!(!logged.contains("canary-inline"), "{logged}");
@@ -7632,7 +7634,7 @@ mod repository_service_tests {
         let (catalog, _scratch) =
             catalog_at("rclone-down", location, "echo not-a-real-password", engine).await;
         let refused = catalog.snapshots("rclone-down".to_owned()).await;
-        assert_eq!(refused, Err(SnapshotsError::Unavailable));
+        assert_eq!(refused, Err(engine_unavailable()));
         let logged = logged_about("rclone-down").join("\n");
         assert!(
             logged.contains("rclone::sftp,host=nas.example.com,pass=***:/backups"),
@@ -7765,10 +7767,19 @@ mod repository_service_tests {
         }
     }
 
-    #[tokio::test]
-    async fn a_configuration_that_cannot_be_used_is_unavailable_with_its_code() {
+    /// A configuration that can't be used, and the code, the arguments and
+    /// the detail a refusal of it carries.
+    pub(super) type Unusable = (
+        ConfigError,
+        ErrorCode,
+        Vec<(&'static str, MsgArg)>,
+        Option<&'static str>,
+    );
+
+    /// Each way a configuration can't be used, as every route refuses it.
+    pub(super) fn unusable_configurations() -> Vec<Unusable> {
         let text = |value: &str| MsgArg::Text(value.to_owned());
-        for (error, code, args, detail) in [
+        vec![
             (
                 ConfigError::Unavailable {
                     file: "/c/config.toml".into(),
@@ -7836,7 +7847,12 @@ mod repository_service_tests {
                 vec![("file", text("/c/config.toml"))],
                 None,
             ),
-        ] {
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_configuration_that_cannot_be_used_is_unavailable_with_its_code() {
+        for (error, code, args, detail) in unusable_configurations() {
             let engine = engine();
             let service = service(&engine, Arc::new(Broken(error.clone())));
             let expected = Err(RepositoriesError::Unavailable {
@@ -7860,6 +7876,86 @@ mod repository_service_tests {
                 expected.map(|_: ()| ()),
                 "{error:?}"
             );
+        }
+    }
+
+    /// The lists of plans and repositories refuse a configuration they can't
+    /// read as a save does (#347): a mistake names its file, its line and its
+    /// setting.
+    #[tokio::test]
+    async fn the_lists_refuse_a_configuration_that_cannot_be_used_as_a_save_does() {
+        for (error, code, args, detail) in unusable_configurations() {
+            let catalog = ConfigCatalog {
+                config: Arc::new(Broken(error.clone())),
+                engine: engine(),
+                operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            };
+            let expected = CatalogError::Unavailable {
+                code,
+                args,
+                detail: detail.map(str::to_owned),
+            };
+            assert_eq!(
+                catalog.plans().await.map(|_| ()),
+                Err(expected.clone()),
+                "{error:?}"
+            );
+            assert_eq!(
+                catalog.repositories().await.map(|_| ()),
+                Err(expected),
+                "{error:?}"
+            );
+        }
+    }
+
+    /// A listing of a repository's snapshots and the start of a backup read
+    /// the configuration first, and refuse one they can't use as a save does
+    /// (#347): the engine is never asked.
+    #[tokio::test]
+    async fn a_listing_and_a_backup_refuse_a_configuration_that_cannot_be_used_as_a_save_does() {
+        for (error, code, args, detail) in unusable_configurations() {
+            let (scripted, config) = (engine(), Arc::new(Broken(error.clone())));
+            let catalog = ConfigCatalog {
+                config: config.clone(),
+                engine: scripted.clone(),
+                operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            };
+            let runner = PlanRunner {
+                config,
+                resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+                agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+                engine: scripted.clone(),
+                retention: Arc::new(engine::RusticRetention),
+                store: Arc::new(app::fakes::InMemoryOperationStore::new()),
+                registry: Arc::new(CancelRegistry::new()),
+                hooks: Arc::new(ProcessHookRunner::new()),
+                events: Arc::new(BroadcastEventBus::new()),
+            };
+            let detail = detail.map(str::to_owned);
+            assert_eq!(
+                catalog.snapshots("demo".to_owned()).await.map(|_| ()),
+                Err(SnapshotsError::Unavailable {
+                    code,
+                    args: args.clone(),
+                    detail: detail.clone(),
+                }),
+                "{error:?}"
+            );
+            assert_eq!(
+                runner.start_backup("home".to_owned()).await,
+                Err(StartError::Unavailable { code, args, detail }),
+                "{error:?}"
+            );
+            assert_eq!(jobs(&scripted), 0, "{error:?}");
+        }
+    }
+
+    /// A listing the engine refused, told by its code alone.
+    fn engine_unavailable() -> SnapshotsError {
+        SnapshotsError::Unavailable {
+            code: ErrorCode::EngineUnavailable,
+            args: Vec::new(),
+            detail: None,
         }
     }
 

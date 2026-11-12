@@ -824,6 +824,17 @@ pub(crate) fn refusal(
     localizer.error(code, &args, detail).into_text()
 }
 
+/// A refusal as [`refusal`] writes it, with the sender's own words marked:
+/// they are English whatever the page's language (§8.4).
+pub(crate) fn refused_sentence(
+    _localizer: &Localizer,
+    _code: ErrorCode,
+    _args: &[(String, MsgArg)],
+    _detail: Option<&str>,
+) -> crate::repositories::Sentence {
+    todo!()
+}
+
 /// What a person has typed into the Repositories form, one signal per field,
 /// and whether they asked this agent to maintain the repository.
 #[derive(Clone, Copy)]
@@ -1763,6 +1774,24 @@ mod tests {
         );
         let without = refusal(&localizer, ErrorCode::OperationFailed, &[], None);
         assert_eq!(without, "The operation failed.");
+    }
+
+    #[test]
+    fn a_mistake_in_the_configuration_is_said_with_its_line_and_its_setting_marked_as_sent() {
+        let sentence = refused_sentence(
+            &Localizer::new(&[]),
+            ErrorCode::ConfigInvalid,
+            &[
+                ("file".to_owned(), MsgArg::Text("/c/config.toml".to_owned())),
+                ("line".to_owned(), MsgArg::Text("6".to_owned())),
+            ],
+            Some("repositories.demo.colour"),
+        );
+        let said = sentence.plain().replace(['\u{2068}', '\u{2069}'], "");
+        assert!(said.contains("/c/config.toml"), "{said}");
+        assert!(said.contains("line 6: repositories.demo.colour"), "{said}");
+        let (detail, _) = sentence.detail.expect("the setting is marked as sent");
+        assert_eq!(detail, "repositories.demo.colour");
     }
 
     #[test]

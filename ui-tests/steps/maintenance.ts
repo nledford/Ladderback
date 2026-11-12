@@ -615,19 +615,23 @@ Then(
   },
 );
 
-// What the engine says is English whatever the language of the page, and the
-// page marks it so (§4.5).
-Then("the alert marks the engine's words as English", async function (this: BrowserWorld) {
+// What the sender of a refusal says in its own words, the engine's or the
+// daemon's, is English whatever the language of the page, and the page marks
+// it so (§4.5, §8.4).
+Then("the alert marks the sender's words as English", async function (this: BrowserWorld) {
   const words = this.page.getByRole("alert").locator('[lang="en"]');
   await words.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-  assert.notEqual((await words.first().innerText()).trim(), "", "the engine's words in the alert");
+  assert.notEqual((await words.first().innerText()).trim(), "", "the sender's words in the alert");
 });
 
 // A refusal of the preview is told where a reader is looking, as an alert.
+// What the catalog filled in is set apart by bidi isolation marks, which a
+// reader never hears (§4.5): they may stand between any two characters.
 Then("the page shows an alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  const heard = [...needle].map(escape).join(ISOLATION);
   await this.page
     .getByRole("alert")
-    .filter({ hasText: new RegExp(escape(needle)) })
+    .filter({ hasText: new RegExp(heard) })
     .first()
     .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
 });
