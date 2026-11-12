@@ -880,8 +880,15 @@ impl PlanRunner {
     }
 
     /// Starts a backup of plan `id`, started by `trigger`, on a task of its
-    /// own, and returns its operation's ID once the log has it queued.
-    async fn start_plan(&self, id: &PlanId, trigger: Trigger) -> Result<OperationId, StartError> {
+    /// own, and returns its operation's ID once the log has it queued. It
+    /// runs in `place` when the scheduler gave it one, else in a place it
+    /// takes in the queue now, as any run started by hand does (§5).
+    async fn start_plan(
+        &self,
+        id: &PlanId,
+        trigger: Trigger,
+        place: Option<Place>,
+    ) -> Result<OperationId, StartError> {
         let config = self.config.load().await.map_err(|error| {
             config_unusable(error, |code, args, detail| StartError::Unavailable {
                 code,
@@ -890,6 +897,7 @@ impl PlanRunner {
             })
         })?;
         let (job, setup) = self.backup_of(&config, id).await?;
+        let place = place.unwrap_or_else(|| self.queue.push(id, config.agent().concurrency));
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let cancel = self.cancel_switch(operation);
@@ -903,8 +911,9 @@ impl PlanRunner {
         tokio::spawn(async move {
             let queued = use_case.queue(operation, trigger, job).await;
             let _ = recorded.send(());
-            // Nothing waits on the run: it reports through the event bus.
-            let finished = use_case.run_queued(queued, cancel).await;
+            // Nothing waits on the run: it reports through the event bus. It
+            // waits in the log as queued until its turn comes.
+            let finished = use_case.run_in_turn(queued, place, cancel).await;
             registry.finish(&operation);
             log_ended(&finished);
         });
@@ -934,8 +943,7 @@ fn start_refused(error: &StartError) -> String {
 #[async_trait]
 impl PlanRuns for PlanRunner {
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
-        drop(place);
-        if let Err(error) = self.start_plan(plan, trigger).await {
+        if let Err(error) = self.start_plan(plan, trigger, Some(place)).await {
             log::warn!(
                 "the {trigger:?} run of plan {} didn't start: {}",
                 plan.as_str(),
@@ -948,32 +956,39 @@ impl PlanRuns for PlanRunner {
         let id = operation.id();
         let built = match operation.target().plan.clone() {
             Some(plan) => match self.config.load().await {
-                Ok(config) => self.backup_of(&config, &plan).await,
+                Ok(config) => self
+                    .backup_of(&config, &plan)
+                    .await
+                    .map(|(job, setup)| (job, setup, plan, config.agent().concurrency)),
                 Err(error) => Err(config_unusable(error, |code, args, detail| {
                     StartError::Unavailable { code, args, detail }
                 })),
             },
             None => Err(StartError::UnknownPlan),
         };
-        let built = built
-            .map_err(|error| start_refused(&error))
-            .and_then(|(job, setup)| {
-                // The plan may have moved to another repository since the
-                // queue's own read: it isn't run there under a record of the old.
-                if operation.target().is_on(job.target().repository.as_ref()) {
-                    Ok((job, setup))
-                } else {
-                    Err("its plan now backs up to another repository".to_owned())
-                }
-            });
+        let built =
+            built
+                .map_err(|error| start_refused(&error))
+                .and_then(|(job, setup, plan, limit)| {
+                    // The plan may have moved to another repository since the
+                    // queue's own read: it isn't run there under a record of the old.
+                    if operation.target().is_on(job.target().repository.as_ref()) {
+                        Ok((job, setup, plan, limit))
+                    } else {
+                        Err("its plan now backs up to another repository".to_owned())
+                    }
+                });
         match built {
-            Ok((job, setup)) => {
+            Ok((job, setup, plan, limit)) => {
+                // Oldest first, as the queue hands them on: each waits for
+                // its turn like any other backup (§5).
+                let place = self.queue.push(&plan, limit);
                 let cancel = self.cancel_switch(id);
                 let use_case = self.backup_use_case(setup);
                 let registry = Arc::clone(&self.registry);
                 tokio::spawn(async move {
                     let queued = app::execution::Queued::resumed(operation, job);
-                    let finished = use_case.run_queued(queued, cancel).await;
+                    let finished = use_case.run_in_turn(queued, place, cancel).await;
                     registry.finish(&id);
                     log_ended(&finished);
                 });
@@ -1009,8 +1024,14 @@ impl PlanRuns for PlanRunner {
                 plan.as_str()
             ),
             ScheduleReport::Overlapped { plan, overlapping } => log::info!(
-                "the scheduled run of plan {} was skipped: its last run is still going ({overlapping:?})",
-                plan.as_str()
+                "the scheduled run of plan {} was skipped: {}",
+                plan.as_str(),
+                match overlapping {
+                    domain::execution::queue::Overlapping::Running =>
+                        "its last run is still running",
+                    domain::execution::queue::Overlapping::Waiting =>
+                        "a run of it is already waiting for its turn",
+                }
             ),
             ScheduleReport::PowerUnknown { plan, error } => log::warn!(
                 "the scheduled run of plan {} starts, though what powers the machine is unknown: {error:?}",
@@ -1052,7 +1073,7 @@ impl PlanRuns for PlanRunner {
 impl Operations for PlanRunner {
     async fn start_backup(&self, plan: String) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
-        let operation = self.start_plan(&id, Trigger::Manual).await?;
+        let operation = self.start_plan(&id, Trigger::Manual, None).await?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
 

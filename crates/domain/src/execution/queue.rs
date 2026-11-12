@@ -53,8 +53,7 @@ impl BackupQueue {
     /// Runs at most `limit` backups at once from now on. Lowering it stops
     /// nothing that runs: no run starts until fewer than `limit` do.
     pub fn set_limit(&mut self, limit: Concurrency) {
-        let _ = limit;
-        todo!()
+        self.limit = limit;
     }
 
     /// A run of `plan` its schedule starts came due: it waits for its turn,
@@ -62,30 +61,55 @@ impl BackupQueue {
     /// has a run waiting already skips it ([`Overlapping::Waiting`]); under
     /// `skip`, so does a plan whose last run is running.
     pub fn due(&mut self, plan: &PlanId, overlap: Overlap) -> Result<Ticket, Overlapping> {
-        let _ = (plan, overlap);
-        todo!()
+        if self.waiting.values().any(|waiting| waiting == plan) {
+            return Err(Overlapping::Waiting);
+        }
+        if overlap == Overlap::Skip && self.running.values().any(|running| running == plan) {
+            return Err(Overlapping::Running);
+        }
+        Ok(self.push(plan))
     }
 
     /// A run of `plan` that waits for its turn whatever else of the plan is
     /// running or waiting: a run started by hand, or one the queue held from
     /// before the daemon started.
     pub fn push(&mut self, plan: &PlanId) -> Ticket {
-        let _ = plan;
-        todo!()
+        let ticket = Ticket(self.issued);
+        // A daemon would have to queue a run every nanosecond for 584 years
+        // to wrap it.
+        self.issued = self.issued.wrapping_add(1);
+        self.waiting.insert(ticket, plan.clone());
+        ticket
     }
 
     /// Starts the waiting runs that may start now, and returns their
     /// tickets: while fewer than the limit run, the oldest waiting run whose
     /// plan has none running.
     pub fn start(&mut self) -> Vec<Ticket> {
-        todo!()
+        let mut started = Vec::new();
+        while self.running.len() < usize::from(self.limit.get()) {
+            let running = &self.running;
+            let Some(ticket) = self
+                .waiting
+                .iter()
+                .find(|(_, plan)| !running.values().any(|other| other == *plan))
+                .map(|(ticket, _)| *ticket)
+            else {
+                break;
+            };
+            if let Some(plan) = self.waiting.remove(&ticket) {
+                self.running.insert(ticket, plan);
+                started.push(ticket);
+            }
+        }
+        started
     }
 
     /// The run with `ticket` ended, or left the queue before its turn. A
     /// ticket the queue doesn't hold changes nothing.
     pub fn leave(&mut self, ticket: Ticket) {
-        let _ = ticket;
-        todo!()
+        self.running.remove(&ticket);
+        self.waiting.remove(&ticket);
     }
 }
 

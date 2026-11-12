@@ -180,13 +180,16 @@ impl Scheduler {
             }
         };
         let now = self.clock.now();
+        plans.limit = config.agent().concurrency;
         let scheduled = scheduled(&config);
         let mut kept = plans.kept.take().unwrap_or_default();
-        for (plan, schedule) in &scheduled {
+        for (plan, (schedule, overlap)) in &scheduled {
             let next = match plans.planned.get_mut(plan) {
                 Some(held) if same_runs(&held.schedule, schedule) => {
-                    // Its conditions may have changed; its runs haven't.
+                    // Its conditions and overlap policy may have changed;
+                    // its runs haven't.
                     held.schedule = schedule.clone();
+                    held.overlap = *overlap;
                     continue;
                 }
                 Some(_) => {
@@ -210,7 +213,7 @@ impl Scheduler {
                 plan.clone(),
                 Planned {
                     schedule: schedule.clone(),
-                    overlap: Overlap::default(),
+                    overlap: *overlap,
                     next,
                     after_wake: false,
                 },
@@ -249,9 +252,11 @@ impl Scheduler {
     }
 
     /// Starts every run that is due, in the order of the plans' IDs, each
-    /// after the plan's conditions, and plans each plan's following run from
-    /// the time its run started (or was skipped). The catch-up runs after a
-    /// wake first wait, once for all of them, for the network.
+    /// after the plan's conditions and as its overlap policy says, in a place
+    /// of the queue that runs at most `limit` backups at once, and plans each
+    /// plan's following run from the time its run started (or was skipped).
+    /// The catch-up runs after a wake first wait, once for all of them, for
+    /// the network.
     async fn start_due(&self, planned: &mut BTreeMap<PlanId, Planned>, limit: Concurrency) {
         let now = self.clock.now();
         let due: Vec<PlanId> = planned
@@ -273,17 +278,13 @@ impl Scheduler {
             let Some(next) = held.next else { continue };
             held.after_wake = false;
             match check_power(&held.schedule, self.power.as_ref()).await {
-                PowerCheck::Met => {
-                    let place = self.queue.push(&plan, limit);
-                    self.runs.start(&plan, next.trigger, place).await;
-                }
+                PowerCheck::Met => self.start(&plan, held, next.trigger, limit).await,
                 PowerCheck::Unknown(error) => {
                     self.runs.report(ScheduleReport::PowerUnknown {
                         plan: plan.clone(),
                         error,
                     });
-                    let place = self.queue.push(&plan, limit);
-                    self.runs.start(&plan, next.trigger, place).await;
+                    self.start(&plan, held, next.trigger, limit).await;
                 }
                 PowerCheck::Unmet(unmet) => self.runs.report(ScheduleReport::Skipped {
                     plan: plan.clone(),
@@ -298,6 +299,18 @@ impl Scheduler {
                 self.random.draw(),
             );
             held.next = self.keep(&plan, following).await;
+        }
+    }
+
+    /// Starts `plan`'s due run in a place of the queue, or says why its
+    /// overlap policy skips it: its last run is still going (§5).
+    async fn start(&self, plan: &PlanId, held: &Planned, trigger: Trigger, limit: Concurrency) {
+        match self.queue.due(plan, held.overlap, limit) {
+            Ok(place) => self.runs.start(plan, trigger, place).await,
+            Err(overlapping) => self.runs.report(ScheduleReport::Overlapped {
+                plan: plan.clone(),
+                overlapping,
+            }),
         }
     }
 
@@ -343,12 +356,13 @@ impl Scheduler {
     }
 }
 
-/// The plans of `config` that have a schedule.
-fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, Schedule> {
+/// The plans of `config` that have a schedule, each with its overlap
+/// policy.
+fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, (Schedule, Overlap)> {
     config
         .plans()
         .iter()
-        .filter_map(|plan| Some((plan.id.clone(), plan.schedule.clone()?)))
+        .filter_map(|plan| Some((plan.id.clone(), (plan.schedule.clone()?, plan.overlap))))
         .collect()
 }
 

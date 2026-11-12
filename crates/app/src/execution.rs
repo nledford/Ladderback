@@ -204,11 +204,35 @@ impl RunOperation {
     pub async fn run_in_turn(
         &self,
         queued: Queued,
-        place: Place,
+        mut place: Place,
         cancel: impl Future<Output = ()> + Send,
     ) -> Finished {
-        let _ = (queued, place, cancel);
-        todo!()
+        let mut cancel = pin!(cancel.fuse());
+        let turn = select_biased! {
+            () = cancel => false,
+            () = place.turn().fuse() => true,
+        };
+        let finished = if turn {
+            self.run_queued(queued, cancel).await
+        } else {
+            self.cancel_waiting(queued).await
+        };
+        drop(place);
+        finished
+    }
+
+    /// Ends `queued` cancelled before its turn came: it records the end and
+    /// announces it, as a run does, and nothing else.
+    async fn cancel_waiting(&self, queued: Queued) -> Finished {
+        let Queued { mut run, .. } = queued;
+        self.cancel(&mut run);
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: run.result,
+            recording_errors: run.recording_errors,
+        }
     }
 
     /// Plays the engine's events into the operation until it finishes.

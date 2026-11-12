@@ -7,7 +7,8 @@
 //! ended.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::PlanId;
 use domain::execution::queue::{BackupQueue, Overlapping, Ticket};
@@ -57,15 +58,51 @@ impl RunQueue {
         overlap: Overlap,
         limit: Concurrency,
     ) -> Result<Place, Overlapping> {
-        let _ = (plan, overlap, limit);
-        todo!()
+        self.admit(limit, |queue| queue.due(plan, overlap))
     }
 
     /// A place for any other run of `plan`: one started by hand, or one the
     /// queue held from before the start (`BackupQueue::push`).
     pub fn push(&self, plan: &PlanId, limit: Concurrency) -> Place {
-        let _ = (plan, limit);
-        todo!()
+        match self.admit(limit, |queue| Ok::<_, Infallible>(queue.push(plan))) {
+            Ok(place) => place,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Applies `limit`, asks `take` for a ticket, and starts whatever may
+    /// start now: the new run, or, under a raised limit, runs that waited,
+    /// whether or not `take` gave a ticket.
+    fn admit<E>(
+        &self,
+        limit: Concurrency,
+        take: impl FnOnce(&mut BackupQueue) -> Result<Ticket, E>,
+    ) -> Result<Place, E> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.set_limit(limit);
+        let place = take(&mut state.queue).map(|ticket| {
+            let (sender, turn) = oneshot::channel();
+            state.turns.insert(ticket, sender);
+            Place {
+                ticket,
+                state: Arc::clone(&self.state),
+                turn,
+            }
+        });
+        state.start();
+        place
+    }
+}
+
+impl State {
+    /// Hands their turn to the runs that may start now.
+    fn start(&mut self) {
+        for ticket in self.queue.start() {
+            if let Some(turn) = self.turns.remove(&ticket) {
+                // A place drops its receiver only as it leaves the queue.
+                let _ = turn.send(());
+            }
+        }
     }
 }
 
@@ -78,12 +115,19 @@ impl Default for RunQueue {
 impl Place {
     /// Waits until the run may start, which may be at once.
     pub async fn turn(&mut self) {
-        todo!()
+        // The sender goes only with the turn, or as the place leaves, which
+        // can't happen while it waits here.
+        let _ = (&mut self.turn).await;
     }
 }
 
 impl Drop for Place {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.leave(self.ticket);
+        state.turns.remove(&self.ticket);
+        state.start();
+    }
 }
 
 #[cfg(test)]
