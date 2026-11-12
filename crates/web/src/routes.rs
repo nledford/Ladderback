@@ -2,7 +2,7 @@
 //! path shows. Each page has its own `<h1>`, the heading focus moves to when a
 //! reader navigates to it, so it carries `tabindex="-1"`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto};
@@ -15,9 +15,12 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
-use crate::components::{Checkbox, ErrorSummary, FormField, Progress, StatusBadge, SummaryItem};
-use crate::live::say;
+use crate::components::{
+    Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
+};
+use crate::live::{reply, say};
 use crate::operations::{self, Name};
+use crate::pause::{self, Ends, Pausable};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
@@ -82,6 +85,11 @@ pub(crate) struct Empty {}
 /// to a row changes the text, the bar or the button it is about, and nothing
 /// else, so a control a reader has focused is never replaced while its row
 /// updates (WCAG 2.4.3).
+///
+/// A reader can pause the page (§4.5, "Live updates"; WCAG 2.2.2): the stream
+/// goes on filling the live state, while the heading and the table show the
+/// copy taken at the pause ([`Pausable`]), and the runs that end meanwhile are
+/// counted rather than announced, then told in one sentence on the resume.
 #[component]
 pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_OPERATIONS_HEADING);
@@ -106,6 +114,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         text(&localizer, msg::UI_BACKUP_STARTED),
         text(&localizer, msg::UI_STILL_WAITING),
     );
+    let (pause_label, paused_said) = (
+        text(&localizer, msg::UI_LIVE_PAUSE),
+        text(&localizer, msg::UI_LIVE_PAUSED),
+    );
     let localizer_for_errors = Arc::clone(&localizer);
     // The state the page shows, and the connection that fills it: the history
     // first, then the events stream, with the reconnect's re-fetch between
@@ -117,6 +129,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
     ws::watch(&base, ops, phase);
+    // What the page shows: the live state, or the copy taken when the reader
+    // paused it. Every view reads this; the stream, the settle-poll and the
+    // end announcements read the live state.
+    let page = Pausable::new(ops, phase);
     let plans_url = format!("{base}/api/v1/plans");
     let plans_ops = ops;
     spawn_local(async move {
@@ -128,25 +144,50 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // The end of a run is announced from a status transition, so the events
     // stream and the settle-poll both arrive at one announcement, whichever
     // sees the end first. The first sight of a row only seeds its status.
+    // The end of a run the reader cancelled answers that press, and is said
+    // even while the page is paused. Any other end, while the page is paused,
+    // is counted instead, and the resume tells the count in one sentence.
     let seen = StoredValue::new(HashMap::<String, String>::new());
+    let cancelled = StoredValue::new(HashSet::<String>::new());
+    let ends = StoredValue::new(Ends::default());
     let announced_ops = ops;
     let announced_localizer = Arc::clone(&localizer);
     Effect::new(move |_| {
         let rows = announced_ops.get().rows;
+        let paused = page.paused_untracked();
         seen.update_value(|seen| {
             for row in &rows {
                 let status = row.summary.status.clone();
                 let previous = seen.insert(row.summary.id.clone(), status.clone());
                 let changed = previous.is_some_and(|previous| announces_end(&previous, &status));
                 if changed {
+                    let asked = cancelled
+                        .try_update_value(|cancelled| cancelled.remove(&row.summary.id))
+                        .unwrap_or_default();
                     let (politeness, words) = operations::end(&row.summary);
-                    say(
-                        politeness,
-                        &text_with(&announced_localizer, words.id, &words.args),
-                    );
+                    let words = text_with(&announced_localizer, words.id, &words.args);
+                    if asked {
+                        reply(politeness, &words);
+                    } else if paused {
+                        ends.update_value(|ends| ends.count(&status));
+                    } else {
+                        say(politeness, &words);
+                    }
                 }
             }
         });
+    });
+    let banner_localizer = Arc::clone(&localizer);
+    let resumed_localizer = Arc::clone(&localizer);
+    let on_pause = Callback::new(move |()| {
+        ends.set_value(Ends::default());
+        page.pause();
+    });
+    let on_resume = Callback::new(move |()| {
+        page.resume();
+        let words = pause::resumed(ends.get_value());
+        ends.set_value(Ends::default());
+        text_with(&resumed_localizer, words.id, &words.args)
     });
     // What the page shows, and the ids of the rows in the order it shows them.
     // Each is a memo, so an update that leaves it as it was rebuilds nothing:
@@ -155,24 +196,34 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // they are. History is the daemon's own order; a sort order is the sort
     // button's, and follows it as the reader presses it.
     let showing = Memo::new(move |_| {
-        let phase = phase.get();
-        ops.with(|state| shown(phase, &state.rows))
+        let phase = page.phase();
+        page.with(|state| shown(phase, &state.rows))
     });
-    let order = Memo::new(move |_| ops.with(|state| ordered(&state.rows, sort.get())));
+    let order = Memo::new(move |_| page.with(|state| ordered(&state.rows, sort.get())));
     let table_localizer = Arc::clone(&localizer);
     // The zone the browser reads its clock in, asked once: every instant the
     // page shows is written in it (§8.4).
     let viewer = l10n::viewer_zone();
-    let cancel_localizer = Arc::clone(&localizer);
     let start_base = base.clone();
     let cancel_base = base.clone();
     let start_ops = ops;
-    let cancel_ops = ops;
     view! {
         <PageHeading>
-            {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+            {move || if page.phase() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
         </PageHeading>
         <p>{body}</p>
+        <PauseUpdates
+            label=pause_label
+            paused_said=paused_said
+            paused=Signal::derive(move || page.paused())
+            banner=Signal::derive(move || {
+                let words = pause::banner(page.pending());
+                text_with(&banner_localizer, words.id, &words.args)
+            })
+            banner_id="operations-paused"
+            on_pause=on_pause
+            on_resume=on_resume
+        />
         {move || error.get().map(|text| view! { <p role="alert">{text}</p> })}
         // The plans sit outside the connection's phases: a reader can start a
         // backup while the history is still on its way. Their buttons are a
@@ -213,12 +264,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         spawn_local(async move {
                                             match ws::post(&url, &request).await {
                                                 Some(Posted::Done(answer)) => {
-                                                    say(Politeness::Polite, &started);
+                                                    reply(Politeness::Polite, &started);
                                                     if let Some(operation) =
                                                         ws::started_operation(&answer)
                                                         && !ws::settle(&base, ops, &operation).await
                                                     {
-                                                        say(Politeness::Polite, &still_waiting);
+                                                        reply(Politeness::Polite, &still_waiting);
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
@@ -252,7 +303,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             let newest = sorted_newest.clone();
             let oldest = sorted_oldest.clone();
             let rows_localizer = table_localizer.clone();
-            let rows_errors = cancel_localizer.clone();
             let rows_base = cancel_base.clone();
             let rows_zone = viewer.clone();
             match showing.get() {
@@ -289,7 +339,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                         SortOrder::NewestFirst => SortOrder::OldestFirst,
                                                     };
                                                     sort.set(next);
-                                                    say(
+                                                    reply(
                                                         Politeness::Polite,
                                                         match next {
                                                             SortOrder::OldestFirst => &oldest,
@@ -314,8 +364,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         row_view(
                                             rows_localizer.clone(),
                                             rows_base.clone(),
-                                            cancel_ops,
-                                            rows_errors.clone(),
+                                            page,
+                                            cancelled,
                                             id,
                                             error,
                                             rows_zone.clone(),
@@ -345,19 +395,25 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// progress report moves the bar, a start changes the status and the Started
 /// cell, and none of them replaces the Cancel button (WCAG 2.4.3). The button
 /// goes only when the run ends, and then it is no longer a control.
+///
+/// What it shows is read from `page`, which holds still while the reader has
+/// paused it; a cancel waits for its end in the live state, and puts its run
+/// in `cancelled`, so that its end is said as the answer to the press.
 fn row_view(
     localizer: Arc<Localizer>,
     base: String,
-    ops: RwSignal<OperationsState>,
-    error_localizer: Arc<Localizer>,
+    page: Pausable,
+    cancelled: StoredValue<HashSet<String>>,
     id: String,
     error: RwSignal<Option<String>>,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
+    // Its refusals are worded in the same language as the rest of it.
+    let error_localizer = Arc::clone(&localizer);
     // What an operation is and where it ran do not change, so its name and its
     // Cancel button's label are worded once.
-    let (name, cancel_label) = ops
-        .with_untracked(|state| {
+    let (name, cancel_label) = untrack(|| {
+        page.with(|state| {
             state.row(&id).map(|row| {
                 let name = match operations::name(&row.summary) {
                     Name::Plan(plan) => plan,
@@ -367,13 +423,14 @@ fn row_view(
                 (name, text_with(&localizer, cancel.id, &cancel.args))
             })
         })
-        .unwrap_or_default();
+    })
+    .unwrap_or_default();
     // A row that has left the state, in the moment before its view is dropped,
     // reads as empty: never a panic, never a stale fact.
     let status = Memo::new({
         let id = id.clone();
         move |_| {
-            ops.with(|state| {
+            page.with(|state| {
                 state
                     .row(&id)
                     .map(|row| row.summary.status.clone())
@@ -384,7 +441,7 @@ fn row_view(
     let started = Memo::new({
         let id = id.clone();
         move |_| {
-            ops.with(|state| {
+            page.with(|state| {
                 state
                     .row(&id)
                     .map(|row| key(row).to_owned())
@@ -394,12 +451,12 @@ fn row_view(
     });
     let percent = Memo::new({
         let id = id.clone();
-        move |_| ops.with(|state| state.row(&id).and_then(progress_percent))
+        move |_| page.with(|state| state.row(&id).and_then(progress_percent))
     });
     let result = Memo::new({
         let id = id.clone();
         move |_| {
-            ops.with(|state| {
+            page.with(|state| {
                 state
                     .row(&id)
                     .map(|row| operations::result(&row.summary))
@@ -478,15 +535,21 @@ fn row_view(
                                         let still_waiting = still_waiting.clone();
                                         let operation = operation.clone();
                                         let url = url.clone();
-                                        let ops = ops;
+                                        let ops = page.live();
+                                        cancelled.update_value(|cancelled| {
+                                            cancelled.insert(operation.clone());
+                                        });
                                         spawn_local(async move {
                                             match ws::post(&url, &Empty {}).await {
                                                 Some(Posted::Done(_)) => {
                                                     if !ws::settle(&base, ops, &operation).await {
-                                                        say(Politeness::Polite, &still_waiting);
+                                                        reply(Politeness::Polite, &still_waiting);
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
+                                                    cancelled.update_value(|cancelled| {
+                                                        cancelled.remove(&operation);
+                                                    });
                                                     error.set(Some(refusal(
                                                         &error_localizer,
                                                         code,
@@ -494,7 +557,11 @@ fn row_view(
                                                         detail.as_deref(),
                                                     )));
                                                 }
-                                                None => {}
+                                                None => {
+                                                    cancelled.update_value(|cancelled| {
+                                                        cancelled.remove(&operation);
+                                                    });
+                                                }
                                             }
                                         });
                                     }
@@ -825,7 +892,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             return;
         }
         busy.set(true);
-        say(
+        reply(
             Politeness::Polite,
             &text(&submit_localizer, msg::UI_REPOSITORIES_WORKING),
         );
@@ -855,7 +922,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                         let (id, args) = outcome.shown(alias);
                         result.set(Some(text_with(&localizer, id, &args)));
                         let (id, args) = outcome.announced(alias);
-                        say(Politeness::Polite, &text_with(&localizer, id, &args));
+                        reply(Politeness::Polite, &text_with(&localizer, id, &args));
                         problems.show(Vec::new(), None);
                         if outcome.saved() {
                             inputs.clear();
@@ -1088,7 +1155,7 @@ fn create_in_row(
         busy.set(true);
         creates.created.set(None);
         refused.set(None);
-        say(
+        reply(
             Politeness::Polite,
             &text(&localizer, msg::UI_REPOSITORIES_WORKING),
         );

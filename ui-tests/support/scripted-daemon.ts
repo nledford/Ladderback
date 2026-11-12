@@ -241,4 +241,20 @@ export class ScriptedDaemon {
     backup.result = { type: "backup", files, bytes: 4096, "duration-ms": 1000 };
     await this.#tell({ type: "operation-succeeded", operation: backup.id, finished_at: finishedAt });
   }
+
+  /** The backup of `plan` fails, the engine's own failure: its log has the
+   *  end before the page is told, as with `succeeds`. */
+  async fails(plan: string, finishedAt: string): Promise<void> {
+    const backup = this.#backupOf(plan);
+    backup.status = "failed";
+    backup["finished-at"] = finishedAt;
+    backup["failure-code"] = "operation-failed";
+    await this.#tell({
+      type: "operation-failed",
+      operation: backup.id,
+      code: "operation-failed",
+      args: [],
+      finished_at: finishedAt,
+    });
+  }
 }

@@ -196,6 +196,24 @@ impl OperationsState {
     pub(crate) fn row(&self, operation: &str) -> Option<&OperationRow> {
         self.rows.iter().find(|row| row.summary.id == operation)
     }
+
+    /// How many operations this state shows otherwise than `shown` does: a
+    /// row that changed, a row `shown` lacks and a row this one lacks each
+    /// count once, however many events changed it. What a paused page's
+    /// banner counts (§4.5): the rows that change when it resumes.
+    pub(crate) fn changes_since(&self, shown: &Self) -> usize {
+        let mut before: HashMap<&str, &OperationRow> = shown
+            .rows
+            .iter()
+            .map(|row| (row.summary.id.as_str(), row))
+            .collect();
+        let changed = self
+            .rows
+            .iter()
+            .filter(|row| before.remove(row.summary.id.as_str()) != Some(*row))
+            .count();
+        changed.saturating_add(before.len())
+    }
 }
 
 /// Where a status stands in an operation's life: still `QUEUED`, running, or
@@ -379,6 +397,74 @@ mod tests {
 
     const FIRST: &str = "000000000001";
     const SECOND: &str = "000000000002";
+
+    #[test]
+    fn a_state_shows_no_change_since_itself() {
+        let state = OperationsState::from_history(
+            vec![
+                summary(SECOND, "running", true, false),
+                succeeded_backup(FIRST),
+            ],
+            None,
+        );
+        assert_eq!(state.changes_since(&state.clone()), 0);
+    }
+
+    #[test]
+    fn a_row_that_changed_is_one_change_however_many_events_changed_it() {
+        let shown = OperationsState::from_history(
+            vec![
+                summary(SECOND, "running", true, false),
+                succeeded_backup(FIRST),
+            ],
+            None,
+        );
+        let mut live = shown.clone();
+        for current in 1..=5 {
+            live.apply(&UiEvent::OperationProgress {
+                operation: id(SECOND),
+                current,
+                total: Some(5),
+            });
+        }
+        assert_eq!(live.changes_since(&shown), 1);
+        live.apply(&UiEvent::OperationSucceeded {
+            operation: id(SECOND),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        assert_eq!(live.changes_since(&shown), 1);
+    }
+
+    #[test]
+    fn a_row_that_came_and_a_row_that_went_are_a_change_each() {
+        let shown = OperationsState::from_history(
+            vec![
+                summary(SECOND, "running", true, false),
+                succeeded_backup(FIRST),
+            ],
+            None,
+        );
+        let came = OperationsState::from_history(
+            vec![
+                summary("000000000003", "queued", false, false),
+                summary(SECOND, "running", true, false),
+                succeeded_backup(FIRST),
+            ],
+            None,
+        );
+        assert_eq!(came.changes_since(&shown), 1);
+        let went =
+            OperationsState::from_history(vec![summary(SECOND, "running", true, false)], None);
+        assert_eq!(went.changes_since(&shown), 1);
+        let both = OperationsState::from_history(
+            vec![
+                summary("000000000003", "queued", false, false),
+                summary(SECOND, "succeeded", true, true),
+            ],
+            None,
+        );
+        assert_eq!(both.changes_since(&shown), 3);
+    }
 
     #[test]
     fn the_history_arrives_newest_first_with_its_cursor() {

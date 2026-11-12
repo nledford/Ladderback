@@ -20,6 +20,10 @@
 //!   say nothing for a live region in inert content. They are written at once
 //!   when the last modal closes, assertive first. At most [`MAX_HELD`] wait
 //!   per region.
+//! - **While live updates are paused every event waits** (WCAG 2.2.2): what
+//!   happened by itself is held until the reader resumes, and then said in
+//!   one write after the page's own summary. What answers the reader's own
+//!   press is said as usual.
 //! - **Progress is never announced.**
 
 use std::time::Duration;
@@ -54,8 +58,12 @@ pub(crate) enum Politeness {
 /// What a message is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
-    /// Something that happened: an operation finished, an agent came back.
+    /// Something that happened by itself: an operation finished, an agent
+    /// came back. It waits while live updates are paused.
     Event,
+    /// The page's answer to what the reader just did: a sort, a start, a
+    /// form's result. It is said whether or not live updates are paused.
+    Reply,
     /// A progress update. It is never announced: a screen reader reads the
     /// `<progress>` element itself.
     Progress,
@@ -97,6 +105,15 @@ pub(crate) struct Announcer<C> {
     window_ends: Option<Duration>,
     /// How many modal dialogs are open.
     open_modals: usize,
+    /// Whether the reader has paused live updates.
+    paused: bool,
+    /// Polite events waiting for the resume, in arrival order.
+    paused_polite: Vec<String>,
+    /// Assertive events waiting for the resume, in arrival order.
+    paused_assertive: Vec<String>,
+    /// What the pause said, which a resume replaces while it is not yet
+    /// written.
+    paused_said: Option<String>,
     polite_set: Option<PendingSet>,
     assertive_set: Option<PendingSet>,
 }
@@ -109,6 +126,10 @@ impl<C: Clock> Announcer<C> {
             held_assertive: Vec::new(),
             window_ends: None,
             open_modals: 0,
+            paused: false,
+            paused_polite: Vec::new(),
+            paused_assertive: Vec::new(),
+            paused_said: None,
             polite_set: None,
             assertive_set: None,
         }
@@ -122,6 +143,13 @@ impl<C: Clock> Announcer<C> {
             text,
         } = announcement;
         if kind == Kind::Progress || text.trim().is_empty() {
+            return Vec::new();
+        }
+        if kind == Kind::Event && self.paused {
+            match politeness {
+                Politeness::Polite => hold(&mut self.paused_polite, text),
+                Politeness::Assertive => hold(&mut self.paused_assertive, text),
+            }
             return Vec::new();
         }
         match politeness {
@@ -154,6 +182,70 @@ impl<C: Clock> Announcer<C> {
             return Vec::new();
         }
         self.open_modals -= 1;
+        if self.open_modals > 0 {
+            return Vec::new();
+        }
+        let mut effects = self.flush_held_assertive();
+        effects.extend(self.flush_held());
+        effects
+    }
+
+    /// The reader paused live updates: every [`Kind::Event`] waits for
+    /// [`Self::resume`]. `said`, the page's answer to the press, is written at
+    /// once rather than after a merge window, so a resume soon after never
+    /// joins it. Returns the writes due now.
+    pub(crate) fn pause(&mut self, said: String) -> Vec<Effect> {
+        self.paused = true;
+        // What came before the pause, still in its window, is said with it,
+        // first: nothing that happened before the press follows its answer.
+        hold(&mut self.held, said.clone());
+        self.paused_said = Some(said);
+        if self.open_modals > 0 {
+            return Vec::new();
+        }
+        self.flush_held()
+    }
+
+    /// The reader resumed live updates: `summary`, what changed meanwhile,
+    /// is said first, then every message that waited, in one write per
+    /// region at once, assertive first. Behind an open modal they wait for it
+    /// to close instead. A resume while not paused is ignored.
+    pub(crate) fn resume(&mut self, summary: Option<String>) -> Vec<Effect> {
+        if !self.paused {
+            return Vec::new();
+        }
+        self.paused = false;
+        // A pause not yet written is stale: the resume says what is true now.
+        // The pause may have joined a write already queued, as its last text:
+        // only the pause leaves it.
+        if let Some(said) = self.paused_said.take() {
+            let before = self.polite_set.as_ref().and_then(|pending| {
+                pending
+                    .text
+                    .strip_suffix(said.as_str())
+                    .map(|before| before.trim_end().to_owned())
+            });
+            match before {
+                Some(before) if before.is_empty() => self.polite_set = None,
+                Some(before) => {
+                    if let Some(pending) = self.polite_set.as_mut() {
+                        pending.text = before;
+                    }
+                }
+                None => {}
+            }
+            self.held.retain(|text| *text != said);
+        }
+        let mut polite = Vec::new();
+        let waited = std::mem::take(&mut self.paused_polite);
+        let replies = std::mem::take(&mut self.held);
+        for text in summary.into_iter().chain(waited).chain(replies) {
+            hold(&mut polite, text);
+        }
+        self.held = polite;
+        for text in std::mem::take(&mut self.paused_assertive) {
+            hold(&mut self.held_assertive, text);
+        }
         if self.open_modals > 0 {
             return Vec::new();
         }
@@ -300,6 +392,22 @@ mod tests {
                 politeness,
                 text: text.to_owned(),
             })
+        }
+
+        fn reply(&mut self, text: &str) -> Vec<Effect> {
+            self.announcer.announce(Announcement {
+                kind: Kind::Reply,
+                politeness: Polite,
+                text: text.to_owned(),
+            })
+        }
+
+        fn pause(&mut self) -> Vec<Effect> {
+            self.announcer.pause("Live updates are paused.".to_owned())
+        }
+
+        fn resume(&mut self, summary: &str) -> Vec<Effect> {
+            self.announcer.resume(Some(summary.to_owned()))
         }
 
         fn polite(&mut self, text: &str) -> Vec<Effect> {
@@ -639,5 +747,223 @@ mod tests {
         page.say(Assertive, "Restore failed.");
         page.at(500);
         assert_eq!(page.announcer.next_wakeup(), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn pausing_says_so_at_once_without_a_merge_window() {
+        let mut page = Page::new();
+        assert_eq!(page.pause(), [Clear(Polite)]);
+        assert_eq!(
+            page.writes_between(1, 5_000),
+            [(50, set(Polite, "Live updates are paused."))]
+        );
+    }
+
+    #[test]
+    fn an_event_while_paused_is_not_said() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        assert_eq!(page.polite("Backup finished."), []);
+        assert_eq!(page.say(Assertive, "Backup failed."), []);
+        assert_eq!(page.writes_between(101, 10_000), []);
+        assert_eq!(page.announcer.next_wakeup(), None);
+    }
+
+    #[test]
+    fn a_reply_while_paused_is_said_as_usual() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.reply("Sorted by started, newest first.");
+        assert_eq!(
+            page.writes_between(101, 5_000),
+            [
+                (2_100, Clear(Polite)),
+                (2_150, set(Polite, "Sorted by started, newest first.")),
+            ]
+        );
+    }
+
+    #[test]
+    fn resuming_says_the_summary_then_what_waited_in_one_write_at_once() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.polite("Still waiting.");
+        page.polite("Agent back online.");
+        page.at(5_000);
+        assert_eq!(page.resume("Live updates are on again."), [Clear(Polite)]);
+        assert_eq!(
+            page.writes_between(5_001, 10_000),
+            [(
+                5_050,
+                set(
+                    Polite,
+                    "Live updates are on again. Still waiting. Agent back online."
+                )
+            )]
+        );
+    }
+
+    #[test]
+    fn resuming_says_what_waited_assertively_first() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.say(Assertive, "Restore failed.");
+        page.at(5_000);
+        assert_eq!(
+            page.resume("Live updates are on again."),
+            [Clear(Assertive), Clear(Polite)]
+        );
+        assert_eq!(
+            page.poll_at(5_050),
+            [
+                set(Assertive, "Restore failed."),
+                set(Polite, "Live updates are on again."),
+            ]
+        );
+    }
+
+    #[test]
+    fn after_a_resume_events_are_said_again() {
+        let mut page = Page::new();
+        page.pause();
+        page.at(1_000);
+        page.resume("Live updates are on again.");
+        page.writes_between(1_001, 1_100);
+        page.polite("Backup finished.");
+        assert_eq!(
+            page.writes_between(1_101, 5_000),
+            [
+                (3_100, Clear(Polite)),
+                (3_150, set(Polite, "Backup finished.")),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_reply_still_in_its_window_joins_the_resumes_write() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.reply("Sorted by started, newest first.");
+        page.at(500);
+        assert_eq!(page.resume("Live updates are on again."), [Clear(Polite)]);
+        assert_eq!(
+            page.writes_between(501, 5_000),
+            [(
+                550,
+                set(
+                    Polite,
+                    "Live updates are on again. Sorted by started, newest first."
+                )
+            )]
+        );
+    }
+
+    #[test]
+    fn a_resume_while_not_paused_is_ignored() {
+        let mut page = Page::new();
+        assert_eq!(page.resume("Live updates are on again."), []);
+        page.polite("Backup finished.");
+        assert_eq!(page.poll_at(1_999), []);
+        assert_eq!(page.poll_at(2_000), [Clear(Polite)]);
+        assert_eq!(page.poll_at(2_050), [set(Polite, "Backup finished.")]);
+    }
+
+    #[test]
+    fn a_resume_with_nothing_to_say_writes_nothing() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        assert_eq!(page.announcer.resume(None), []);
+        assert_eq!(page.writes_between(101, 5_000), []);
+    }
+
+    #[test]
+    fn a_resume_behind_an_open_modal_waits_for_it_to_close() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.polite("Backup finished.");
+        page.announcer.modal_opened();
+        assert_eq!(page.resume("Live updates are on again."), []);
+        assert_eq!(page.writes_between(101, 5_000), []);
+        assert_eq!(page.announcer.modal_closed(), [Clear(Polite)]);
+        assert_eq!(
+            page.poll_at(5_050),
+            [set(Polite, "Live updates are on again. Backup finished.")]
+        );
+    }
+
+    #[test]
+    fn what_waits_while_paused_is_said_once_and_bounded() {
+        let mut page = Page::new();
+        page.pause();
+        page.writes_between(1, 100);
+        page.polite("Backup finished.");
+        for number in 0..MAX_HELD + 5 {
+            page.polite(&format!("Message {number}."));
+            page.say(Assertive, &format!("Failure {number}."));
+        }
+        page.at(1_000);
+        assert_eq!(
+            page.resume("Live updates are on again."),
+            [Clear(Assertive), Clear(Polite)]
+        );
+        let polite = ["Live updates are on again.", "Backup finished."]
+            .into_iter()
+            .map(str::to_owned)
+            .chain((0..MAX_HELD - 2).map(|number| format!("Message {number}.")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let assertive = (0..MAX_HELD)
+            .map(|number| format!("Failure {number}."))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            page.poll_at(1_050),
+            [set(Assertive, &assertive), set(Polite, &polite)]
+        );
+    }
+
+    #[test]
+    fn a_pause_behind_an_open_modal_says_so_when_it_closes() {
+        let mut page = Page::new();
+        page.announcer.modal_opened();
+        assert_eq!(page.pause(), []);
+        assert_eq!(page.announcer.modal_closed(), [Clear(Polite)]);
+        assert_eq!(page.poll_at(50), [set(Polite, "Live updates are paused.")]);
+    }
+
+    #[test]
+    fn a_resume_before_the_pause_is_written_replaces_it() {
+        let mut page = Page::new();
+        assert_eq!(page.pause(), [Clear(Polite)]);
+        page.at(10);
+        assert_eq!(page.resume("Live updates are on again."), [Clear(Polite)]);
+        assert_eq!(
+            page.writes_between(11, 5_000),
+            [(60, set(Polite, "Live updates are on again."))]
+        );
+    }
+
+    #[test]
+    fn a_resume_before_a_pause_joined_to_an_event_is_written_drops_only_the_pause() {
+        let mut page = Page::new();
+        assert!(page.polite("Backup finished.").is_empty());
+        page.at(1_000);
+        assert_eq!(page.pause(), [Clear(Polite)]);
+        page.at(1_020);
+        assert!(page.resume("Live updates are on again.").is_empty());
+        assert_eq!(
+            page.writes_between(1_021, 5_000),
+            [(
+                1_050,
+                set(Polite, "Backup finished. Live updates are on again.")
+            )]
+        );
     }
 }

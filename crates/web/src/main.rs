@@ -56,6 +56,8 @@ mod maintenance;
 mod operations;
 mod page;
 mod repositories;
+// What a paused live page shows, counts and says, decided on the host.
+mod pause;
 mod routes;
 // The Snapshots page's DOM glue; the decisions it sends and shows are
 // `maintenance.rs` and `wording.rs`.

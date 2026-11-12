@@ -31,8 +31,8 @@ Given("the browser asks for {string}", function (this: BrowserWorld, setting: st
 });
 
 Given("the reader sets the text size to {int} percent", function (this: BrowserWorld, percent: number) {
-  assert.equal(percent, 200, "only the 200 percent text size is defined");
-  this.readerStyles.push(DOUBLE_FONT_CSS);
+  assert.ok(percent === 100 || percent === 200, "only 100 percent, the browser's own size, and 200 percent are defined");
+  if (percent === 200) this.readerStyles.push(DOUBLE_FONT_CSS);
 });
 
 Given("the reader increases the text spacing", function (this: BrowserWorld) {

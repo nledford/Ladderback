@@ -215,6 +215,16 @@ ui-gallery-demo-empty-review = Demo review with nothing to do
 # What the review demo that has nothing to do says.
 ui-gallery-demo-empty-review-body = There is nothing to change.
 
+# The heading of the pause control's demo.
+ui-gallery-pause-heading = Pause control
+
+# The demo's pause control: it pauses the demo's own updates.
+ui-gallery-pause-demo = Pause the demo updates
+
+# A button that ends a demo run: said at once while updates are not paused,
+# counted while they are.
+ui-gallery-finish-demo-run = Finish a demo run
+
 ## The review dialog (§4.5): what a run would do, shown in a dialog before it
 ## runs. The gallery's demos and the snapshots page both use its buttons.
 
@@ -786,6 +796,45 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## Pausing live updates (§4.5, WCAG 2.2.2): a page that changes by itself
+## holds still until the reader resumes it.
+
+# The toggle button that pauses a page's live updates. Its name stays the same
+# while it is pressed; a screen reader says that it is.
+ui-live-pause = Pause live updates
+
+# Said politely, once, when live updates are paused.
+ui-live-paused = Live updates are paused.
+
+# The banner beside the paused button, which describes it. It is not said by
+# itself: a screen reader reads it with the button.
+# $count (number): how many things on the page have changed since updates were
+# paused, which the page shows when they resume.
+ui-live-paused-banner =
+    { $count ->
+        [0] Live updates are paused. Nothing has changed since.
+        [one] Live updates are paused. One change is waiting.
+       *[other] Live updates are paused. { $count } changes are waiting.
+    }
+
+# Said politely, once, when live updates resume, in place of one announcement
+# for each run that ended while they were paused.
+# $ended (number): how many runs ended while updates were paused.
+# $failed (number): how many of those runs failed.
+ui-live-resumed =
+    { $ended ->
+        [0] Live updates are on again. No run ended while they were paused.
+        [one] { $failed ->
+            [0] Live updates are on again. One run ended while they were paused, and it did not fail.
+           *[other] Live updates are on again. One run ended while they were paused, and it failed.
+        }
+       *[other] { $failed ->
+            [0] Live updates are on again. { $ended } runs ended while they were paused, and none of them failed.
+            [one] Live updates are on again. { $ended } runs ended while they were paused, and one of them failed.
+           *[other] Live updates are on again. { $ended } runs ended while they were paused, and { $failed } of them failed.
+        }
+    }
 
 ## The navigation every page shares.
 
