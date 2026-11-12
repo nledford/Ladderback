@@ -125,6 +125,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [68](decisions/68-the-start-of-an-operation-is-announced-from-the-run.md) | The start of an operation is announced from the run |
 | [69](decisions/69-a-save-edits-the-file-a-person-wrote.md) | A save edits the file a person wrote |
 | [71](decisions/71-signing-macos-builds-without-a-developer-id.md) | Signing macOS builds without a Developer ID |
+| [72](decisions/72-a-schedule-s-interval-and-time-zone-and-a-plan-s-overlap-policy.md) | A schedule's interval and time zone, and a plan's overlap policy |
 
 ## 17. Open questions
 
