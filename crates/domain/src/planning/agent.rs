@@ -237,15 +237,47 @@ impl AgentConfig {
     /// as the repository ID of the entry `alias` (§6.1, decision NN), the
     /// rest of it as it is. Recorded only while that entry is still `read`,
     /// the entry as the job that opened the repository read it, and records
-    /// no ID; and only when no other entry records `id`.
+    /// no ID; and only when no other entry is that repository, by the rule
+    /// [`AgentConfig::new`] checks, so the result is a configuration it
+    /// would build.
     pub fn record_id(
         &self,
         alias: &RepositoryAlias,
         read: &RepositoryConfig,
         id: &RepositoryId,
     ) -> Result<Self, NotRecorded> {
-        let _ = (alias, read, id);
-        todo!()
+        let entry = match self.repositories.get(alias) {
+            Some(entry) if entry == read => entry,
+            // An earlier job made from the same read recorded this ID.
+            Some(entry)
+                if entry.id.as_ref() == Some(id)
+                    && read.id.is_none()
+                    && RepositoryConfig {
+                        id: None,
+                        ..entry.clone()
+                    } == *read =>
+            {
+                return Err(NotRecorded::Recorded);
+            }
+            _ => return Err(NotRecorded::Changed),
+        };
+        if entry.id.is_some() {
+            return Err(NotRecorded::Recorded);
+        }
+        let same = self
+            .repositories
+            .iter()
+            .find(|(other, config)| *other != alias && config.is(&entry.settings, Some(id)));
+        if let Some((other, _)) = same {
+            return Err(NotRecorded::SameRepository {
+                other: other.clone(),
+            });
+        }
+        let mut recorded = self.clone();
+        if let Some(entry) = recorded.repositories.get_mut(alias) {
+            entry.id = Some(id.clone());
+        }
+        Ok(recorded)
     }
 }
 
