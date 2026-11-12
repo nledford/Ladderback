@@ -18,11 +18,12 @@
 //!   plan's tags. A forget over all snapshots of one group would otherwise
 //!   reach the other plans', and the other agents'.
 //!
-//! What stays out: the schedule, the retry and the repository's maintenance
-//! (rustic has no place for them, and a forget that prunes would run outside
-//! Ladderback's own maintenance), and every secret. A password is written as
-//! the command or the file that reads it, and an option that is a reference
-//! or a secret is left out with the variable that rustic reads it from.
+//! What stays out: the schedule, the overlap policy, the retry and the
+//! repository's maintenance (rustic has no place for them, and a forget that
+//! prunes would run outside Ladderback's own maintenance), and every secret.
+//! A password is written as the command or the file that reads it, and an
+//! option that is a reference or a secret is left out with the variable that
+//! rustic reads it from.
 
 use crate::KeyringCommand;
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
