@@ -637,12 +637,21 @@ impl Operations for PlanRunner {
         // The engine opens only the repository the configuration recorded,
         // when it recorded one (§7.3), and the job carries the entry it was
         // made from, so the ID it opens is recorded in an entry that records
-        // none (§6.1, decision 57).
-        let resolved = self
+        // none (§6.1, decision 57). A secret that can't be resolved is
+        // refused with its own code, masked of every secret of the
+        // repository, as the repository routes refuse it (I4, #309).
+        let resolved = match self
             .resolve
             .resolve_saved(&plan.repository, repository)
             .await
-            .map_err(|_| StartError::Unavailable)?;
+        {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                return Err(StartError::SecretRefused(
+                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
+                ));
+            }
+        };
         let job = Job::Backup(BackupJob {
             repository: resolved.access,
             sources: plan.sources.iter().map(|s| s.as_str().to_owned()).collect(),

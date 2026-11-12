@@ -65,8 +65,13 @@ fn source(agent: &Agent) -> PathBuf {
 }
 
 /// Writes the daemon's configuration again, with `hooks` around every
-/// operation: the same repository, plan and source the serving step chose.
-async fn save_config_with_hooks(agent: &Agent, run_finally: Option<String>) {
+/// operation and the repository's password from `password`: the same
+/// repository, plan and source the serving step chose.
+async fn save_config(
+    agent: &Agent,
+    run_finally: Option<String>,
+    password: domain::secrets::SecretRef,
+) {
     let repository = agent
         .backup
         .repository
@@ -89,9 +94,7 @@ async fn save_config_with_hooks(agent: &Agent, run_finally: Option<String>) {
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
                     repo_hot: None,
-                    password: domain::secrets::SecretRef::Inline(
-                        domain::secrets::SecretValue::new(super::backup_steps::PASSWORD),
-                    ),
+                    password,
                     options: Default::default(),
                     options_hot: Default::default(),
                     options_cold: Default::default(),
@@ -344,7 +347,61 @@ async fn a_finally_hook(agent: &mut Agent) {
         "touch {}",
         mark.to_str().expect("a hook mark path without spaces")
     );
-    save_config_with_hooks(agent, Some(command)).await;
+    save_config(agent, Some(command), inline_password()).await;
+}
+
+/// The password the serving step's repository was made with, written in the
+/// configuration.
+fn inline_password() -> domain::secrets::SecretRef {
+    domain::secrets::SecretRef::Inline(domain::secrets::SecretValue::new(
+        super::backup_steps::PASSWORD,
+    ))
+}
+
+#[given(
+    expr = "the plan's repository reads its password from a command that prints {string} and then fails saying {string}"
+)]
+async fn a_failing_password_command(agent: &mut Agent, printed: String, said: String) {
+    // `/bin/sh` is started directly, with no shell around it: the script is
+    // one argument. What it prints is on stdout, where a password would be.
+    let script = format!("printf '%s\\n' '{printed}'; printf '%s\\n' '{said}' >&2; exit 3");
+    let command = domain::secrets::CommandLine::new("/bin/sh", ["-c".to_owned(), script])
+        .expect("a command line");
+    save_config(agent, None, domain::secrets::SecretRef::Command(command)).await;
+}
+
+#[when(expr = "the client starts a backup of the plan {string}")]
+async fn the_client_starts_a_backup(agent: &mut Agent, plan: String) {
+    let body = serde_json::json!({ "plan": plan }).to_string();
+    super::repositories_steps::api_post(agent, "/api/v1/operations", &body).await;
+}
+
+#[then(expr = "the refusal names the setting {string} and the command {string}")]
+fn the_refusal_names_the_command(agent: &mut Agent, setting: String, command: String) {
+    let (_, json) = super::repositories_steps::api_answer(agent);
+    let text = |value: String| serde_json::json!({"type": "text", "value": value});
+    assert_eq!(json["args"]["field"], text(setting), "the refusal: {json}");
+    assert_eq!(json["args"]["source"], text(command), "the refusal: {json}");
+}
+
+#[then(expr = "the refusal says the command said {string}")]
+fn the_refusal_says_what_the_command_said(agent: &mut Agent, said: String) {
+    let (_, json) = super::repositories_steps::api_answer(agent);
+    assert_eq!(
+        json["detail"],
+        serde_json::json!(said),
+        "the refusal: {json}"
+    );
+}
+
+#[then("the history page lists no operation")]
+async fn lists_no_operation(agent: &mut Agent) {
+    let page = history_page(agent, "limit=50").await;
+    assert_eq!(
+        page.get("operations"),
+        Some(&serde_json::json!([])),
+        "the history page: {page}"
+    );
 }
 
 /// The file a held after hook waits on, in the scenario's scratch folder.

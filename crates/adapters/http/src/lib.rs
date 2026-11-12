@@ -123,12 +123,16 @@ pub trait Operations: Send + Sync {
 }
 
 /// Why a request couldn't start an operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartError {
     /// No plan by that name is configured.
     UnknownPlan,
+    /// The plan's repository has a secret that cannot be resolved, or a
+    /// setting with a reference that is not valid: the refusal says which,
+    /// as the repository routes and the snapshot listing tell it.
+    SecretRefused(SecretRefusal),
     /// A plan is there but cannot be started just now, for example because
-    /// its configuration or repository cannot be read.
+    /// its configuration cannot be read.
     Unavailable,
 }
 
@@ -415,6 +419,7 @@ async fn run_plan(
             api::ErrorCode::PlanUnknown,
             vec![("plan", api::MsgArg::Text(plan))],
         ),
+        Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(StartError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::ConfigUnavailable,
@@ -769,10 +774,17 @@ mod tests {
     #[async_trait]
     impl Operations for Plans {
         async fn start_backup(&self, plan: String) -> Result<String, StartError> {
-            if plan == "missing" {
-                Err(StartError::UnknownPlan)
-            } else {
-                Ok("018f0000-0000-7000-8000-000000000001".to_owned())
+            match plan.as_str() {
+                "missing" => Err(StartError::UnknownPlan),
+                "no-secret" => Err(StartError::SecretRefused(SecretRefusal {
+                    code: api::ErrorCode::SecretCommandFailed,
+                    args: vec![
+                        ("field", api::MsgArg::Text("password".to_owned())),
+                        ("source", api::MsgArg::Text("pass".to_owned())),
+                    ],
+                    detail: Some("no such entry".to_owned()),
+                })),
+                _ => Ok("018f0000-0000-7000-8000-000000000001".to_owned()),
             }
         }
 
@@ -1088,6 +1100,33 @@ mod tests {
         assert_eq!(
             body(response).await,
             r#"{"code":"plan-unknown","args":{"plan":{"type":"text","value":"missing"}}}"#
+        );
+    }
+
+    /// A secret of the plan's repository that can't be resolved is refused
+    /// with its own code, its arguments and what the source said, as the
+    /// repository routes refuse it: not as a configuration that can't be
+    /// read (#309).
+    #[tokio::test]
+    async fn a_plan_whose_secret_cannot_be_resolved_is_refused_with_the_secret_s_code() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/operations",
+            r#"{"plan":"no-secret"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+            serde_json::json!({
+                "code": "secret-command-failed",
+                "args": {
+                    "field": {"type": "text", "value": "password"},
+                    "source": {"type": "text", "value": "pass"},
+                },
+                "detail": "no such entry",
+            })
         );
     }
 
