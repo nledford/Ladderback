@@ -18,21 +18,29 @@ axum.workspace = true
 base64.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
+log.workspace = true
 serde_json.workspace = true
 mime_guess.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 sha2.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+# Every accept holds the spawn gate (decision 66).
+spawn-gate.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "time"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+testkit.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tokio-tungstenite = { workspace = true }
 tower.workspace = true
 uuid.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+# `dup` makes a descriptor that is not close-on-exec: the listener's tests.
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

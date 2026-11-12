@@ -12,6 +12,7 @@
 )]
 
 mod body_limit;
+mod listener;
 mod maintenance;
 mod repositories;
 mod request_checks;
@@ -33,6 +34,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
+pub use listener::GatedListener;
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
@@ -995,7 +997,8 @@ mod tests {
     /// Serves the router on a loopback port, and returns where and the bus
     /// its state holds.
     async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let loopback = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0));
+        let listener = GatedListener::bind(loopback).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let events = Arc::new(InMemoryEventBus::new());
         let state = AppState {
