@@ -859,6 +859,165 @@ mod tests {
         assert_eq!(state.rows[0].summary.status, "succeeded");
     }
 
+    /// `summary` with the warnings `codes`, newest last, as the history
+    /// holds them.
+    fn warned(mut summary: OperationSummaryDto, codes: &[WarningCode]) -> OperationSummaryDto {
+        summary.warning_codes = codes.to_vec();
+        summary
+    }
+
+    #[test]
+    fn a_reread_at_the_same_stage_adds_the_warnings_the_page_missed() {
+        // The page heard the start and some progress; a hook before the run
+        // warned, which no event tells (#328). The re-read has the warning,
+        // and the rest of the row stays as the page has it.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "queued", false, false)], None);
+        state.apply(&UiEvent::OperationStarted {
+            operation: id(FIRST),
+            repository: Some("demo".to_owned()),
+            started_at: "2026-11-09T10:00:01.234567Z".to_owned(),
+        });
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            current: 3,
+            total: Some(10),
+        });
+        state.merge(page(
+            vec![warned(
+                summary(FIRST, "running", true, false),
+                &[WarningCode::HookWarning],
+            )],
+            None,
+        ));
+        let row = &state.rows[0];
+        assert_eq!(row.summary.warning_codes, [WarningCode::HookWarning]);
+        assert_eq!(row.summary.status, "running");
+        assert_eq!(
+            row.summary.started_at.as_deref(),
+            Some("2026-11-09T10:00:01.234567Z"),
+            "the start the page heard stays"
+        );
+        assert_eq!(
+            row.progress,
+            Some(Progress {
+                current: 3,
+                total: Some(10)
+            }),
+            "the live part of the row survives the merge"
+        );
+    }
+
+    #[test]
+    fn a_reread_adds_each_warning_the_page_lacks_once() {
+        // The page heard one unreadable source; the history has the hook's
+        // warning from before the run. Each is in the row once, the
+        // history's first, however often the history is read again.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let unreadable = UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        };
+        state.apply(&unreadable);
+        let history = warned(
+            summary(FIRST, "running", true, false),
+            &[WarningCode::HookWarning],
+        );
+        state.merge(page(vec![history.clone()], None));
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [WarningCode::HookWarning, WarningCode::SourceUnreadable]
+        );
+        state.merge(page(vec![history], None));
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [WarningCode::HookWarning, WarningCode::SourceUnreadable],
+            "a second read adds nothing the row has"
+        );
+        // A second unreadable source is a warning of its own: a history that
+        // has one of the two leaves the row both.
+        state.apply(&unreadable);
+        state.merge(page(
+            vec![warned(
+                summary(FIRST, "running", true, false),
+                &[WarningCode::HookWarning, WarningCode::SourceUnreadable],
+            )],
+            None,
+        ));
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [
+                WarningCode::HookWarning,
+                WarningCode::SourceUnreadable,
+                WarningCode::SourceUnreadable
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_whose_warning_came_only_from_the_history_ends_with_warnings() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.merge(page(
+            vec![warned(
+                summary(FIRST, "running", true, false),
+                &[WarningCode::SourceUnreadable],
+            )],
+            None,
+        ));
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        assert_eq!(state.rows[0].summary.status, "succeeded-with-warnings");
+    }
+
+    #[test]
+    fn a_reread_that_moves_a_queued_row_on_keeps_the_warnings_the_page_heard() {
+        // The page read the run as queued, and its start was told before the
+        // stream opened; a warning then reached the queued row. The read
+        // that says running keeps that warning beside the history's own.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "queued", false, false)], None);
+        state.apply(&UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        });
+        let read = warned(
+            summary(FIRST, "running", true, false),
+            &[WarningCode::HookWarning],
+        );
+        state.merge(page(vec![read.clone()], None));
+        let row = &state.rows[0];
+        assert_eq!(
+            row.summary.warning_codes,
+            [WarningCode::HookWarning, WarningCode::SourceUnreadable]
+        );
+        assert_eq!(row.summary.status, "running");
+        assert_eq!(row.summary.started_at, read.started_at, "the read's start");
+    }
+
+    #[test]
+    fn the_end_the_store_has_replaces_the_end_the_page_heard() {
+        // The page heard the end before it had every warning: the end
+        // re-read is where the row learns how the run ended in full.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00.123456Z".to_owned(),
+        });
+        assert_eq!(state.rows[0].summary.status, "succeeded");
+        let mut ended = warned(succeeded_backup(FIRST), &[WarningCode::HookWarning]);
+        ended.status = "succeeded-with-warnings".to_owned();
+        state.merge(page(vec![ended.clone()], None));
+        assert_eq!(state.rows[0].summary, ended);
+        assert_eq!(state.rows[0].progress, None);
+    }
+
     #[test]
     fn every_2xx_answer_is_a_success_and_nothing_else_is() {
         for status in [200, 201, 202, 204, 299] {
