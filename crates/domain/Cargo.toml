@@ -17,6 +17,7 @@ uuid.workspace = true
 workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 url.workspace = true
