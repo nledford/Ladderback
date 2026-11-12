@@ -195,6 +195,60 @@ Feature: Install Ladderback with one command
       And standard error says "https://github.com/casey/just/releases"
       And nothing was installed, fetched or built
 
+  Rule: With rustup, it builds with the Rust the release pins
+    A release names the Rust it builds with in `rust-toolchain.toml`
+    (decision 78). A variable in the owner's environment that names another
+    Rust would outrank it, so the script leaves those out of the build and
+    says so; the owner's shell keeps them. The pinned Rust is installed
+    before the build when rustup doesn't have it, rather than left to
+    rustup's automatic install, which rustup has deprecated.
+
+    Scenario Outline: A Rust the owner's environment names is ignored, and the script says so
+      Given the owner's environment sets <variable> to "<value>"
+      When the owner runs the install script
+      Then the command exits with status 0
+      And standard output says "Ignoring <variable>=<value>"
+      And the release was built with the Rust it pins, "1.100.0"
+
+      Examples:
+        | variable          | value                      |
+        | RUSTUP_TOOLCHAIN  | 1.99.1                     |
+        | RUSTC             | /opt/rust-1.99.1/bin/rustc |
+        | CARGO_BUILD_RUSTC | /opt/rust-1.99.1/bin/rustc |
+
+    Scenario: The Rust the release pins is installed before the build when rustup doesn't have it
+      Given rustup doesn't have the Rust the release pins
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the Rust the release pins was installed, with the components and targets it lists, before the release
+
+    Scenario: The Rust the release pins gets the WebAssembly target it lacks
+      Given rustup has the Rust the release pins without the WebAssembly target
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the Rust the release pins was installed, with the components and targets it lists, before the release
+
+    Scenario: Running it again doesn't install the Rust the release pins again
+      Given rustup doesn't have the Rust the release pins
+      And the owner has run the install script, and its build rewrote the web UI's stylesheet
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the Rust the release pins was installed by the first run only
+
+    Scenario: wasm-bindgen is built with the Rust the release pins too
+      Given the system is Linux on "aarch64" with glibc "2.36"
+      And the owner's environment sets RUSTUP_TOOLCHAIN to "1.99.1"
+      When the owner runs the install script with "--yes"
+      Then the command exits with status 0
+      And wasm-bindgen was built with the Rust the release pins, "1.100.0"
+
+    Scenario: A release that pins no Rust is refused
+      Given Ladderback has since released "v0.2.1", which pins no Rust
+      When the owner runs the install script
+      Then the command exits with status 1
+      And standard error says "names no Rust version"
+      And no release was installed
+
   Rule: It keeps the source in a folder of its own and never deletes one
 
     Scenario: A folder that holds something else is refused and left as it was
