@@ -60,6 +60,17 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A browser draws a form control's text in a font of its own, fixed in size
+   (13.33 px in Chromium), so a button's label stayed that size when the
+   reader's text size doubled the rest of the page (1.4.4). A control takes
+   the size and face of the text around it instead. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 a {
   color: var(--accent);
 }
@@ -235,7 +246,6 @@ main:focus {
   margin-block: 0.25rem;
   padding-block: 0.25rem;
   padding-inline: 0.5rem;
-  font: inherit;
 }
 
 .field p {
@@ -385,6 +395,15 @@ table.operations thead th:nth-child(5) {
 table.operations :is(th, td),
 table.operations .badge {
   padding-inline: min(0.5rem, 1.25vw);
+}
+
+/* A button's label takes the page's text size (see the form controls rule),
+   so at 320 px with 200 % text one letter of it and the browser's own padding
+   (6 px a side) made the Cancel button a few pixels wider than its cell. Its
+   padding follows the screen's width the same way: the browser's 6 px on a
+   wide screen, less on a small one. */
+table.operations td button {
+  padding-inline: min(0.375rem, 1.25vw);
 }
 
 table.operations td ul {

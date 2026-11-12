@@ -175,9 +175,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         <p>{body}</p>
         {move || error.get().map(|text| view! { <p role="alert">{text}</p> })}
         // The plans sit outside the connection's phases: a reader can start a
-        // backup while the history is still on its way.
+        // backup while the history is still on its way. Their buttons are a
+        // row of actions, as a dialog's are, so each stands apart from the
+        // next and they wrap on a small screen (§4.4).
         {move || {
-            plans
+            let buttons = plans
                 .get()
                 .map(|plans| {
                     plans
@@ -240,7 +242,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                         })
                         .collect::<Vec<_>>()
                 })
-                .unwrap_or_default()
+                .unwrap_or_default();
+            (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
         }}
         {move || {
             // Per render: the sort button's and rows' closures own what they

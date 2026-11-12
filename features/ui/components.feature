@@ -6,7 +6,9 @@ Feature: The shared components in the gallery
   error, a checkbox, a progress bar whose changes are never announced, and a
   toast. Every demo state a component can show (loading, empty, error,
   success, on and off) stays clear of accessibility violations, and each
-  component's structure is pinned by an ARIA snapshot.
+  component's structure is pinned by an ARIA snapshot. The text of a control,
+  such as a button's label, grows with the reader's text size as the page's
+  does, and the gallery still fits a small screen when the text has grown (A4).
 
   Scenario: A dialog opens from a button, traps focus, closes on Escape and returns focus
     When I open the component gallery
@@ -142,3 +144,25 @@ Feature: The shared components in the gallery
       | opener                    | dialog                         |
       | Open a demo review        | Demo review to confirm         |
       | Open an empty demo review | Demo review with nothing to do |
+
+  Scenario Outline: A button's label grows with the reader's text size
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I press Tab until focus is on the button "<button>"
+    Then the label of the button "<button>" is as large as the page's text
+    And the page has no accessibility violations
+
+    Examples:
+      | button                    |
+      | Open the demo dialog      |
+      | Sort by repository        |
+      | Check the repository name |
+
+  Scenario: The gallery fits a small screen with larger text, its buttons' labels grown with it
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the label of the button "Open the demo dialog" is as large as the page's text
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
