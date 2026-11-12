@@ -490,7 +490,8 @@ struct EventEngine {
 impl Engine for EventEngine {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
         // What the started event can name: the repository's ID, when the job
-        // knows it already.
+        // knows it already. A first job's entry records none yet (decision
+        // 57); its start names the repository the engine says it opened.
         let repository = match &job {
             Job::Backup(backup) => backup.repository.id.clone(),
             _ => None,
@@ -538,9 +539,15 @@ impl Publish {
     fn ui(&mut self, event: &EngineEvent) -> Option<UiEvent> {
         use EngineEvent as E;
         match event {
-            E::Started { index_read_at, .. } => Some(UiEvent::OperationStarted {
+            E::Started {
+                index_read_at,
+                repository,
+            } => Some(UiEvent::OperationStarted {
                 operation: self.operation.clone(),
-                repository: self.repository.clone(),
+                repository: self
+                    .repository
+                    .clone()
+                    .or_else(|| repository.as_ref().map(|id| id.as_str().to_owned())),
                 started_at: index_read_at.to_string(),
             }),
             E::Progress(progress) => self.progress_ui(progress),
@@ -4153,6 +4160,52 @@ mod tests {
                 "the page's news of {end:?}"
             );
         }
+    }
+
+    /// A saved repository's first job knows no ID when it is made: its entry
+    /// records none yet (decision 57). The page still hears which repository
+    /// the job started on, the one the engine says it opened.
+    #[tokio::test]
+    async fn a_first_jobs_start_names_the_repository_the_engine_opened() {
+        let id = "b".repeat(64);
+        let started = EngineEvent::Started {
+            index_read_at: domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+            repository: Some(domain::RepositoryId::parse(&id).expect("a repository ID")),
+        };
+        let bus = Arc::new(BroadcastEventBus::new());
+        let mut heard = bus.subscribe().await;
+        let engine = EventEngine {
+            inner: Arc::new(Answers(vec![started.clone()])),
+            bus,
+        };
+        // A job whose access names no repository ID, as a first job's does.
+        let job = Job::Fake(app::ports::FakeJob {
+            steps: 1,
+            step_delay: std::time::Duration::ZERO,
+            warnings: Vec::new(),
+            end: app::ports::FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        let operation = OperationId::from_uuid(Uuid::from_u128(7));
+        let running = engine
+            .run(operation, job)
+            .await
+            .expect("the engine takes the job");
+        let reported: Vec<EngineEvent> = running.events.collect().await;
+        assert_eq!(reported, [started], "the runner's events");
+
+        let news = futures::FutureExt::now_or_never(heard.next()).flatten();
+        assert_eq!(
+            news,
+            Some(UiEvent::OperationStarted {
+                operation: "00000000-0000-0000-0000-000000000007".to_owned(),
+                repository: Some(id),
+                started_at: domain::Timestamp::from_second(1_800_000_000)
+                    .expect("a time")
+                    .to_string(),
+            }),
+            "the page's news of the start"
+        );
     }
 
     /// An operation log that refuses every save, in the words a database
