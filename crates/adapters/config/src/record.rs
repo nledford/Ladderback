@@ -72,18 +72,16 @@ fn added(text: &str, alias: &RepositoryAlias, id: &RepositoryId) -> Result<Strin
         }
         Item::Value(Value::InlineTable(table)) if !table.contains_key(KEY) => {
             let last = table.iter().last().map(|(key, _)| key.to_owned());
-            let closing = last
-                .and_then(|key| table.get_mut(&key))
-                .map(|value| {
-                    let suffix = value
-                        .decor()
-                        .suffix()
-                        .and_then(|suffix| suffix.as_str())
-                        .unwrap_or_default()
-                        .to_owned();
-                    value.decor_mut().set_suffix("");
-                    suffix
-                });
+            let closing = last.and_then(|key| table.get_mut(&key)).map(|value| {
+                let suffix = value
+                    .decor()
+                    .suffix()
+                    .and_then(|suffix| suffix.as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                value.decor_mut().set_suffix("");
+                suffix
+            });
             table.insert(KEY, id.as_str().into());
             if let (Some(closing), Some(value)) = (closing, table.get_mut(KEY)) {
                 value.decor_mut().set_suffix(closing);
@@ -330,10 +328,7 @@ password-env = \"DEMO_USB\"
     #[test]
     fn a_file_whose_lines_end_in_crlf_gains_a_line_that_ends_so() {
         let crlf = FILE.replace('\n', "\r\n");
-        assert_eq!(
-            recorded_in(&crlf),
-            Ok(added_to_nas().replace('\n', "\r\n"))
-        );
+        assert_eq!(recorded_in(&crlf), Ok(added_to_nas().replace('\n', "\r\n")));
     }
 
     #[test]

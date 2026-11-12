@@ -3652,7 +3652,9 @@ mod tests {
             format!("{entry}repository-id = {id:?}\n{plans}")
         );
         assert_eq!(
-            *told.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            *told
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
             vec![Recording::Recorded {
                 alias: RepositoryAlias::parse("demo").expect("an alias"),
                 id: domain::RepositoryId::parse(&id).expect("a repository ID"),
