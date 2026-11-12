@@ -120,6 +120,10 @@ pub enum ErrorCode {
     /// A command that gives a repository's secret ran and failed. As
     /// `SecretMissing`; its first line of stderr, redacted, is the `detail`.
     SecretCommandFailed,
+    /// A command that gives a repository's secret succeeded, but something
+    /// it started kept its output open before the secret's line ended, so it
+    /// gave no whole secret. As `SecretMissing`; nothing it printed is shown.
+    SecretCommandOutputOpen,
     /// A command that gives a repository's secret ran for longer than it
     /// may. As `SecretMissing`, and `seconds`.
     SecretCommandTimedOut,
@@ -501,7 +505,8 @@ impl ErrorCode {
             Self::SecretMissing
             | Self::SecretUnreadable
             | Self::SecretNotText
-            | Self::SecretCommandFailed => &[
+            | Self::SecretCommandFailed
+            | Self::SecretCommandOutputOpen => &[
                 ArgSpec {
                     name: "field",
                     kind: ArgKind::Text,
@@ -1317,6 +1322,7 @@ mod tests {
             ErrorCode::SecretUnreadable,
             ErrorCode::SecretNotText,
             ErrorCode::SecretCommandFailed,
+            ErrorCode::SecretCommandOutputOpen,
         ] {
             assert_eq!(code.args(), &named, "{code:?}");
         }

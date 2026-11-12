@@ -71,6 +71,7 @@ pub async fn run(harness: &dyn SecretsHarness) {
     a_command_that_prints_nothing_is_missing(harness).await;
     a_command_that_fails_is_told_by_its_status_and_its_stderr(harness).await;
     a_failed_command_that_quotes_what_it_printed_has_it_masked(harness).await;
+    a_failed_command_whose_output_ends_partway_through_a_line_quotes_nothing(harness).await;
     a_command_that_cannot_be_started_is_unreachable(harness).await;
     a_command_that_takes_too_long_is_timed_out(harness).await;
     a_keyring_gives_the_secret_of_an_entry(harness).await;
@@ -269,11 +270,14 @@ async fn a_secret_may_be_as_large_as_the_limit_and_no_larger(harness: &dyn Secre
         resolve(harness, &SecretRef::Command(command)).await,
         gives(&at_the_limit)
     );
-    let command = harness.printing(long.as_bytes());
-    assert_eq!(
-        resolve(harness, &SecretRef::Command(command.clone())).await,
-        too_large(command_source(&command))
-    );
+    // One byte over is too large, as is a short first line in too much.
+    for printed in [&over, &long] {
+        let command = harness.printing(printed.as_bytes());
+        assert_eq!(
+            resolve(harness, &SecretRef::Command(command.clone())).await,
+            too_large(command_source(&command))
+        );
+    }
 }
 
 async fn a_file_others_can_read_comes_with_a_warning(harness: &dyn SecretsHarness) {
@@ -379,7 +383,7 @@ async fn a_command_that_prints_nothing_is_missing(harness: &dyn SecretsHarness) 
 }
 
 async fn a_command_that_fails_is_told_by_its_status_and_its_stderr(harness: &dyn SecretsHarness) {
-    let command = harness.failing(3, "hunter2", "no such entry\nsecond line");
+    let command = harness.failing(3, "hunter2\n", "no such entry\nsecond line");
     assert_eq!(
         resolve(harness, &SecretRef::Command(command.clone())).await,
         Err(SecretError {
@@ -394,7 +398,11 @@ async fn a_command_that_fails_is_told_by_its_status_and_its_stderr(harness: &dyn
 
 /// A helper that rejects a value may quote it on stderr, which an error shows.
 async fn a_failed_command_that_quotes_what_it_printed_has_it_masked(harness: &dyn SecretsHarness) {
-    let command = harness.failing(1, "hunter2-canary", "rejected hunter2-canary\nsecond line");
+    let command = harness.failing(
+        1,
+        "hunter2-canary\n",
+        "rejected hunter2-canary\nsecond line",
+    );
     assert_eq!(
         resolve(harness, &SecretRef::Command(command.clone())).await,
         Err(SecretError {
@@ -402,6 +410,26 @@ async fn a_failed_command_that_quotes_what_it_printed_has_it_masked(harness: &dy
             problem: Problem::CommandFailed {
                 status: Some(1),
                 detail: "rejected ***".to_owned(),
+            },
+        })
+    );
+}
+
+/// A failed helper's output that ends partway through a line may have been
+/// cut by its own end, as when it is killed partway through printing its
+/// secret: masked against that part, a quote of the whole secret would show
+/// the rest. Nothing it said is quoted then (I4, #237).
+async fn a_failed_command_whose_output_ends_partway_through_a_line_quotes_nothing(
+    harness: &dyn SecretsHarness,
+) {
+    let command = harness.failing(1, "hunter2-ca", "rejected hunter2-canary");
+    assert_eq!(
+        resolve(harness, &SecretRef::Command(command.clone())).await,
+        Err(SecretError {
+            source: command_source(&command),
+            problem: Problem::CommandFailed {
+                status: Some(1),
+                detail: String::new(),
             },
         })
     );

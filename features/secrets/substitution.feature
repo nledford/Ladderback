@@ -326,7 +326,7 @@ Feature: Secret references in a repository's settings
       And the problem is that it is missing
 
     Scenario: A command that fails is told by its status and what it said
-      Given the command "vault-reader --token demo-argument" prints "demo-stdout" and fails with status 2 saying "no such entry\nsecond line"
+      Given the command "vault-reader --token demo-argument" prints "demo-stdout\n" and fails with status 2 saying "no such entry\nsecond line"
       And the repository's password is printed by the command "vault-reader --token demo-argument"
       When the repository is resolved
       Then the resolution fails for the field "password"
@@ -336,11 +336,32 @@ Feature: Secret references in a repository's settings
       And the failure doesn't mention "demo-argument"
 
     Scenario: A command that stops partway through quoting what it printed shows none of it
-      Given the command "vault-reader" prints "CANARY-cut-password" and fails with status 1 saying "rejected CANARY-cut"
+      Given the command "vault-reader" prints "CANARY-cut-password\n" and fails with status 1 saying "rejected CANARY-cut"
       And the repository's password is printed by the command "vault-reader"
       When the repository is resolved
       Then the resolution fails for the field "password"
       And the problem is that the command exited with status 1 saying "rejected ***"
+
+    Scenario: A command that stops partway through printing its password shows nothing it said
+      Given the command "vault-reader" prints "CANARY-cut" and fails with status 1 saying "rejected CANARY-cut-password"
+      And the repository's password is printed by the command "vault-reader"
+      When the repository is resolved
+      Then the resolution fails for the field "password"
+      And the problem is that the command exited with status 1, and nothing it said is shown
+
+    Scenario: A command whose output something it started holds open before the password's line ends gives no password
+      Given the command "pass show demo/repo" prints "command-pass" while something it started holds its output open
+      And the repository's password is printed by the command "pass show demo/repo"
+      When the repository is resolved
+      Then the resolution fails for the field "password"
+      And the failure names the program "pass"
+      And the problem is that its output was cut short
+
+    Scenario: A command whose output something it started holds open after the password's line gives that line
+      Given the command "pass show demo/repo" prints "command-password\nnot the pass" while something it started holds its output open
+      And the repository's password is printed by the command "pass show demo/repo"
+      When the repository is resolved
+      Then the resolved password is "command-password"
 
     Scenario: A command that never ends
       Given the command "pass show demo/repo" never ends

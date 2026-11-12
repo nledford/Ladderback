@@ -1631,6 +1631,11 @@ async fn secret_refusal(
                     | SourceName::File { .. }
                     | SourceName::Env { .. } => refusal(ErrorCode::SecretUnreadable, named, None),
                 },
+                // A command that succeeded while something it started kept
+                // its output open before its secret's line ended gave no
+                // secret, and nothing it printed is shown. Not a failure of
+                // the command, which exited as it should.
+                Problem::OutputCut => refusal(ErrorCode::SecretCommandOutputOpen, named, None),
             }
         }
         Cause::ReferenceInProcessArguments => {
@@ -6142,6 +6147,12 @@ mod repository_service_tests {
                     ("source", text("pass")),
                     ("seconds", count(60)),
                 ],
+                None,
+            ),
+            (
+                unresolved(Field::Password, command(), Problem::OutputCut),
+                ErrorCode::SecretCommandOutputOpen,
+                at("password", "pass"),
                 None,
             ),
             (

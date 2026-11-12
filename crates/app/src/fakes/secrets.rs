@@ -3,8 +3,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use domain::secrets::{
-    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, command_failure,
-    command_secret, decode, file_warning,
+    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, Stdout,
+    command_failure, command_secret, decode, file_warning,
 };
 
 use crate::ports::{Resolved, SecretResolver};
@@ -14,6 +14,14 @@ use crate::ports::{Resolved, SecretResolver};
 pub enum Script {
     /// Runs to its end with this exit status and output.
     Exits {
+        status: i32,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    /// Exits with this status and output, while something it started still
+    /// holds its stdout open when the pipe grace runs out: the resolver has
+    /// only what came before.
+    LeavesOutputOpen {
         status: i32,
         stdout: Vec<u8>,
         stderr: Vec<u8>,
@@ -209,22 +217,12 @@ impl SecretResolver for FakeSecrets {
                         status,
                         stdout,
                         stderr,
-                    }) if *status != 0 => {
-                        // The fake keeps all of its scripted output.
-                        Err(command_failure(
-                            &source,
-                            Some(*status),
-                            Some(stdout),
-                            stderr,
-                        ))
-                    }
-                    Some(Script::Exits { stdout, .. }) => {
-                        let value = command_secret(&source, stdout)?;
-                        Ok(Resolved {
-                            value,
-                            warnings: Vec::new(),
-                        })
-                    }
+                    }) => exited(&source, *status, Stdout::ReadToEnd(stdout), stderr),
+                    Some(Script::LeavesOutputOpen {
+                        status,
+                        stdout,
+                        stderr,
+                    }) => exited(&source, *status, Stdout::LeftOpen(stdout), stderr),
                 }
             }
             SecretRef::Keyring(entry) => {
@@ -243,4 +241,21 @@ impl SecretResolver for FakeSecrets {
             }
         }
     }
+}
+
+/// What a scripted command that exited with `status` gives, read through the
+/// rules the real resolver reads it by.
+fn exited(
+    source: &SourceName,
+    status: i32,
+    stdout: Stdout<'_>,
+    stderr: &[u8],
+) -> Result<Resolved, SecretError> {
+    if status != 0 {
+        return Err(command_failure(source, Some(status), stdout, stderr));
+    }
+    Ok(Resolved {
+        value: command_secret(source, stdout)?,
+        warnings: Vec::new(),
+    })
 }

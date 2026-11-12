@@ -739,6 +739,87 @@ async fn a_secret_cut_off_at_the_stdout_cap_leaves_nothing_of_itself_in_the_erro
     );
 }
 
+/// A helper killed partway through printing its secret, or exiting there,
+/// that quotes all of the secret on stderr: its stdout was read to its end
+/// but holds only part of the secret, and the detail masked against that
+/// part would show the rest. Nothing it said is quoted, and the error keeps
+/// its status (I4, #237).
+#[tokio::test]
+async fn a_helper_that_ends_partway_through_printing_its_secret_quotes_nothing_it_said() {
+    for (end, status) in [("kill -9 $$", None), ("exit 1", Some(1))] {
+        let script = sh(
+            &format!("printf hunter2-ca; echo 'rejected hunter2-canary' >&2; {end}"),
+            Vec::<String>::new(),
+        );
+        let result = within(
+            Duration::from_secs(5),
+            resolver(Duration::from_secs(30)).resolve(&command(script)),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Err(SecretError {
+                source: program("sh"),
+                problem: Problem::CommandFailed {
+                    status,
+                    detail: String::new(),
+                },
+            }),
+            "{end}"
+        );
+    }
+}
+
+/// A helper that succeeds while something it started holds its stdout open,
+/// before the line that is its secret has ended: what was read when the
+/// grace ran out may be only part of the secret, which is refused rather
+/// than used (#237).
+#[tokio::test]
+async fn a_helper_whose_daemon_holds_its_output_before_its_secret_s_line_ended_gives_none() {
+    let directory = TempDir::new().unwrap();
+    let pidfile = directory.path().join("pid");
+    let script = sh(
+        r#"sleep 60 & echo $! > "$1"; printf hunter2-ca"#,
+        [pidfile.display().to_string()],
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(script)),
+    )
+    .await;
+    let _reaper = Reaper(recorded_pid(&pidfile).await);
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::OutputCut,
+        })
+    );
+}
+
+/// A helper that prints part of its secret, quotes all of it on stderr and
+/// then outlives its limit: it is timed out, which gives neither what it
+/// printed nor what it said (I4, #237).
+#[tokio::test]
+async fn a_helper_timed_out_after_printing_part_of_its_secret_gives_none_of_it() {
+    let script = sh(
+        "printf hunter2-ca; echo 'rejected hunter2-canary' >&2; sleep 60",
+        Vec::<String>::new(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_millis(300)).resolve(&command(script)),
+    )
+    .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: program("sh"),
+            problem: Problem::TimedOut { seconds: 1 },
+        })
+    );
+}
+
 #[tokio::test]
 async fn the_error_of_a_failed_command_holds_nothing_it_printed_as_its_secret() {
     let echo_both = CommandLine::new(

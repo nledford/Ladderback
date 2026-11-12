@@ -54,6 +54,11 @@ pub enum Problem {
     CommandFailed { status: Option<i32>, detail: String },
     /// The command ran for longer than it may.
     TimedOut { seconds: u64 },
+    /// The command exited, but what was read of its stdout ends before the
+    /// end of its first line, the secret: something it started still held
+    /// stdout open when the pipe grace ran out, so that line may have gone
+    /// on. Never read as the secret.
+    OutputCut,
 }
 
 /// The most bytes of what a failed command wrote that an error keeps.
@@ -119,14 +124,38 @@ pub fn decode(
     Ok(SecretValue::new(extract(text)))
 }
 
+/// What a command printed on stdout, as far as it was read. It holds what
+/// may be a secret, so it has no `Debug`.
+#[derive(Clone, Copy)]
+pub enum Stdout<'a> {
+    /// Read to its end: the command, and whatever it started, closed it.
+    ReadToEnd(&'a [u8]),
+    /// Not read to its end when the pipe grace ran out after the command
+    /// exited (something it started still held it, or stderr, open): more
+    /// may have followed.
+    LeftOpen(&'a [u8]),
+}
+
 /// The secret that a command gave as its `stdout`: the first line of it. A
 /// command that printed nothing, or only white space, gave no secret: that
 /// is `Missing`, never an empty secret, which a repository would fail to
 /// open with, far from its cause. (A variable, a file or a keyring entry
 /// that is set to nothing was set so on purpose, and stays the empty
 /// secret.)
-pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue, SecretError> {
-    let secret = decode(source, stdout, first_line)?;
+///
+/// A `stdout` left open may stop anywhere: its first line is whole once
+/// that line's newline was read, and before that it may be only part of the
+/// secret, which is `OutputCut`, never used. One read to its end needs no
+/// newline: the command and what it started closed it there.
+pub fn command_secret(source: &SourceName, stdout: Stdout<'_>) -> Result<SecretValue, SecretError> {
+    let (Stdout::ReadToEnd(bytes) | Stdout::LeftOpen(bytes)) = stdout;
+    let secret = decode(source, bytes, first_line)?;
+    if matches!(stdout, Stdout::LeftOpen(_)) && !bytes.contains(&b'\n') {
+        return Err(SecretError {
+            source: source.clone(),
+            problem: Problem::OutputCut,
+        });
+    }
     if secret.expose().trim().is_empty() {
         return Err(SecretError::missing(source.clone()));
     }
@@ -139,17 +168,26 @@ pub fn command_secret(source: &SourceName, stdout: &[u8]) -> Result<SecretValue,
 /// pipe grace, a failed read or the command itself can stop it partway
 /// through what it printed, and what was read doesn't say which did.
 ///
-/// `stdout` is `None` when its read stopped before the end: what was read
-/// is then only part of what the command printed, and stderr masked
-/// against that part would show the rest of a secret it quotes. Nothing
-/// of stderr is quoted then; the error keeps its status.
+/// `stdout` is whole only when it was read to its end and is empty or ends
+/// with a newline. One left open is only part of what the command printed,
+/// and one that ends partway through a line may be too: the command's own
+/// end (killed partway through printing its secret, or exiting there) cuts
+/// it with nothing in what was read to say so. Stderr masked against that
+/// part would show the rest of a secret it quotes (`***nary`), so nothing
+/// of stderr is quoted then; the error keeps its status. A secret is a
+/// first line, so a line with its newline is whole however the command
+/// ended.
 pub fn command_failure(
     source: &SourceName,
     status: Option<i32>,
-    stdout: Option<&[u8]>,
+    stdout: Stdout<'_>,
     stderr: &[u8],
 ) -> SecretError {
-    let said = stdout.map_or_else(String::new, |stdout| {
+    let whole = match stdout {
+        Stdout::ReadToEnd(bytes) if bytes.is_empty() || bytes.ends_with(b"\n") => Some(bytes),
+        Stdout::ReadToEnd(_) | Stdout::LeftOpen(_) => None,
+    };
+    let said = whole.map_or_else(String::new, |stdout| {
         // A helper that rejects a value may quote it on stderr: what it
         // printed (less the line ending its last line ends with, which isn't
         // what it quotes), and its first line, which is what it would have
@@ -610,7 +648,7 @@ mod tests {
         let source = command("pass");
         for stdout in ["", "\n", "\r\n", "   ", " \t \n", "\u{a0}\n"] {
             assert_eq!(
-                command_secret(&source, stdout.as_bytes()),
+                command_secret(&source, Stdout::ReadToEnd(stdout.as_bytes())),
                 Err(SecretError::missing(source.clone())),
                 "{stdout:?}"
             );
@@ -623,7 +661,7 @@ mod tests {
     fn a_command_whose_first_line_is_blank_gave_no_secret() {
         let source = command("pass");
         assert_eq!(
-            command_secret(&source, b"\n\nhunter2\n"),
+            command_secret(&source, Stdout::ReadToEnd(b"\n\nhunter2\n")),
             Err(SecretError::missing(source))
         );
     }
@@ -634,7 +672,7 @@ mod tests {
         let error = command_failure(
             &source,
             Some(1),
-            Some(b"hunter2-canary\n".as_slice()),
+            Stdout::ReadToEnd(b"hunter2-canary\n"),
             b"rejected hunter2-canary\nsecond line\n",
         );
         assert_eq!(
@@ -651,7 +689,7 @@ mod tests {
         let error = command_failure(
             &source,
             Some(2),
-            Some(b"hunter2\nsecond line\n".as_slice()),
+            Stdout::ReadToEnd(b"hunter2\nsecond line\n"),
             b"bad value hunter2\n",
         );
         assert_eq!(
@@ -673,7 +711,7 @@ mod tests {
         let stdout = format!("{secret}\n");
         // Longer than the kept stderr.
         let kept = secret.as_bytes().get(..8192).unwrap();
-        let error = command_failure(&source, Some(1), Some(stdout.as_bytes()), kept);
+        let error = command_failure(&source, Some(1), Stdout::ReadToEnd(stdout.as_bytes()), kept);
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -683,7 +721,12 @@ mod tests {
         );
         // Quoted, and cut inside it.
         let stderr = format!("rejected {}", secret.get(..600).unwrap());
-        let error = command_failure(&source, Some(1), Some(stdout.as_bytes()), stderr.as_bytes());
+        let error = command_failure(
+            &source,
+            Some(1),
+            Stdout::ReadToEnd(stdout.as_bytes()),
+            stderr.as_bytes(),
+        );
         assert_eq!(
             error.problem,
             Problem::CommandFailed {
@@ -701,7 +744,7 @@ mod tests {
     #[test]
     fn what_a_failed_command_said_is_masked_as_cut_whoever_cut_it() {
         let source = command("pass");
-        let stdout = Some(b"hunter2-canary\n".as_slice());
+        let stdout = Stdout::ReadToEnd(b"hunter2-canary\n");
         for (said, detail) in [
             ("rejected hello", "rejected hello"),
             ("rejected hunter2-", "rejected ***"),
@@ -726,7 +769,12 @@ mod tests {
     #[test]
     fn a_failed_command_whose_stdout_was_cut_quotes_nothing_it_said() {
         let source = command("pass");
-        let error = command_failure(&source, Some(1), None, b"rejected hunter2-canary\n");
+        let error = command_failure(
+            &source,
+            Some(1),
+            Stdout::LeftOpen(b"hunter2-ca"),
+            b"rejected hunter2-canary\n",
+        );
         assert_eq!(
             error,
             SecretError {
@@ -737,6 +785,107 @@ mod tests {
                 },
             }
         );
+        // Even when what was read ends a line: more lines may have followed,
+        // and the whole of what was printed is a needle too.
+        let error = command_failure(
+            &source,
+            Some(1),
+            Stdout::LeftOpen(b"hunter2-canary\n"),
+            b"rejected hunter2-canary\n",
+        );
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: String::new(),
+            }
+        );
+    }
+
+    /// A failed command's stdout is whole only when it was read to its end
+    /// and its last line ended: the command's own end (killed partway
+    /// through printing its secret, or exiting there) can cut it with
+    /// nothing in what was read to say so, and masking what it said against
+    /// that part would show the rest (`***nary`). Nothing it said is quoted
+    /// then, and the error keeps its status (I4, #237).
+    #[test]
+    fn a_failed_command_whose_stdout_ends_partway_through_a_line_quotes_nothing_it_said() {
+        let source = command("pass");
+        for status in [Some(1), None] {
+            let error = command_failure(
+                &source,
+                status,
+                Stdout::ReadToEnd(b"hunter2-ca"),
+                b"rejected hunter2-canary\n",
+            );
+            assert_eq!(
+                error.problem,
+                Problem::CommandFailed {
+                    status,
+                    detail: String::new(),
+                },
+                "{status:?}"
+            );
+        }
+        // An ended line, or nothing printed at all, is whole.
+        for (stdout, said, detail) in [
+            (
+                b"hunter2-canary\r\n".as_slice(),
+                "rejected hunter2-canary",
+                "rejected ***",
+            ),
+            (b"".as_slice(), "no such entry", "no such entry"),
+        ] {
+            let error =
+                command_failure(&source, Some(1), Stdout::ReadToEnd(stdout), said.as_bytes());
+            assert_eq!(
+                error.problem,
+                Problem::CommandFailed {
+                    status: Some(1),
+                    detail: detail.to_owned(),
+                },
+                "{said:?}"
+            );
+        }
+    }
+
+    /// A stdout left open was read only as far as the grace allowed: its
+    /// first line is the secret once that line's newline was read, and
+    /// before that it may be only part of one, which is refused rather than
+    /// used (#237). The limits of every source come first; a line read to
+    /// its end needs no newline.
+    #[test]
+    fn a_stdout_left_open_gives_its_first_line_only_once_that_line_ended() {
+        let source = command("pass");
+        let cut = Err(SecretError {
+            source: source.clone(),
+            problem: Problem::OutputCut,
+        });
+        for stdout in ["hunter2-ca", "hunter2\r", "   ", ""] {
+            assert_eq!(
+                command_secret(&source, Stdout::LeftOpen(stdout.as_bytes())),
+                cut,
+                "{stdout:?}"
+            );
+        }
+        let given = command_secret(&source, Stdout::LeftOpen(b"hunter2\r\nsecond li")).unwrap();
+        assert_eq!(given.expose(), "hunter2");
+        assert_eq!(
+            command_secret(&source, Stdout::LeftOpen(b" \nhunter2\n")),
+            Err(SecretError::missing(source.clone()))
+        );
+        let over = "x".repeat(MAX_SECRET_BYTES + 1);
+        assert_eq!(
+            command_secret(&source, Stdout::LeftOpen(over.as_bytes())),
+            Err(SecretError {
+                source: source.clone(),
+                problem: Problem::TooLarge {
+                    limit: MAX_SECRET_BYTES
+                },
+            })
+        );
+        let given = command_secret(&source, Stdout::ReadToEnd(b"hunter2")).unwrap();
+        assert_eq!(given.expose(), "hunter2");
     }
 
     #[test]
@@ -749,7 +898,7 @@ mod tests {
             ("  hunter2 \n", "  hunter2 "),
             ("\u{a0}x\n", "\u{a0}x"),
         ] {
-            let given = command_secret(&source, stdout.as_bytes()).unwrap();
+            let given = command_secret(&source, Stdout::ReadToEnd(stdout.as_bytes())).unwrap();
             assert_eq!(given.expose(), secret, "{stdout:?}");
         }
     }
@@ -761,7 +910,7 @@ mod tests {
         let source = command("pass");
         let blank = " ".repeat(MAX_SECRET_BYTES + 1);
         assert_eq!(
-            command_secret(&source, blank.as_bytes()),
+            command_secret(&source, Stdout::ReadToEnd(blank.as_bytes())),
             Err(SecretError {
                 source: source.clone(),
                 problem: Problem::TooLarge {
@@ -770,7 +919,7 @@ mod tests {
             })
         );
         assert_eq!(
-            command_secret(&source, &[0xff, b'\n']),
+            command_secret(&source, Stdout::ReadToEnd(&[0xff, b'\n'])),
             Err(SecretError {
                 source,
                 problem: Problem::NotUnicode,
