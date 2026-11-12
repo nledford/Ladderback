@@ -79,32 +79,54 @@ impl EventKind {
     /// The event's name, as a rule, a template and a webhook's body say it:
     /// `backup.failed`.
     pub fn name(self) -> &'static str {
-        todo!()
+        match self {
+            Self::BackupStarted => "backup.started",
+            Self::BackupSucceeded => "backup.succeeded",
+            Self::BackupWarning => "backup.warning",
+            Self::BackupFailed => "backup.failed",
+            Self::ForgetFailed => "forget.failed",
+            Self::PruneFailed => "prune.failed",
+            Self::CheckFailed => "check.failed",
+        }
     }
 
     /// The event `text` names, or [`ValueKind::NotificationEvent`].
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let _ = text;
-        todo!()
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.name() == text)
+            .ok_or_else(|| InvalidValue::new(ValueKind::NotificationEvent, text))
     }
 
     /// The ping a healthchecks channel sends for this event.
     pub fn ping(self) -> Ping {
-        todo!()
+        match self {
+            Self::BackupStarted => Ping::Start,
+            Self::BackupSucceeded | Self::BackupWarning => Ping::Success,
+            Self::BackupFailed | Self::ForgetFailed | Self::PruneFailed | Self::CheckFailed => {
+                Ping::Fail
+            }
+        }
     }
 
     /// The event an operation of `kind` makes when it starts: only a backup's
     /// start is told.
     pub fn started(kind: OperationKind) -> Option<Self> {
-        let _ = kind;
-        todo!()
+        (kind == OperationKind::Backup).then_some(Self::BackupStarted)
     }
 
     /// The event an operation of `kind` makes when it ends with `outcome`. A
     /// backup tells each ending; forget, prune and check only a failure.
     pub fn ended(kind: OperationKind, outcome: Outcome) -> Option<Self> {
-        let _ = (kind, outcome);
-        todo!()
+        match (kind, outcome) {
+            (OperationKind::Backup, Outcome::Succeeded) => Some(Self::BackupSucceeded),
+            (OperationKind::Backup, Outcome::SucceededWithWarnings) => Some(Self::BackupWarning),
+            (OperationKind::Backup, Outcome::Failed) => Some(Self::BackupFailed),
+            (OperationKind::Forget, Outcome::Failed) => Some(Self::ForgetFailed),
+            (OperationKind::Prune, Outcome::Failed) => Some(Self::PruneFailed),
+            (OperationKind::Check, Outcome::Failed) => Some(Self::CheckFailed),
+            _ => None,
+        }
     }
 }
 
@@ -153,16 +175,31 @@ impl<'a> Subject<'a> {
 impl Event {
     /// The event `subject` makes when it starts, at `at`.
     pub fn started(subject: Subject<'_>, at: Timestamp) -> Option<Self> {
-        let _ = (subject, at);
-        todo!()
+        let kind = EventKind::started(subject.kind)?;
+        Some(Self::of(kind, subject, None, at))
     }
 
     /// The event `subject` makes when it ends with `outcome`, at `at`. The
     /// code is the one the operation's status records, when it records a
     /// failure; a failure the log hasn't recorded has none.
     pub fn ended(subject: Subject<'_>, outcome: Outcome, at: Timestamp) -> Option<Self> {
-        let _ = (subject, outcome, at);
-        todo!()
+        let kind = EventKind::ended(subject.kind, outcome)?;
+        let code = match outcome {
+            Outcome::Failed => failed(subject.status),
+            Outcome::Succeeded | Outcome::SucceededWithWarnings => None,
+        };
+        Some(Self::of(kind, subject, code, at))
+    }
+
+    fn of(kind: EventKind, subject: Subject<'_>, code: Option<&'static str>, at: Timestamp) -> Self {
+        Self {
+            kind,
+            operation: subject.operation,
+            plan: subject.target.plan.clone(),
+            repository: subject.repository.cloned(),
+            at,
+            code,
+        }
     }
 }
 
@@ -173,8 +210,7 @@ pub struct ChannelName(String);
 
 impl ChannelName {
     pub fn parse(value: &str) -> Result<Self, InvalidValue> {
-        let _ = value;
-        todo!()
+        slug(value).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
@@ -189,8 +225,7 @@ pub struct RuleName(String);
 
 impl RuleName {
     pub fn parse(value: &str) -> Result<Self, InvalidValue> {
-        let _ = value;
-        todo!()
+        slug(value).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
@@ -217,19 +252,28 @@ impl ChannelKind {
     /// The kind's name in the configuration: `webhook`, `ntfy`,
     /// `healthchecks`.
     pub fn name(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Webhook => "webhook",
+            Self::Ntfy => "ntfy",
+            Self::Healthchecks => "healthchecks",
+        }
     }
 
     /// The kind `text` names, or [`ValueKind::ChannelKind`].
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let _ = text;
-        todo!()
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.name() == text)
+            .ok_or_else(|| InvalidValue::new(ValueKind::ChannelKind, text))
     }
 
     /// Whether a channel of this kind sends credentials with a message: a
     /// webhook and ntfy do, a ping URL is its own credential.
     pub fn takes_auth(self) -> bool {
-        todo!()
+        match self {
+            Self::Webhook | Self::Ntfy => true,
+            Self::Healthchecks => false,
+        }
     }
 }
 
@@ -246,8 +290,14 @@ pub const MAX_USERNAME_BYTES: usize = 128;
 impl Username {
     /// The name `text` is, or [`ValueKind::ChannelUsername`].
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        let _ = text;
-        todo!()
+        let plain = !text.is_empty()
+            && text.len() <= MAX_USERNAME_BYTES
+            && !text.chars().any(|c| c == ':' || c.is_control());
+        if plain {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::ChannelUsername, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -288,8 +338,17 @@ pub enum ChannelError {
 
 impl Channel {
     pub fn new(kind: ChannelKind, url: SecretRef, auth: Option<Auth>) -> Result<Self, ChannelError> {
-        let _ = (kind, url, auth);
-        todo!()
+        let auth_secret = auth.as_ref().map(|auth| match auth {
+            Auth::Bearer(token) => token,
+            Auth::Basic { password, .. } => password,
+        });
+        if url.inline().is_some() || auth_secret.is_some_and(|secret| secret.inline().is_some()) {
+            return Err(ChannelError::InlineSecret);
+        }
+        if auth.is_some() && !kind.takes_auth() {
+            return Err(ChannelError::AuthNotTaken);
+        }
+        Ok(Self { kind, url, auth })
     }
 
     pub fn kind(&self) -> ChannelKind {
@@ -325,8 +384,15 @@ impl Rule {
         plans: BTreeSet<PlanId>,
         template: Option<Template>,
     ) -> Result<Self, InvalidValue> {
-        let _ = (events, channel, plans, template);
-        todo!()
+        if events.is_empty() {
+            return Err(InvalidValue::new(ValueKind::NotificationEvent, ""));
+        }
+        Ok(Self {
+            events,
+            channel,
+            plans,
+            template,
+        })
     }
 
     pub fn events(&self) -> &BTreeSet<EventKind> {
@@ -349,8 +415,9 @@ impl Rule {
     /// or the event's plan. An event without a plan (a prune) is sent only
     /// by a rule that names none.
     pub fn matches(&self, event: &Event) -> bool {
-        let _ = event;
-        todo!()
+        self.events.contains(&event.kind)
+            && (self.plans.is_empty()
+                || event.plan.as_ref().is_some_and(|plan| self.plans.contains(plan)))
     }
 }
 
@@ -379,8 +446,16 @@ impl Notifications {
         channels: BTreeMap<ChannelName, Channel>,
         rules: BTreeMap<RuleName, Rule>,
     ) -> Result<Self, Violation> {
-        let _ = (channels, rules);
-        todo!()
+        let unknown = rules
+            .iter()
+            .find(|(_, rule)| !channels.contains_key(rule.channel()));
+        if let Some((name, rule)) = unknown {
+            return Err(Violation::UnknownChannel {
+                rule: name.clone(),
+                channel: rule.channel().clone(),
+            });
+        }
+        Ok(Self { channels, rules })
     }
 
     pub fn channels(&self) -> &BTreeMap<ChannelName, Channel> {
@@ -398,8 +473,18 @@ impl Notifications {
 
     /// Each rule that sends `event`, in name order, with its channel.
     pub fn matching<'a>(&'a self, event: &'a Event) -> impl Iterator<Item = Matched<'a>> + 'a {
-        let _ = event;
-        std::iter::from_fn(|| todo!())
+        self.rules.iter().filter_map(move |(name, rule)| {
+            if !rule.matches(event) {
+                return None;
+            }
+            let (channel_name, channel) = self.channels.get_key_value(rule.channel())?;
+            Some(Matched {
+                rule: name,
+                template: rule.template(),
+                channel_name,
+                channel,
+            })
+        })
     }
 }
 
@@ -408,5 +493,14 @@ fn failed(status: &OperationStatus) -> Option<&'static str> {
     match status {
         OperationStatus::Failed { reason } => Some(reason.code()),
         _ => None,
+    }
+}
+
+/// `value` as a channel's or a rule's name, when it is a slug.
+fn slug(value: &str) -> Result<String, InvalidValue> {
+    if crate::ids::is_slug(value) {
+        Ok(value.to_owned())
+    } else {
+        Err(InvalidValue::new(ValueKind::NotificationName, value))
     }
 }

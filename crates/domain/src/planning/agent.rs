@@ -207,8 +207,22 @@ impl AgentConfig {
     /// [`Violation::UnknownRulePlan`], for the first such rule in name order
     /// and its first such plan.
     pub fn with_notifications(self, notifications: Notifications) -> Result<Self, Violation> {
-        let _ = notifications;
-        todo!()
+        for (name, rule) in notifications.rules() {
+            let unknown = rule
+                .plans()
+                .iter()
+                .find(|plan| !self.plans.iter().any(|known| &known.id == *plan));
+            if let Some(plan) = unknown {
+                return Err(Violation::UnknownRulePlan {
+                    rule: name.clone(),
+                    plan: plan.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            notifications,
+            ..self
+        })
     }
 
     /// The notification rules and the channels they send to (§11).
