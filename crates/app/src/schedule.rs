@@ -1088,6 +1088,23 @@ mod tests {
         }
     }
 
+    // A sleep that never waits spins the loop inside one poll, so the
+    // retry scenarios would hang instead of failing.
+    #[tokio::test]
+    async fn a_backup_that_ends_before_the_sleep_does_wakes_the_loop_with_its_end() {
+        let (sender, ends) = crate::retry::run_ends();
+        let scheduler = Scheduler {
+            ends,
+            ..scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()))
+        };
+        let end = home_ended(Trigger::Schedule, RunOutcome::Failed);
+        sender.send(end.clone());
+        assert_eq!(
+            scheduler.sleep(SignedDuration::from_hours(1)).await,
+            Some(end)
+        );
+    }
+
     #[tokio::test]
     async fn another_run_that_ends_the_series_stops_its_started_retry() {
         let scheduler = scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()));
