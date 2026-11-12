@@ -1,11 +1,41 @@
 ## 11. Notifications
 
-Configured on the hub (or on a standalone agent). Each rule is **event → channel**:
+Configured on the hub (or on a standalone agent). Each **notification rule** is **events → channel**:
 
 - Events: `backup.started`, `backup.succeeded`, `backup.failed`, `backup.warning`, `backup.missed` (no success within N × interval), `backup.retrying`, `forget.failed`, `prune.failed`, `prune.refused` (`keep-delete` too small for the margin, §7.3), `check.failed`, `check.errors`, `agent.offline` (> N min), `repo.unmanaged_groups`, `repo.claim_rejected`, `repo.maintenance_paused` (lease not renewed, repo now shared, or not configured on the hub).
 - Channels: generic webhook (JSON), ntfy, Gotify, Discord/Slack webhook, SMTP.
 - **Templates.** Default message text comes from the `notify.ftl` catalog in the configured locale (§8.4). Users may override it with their own templates, which are not localized. Webhook bodies are JSON with stable, unlocalized keys, event names and error codes, plus a localized `message` field. Templates never receive secrets (I4).
 - **healthchecks.io-style pings per plan**: `start`, `success` and `fail` URLs. These are the most robust "it silently stopped" detector, because they work even when the whole Ladderback system is down.
+
+**As built (M2, decision 74).** An agent sends the events it emits today: `backup.started`, `backup.succeeded`, `backup.warning` (a backup that succeeded with warnings, told instead of `backup.succeeded`), `backup.failed`, `forget.failed`, `prune.failed` and `check.failed`. The others arrive with the parts of the agent that emit them (the scheduler, retries, the hub). Channels are `webhook`, `ntfy` and `healthchecks`; Gotify, Discord/Slack and SMTP are not built.
+
+```toml
+[notifications.channels.ops]
+kind = "ntfy"
+url-env = "NTFY_TOPIC_URL"            # https://ntfy.example.com/backups
+token-file = "/run/secrets/ntfy_token"
+
+[notifications.channels.home-check]
+kind = "healthchecks"
+url-keyring = "ladderback/home-check"  # the check's ping URL
+
+[notifications.rules.failures]
+events = ["backup.failed", "prune.failed"]
+channel = "ops"
+template = "{event}: {plan} {repository} ({code})"
+
+[notifications.rules.home-pings]
+events = ["backup.started", "backup.succeeded", "backup.failed"]
+channel = "home-check"
+plans = ["home"]
+```
+
+- **A channel's URL is a secret**, as its token and password are: whoever knows a webhook's or a topic's URL can post to it. Each is given by exactly one of `-command`, `-keyring`, `-file` and `-env` (`url-…`, `token-…`, `password-…`), with the rules a repository's password follows (§10.2): a file by an absolute path, a command whose program is a name on `PATH` or an absolute path. Never as text in the file: `url`, `token` and `password` are not keys. Each is read when a notification is sent, never kept. `webhook` and `ntfy` may sign in with a bearer token (`token-…`) or with `username` and a password by HTTP Basic; `healthchecks` signs in with nothing and takes none of those keys.
+- **A rule** names its `events`, its `channel` and, optionally, its `plans` (only those plans' events; an event without a plan, as a prune's, is sent only by a rule that names none) and a `template`. The configuration is refused when a rule names a channel or a plan it doesn't have. Rules are matched in name order, and each one an event matches sends it once.
+- **A template** is text with the placeholders `{event}`, `{plan}`, `{repository}`, `{operation}`, `{code}` (the failure's code, as `operation-failed`) and `{time}`; `{{` and `}}` write a brace. A fact the event doesn't have is empty. It reads only these facts, so no secret, location or engine text can reach a message (I4). Without one, the message is the catalog's `notify-<event>` in the agent's locale.
+- **What is sent.** A webhook is posted JSON: `event`, `plan`, `repository`, `operation`, `code`, `time` (`null` when the event lacks it) and `message`. An ntfy topic is posted the message, titled with the event's name. A healthchecks check is pinged at its URL for a success, at `/start` of it when a backup starts and at `/fail` of it for a failure. A message is cut to 4 KiB, and a URL longer than 8 KiB, or not `http` or `https` with a host, is not sent to.
+- **Delivery.** Each delivery ends within 30 s; only a 2xx answer delivers it, a redirect is never followed (so a channel can't move a notification and its credentials elsewhere), and the answer's body is never read. A notification that isn't delivered is not tried again: the daemon logs `notification-undelivered` with the rule, the channel, the event and why (`secret-unavailable`, `invalid-address`, `unreachable`, `timed-out` or `rejected`), never the URL, the token or the library's text. An event that comes while the configuration can't be read is logged once, with the configuration's error, and sent nowhere. The notifier reads the configuration for each event, so a rule saved while the daemon runs applies to the next event, and it is subscribed to the events before any operation runs.
+- **Proxies.** Deliveries go through the proxy the standard variables name (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, in either case), as a worker's requests do (§4.1), read once when the daemon starts. A channel on loopback or the local network is sent through the proxy too, unless `NO_PROXY` names its host (`NO_PROXY=127.0.0.1,ntfy.example.com`). The macOS system proxy settings are not read.
 
 ---
 

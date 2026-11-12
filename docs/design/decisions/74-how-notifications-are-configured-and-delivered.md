@@ -1,0 +1,18 @@
+# Decision 74: How notifications are configured and delivered
+
+**A notification rule sends the events it names to one channel, a webhook, an ntfy topic or a healthchecks check, whose URL is a secret like its token; each notification is one HTTP request, sent once, through the proxy the environment names** (recorded 2026-11-12, §11; #277).
+
+- **The configuration.** `[notifications.channels.NAME]` and `[notifications.rules.NAME]` in `config.toml`, in the domain as `Notifications`, which `AgentConfig` owns, so a rule that names a channel or a plan the file doesn't have is refused with the rest of the file, and every save keeps the tables. A channel's URL, token and password come from a command, the keyring, a file or a variable, as a repository's password does (§10.2), never as text, and a command is refused when its program is named by a relative path.
+- **A URL is a secret.** A webhook's or an ntfy topic's URL is all anyone needs to post to it, and a healthchecks ping URL is all anyone needs to report a check as up. So it is read like a token, for one delivery, and never logged, sent or shown.
+- **One request, one attempt.** Each notification is one request that ends within 30 s, follows no redirect, and doesn't read the answer's body; a 2xx answer delivers it. One that isn't delivered is logged as `notification-undelivered`, with the rule, the channel, the event and the reason, and isn't tried again. A request whose credentials can't be written as a header (a token with a line break) is reported as `unreachable`, the reason a request that never left gets.
+- **The configuration is read for each event,** so a rule saved while the daemon runs applies to the next event with no restart. An event that comes while the file can't be read is logged and sent nowhere.
+- **Proxies from the environment only.** The client honours `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (either case), read once when the daemon starts, as a worker's requests do (§4.1). A channel on loopback or the local network goes through the proxy too unless `NO_PROXY` names its host. As the HTTP library does for any CGI program, `HTTP_PROXY` is ignored when `REQUEST_METHOD` is set.
+- **The default text** of each event is a message of `notify.ftl` in the agent's locale (§8.4); a rule's template replaces it, with the event's facts and nothing else (I4). A fact a default message names that the event doesn't have (a plan for an event without one) is written as the operation's ID.
+
+Why:
+
+- **No retry, no queue.** A retry would keep a resolved secret in memory, or resolve it again, for a delivery the person may no longer want, and an outbox for notifications would be a second persistent queue beside the operations' (§4). A missed notification is logged, and a healthchecks check catches what the agent didn't say: its check reports the plan as down when no success arrives.
+- **No redirect.** A redirect would send the notification, and the `Authorization` header with it, wherever the channel's server says. A channel that moved is reported as `rejected`, with its status, and the person updates the URL.
+- **The macOS system proxy isn't read.** The HTTP library reads it only with its `system-proxy` feature, which needs the `system-configuration` crate, not otherwise in the dependency graph. The workers, which use the same variables, don't read it either; a Mac behind a proxy sets the variables for the daemon as it does for a worker.
+
+Cost: a notification lost to a channel that was briefly down is gone, and only the daemon's log says so. Gotify, Discord/Slack and SMTP, and the events of the scheduler, retries and the hub, arrive with the work that needs them.
