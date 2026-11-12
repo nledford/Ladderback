@@ -294,12 +294,14 @@ impl Notify {
     }
 }
 
-/// A success the log records with warnings is told as one.
+/// A success the log records with warnings is told as one. The log's status
+/// says so whenever the run recorded a warning (`Operation::succeed`), or
+/// was given one after it ended (`Operation::attach_warning`).
 fn with_warnings(outcome: Outcome, record: &OperationRecord) -> Outcome {
-    let warned =
-        record.status == OperationStatus::SucceededWithWarnings || record.warning_count > 0;
     match outcome {
-        Outcome::Succeeded if warned => Outcome::SucceededWithWarnings,
+        Outcome::Succeeded if record.status == OperationStatus::SucceededWithWarnings => {
+            Outcome::SucceededWithWarnings
+        }
         other => other,
     }
 }
