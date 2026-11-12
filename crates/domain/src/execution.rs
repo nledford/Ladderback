@@ -6,6 +6,7 @@ pub mod next_run;
 pub mod plan_tags;
 #[cfg(test)]
 mod properties;
+pub mod queue;
 pub mod wake;
 
 use serde::{Deserialize, Serialize};

@@ -16,6 +16,7 @@ use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
     HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
+use crate::queue::Place;
 
 /// Runs one operation on the engine and records its lifecycle in the
 /// operation log: queued now, running once the engine starts, then finished
@@ -186,6 +187,45 @@ impl RunOperation {
             self.drive(&mut run, job, cancel).await;
         }
         self.run_ending_hooks(&mut run).await;
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: run.result,
+            recording_errors: run.recording_errors,
+        }
+    }
+
+    /// Runs the job of an operation [`Self::queue`] recorded once `place`'s
+    /// turn comes, as [`Self::run_queued`] does, and gives the place up when
+    /// the run has ended (§5, the concurrency limit). A cancel that comes
+    /// while it waits ends the operation cancelled at once: nothing ran, so
+    /// no hook runs and the engine isn't asked.
+    pub async fn run_in_turn(
+        &self,
+        queued: Queued,
+        mut place: Place,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        let mut cancel = pin!(cancel.fuse());
+        let turn = select_biased! {
+            () = cancel => false,
+            () = place.turn().fuse() => true,
+        };
+        let finished = if turn {
+            self.run_queued(queued, cancel).await
+        } else {
+            self.cancel_waiting(queued).await
+        };
+        drop(place);
+        finished
+    }
+
+    /// Ends `queued` cancelled before its turn came: it records the end and
+    /// announces it, as a run does, and nothing else.
+    async fn cancel_waiting(&self, queued: Queued) -> Finished {
+        let Queued { mut run, .. } = queued;
+        self.cancel(&mut run);
         self.record(&mut run).await;
         announce_end(self.events.as_deref(), &run.operation).await;
         Finished {

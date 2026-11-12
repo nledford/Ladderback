@@ -18,8 +18,9 @@ use domain::execution::OperationKind;
 use domain::execution::Trigger;
 use domain::execution::conditions::UnmetCondition;
 use domain::execution::next_run::NextRun;
+use domain::execution::queue::Overlapping;
 use domain::execution::wake::WAKE_CHECK_EVERY;
-use domain::planning::{AgentConfig, NoNextRun, Schedule, ScheduleZone};
+use domain::planning::{AgentConfig, NoNextRun, Overlap, Schedule, ScheduleZone};
 use domain::{OperationId, PlanId, SignedDuration, TimeZone, Timestamp};
 
 use crate::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
@@ -27,19 +28,22 @@ use crate::ports::{
     Clock, ConfigError, ConfigStore, Network, PlannedRun, PlatformError, PowerSupply, Random,
     ScheduleStore, StoreError,
 };
+use crate::queue::{Place, RunQueue};
 use crate::recovery::QueuedEnd;
 
 /// What starts the runs the scheduler and the queue decide on: the
 /// composition root's backups of a plan, each on a task of its own. Not a
-/// port: it is the use cases the root wires, and the seam where the overlap
-/// policy and the limit on concurrent runs (#276) and retries (#275) go.
+/// port: it is the use cases the root wires. Which runs may start when is
+/// the [`RunQueue`]'s (the overlap policy and the concurrency limit, §5);
+/// retries (#275) go here too.
 #[async_trait]
 pub trait PlanRuns: Send + Sync {
     /// Starts a backup of `plan`, started by `trigger`, as a new operation,
-    /// and returns once the operation log has it queued. A run that can't
-    /// start (a secret that can't be resolved) is the implementation's to
-    /// say in the daemon's log.
-    async fn start(&self, plan: &PlanId, trigger: Trigger);
+    /// and returns once the operation log has it queued. It runs once
+    /// `place`'s turn comes, and holds the place until it ends. A run that
+    /// can't start (a secret that can't be resolved) is the
+    /// implementation's to say in the daemon's log, and drops its place.
+    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place);
 
     /// Runs `operation`, a backup the log holds as queued from before the
     /// daemon started, under its own ID, and returns once it is on its way.
@@ -54,6 +58,12 @@ pub trait PlanRuns: Send + Sync {
 pub enum ScheduleReport {
     /// A plan's run didn't start: a condition it sets wasn't met.
     Skipped { plan: PlanId, unmet: UnmetCondition },
+    /// A plan's run didn't start: its last run is still going, running or
+    /// waiting for its turn, and its overlap policy skips it (§5).
+    Overlapped {
+        plan: PlanId,
+        overlapping: Overlapping,
+    },
     /// A plan's run started, though the platform couldn't say what powers
     /// the machine.
     PowerUnknown { plan: PlanId, error: PlatformError },
@@ -88,6 +98,8 @@ pub struct Scheduler {
     pub power: Arc<dyn PowerSupply>,
     pub network: Arc<dyn Network>,
     pub runs: Arc<dyn PlanRuns>,
+    /// The agent's one queue of backups, which the routes share.
+    pub queue: Arc<RunQueue>,
     /// The machine's time zone, which a cron schedule that names none is
     /// read in.
     pub zone: TimeZone,
@@ -97,6 +109,9 @@ pub struct Scheduler {
 #[derive(Clone, Debug)]
 struct Planned {
     schedule: Schedule,
+    /// What the plan does with a run that comes due while its last one is
+    /// still going.
+    overlap: Overlap,
     /// `None` once the schedule has no run after its last one.
     next: Option<NextRun>,
     /// A catch-up the agent decided on as it woke: it waits for the network.
@@ -151,8 +166,9 @@ impl Scheduler {
     /// Reads the configuration and brings the plans in line with it: a plan
     /// first found is planned (from its kept run on start, else from now), a
     /// plan whose cadence, time zone or jitter changed is planned again from
-    /// now, and a plan no longer scheduled is forgotten. A configuration that
-    /// can't be read changes nothing.
+    /// now, and a plan no longer scheduled is forgotten. The queue runs as
+    /// many backups at once as it says from then on, the runs already
+    /// waiting included. A configuration that can't be read changes nothing.
     async fn refresh(&self, plans: &mut Plans) {
         let config = match self.config.load().await {
             Ok(config) => config,
@@ -162,13 +178,16 @@ impl Scheduler {
             }
         };
         let now = self.clock.now();
+        self.queue.set_limit(config.agent().concurrency);
         let scheduled = scheduled(&config);
         let mut kept = plans.kept.take().unwrap_or_default();
-        for (plan, schedule) in &scheduled {
+        for (plan, (schedule, overlap)) in &scheduled {
             let next = match plans.planned.get_mut(plan) {
                 Some(held) if same_runs(&held.schedule, schedule) => {
-                    // Its conditions may have changed; its runs haven't.
+                    // Its conditions and overlap policy may have changed;
+                    // its runs haven't.
                     held.schedule = schedule.clone();
+                    held.overlap = *overlap;
                     continue;
                 }
                 Some(_) => {
@@ -192,6 +211,7 @@ impl Scheduler {
                 plan.clone(),
                 Planned {
                     schedule: schedule.clone(),
+                    overlap: *overlap,
                     next,
                     after_wake: false,
                 },
@@ -230,9 +250,10 @@ impl Scheduler {
     }
 
     /// Starts every run that is due, in the order of the plans' IDs, each
-    /// after the plan's conditions, and plans each plan's following run from
-    /// the time its run started (or was skipped). The catch-up runs after a
-    /// wake first wait, once for all of them, for the network.
+    /// after the plan's conditions and as its overlap policy says, in a place
+    /// of the queue, and plans each plan's following run from the time its
+    /// run started (or was skipped). The catch-up runs after a wake first
+    /// wait, once for all of them, for the network.
     async fn start_due(&self, planned: &mut BTreeMap<PlanId, Planned>) {
         let now = self.clock.now();
         let due: Vec<PlanId> = planned
@@ -254,13 +275,9 @@ impl Scheduler {
             let Some(next) = held.next else { continue };
             held.after_wake = false;
             match check_power(&held.schedule, self.power.as_ref()).await {
-                PowerCheck::Met => self.runs.start(&plan, next.trigger).await,
+                PowerCheck::Met => self.start(&plan, held, next.trigger, None).await,
                 PowerCheck::Unknown(error) => {
-                    self.runs.report(ScheduleReport::PowerUnknown {
-                        plan: plan.clone(),
-                        error,
-                    });
-                    self.runs.start(&plan, next.trigger).await;
+                    self.start(&plan, held, next.trigger, Some(error)).await;
                 }
                 PowerCheck::Unmet(unmet) => self.runs.report(ScheduleReport::Skipped {
                     plan: plan.clone(),
@@ -275,6 +292,34 @@ impl Scheduler {
                 self.random.draw(),
             );
             held.next = self.keep(&plan, following).await;
+        }
+    }
+
+    /// Starts `plan`'s due run in a place of the queue, or says why its
+    /// overlap policy skips it: its last run is still going (§5). A run that
+    /// starts though the power source is `unknown` says so first; a skipped
+    /// one says only why it was skipped.
+    async fn start(
+        &self,
+        plan: &PlanId,
+        held: &Planned,
+        trigger: Trigger,
+        unknown: Option<PlatformError>,
+    ) {
+        match self.queue.due(plan, held.overlap) {
+            Ok(place) => {
+                if let Some(error) = unknown {
+                    self.runs.report(ScheduleReport::PowerUnknown {
+                        plan: plan.clone(),
+                        error,
+                    });
+                }
+                self.runs.start(plan, trigger, place).await;
+            }
+            Err(overlapping) => self.runs.report(ScheduleReport::Overlapped {
+                plan: plan.clone(),
+                overlapping,
+            }),
         }
     }
 
@@ -320,12 +365,13 @@ impl Scheduler {
     }
 }
 
-/// The plans of `config` that have a schedule.
-fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, Schedule> {
+/// The plans of `config` that have a schedule, each with its overlap
+/// policy.
+fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, (Schedule, Overlap)> {
     config
         .plans()
         .iter()
-        .filter_map(|plan| Some((plan.id.clone(), plan.schedule.clone()?)))
+        .filter_map(|plan| Some((plan.id.clone(), (plan.schedule.clone()?, plan.overlap))))
         .collect()
 }
 
@@ -349,23 +395,43 @@ mod tests {
 
     use async_trait::async_trait;
     use domain::execution::next_run::NextRun;
+    use domain::execution::queue::Overlapping;
     use domain::execution::wake::WAKE_CHECK_EVERY;
     use domain::execution::{Operation, Trigger};
-    use domain::planning::{CronExpression, Schedule, ScheduleZone};
+    use domain::planning::{
+        AgentConfig, AgentSettings, Concurrency, CronExpression, Hooks, Overlap, Schedule,
+        ScheduleZone,
+    };
     use domain::{PlanId, SignedDuration, TimeZone, Timestamp};
 
-    use super::{PlanRuns, Planned, ScheduleReport, Scheduler, same_runs, zone_of};
+    use futures::FutureExt;
+
+    use super::{PlanRuns, Planned, Plans, ScheduleReport, Scheduler, same_runs, zone_of};
     use crate::fakes::{
         FakeClock, FakeNetwork, FakePower, InMemoryConfigStore, InMemoryScheduleStore, SeededRandom,
     };
+    use crate::ports::PlatformError;
+    use crate::queue::{Place, RunQueue};
 
-    /// The runs the scheduler starts, in order.
+    /// The runs the scheduler starts, in order, each holding its place as a
+    /// run that never ends, and what it said.
     #[derive(Default)]
-    struct Started(Mutex<Vec<(PlanId, Trigger)>>);
+    struct Started {
+        runs: Mutex<Vec<(PlanId, Trigger)>>,
+        places: Mutex<Vec<Place>>,
+        reports: Mutex<Vec<ScheduleReport>>,
+    }
 
     impl Started {
         fn runs(&self) -> Vec<(PlanId, Trigger)> {
-            self.0
+            self.runs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+
+        fn reports(&self) -> Vec<ScheduleReport> {
+            self.reports
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone()
@@ -374,16 +440,25 @@ mod tests {
 
     #[async_trait]
     impl PlanRuns for Started {
-        async fn start(&self, plan: &PlanId, trigger: Trigger) {
-            self.0
+        async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
+            self.runs
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((plan.clone(), trigger));
+            self.places
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(place);
         }
 
         async fn resume(&self, _: Operation) {}
 
-        fn report(&self, _: ScheduleReport) {}
+        fn report(&self, report: ScheduleReport) {
+            self.reports
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(report);
+        }
     }
 
     fn at(text: &str) -> Timestamp {
@@ -403,16 +478,23 @@ mod tests {
             power: Arc::new(FakePower::new()),
             network: Arc::new(FakeNetwork::new()),
             runs,
+            queue: Arc::new(RunQueue::new()),
             zone: TimeZone::UTC,
         }
     }
 
     /// The plan `home`, scheduled daily at 03:00, with its next run at `next`.
     fn home_planned_for(next: &str) -> BTreeMap<PlanId, Planned> {
+        home_planned_with(next, Overlap::Skip)
+    }
+
+    /// The same, with `overlap` as its overlap policy.
+    fn home_planned_with(next: &str, overlap: Overlap) -> BTreeMap<PlanId, Planned> {
         BTreeMap::from([(
             home(),
             Planned {
                 schedule: daily(),
+                overlap,
                 next: Some(NextRun {
                     at: at(next),
                     trigger: Trigger::Schedule,
@@ -420,6 +502,10 @@ mod tests {
                 after_wake: false,
             },
         )])
+    }
+
+    fn one() -> Concurrency {
+        Concurrency::default()
     }
 
     // These three would otherwise be asserted only by the scheduler
@@ -450,6 +536,119 @@ mod tests {
             planned[&home()].next.map(|next| next.at),
             Some(at("2026-06-10T03:00:00Z"))
         );
+    }
+
+    /// `home` runs at 03:00 and is still going (its place is held) when a
+    /// run of it comes due again; what became of the run, and of the plan's
+    /// next run.
+    async fn due_again_while_running(overlap: Overlap) -> (Arc<Started>, Option<Timestamp>) {
+        let runs = Arc::new(Started::default());
+        let scheduler = scheduler("2026-06-10T03:00:00Z", runs.clone());
+        let mut planned = home_planned_with("2026-06-10T03:00:00Z", overlap);
+        scheduler.start_due(&mut planned).await;
+        if let Some(held) = planned.get_mut(&home()) {
+            held.next = Some(NextRun {
+                at: at("2026-06-10T03:00:00Z"),
+                trigger: Trigger::Schedule,
+            });
+        }
+        scheduler.start_due(&mut planned).await;
+        let next = planned[&home()].next.map(|next| next.at);
+        (runs, next)
+    }
+
+    #[tokio::test]
+    async fn a_run_due_while_the_plan_s_last_one_runs_is_skipped_and_said_so() {
+        let (runs, next) = due_again_while_running(Overlap::Skip).await;
+        assert_eq!(runs.runs(), vec![(home(), Trigger::Schedule)]);
+        assert_eq!(
+            runs.reports(),
+            vec![ScheduleReport::Overlapped {
+                plan: home(),
+                overlapping: Overlapping::Running
+            }]
+        );
+        // The run after it is planned as for a run that started.
+        assert_eq!(next, Some(at("2026-06-11T03:00:00Z")));
+    }
+
+    #[tokio::test]
+    async fn a_plan_that_queues_starts_its_run_due_while_its_last_one_runs() {
+        let (runs, next) = due_again_while_running(Overlap::Queue).await;
+        assert_eq!(
+            runs.runs(),
+            vec![(home(), Trigger::Schedule), (home(), Trigger::Schedule)]
+        );
+        assert_eq!(runs.reports(), vec![]);
+        assert_eq!(next, Some(at("2026-06-11T03:00:00Z")));
+    }
+
+    /// A run that would start though the power source is unknown, but that
+    /// its overlap policy skips, is said as skipped only, never as starting.
+    #[tokio::test]
+    async fn a_run_skipped_for_overlap_on_unknown_power_says_only_the_skip() {
+        let runs = Arc::new(Started::default());
+        let mut scheduler = scheduler("2026-06-10T03:00:00Z", runs.clone());
+        let power = Arc::new(FakePower::new());
+        power.set(Err(PlatformError::TimedOut {
+            from: "demo power".to_owned(),
+        }));
+        scheduler.power = power;
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        let place = scheduler
+            .queue
+            .due(&home(), Overlap::Skip)
+            .expect("an idle plan takes a place");
+        if let Some(held) = planned.get_mut(&home()) {
+            held.schedule = daily().with_on_ac_power(true);
+        }
+        scheduler.start_due(&mut planned).await;
+        assert_eq!(runs.runs(), vec![]);
+        assert_eq!(
+            runs.reports(),
+            vec![ScheduleReport::Overlapped {
+                plan: home(),
+                overlapping: Overlapping::Running
+            }]
+        );
+        drop(place);
+    }
+
+    /// The limit the configuration says applies to the runs already waiting
+    /// as soon as the scheduler reads it: a raised one starts them, a
+    /// lowered one holds them back.
+    #[tokio::test]
+    async fn the_limit_read_from_the_configuration_applies_to_the_waiting_runs() {
+        let scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
+        let docs = PlanId::parse("docs").unwrap();
+        let photos = PlanId::parse("photos").unwrap();
+        let running = scheduler.queue.push(&docs, one());
+        let mut waiting = scheduler.queue.push(&home(), one());
+        let save = |limit: i64| {
+            let config = AgentConfig::new(
+                AgentSettings {
+                    concurrency: Concurrency::new(limit).unwrap(),
+                    ..AgentSettings::default()
+                },
+                Hooks::default(),
+                BTreeMap::new(),
+                Vec::new(),
+            )
+            .unwrap();
+            let store = scheduler.config.clone();
+            async move { store.save(&config).await.unwrap() }
+        };
+        save(2).await;
+        scheduler.refresh(&mut Plans::default()).await;
+        assert!(waiting.turn().now_or_never().is_some(), "a raised limit");
+
+        let mut third = scheduler.queue.push(&photos, Concurrency::new(2).unwrap());
+        save(1).await;
+        scheduler.refresh(&mut Plans::default()).await;
+        drop(running);
+        assert!(third.turn().now_or_never().is_none(), "a lowered limit");
+        drop(waiting);
+        assert!(third.turn().now_or_never().is_some());
     }
 
     #[test]
