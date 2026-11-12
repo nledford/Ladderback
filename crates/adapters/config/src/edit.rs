@@ -1,12 +1,14 @@
 //! Editing the file a person wrote (§6.1): a change is made in the file as
 //! it is, and the rest of it, comments, blank lines and layout, stays as
-//! written. Recording a repository's ID adds one key this way (decision 57).
+//! written. Recording a repository's ID adds one key this way (decision 57),
+//! and a save sets, adds and removes the settings it changes (decision 69).
 
 use std::path::Path;
 
 use domain::planning::AgentConfig;
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, TableLike};
 
-use crate::schema::Schemas;
+use crate::schema::{Schemas, over_cap, parse, render_as};
 
 /// The byte order mark a file may start with.
 const BOM: &str = "\u{feff}";
@@ -37,6 +39,15 @@ pub(crate) fn as_written<E>(
 
 /// `text`, the file as it is, changed to hold `config`, whose text in the
 /// daemon's layout is `rendered`; `None` when it can't be.
+///
+/// The change is what differs between the file's configuration and
+/// `config`, each written in the daemon's layout: a setting whose text
+/// differs there is set where the file writes it, added after the last
+/// setting of its table, or removed with its line; a plan is found by its
+/// ID. Everything else is left as written, so a setting the file writes
+/// its own way (`'…'`, `"5 minutes"`, a default said out loud) keeps that
+/// way until a save changes it. The result must read back as `config`, as
+/// a load reads it, and fit in a file.
 pub(crate) fn saved(
     file: &Path,
     text: &str,
@@ -44,7 +55,140 @@ pub(crate) fn saved(
     rendered: &str,
     schemas: &Schemas,
 ) -> Option<String> {
-    todo!()
+    // A file in an older version is the load's to migrate, as a whole.
+    let before = parse(file, text, schemas)
+        .ok()
+        .filter(|parsed| !parsed.migrated)?;
+    let base = render_as(file, &before.config, schemas.current).ok()?;
+    let edited = as_written(text, (), |body| merged(body, &base, rendered).ok_or(())).ok()?;
+    let read = parse(file, &edited, schemas).ok()?;
+    (read.config == *config && !over_cap(edited.len())).then_some(edited)
+}
+
+/// `text` with the change from `base` to `new` made in it.
+fn merged(text: &str, base: &str, new: &str) -> Option<String> {
+    let mut doc: DocumentMut = text.parse().ok()?;
+    let base: DocumentMut = base.parse().ok()?;
+    let new: DocumentMut = new.parse().ok()?;
+    merge(doc.as_table_mut(), Some(base.as_table()), new.as_table());
+    Some(doc.to_string())
+}
+
+/// Makes the change from `base` to `new`, a table in the daemon's layout
+/// before and after the save, in `mine`, that table as the file writes it.
+fn merge(mine: &mut Table, base: Option<&dyn TableLike>, new: &dyn TableLike) {
+    for (key, item) in new.iter() {
+        set(mine, key, base.and_then(|base| base.get(key)), item);
+    }
+    for (key, _) in base.into_iter().flat_map(TableLike::iter) {
+        if !new.contains_key(key) {
+            mine.remove(key);
+        }
+    }
+}
+
+/// Makes `key` of `mine` say what `new` says, where `base` is what it said
+/// before the save, both in the daemon's layout.
+fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item) {
+    let Some(item) = mine.get_mut(key) else {
+        if !same(base, new) {
+            mine.insert(key, placed(new));
+        }
+        return;
+    };
+    match (item, new.as_table_like(), new) {
+        (Item::Table(table), Some(new), _) => {
+            merge(table, base.and_then(Item::as_table_like), new);
+        }
+        (Item::ArrayOfTables(tables), _, Item::ArrayOfTables(new)) => {
+            plans(tables, base.and_then(Item::as_array_of_tables), new);
+        }
+        (item, _, _) => {
+            if !same(base, new) {
+                replace(item, new);
+            }
+        }
+    }
+}
+
+/// Makes the change from `base` to `new` in `mine`, the plans as the file
+/// writes them, each found by its ID, in the order of `new`: a plan kept is
+/// changed where it is written, one added follows the last, and one
+/// removed goes with what is written in it.
+fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTables) {
+    let mut old: Vec<Table> = std::mem::take(mine).into_iter().collect();
+    for plan in new.iter() {
+        let id = id_of(plan);
+        let table = match old.iter().position(|table| id_of(table) == id) {
+            Some(at) => {
+                let mut table = old.remove(at);
+                let was = base.and_then(|base| base.iter().find(|table| id_of(table) == id));
+                merge(&mut table, was.map(|was| was as &dyn TableLike), plan);
+                table
+            }
+            None => {
+                let mut table = plan.clone();
+                unplace(&mut table);
+                table
+            }
+        };
+        mine.push(table);
+    }
+}
+
+fn id_of(plan: &Table) -> Option<&str> {
+    plan.get("id").and_then(Item::as_str)
+}
+
+/// Whether `base` and `new`, both in the daemon's layout, say the same.
+fn same(base: Option<&Item>, new: &Item) -> bool {
+    base.is_some_and(|base| text(base) == text(new))
+}
+
+/// `item` written as one value, without the space around it.
+fn text(item: &Item) -> String {
+    let mut item = item.clone();
+    item.make_value();
+    if let Some(value) = item.as_value_mut() {
+        value.decor_mut().clear();
+    }
+    item.to_string()
+}
+
+/// `new` as it goes into the file: a value spaced as the daemon writes
+/// one, a table after a blank line and after the table before it.
+fn placed(new: &Item) -> Item {
+    let mut item = new.clone();
+    match &mut item {
+        Item::Value(value) => value.decor_mut().clear(),
+        Item::Table(table) => unplace(table),
+        Item::ArrayOfTables(tables) => tables.iter_mut().for_each(unplace),
+        Item::None => {}
+    }
+    item
+}
+
+/// Drops the place `table` and the tables in it had in the daemon's text,
+/// so each is written after the table before it in the file.
+fn unplace(table: &mut Table) {
+    table.set_position(None);
+    table.decor_mut().set_prefix("\n");
+    for (_, item) in table.iter_mut() {
+        if let Some(table) = item.as_table_mut() {
+            unplace(table);
+        }
+    }
+}
+
+/// Puts `new` in the place of `item`, as a value with the space and
+/// comment `item` has around it.
+fn replace(item: &mut Item, new: &Item) {
+    let mut value = new.clone();
+    value.make_value();
+    if let (Some(value), Some(old)) = (value.as_value_mut(), item.as_value()) {
+        *value.decor_mut() = old.decor().clone();
+    }
+    *item = value;
 }
 
 #[cfg(test)]

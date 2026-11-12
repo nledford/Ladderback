@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
 
+use crate::edit::saved;
 use crate::files::{self, Contents};
 use crate::record::{reads_back, with_id};
 use crate::schema::{MAX_CONFIG_BYTES, Schemas, parse, render_as};
@@ -139,9 +140,17 @@ impl Job {
         Ok(parsed.config)
     }
 
+    /// Writes `config` over the file: as an edit of the file as it is when
+    /// one can be made, so what a person wrote around the change stays, and
+    /// otherwise in the daemon's layout, as a first save writes it.
     fn save(&self, config: &AgentConfig) -> Result<(), ConfigError> {
-        let text = render_as(&self.path, config, self.schemas.current)?;
+        let rendered = render_as(&self.path, config, self.schemas.current)?;
         let old = self.current_bytes()?;
+        let text = old
+            .as_deref()
+            .and_then(|old| std::str::from_utf8(old).ok())
+            .and_then(|old| saved(&self.path, old, config, &rendered, &self.schemas))
+            .unwrap_or(rendered);
         self.replace(old.as_deref(), &text)
     }
 
