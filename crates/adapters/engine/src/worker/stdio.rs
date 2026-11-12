@@ -58,11 +58,16 @@ mod tests {
             detached();
             return;
         }
-        let output = Command::new(std::env::current_exe().unwrap())
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
             .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
             .env(CHILD, "1")
             .stdin(Stdio::null())
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = spawn_gate::hold(|| command.spawn())
+            .unwrap()
+            .wait_with_output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

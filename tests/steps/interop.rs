@@ -344,7 +344,16 @@ fn removes_config(agent: &mut Agent) {
 async fn rustic_dry_run(agent: &mut Agent) {
     // Placed right before rustic is run, so that a machine without it says
     // so, and everything before still ran.
-    let installed = blocking(|| Command::new("rustic").arg("--version").output().is_ok()).await;
+    let installed = blocking(|| {
+        let mut version = Command::new("rustic");
+        version
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        spawn_gate::hold(|| version.spawn()).is_ok_and(|mut child| child.wait().is_ok())
+    })
+    .await;
     if !installed {
         agent.interop.rustic_missing = true;
         testkit::skip!("rustic is not on the PATH");
@@ -367,7 +376,8 @@ async fn rustic_dry_run(agent: &mut Agent) {
     let work = work_dir(agent);
     let home = home_dir(agent);
     let output = blocking(move || {
-        Command::new("rustic")
+        let mut rustic = Command::new("rustic");
+        rustic
             .args(["-P"])
             .arg(&profile)
             .args(["forget", "--dry-run", "--json"])
@@ -376,8 +386,13 @@ async fn rustic_dry_run(agent: &mut Agent) {
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("HOME", home)
             .env("RUSTIC_NO_CACHE", "true")
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        spawn_gate::hold(|| rustic.spawn())
             .expect("rustic runs")
+            .wait_with_output()
+            .expect("rustic ran")
     })
     .await;
     assert!(

@@ -31,13 +31,17 @@ const PACKAGE: &str = env!("CARGO_MANIFEST_DIR");
 /// so that Cargo reuses the build it has.
 fn test_binary(target: &str) -> PathBuf {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(cargo)
+    let mut command = Command::new(cargo);
+    command
         .args(["test", "--workspace", "--no-run", "--message-format=json"])
         .args(["--test", target])
         .current_dir(PACKAGE)
         .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    let output = spawn_gate::hold(|| command.spawn())
+        .expect("cargo ran")
+        .wait_with_output()
         .expect("cargo ran");
     assert!(
         output.status.success(),
@@ -102,7 +106,8 @@ fn left_in_the_platforms_folders_by(target: &str) -> Vec<String> {
             .expect("the platform's config folder");
         std::fs::write(&path, NEWER_SCHEMA).expect("the config file");
     }
-    let output = Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .current_dir(PACKAGE)
         .env("HOME", home.path())
         .env("XDG_DATA_HOME", home.path().join(".local/share"))
@@ -112,7 +117,11 @@ fn left_in_the_platforms_folders_by(target: &str) -> Vec<String> {
         .env_remove("LADDERBACK_CONFIG_DIR")
         .env_remove("LADDERBACK_DATA_DIR")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = spawn_gate::hold(|| command.spawn())
+        .expect("the test binary ran")
+        .wait_with_output()
         .expect("the test binary ran");
     // The planted files, and the folders that hold only them, are not a
     // daemon's doing.

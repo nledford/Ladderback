@@ -5,7 +5,7 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use app::ports::{PlanExport, ProfileWriter};
 use domain::execution::plan_tags::{PlanTags, UserTag};
@@ -106,7 +106,16 @@ fn at<'a>(value: &'a toml::Value, path: &str) -> &'a toml::Value {
 
 #[test]
 fn the_stock_rustic_reads_every_key_the_writer_writes() {
-    if Command::new("rustic").arg("--version").output().is_err() {
+    let mut version = Command::new("rustic");
+    version
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if spawn_gate::hold(|| version.spawn())
+        .and_then(|mut child| child.wait())
+        .is_err()
+    {
         testkit::skip!("rustic is not on the PATH");
     }
     let export = export();
@@ -116,7 +125,8 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
     let scratch = tempdir().expect("a scratch folder");
     let profile = scratch.path().join("exported.toml");
     std::fs::write(&profile, &written.text).expect("the profile");
-    let output = Command::new("rustic")
+    let mut rustic = Command::new("rustic");
+    rustic
         .arg("-P")
         .arg(&profile)
         .arg("show-config")
@@ -124,7 +134,12 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", scratch.path())
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = spawn_gate::hold(|| rustic.spawn())
+        .expect("rustic runs")
+        .wait_with_output()
         .expect("rustic runs");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
