@@ -23,7 +23,7 @@ use jiff::Timestamp;
 pub use template::{MAX_TEMPLATE_BYTES, Template};
 
 use crate::execution::{Operation, OperationKind, OperationStatus, Target};
-use crate::planning::{InvalidValue, ValueKind, Violation};
+use crate::planning::{InvalidValue, ValueKind, Violation, is_relative_program};
 use crate::secrets::SecretRef;
 use crate::{OperationId, PlanId, RepositoryAlias};
 
@@ -342,6 +342,18 @@ pub enum ChannelError {
     InlineSecret,
     /// Credentials for a kind that sends none.
     AuthNotTaken,
+    /// The command that prints the secret starts its program by a relative
+    /// path, which the daemon's working directory would decide, as a
+    /// repository's `password-command` would.
+    RelativeProgram(ChannelSecret),
+}
+
+/// Which of a channel's secrets: its URL, its token or its password.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChannelSecret {
+    Url,
+    Token,
+    Password,
 }
 
 impl Channel {
@@ -351,11 +363,19 @@ impl Channel {
         auth: Option<Auth>,
     ) -> Result<Self, ChannelError> {
         let auth_secret = auth.as_ref().map(|auth| match auth {
-            Auth::Bearer(token) => token,
-            Auth::Basic { password, .. } => password,
+            Auth::Bearer(token) => (ChannelSecret::Token, token),
+            Auth::Basic { password, .. } => (ChannelSecret::Password, password),
         });
-        if url.inline().is_some() || auth_secret.is_some_and(|secret| secret.inline().is_some()) {
-            return Err(ChannelError::InlineSecret);
+        let secrets = [(ChannelSecret::Url, &url)].into_iter().chain(auth_secret);
+        for (which, secret) in secrets {
+            if secret.inline().is_some() {
+                return Err(ChannelError::InlineSecret);
+            }
+            if let SecretRef::Command(command) = secret
+                && is_relative_program(command.program())
+            {
+                return Err(ChannelError::RelativeProgram(which));
+            }
         }
         if auth.is_some() && !kind.takes_auth() {
             return Err(ChannelError::AuthNotTaken);

@@ -5,7 +5,7 @@ use jiff::Timestamp;
 use super::*;
 use crate::execution::{FailureReason, Target, Trigger};
 use crate::planning::{AgentConfig, AgentSettings, Hooks, Plan, Source};
-use crate::secrets::SecretValue;
+use crate::secrets::{CommandLine, SecretValue};
 use crate::{RepositoryAlias, Uuid};
 
 fn at() -> Timestamp {
@@ -336,6 +336,52 @@ fn a_ping_url_signs_in_with_nothing() {
         );
     }
     assert!(Channel::new(ChannelKind::Healthchecks, env("DEMO_PING_URL"), None).is_ok());
+}
+
+// The command runs in the daemon's working directory, as a repository's
+// `password-command` and a hook do.
+#[test]
+fn a_channel_never_starts_a_program_by_a_relative_path() {
+    let command = |line: &str| SecretRef::Command(CommandLine::parse(line).unwrap());
+    for relative in ["./get-url", "bin/get-url --vault demo"] {
+        assert_eq!(
+            Channel::new(ChannelKind::Webhook, command(relative), None),
+            Err(ChannelError::RelativeProgram(ChannelSecret::Url)),
+            "{relative}"
+        );
+        assert_eq!(
+            Channel::new(
+                ChannelKind::Ntfy,
+                env("DEMO_TOPIC_URL"),
+                Some(Auth::Bearer(command(relative)))
+            ),
+            Err(ChannelError::RelativeProgram(ChannelSecret::Token)),
+            "{relative}"
+        );
+        assert_eq!(
+            Channel::new(
+                ChannelKind::Webhook,
+                env("DEMO_WEBHOOK_URL"),
+                Some(basic(command(relative)))
+            ),
+            Err(ChannelError::RelativeProgram(ChannelSecret::Password)),
+            "{relative}"
+        );
+    }
+    // A name is looked up on `PATH`; an absolute path is one file.
+    for runnable in ["get-url --vault demo", "/usr/local/bin/get-url"] {
+        let url = command(runnable);
+        let token = Auth::Bearer(command(runnable));
+        assert!(
+            Channel::new(ChannelKind::Ntfy, url.clone(), Some(token)).is_ok(),
+            "{runnable}"
+        );
+        let basic = basic(command(runnable));
+        assert!(
+            Channel::new(ChannelKind::Webhook, url, Some(basic)).is_ok(),
+            "{runnable}"
+        );
+    }
 }
 
 #[test]

@@ -232,6 +232,45 @@ fn a_channel_needs_exactly_one_url_source_and_at_most_one_token_source() {
     assert_eq!(relative.at, Some(position_of(&text, "\"relative/url\"")));
 }
 
+// The command runs in the daemon's working directory, as a repository's
+// `password-command` does.
+#[test]
+fn a_channel_command_that_starts_a_program_by_a_relative_path_is_refused_where_it_is_written() {
+    let tables = [
+        ("url-command", "kind = \"webhook\"\n"),
+        ("token-command", "kind = \"ntfy\"\nurl-env = \"A\"\n"),
+        (
+            "password-command",
+            "kind = \"webhook\"\nurl-env = \"A\"\nusername = \"demo-user\"\n",
+        ),
+    ];
+    for (key, table) in tables {
+        let command = "bin/get-secret --vault CANARY-vault";
+        let text = with(&format!(
+            "[notifications.channels.ops]\n{table}{key} = \"{command}\"\n"
+        ));
+        let relative = invalid(parsed(&text));
+        assert_eq!(
+            relative.problem,
+            Problem::Secret(PasswordProblem::RelativeProgram),
+            "{key}"
+        );
+        assert_eq!(
+            relative.key.as_deref(),
+            Some(format!("notifications.channels.ops.{key}").as_str())
+        );
+        assert_eq!(
+            relative.at,
+            Some(position_of(&text, &format!("\"{command}\"")))
+        );
+        assert!(!format!("{relative:?}").contains("CANARY"), "{relative:?}");
+        let text = with(&format!(
+            "[notifications.channels.ops]\n{table}{key} = \"get-secret --vault demo\"\n"
+        ));
+        assert!(parsed(&text).is_ok(), "{key}");
+    }
+}
+
 #[test]
 fn a_ping_url_signs_in_with_nothing() {
     for key in [

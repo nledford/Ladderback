@@ -184,7 +184,8 @@ pub enum PasswordProblem {
     NotAKeyringEntry,
     /// `password-command` can't be split into words.
     BadCommand,
-    /// `password-command` starts its program by a relative path, which the
+    /// `password-command` (or a channel's `url-command`, `token-command` or
+    /// `password-command`) starts its program by a relative path, which the
     /// daemon's working directory would decide.
     RelativeProgram,
 }

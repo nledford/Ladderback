@@ -86,7 +86,7 @@ pub fn is_relative_location(location: &str) -> bool {
 
 /// Whether a program is named by a relative path: with a `/` in it, and not
 /// at its start. A name without one is looked up on `PATH`.
-pub(super) fn is_relative_program(program: &str) -> bool {
+pub(crate) fn is_relative_program(program: &str) -> bool {
     program.contains('/') && !program.starts_with('/')
 }
 

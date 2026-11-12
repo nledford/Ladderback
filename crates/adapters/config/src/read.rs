@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Problem};
 use domain::execution::plan_tags::UserTag;
 use domain::notifications::{
-    Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName, Template,
-    Username,
+    Auth, Channel, ChannelError, ChannelKind, ChannelName, ChannelSecret, EventKind, Notifications,
+    Rule, RuleName, Template, Username,
 };
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
@@ -492,9 +492,23 @@ fn channel(reader: &Reader<'_, '_>, path: &Path, table: ChannelTable) -> Read<Ch
         }
         (None, None, Some(_)) => return reader.required(path, "username", None),
     };
-    // Neither refusal can happen: no key holds a secret as text, and a kind
-    // that signs in with nothing was refused its keys above.
-    Channel::new(kind, url, auth).map_err(|_| several())
+    // A secret as text and keys a kind doesn't take were refused above; a
+    // command started by a relative path is refused at its key, as a
+    // repository's `password-command` is.
+    Channel::new(kind, url, auth).map_err(|error| match error {
+        ChannelError::RelativeProgram(which) => {
+            let key = match which {
+                ChannelSecret::Url => "url-command",
+                ChannelSecret::Token => "token-command",
+                ChannelSecret::Password => "password-command",
+            };
+            reader.refuse(
+                &path.key(key),
+                Problem::Secret(PasswordProblem::RelativeProgram),
+            )
+        }
+        ChannelError::InlineSecret | ChannelError::AuthNotTaken => several(),
+    })
 }
 
 fn rule(reader: &Reader<'_, '_>, path: &Path, table: RuleTable) -> Read<Rule> {
