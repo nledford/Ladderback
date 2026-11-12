@@ -90,6 +90,13 @@ exclude_re = [
     # Compiled only where there is no OS keyring (neither macOS nor Linux): on
     # the hosts that run mutants the mutant builds and nothing calls it.
     'crates/adapters/secrets/src/keyring_store\.rs.*: replace <impl KeyringStore for Unavailable>::get ',
+    # `HttpNotifier::text` keeps the localizer of the last agent locale it
+    # wrote in, so the catalogs are read once a locale rather than once a
+    # message. A guard of `false` builds that same localizer again for every
+    # message: the text is the same, only slower, so no test can tell it from
+    # the cache. A guard of `true` (an old locale's localizer for a new one) is
+    # not excluded and is caught.
+    'crates/adapters/notify/src/lib\.rs.*: replace match guard held\.0 == \*locale with false in HttpNotifier::text$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

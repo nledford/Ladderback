@@ -48,11 +48,12 @@ fn a_url_that_is_not_http_with_a_host_is_no_address() {
 }
 
 #[test]
-fn a_url_longer_than_the_cap_is_no_address() {
+fn a_url_longer_than_8_kib_is_no_address() {
+    // Technical design §11: a URL longer than 8 KiB is not sent to.
     let base = "https://ntfy.example.com/";
-    let longest = format!("{base}{}", "a".repeat(MAX_URL_BYTES - base.len()));
+    let longest = format!("{base}{}", "a".repeat(8 * 1024 - base.len()));
     assert_eq!(longest.len(), MAX_URL_BYTES);
-    assert!(address(&longest).is_ok(), "a URL at the cap is taken");
+    assert!(address(&longest).is_ok(), "an 8 KiB URL is taken");
     let longer = format!("{longest}a");
     assert_eq!(address(&longer), Err(NotifyError::InvalidAddress));
 }
@@ -232,7 +233,7 @@ fn an_agents_locale_without_a_catalog_falls_back_to_the_systems() {
 }
 
 #[test]
-fn a_custom_message_is_sent_as_it_is_up_to_the_cap() {
+fn a_custom_message_is_sent_as_it_is_up_to_4_kib() {
     let notifier = HttpNotifier::new(localizer(), Duration::from_secs(1)).expect("a client");
     let notification = |text: String| Notification {
         destination: app::ports::Destination {
@@ -244,7 +245,8 @@ fn a_custom_message_is_sent_as_it_is_up_to_the_cap() {
         message: Message::Custom(text),
         locale: None,
     };
-    let text = "a".repeat(MAX_MESSAGE_BYTES);
+    // Technical design §11: a message is cut to 4 KiB.
+    let text = "a".repeat(4 * 1024);
     assert_eq!(notifier.text(&notification(text.clone())), text);
     assert_eq!(notifier.text(&notification(format!("{text}b"))), text);
 }
