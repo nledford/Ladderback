@@ -460,6 +460,30 @@ async fn a_command_gets_no_input() {
     assert!(started.elapsed() < Duration::from_secs(5));
 }
 
+/// A password command inherits no descriptor that another start in the
+/// daemon has open: it starts through the spawn gate, so it waits while a
+/// pipe that is not yet close-on-exec is open, as a worker's, a hook's or
+/// another command's pipes are for a moment where the platform has no
+/// `pipe2` (#234). A command that held a worker's pipe could read the job
+/// it is sent, secrets and all, or keep it from the end of its input.
+#[tokio::test]
+async fn a_command_inherits_no_pipe_another_start_has_open() {
+    let pipe = testkit::inheritable::InheritablePipe::open();
+    let found = sh(
+        &format!("{}\necho none", testkit::inheritable::INHERITED),
+        pipe.numbers(),
+    );
+    let result = within(
+        Duration::from_secs(5),
+        resolver(Duration::from_secs(30)).resolve(&command(found)),
+    )
+    .await;
+    let Ok(Resolved { value, .. }) = result else {
+        panic!("the command failed: {result:?}");
+    };
+    assert_eq!(value.expose(), "none", "the command inherited a descriptor");
+}
+
 #[tokio::test]
 async fn a_command_that_is_killed_by_a_signal_has_no_status() {
     let result = within(

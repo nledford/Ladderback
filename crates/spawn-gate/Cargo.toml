@@ -1,0 +1,11 @@
+[package]
+name = "spawn-gate"
+description = "One child process starts at a time in a process, so none inherits another's pipes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

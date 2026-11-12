@@ -20,6 +20,7 @@ nix = { workspace = true, features = ["signal"] }
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 tempfile.workspace = true
+testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 uuid.workspace = true
 

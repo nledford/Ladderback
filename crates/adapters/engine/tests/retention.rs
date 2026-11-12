@@ -185,3 +185,53 @@ async fn an_error_never_carries_what_a_reference_resolved_to() {
         "the detail leaks a resolved secret: {detail}"
     );
 }
+
+/// The `rclone` that rustic's backend starts for an `rclone:` repository
+/// inherits no descriptor another start in the daemon has open: the
+/// backends are built through the spawn gate, so it waits while a pipe that
+/// is not yet close-on-exec is open (decision 58). The stand-in for
+/// `rclone` writes the number of each of the pipe's ends it holds to a file
+/// before any redirection of its own can open one, then exits, so the open
+/// fails.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_rclone_repository_s_server_inherits_no_pipe_another_start_has_open() {
+    let scratch = tempfile::tempdir().unwrap();
+    let found = scratch.path().join("found");
+    let pipe = testkit::inheritable::InheritablePipe::open();
+    let [read, write] = pipe.numbers();
+    // rustic appends the repository's path as the last argument.
+    let stand_in = format!(
+        "sh -c 'found=; for n in \"$1\" \"$2\"; do if [ -e /dev/fd/$n ]; then found=\"$found $n\"; fi; done; echo \"$found\" > \"$3\"' sh {read} {write} '{}'",
+        found.display()
+    );
+    let access = RepositoryAccess {
+        repository: "rclone:demo-remote:repo".to_owned(),
+        repo_hot: None,
+        password: domain::secrets::SecretValue::new(PASSWORD),
+        id: None,
+        options: [("rclone-command".to_owned(), stand_in)].into(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: Vec::new(),
+    };
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("the stand-in exits before it serves");
+    drop(pipe);
+    let inherited = std::fs::read_to_string(&found)
+        .unwrap_or_else(|_| panic!("the stand-in never ran: {error:?}"));
+    assert_eq!(
+        inherited.trim(),
+        "",
+        "the rclone stand-in inherited another start's pipe"
+    );
+}

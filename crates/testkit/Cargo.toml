@@ -7,5 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+spawn-gate.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# `pipe` makes a pipe that is not close-on-exec: `inheritable`.
+nix.workspace = true
+
 [lints]
 workspace = true

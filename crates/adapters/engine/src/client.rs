@@ -2012,6 +2012,32 @@ mod tests {
         assert!(events.next().await.is_none());
     }
 
+    /// A worker inherits no descriptor that another start in the daemon has
+    /// open: it starts through the spawn gate, so it waits while a pipe
+    /// that is not yet close-on-exec is open, as another worker's, a hook's
+    /// or a password command's pipes are for a moment where the platform
+    /// has no `pipe2` (#234). A worker that held another's stdin would keep
+    /// it from the end of its job until it ended itself. The script exits 4
+    /// if it inherited a descriptor, 3 if not.
+    #[tokio::test]
+    async fn a_worker_inherits_no_pipe_another_start_has_open() {
+        let pipe = testkit::inheritable::InheritablePipe::open();
+        let [read, write] = pipe.numbers();
+        // No pipeline and no `$(…)`: either makes a pipe the test could find.
+        let script = concat!(
+            "found=no; for n; do if [ -e /dev/fd/$n ]; then found=yes; fi; done\n",
+            "cat >/dev/null; if [ $found = yes ]; then exit 4; fi; exit 3"
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script, "sh", &read, &write]);
+        let RunningJob { mut events, .. } = run(&engine).await;
+        assert_eq!(
+            events.next().await,
+            Some(EngineEvent::Failed(FailureReason::EngineExited {
+                exit_code: Some(3)
+            }))
+        );
+    }
+
     #[tokio::test]
     async fn a_worker_cut_off_mid_line_at_its_deadline_is_a_passed_deadline() {
         let script = format!(

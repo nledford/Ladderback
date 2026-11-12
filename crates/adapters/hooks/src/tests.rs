@@ -531,6 +531,69 @@ async fn a_descendant_cannot_write_to_a_hook_s_output_after_the_call_returned() 
     logged(&log, "status 141").await;
 }
 
+/// The call lets go of the hook's pipes only while no start is in flight:
+/// a start (another hook's, a worker's) can copy every descriptor of the
+/// daemon into a child that has not yet run `exec`, close-on-exec or not,
+/// and holds the spawn gate until it has. A copy of the read end that
+/// outlived the call would let a descendant's late write go through (#234).
+/// Here a start holds the gate before the hook may end (it waits for a file
+/// the test makes only then); the call returns only once it has let go.
+#[tokio::test]
+async fn the_call_lets_go_of_the_pipes_only_while_no_start_is_in_flight() {
+    const HELD: Duration = Duration::from_secs(1);
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let go = scratch.path().join("log.go");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let entry = sh(
+        r#"echo started >> "$1"; while [ ! -e "$1.go" ]; do sleep 0.01; done"#,
+        &log,
+    );
+    let context = context();
+    let start = async {
+        logged(&log, "started").await;
+        let start = testkit::inheritable::start_in_flight(HELD);
+        std::fs::write(&go, "").unwrap();
+        start
+    };
+    let (outcome, start) = tokio::join!(
+        within(Duration::from_secs(5), runner.run(&entry, &context)),
+        start
+    );
+    let returned = Instant::now();
+    let let_go = start.join().unwrap();
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert!(
+        returned >= let_go,
+        "the call let go of the pipes while a start held the gate"
+    );
+}
+
+/// A hook inherits no descriptor that another start in the daemon has open:
+/// it starts through the spawn gate, so it waits while a pipe that is not
+/// yet close-on-exec is open, as a worker's, another hook's or a password
+/// command's pipes are for a moment where the platform has no `pipe2`
+/// (#234). A hook that held another's pipe would keep its reader from the
+/// end, or its writer from the SIGPIPE.
+#[tokio::test]
+async fn a_hook_inherits_no_pipe_another_start_has_open() {
+    let pipe = testkit::inheritable::InheritablePipe::open();
+    let [read, write] = pipe.numbers();
+    let entry = HookEntry::new(
+        "sh",
+        ["-c", testkit::inheritable::INHERITED, "sh", &read, &write],
+        OnFailure::Error,
+    )
+    .unwrap();
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
+    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert_eq!(
+        outcome.stdout.text, "",
+        "the hook inherited these descriptors"
+    );
+}
+
 /// The call returns once the killed hook is reaped, not when the SIGKILL is
 /// sent: here the SIGKILL takes a while to arrive, as it does for a hook that
 /// is busy in the kernel, and the call waits for it. (The SIGTERM is not

@@ -2352,6 +2352,7 @@ dependencies = [
  "domain",
  "nix 0.31.3",
  "tempfile",
+ "testkit",
  "tokio",
  "uuid",
 ]
@@ -6346,6 +6347,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "spawn-gate"
+version = "0.1.1"
+
+[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6811,6 +6816,10 @@ dependencies = [
 [[package]]
 name = "testkit"
 version = "0.1.1"
+dependencies = [
+ "nix 0.31.3",
+ "spawn-gate",
+]
 
 [[package]]
 name = "textwrap"

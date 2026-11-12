@@ -14,6 +14,7 @@ members = [
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
+    "crates/spawn-gate",
     "crates/testkit",
 ]
 # `web` only builds for wasm32 with trunk; host commands skip it unless asked.
@@ -31,6 +32,7 @@ default-members = [
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
+    "crates/spawn-gate",
     "crates/testkit",
 ]
 
@@ -59,6 +61,7 @@ http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
 secrets = { path = "crates/adapters/secrets" }
 store = { path = "crates/adapters/store" }
+spawn-gate = { path = "crates/spawn-gate" }
 testkit = { path = "crates/testkit" }
 
 async-trait = "0.1.92"

@@ -11,8 +11,13 @@
 //! [`scenario_watch::ScenarioWatch`] is how a cucumber runner stops at a
 //! scenario that runs too long, naming it, instead of hanging until CI
 //! cancels the job.
+//!
+//! [`inheritable::InheritablePipe`] is how a test shows that what starts a
+//! child waits for the spawn gate.
 
 pub mod daemon;
+#[cfg(unix)]
+pub mod inheritable;
 pub mod scenario_watch;
 
 use std::fs::OpenOptions;
