@@ -67,6 +67,8 @@ mod service_steps;
 mod shutdown_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
+#[path = "steps/notifications.rs"]
+mod notifications_steps;
 
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
@@ -98,6 +100,7 @@ struct Agent {
     maintenance: maintenance_steps::MaintenanceE2e,
     cache: cache_steps::CacheE2e,
     service: service_steps::ServiceE2e,
+    notifications: notifications_steps::NotificationsE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -144,6 +147,7 @@ impl Agent {
             cache: cache_steps::CacheE2e::default(),
             service: service_steps::ServiceE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
+            notifications: notifications_steps::NotificationsE2e::default(),
         }
     }
 

@@ -666,3 +666,79 @@ async fn fake_service_manager_meets_the_service_manager_contract() {
     )));
     contract::service::run(&harness).await;
 }
+
+/// Channels for the recording fake: each URL is fresh, and one that doesn't
+/// accept is told to fail as its behaviour says.
+#[derive(Default)]
+struct FakeNotifierHarness {
+    notifier: app::fakes::RecordingNotifier,
+    next: AtomicUsize,
+}
+
+#[async_trait]
+impl contract::notifier::NotifierHarness for FakeNotifierHarness {
+    fn notifier(&self) -> &dyn app::ports::Notifier {
+        &self.notifier
+    }
+
+    fn url(
+        &self,
+        kind: domain::notifications::ChannelKind,
+        behaviour: contract::notifier::Behaviour,
+    ) -> String {
+        use app::ports::NotifyError;
+        use contract::notifier::Behaviour;
+        let number = self.next.fetch_add(1, Ordering::Relaxed);
+        let url = format!("http://127.0.0.1/{}/{number}", kind.name());
+        let failure = match behaviour {
+            Behaviour::Accepts => None,
+            Behaviour::Refuses => Some(NotifyError::Unreachable),
+            Behaviour::Hangs => Some(NotifyError::TimedOut),
+            Behaviour::Answers(status) if (200..300).contains(&status) => None,
+            Behaviour::Answers(status) => Some(NotifyError::Rejected { status }),
+        };
+        if let Some(error) = failure {
+            self.notifier.fail_at(&url, error);
+        }
+        url
+    }
+
+    async fn received(&self) -> Vec<contract::notifier::Received> {
+        use app::ports::{Credentials, Message};
+        use contract::notifier::{Received, ReceivedAuth};
+        use domain::notifications::ChannelKind;
+        self.notifier
+            .delivered()
+            .into_iter()
+            .map(|notification| {
+                let kind = notification.destination.kind;
+                let pinged = kind == ChannelKind::Healthchecks;
+                Received {
+                    kind,
+                    ping: pinged.then(|| notification.event.kind.ping()),
+                    event: if pinged {
+                        String::new()
+                    } else {
+                        notification.event.kind.name().to_owned()
+                    },
+                    message: match notification.message {
+                        Message::Default => format!("default text of {}", notification.event.kind.name()),
+                        Message::Custom(text) => text,
+                    },
+                    auth: notification.destination.auth.map(|auth| match auth {
+                        Credentials::Bearer(token) => ReceivedAuth::Bearer(token.expose().to_owned()),
+                        Credentials::Basic { username, password } => ReceivedAuth::Basic {
+                            username: username.as_str().to_owned(),
+                            password: password.expose().to_owned(),
+                        },
+                    }),
+                }
+            })
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn the_recording_notifier_meets_the_notifier_contract() {
+    contract::notifier::run(&FakeNotifierHarness::default()).await;
+}

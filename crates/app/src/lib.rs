@@ -22,6 +22,7 @@ pub mod history;
 pub mod interop;
 pub mod log_write;
 pub mod maintenance;
+pub mod notifications;
 pub mod ports;
 pub mod queue;
 pub mod recovery;

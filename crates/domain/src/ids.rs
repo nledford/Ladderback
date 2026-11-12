@@ -126,7 +126,7 @@ pub struct PlanId(String);
 /// Whether `value` is a slug: at most 64 bytes of lowercase letters, digits
 /// and hyphens, the first not a hyphen. What a plan's ID and a repository's
 /// alias are made of.
-fn is_slug(value: &str) -> bool {
+pub(crate) fn is_slug(value: &str) -> bool {
     let slug = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
     value.len() <= 64
         && value.bytes().next().is_some_and(slug)

@@ -82,6 +82,11 @@ impl From<InvalidValue> for Refusal {
             ValueKind::OptionValue => "option-value",
             ValueKind::Options => "options",
             ValueKind::HookProgram => "hook-program",
+            ValueKind::NotificationEvent => "notification-event",
+            ValueKind::NotificationName => "notification-name",
+            ValueKind::ChannelKind => "channel-kind",
+            ValueKind::NotificationTemplate => "notification-template",
+            ValueKind::ChannelUsername => "channel-username",
         };
         Self {
             kind,

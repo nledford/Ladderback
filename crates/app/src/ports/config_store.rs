@@ -146,6 +146,11 @@ pub enum Problem {
     ReservedTag,
     /// The repository's password isn't given as the format needs.
     Password(PasswordProblem),
+    /// A notification channel's URL or token isn't given as the format
+    /// needs: by exactly one of its `-command`, `-keyring`, `-file` and
+    /// `-env` keys (at most one for a token), as a password is, and never as
+    /// text in the file.
+    Secret(PasswordProblem),
     /// A schedule doesn't say what its moments are as the format needs.
     Cadence(CadenceProblem),
     /// The settings are each valid, but they disagree with one another.

@@ -6,6 +6,7 @@ pub mod config_store;
 pub mod engine;
 pub mod event_bus;
 pub mod hooks;
+pub mod notifier;
 pub mod network;
 pub mod operation_store;
 pub mod power;

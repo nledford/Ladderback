@@ -128,6 +128,18 @@ fn violated(reader: &Reader<'_, '_>, root: &Path, violation: Violation) -> Confi
             let path = entry(second);
             return reader.error(&path, Spot::Key, Problem::Violation(violation), detail);
         }
+        Violation::UnknownChannel { rule, .. } | Violation::UnknownRulePlan { rule, .. } => {
+            let key = match &violation {
+                Violation::UnknownChannel { .. } => "channel",
+                _ => "plans",
+            };
+            let path = root
+                .key("notifications")
+                .key("rules")
+                .key(rule.as_str())
+                .key(key);
+            return reader.refuse(&path, Problem::Violation(violation));
+        }
     };
     let path = root.key("plans").index(index).key(key);
     reader.refuse(&path, Problem::Violation(violation))

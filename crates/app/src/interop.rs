@@ -410,6 +410,54 @@ mod tests {
         assert!(programs(&hooks.run_finally)[1].contains("their-finally"));
     }
 
+    /// The rules and channels of a configuration: one channel, and one rule
+    /// that sends it every failed backup.
+    fn notifications() -> domain::notifications::Notifications {
+        use domain::notifications::{
+            Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
+        };
+        let ops = ChannelName::parse("ops").expect("a channel name");
+        Notifications::new(
+            BTreeMap::from([(
+                ops.clone(),
+                Channel::new(
+                    ChannelKind::Ntfy,
+                    SecretRef::Env("DEMO_TOPIC_URL".to_owned()),
+                    None,
+                )
+                .expect("a channel"),
+            )]),
+            BTreeMap::from([(
+                RuleName::parse("failures").expect("a rule name"),
+                Rule::new(
+                    [EventKind::BackupFailed].into(),
+                    ops,
+                    Default::default(),
+                    None,
+                )
+                .expect("a rule"),
+            )]),
+        )
+        .expect("rules that name their channel")
+    }
+
+    #[tokio::test]
+    async fn an_import_keeps_the_notification_rules_and_channels() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        config
+            .save(
+                &AgentConfig::default()
+                    .with_notifications(notifications())
+                    .expect("rules for no plan in particular"),
+            )
+            .await
+            .expect("saved");
+        import(&config, profile(vec![plan("home", None)], Hooks::default()))
+            .await
+            .expect("imported");
+        assert_eq!(saved(&config).await.notifications(), &notifications());
+    }
+
     #[tokio::test]
     async fn a_plan_without_a_host_stops_the_agent_from_taking_the_others() {
         let config = Arc::new(InMemoryConfigStore::new());
