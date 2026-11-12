@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use app::fakes::{FakeClock, InMemoryAdminPassword, SeededRandom};
@@ -419,6 +419,33 @@ async fn the_wait_is_kept_by_the_connections_address_never_a_forwarded_one() {
     );
 }
 
+/// A sign-in the server hands over without its connection's address can't
+/// be given a wait of its own. Keyed on one stand-in address, it would make
+/// every client share one wait, which a single client could keep at its
+/// longest for all: it is refused, loudly, and its password counts for no one.
+#[tokio::test]
+async fn a_sign_in_without_its_connection_s_address_is_refused_and_counts_for_no_one() {
+    let on = on();
+    for password in ["not-the-password", PASSWORD] {
+        let mut request = sign_in_request(password, &[]);
+        request
+            .extensions_mut()
+            .remove::<ConnectInfo<crate::PeerAddr>>();
+        assert_eq!(
+            code(send(&on, request).await).await,
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some("sign-in-unavailable".to_owned())
+            )
+        );
+    }
+    assert_eq!(
+        send(&on, sign_in_request(PASSWORD, &[])).await.status(),
+        StatusCode::OK,
+        "the refused sign-ins made a client wait"
+    );
+}
+
 #[tokio::test]
 async fn a_sign_in_body_that_isnt_one_password_is_refused() {
     let on = on();
@@ -656,7 +683,9 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
 
     let on = on();
     let (cookie, _) = signed_in(&on).await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        .await
+        .unwrap();
     let addr = listener.local_addr().unwrap();
     let mut state = test_state();
     state.sign_in = on.clone();

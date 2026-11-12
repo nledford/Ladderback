@@ -10,7 +10,6 @@
 //! cookie is looked at, and a request with no session never has its body
 //! read.
 
-use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, SessionDto, SignInDto, SignInStateDto};
@@ -155,10 +154,24 @@ pub(crate) async fn sign_in(State(sign_in): State<SignIn>, request: Request) -> 
     let SignIn::On(access) = sign_in else {
         return answer(SignInStateDto::Off, None);
     };
-    let address = request
+    // Each client's sign-ins wait on their own, keyed by the connection's
+    // address (§10.1). A server that didn't hand it over would put every
+    // client in one wait, which one client could keep at its longest for
+    // all: refuse, and say so to whoever runs the daemon.
+    let Some(ConnectInfo(crate::PeerAddr(peer))) = request
         .extensions()
         .get::<ConnectInfo<crate::PeerAddr>>()
-        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |info| info.0.0.ip());
+        .copied()
+    else {
+        log::error!(
+            "a sign-in arrived without its connection's address; the server must be served with its connect info"
+        );
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::SignInUnavailable,
+        );
+    };
+    let address = peer.ip();
     let secure = over_https(request.headers());
     // The body limit has already read the body, bounded by the API's limit
     // (`body_limit`), so this only takes the bytes it holds.

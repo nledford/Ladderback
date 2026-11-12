@@ -322,7 +322,9 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// API request without a live session, or a changed one without its CSRF
 /// token; and neither does one whose body is over the limit of its class of
 /// route (§10.1). Every response, a refusal included, carries the security
-/// headers.
+/// headers. Serve it with `into_make_service_with_connect_info::<PeerAddr>()`
+/// through a [`GatedListener`]: with sign-in on, a sign-in without its
+/// connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     let sign_in = state.sign_in.clone();
     Router::new()

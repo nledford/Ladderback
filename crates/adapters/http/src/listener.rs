@@ -165,9 +165,8 @@ const AFTER_FAILURE: Duration = Duration::from_secs(1);
 /// The client's address as the daemon's server hands it to a request
 /// (`axum::extract::ConnectInfo<PeerAddr>`). axum gives a `SocketAddr` only
 /// from its own `TcpListener`, so the daemon's [`GatedListener`] needs a type
-/// of its own; tokio's listener gives one too, for tests that serve through
-/// it. (One impl for every listener whose address is a `SocketAddr` would
-/// overlap axum's own impl for its tapped listeners.)
+/// of its own. (One impl for every listener whose address is a `SocketAddr`
+/// would overlap axum's own impl for its tapped listeners.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeerAddr(pub SocketAddr);
 
@@ -175,14 +174,6 @@ impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, Gate
     for PeerAddr
 {
     fn connect_info(stream: axum::serve::IncomingStream<'_, GatedListener>) -> Self {
-        Self(*stream.remote_addr())
-    }
-}
-
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TcpListener>>
-    for PeerAddr
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, TcpListener>) -> Self {
         Self(*stream.remote_addr())
     }
 }
