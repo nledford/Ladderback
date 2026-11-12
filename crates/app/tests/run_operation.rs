@@ -1502,11 +1502,32 @@ async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothi
     let waiting = queue.push(&plan("home"), limit);
     let engine = Arc::new(Live::new());
     let store = log();
+    // A hook in every list: none of them may run for a run that never had
+    // its turn.
+    let hooks = Arc::new(app::fakes::FakeHookRunner::new());
+    hooks.script("demo-hook", app::fakes::Scripted::succeeds());
+    let entry = || {
+        domain::planning::HookEntry::new("demo-hook", ["demo"], domain::planning::OnFailure::Error)
+            .unwrap()
+    };
+    let setup = app::ports::HookSetup {
+        agent: domain::planning::Hooks {
+            run_before: vec![entry()],
+            run_after: vec![entry()],
+            run_failed: vec![entry()],
+            run_finally: vec![entry()],
+        },
+        repository: domain::planning::Hooks::default(),
+        plan: domain::planning::Hooks::default(),
+        plan_id: plan("home"),
+        repository_alias: domain::RepositoryAlias::parse("nas").unwrap(),
+    };
     let use_case = RunOperation::new(
         engine.clone(),
         Arc::new(FakeClock::new(t(3))),
         store.clone(),
-    );
+    )
+    .with_hooks(hooks.clone(), setup);
     let queued = use_case.queue(id(), Trigger::Manual, fake_job(None)).await;
     let run = tokio::spawn(async move {
         use_case
@@ -1519,6 +1540,11 @@ async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothi
     assert_eq!(ended.operation.finished_at(), Some(t(3)));
     // The engine was never asked: a job it had been given would be stopped.
     assert_eq!((engine.stops(), engine.kills()), (0, 0));
+    assert_eq!(
+        hooks.calls().len(),
+        0,
+        "a hook ran for a run that never had its turn"
+    );
     assert_logged_as_it_ended(&store, &ended).await;
     // Its place left the queue: the next run takes its turn once the
     // running one ends, not after the cancelled one too.

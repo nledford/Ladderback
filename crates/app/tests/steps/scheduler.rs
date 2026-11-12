@@ -438,6 +438,7 @@ fn on_battery(agent: &mut Agent) {
 }
 
 #[given(expr = "the plan {string} queues a run that comes due while its last run is going")]
+#[when(expr = "the plan {string} queues a run that comes due while its last run is going")]
 async fn queues_overlapping(agent: &mut Agent, name: String) {
     agent.scheduler.plan(&name).overlap = Overlap::Queue;
     agent.scheduler.save().await;
@@ -451,7 +452,8 @@ fn run_takes(agent: &mut Agent, name: String, minutes: i64) {
         .takes(plan_id(&name), SignedDuration::from_mins(minutes));
 }
 
-#[given(expr = "the agent runs at most {int} backups at once")]
+#[given(expr = "the agent runs at most {int} backup(s) at once")]
+#[when(expr = "the agent runs at most {int} backup(s) at once")]
 async fn at_most(agent: &mut Agent, limit: i64) {
     agent.scheduler.concurrency = Concurrency::new(limit).expect("the scenario's limit is valid");
     agent.scheduler.save().await;

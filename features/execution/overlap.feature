@@ -75,3 +75,35 @@ Feature: The overlap policy and the concurrency limit
     When the agent serves until "2026-06-10 03:55+00:00"
     Then the runs of the plan "home" started at "2026-06-10 03:50+00:00"
     And the agent said the run of the plan "home" was skipped because a run of it is already waiting
+
+  Scenario: A raised limit starts a run waiting for it
+    Given the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "docs" is scheduled "0 3 * * *"
+    And the plan "home" is scheduled "0 3 * * *"
+    And a run of the plan "docs" takes 60 minutes
+    When the agent serves until "2026-06-10 03:10+00:00"
+    And the agent runs at most 2 backups at once
+    And the agent serves until "2026-06-10 03:20+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:10:30+00:00"
+
+  Scenario: A lowered limit holds back the runs waiting for it
+    Given the agent runs at most 2 backups at once
+    And the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "docs" is scheduled "0 3 * * *"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the plan "photos" is scheduled "0 3 * * *"
+    And a run of the plan "docs" takes 20 minutes
+    And a run of the plan "home" takes 30 minutes
+    When the agent serves until "2026-06-10 03:10+00:00"
+    And the agent runs at most 1 backup at once
+    And the agent serves until "2026-06-10 03:40+00:00"
+    Then the runs of the plan "photos" started at "2026-06-10 03:30+00:00"
+
+  Scenario: A changed overlap policy applies to the plan's next due run
+    Given the agent starts at "2026-06-10 02:50+00:00"
+    And the plan "home" is scheduled "*/30 * * * *"
+    And a run of the plan "home" takes 45 minutes
+    When the agent serves until "2026-06-10 03:10+00:00"
+    And the plan "home" queues a run that comes due while its last run is going
+    And the agent serves until "2026-06-10 03:50+00:00"
+    Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:45+00:00"

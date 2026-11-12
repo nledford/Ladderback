@@ -39,7 +39,8 @@ pub struct Place {
 }
 
 impl RunQueue {
-    /// An empty queue. Its limit is the one each place is asked for with.
+    /// An empty queue that runs one backup at a time until it is told the
+    /// configuration's limit ([`Self::set_limit`], [`Self::push`]).
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
@@ -49,37 +50,45 @@ impl RunQueue {
         }
     }
 
+    /// Runs at most `limit` backups at once from now on, as the
+    /// configuration says: a raised limit starts the waiting runs it makes
+    /// room for at once, and a lowered one starts nothing until fewer run.
+    pub fn set_limit(&self, limit: Concurrency) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.set_limit(limit);
+        state.start();
+    }
+
     /// A place for a run of `plan` its schedule starts, which came due now,
-    /// or why it is skipped (`BackupQueue::due`). `limit` is the agent's
-    /// concurrency, as the configuration says now.
-    pub fn due(
-        &self,
-        plan: &PlanId,
-        overlap: Overlap,
-        limit: Concurrency,
-    ) -> Result<Place, Overlapping> {
-        self.admit(limit, |queue| queue.due(plan, overlap))
+    /// or why it is skipped (`BackupQueue::due`), under the limit the
+    /// scheduler last set.
+    pub fn due(&self, plan: &PlanId, overlap: Overlap) -> Result<Place, Overlapping> {
+        self.admit(|queue| queue.due(plan, overlap))
     }
 
     /// A place for any other run of `plan`: one started by hand, or one the
-    /// queue held from before the start (`BackupQueue::push`).
+    /// queue held from before the start (`BackupQueue::push`). `limit` is
+    /// the agent's concurrency, as the configuration says now, and applies
+    /// from then on.
     pub fn push(&self, plan: &PlanId, limit: Concurrency) -> Place {
-        match self.admit(limit, |queue| Ok::<_, Infallible>(queue.push(plan))) {
+        let taken = self.admit(|queue| {
+            queue.set_limit(limit);
+            Ok::<_, Infallible>(queue.push(plan))
+        });
+        match taken {
             Ok(place) => place,
             Err(never) => match never {},
         }
     }
 
-    /// Applies `limit`, asks `take` for a ticket, and starts whatever may
-    /// start now: the new run, or, under a raised limit, runs that waited,
-    /// whether or not `take` gave a ticket.
+    /// Asks `take` for a ticket, and starts whatever may start now: the new
+    /// run, or, under a limit `take` raised, runs that waited, whether or
+    /// not `take` gave a ticket.
     fn admit<E>(
         &self,
-        limit: Concurrency,
         take: impl FnOnce(&mut BackupQueue) -> Result<Ticket, E>,
     ) -> Result<Place, E> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.queue.set_limit(limit);
         let place = take(&mut state.queue).map(|ticket| {
             let (sender, turn) = oneshot::channel();
             state.turns.insert(ticket, sender);
@@ -197,15 +206,30 @@ mod tests {
     }
 
     #[test]
+    fn a_limit_set_applies_to_the_runs_already_waiting() {
+        let queue = RunQueue::new();
+        let docs = queue.push(&plan("docs"), limit(1));
+        let mut home = queue.push(&plan("home"), limit(1));
+        queue.set_limit(limit(2));
+        assert!(has_turn(&mut home), "a raised limit starts the waiting run");
+        let mut photos = queue.push(&plan("photos"), limit(2));
+        queue.set_limit(limit(1));
+        drop(docs);
+        assert!(!has_turn(&mut photos), "a lowered limit holds it back");
+        drop(home);
+        assert!(has_turn(&mut photos));
+    }
+
+    #[test]
     fn a_due_run_skipped_for_overlap_takes_no_place() {
         let queue = RunQueue::new();
-        let mut first = queue.due(&plan("home"), Overlap::Skip, limit(1)).unwrap();
+        let mut first = queue.due(&plan("home"), Overlap::Skip).unwrap();
         assert!(has_turn(&mut first));
         assert!(matches!(
-            queue.due(&plan("home"), Overlap::Skip, limit(1)),
+            queue.due(&plan("home"), Overlap::Skip),
             Err(Overlapping::Running)
         ));
-        let mut docs = queue.due(&plan("docs"), Overlap::Skip, limit(1)).unwrap();
+        let mut docs = queue.due(&plan("docs"), Overlap::Skip).unwrap();
         assert!(!has_turn(&mut docs));
         drop(first);
         assert!(has_turn(&mut docs));
@@ -214,12 +238,13 @@ mod tests {
     #[test]
     fn a_due_run_that_queues_starts_once_its_plans_last_run_ends() {
         let queue = RunQueue::new();
-        let mut first = queue.due(&plan("home"), Overlap::Queue, limit(2)).unwrap();
-        let mut second = queue.due(&plan("home"), Overlap::Queue, limit(2)).unwrap();
+        queue.set_limit(limit(2));
+        let mut first = queue.due(&plan("home"), Overlap::Queue).unwrap();
+        let mut second = queue.due(&plan("home"), Overlap::Queue).unwrap();
         assert!(has_turn(&mut first));
         assert!(!has_turn(&mut second));
         assert!(matches!(
-            queue.due(&plan("home"), Overlap::Queue, limit(2)),
+            queue.due(&plan("home"), Overlap::Queue),
             Err(Overlapping::Waiting)
         ));
         drop(first);
