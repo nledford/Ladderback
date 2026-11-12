@@ -7,6 +7,78 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/nledford/Ladderback/compare/v0.1.1...v0.2.0) - 2026-11-12
+
+The first release worth using on your own machines: plans run on their schedules, with catch-up after sleep, cron in a time zone, a choice of skipping or queuing a run while the last one is going, a limit on how many run at once, and retries of a failed scheduled backup. Notifications go to webhooks, ntfy and healthchecks. Ladderback installs as a systemd user service or launchd agent, and an optional sign-in protects the web UI. There is still no restore: use the `rustic` CLI, and try a restore before relying on the backups. Restore comes in 0.3.
+
+### Breaking
+
+- Run maintenance only on repositories this agent maintains ([#201](https://github.com/nledford/Ladderback/pull/201))
+- Refuse a second name for a configured repository ([#213](https://github.com/nledford/Ladderback/pull/213))
+- Refuse a relative glob file in a plan or an imported profile ([#242](https://github.com/nledford/Ladderback/pull/242))
+- Refuse a location or option over 64 KiB and more than 64 options, and mask in linear time ([#251](https://github.com/nledford/Ladderback/pull/251)): a `config.toml` whose `repository` or `repo-hot`, or one of whose option values, is longer than 64 KiB, or whose `options`, `options-hot` or `options-cold` holds more than 64 options, no longer loads, and the repository routes refuse such settings with `invalid-body`. Shorten the location or value (keep credentials in a secret reference or rclone's own config), and split or drop options.
+- Refuse a relative path a repository, a hook or a password command names ([#250](https://github.com/nledford/Ladderback/pull/250))
+
+### Added
+
+- Warn when a repository maintained here holds snapshots from other hosts ([#235](https://github.com/nledford/Ladderback/pull/235))
+- Record a saved repository's ID the first time a job opens it ([#269](https://github.com/nledford/Ladderback/pull/269))
+- Say when Linux has no keyring service to ask, and warn when an export's keyring command is missing ([#288](https://github.com/nledford/Ladderback/pull/288))
+- Work out when a plan runs next, with catch-up, jitter and changes of the clocks ([#294](https://github.com/nledford/Ladderback/pull/294))
+- A save keeps what a person wrote in config.toml around its change ([#335](https://github.com/nledford/Ladderback/pull/335))
+- Read the machine's power source, network state and wakes for the conditions before a scheduled run ([#301](https://github.com/nledford/Ladderback/pull/301))
+- Let a reader pause the Operations page's live updates ([#303](https://github.com/nledford/Ladderback/pull/303))
+- Install and remove Ladderback as a user service ([#304](https://github.com/nledford/Ladderback/pull/304))
+- Read and write a schedule's interval and time zone, and a plan's overlap policy, in config.toml ([#349](https://github.com/nledford/Ladderback/pull/349))
+- Tidy the workers' rustic cache each time the daemon starts ([#295](https://github.com/nledford/Ladderback/pull/295))
+- Show each listed snapshot's time as its own clock read it ([#311](https://github.com/nledford/Ladderback/pull/311))
+- Run scheduled plans, and queued backups again after a restart ([#390](https://github.com/nledford/Ladderback/pull/390))
+- Skip or queue a scheduled backup while its last run is going, and limit how many run at once ([#404](https://github.com/nledford/Ladderback/pull/404))
+- Send notifications to webhooks, ntfy and healthchecks ([#405](https://github.com/nledford/Ladderback/pull/405))
+- Optional sign-in with an admin password ([#395](https://github.com/nledford/Ladderback/pull/395))
+- Retry a failed scheduled backup with a doubling back-off ([#414](https://github.com/nledford/Ladderback/pull/414))
+
+### Fixed
+
+- Keep the packs a cancelled backup finished ([#211](https://github.com/nledford/Ladderback/pull/211))
+- Let go of the operation log's file when the store closes ([#210](https://github.com/nledford/Ladderback/pull/210))
+- Show what a repository check found ([#225](https://github.com/nledford/Ladderback/pull/225))
+- Close the operation log when the daemon stops ([#227](https://github.com/nledford/Ladderback/pull/227))
+- Let a backup stopped at its deadline keep its finished packs ([#226](https://github.com/nledford/Ladderback/pull/226))
+- Warn about credentials kept in a repository's location ([#230](https://github.com/nledford/Ladderback/pull/230))
+- Mask output cut off by a timeout as cut text ([#231](https://github.com/nledford/Ladderback/pull/231))
+- Mask credentials written in an rclone connection string ([#239](https://github.com/nledford/Ladderback/pull/239))
+- Show what each operation did on the Operations page ([#241](https://github.com/nledford/Ladderback/pull/241))
+- Mask cut output whoever cut it, and never quote a cut secret ([#238](https://github.com/nledford/Ladderback/pull/238))
+- Create an imported repository from its row on the Repositories page ([#253](https://github.com/nledford/Ladderback/pull/253))
+- Never use or quote against a secret command's stdout cut partway through a line ([#254](https://github.com/nledford/Ladderback/pull/254))
+- Refuse a job whose secrets come to more than 256 KiB to mask ([#264](https://github.com/nledford/Ladderback/pull/264))
+- Start every child process through one spawn gate ([#270](https://github.com/nledford/Ladderback/pull/270))
+- Keep rustic's cache between jobs in the agent's cache folder ([#282](https://github.com/nledford/Ladderback/pull/282))
+- Keep the Operations table's columns still and its sort button apart from the header's text ([#293](https://github.com/nledford/Ladderback/pull/293))
+- Let button labels and other form controls grow with the text size ([#298](https://github.com/nledford/Ladderback/pull/298))
+- Name the repository a first job opened when it starts ([#307](https://github.com/nledford/Ladderback/pull/307))
+- Refuse a repository location a reference resolves to a relative path ([#313](https://github.com/nledford/Ladderback/pull/313))
+- Open the e2e steps' HTTP connections only once they are connected ([#318](https://github.com/nledford/Ladderback/pull/318))
+- Let a stopped backup wind down when its events went unread ([#322](https://github.com/nledford/Ladderback/pull/322))
+- Refuse a backup start whose secret can't be resolved with the secret's code ([#327](https://github.com/nledford/Ladderback/pull/327))
+- Keep repository credentials out of the daemon's log during retention ([#334](https://github.com/nledford/Ladderback/pull/334))
+- Mask credentials where rclone quotes them as Go's %q does ([#336](https://github.com/nledford/Ladderback/pull/336))
+- Refuse rclone locations and flags that name a relative path ([#323](https://github.com/nledford/Ladderback/pull/323))
+- Hold the spawn gate only while rclone starts, not until it serves ([#329](https://github.com/nledford/Ladderback/pull/329))
+- Announce a run's start only once the history has it running ([#332](https://github.com/nledford/Ladderback/pull/332))
+- Stop an rclone that never serves at a start deadline, rather than leaving it running ([#348](https://github.com/nledford/Ladderback/pull/348))
+- Warn when another agent recently wrote to a repository maintained here under this machine's name ([#297](https://github.com/nledford/Ladderback/pull/297))
+- Keep a starting child from holding the server's connections on macOS ([#320](https://github.com/nledford/Ladderback/pull/320))
+- Say where config.toml is wrong on every page and route that reads it ([#391](https://github.com/nledford/Ladderback/pull/391))
+- Show the warnings a run recorded before the Operations page was listening ([#389](https://github.com/nledford/Ladderback/pull/389))
+- Stop the Operations page's live updates when you leave it ([#392](https://github.com/nledford/Ladderback/pull/392))
+- Mask secrets as rclone quotes them whatever Rust toolchain builds Ladderback ([#407](https://github.com/nledford/Ladderback/pull/407))
+
+### Changed
+
+- Building Ladderback from source needs Rust 1.100.0 or newer, and the checkout pins that version for rustup ([#411](https://github.com/nledford/Ladderback/pull/411))
+
 ## [0.1.1](https://github.com/nledford/Ladderback/compare/v0.1.0...v0.1.1) - 2026-11-11
 
 ### Fixed
