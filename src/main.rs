@@ -28,6 +28,7 @@ mod composition;
 mod logging;
 mod output;
 mod profiles;
+mod service;
 
 #[derive(Parser)]
 #[command(
@@ -79,6 +80,9 @@ enum Command {
         #[arg(long, value_name = "ID")]
         plan: String,
     },
+    // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
+    InstallService,
+    RemoveService,
     /// Run one operation, read from stdin, and report events on stdout.
     /// Started by the agent; not for direct use.
     #[command(hide = true)]
@@ -115,6 +119,8 @@ fn main() -> ExitCode {
             json,
         } => profiles::import_profile(file, repo_name, output::Report::asked(json)),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
+        Command::InstallService => service::install_service(),
+        Command::RemoveService => service::remove_service(),
         Command::Worker => engine::worker::main(),
     }
 }

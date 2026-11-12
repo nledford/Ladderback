@@ -1,0 +1,17 @@
+# Written by `ladderback install-service`; `ladderback remove-service` removes it.
+[Unit]
+Description=Ladderback, a backup manager for rustic
+Documentation=https://github.com/nledford/Ladderback
+
+[Service]
+Type=exec
+ExecStart=:"/home/demo/.local/bin/ladderback" serve
+CacheDirectory=ladderback
+CacheDirectoryMode=0700
+Environment=LADDERBACK_CACHE_DIR=%C/ladderback
+KillMode=mixed
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

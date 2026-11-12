@@ -42,6 +42,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 |---|---|
 | Agent | One machine running `ladderback serve`, identified by its agent ID |
 | Hub | The agent running `--hub`; holds the registry, ownership and aggregated history |
+| Service | An agent the user's **service manager** runs in the background, from login on: a systemd user unit on Linux, a launchd agent on macOS. Its **service file** says what the manager runs: this `ladderback` program's `serve`. `ladderback install-service` writes the file and has the manager start it; `ladderback remove-service` has the manager stop it and removes the file (§12) |
 | Plan | What to back up, from which agent, into which repository, when, and how long to keep it |
 | Repository | A rustic repository, identified by its **repository ID**. An **alias** is one agent's local name for it |
 | Operation | One run of one action (backup, forget, prune, check, restore, …) with a lifecycle: `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed { reason }` / `Cancelled`. A missed deadline is `Failed { reason: DeadlinePassed }` |

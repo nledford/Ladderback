@@ -493,6 +493,32 @@ impl contract::power::PowerHarness for FakePowerHarness {
     }
 }
 
+/// The fake answers from its own memory.
+struct FakeService(app::fakes::FakeServiceManager);
+
+#[async_trait]
+impl contract::service::ServiceHarness for FakeService {
+    fn manager(&self) -> &dyn app::ports::ServiceManager {
+        &self.0
+    }
+
+    fn programs(&self) -> [domain::service::ServicePath; 2] {
+        [
+            "/home/demo/bin/ladderback",
+            "/opt/ladderback/bin/ladderback",
+        ]
+        .map(|path| domain::service::ServicePath::parse(std::path::Path::new(path)).unwrap())
+    }
+
+    async fn runs(&self) -> bool {
+        self.0.runs()
+    }
+
+    fn file_text(&self) -> Option<String> {
+        self.0.file_text()
+    }
+}
+
 #[tokio::test]
 async fn the_fake_power_supply_meets_the_power_contract() {
     contract::power::run(&FakePowerHarness).await;
@@ -601,4 +627,12 @@ async fn an_auto_advancing_fake_clock_jumps_to_a_monotonic_sleepers_time() {
     clock.sleep(SignedDuration::from_mins(5)).await;
     assert_eq!(clock.now(), epoch() + SignedDuration::from_mins(5));
     assert_eq!(clock.monotonic(), SignedDuration::from_mins(5));
+}
+
+#[tokio::test]
+async fn fake_service_manager_meets_the_service_manager_contract() {
+    let harness = FakeService(app::fakes::FakeServiceManager::new(PathBuf::from(
+        "/home/demo/.config/systemd/user/ladderback.service",
+    )));
+    contract::service::run(&harness).await;
 }

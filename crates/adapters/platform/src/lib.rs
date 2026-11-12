@@ -16,6 +16,7 @@ pub mod data_dir_lock;
 pub mod dirs;
 pub mod network;
 pub mod power;
+pub mod service;
 mod source;
 
 use app::ports::Clock;

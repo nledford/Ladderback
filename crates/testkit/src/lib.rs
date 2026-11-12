@@ -24,6 +24,8 @@ pub mod daemon;
 pub mod inheritable;
 pub mod net;
 pub mod scenario_watch;
+#[cfg(unix)]
+pub mod service_manager;
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};

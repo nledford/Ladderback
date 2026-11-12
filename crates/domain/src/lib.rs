@@ -20,6 +20,7 @@ pub mod planning;
 #[cfg(test)]
 mod properties;
 pub mod secrets;
+pub mod service;
 pub mod snapshot;
 
 pub use ids::{

@@ -39,6 +39,9 @@ pub struct InteropE2e {
     /// Whether the commands run with no descriptor for standard output at
     /// all, as a shell starts one with `>&-`.
     pub(super) stdout_not_open: bool,
+    /// The name the commands are run by, which the scenario's `PATH` finds
+    /// as a shell would; the built program's path when unset.
+    pub(super) program: Option<String>,
     pub(super) ran: Option<Ran>,
     /// The profile the last export wrote on stdout.
     exported: Option<String>,
@@ -125,13 +128,18 @@ pub(super) fn pipe_without_reader() -> std::io::PipeWriter {
 pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     fs::create_dir_all(work_dir(agent)).expect("the working folder");
     fs::create_dir_all(home_dir(agent)).expect("the home folder");
+    let program = agent
+        .interop
+        .program
+        .as_deref()
+        .unwrap_or(super::LADDERBACK);
     // Only a shell can start a program with a descriptor closed.
     let mut command = if agent.interop.stdout_not_open {
         let mut shell = Command::new("/bin/sh");
-        shell.args(["-c", r#"exec "$0" "$@" >&-"#, super::LADDERBACK]);
+        shell.args(["-c", r#"exec "$0" "$@" >&-"#, program]);
         shell
     } else {
-        Command::new(super::LADDERBACK)
+        Command::new(program)
     };
     command
         .args(args)
