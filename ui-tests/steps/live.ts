@@ -258,6 +258,118 @@ Then("the table {string} has {int} rows", async function (this: BrowserWorld, na
   );
 });
 
+// The widths of a table's columns, as its column headers are laid out, noted
+// by one step for a later one to compare with.
+const notedWidths = new WeakMap<BrowserWorld, number[]>();
+
+function columnWidths(world: BrowserWorld, name: string): Promise<number[]> {
+  return table(world, name)
+    .getByRole("columnheader")
+    .evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
+}
+
+When("the widths of the columns of the table {string} are noted", async function (this: BrowserWorld, name: string) {
+  notedWidths.set(this, await columnWidths(this, name));
+});
+
+// A column that widens or narrows as a row's content changes moves every
+// column beside it: the table jumps under the reader's eyes. Within half a
+// pixel, the layout's own rounding, a column keeps its width.
+Then("the columns of the table {string} keep the widths noted", async function (this: BrowserWorld, name: string) {
+  const noted = notedWidths.get(this);
+  assert.ok(noted, `the widths of the columns of the table ${name} were never noted`);
+  const now = await columnWidths(this, name);
+  assert.equal(now.length, noted.length, `the table ${name} has another number of columns`);
+  const moved = now.flatMap((width, at) => {
+    const before = noted[at] ?? 0;
+    return Math.abs(width - before) > 0.5 ? [`column ${at + 1}: ${Math.round(before)}px, now ${Math.round(width)}px`] : [];
+  });
+  assert.deepEqual(moved, [], `the columns of the table ${name} changed width`);
+});
+
+// The gap a reader needs to see a header's text and its button as two things:
+// a quarter of the root's text size, 4 px at the browser's default.
+const APART_REM = 0.25;
+
+// A header's sort button is inside the header's own cell and clear of the
+// header's text: each line of the text is at least APART_REM away from the
+// button, beside it or above it, and never under it.
+Then(
+  "the button {string} sits inside the column header {string}, apart from its text",
+  async function (this: BrowserWorld, button: string, header: string) {
+    const cell = this.page.getByRole("columnheader", { name: new RegExp(`^${ISOLATION}${escape(header)}\\b`) });
+    assert.equal(await cell.count(), 1, `the column header "${header}" is not on the page once`);
+    const control = cell.getByRole("button", { name: namePattern(button) });
+    assert.equal(await control.count(), 1, `the column header "${header}" holds no button "${button}"`);
+    const handle = await control.elementHandle();
+    const problems = await cell.evaluate(
+      (th, { target, apartRem }) => {
+        const found: string[] = [];
+        if (!(target instanceof Element)) return ["the button is gone"];
+        const at = target.getBoundingClientRect();
+        const box = th.getBoundingClientRect();
+        if (at.left < box.left - 0.5 || at.right > box.right + 0.5 || at.top < box.top - 0.5 || at.bottom > box.bottom + 0.5) {
+          found.push(`the button reaches ${Math.round(at.left)}..${Math.round(at.right)}px of a header at ${Math.round(box.left)}..${Math.round(box.right)}px`);
+        }
+        const apart = apartRem * parseFloat(getComputedStyle(document.documentElement).fontSize);
+        const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (target.contains(node) || !(node.textContent ?? "").trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const line of range.getClientRects()) {
+            if (line.width === 0) continue;
+            const gap = Math.max(at.left - line.right, line.left - at.right, at.top - line.bottom, line.top - at.bottom);
+            if (gap < apart - 0.5) {
+              found.push(`"${(node.textContent ?? "").trim()}" is ${gap.toFixed(1)}px from the button, less than ${apart}px`);
+            }
+          }
+        }
+        return found;
+      },
+      { target: handle, apartRem: APART_REM },
+    );
+    assert.deepEqual(problems, [], `the button "${button}" is not apart from the header "${header}"`);
+  },
+);
+
+// A table whose columns have fixed shares lets a cell's content run past the
+// cell when it can't fit: it draws over the next column, which neither the
+// page's width nor a clipped box shows. Every box and every line of text in a
+// cell stays inside the cell, within half a pixel of rounding.
+Then("nothing in the table {string} runs outside its cell", async function (this: BrowserWorld, name: string) {
+  const outside = await table(this, name).evaluate(async (element) => {
+    await document.fonts.ready;
+    // Let layout settle after injected styles.
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const found: string[] = [];
+    const describe = (rect: DOMRect) =>
+      `${Math.round(rect.left)}..${Math.round(rect.right)} x ${Math.round(rect.top)}..${Math.round(rect.bottom)}`;
+    for (const cell of element.querySelectorAll("th, td")) {
+      const box = cell.getBoundingClientRect();
+      const check = (rect: DOMRect, what: string) => {
+        if (rect.width === 0 && rect.height === 0) return;
+        if (rect.left < box.left - 0.5 || rect.right > box.right + 0.5 || rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5) {
+          found.push(`${what} at ${describe(rect)}px runs outside its cell at ${describe(box)}px`);
+        }
+      };
+      for (const inner of cell.querySelectorAll("*")) {
+        if (getComputedStyle(inner).display === "none") continue;
+        check(inner.getBoundingClientRect(), `<${inner.localName}> "${(inner.textContent ?? "").trim().slice(0, 30)}"`);
+      }
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!(node.textContent ?? "").trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const line of range.getClientRects()) check(line, `the text "${(node.textContent ?? "").trim().slice(0, 30)}"`);
+      }
+    }
+    return found;
+  });
+  assert.deepEqual(outside, [], `something in the table ${name} runs outside its cell`);
+});
+
 /** The row of a table that its row header names. A name the catalog wrote
  *  holds its arguments in bidi isolation marks, which a reader never hears. */
 function rowNamed(world: BrowserWorld, name: string, row: string): Locator {
