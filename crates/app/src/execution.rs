@@ -16,6 +16,7 @@ use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
     HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
+use crate::queue::Place;
 
 /// Runs one operation on the engine and records its lifecycle in the
 /// operation log: queued now, running once the engine starts, then finished
@@ -193,6 +194,21 @@ impl RunOperation {
             result: run.result,
             recording_errors: run.recording_errors,
         }
+    }
+
+    /// Runs the job of an operation [`Self::queue`] recorded once `place`'s
+    /// turn comes, as [`Self::run_queued`] does, and gives the place up when
+    /// the run has ended (§5, the concurrency limit). A cancel that comes
+    /// while it waits ends the operation cancelled at once: nothing ran, so
+    /// no hook runs and the engine isn't asked.
+    pub async fn run_in_turn(
+        &self,
+        queued: Queued,
+        place: Place,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        let _ = (queued, place, cancel);
+        todo!()
     }
 
     /// Plays the engine's events into the operation until it finishes.

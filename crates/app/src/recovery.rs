@@ -144,7 +144,7 @@ mod tests {
 
     #[async_trait]
     impl PlanRuns for Recording {
-        async fn start(&self, _: &PlanId, _: Trigger) {}
+        async fn start(&self, _: &PlanId, _: Trigger, _: crate::queue::Place) {}
 
         async fn resume(&self, operation: Operation) {
             self.resumed

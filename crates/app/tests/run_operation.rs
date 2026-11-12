@@ -1450,3 +1450,80 @@ async fn a_stalled_write_does_not_hold_the_deadline() {
     assert_eq!(ended.operation.finished_at(), Some(t(5)));
     assert_eq!((engine.stops(), engine.kills()), (1, 0));
 }
+
+fn plan(name: &str) -> domain::PlanId {
+    domain::PlanId::parse(name).unwrap()
+}
+
+/// Whether `place`'s turn has come, without waiting for it.
+fn has_turn(place: &mut app::queue::Place) -> bool {
+    place.turn().now_or_never().is_some()
+}
+
+#[tokio::test]
+async fn a_queued_operation_waits_for_its_turn_and_gives_its_place_up_when_it_ends() {
+    let limit = domain::planning::Concurrency::default();
+    let queue = app::queue::RunQueue::new();
+    let running = queue.push(&plan("docs"), limit);
+    let waiting = queue.push(&plan("home"), limit);
+    let engine = Arc::new(Live::new());
+    let store = log();
+    let use_case = RunOperation::new(
+        engine.clone(),
+        Arc::new(FakeClock::new(t(0))),
+        store.clone(),
+    );
+    let queued = use_case.queue(id(), Trigger::Manual, fake_job(None)).await;
+    engine.send(started());
+    engine.send(succeeded());
+    let run = tokio::spawn(async move {
+        use_case
+            .run_in_turn(queued, waiting, future::pending())
+            .await
+    });
+    settle().await;
+    assert!(!run.is_finished(), "the run went ahead of its turn");
+    assert_eq!(logged(&store).await.record.status, OperationStatus::Queued);
+
+    drop(running);
+    let ended = finished(run).await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Succeeded);
+    assert_logged_as_it_ended(&store, &ended).await;
+    // The run gave its place up: the next one takes its turn at once.
+    let mut next = queue.push(&plan("photos"), limit);
+    assert!(has_turn(&mut next));
+}
+
+#[tokio::test]
+async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothing() {
+    let limit = domain::planning::Concurrency::default();
+    let queue = app::queue::RunQueue::new();
+    let running = queue.push(&plan("docs"), limit);
+    let waiting = queue.push(&plan("home"), limit);
+    let engine = Arc::new(Live::new());
+    let store = log();
+    let use_case = RunOperation::new(
+        engine.clone(),
+        Arc::new(FakeClock::new(t(3))),
+        store.clone(),
+    );
+    let queued = use_case.queue(id(), Trigger::Manual, fake_job(None)).await;
+    let run = tokio::spawn(async move {
+        use_case
+            .run_in_turn(queued, waiting, future::ready(()))
+            .await
+    });
+    let ended = finished(run).await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(ended.operation.started_at(), None);
+    assert_eq!(ended.operation.finished_at(), Some(t(3)));
+    // The engine was never asked: a job it had been given would be stopped.
+    assert_eq!((engine.stops(), engine.kills()), (0, 0));
+    assert_logged_as_it_ended(&store, &ended).await;
+    // Its place left the queue: the next run takes its turn once the
+    // running one ends, not after the cancelled one too.
+    let mut next = queue.push(&plan("photos"), limit);
+    assert!(!has_turn(&mut next));
+    drop(running);
+    assert!(has_turn(&mut next));
+}

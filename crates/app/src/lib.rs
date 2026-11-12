@@ -23,6 +23,7 @@ pub mod interop;
 pub mod log_write;
 pub mod maintenance;
 pub mod ports;
+pub mod queue;
 pub mod recovery;
 pub mod repositories;
 pub mod schedule;

@@ -26,6 +26,7 @@ use app::ports::{
     PowerSupply, ProfileError, ProfileNotice, ProgressEvent, RunningJob, ScheduleStore,
     SnapshotSummary,
 };
+use app::queue::{Place, RunQueue};
 use app::recovery::RecoverOperations;
 use app::repositories::{
     ConfigWrites, ConnectRepository, CreateOffers, InitRepository, RecordOpened, Recording,
@@ -171,6 +172,7 @@ impl Background {
     /// Runs the queue's leftovers, oldest first, then the scheduler, until
     /// the future is dropped.
     pub(crate) async fn run(self) {
+        let queue = Arc::clone(&self.runner.queue);
         let runs: Arc<dyn PlanRuns> = self.runner;
         resume_queued(self.queued, self.config.as_ref(), self.store, runs.as_ref()).await;
         Scheduler {
@@ -181,6 +183,7 @@ impl Background {
             power: self.conditions.power,
             network: self.conditions.network,
             runs,
+            queue,
             zone: domain::TimeZone::system(),
         }
         .run()
@@ -383,6 +386,7 @@ async fn state_over(
         registry: Arc::new(CancelRegistry::new()),
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
+        queue: Arc::new(RunQueue::new()),
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -797,6 +801,9 @@ struct PlanRunner {
     /// Where each run announces how its operation ended, once the log has the
     /// end (§4.4).
     events: Arc<dyn EventBus>,
+    /// The agent's one queue of backups, which the scheduler shares: every
+    /// backup takes its turn in it (§5, the concurrency limit).
+    queue: Arc<RunQueue>,
 }
 
 impl PlanRunner {
@@ -926,7 +933,8 @@ fn start_refused(error: &StartError) -> String {
 
 #[async_trait]
 impl PlanRuns for PlanRunner {
-    async fn start(&self, plan: &PlanId, trigger: Trigger) {
+    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
+        drop(place);
         if let Err(error) = self.start_plan(plan, trigger).await {
             log::warn!(
                 "the {trigger:?} run of plan {} didn't start: {}",
@@ -998,6 +1006,10 @@ impl PlanRuns for PlanRunner {
         match report {
             ScheduleReport::Skipped { plan, unmet } => log::info!(
                 "the scheduled run of plan {} was skipped: a condition it sets isn't met ({unmet:?})",
+                plan.as_str()
+            ),
+            ScheduleReport::Overlapped { plan, overlapping } => log::info!(
+                "the scheduled run of plan {} was skipped: its last run is still going ({overlapping:?})",
                 plan.as_str()
             ),
             ScheduleReport::PowerUnknown { plan, error } => log::warn!(
@@ -3715,6 +3727,7 @@ mod tests {
             registry: Arc::new(CancelRegistry::new()),
             hooks: Arc::new(hooks),
             events: Arc::new(BroadcastEventBus::new()),
+            queue: Arc::new(RunQueue::new()),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -3738,6 +3751,51 @@ mod tests {
         let cancel = runner.cancel(id).await;
         open_gate.send(true).expect("the gate opens");
         cancel.expect("a cancel in the start window is accepted");
+    }
+
+    /// A backup started while another runs waits in the queue for its turn
+    /// (§5, the concurrency limit, 1 here): it is in the log as queued, and
+    /// nothing of it runs, its hooks included, until the running one ends.
+    #[tokio::test]
+    async fn a_backup_started_while_another_runs_waits_for_its_turn() {
+        let (runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
+        let first = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts");
+        entered
+            .changed()
+            .await
+            .expect("the first run reaches its hooks");
+        let second = runner
+            .start_backup("home".into())
+            .await
+            .expect("the plan starts again");
+        let second_id = operation_of(&second).expect("an operation ID");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), entered.changed())
+                .await
+                .is_err(),
+            "the second run reached its hooks while the first one ran"
+        );
+        assert_eq!(status_of(&runner, second_id).await, OperationStatus::Queued);
+
+        open_gate.send(true).expect("the gate opens");
+        runner
+            .cancel(first)
+            .await
+            .expect("the first run is cancelled");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            entered.wait_for(|entries| *entries >= 2),
+        )
+        .await
+        .expect("the second run takes its turn once the first one ends")
+        .expect("the gate stays open");
+        runner
+            .cancel(second)
+            .await
+            .expect("the second run is cancelled");
     }
 
     /// A runner as [`runner_at_a_gate`] makes it, whose log holds a backup of
@@ -8484,6 +8542,7 @@ mod repository_service_tests {
                 registry: Arc::new(CancelRegistry::new()),
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
+                queue: Arc::new(RunQueue::new()),
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -8526,9 +8585,13 @@ mod repository_service_tests {
                 registry: Arc::new(CancelRegistry::new()),
                 hooks: Arc::new(ProcessHookRunner::new()),
                 events: Arc::new(BroadcastEventBus::new()),
+                queue: Arc::new(RunQueue::new()),
             };
 
-            PlanRuns::start(&runner, &plan, Trigger::Schedule).await;
+            let place = runner
+                .queue
+                .push(&plan, domain::planning::Concurrency::default());
+            PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
 
             assert_eq!(jobs(&scripted), 0, "{error:?}");
             let history = store
