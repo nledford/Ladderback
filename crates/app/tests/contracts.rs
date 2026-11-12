@@ -447,3 +447,158 @@ impl contract::profiles::ProfilesHarness for FakeProfilesHarness {
 async fn the_fake_profile_reader_and_writer_meet_the_profiles_contract() {
     contract::profiles::run(&FakeProfilesHarness::new()).await;
 }
+
+/// The fake power supply, told what to say.
+struct FakePowerHarness;
+
+impl FakePowerHarness {
+    fn saying(
+        answer: Result<domain::execution::conditions::PowerSource, app::ports::PlatformError>,
+    ) -> Arc<dyn app::ports::PowerSupply> {
+        let power = Arc::new(app::fakes::FakePower::new());
+        power.set(answer);
+        power
+    }
+}
+
+impl contract::power::PowerHarness for FakePowerHarness {
+    fn on_ac(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Ok(domain::execution::conditions::PowerSource::Ac))
+    }
+
+    fn on_battery(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Ok(domain::execution::conditions::PowerSource::Battery))
+    }
+
+    fn without_battery(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Ok(domain::execution::conditions::PowerSource::Ac))
+    }
+
+    fn battery_not_discharging(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Ok(domain::execution::conditions::PowerSource::Ac))
+    }
+
+    fn unrecognized(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "Solar".to_owned(),
+        }))
+    }
+
+    fn unreadable(&self) -> Arc<dyn app::ports::PowerSupply> {
+        Self::saying(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn the_fake_power_supply_meets_the_power_contract() {
+    contract::power::run(&FakePowerHarness).await;
+}
+
+#[tokio::test]
+async fn the_fake_power_supply_is_on_ac_power_until_told_otherwise() {
+    use app::ports::PowerSupply;
+    let power = app::fakes::FakePower::new();
+    assert_eq!(power.asked(), 0);
+    assert_eq!(
+        power.source().await,
+        Ok(domain::execution::conditions::PowerSource::Ac)
+    );
+    assert_eq!(power.asked(), 1);
+    let _ = power.source().await;
+    assert_eq!(power.asked(), 2);
+}
+
+/// The fake network, told what to say.
+struct FakeNetworkHarness;
+
+impl FakeNetworkHarness {
+    fn saying(answer: Result<bool, app::ports::PlatformError>) -> Arc<dyn app::ports::Network> {
+        let network = Arc::new(app::fakes::FakeNetwork::new());
+        network.set(answer);
+        network
+    }
+}
+
+impl contract::network::NetworkHarness for FakeNetworkHarness {
+    fn online(&self) -> Arc<dyn app::ports::Network> {
+        Self::saying(Ok(true))
+    }
+
+    fn offline(&self) -> Arc<dyn app::ports::Network> {
+        Self::saying(Ok(false))
+    }
+
+    fn only_loopback(&self) -> Arc<dyn app::ports::Network> {
+        Self::saying(Ok(false))
+    }
+
+    fn unrecognized(&self) -> Arc<dyn app::ports::Network> {
+        Self::saying(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "maybe".to_owned(),
+        }))
+    }
+
+    fn unreadable(&self) -> Arc<dyn app::ports::Network> {
+        Self::saying(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn the_fake_network_meets_the_network_contract() {
+    contract::network::run(&FakeNetworkHarness).await;
+}
+
+#[tokio::test]
+async fn the_fake_network_is_online_until_told_otherwise() {
+    use app::ports::Network;
+    let network = app::fakes::FakeNetwork::new();
+    assert_eq!(network.asked(), 0);
+    assert_eq!(network.is_online().await, Ok(true));
+    assert_eq!(network.asked(), 1);
+    let _ = network.is_online().await;
+    assert_eq!(network.asked(), 2);
+}
+
+/// While the machine sleeps, wall-clock time moves on and monotonic time
+/// stands still: a sleeper on the wall clock wakes, one on monotonic time
+/// waits on for the rest of its time.
+#[tokio::test]
+async fn a_suspended_fake_clock_moves_only_its_wall_clock() {
+    use futures::FutureExt;
+    let clock = FakeClock::new(epoch());
+    let monotonic = clock.monotonic();
+    let mut on_the_wall = clock.sleep_until(epoch() + SignedDuration::from_mins(1));
+    let mut monotonic_sleeper = clock.sleep(SignedDuration::from_mins(1));
+    assert!((&mut on_the_wall).now_or_never().is_none());
+    assert!((&mut monotonic_sleeper).now_or_never().is_none());
+
+    clock.suspend(SignedDuration::from_hours(3));
+    assert_eq!(clock.now(), epoch() + SignedDuration::from_hours(3));
+    assert_eq!(clock.monotonic(), monotonic, "monotonic time stood still");
+    assert!((&mut on_the_wall).now_or_never().is_some());
+    assert!((&mut monotonic_sleeper).now_or_never().is_none());
+
+    clock.advance(SignedDuration::from_secs(59));
+    assert!((&mut monotonic_sleeper).now_or_never().is_none());
+    clock.advance(SignedDuration::from_secs(1));
+    assert!(monotonic_sleeper.now_or_never().is_some());
+    assert_eq!(clock.monotonic(), monotonic + SignedDuration::from_mins(1));
+}
+
+/// An auto-advancing fake clock jumps straight to a monotonic sleeper's
+/// time, as it does to a wall-clock deadline.
+#[tokio::test]
+async fn an_auto_advancing_fake_clock_jumps_to_a_monotonic_sleepers_time() {
+    let clock = FakeClock::auto_advancing(epoch());
+    clock.sleep(SignedDuration::from_mins(5)).await;
+    assert_eq!(clock.now(), epoch() + SignedDuration::from_mins(5));
+    assert_eq!(clock.monotonic(), SignedDuration::from_mins(5));
+}

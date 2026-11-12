@@ -65,6 +65,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Catch-up | One run in place of any number of runs missed while the agent was off or asleep |
 | Next run | When a plan runs next: the schedule's next moment after the last run started (a cron expression's on the wall clock of its zone, or an `every` interval in real time), plus jitter; planned when a run starts and kept while the agent is away (§5) |
 | Jitter | How far after its moment a run may be put, so that machines on one schedule don't start at once; never as far as the schedule's following moment |
+| Wake | The machine waking from sleep, or its clock set forward: wall-clock time ran more than 2 min ahead of monotonic time between two samples of the clocks 30 s apart. A run missed meanwhile can catch up, and a catch-up run after a wake first waits up to 2 min for the network (§5) |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
 
 **Bounded contexts.**
@@ -165,10 +166,11 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `ScheduleStore`, `SnapshotCatalog`, `Outbox`, `LeaseCache` (agent), `OwnershipRegistry` and `AgentRegistry` (hub) | Persistence | sqlx SQLite | In-memory |
 | `ConfigStore` | Load (parsing and migrating old schemas), and atomically save `AgentConfig` | TOML file with version history | In-memory |
 | `SecretResolver` | Resolve a `SecretRef` | Command, keyring, file, env | Map-backed fake |
-| `Clock` | Wall-clock and monotonic time, `sleep_until` | System clocks, tokio timers | Controllable fake clock that fires timers when advanced |
+| `Clock` | Wall-clock and monotonic time, `sleep_until` (wall-clock) and `sleep` (monotonic: time asleep doesn't count) | System clocks (`Instant`), tokio timers | Controllable fake clock that fires timers when advanced, and can `suspend` the machine (wall-clock time moves, monotonic time doesn't) |
 | `Random` | Jitter, UUIDv7 IDs, epochs, pairing tokens | OS randomness | Seeded |
 | `Identity` | The agent's Ed25519 key: public key and signing | Key file in the data dir | Fixed test key |
-| `Platform` | AC power, metered network, network ready | Linux / macOS modules | Scripted fake |
+| `PowerSupply` | AC power or battery (§16, decision 63) | `/sys/class/power_supply` on Linux, `pmset -g batt` on macOS | Scripted fake |
+| `Network` | Whether the machine is online (§16, decision 63) | `/sys/class/net` on Linux, `scutil --nwi` on macOS | Scripted fake |
 | `EventPublisher` | Deliver domain events to in-process subscribers (UI, outbox, notifications) | Broadcast channel | Recording fake |
 | `Notifier` | Deliver a rendered notification | reqwest, lettre | Recording fake |
 | `HubLink` / `AgentLink` | Send `AgentReport`s to the hub / `HubCommand`s to an agent | WebSocket sync | In-memory pair |

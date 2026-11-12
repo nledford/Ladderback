@@ -6,6 +6,7 @@ mod engine;
 mod event_bus;
 mod hooks;
 mod operation_store;
+mod platform;
 mod profiles;
 mod retention;
 mod secrets;
@@ -30,6 +31,7 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Start, StoreError, maintained_repository,
 };
+pub use platform::{Network, PlatformError, PowerSupply};
 pub use profiles::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
     ProfileReader, ProfileWriter, RenderedProfile,

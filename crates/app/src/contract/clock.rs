@@ -19,6 +19,9 @@ pub trait ClockHarness: Send + Sync {
 pub async fn run(harness: &dyn ClockHarness, step: SignedDuration) {
     sleeping_until_a_past_time_returns_at_once(harness).await;
     a_sleeper_wakes_only_once_its_deadline_has_passed(harness, step).await;
+    monotonic_time_moves_on_with_the_time_that_passes(harness, step).await;
+    sleeping_for_no_time_returns_at_once(harness).await;
+    a_sleeper_wakes_only_once_its_time_has_passed(harness, step).await;
 }
 
 async fn sleeping_until_a_past_time_returns_at_once(harness: &dyn ClockHarness) {
@@ -58,5 +61,66 @@ async fn a_sleeper_wakes_only_once_its_deadline_has_passed(
         clock.now() >= deadline,
         "after waking, now ({}) must be at or after the deadline ({deadline})",
         clock.now()
+    );
+}
+
+async fn monotonic_time_moves_on_with_the_time_that_passes(
+    harness: &dyn ClockHarness,
+    step: SignedDuration,
+) {
+    let clock = harness.clock();
+    let before = clock.monotonic();
+    harness.let_time_pass(step).await;
+    let after = clock.monotonic();
+    assert!(
+        after - before >= step,
+        "monotonic time moved {} while {step} passed",
+        after - before
+    );
+}
+
+async fn sleeping_for_no_time_returns_at_once(harness: &dyn ClockHarness) {
+    let clock = harness.clock();
+    assert!(
+        clock.sleep(SignedDuration::ZERO).now_or_never().is_some(),
+        "a sleep of no time must not wait"
+    );
+    assert!(
+        clock
+            .sleep(SignedDuration::from_secs(-1))
+            .now_or_never()
+            .is_some(),
+        "a sleep of a negative time must not wait"
+    );
+}
+
+async fn a_sleeper_wakes_only_once_its_time_has_passed(
+    harness: &dyn ClockHarness,
+    step: SignedDuration,
+) {
+    let clock = harness.clock();
+    let start = clock.monotonic();
+    let mut sleeper = clock.sleep(step * 2);
+    // A sleep counts from its first poll, as every future starts.
+    assert!(
+        (&mut sleeper).now_or_never().is_none(),
+        "a sleeper must not wake at once"
+    );
+
+    harness.let_time_pass(step).await;
+    assert!(
+        (&mut sleeper).now_or_never().is_none(),
+        "a sleeper must not wake before its time has passed"
+    );
+
+    harness.let_time_pass(step * 2).await;
+    assert!(
+        sleeper.now_or_never().is_some(),
+        "a sleeper must wake once its time has passed"
+    );
+    assert!(
+        clock.monotonic() - start >= step * 2,
+        "after waking, monotonic time must have moved at least {}",
+        step * 2
     );
 }

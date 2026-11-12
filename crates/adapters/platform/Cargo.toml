@@ -1,6 +1,6 @@
 [package]
 name = "platform"
-description = "Platform adapter: system clock and agent ID"
+description = "Platform adapter: system clock, power source, network state and agent ID"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,8 @@ hostname = "0.4"
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["time"] }
+spawn-gate.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]

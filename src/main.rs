@@ -180,6 +180,9 @@ fn run_daemon(
         state,
         log: operation_log,
         lock,
+        // Kept for the daemon's life; the scheduler (#274) is the first to
+        // ask them.
+        conditions: _conditions,
     } = match runtime.block_on(composition::daemon()) {
         Ok(daemon) => daemon,
         Err(refused) => {
