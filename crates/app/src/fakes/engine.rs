@@ -65,7 +65,10 @@ impl Engine for SimulatedEngine {
                 .map(|budget| Deadline::after_index_read(now, budget)),
             stopped: Arc::clone(&stopped),
         };
-        let started = EngineEvent::Started { index_read_at: now };
+        let started = EngineEvent::Started {
+            index_read_at: now,
+            repository: None,
+        };
         let events = stream::iter([started])
             .chain(stream::unfold(playing, |mut playing| async move {
                 loop {

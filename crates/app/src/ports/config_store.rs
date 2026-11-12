@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use domain::IdKind;
-use domain::planning::{AgentConfig, ValueKind, Violation};
+use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig, ValueKind, Violation};
+use domain::{IdKind, RepositoryAlias, RepositoryId};
 
 /// Keeps the agent's configuration: the plans, repositories and settings the
 /// user wrote, as one whole (technical design §3.2 and §6.1).
@@ -17,6 +17,10 @@ use domain::planning::{AgentConfig, ValueKind, Violation};
 ///   one saved, down to the order of each list, and does so again for as long
 ///   as nothing else is saved.
 /// - The last `save` wins: it replaces everything an earlier one stored.
+/// - After [`record_id`](Self::record_id) returns `Ok`, `load` returns the
+///   configuration [`AgentConfig::record_id`] makes of the one stored before,
+///   and nothing else changed; after an `Err`, the stored configuration is
+///   as it was.
 #[async_trait]
 pub trait ConfigStore: Send + Sync {
     /// The stored configuration, or the empty one when none was ever saved.
@@ -24,6 +28,47 @@ pub trait ConfigStore: Send + Sync {
 
     /// Stores `config` in place of whatever was stored.
     async fn save(&self, config: &AgentConfig) -> Result<(), ConfigError>;
+
+    /// Records `id`, the repository a job opened, as the repository ID of
+    /// the entry `alias`, which the job read as `read`, and changes nothing
+    /// else (§6.1, decision NN). The daemon does this on its own, in a file
+    /// a person may have written by hand, so a store keeps everything else
+    /// it holds as it is, down to how it is written, and writes nothing when
+    /// it can't: [`AgentConfig::record_id`] decides whether the ID is
+    /// recorded, and the store whether it can add it alone.
+    async fn record_id(
+        &self,
+        alias: &RepositoryAlias,
+        read: &RepositoryConfig,
+        id: &RepositoryId,
+    ) -> Result<(), RecordError>;
+}
+
+/// Why [`ConfigStore::record_id`] recorded nothing. None of them is a
+/// failure of the job that opened the repository: the next one tries again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RecordError {
+    /// The configuration says not to record it.
+    NotRecorded(NotRecorded),
+    /// The store can't add the ID without changing something else, so it
+    /// wrote nothing.
+    NotInPlace(NotInPlace),
+    /// The configuration couldn't be read or written.
+    Store(ConfigError),
+}
+
+/// Why a store couldn't add a repository ID and nothing else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotInPlace {
+    /// The entry is written in a form the store doesn't add a key to.
+    Form,
+    /// The file with the ID added wouldn't read back as the configuration
+    /// with the ID and nothing else changed.
+    ReadBack,
+    /// The file with the ID added would be larger than the store reads.
+    TooLarge,
+    /// The file changed while the store added the ID.
+    ChangedMeanwhile,
 }
 
 /// Where in a file a [`ConfigError::Invalid`] was found: the line and the

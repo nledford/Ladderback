@@ -217,7 +217,7 @@ impl RunOperation {
                         return;
                     };
                     let is_start = matches!(event, EngineEvent::Started { .. });
-                    if let EngineEvent::Started { index_read_at } = &event
+                    if let EngineEvent::Started { index_read_at, .. } = &event
                         && let Some(budget) = budget
                         && timer.is_terminated()
                     {

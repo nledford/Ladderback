@@ -1043,7 +1043,10 @@ async fn read_log_line(
 /// text: one of those secrets the cut went through leaves nothing behind.
 fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
     Some(match event {
-        WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started { index_read_at },
+        WorkerEvent::Started { index_read_at, .. } => EngineEvent::Started {
+            index_read_at,
+            repository: None,
+        },
         WorkerEvent::ProgressStart { key, kind, prefix } => {
             EngineEvent::Progress(ProgressEvent::Begin {
                 key,
@@ -2488,6 +2491,7 @@ mod tests {
                 .map(|secret| domain::secrets::SecretValue::new(*secret))
                 .collect(),
             id: None,
+            entry: None,
         })
     }
 
@@ -2864,6 +2868,7 @@ mod tests {
             ]),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 
@@ -3273,6 +3278,7 @@ mod tests {
             options_cold: std::collections::BTreeMap::new(),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 
@@ -3524,6 +3530,7 @@ mod tests {
                 options_cold: BTreeMap::new(),
                 secrets: Vec::new(),
                 id: Some(id.clone()),
+                entry: None,
             })
         };
 

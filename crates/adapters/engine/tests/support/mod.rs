@@ -89,6 +89,7 @@ impl Location {
             options_cold: self.options_cold.clone(),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 

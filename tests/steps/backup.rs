@@ -610,6 +610,7 @@ impl Agent {
                 options_cold: Default::default(),
                 secrets: Vec::new(),
                 id: self.backup.id.clone(),
+                entry: None,
             },
             sources: vec![self.source().to_str().unwrap().to_owned()],
             tags: self.plan_tags(),

@@ -45,6 +45,7 @@ async fn a_worker_stuck_opening_its_repository_is_not_timed_out_as_one_that_neve
         options_cold: Default::default(),
         secrets: Vec::new(),
         id: None,
+        entry: None,
     });
     let RunningJob {
         mut events,

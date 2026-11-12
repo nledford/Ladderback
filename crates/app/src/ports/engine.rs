@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
-use domain::planning::{Hostname, SourceFilter, masked_options};
+use domain::planning::{Hostname, RepositoryConfig, SourceFilter, masked_options};
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
-use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId, Timestamp};
+use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp};
 use futures::stream::BoxStream;
 
 /// Runs operations against a repository and reports what happens as a stream
@@ -148,21 +148,30 @@ impl Job {
         }
     }
 
+    /// The repository the job opens: every job's but a fake one's.
+    pub fn access(&self) -> Option<&RepositoryAccess> {
+        match self {
+            Self::Fake(_) => None,
+            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => Some(access),
+            Self::Backup(job) => Some(&job.repository),
+            Self::Forget(job) => Some(&job.repository),
+            Self::Rewrite(job) => Some(&job.repository),
+            Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
+            Self::Check(job) => Some(&job.repository),
+        }
+    }
+
     /// What the job works on: a backup's plan, and the repository of any job
     /// that opens one whose ID is already known.
     pub fn target(&self) -> Target {
-        let (plan, access) = match self {
-            Self::Fake(_) => return Target::default(),
-            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => (None, access),
-            Self::Backup(job) => (Some(job.tags.plan().clone()), &job.repository),
-            Self::Forget(job) => (None, &job.repository),
-            Self::Rewrite(job) => (Some(job.tags.plan().clone()), &job.repository),
-            Self::Prune(job) | Self::PrunePlan(job) => (None, &job.repository),
-            Self::Check(job) => (None, &job.repository),
+        let plan = match self {
+            Self::Backup(job) => Some(job.tags.plan().clone()),
+            Self::Rewrite(job) => Some(job.tags.plan().clone()),
+            _ => None,
         };
         Target {
             plan,
-            repository: access.id.clone(),
+            repository: self.access().and_then(|access| access.id.clone()),
         }
     }
 }
@@ -194,6 +203,20 @@ pub struct RepositoryAccess {
     /// The repository's ID when already known; the engine uses it to give
     /// each worker its own cache dir. `None` before the first `Identify`.
     pub id: Option<RepositoryId>,
+    /// The configuration entry the job was made from, when it was made from
+    /// one, as the job read it. The engine doesn't use it: the daemon
+    /// records in it the ID of the repository the job opened, when the entry
+    /// records none (§6.1, decision NN). `None` for a repository a request
+    /// gave, which no entry holds yet.
+    pub entry: Option<SavedEntry>,
+}
+
+/// A repository's entry in the configuration, under its alias, as a job read
+/// it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedEntry {
+    pub alias: RepositoryAlias,
+    pub entry: RepositoryConfig,
 }
 
 impl RepositoryAccess {
@@ -238,6 +261,7 @@ impl std::fmt::Debug for RepositoryAccess {
             .field("options_cold", &masked_options(&self.options_cold))
             .field("secrets", &secrets)
             .field("id", &self.id)
+            .field("entry", &self.entry.as_ref().map(|saved| &saved.alias))
             .finish()
     }
 }
@@ -342,6 +366,10 @@ pub enum EngineEvent {
     /// counts from it.
     Started {
         index_read_at: Timestamp,
+        /// The ID of the repository the job opened. `None` for a job that
+        /// opens none: a fake job, and an initialisation, which reports the
+        /// new repository's ID in its result.
+        repository: Option<RepositoryId>,
     },
     Progress(ProgressEvent),
     Warning(Warning),
@@ -510,6 +538,7 @@ mod tests {
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id,
+            entry: None,
         }
     }
 
@@ -588,13 +617,19 @@ mod tests {
             deadline_budget: SignedDuration::from_hours(6),
         });
         assert_eq!(backup.kind(), OperationKind::Backup);
-        assert_eq!(
-            backup.target(),
-            Target {
-                plan: Some(plan),
-                repository: Some(repository),
-            }
-        );
+        let on_plan = Target {
+            plan: Some(plan.clone()),
+            repository: Some(repository),
+        };
+        assert_eq!(backup.target(), on_plan);
+
+        let rewrite = Job::Rewrite(RewriteJob {
+            repository: access.clone(),
+            ids: Vec::new(),
+            tags: PlanTags::new(plan, AgentId::from_uuid(Uuid::from_u128(1))),
+        });
+        assert_eq!(rewrite.kind(), OperationKind::Adopt);
+        assert_eq!(rewrite.target(), on_plan);
 
         let prune = Job::Prune(PruneJob {
             repository: access.clone(),
@@ -635,6 +670,7 @@ mod tests {
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 

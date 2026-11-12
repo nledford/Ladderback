@@ -26,7 +26,7 @@ use app::ports::{
 };
 use app::recovery::RecoverOperations;
 use app::repositories::{
-    ConnectRepository, CreateOffers, InitRepository, RepositoryError, SavedEntryError,
+    ConnectRepository, CreateOffers, InitRepository, Recording, RepositoryError, SavedEntryError,
     TestRepository,
 };
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
@@ -313,6 +313,12 @@ fn workers_cache(dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> 
     Some(dir)
 }
 
+/// Says in the log what became of the ID of a repository a job opened,
+/// whose entry recorded none.
+fn log_recording(_recording: Recording) {
+    todo!()
+}
+
 /// Waits for `close`, the closing of the operation log at `database`, for
 /// at most `bound`, and says in the log when it gave up.
 async fn close_within(
@@ -485,7 +491,7 @@ impl Publish {
     fn ui(&mut self, event: &EngineEvent) -> Option<UiEvent> {
         use EngineEvent as E;
         match event {
-            E::Started { index_read_at } => Some(UiEvent::OperationStarted {
+            E::Started { index_read_at, .. } => Some(UiEvent::OperationStarted {
                 operation: self.operation.clone(),
                 repository: self.repository.clone(),
                 started_at: index_read_at.to_string(),
@@ -1255,11 +1261,7 @@ impl Catalog for ConfigCatalog {
             Arc::clone(&self.engine),
             ResolveRepository::new(Arc::new(SystemSecrets::default())),
         )
-        .list(
-            OperationId::from_uuid(Uuid::now_v7()),
-            &repository.settings,
-            repository.id.as_ref(),
-        )
+        .list(OperationId::from_uuid(Uuid::now_v7()), &alias, repository)
         .await;
         // A secret: its code and the words a command or the platform gave,
         // masked of every secret of the repository, in the log as in the
@@ -2776,6 +2778,105 @@ mod tests {
         );
     }
 
+    #[test]
+    fn each_recording_is_logged_at_its_level_naming_only_the_alias_the_id_and_the_reason() {
+        super::captured_log::capture();
+        let id = "c".repeat(64);
+        let parsed = || domain::RepositoryId::parse(&id).expect("a repository ID");
+        let alias = |alias: &str| RepositoryAlias::parse(alias).expect("an alias");
+        let cases = [
+            (
+                Recording::Recorded {
+                    alias: alias("logged-recorded"),
+                    id: parsed(),
+                },
+                log::Level::Info,
+                format!(
+                    "recorded the repository ID {id} in the entry logged-recorded of the configuration: a job opened it"
+                ),
+            ),
+            (
+                Recording::NotRecorded {
+                    alias: alias("logged-changed"),
+                    id: parsed(),
+                    why: domain::planning::NotRecorded::Changed,
+                },
+                log::Level::Info,
+                format!(
+                    "did not record the repository ID {id} in the entry logged-changed of the configuration (Changed); the next job that opens it tries again"
+                ),
+            ),
+            (
+                Recording::NotRecorded {
+                    alias: alias("logged-same"),
+                    id: parsed(),
+                    why: domain::planning::NotRecorded::SameRepository {
+                        other: alias("logged-other"),
+                    },
+                },
+                log::Level::Warn,
+                format!(
+                    "did not record the repository ID {id} in the entry logged-same of the configuration: the entry logged-other records it, so the two entries are one repository; remove one of them"
+                ),
+            ),
+            (
+                Recording::NotInPlace {
+                    alias: alias("logged-form"),
+                    id: parsed(),
+                    why: app::ports::NotInPlace::Form,
+                },
+                log::Level::Warn,
+                format!(
+                    "did not record the repository ID {id} in the entry logged-form of the configuration: it can't be added without changing something else in the file (Form); the next job that opens it tries again"
+                ),
+            ),
+            (
+                Recording::Busy {
+                    alias: alias("logged-busy"),
+                    id: parsed(),
+                },
+                log::Level::Info,
+                format!(
+                    "did not record the repository ID {id} in the entry logged-busy of the configuration: another change to it was being saved; the next job that opens it tries again"
+                ),
+            ),
+            (
+                Recording::Failed {
+                    alias: alias("logged-failed"),
+                    id: parsed(),
+                    error: ConfigError::Unavailable {
+                        file: "/srv/demo/config.toml".to_owned(),
+                        detail: "read-only file system".to_owned(),
+                    },
+                },
+                log::Level::Warn,
+                format!(
+                    "did not record the repository ID {id} in the entry logged-failed of the configuration (Unavailable {{ file: \"/srv/demo/config.toml\", detail: \"read-only file system\" }}); the next job that opens it tries again"
+                ),
+            ),
+        ];
+        for (recording, level, line) in cases {
+            let entry = match &recording {
+                Recording::Recorded { alias, .. }
+                | Recording::NotRecorded { alias, .. }
+                | Recording::NotInPlace { alias, .. }
+                | Recording::Busy { alias, .. }
+                | Recording::Failed { alias, .. } => format!("entry {} ", alias.as_str()),
+            };
+            log_recording(recording);
+            let said: Vec<_> = super::captured_log::lines()
+                .into_iter()
+                .chain(
+                    super::captured_log::infos()
+                        .into_iter()
+                        .map(|line| (log::Level::Info, line)),
+                )
+                .filter(|(_, said)| said.contains(&entry))
+                .collect();
+            assert_eq!(said, vec![(level, line)]);
+        }
+    }
+
     #[tokio::test]
     async fn a_data_folder_another_process_holds_is_refused_before_its_log_is_opened() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
@@ -3348,6 +3449,167 @@ mod tests {
         assert!(kinds.contains(&"Ls".to_owned()), "the jobs: {kinds:?}");
     }
 
+    /// An engine for a repository that holds no snapshots, as [`Empty`], that
+    /// also tells which configuration entry each job was made from.
+    struct Saved(tokio::sync::mpsc::UnboundedSender<(String, Option<app::ports::SavedEntry>)>);
+
+    #[async_trait]
+    impl Engine for Saved {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let entry = job.access().and_then(|access| access.entry.clone());
+            let _ = self.0.send((format!("{:?}", job.kind()), entry));
+            Empty.run(op, job).await
+        }
+    }
+
+    /// Every job that opens a saved repository carries the entry it was made
+    /// from, as it was read: the listing, the reads behind the history view
+    /// and a backup. The daemon records in that entry the ID of the
+    /// repository the job opened, when it records none (§6.1, decision NN).
+    #[tokio::test]
+    async fn every_job_carries_the_entry_it_was_made_from() {
+        let (mut runner, _entered, open_gate, scratch) = runner_at_a_gate().await;
+        let (seen, mut jobs) = tokio::sync::mpsc::unbounded_channel();
+        runner.engine = Arc::new(Saved(seen));
+        let location = scratch.path().join("repo").display().to_string();
+        let source = scratch.path().join("source").display().to_string();
+        let (config_dir, _) = own_folders(scratch.path());
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!(
+                "schema = 1\n\n\
+                 [repositories.demo]\nrepository = {location:?}\npassword = \"demo-password\"\n\
+                 maintenance = \"local\"\n\n\
+                 [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [{source:?}]\n"
+            ),
+        )
+        .expect("the config file");
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let expected = Some(app::ports::SavedEntry {
+            entry: runner
+                .config
+                .load()
+                .await
+                .expect("the configuration")
+                .repository(&alias)
+                .cloned()
+                .expect("the entry"),
+            alias,
+        });
+        let catalog = ConfigCatalog {
+            config: Arc::clone(&runner.config),
+            engine: Arc::clone(&runner.engine),
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+        };
+        catalog
+            .snapshots("demo".to_owned())
+            .await
+            .expect("the listing");
+        runner.groups("demo".to_owned()).await.expect("the groups");
+        open_gate.send(true).expect("the gate opens");
+        runner
+            .start_backup("home".to_owned())
+            .await
+            .expect("the plan starts");
+        let mut kinds = Vec::new();
+        while !kinds.iter().any(|kind| kind == "Backup") {
+            let (kind, entry) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), jobs.recv())
+                    .await
+                    .expect("the engine is asked")
+                    .expect("a job");
+            assert_eq!(entry, expected, "the {kind} job");
+            kinds.push(kind);
+        }
+        assert!(kinds.contains(&"Ls".to_owned()), "the jobs: {kinds:?}");
+    }
+
+    /// An engine for a repository that holds no snapshots, whose every job
+    /// opens the repository `.0` and says so when it starts.
+    struct Opens(domain::RepositoryId);
+
+    #[async_trait]
+    impl Engine for Opens {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let result = match job {
+                Job::Identify(_) => EngineResult::Repository { id: self.0.clone() },
+                _ => EngineResult::Snapshots(Vec::new()),
+            };
+            Ok(RunningJob {
+                events: futures::stream::iter([
+                    EngineEvent::Started {
+                        index_read_at: domain::Timestamp::from_second(1_800_000_000)
+                            .expect("a time"),
+                        repository: Some(self.0.clone()),
+                    },
+                    EngineEvent::Succeeded(result),
+                ])
+                .boxed(),
+                control: Box::new(Parked),
+            })
+        }
+    }
+
+    /// The daemon's engine records, through the configuration file, the ID
+    /// of the repository a job opened in the entry the job was made from:
+    /// the file gains that one line, and every other byte is as written
+    /// (§6.1, decision 57).
+    #[tokio::test]
+    async fn a_job_that_opens_an_entry_without_an_id_records_it_in_the_file() {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config_dir, _) = own_folders(scratch.path());
+        let file = config_dir.join("config.toml");
+        let location = scratch.path().join("repo").display().to_string();
+        let source = scratch.path().join("source").display().to_string();
+        let entry = format!(
+            "schema = 1\n\n\
+             [repositories.demo]\nrepository = {location:?}\npassword = \"demo-password\"\n\
+             maintenance = \"local\"\n"
+        );
+        let plans =
+            format!("\n[[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [{source:?}]\n");
+        std::fs::write(&file, format!("{entry}{plans}")).expect("the config file");
+        let id = "07".repeat(32);
+        let config: Arc<dyn ConfigStore> =
+            Arc::new(FileConfigStore::new(file.clone(), Arc::new(SystemClock)));
+        let told = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let report = {
+            let told = Arc::clone(&told);
+            move |recording: Recording| {
+                told.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(recording);
+            }
+        };
+        let catalog = ConfigCatalog {
+            config: Arc::clone(&config),
+            engine: Arc::new(app::repositories::RecordOpened::new(
+                Arc::new(Opens(
+                    domain::RepositoryId::parse(&id).expect("a repository ID"),
+                )),
+                config,
+                Arc::new(app::repositories::ConfigWrites::default()),
+                Arc::new(report),
+            )),
+            operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+        };
+        catalog
+            .snapshots("demo".to_owned())
+            .await
+            .expect("the listing");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("the config file"),
+            format!("{entry}repository-id = {id:?}\n{plans}")
+        );
+        assert_eq!(
+            *told.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec![Recording::Recorded {
+                alias: RepositoryAlias::parse("demo").expect("an alias"),
+                id: domain::RepositoryId::parse(&id).expect("a repository ID"),
+            }]
+        );
+    }
+
     /// A start that carries a selection is held to it (I6): what a forget
     /// would remove is read again, and a repository that no longer matches
     /// what the review named refuses before anything is removed.
@@ -3536,6 +3798,7 @@ mod tests {
     fn started() -> EngineEvent {
         EngineEvent::Started {
             index_read_at: domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+            repository: None,
         }
     }
 
@@ -4981,6 +5244,15 @@ mod repository_service_tests {
         async fn save(&self, config: &domain::planning::AgentConfig) -> Result<(), ConfigError> {
             self.0.save(config).await
         }
+
+        async fn record_id(
+            &self,
+            alias: &domain::RepositoryAlias,
+            read: &domain::planning::RepositoryConfig,
+            id: &RepositoryId,
+        ) -> Result<(), app::ports::RecordError> {
+            self.0.record_id(alias, read, id).await
+        }
     }
 
     /// A configuration store that can't be read.
@@ -4994,6 +5266,15 @@ mod repository_service_tests {
 
         async fn save(&self, _config: &domain::planning::AgentConfig) -> Result<(), ConfigError> {
             Err(self.0.clone())
+        }
+
+        async fn record_id(
+            &self,
+            _alias: &domain::RepositoryAlias,
+            _read: &domain::planning::RepositoryConfig,
+            _id: &RepositoryId,
+        ) -> Result<(), app::ports::RecordError> {
+            Err(app::ports::RecordError::Store(self.0.clone()))
         }
     }
 

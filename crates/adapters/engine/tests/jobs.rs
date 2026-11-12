@@ -647,3 +647,59 @@ async fn folders_of_a_repository_that_rustic_does_not_write_to_are_left_alone() 
         assert!(path.exists(), "{path:?} was deleted");
     }
 }
+
+/// What the job said when it started: the ID of the repository it opened.
+fn started_with(events: &[EngineEvent]) -> Option<domain::RepositoryId> {
+    match events
+        .iter()
+        .find(|e| !matches!(e, EngineEvent::Progress(_)))
+    {
+        Some(EngineEvent::Started { repository, .. }) => repository.clone(),
+        _ => panic!("the job reports its start first: {events:?}"),
+    }
+}
+
+/// Every job that opens a repository names, as it starts, the ID of the one
+/// it opened, so the daemon can record it in an entry that records none
+/// (§6.1, decision NN). Both halves of a hot/cold repository hold one ID. An
+/// initialisation opens none: the repository it makes is new, and its ID is
+/// in the result.
+#[tokio::test]
+async fn every_job_that_opens_a_repository_names_its_id_when_it_starts() {
+    for hot_cold in [false, true] {
+        let scratch = Scratch::new();
+        let location = if hot_cold {
+            scratch.hot_cold()
+        } else {
+            scratch.local()
+        };
+        let made = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
+        assert_eq!(started_with(&made), None, "init, hot/cold: {hot_cold}");
+        let EngineResult::Repository { id: opened } = succeeded(&made).clone() else {
+            panic!("not an init result: {made:?}");
+        };
+        write_file(scratch.source().join("a.txt"), b"hello");
+        let jobs = [
+            Job::Identify(location.access(PASSWORD)),
+            Job::Ls(location.access(PASSWORD)),
+            backup_job(&location, &scratch.source(), "daily", HOUR),
+            check_job(&location, false),
+            Job::Forget(ForgetJob {
+                repository: location.access(PASSWORD),
+                ids: Vec::new(),
+            }),
+            prune_plan_job(&location),
+            prune_job(&location),
+        ];
+        for job in jobs {
+            let kind = job.kind();
+            let events = run_to_end(&engine(), job).await;
+            succeeded(&events);
+            assert_eq!(
+                started_with(&events),
+                Some(opened.clone()),
+                "{kind:?}, hot/cold: {hot_cold}"
+            );
+        }
+    }
+}

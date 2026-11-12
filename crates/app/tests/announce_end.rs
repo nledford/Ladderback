@@ -50,6 +50,7 @@ fn job(deadline_budget: Option<SignedDuration>) -> Job {
 fn started() -> EngineEvent {
     EngineEvent::Started {
         index_read_at: t(0),
+        repository: None,
     }
 }
 

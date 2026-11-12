@@ -75,6 +75,7 @@ fn access(
         options_cold: BTreeMap::new(),
         secrets: secrets.iter().map(|s| SecretValue::new(*s)).collect(),
         id: None,
+        entry: None,
     }
 }
 

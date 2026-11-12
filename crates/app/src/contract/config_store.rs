@@ -53,6 +53,8 @@ pub async fn run(store: &dyn ConfigStore) {
     saving_what_was_loaded_changes_nothing(store, &configs.rich).await;
     a_minimal_configuration_loads_as_it_was_saved(store, &configs.minimal).await;
     the_last_save_wins(store, &configs).await;
+    recording_an_id_changes_that_entry_and_nothing_else(store, &configs.rich).await;
+    an_id_the_configuration_says_not_to_record_changes_nothing(store, &configs.rich).await;
 }
 
 /// A configuration that sets every part of the model, and one that sets only
@@ -456,4 +458,83 @@ async fn the_last_save_wins(store: &dyn ConfigStore, configs: &Configs) {
         "a configuration saved again replaces the empty one",
     )
     .await;
+}
+
+fn new_id(byte: &str) -> Option<RepositoryId> {
+    RepositoryId::parse(&byte.repeat(32)).ok()
+}
+
+async fn recording_an_id_changes_that_entry_and_nothing_else(
+    store: &dyn ConfigStore,
+    config: &AgentConfig,
+) {
+    let what = "recording an ID changes that entry and nothing else";
+    saved(store, config, what).await;
+    let (Some(cloud), Some(id)) = (alias("cloud"), new_id("c1")) else {
+        return;
+    };
+    let read = config.repository(&cloud).cloned();
+    assert!(read.is_some(), "{what}: the suite's entry is there");
+    let Some(read) = read else { return };
+    assert_eq!(read.id, None, "{what}: the suite's entry records no ID");
+    let expected = config.record_id(&cloud, &read, &id);
+    assert!(
+        expected.is_ok(),
+        "{what}: the rule records it: {expected:?}"
+    );
+    let Ok(expected) = expected else { return };
+    assert_eq!(store.record_id(&cloud, &read, &id).await, Ok(()), "{what}");
+    loads_as(store, &expected, what).await;
+}
+
+async fn an_id_the_configuration_says_not_to_record_changes_nothing(
+    store: &dyn ConfigStore,
+    config: &AgentConfig,
+) {
+    use crate::ports::RecordError;
+    use domain::planning::NotRecorded;
+
+    let what = "an ID the configuration says not to record changes nothing";
+    saved(store, config, what).await;
+    let (Some(nas), Some(usb), Some(id)) = (alias("nas"), alias("usb"), new_id("c2")) else {
+        return;
+    };
+    let (Some(recorded), Some(usb_entry)) = (
+        config.repository(&nas).cloned(),
+        config.repository(&usb).cloned(),
+    ) else {
+        return;
+    };
+    let mut edited = usb_entry.clone();
+    edited.maintenance = Maintenance::Hub;
+    let Some(nas_id) = recorded.id.clone() else {
+        return;
+    };
+    let refusals = [
+        (&nas, &recorded, &id, NotRecorded::Recorded),
+        (&usb, &edited, &id, NotRecorded::Changed),
+        (
+            &usb,
+            &usb_entry,
+            &nas_id,
+            NotRecorded::SameRepository { other: nas.clone() },
+        ),
+    ];
+    for (alias, read, id, why) in refusals {
+        assert_eq!(
+            store.record_id(alias, read, id).await,
+            Err(RecordError::NotRecorded(why.clone())),
+            "{what}: {why:?}"
+        );
+        loads_as(store, config, what).await;
+    }
+
+    let empty = AgentConfig::default();
+    saved(store, &empty, what).await;
+    assert_eq!(
+        store.record_id(&usb, &usb_entry, &id).await,
+        Err(RecordError::NotRecorded(NotRecorded::Changed)),
+        "{what}: an entry that isn't there"
+    );
+    loads_as(store, &empty, what).await;
 }

@@ -5,8 +5,10 @@
 //! the job it was resolved for.
 
 mod create_offers;
+mod record_opened;
 
 pub use create_offers::CreateOffers;
+pub use record_opened::{ConfigWrites, RecordOpened, Recording};
 
 use std::sync::Arc;
 
@@ -681,6 +683,7 @@ mod tests {
     fn started() -> EngineEvent {
         EngineEvent::Started {
             index_read_at: START,
+            repository: None,
         }
     }
 

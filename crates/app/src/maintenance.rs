@@ -1397,6 +1397,7 @@ mod tests {
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 
@@ -1665,6 +1666,7 @@ mod read_timeout_tests {
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id: None,
+            entry: None,
         }
     }
 
@@ -1920,6 +1922,7 @@ mod cancel_tests {
                     options_cold: BTreeMap::new(),
                     secrets: Vec::new(),
                     id: None,
+                    entry: None,
                 },
                 ids: (0..count)
                     .map(|n| SnapshotId::parse(&format!("{n:064x}")).expect("a snapshot ID"))
