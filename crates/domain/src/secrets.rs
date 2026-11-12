@@ -55,9 +55,9 @@ pub const MAX_OPTION_VALUE_BYTES: usize = MAX_SECRET_BYTES;
 pub const MAX_OPTIONS: usize = 64;
 
 /// The most bytes of secrets one redactor looks for, each counted once
-/// however many places hold it: a secret gives up to about 50 bytes of
-/// needles per byte of it, which take about 250 bytes of memory, so this
-/// keeps one redactor under about 64 MiB. The secrets of a real repository
+/// however many places hold it: a secret gives up to about 80 bytes of
+/// needles per byte of it, which take about 400 bytes of memory, so this
+/// keeps one redactor under about 100 MiB. The secrets of a real repository
 /// come to a few kilobytes (technical design §10.2).
 pub const MAX_MASKED_BYTES: usize = 256 * 1024;
 
@@ -326,7 +326,7 @@ impl std::fmt::Debug for Redactor {
 impl Redactor {
     /// A redactor for `secrets`, each counted once. When they come to more
     /// than [`MAX_MASKED_BYTES`], none of their forms is built (each about
-    /// 50 times the secret's size): the redactor masks every text whole.
+    /// 80 times the secret's size): the redactor masks every text whole.
     pub fn new<'a>(secrets: impl IntoIterator<Item = &'a SecretValue>) -> Self {
         let mut values: Vec<&str> = secrets
             .into_iter()
@@ -349,7 +349,7 @@ impl Redactor {
                 let raw = partial_needles(value);
                 let escaped: Vec<String> = std::iter::once(value)
                     .chain(raw.iter().map(String::as_str))
-                    .filter_map(debug_escaped)
+                    .flat_map(|form| debug_escaped(form).into_iter().chain(go_quoted(form)))
                     .collect();
                 url_needles(value).into_iter().chain(raw).chain(escaped)
             })
@@ -581,6 +581,91 @@ fn debug_escaped(secret: &str) -> Option<String> {
     let quoted = format!("{secret:?}");
     let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
     (inner != secret).then(|| inner.to_owned())
+}
+
+/// A secret, or a raw form of it, as Go's `strconv.Quote` writes it between
+/// the quotes, where that differs from it: rclone, written in Go, quotes
+/// what it can't serve as `%q` does (`Failed to create file system for
+/// "…"`), and the worker and the daemon log what it writes (#331). Go
+/// escapes `"` and `\`, writes `\a`, `\b`, `\f`, `\n`, `\r`, `\t` and `\v`
+/// for those, and any other character it doesn't print ([`go_prints`]) as
+/// `\x01` below the space and for DEL, else as `\u200b` or `\U000e0001`.
+/// Like `Debug`, it escapes each character on its own, so this form is in
+/// the quoted text wherever the secret is in the text quoted. Where it is
+/// the `Debug` form (a secret whose only escaped characters are `"`, `\`,
+/// tab or a line break), `Redactor::new` drops the duplicate.
+fn go_quoted(secret: &str) -> Option<String> {
+    use std::fmt::Write;
+    let mut quoted = String::with_capacity(secret.len());
+    for c in secret.chars() {
+        let code = u32::from(c);
+        // Writing to a `String` can't fail.
+        let _ = match c {
+            '"' | '\\' => write!(quoted, "\\{c}"),
+            '\u{7}' => quoted.write_str("\\a"),
+            '\u{8}' => quoted.write_str("\\b"),
+            '\u{c}' => quoted.write_str("\\f"),
+            '\n' => quoted.write_str("\\n"),
+            '\r' => quoted.write_str("\\r"),
+            '\t' => quoted.write_str("\\t"),
+            '\u{b}' => quoted.write_str("\\v"),
+            _ if go_prints(c) => quoted.write_char(c),
+            '\0'..='\u{1f}' | '\u{7f}' => write!(quoted, "\\x{code:02x}"),
+            '\u{80}'..='\u{ffff}' => write!(quoted, "\\u{code:04x}"),
+            _ => write!(quoted, "\\U{code:08x}"),
+        };
+    }
+    (quoted != secret).then_some(quoted)
+}
+
+/// The characters Rust's `Debug` escapes that are neither control, format,
+/// separator, private-use nor unassigned characters, and so print in Go:
+/// the default-ignorable marks and letters (the combining grapheme joiner,
+/// variation selectors, the Hangul fillers), which `Debug` escapes in newer
+/// Rust versions (1.99 does; 1.97 printed them).
+const DEBUG_ESCAPES_GO_PRINTS: [std::ops::RangeInclusive<char>; 9] = [
+    '\u{34f}'..='\u{34f}',
+    '\u{115f}'..='\u{1160}',
+    '\u{17b4}'..='\u{17b5}',
+    '\u{180b}'..='\u{180d}',
+    '\u{180f}'..='\u{180f}',
+    '\u{3164}'..='\u{3164}',
+    '\u{fe00}'..='\u{fe0f}',
+    '\u{ffa0}'..='\u{ffa0}',
+    '\u{e0100}'..='\u{e01ef}',
+];
+
+/// Whether Go's `strconv.Quote` writes `c` as it is (`"` and `\` aside):
+/// whether `unicode.IsPrint` takes it, a letter, mark, number, punctuation
+/// or symbol, or the space. Rust's `Debug` leaves the characters of those
+/// categories unescaped (its `core::unicode::printable` tables), apart from
+/// three escapes of its own: `'`, which `str::escape_debug` escapes; the
+/// characters of [`DEBUG_ESCAPES_GO_PRINTS`]; and a grapheme extender (a
+/// combining character among them), which `str::escape_debug` escapes only
+/// at the start of a text, so `c` is asked after a space. Both read the
+/// categories from Unicode's tables, so this is Go's answer wherever the
+/// two Unicode versions agree; a character one version has assigned and
+/// the other not is printed by one and escaped by the other, and then a
+/// secret holding it is not masked as Go quotes it (technical design
+/// §10.2).
+fn go_prints(c: char) -> bool {
+    if c == '\''
+        || DEBUG_ESCAPES_GO_PRINTS
+            .iter()
+            .any(|range| range.contains(&c))
+    {
+        return true;
+    }
+    let mut pair = [b' '; 5];
+    let Some(after) = pair.get_mut(1..) else {
+        return false;
+    };
+    // Four bytes hold any character.
+    let len = c.encode_utf8(after).len();
+    match pair.get(..=len).map(std::str::from_utf8) {
+        Some(Ok(text)) => text.escape_debug().skip(1).eq([c]),
+        _ => false,
+    }
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -1016,6 +1101,83 @@ mod tests {
         for logged in [key.trim(), "CANARY\"line-one", "CANARY\\line-two"] {
             assert_eq!(by_line.redact(&format!("{logged:?}")), r#""***""#);
         }
+    }
+
+    /// rclone, written in Go, quotes what it can't serve as `%q` does
+    /// (`Failed to create file system for "…"`): a control character as
+    /// `\x01` or `\a`, a format character, a separator other than the space,
+    /// a private-use or unassigned character as `\u200b` or `\U000e0001`, and
+    /// a combining character as it is, where `Debug` escapes it (#331). The
+    /// quoted forms are Go's own, from `strconv.Quote`.
+    #[test]
+    fn a_secret_is_replaced_as_go_quotes_it() {
+        let masked = "CRITICAL: Failed to create file system for \
+                      \":s3,secret_access_key=***:demo-bucket/repo\": demo error";
+        for (secret, quoted) in [
+            (
+                "CANARY\u{1}bell\u{7}del\u{7f}nul\u{0}",
+                r"CANARY\x01bell\adel\x7fnul\x00",
+            ),
+            ("CANARY\u{8}\u{c}\u{b}\r", r"CANARY\b\f\v\r"),
+            (
+                "CANARY\u{200b}zw\u{85}nel\u{a0}nbsp\u{2028}ls\u{e000}pua\u{378}na\u{e0001}tag\u{ffff}",
+                r"CANARY\u200bzw\u0085nel\u00a0nbsp\u2028ls\ue000pua\u0378na\U000e0001tag\uffff",
+            ),
+            (
+                "CANARY'it\"s\\e\u{301}\t\u{1}",
+                "CANARY'it\\\"s\\\\e\u{301}\\t\\x01",
+            ),
+            // A variation selector, the combining grapheme joiner and a
+            // Hangul filler print in Go; newer Rust's `Debug` escapes them.
+            (
+                "CANARY\u{fe0f}\u{34f}\u{115f}\u{1}",
+                "CANARY\u{fe0f}\u{34f}\u{115f}\\x01",
+            ),
+        ] {
+            let line = format!(
+                "CRITICAL: Failed to create file system for \
+                 \":s3,secret_access_key={quoted}:demo-bucket/repo\": demo error"
+            );
+            assert_eq!(redactor(&[secret]).redact(&line), masked, "{secret:?}");
+        }
+        // Its other raw forms too: without the white space around it, and
+        // each line of one that spans lines.
+        let by_line = redactor(&["  CANARY\u{1}line-one\nCANARY\u{7f}line-two\n"]);
+        for quoted in [
+            r"CANARY\x01line-one\nCANARY\x7fline-two",
+            r"CANARY\x01line-one",
+            r"CANARY\x7fline-two",
+        ] {
+            assert_eq!(by_line.redact(&format!("\"{quoted}\"")), r#""***""#);
+        }
+    }
+
+    /// A secret Go prints as it is, `'` and a combining character included,
+    /// adds no needle: only what Go escapes costs one.
+    #[test]
+    fn a_secret_go_prints_as_it_is_has_no_go_quoted_form() {
+        assert_eq!(go_quoted("CANARY 'plain' e\u{301}"), None);
+        assert_eq!(go_quoted("CANARY\u{1}"), Some(r"CANARY\x01".to_owned()));
+    }
+
+    /// Every character is quoted as Go 1.27.3's `strconv.Quote` quotes it
+    /// (Unicode 17): the count of characters Go escapes and an FNV-1a hash
+    /// of every quoted form, each followed by a line break, in order, are
+    /// Go's own. [`go_prints`] asks Rust's `Debug`, whose tables change with
+    /// the toolchain: when this fails, quote every character with Go again
+    /// and correct [`DEBUG_ESCAPES_GO_PRINTS`] (technical design §10.2).
+    #[test]
+    fn every_character_is_quoted_as_go_quotes_it() {
+        let mut escaped = 0_u32;
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for c in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+            let text = c.to_string();
+            let form = go_quoted(&text).inspect(|_| escaped += 1).unwrap_or(text);
+            for byte in form.bytes().chain(*b"\n") {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        assert_eq!((escaped, hash), (952_453, 0x7b11_61e7_95fe_c298));
     }
 
     #[test]
@@ -2260,7 +2422,7 @@ mod tests {
     }
 
     /// Up to the cap, a redactor masks each secret; past it, it builds no
-    /// form of any (each about 50 times its size) and masks every text
+    /// form of any (each about 80 times its size) and masks every text
     /// whole: more than a secret, never less (I4).
     #[test]
     fn a_redactor_builds_no_forms_of_secrets_past_the_cap() {

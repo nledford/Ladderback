@@ -2595,6 +2595,41 @@ mod tests {
         assert_eq!(line, "redaction one: *** then ***");
     }
 
+    /// A line as rclone writes it, quoting what it can't serve as Go's `%q`
+    /// does, a control or format character of a credential escaped (#331),
+    /// is masked on the worker's stderr. rustic logs rclone's lines as the
+    /// worker's log events, which the same redactor masks.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_is_masked_where_rclone_quotes_it_in_what_the_worker_writes_to_stderr() {
+        capture_the_worker_log();
+        let script = format!(
+            r#"cat >/dev/null; printf '%s\n' '2026/11/12 10:00:00 CRITICAL: Failed to create file system for ":s3,secret_access_key=CANARY-go\x01quoted\u200bkey:demo-bucket/repo": demo error' >&2; echo '{}'"#,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-go\u{1}quoted\u{200b}key"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        let line = logged_soon(log::Level::Warn, |text| {
+            text.starts_with("2026/11/12 10:00:00 CRITICAL")
+        })
+        .await
+        .expect("the worker's stderr never reached the log");
+        assert_eq!(
+            line,
+            "2026/11/12 10:00:00 CRITICAL: Failed to create file system for \
+             \":s3,secret_access_key=***:demo-bucket/repo\": demo error"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_secret_straddling_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {
