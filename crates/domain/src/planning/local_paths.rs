@@ -6,8 +6,8 @@
 //! how the daemon was started.
 //!
 //! A field is judged by what is known of it before a job resolves its
-//! `${…}` references: the text up to the first one. What a reference holds
-//! is checked by nothing here.
+//! `${…}` references: the text up to the first one. A location a job has
+//! resolved is judged whole, by [`is_relative_location`].
 
 use crate::secrets::{CommandLine, Part, SecretRef, Template};
 
@@ -72,6 +72,14 @@ impl RepositorySettings {
             .find(|(name, value)| reads(&cold, name, value))
             .map(|(name, _)| RepositoryField::OptionCold(name.clone()))
     }
+}
+
+/// Whether `location`, a repository location as a job resolved it (every
+/// reference replaced by what it held), names a folder on this machine by a
+/// relative path, read as [`RepositorySettings::relative_path`] reads a
+/// location all of which is known.
+pub fn is_relative_location(location: &str) -> bool {
+    read_location(location, true).is_some_and(|location| location.relative)
 }
 
 /// Whether a program is named by a relative path: with a `/` in it, and not
@@ -142,11 +150,16 @@ struct Location {
 /// when rustic refuses the scheme.
 fn location(value: &str) -> Option<Location> {
     let Known { head, whole } = Known::of(value)?;
+    read_location(&head, whole)
+}
+
+/// [`location`], from `head`, what is known of it, and whether that is all.
+fn read_location(head: &str, whole: bool) -> Option<Location> {
     let Some((scheme, rest)) = head.split_once(':') else {
         // A `/` before any `:` leaves no scheme a reference could finish.
         return (whole || head.contains('/')).then(|| Location {
             backend: Backend::Local,
-            relative: starts_relative(&head, whole),
+            relative: starts_relative(head, whole),
         });
     };
     let (backend, relative) = match scheme {
@@ -629,5 +642,52 @@ mod tests {
             settings.relative_path(),
             Some(RepositoryField::OptionHot("root".to_owned()))
         );
+    }
+
+    // A job resolves `${REPO}` before rustic opens it, and only then is the
+    // location known (#247). What a reference held is text: a `$` in it
+    // starts no reference.
+    #[test]
+    fn a_resolved_location_that_names_a_folder_here_by_a_relative_path_is_relative() {
+        for location in RELATIVE
+            .into_iter()
+            .map(str::to_owned)
+            .chain(RELATIVE.iter().map(|path| format!("local:{path}")))
+            .chain(
+                [
+                    "${HOME}/repo",
+                    " /srv/demo-repo",
+                    "rclone:backups/repo",
+                    "rclone:./repo",
+                    "rclone:~/repo",
+                    "rclone:repo",
+                    "rclone:backups/nas:repo",
+                ]
+                .map(str::to_owned),
+            )
+        {
+            assert!(is_relative_location(&location), "{location:?}");
+        }
+    }
+
+    #[test]
+    fn a_resolved_location_that_is_a_full_path_or_no_folder_here_is_not_relative() {
+        for location in [
+            "/srv/demo-repo",
+            "/",
+            "local:/srv/demo-repo",
+            "rclone:nas:backups/repo",
+            "rclone:/srv/demo-repo",
+            "rest:https://nas.example/repo",
+            "opendal:s3",
+            "opendal:fs",
+            "opendal:sftp:backups",
+            // What rustic reads as a backend it doesn't know, and refuses.
+            "nas:backups/repo",
+            "LOCAL:backups/repo",
+            "s3:s3.example.net/demo-backups",
+        ] {
+            assert!(!is_relative_location(location), "{location:?}");
+        }
     }
 }

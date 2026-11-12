@@ -28,7 +28,7 @@ pub struct ConfigSetup {
 
 /// `{scratch}` in a step's text stands for the scenario's scratch folder,
 /// and the placeholders [`long_texts`] knows for what they say.
-fn in_scratch(agent: &Agent, text: &str) -> String {
+pub(super) fn in_scratch(agent: &Agent, text: &str) -> String {
     long_texts(&text.replace("{scratch}", &agent.scratch().display().to_string()))
 }
 

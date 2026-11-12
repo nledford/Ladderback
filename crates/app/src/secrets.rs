@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use domain::RepositoryAlias;
-use domain::planning::{RepositoryConfig, RepositorySettings};
+use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
     MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Reference,
     SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError, TooMuchToMask,
@@ -63,6 +63,12 @@ pub enum Cause {
     /// with this field's: more than a job masks, so the job can't run (I4).
     /// Nothing after this field is read.
     TooMuchToMask { limit: usize },
+    /// The field is a location that, resolved, names a folder on this machine
+    /// by a relative path
+    /// ([`is_relative_location`](domain::planning::is_relative_location)),
+    /// which rustic would read from wherever the daemon was started. Nothing
+    /// of what it resolved to is kept: a reference may hold a secret (I4).
+    RelativePath,
 }
 
 /// The first field that couldn't be resolved, tried in the order password,
@@ -254,6 +260,20 @@ fn refuse_supplied_prefix(
     Ok(())
 }
 
+/// A location a reference decides is judged only once it is expanded: one
+/// that names a folder on this machine by a relative path would be read from
+/// the daemon's working directory (#247). The refusal holds nothing of the
+/// expansion, which may be a secret.
+fn refuse_relative_location(field: Field, expanded: &str) -> Result<(), ResolveError> {
+    if is_relative_location(expanded) {
+        return Err(ResolveError {
+            field,
+            cause: Cause::RelativePath,
+        });
+    }
+    Ok(())
+}
+
 /// The secrets counted are past what a redactor masks.
 fn too_much_to_mask(_: TooMuchToMask) -> Cause {
     Cause::TooMuchToMask {
@@ -293,6 +313,7 @@ impl Run<'_> {
     async fn location(&mut self, field: Field, text: &str) -> Result<String, ResolveError> {
         let expanded = self.expand(field.clone(), text).await?;
         refuse_supplied_prefix(field.clone(), text, &expanded)?;
+        refuse_relative_location(field.clone(), &expanded)?;
         self.masked
             .location(&expanded)
             .map_err(|too_much| ResolveError {

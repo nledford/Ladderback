@@ -566,11 +566,11 @@ async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
     api_post(agent, "/api/v1/repositories/_init", &body.to_string()).await;
 }
 
-/// The body may hold the placeholders `long_texts` knows, for a field too
-/// long to write in a step.
+/// The body may hold `{scratch}` for the scenario's scratch folder, and the
+/// placeholders `long_texts` knows, for a field too long to write in a step.
 #[when(regex = r#"^the client sends (.+) to "([^"]+)"$"#)]
 async fn api_sends(agent: &mut Agent, body: String, route: String) {
-    let body = super::config_steps::long_texts(&body);
+    let body = super::config_steps::in_scratch(agent, &body);
     api_post(agent, &route, &body).await;
 }
 
@@ -643,6 +643,16 @@ fn api_no_answer_holds_password(agent: &mut Agent) {
         assert!(
             !answer.contains(secret),
             "an answer holds the password: {answer}"
+        );
+    }
+}
+
+#[then(expr = "no answer shows {string}")]
+fn api_no_answer_shows(agent: &mut Agent, text: String) {
+    for answer in &agent.repositories.api_answers {
+        assert!(
+            !answer.contains(&text),
+            "an answer shows {text:?}: {answer}"
         );
     }
 }

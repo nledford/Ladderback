@@ -196,10 +196,10 @@ Feature: Secret references in a repository's settings
       And the field is invalid because it has more than 16 references
 
     Scenario: A field with as many references as the limit is resolved
-      Given the environment variable "DEMO_X" is "a"
+      Given the environment variable "DEMO_X" is "/a"
       And the repository is 16 references to the variable "DEMO_X"
       When the repository is resolved
-      Then the resolved repository is "aaaaaaaaaaaaaaaa"
+      Then the resolved repository is "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"
 
     Scenario: A field longer than the limit fails
       Given the repository is 65537 bytes of text
@@ -215,8 +215,8 @@ Feature: Secret references in a repository's settings
   Rule: A field never expands to more than 64 KiB
 
     Scenario: A reference that fills the limit is resolved
-      Given the environment variable "DEMO_BIG" holds 65536 bytes of text
-      And the repository is "${DEMO_BIG}"
+      Given the environment variable "DEMO_BIG" holds 65535 bytes of text
+      And the repository is "/${DEMO_BIG}"
       When the repository is resolved
       Then the resolved repository has 65536 bytes
 
@@ -594,6 +594,48 @@ Feature: Secret references in a repository's settings
       Then the resolution fails for the field "repo-hot"
       And the field is refused because it holds more than 16 credentials
       And nothing was read
+
+  Rule: A location a reference makes is a full path when it names a folder on this machine
+    rustic opens a local repository from the daemon's working directory, so a
+    location that names a folder on this machine by a path that doesn't start
+    with `/` would mean whichever folder the daemon was started in. The
+    configuration can't tell while a reference decides the location, so the
+    job refuses it once the reference is resolved, before rustic opens
+    anything. The refusal names the field, never what the reference held:
+    a reference may hold a secret (I4).
+
+    Scenario Outline: A reference that makes the repository a relative path is refused: <what>
+      Given the environment variable "DEMO_REPO" is "<value>"
+      And the repository is "<location>"
+      When the repository is resolved
+      Then the resolution fails for the field "repository"
+      And the location is refused because it is not a full path on this machine
+      And the failure doesn't mention "CANARY-relative"
+
+      Examples:
+        | what                          | value                 | location           |
+        | a path in a folder            | CANARY-relative/repo  | ${DEMO_REPO}       |
+        | a folder of its own           | CANARY-relative       | ${DEMO_REPO}       |
+        | a path from the working one   | ./CANARY-relative     | ${DEMO_REPO}       |
+        | a path from the one above it  | ../CANARY-relative    | ${DEMO_REPO}       |
+        | a path under ~                | ~/CANARY-relative     | ${DEMO_REPO}       |
+        | the local scheme and the path | local:CANARY-relative | ${DEMO_REPO}       |
+        | the path after local:         | CANARY-relative/repo  | local:${DEMO_REPO} |
+
+    Scenario: A reference that is empty leaves no location, and is refused
+      Given the environment variable "DEMO_REPO" is empty
+      And the repository is "${DEMO_REPO}"
+      When the repository is resolved
+      Then the resolution fails for the field "repository"
+      And the location is refused because it is not a full path on this machine
+
+    Scenario: A reference that makes the hot repository a relative path is refused
+      Given the environment variable "DEMO_HOT" is "CANARY-relative/hot"
+      And the hot repository is "local:${DEMO_HOT}"
+      When the repository is resolved
+      Then the resolution fails for the field "repo-hot"
+      And the location is refused because it is not a full path on this machine
+      And the failure doesn't mention "CANARY-relative"
 
   Rule: The first field that fails is the one reported
 
