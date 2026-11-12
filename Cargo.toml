@@ -79,6 +79,13 @@ console_error_panic_hook = "0.1.7"
 # feature stays off, and `just architecture` bans `chrono` from `domain`.
 croner = { version = "4.0.3", default-features = false, features = ["jiff"] }
 cucumber = "0.23.0"
+# The D-Bus error inside a Secret Service failure, by name: `secrets` tells no
+# session bus or no daemon from a call that failed (security §10.2). Its tests
+# build those errors; the code reads the one `dbus-secret-service` hands back.
+dbus = { version = "0.9.12", default-features = false }
+# The error type `keyring` boxes for a Secret Service failure on Linux. It
+# must be the very version `keyring` uses.
+dbus-secret-service = { version = "4.1.0", default-features = false }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
 # ICU4X's decimal type: the number a locale-aware formatter writes.
 fixed_decimal = { version = "0.7.3", default-features = false }

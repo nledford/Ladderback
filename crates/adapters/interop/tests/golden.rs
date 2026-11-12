@@ -15,7 +15,7 @@ use domain::planning::{
 };
 use domain::secrets::{FileRead, SecretRef};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
-use interop::RusticProfileWriter;
+use interop::{KeyringCommand, RusticProfileWriter};
 use tempfile::tempdir;
 
 const AGENT: &str = "00000000-0000-0000-0000-000000000001";
@@ -119,7 +119,8 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
         testkit::skip!("rustic is not on the PATH");
     }
     let export = export();
-    let written = RusticProfileWriter::new()
+    let no_folders = std::ffi::OsStr::new("");
+    let written = RusticProfileWriter::new(KeyringCommand::of_this_platform(), Some(no_folders))
         .render(&export)
         .expect("the export is made");
     let scratch = tempdir().expect("a scratch folder");

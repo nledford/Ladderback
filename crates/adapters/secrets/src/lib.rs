@@ -181,6 +181,7 @@ impl SystemSecrets {
             Err(Failure::NoEntry) => Err(SecretError::missing(source.clone())),
             Err(Failure::NotUnicode) => Err(fail(Problem::NotUnicode)),
             Err(Failure::Unreachable(detail)) => Err(fail(Problem::Unreachable { detail })),
+            Err(Failure::NoService(_)) => todo!(),
         }
     }
 

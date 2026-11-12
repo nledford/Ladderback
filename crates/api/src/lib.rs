@@ -111,6 +111,12 @@ pub enum ErrorCode {
     /// can't be opened. As `SecretMissing`; the platform's words, redacted,
     /// are the `detail`.
     SecretUnreadable,
+    /// A repository's secret is in a keyring entry, and the machine has no
+    /// keyring service that can be asked for it: on Linux no Secret Service
+    /// runs, there is no session bus to reach one by (a server, a system
+    /// service), or the service says its keyring is locked. As
+    /// `SecretMissing`; the platform's words, redacted, are the `detail`.
+    SecretKeyringUnavailable,
     /// A repository's secret isn't text: its source holds bytes that are not
     /// UTF-8. As `SecretMissing`.
     SecretNotText,
@@ -305,6 +311,12 @@ pub enum WarningCode {
     /// it: `password`, `maintenance`, `group-by`, `options`, `options-hot`,
     /// `options-cold` or `hooks`.
     ProfileSettingKept,
+    /// An export wrote a profile that reads the repository's password from
+    /// the keyring with a program that isn't on the `PATH` it was exported
+    /// under, so rustic can't read the password on this machine. The
+    /// argument `program` is the program: `secret-tool`, or `security` on
+    /// macOS.
+    ProfileKeyringCommandMissing,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -516,6 +528,7 @@ impl ErrorCode {
             Self::RepositoryAliasInvalid => &[],
             Self::SecretMissing
             | Self::SecretUnreadable
+            | Self::SecretKeyringUnavailable
             | Self::SecretNotText
             | Self::SecretCommandFailed
             | Self::SecretCommandOutputOpen => &[
@@ -847,6 +860,11 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::ProfileKeyringCommandMissing => &[ArgSpec {
+                name: "program",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::SourceUnreadable
             | Self::CheckWarning
             | Self::CheckError
@@ -1346,6 +1364,7 @@ mod tests {
         for code in [
             ErrorCode::SecretMissing,
             ErrorCode::SecretUnreadable,
+            ErrorCode::SecretKeyringUnavailable,
             ErrorCode::SecretNotText,
             ErrorCode::SecretCommandFailed,
             ErrorCode::SecretCommandOutputOpen,
@@ -1518,6 +1537,10 @@ mod tests {
         assert_eq!(
             WarningCode::LocationSecret.args(),
             &[text("field", false), text("kind", false)]
+        );
+        assert_eq!(
+            WarningCode::ProfileKeyringCommandMissing.args(),
+            &[text("program", false)]
         );
         for code in [
             WarningCode::ProfilePrune,

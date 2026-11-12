@@ -90,6 +90,12 @@ pub enum ProfileNotice {
     /// configuration names it: `password`, `maintenance`, `group-by`,
     /// `options`, `options-hot`, `options-cold` or `hooks`.
     RepositorySettingKept { repository: String, setting: String },
+    /// An export wrote a profile that reads the repository's password from
+    /// the keyring with `program`, which isn't on the `PATH` it was exported
+    /// under: rustic can't read the password on this machine. A warning, not
+    /// a refusal: the profile may run on another machine, and nothing in it
+    /// is a secret.
+    KeyringCommandMissing { program: String },
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or

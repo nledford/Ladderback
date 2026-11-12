@@ -720,6 +720,17 @@ mod tests {
     }
 
     #[test]
+    fn a_keyring_with_no_service_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(
+                ErrorCode::SecretKeyringUnavailable,
+                &[("field".into(), text("password"))]
+            ),
+            Some(Field::Password)
+        );
+    }
+
+    #[test]
     fn a_location_with_too_many_credentials_belongs_to_the_location_it_is() {
         let field = |name: &str| {
             field_of(

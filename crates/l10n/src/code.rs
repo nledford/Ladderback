@@ -58,6 +58,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RepositoryAliasInvalid => msg::ERROR_REPOSITORY_ALIAS_INVALID,
     SecretMissing => msg::ERROR_SECRET_MISSING,
     SecretUnreadable => msg::ERROR_SECRET_UNREADABLE,
+    SecretKeyringUnavailable => msg::ERROR_SECRET_KEYRING_UNAVAILABLE,
     SecretNotText => msg::ERROR_SECRET_NOT_TEXT,
     SecretTooLarge => msg::ERROR_SECRET_TOO_LARGE,
     SecretCommandFailed => msg::ERROR_SECRET_COMMAND_FAILED,
@@ -117,5 +118,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileOptionLeftOut => msg::WARNING_PROFILE_OPTION_LEFT_OUT,
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
     ProfileSettingKept => msg::WARNING_PROFILE_SETTING_KEPT,
+    ProfileKeyringCommandMissing => msg::WARNING_PROFILE_KEYRING_COMMAND_MISSING,
     Unknown => msg::WARNING_UNKNOWN,
 });

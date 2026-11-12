@@ -23,6 +23,7 @@ mod tables;
 mod write;
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use app::ports::{
@@ -103,18 +104,83 @@ impl ProfileReader for FileProfileReader {
     }
 }
 
+/// The program a profile runs to read the secret of a keyring entry
+/// (§6.2): the platform's own keyring command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyringCommand {
+    /// `security find-generic-password`, macOS's.
+    Security,
+    /// `secret-tool lookup`, libsecret's, for the Secret Service on Linux.
+    SecretTool,
+}
+
+impl KeyringCommand {
+    /// The command of the platform this is built for: `security` on macOS,
+    /// `secret-tool` elsewhere.
+    pub const fn of_this_platform() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Security
+        } else {
+            Self::SecretTool
+        }
+    }
+}
+
 /// Writes a plan as a profile `rustic -P` accepts.
-#[derive(Clone, Debug, Default)]
-pub struct RusticProfileWriter;
+///
+/// Like the reader, it never looks at the process: the keyring command and
+/// the `PATH` are handed to it.
+#[derive(Clone, Debug)]
+pub struct RusticProfileWriter {
+    keyring: KeyringCommand,
+    path: Vec<PathBuf>,
+}
 
 impl RusticProfileWriter {
-    pub fn new() -> Self {
-        Self
+    /// A writer whose profiles read a keyring entry with `keyring`, which it
+    /// looks for on `path`, the `PATH` the export runs under (`None` when it
+    /// is unset). A command it can't find there is a notice.
+    pub fn new(keyring: KeyringCommand, path: Option<&OsStr>) -> Self {
+        Self {
+            keyring,
+            path: folders(path),
+        }
     }
+}
+
+/// The folders a program is looked for in on `path`, first to last.
+fn folders(path: Option<&OsStr>) -> Vec<PathBuf> {
+    std::env::split_paths(path.unwrap_or_default()).collect()
 }
 
 impl ProfileWriter for RusticProfileWriter {
     fn render(&self, export: &PlanExport) -> Result<RenderedProfile, ExportRefusal> {
-        write::render(export)
+        write::render(export, self.keyring, &self.path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With no `PATH` a program is looked for where `execvp` looks, not in
+    /// the folder the export runs in.
+    #[test]
+    fn an_unset_path_is_searched_as_execvp_searches_it() {
+        assert_eq!(
+            folders(None),
+            [PathBuf::from("/usr/bin"), PathBuf::from("/bin")]
+        );
+    }
+
+    /// An empty or relative entry names a folder by the one rustic will run
+    /// in, not the export's: it is left out, and an empty `PATH` has none.
+    #[test]
+    fn empty_and_relative_entries_of_the_path_are_left_out() {
+        assert_eq!(
+            folders(Some(OsStr::new(":bin:/opt/demo/bin::./tools:/usr/bin:"))),
+            [PathBuf::from("/opt/demo/bin"), PathBuf::from("/usr/bin")]
+        );
+        assert_eq!(folders(Some(OsStr::new(""))), Vec::<PathBuf>::new());
     }
 }

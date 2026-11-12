@@ -177,6 +177,11 @@ fn keyring_holds(agent: &mut Agent, secret: String, entry: String) {
     agent.secrets.store.set_keyring_entry(&entry, &secret);
 }
 
+#[given("the machine has no keyring service")]
+fn no_keyring_service(agent: &mut Agent) {
+    agent.secrets.store.remove_keyring_service();
+}
+
 #[given(expr = "the command {string} prints {string}")]
 fn command_prints(agent: &mut Agent, command: String, stdout: String) {
     let stdout = text(&stdout).into_bytes();
@@ -534,6 +539,18 @@ fn problem_unreachable(agent: &mut Agent) {
         matches!(
             agent.secrets.unresolved().problem,
             Problem::Unreachable { .. }
+        ),
+        "{:?}",
+        agent.secrets.unresolved()
+    );
+}
+
+#[then("the problem is that there is no keyring service to ask")]
+fn problem_no_keyring_service(agent: &mut Agent) {
+    assert!(
+        matches!(
+            agent.secrets.unresolved().problem,
+            Problem::KeyringUnavailable { .. }
         ),
         "{:?}",
         agent.secrets.unresolved()

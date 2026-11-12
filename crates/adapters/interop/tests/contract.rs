@@ -10,7 +10,7 @@ use app::contract::profiles::{self, ProfilesHarness};
 use app::ports::{ProfileReader, ProfileWriter};
 use common::{ENTRY, REPOSITORY, Scratch};
 use domain::RepositoryAlias;
-use interop::RusticProfileWriter;
+use interop::{KeyringCommand, RusticProfileWriter};
 
 struct RealProfiles(Scratch);
 
@@ -20,7 +20,10 @@ impl ProfilesHarness for RealProfiles {
     }
 
     fn writer(&self) -> Arc<dyn ProfileWriter> {
-        Arc::new(RusticProfileWriter::new())
+        Arc::new(RusticProfileWriter::new(
+            KeyringCommand::of_this_platform(),
+            Some(std::ffi::OsStr::new("")),
+        ))
     }
 
     fn good_profile(&self, _repository: &RepositoryAlias) -> PathBuf {

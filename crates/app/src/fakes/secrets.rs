@@ -113,6 +113,12 @@ impl FakeSecrets {
             .insert(entry.to_string(), secret.to_owned());
     }
 
+    /// A machine with no keyring service to ask, as a server with no
+    /// Secret Service: every keyring entry fails as `KeyringUnavailable`.
+    pub fn remove_keyring_service(&self) {
+        todo!()
+    }
+
     /// What running `command` does. A command with no script can't be started.
     pub fn script(&self, command: &CommandLine, script: Script) {
         self.lock().commands.insert(

@@ -185,6 +185,50 @@ Feature: Export a plan as a rustic profile
       Then the export succeeds
       And the exported profile reads the password from the keyring entry "ladderback/demo"
 
+    # The profile may run on another machine, so a command this one lacks is
+    # a warning, not a refusal: a refusal is for what would leak a secret.
+    Scenario: A keyring command this machine doesn't have is warned about, with the package it comes in
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-keyring = "ladderback/demo"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        retention = { keep-last = 3 }
+        """
+      And the PATH holds no keyring command
+      When the owner exports the plan "home"
+      Then the export succeeds
+      And the exported profile reads the password from the keyring entry "ladderback/demo"
+      And the export warns that the platform's keyring command isn't on the PATH, naming its package
+
+    Scenario: A keyring command on the PATH is exported without a warning
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-keyring = "ladderback/demo"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        retention = { keep-last = 3 }
+        """
+      And the PATH holds the platform's keyring command
+      When the owner exports the plan "home"
+      Then the export succeeds
+      And the exported profile reads the password from the keyring entry "ladderback/demo"
+      And the export gives no warning
+
     Scenario: A password written in the config is refused, and never shown
       Given a config file holding:
         """

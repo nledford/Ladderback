@@ -44,6 +44,12 @@ pub enum Problem {
     /// a program that can't be started, a keyring that can't be opened. The
     /// platform's own words, as they came.
     Unreachable { detail: String },
+    /// The source is a keyring entry, and the machine has no keyring service
+    /// that can be asked for it: on Linux no Secret Service runs, there is no
+    /// session bus to reach one by (a server, a system service), or the
+    /// service says its keyring is locked. What the platform said is the
+    /// detail.
+    KeyringUnavailable { detail: String },
     /// A secret has to be text, and this isn't valid UTF-8.
     NotUnicode,
     /// More than [`MAX_SECRET_BYTES`](super::MAX_SECRET_BYTES), the cap on

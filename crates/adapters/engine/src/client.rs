@@ -1094,6 +1094,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty
                 | WarningCode::ProfileSettingKept
+                | WarningCode::ProfileKeyringCommandMissing
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),
@@ -1196,6 +1197,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::RepositoryAliasInvalid
                 | ErrorCode::SecretMissing
                 | ErrorCode::SecretUnreadable
+                | ErrorCode::SecretKeyringUnavailable
                 | ErrorCode::SecretNotText
                 | ErrorCode::SecretTooLarge
                 | ErrorCode::SecretCommandFailed

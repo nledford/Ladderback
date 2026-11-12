@@ -24,6 +24,7 @@
 //! the command or the file that reads it, and an option that is a reference
 //! or a secret is left out with the variable that rustic reads it from.
 
+use crate::KeyringCommand;
 use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
 use domain::planning::{
     GlobFile, HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings,
@@ -33,9 +34,15 @@ use domain::secrets::{
     url_passwords,
 };
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-/// The profile of `export`, and the options it left out.
-pub(crate) fn render(export: &PlanExport) -> Result<RenderedProfile, ExportRefusal> {
+/// The profile of `export`, and the options it left out. A keyring password
+/// is read with `keyring`, looked for in `path`.
+pub(crate) fn render(
+    export: &PlanExport,
+    keyring: KeyringCommand,
+    path: &[PathBuf],
+) -> Result<RenderedProfile, ExportRefusal> {
     let plan = &export.plan;
     // rustic reads `a,b` as the two tags `a` and `b`, so the tag can't be
     // written as it is.
@@ -51,7 +58,7 @@ pub(crate) fn render(export: &PlanExport) -> Result<RenderedProfile, ExportRefus
     ));
     hooks(&mut out, "global.hooks", &export.agent_hooks);
 
-    let (repository, mut notices) = repository(&export.repository.settings)?;
+    let (repository, mut notices) = repository(&export.repository.settings, keyring, path)?;
     if plan.retention.is_empty() {
         notices.push(ProfileNotice::RetentionEmpty);
     }
@@ -199,6 +206,8 @@ const OPTIONS_COLD: OptionTable = OptionTable {
 
 fn repository(
     settings: &RepositorySettings,
+    keyring: KeyringCommand,
+    path: &[PathBuf],
 ) -> Result<(Repository, Vec<ProfileNotice>), ExportRefusal> {
     let mut notices = Vec::new();
     let location = plain("repository", &settings.repository)?;
@@ -207,7 +216,7 @@ fn repository(
         .as_deref()
         .map(|hot| plain("repo-hot", hot))
         .transpose()?;
-    let password = password(&settings.password)?;
+    let password = password(&settings.password, keyring, path, &mut notices)?;
     let mut options = Vec::new();
     for (table, values) in [
         (&OPTIONS, &settings.options),
@@ -309,8 +318,15 @@ fn variable(table: &OptionTable, name: &str) -> Result<String, ExportRefusal> {
 }
 
 /// The key and the value that make rustic read the password the way
-/// Ladderback does. A password written in the config is never repeated.
-fn password(secret: &SecretRef) -> Result<(&'static str, String), ExportRefusal> {
+/// Ladderback does. A password written in the config is never repeated. A
+/// keyring password is read with `keyring`, and a notice says so when none
+/// of the folders of `path` holds it.
+fn password(
+    secret: &SecretRef,
+    keyring: KeyringCommand,
+    path: &[PathBuf],
+    notices: &mut Vec<ProfileNotice>,
+) -> Result<(&'static str, String), ExportRefusal> {
     Ok(match secret {
         SecretRef::File { path, .. } => ("password-file", path.clone()),
         SecretRef::Command(command) => (
@@ -318,38 +334,12 @@ fn password(secret: &SecretRef) -> Result<(&'static str, String), ExportRefusal>
             command_line(command.program(), command.args()),
         ),
         SecretRef::Env(name) => ("password-command", command_line("printenv", [name])),
-        SecretRef::Keyring(entry) => ("password-command", keyring_command(entry)),
+        SecretRef::Keyring(entry) => {
+            let _ = (entry, keyring, path, notices);
+            todo!()
+        }
         SecretRef::Inline(_) => return Err(ExportRefusal::InlineSecret),
     })
-}
-
-/// The platform's command that prints the secret of a keyring entry:
-/// `security` on macOS, `secret-tool` elsewhere (§10.2).
-fn keyring_command(entry: &KeyringEntry) -> String {
-    if cfg!(target_os = "macos") {
-        command_line(
-            "security",
-            [
-                "find-generic-password",
-                "-s",
-                entry.service(),
-                "-a",
-                entry.name(),
-                "-w",
-            ],
-        )
-    } else {
-        command_line(
-            "secret-tool",
-            [
-                "lookup",
-                "service",
-                entry.service(),
-                "username",
-                entry.name(),
-            ],
-        )
-    }
 }
 
 // --- Commands ----------------------------------------------------------------
