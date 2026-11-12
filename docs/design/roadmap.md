@@ -115,6 +115,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [54](decisions/54-early-release-builds.md) | Early release builds |
 | [55](decisions/55-a-backup-stopped-at-its-deadline-winds-down.md) | A backup stopped at its deadline winds down |
 | [56](decisions/56-the-calendar-a-retention-rule-counts-on.md) | The calendar a retention rule counts on |
+| [58](decisions/58-one-child-starts-at-a-time.md) | One child starts at a time |
 
 ## 17. Open questions
 
