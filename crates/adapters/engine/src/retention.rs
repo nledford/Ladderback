@@ -96,8 +96,19 @@ fn evaluate(
     let backends = match &spec.repo_hot {
         Some(hot) => backends.repo_hot(hot.clone()),
         None => backends,
+    };
+    // An `rclone:` backend starts `rclone` children, and reads the server's
+    // output until it is up: built through the spawn gate, held until then.
+    // Other backends start nothing, and a slow one must not hold up every
+    // start (decision 58). This runs on a blocking thread already.
+    let starts_rclone = std::iter::once(&spec.repository)
+        .chain(&spec.repo_hot)
+        .any(|location| is_rclone(location));
+    let backends = if starts_rclone {
+        spawn_gate::hold(|| backends.to_backends())
+    } else {
+        backends.to_backends()
     }
-    .to_backends()
     .map_err(|error| engine(redactor, error))?;
     let repository = Repository::new(&RepositoryOptions::default().no_cache(true), &backends)
         .map_err(|error| engine(redactor, error))?
@@ -133,6 +144,12 @@ fn evaluate(
         .into_iter()
         .filter_map(|id| SnapshotId::parse(id.to_hex().as_str()).ok())
         .collect())
+}
+
+/// Whether rustic reads `location` as an `rclone:` repository.
+fn is_rclone(location: &str) -> bool {
+    rustic_backend::util::location_to_type_and_path(location)
+        .is_ok_and(|(kind, _)| kind == rustic_backend::choose::SupportedBackend::Rclone)
 }
 
 fn engine(redactor: &domain::secrets::Redactor, error: impl std::fmt::Display) -> RetentionError {
