@@ -272,6 +272,7 @@ rustic_backend.workspace = true
 hooks.workspace = true
 rustic_core.workspace = true
 secrets.workspace = true
+spawn-gate.workspace = true
 sqlx.workspace = true
 store.workspace = true
 tempfile.workspace = true

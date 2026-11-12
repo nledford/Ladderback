@@ -3208,6 +3208,7 @@ dependencies = [
  "secrets",
  "serde",
  "serde_json",
+ "spawn-gate",
  "sqlx",
  "store",
  "tempfile",

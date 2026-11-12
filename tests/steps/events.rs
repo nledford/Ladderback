@@ -107,11 +107,12 @@ impl Events {
         let status = blocking(move || {
             // `kill` sends it without a crate of its own for that, as
             // `tests/logging.rs` does.
-            let sent = Command::new("kill")
-                .arg("-TERM")
-                .arg(daemon.child.id().to_string())
-                .status()
-                .expect("kill runs");
+            let mut kill = Command::new("kill");
+            kill.arg("-TERM").arg(daemon.child.id().to_string());
+            let sent = spawn_gate::hold(|| kill.spawn())
+                .expect("kill runs")
+                .wait()
+                .expect("kill ran");
             assert!(sent.success(), "the daemon is sent SIGTERM: {sent}");
             let began = std::time::Instant::now();
             loop {
@@ -223,11 +224,10 @@ pub(crate) fn refusal(agent: &mut Agent) -> (ExitStatus, String) {
 fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
     let mut command = Command::new(super::LADDERBACK);
     testkit::daemon::isolate(&mut command, root);
-    let mut child = command
+    command
         .args(["serve", "--listen", "127.0.0.1:0"])
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("ladderback serve starts");
+        .stderr(Stdio::piped());
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback serve starts");
     let stderr = child.stderr.take().expect("the daemon's stderr");
     let mut log = String::new();
     let mut lines = BufReader::new(stderr).lines();
