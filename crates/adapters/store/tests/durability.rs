@@ -152,8 +152,8 @@ async fn reopening_does_not_apply_the_migrations_again() {
     let versions: Vec<i64> = first.iter().map(|row| row.0).collect();
     assert_eq!(
         versions,
-        [1, 2, 3, 4, 5, 6],
-        "six migrations ship: {first:?}"
+        [1, 2, 3, 4, 5, 6, 7],
+        "seven migrations ship: {first:?}"
     );
     assert!(
         first.iter().all(|row| row.2),

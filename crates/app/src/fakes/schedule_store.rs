@@ -2,15 +2,18 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
+use domain::execution::retry::RetryScheduled;
 use domain::{PlanId, Timestamp};
 
 use crate::ports::{PendingRetry, PlannedRun, ScheduleStore, StoreError};
 
-/// The planned runs, kept in memory, for use-case tests and acceptance
-/// scenarios. It keeps what the real store keeps, to the millisecond.
+/// The planned runs and pending retries, kept in memory, for use-case tests
+/// and acceptance scenarios. It keeps what the real store keeps, to the
+/// millisecond.
 #[derive(Default)]
 pub struct InMemoryScheduleStore {
     kept: Mutex<BTreeMap<PlanId, Timestamp>>,
+    retries: Mutex<BTreeMap<PlanId, RetryScheduled>>,
 }
 
 impl InMemoryScheduleStore {
@@ -23,6 +26,15 @@ impl InMemoryScheduleStore {
     fn kept(&self) -> MutexGuard<'_, BTreeMap<PlanId, Timestamp>> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    fn retries(&self) -> MutexGuard<'_, BTreeMap<PlanId, RetryScheduled>> {
+        self.retries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// `at` cut to the millisecond, as the real store keeps it.
+fn to_the_millisecond(at: Timestamp) -> Timestamp {
+    Timestamp::from_millisecond(at.as_millisecond()).unwrap_or(at)
 }
 
 #[async_trait]
@@ -39,9 +51,8 @@ impl ScheduleStore for InMemoryScheduleStore {
     }
 
     async fn plan_run(&self, run: &PlannedRun) -> Result<(), StoreError> {
-        // Cut to the millisecond, as the real store keeps it.
-        let at = Timestamp::from_millisecond(run.at.as_millisecond()).unwrap_or(run.at);
-        self.kept().insert(run.plan.clone(), at);
+        self.kept()
+            .insert(run.plan.clone(), to_the_millisecond(run.at));
         Ok(())
     }
 
@@ -51,16 +62,31 @@ impl ScheduleStore for InMemoryScheduleStore {
     }
 
     async fn pending_retries(&self) -> Result<Vec<PendingRetry>, StoreError> {
-        todo!()
+        Ok(self
+            .retries()
+            .iter()
+            .map(|(plan, retry)| PendingRetry {
+                plan: plan.clone(),
+                retry: *retry,
+            })
+            .collect())
     }
 
     async fn keep_retry(&self, retry: &PendingRetry) -> Result<(), StoreError> {
-        let _ = retry;
-        todo!()
+        let RetryScheduled { attempt, at, until } = retry.retry;
+        self.retries().insert(
+            retry.plan.clone(),
+            RetryScheduled {
+                attempt,
+                at: to_the_millisecond(at),
+                until: until.map(to_the_millisecond),
+            },
+        );
+        Ok(())
     }
 
     async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError> {
-        let _ = plan;
-        todo!()
+        self.retries().remove(plan);
+        Ok(())
     }
 }

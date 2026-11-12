@@ -7,7 +7,7 @@ mod support;
 
 use app::ports::{
     BackupSummary, EngineResult, HistoryQuery, OperationRecord, OperationStore, PageSize,
-    StoreError,
+    ScheduleStore, StoreError,
 };
 use domain::Timestamp;
 use domain::execution::{FailureReason, OperationKind, OperationStatus, Target, Trigger};
@@ -809,5 +809,77 @@ async fn a_report_of_a_corrupt_row_is_short_however_long_the_stored_value_is() {
         row.insert(&mut raw).await;
         let report = corrupt(store.get(id(n)).await, "a huge value");
         assert!(report.len() < 1_000, "{n}: {} bytes", report.len());
+    }
+}
+
+/// A pending retry this version didn't write is reported, naming its plan
+/// and the column, never read as some other retry.
+#[tokio::test]
+async fn a_pending_retry_this_version_did_not_write_is_reported() {
+    for (name, column, attempt, retry_at, until) in [
+        (
+            "attempt 0",
+            "attempt",
+            Cell::Int(0),
+            Cell::Int(ms(0)),
+            Cell::Null,
+        ),
+        (
+            "a negative attempt",
+            "attempt",
+            Cell::Int(-1),
+            Cell::Int(ms(0)),
+            Cell::Null,
+        ),
+        (
+            "an attempt past the last one counted",
+            "attempt",
+            Cell::Int(i64::from(u32::MAX) + 1),
+            Cell::Int(ms(0)),
+            Cell::Null,
+        ),
+        (
+            "an attempt that is text",
+            "attempt",
+            Cell::from("two"),
+            Cell::Int(ms(0)),
+            Cell::Null,
+        ),
+        (
+            "a retry time past the last timestamp",
+            "retry_at",
+            Cell::Int(1),
+            Cell::Int(i64::MAX),
+            Cell::Null,
+        ),
+        (
+            "an end that is text",
+            "until",
+            Cell::Int(1),
+            Cell::Int(ms(0)),
+            Cell::from("soon"),
+        ),
+    ] {
+        let scratch = Scratch::new();
+        let store = scratch.open().await;
+        let mut raw = scratch.raw().await;
+        let mut query = sqlx::query(
+            "INSERT INTO retry_state (plan_id, attempt, retry_at, until) VALUES ('demo-home', ?, ?, ?)",
+        );
+        for cell in [attempt, retry_at, until] {
+            query = match cell {
+                Cell::Null => query.bind(None::<i64>),
+                Cell::Int(number) => query.bind(number),
+                Cell::Real(number) => query.bind(number),
+                Cell::Text(text) => query.bind(text),
+            };
+        }
+        query
+            .execute(&mut raw)
+            .await
+            .expect("the raw retry is inserted");
+        let report = corrupt(store.pending_retries().await, name);
+        assert!(report.contains("demo-home"), "{name}: {report}");
+        assert!(report.contains(column), "{name}: {report}");
     }
 }
