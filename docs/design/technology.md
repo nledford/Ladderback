@@ -20,7 +20,7 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 | Scheduling | `croner` (with its `jiff` feature, not `chrono`) |
 | Time | `jiff` with `tzdb-bundle-always`: the build carries the IANA time-zone database for a host that has none (§3.2, §16 decision 30) |
 | Embedding UI | `rust-embed` |
-| Auth | `argon2`, `axum-login` or a small cookie-session layer |
+| Auth | `argon2` (RustCrypto), `subtle` for comparing tokens in constant time, and a small cookie-session layer in the HTTP adapter (§10.1, decision 70) |
 | Crypto / identity | `ed25519-dalek`, `rustls` |
 | Secrets | `keyring` (macOS Keychain, Secret Service on Linux) |
 | Notifications | `reqwest` (webhooks, ntfy, Gotify, healthchecks.io), `lettre` (SMTP) |

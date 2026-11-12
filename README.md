@@ -76,6 +76,8 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 
 Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another loopback address or port. Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run `git fetch --tags`, the same `git checkout` line, and `just install` again, which replaces the installed binary.
 
+Without a password, anyone with an account on the machine can use Ladderback, and it listens on loopback only. To have it ask for a password, run `ladderback set-password` and start it again; it can then also listen beyond loopback, for a host name given with `--allowed-host` (put TLS in a reverse proxy in front of it). The rules are in [technical design §10.1](docs/design/security.md#101-web-ui).
+
 ## Roadmap
 
 The skeleton (M0), the backup engine (M1a) and the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) are in place: backups run by hand, with no scheduler yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. Milestone **M2** is the first release worth using on your own machines.
