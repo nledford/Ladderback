@@ -12,6 +12,7 @@
 )]
 
 mod body_limit;
+mod listener;
 mod maintenance;
 mod repositories;
 mod request_checks;
@@ -33,6 +34,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
+pub use listener::GatedListener;
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{

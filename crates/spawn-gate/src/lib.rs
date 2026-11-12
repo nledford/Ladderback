@@ -26,7 +26,10 @@
 //!
 //! A start whose `exec` stalls holds the gate as long, so async code waits
 //! for it on the blocking pool with [`hold_blocking`], never on one of the
-//! runtime's threads.
+//! runtime's threads. A call too frequent to pay for a trip to that pool
+//! every time (the HTTP server's accept) takes the gate with [`try_hold`]
+//! where it is free at once, and waits with [`hold_blocking`] only where it
+//! is not.
 
 #![deny(
     clippy::unwrap_used,
@@ -49,6 +52,14 @@ static GATE: Mutex<()> = Mutex::new(());
 pub fn hold<T>(start: impl FnOnce() -> T) -> T {
     let _held = GATE.lock().unwrap_or_else(PoisonError::into_inner);
     start()
+}
+
+/// [`hold`] if the gate is free now: `None`, without waiting and without
+/// running `start`, while another call holds it. A gate that a panicked
+/// `start` left counts as free.
+pub fn try_hold<T>(start: impl FnOnce() -> T) -> Option<T> {
+    let _ = start;
+    todo!("#283: take the gate only if it is free")
 }
 
 /// [`hold`] on tokio's blocking pool: waiting for the gate, and a start whose
@@ -77,9 +88,86 @@ pub async fn hold_blocking<T: Send + 'static>(
 mod tests {
     use std::sync::mpsc::{self, RecvTimeoutError};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    use super::hold;
+    use super::{hold, try_hold};
+
+    /// `try_hold` with `start`, tried until the gate is free: the other
+    /// tests of this binary hold it a while, and `cargo test` runs them at
+    /// the same time as this one.
+    fn once_free<T>(mut start: impl FnMut() -> T) -> T {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(done) = try_hold(&mut start) {
+                return done;
+            }
+            assert!(Instant::now() < deadline, "the gate never came free");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// `try_hold` runs its call when no other holds the gate.
+    #[test]
+    fn try_hold_runs_its_call_while_the_gate_is_free() {
+        assert_eq!(once_free(|| 7), 7);
+    }
+
+    /// `try_hold` neither waits nor runs its call while another holds the
+    /// gate.
+    #[test]
+    fn try_hold_gives_up_while_another_holds_the_gate() {
+        let (entered, first_in) = mpsc::channel();
+        let (leave, first_leaves) = mpsc::channel::<()>();
+        let first = thread::spawn(move || {
+            hold(|| {
+                entered.send(()).unwrap();
+                first_leaves.recv().unwrap();
+            });
+        });
+        first_in.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut ran = false;
+        let tried = try_hold(|| ran = true);
+        leave.send(()).unwrap();
+        first.join().unwrap();
+        assert_eq!(tried, None, "try_hold went through a held gate");
+        assert!(!ran, "try_hold ran its call while another held the gate");
+    }
+
+    /// A start waits while a call of `try_hold` holds the gate, and goes
+    /// through once it returns.
+    #[test]
+    fn a_start_waits_while_try_hold_holds_the_gate() {
+        let (entered, first_in) = mpsc::channel();
+        let (leave, first_leaves) = mpsc::channel::<()>();
+        let first = thread::spawn(move || {
+            once_free(|| {
+                entered.send(()).unwrap();
+                first_leaves.recv().unwrap();
+            });
+        });
+        first_in.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (passed, second_in) = mpsc::channel();
+        let second = thread::spawn(move || hold(|| passed.send(()).unwrap()));
+        assert_eq!(
+            second_in.recv_timeout(Duration::from_millis(200)),
+            Err(RecvTimeoutError::Timeout),
+            "a start went through while try_hold held the gate"
+        );
+        leave.send(()).unwrap();
+        second_in
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the start went through once try_hold returned");
+        first.join().unwrap();
+        second.join().unwrap();
+    }
+
+    /// A start that panicked leaves the gate free for `try_hold` too.
+    #[test]
+    fn try_hold_goes_through_after_a_start_panicked() {
+        let panicked = thread::spawn(|| hold(|| panic!("the start failed"))).join();
+        assert!(panicked.is_err());
+        assert_eq!(once_free(|| 7), 7);
+    }
 
     /// A second start waits while the first holds the gate, and goes through
     /// as soon as the first lets go.
