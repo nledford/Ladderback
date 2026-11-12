@@ -1,7 +1,7 @@
 //! The service (operations §12): an agent the user's service manager runs in
 //! the background, from login on, as its service file says.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// A path a service file may name: the program the service runs, or a file
 /// beside it such as its log. It is absolute, so it means the same in the
@@ -38,13 +38,26 @@ impl ServicePath {
     /// The first [`ServicePathProblem`] it has, in the order the variants are
     /// listed.
     pub fn parse(path: &Path) -> Result<Self, ServicePathProblem> {
-        let _ = path;
-        todo!()
+        let text = path.to_str().ok_or(ServicePathProblem::NotText)?;
+        if !path.has_root() {
+            return Err(ServicePathProblem::Relative);
+        }
+        if path.components().any(|part| part == Component::ParentDir) {
+            return Err(ServicePathProblem::StepsUp);
+        }
+        if text.chars().any(char::is_control) {
+            return Err(ServicePathProblem::ControlCharacter);
+        }
+        if text.contains(['"', '\'', '\\']) {
+            return Err(ServicePathProblem::Quote);
+        }
+        let tidy: PathBuf = path.components().collect();
+        Ok(Self(tidy.to_string_lossy().into_owned()))
     }
 
     /// The path as text.
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -84,7 +97,11 @@ mod tests {
             "/home/demo/o'brien/ladderback",
             r"/home/demo/a\b/ladderback",
         ] {
-            assert_eq!(parse(written), Err(ServicePathProblem::Quote), "{written:?}");
+            assert_eq!(
+                parse(written),
+                Err(ServicePathProblem::Quote),
+                "{written:?}"
+            );
         }
     }
 
