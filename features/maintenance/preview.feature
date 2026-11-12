@@ -98,7 +98,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
     When the owner previews forgetting the repository
     And the repository gains 2 snapshots another agent's plan "home" holds
     And the owner forgets the repository with the preview's selection
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the forget removed exactly the snapshots the preview named
 
   Scenario: A forget confirmed after its plan's snapshots changed is refused and removes nothing
@@ -160,7 +160,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
     And the repository holds 3 snapshots another agent's plan "home" holds
     When the owner previews adopting the other agent's "home" history into the plan "home"
     And the owner adopts the other agent's "home" history into the plan "home" with the preview's selection
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the 3 snapshots are rewritten with the tags of the plan "home"
     And the snapshots the other agent held are gone
 

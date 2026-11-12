@@ -4,19 +4,27 @@
 //! and adoption itself, and nothing can tell it that another machine does
 //! the same (I1). What it can see is who else writes to the repository: a
 //! snapshot whose host is not one this agent records came from another
-//! machine, and that machine may maintain the repository too.
+//! machine, and so did one another agent tagged recently, since two machines
+//! can share one name; that machine may maintain the repository too.
 
 use std::collections::BTreeSet;
 
 use super::{Ownership, Snapshot};
 use crate::execution::{Warning, WarningKind};
 use crate::planning::AgentConfig;
-use crate::{AgentId, RepositoryAlias};
+use crate::{AgentId, RepositoryAlias, SignedDuration, Timestamp};
 
 /// How many other hosts a warning names: the rest are only counted, so a
 /// repository written by many machines can't make the warning, or what is
 /// kept of it, endless (§7.3).
 pub const MAX_NAMED_OTHER_HOSTS: usize = 5;
+
+/// How recent a snapshot another agent tagged must be to come from another
+/// machine whatever host it records: 30 days (§16 decision 62). Two machines
+/// can share one host name, so a recent one may be a second maintainer's;
+/// an older one may be this machine's own from before it was reinstalled
+/// under a new agent ID, and stops warning by itself.
+pub const OTHER_AGENT_RECENCY: SignedDuration = SignedDuration::from_hours(30 * 24);
 
 /// The hosts, other than this one, that a repository maintained here holds
 /// snapshots from: how many, and the first [`MAX_NAMED_OTHER_HOSTS`] of them
@@ -30,17 +38,22 @@ pub struct OtherHosts {
 
 impl OtherHosts {
     /// The other hosts of the repository `alias` of `config`, among
-    /// `snapshots`, for the agent `agent` on the machine called `machine`.
-    /// A snapshot is this host's when this agent tagged it, whatever host it
-    /// records, as one made before the machine was renamed; else when its
-    /// host is one this agent records: the machine's own name, the agent's
-    /// `hostname`, or the `host` of any of its plans. Only a repository whose
-    /// entry asks for `local` maintenance has any.
+    /// `snapshots`, for the agent `agent` on the machine called `machine`,
+    /// at `now`. A snapshot is this host's when this agent tagged it,
+    /// whatever host it records, as one made before the machine was renamed.
+    /// It is another host's when another agent tagged it in the
+    /// [`OTHER_AGENT_RECENCY`] up to `now` (or later, by a clock ahead of
+    /// this one), whatever host it records, since two machines can share one
+    /// name. Else it is this host's when its host is one this agent records:
+    /// the machine's own name, the agent's `hostname`, or the `host` of any
+    /// of its plans. Only a repository whose entry asks for `local`
+    /// maintenance has any.
     pub fn of<'a>(
         config: &AgentConfig,
         alias: &RepositoryAlias,
         agent: &AgentId,
         machine: &str,
+        now: Timestamp,
         snapshots: impl IntoIterator<Item = &'a Snapshot>,
     ) -> Self {
         let maintained_here = config
@@ -59,11 +72,19 @@ impl OtherHosts {
             )
             .collect();
         let own = agent.as_uuid().hyphenated().to_string();
+        // A `now` too near the start of time to go back from has no older
+        // snapshot to tell apart.
+        let recent_since = now
+            .checked_sub(OTHER_AGENT_RECENCY)
+            .unwrap_or(Timestamp::MIN);
         let others: BTreeSet<&str> = snapshots
             .into_iter()
-            .filter(|snapshot| snapshot.agent() != Some(own.as_str()))
+            .filter(|snapshot| match snapshot.agent() {
+                Some(tagger) if tagger == own => false,
+                Some(_) if snapshot.time >= recent_since => true,
+                _ => !this_host.contains(snapshot.hostname.as_str()),
+            })
             .map(|snapshot| snapshot.hostname.as_str())
-            .filter(|host| !this_host.contains(host))
             .collect();
         Self {
             named: others
@@ -120,6 +141,15 @@ mod tests {
 
     fn agent() -> AgentId {
         AgentId::from_uuid(Uuid::from_u128(1))
+    }
+
+    fn another_agent() -> AgentId {
+        AgentId::from_uuid(Uuid::from_u128(2))
+    }
+
+    /// When every test asks, and when its untagged snapshots were taken.
+    fn now() -> Timestamp {
+        Timestamp::from_second(1_800_000_000).expect("a time")
     }
 
     fn alias(text: &str) -> RepositoryAlias {
@@ -187,7 +217,7 @@ mod tests {
     fn snapshot(number: u64, hostname: &str) -> Snapshot {
         Snapshot {
             id: SnapshotId::parse(&format!("{number:064x}")).expect("a snapshot ID"),
-            time: Timestamp::from_second(1_800_000_000).expect("a time"),
+            time: now(),
             hostname: hostname.to_owned(),
             label: String::new(),
             tags: Vec::new(),
@@ -204,35 +234,153 @@ mod tests {
     }
 
     fn other_hosts(config: &AgentConfig, hosts: &[&str]) -> Vec<String> {
-        OtherHosts::of(config, &alias("demo"), &agent(), MACHINE, &snapshots(hosts))
+        OtherHosts::of(
+            config,
+            &alias("demo"),
+            &agent(),
+            MACHINE,
+            now(),
+            &snapshots(hosts),
+        )
+        .hosts()
+        .to_vec()
+    }
+
+    /// A snapshot `agent`'s plan `home` took on `host` at `time`.
+    fn tagged(number: u64, agent: &AgentId, host: &str, time: Timestamp) -> Snapshot {
+        Snapshot {
+            tags: vec![
+                format!("{PLAN_TAG_PREFIX}home"),
+                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            ],
+            time,
+            ..snapshot(number, host)
+        }
+    }
+
+    /// The other hosts among `snapshots` of the repository `demo` of
+    /// `config`, maintained here, asked at [`now`].
+    fn other_hosts_among(config: &AgentConfig, snapshots: &[Snapshot]) -> Vec<String> {
+        OtherHosts::of(config, &alias("demo"), &agent(), MACHINE, now(), snapshots)
             .hosts()
             .to_vec()
     }
 
     #[test]
-    fn a_snapshot_this_agent_tagged_is_this_hosts_whatever_host_it_records() {
+    fn another_agents_recent_snapshot_is_another_hosts_under_any_of_this_hosts_names() {
+        let config = config(
+            Maintenance::Local,
+            Some("demo-pi"),
+            [Some("demo-old-pi"), Some("demo-media")],
+        );
+        let day_ago = now() - SignedDuration::from_hours(24);
+        for host in [MACHINE, "demo-pi", "demo-old-pi", "demo-media"] {
+            let found = OtherHosts::of(
+                &config,
+                &alias("demo"),
+                &agent(),
+                MACHINE,
+                now(),
+                &[
+                    tagged(1, &agent(), host, day_ago),
+                    tagged(2, &another_agent(), host, day_ago),
+                    tagged(3, &another_agent(), host, day_ago),
+                ],
+            );
+            assert_eq!(found.hosts(), [host], "{host}");
+            assert_eq!(found.count(), 1, "{host}");
+        }
+    }
+
+    #[test]
+    fn another_agents_snapshot_is_recent_for_exactly_30_days() {
+        let config = config(Maintenance::Local, Some("demo-pi"), [None, None]);
+        let thirty_days = SignedDuration::from_hours(30 * 24);
+        let nanosecond = SignedDuration::from_nanos(1);
+        for (age, recent) in [
+            (SignedDuration::ZERO, true),
+            (thirty_days - nanosecond, true),
+            (thirty_days, true),
+            (thirty_days + nanosecond, false),
+            (SignedDuration::from_hours(400 * 24), false),
+        ] {
+            let found = other_hosts_among(
+                &config,
+                &[tagged(1, &another_agent(), "demo-pi", now() - age)],
+            );
+            let expected: &[&str] = if recent { &["demo-pi"] } else { &[] };
+            assert_eq!(found, expected, "{age:#}");
+        }
+    }
+
+    #[test]
+    fn another_agents_snapshot_from_a_clock_ahead_of_this_one_is_recent() {
         let config = config(Maintenance::Local, None, [None, None]);
-        let tagged = |number, agent: &AgentId, host| Snapshot {
-            tags: vec![
-                format!("{PLAN_TAG_PREFIX}home"),
-                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
-            ],
-            ..snapshot(number, host)
-        };
-        let another = AgentId::from_uuid(Uuid::from_u128(2));
+        let ahead = now() + SignedDuration::from_hours(400 * 24);
+        assert_eq!(
+            other_hosts_among(&config, &[tagged(1, &another_agent(), MACHINE, ahead)]),
+            [MACHINE]
+        );
+    }
+
+    #[test]
+    fn another_agents_snapshot_at_the_start_of_time_is_recent_then() {
+        let config = config(Maintenance::Local, None, [None, None]);
         let found = OtherHosts::of(
             &config,
             &alias("demo"),
             &agent(),
             MACHINE,
-            &[
-                // Made here before the machine was renamed.
-                tagged(1, &agent(), "demo-old-name"),
-                // Another agent's, on another machine.
-                tagged(2, &another, "demo-nas"),
-            ],
+            Timestamp::MIN,
+            &[tagged(1, &another_agent(), MACHINE, Timestamp::MIN)],
         );
-        assert_eq!(found.hosts(), ["demo-nas"]);
+        assert_eq!(found.hosts(), [MACHINE]);
+    }
+
+    #[test]
+    fn another_agents_old_snapshot_under_another_hosts_name_is_still_another_hosts() {
+        let config = config(Maintenance::Local, None, [None, None]);
+        let old = now() - SignedDuration::from_hours(400 * 24);
+        assert_eq!(
+            other_hosts_among(
+                &config,
+                &[
+                    tagged(1, &another_agent(), "demo-nas", old),
+                    tagged(2, &another_agent(), MACHINE, old),
+                ]
+            ),
+            ["demo-nas"]
+        );
+    }
+
+    #[test]
+    fn another_agents_recent_snapshot_in_a_repository_not_maintained_here_is_no_other_host() {
+        for maintenance in [Maintenance::None, Maintenance::Hub] {
+            let config = config(maintenance, None, [None, None]);
+            assert!(
+                other_hosts_among(&config, &[tagged(1, &another_agent(), MACHINE, now())])
+                    .is_empty(),
+                "{maintenance:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_snapshot_this_agent_tagged_is_this_hosts_whatever_host_it_records() {
+        let config = config(Maintenance::Local, None, [None, None]);
+        assert_eq!(
+            other_hosts_among(
+                &config,
+                &[
+                    // Made here before the machine was renamed.
+                    tagged(1, &agent(), "demo-old-name", now()),
+                    tagged(2, &agent(), MACHINE, now()),
+                    // Another agent's, on another machine.
+                    tagged(3, &another_agent(), "demo-nas", now()),
+                ]
+            ),
+            ["demo-nas"]
+        );
     }
 
     #[test]
@@ -261,6 +409,7 @@ mod tests {
             &alias("demo"),
             &agent(),
             MACHINE,
+            now(),
             &snapshots(&[MACHINE]),
         );
         assert!(found.is_empty(), "{found:?}");
@@ -279,6 +428,7 @@ mod tests {
                 &alias("demo"),
                 &agent(),
                 MACHINE,
+                now(),
                 &snapshots(&hosts),
             );
             assert_eq!(found.hosts().join(", "), five, "{count} hosts");
@@ -303,6 +453,7 @@ mod tests {
             &alias("demo"),
             &agent(),
             MACHINE,
+            now(),
             &snapshots(&[MACHINE]),
         );
         assert_eq!(found.count(), 0);
@@ -358,6 +509,7 @@ mod tests {
                 &alias(elsewhere),
                 &agent(),
                 MACHINE,
+                now(),
                 &snapshots(&["demo-desktop"]),
             );
             assert!(found.is_empty(), "{elsewhere}: {found:?}");

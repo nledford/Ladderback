@@ -933,7 +933,14 @@ impl RunMaintenance {
                     .iter()
                     .flat_map(|group| &group.snapshots),
             );
-        OtherHosts::of(config, alias, &self.agent, &self.hostname, snapshots)
+        OtherHosts::of(
+            config,
+            alias,
+            &self.agent,
+            &self.hostname,
+            self.clock.now(),
+            snapshots,
+        )
     }
 
     /// The other hosts of the repository `alias`, for a run that lists
@@ -961,6 +968,7 @@ impl RunMaintenance {
             alias,
             &self.agent,
             &self.hostname,
+            self.clock.now(),
             &snapshots,
         ))
     }

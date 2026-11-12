@@ -28,7 +28,7 @@ Feature: Forget keeps each plan's history within its policy
     And the repository holds 3 snapshots of the plan "home"
     And the repository holds 2 snapshots another agent's plan "home" holds
     When the owner forgets the repository
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the repository keeps the newest snapshot of the plan "home"
     And the repository still holds the 2 snapshots the other agent's plan holds
 

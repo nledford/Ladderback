@@ -492,6 +492,6 @@ Feature: Export a plan as a rustic profile
       When the owner exports the plan "home"
       And rustic is asked which snapshots its forget would remove, from the exported profile
       And the owner forgets the repository
-      Then the operation ends as succeeded
+      Then the operation ends as succeeded with warnings
       And rustic would have removed 2 snapshots
       And Ladderback removed exactly the snapshots rustic would have removed

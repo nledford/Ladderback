@@ -12,7 +12,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots another agent's plan "home" holds
     When the owner adopts the other agent's "home" history into the plan "home"
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the 3 snapshots are rewritten with the tags of the plan "home"
     And the snapshots the other agent held are gone
 
@@ -20,7 +20,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 7000 snapshots another agent's plan "home" holds
     When the owner adopts the other agent's "home" history into the plan "home"
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the 7000 snapshots are rewritten with the tags of the plan "home"
 
   Scenario: Adopting one group leaves every other snapshot alone
@@ -29,7 +29,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     And the repository holds 2 snapshots another agent's plan "home" holds
     And the repository holds 2 snapshots no plan owns
     When the owner adopts the other agent's "home" history into the plan "home"
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the 2 snapshots are rewritten with the tags of the plan "home"
     And the repository still holds the 3 snapshots of the plan "home"
     And the repository still holds the 2 snapshots no plan owns
@@ -71,7 +71,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 2 snapshots another agent's plan "home" holds
     When the owner adopts the other agent's "home" history into the plan "home" and a forget is asked while it runs
-    Then the operation ends as succeeded
+    Then the operation ends as succeeded with warnings
     And the forget is refused while the adoption holds the repository
 
   Scenario: A refused adoption leaves nothing in the log
