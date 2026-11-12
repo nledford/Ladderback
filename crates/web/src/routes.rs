@@ -136,8 +136,13 @@ pub(crate) fn next_run_cell(
     plan: &PlanSummaryDto,
     zone: Option<&api::IanaZone>,
 ) -> (String, Option<String>) {
-    let _ = (localizer, plan, zone);
-    todo!()
+    if !plan.scheduled {
+        return (text(localizer, msg::UI_START_ON_DEMAND), None);
+    }
+    match &plan.next_run {
+        Some(raw) => (instant(localizer, raw, zone), Some(raw.clone())),
+        None => (text(localizer, msg::UI_START_NOT_PLANNED), None),
+    }
 }
 
 /// How the operations table is ordered (§4.4). `History` is the order the
