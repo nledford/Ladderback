@@ -89,6 +89,13 @@ impl RetrySchedule {
         retry.until.is_some_and(|until| until <= now)
     }
 
+    /// Whether `retry` is past `policy`'s attempts: they were lowered since
+    /// it was planned, and it doesn't run (decision 76).
+    pub fn spent(policy: &RetryPolicy, retry: &RetryScheduled) -> bool {
+        let _ = (policy, retry);
+        todo!("decision 76: a retry past lowered attempts")
+    }
+
     /// Whether a failed run that `trigger` started is retried: one the
     /// schedule started, on time or to catch up, or a retry of one. A run a
     /// person or another program asked for is theirs to retry: they see it
@@ -306,5 +313,18 @@ mod tests {
             ..retry
         };
         assert!(!RetrySchedule::superseded(&unscheduled, at(90)));
+    }
+
+    #[test]
+    fn a_retry_past_lowered_attempts_is_spent() {
+        let retry = |attempt| RetryScheduled {
+            attempt,
+            at: at(10),
+            until: None,
+        };
+        let lowered = policy(2, SignedDuration::from_mins(10));
+        assert!(!RetrySchedule::spent(&lowered, &retry(1)));
+        assert!(!RetrySchedule::spent(&lowered, &retry(2)));
+        assert!(RetrySchedule::spent(&lowered, &retry(3)));
     }
 }

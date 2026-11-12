@@ -809,6 +809,9 @@ async fn no_planned_run(agent: &mut Agent, name: String) {
 #[given(
     expr = "the plan {string} retries a failed backup {int} time(s), {int} minute(s) apart at first"
 )]
+#[when(
+    expr = "the plan {string} retries a failed backup {int} time(s), {int} minute(s) apart at first"
+)]
 async fn retries(agent: &mut Agent, name: String, attempts: i64, minutes: i64) {
     agent.scheduler.plan(&name).retry = Some(
         RetryPolicy::new(attempts, SignedDuration::from_mins(minutes))
