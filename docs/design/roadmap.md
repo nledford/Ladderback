@@ -121,6 +121,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [58](decisions/58-one-child-starts-at-a-time.md) | One child starts at a time |
 | [59](decisions/59-where-the-workers-keep-rustics-cache.md) | Where the workers keep rustic's cache |
 | [60](decisions/60-how-a-plan-s-next-run-is-worked-out.md) | How a plan's next run is worked out |
+| [61](decisions/61-tidying-the-workers-cache-at-start.md) | Tidying the workers' cache at start |
 | [63](decisions/63-the-ports-for-the-conditions-before-a-run.md) | The ports for the conditions before a run |
 | [64](decisions/64-installing-the-agent-as-a-user-service.md) | Installing the agent as a user service |
 | [65](decisions/65-pausing-live-updates.md) | Pausing live updates |
