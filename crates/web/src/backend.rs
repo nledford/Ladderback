@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use api::{OperationSummaryDto, OperationsPageDto, UiEvent};
+use api::{OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode};
 
 /// The live progress of a running operation. Transient: never part of the
 /// stored history, and gone the moment the operation ends.
@@ -137,7 +137,11 @@ impl OperationsState {
     /// regresses a status an event advanced — the store can answer with what
     /// it held before the news the stream told since — and a live row the
     /// page doesn't hold yet stays, newest: dropping it would unshow a run
-    /// the reader is watching.
+    /// the reader is watching. At the stage the row has, a run still going
+    /// keeps what the events said and gains the warnings only the store has:
+    /// mid-run, a before-hook's, which no event tells (#328). A row the read
+    /// moves on keeps the warnings the page heard; a run that ended takes
+    /// the store's end, which has every warning and the result.
     pub(crate) fn merge(&mut self, page: OperationsPageDto) {
         let mut held: HashMap<String, OperationRow> = self
             .rows
@@ -145,20 +149,33 @@ impl OperationsState {
             .map(|row| (row.summary.id.clone(), row))
             .collect();
         let mut rows = Vec::with_capacity(page.operations.len());
-        for summary in page.operations {
+        for mut summary in page.operations {
             let live = held.remove(&summary.id);
             rows.push(match live {
-                // The held row is at least as far along as the page says:
-                // what the events said wins, progress included. An end that
-                // came by an event carries no result, so the page's is kept.
-                Some(mut row) if rank(&row.summary.status) >= rank(&summary.status) => {
-                    row.summary.result = row.summary.result.take().or(summary.result);
+                // The held row is further along than the page says, or as
+                // far along and still going: what the events said wins,
+                // progress included, with what the page has besides.
+                Some(mut row) if keeps(&row.summary.status, &summary.status) => {
+                    if rank(&row.summary.status) < TERMINAL {
+                        row.summary.warning_codes = add_missing(
+                            summary.warning_codes,
+                            std::mem::take(&mut row.summary.warning_codes),
+                        );
+                    }
                     row
                 }
-                _ => OperationRow {
-                    summary,
-                    progress: None,
-                },
+                // The page's row: a row it moves on, which has not ended,
+                // keeps the warnings the events told it.
+                other => {
+                    if let Some(row) = other.filter(|row| rank(&row.summary.status) < TERMINAL) {
+                        summary.warning_codes =
+                            add_missing(summary.warning_codes, row.summary.warning_codes);
+                    }
+                    OperationRow {
+                        summary,
+                        progress: None,
+                    }
+                }
             });
         }
         // What is still held is not in the page: keep only the runs it could
@@ -228,6 +245,34 @@ fn rank(status: &str) -> u8 {
         "running" => 1,
         _ => TERMINAL,
     }
+}
+
+/// Whether a row the page holds, at `held`, stays over the one a read of the
+/// history has, at `read`: it is further along, or as far along and still
+/// going. Of two ends, the history's has what an end event doesn't carry.
+fn keeps(held: &str, read: &str) -> bool {
+    let (held, read) = (rank(held), rank(read));
+    held > read || (held == read && held < TERMINAL)
+}
+
+/// The warnings of `history` with those of `held`, the warnings of a row the
+/// page holds, that `history` lacks. A warning has no identity on the wire
+/// but its code and how many of that code came before it, so each time
+/// `held` has a code more often than `history` is one `history` lacks. The
+/// history's come first, in the order they were recorded; those only the
+/// events told follow, as they were heard.
+fn add_missing(mut history: Vec<WarningCode>, held: Vec<WarningCode>) -> Vec<WarningCode> {
+    let mut unmatched: HashMap<WarningCode, usize> = HashMap::new();
+    for code in &history {
+        *unmatched.entry(*code).or_default() += 1;
+    }
+    for code in held {
+        match unmatched.get_mut(&code) {
+            Some(count) if *count > 0 => *count -= 1,
+            _ => history.push(code),
+        }
+    }
+    history
 }
 
 /// How long to wait before trying the events stream again after the
@@ -1016,6 +1061,50 @@ mod tests {
         state.merge(page(vec![ended.clone()], None));
         assert_eq!(state.rows[0].summary, ended);
         assert_eq!(state.rows[0].progress, None);
+    }
+
+    #[test]
+    fn a_reread_behind_an_end_the_page_heard_adds_nothing_to_the_ended_row() {
+        // The end came by an event before the store had it: the read still
+        // says running. As an event's warning reaches only a row that has
+        // not ended, so does a read's; the end re-read brings the store's end.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        let before = state.clone();
+        state.merge(page(
+            vec![warned(
+                summary(FIRST, "running", true, false),
+                &[WarningCode::HookWarning],
+            )],
+            None,
+        ));
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn an_end_the_store_has_is_taken_whole_over_the_warnings_the_page_heard() {
+        // Of two ends the store's is the whole truth: a warning the page
+        // heard and the store's end lacks is not kept, as it is for a row
+        // the read moves on.
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        });
+        state.apply(&UiEvent::OperationSucceeded {
+            operation: id(FIRST),
+            finished_at: "2026-11-09T10:05:00Z".to_owned(),
+        });
+        let mut ended = warned(succeeded_backup(FIRST), &[WarningCode::HookWarning]);
+        ended.status = "succeeded-with-warnings".to_owned();
+        state.merge(page(vec![ended.clone()], None));
+        assert_eq!(state.rows[0].summary, ended);
     }
 
     #[test]
