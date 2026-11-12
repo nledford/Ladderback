@@ -1,7 +1,8 @@
 //! Properties of [`Redactor`] (invariant I4): for any secrets and any text
 //! that holds them, in any form the redactor masks, the masked text shows
-//! none of them; masking a masked text changes nothing; and a text that holds
-//! no secret comes back as it was.
+//! none of them, nor does a second pass over it; masking a masked text
+//! changes nothing when no secret holds the mask character; and a text that
+//! holds no secret comes back as it was.
 //!
 //! How each part of a URL writes a secret comes from the `url` crate, as in
 //! the redactor's own tests: the parser, not the redactor, decides how a
@@ -15,8 +16,7 @@ use super::{MIN_LINE_BYTES, MIN_PIECE_BYTES, Redactor, SecretValue};
 
 /// The characters of a secret: letters in both cases, digits, white space,
 /// what a URL parser splits a URL at or encodes, and some that aren't ASCII.
-/// Never `*`, the character of the mask: a secret made of it would be found
-/// in the mask itself.
+/// Not `*`, the character of the mask, which [`secret`] adds where it may.
 const SECRET_CHARS: &[char] = &[
     'a', 'b', 'z', 'A', 'B', 'Z', '0', '7', '-', '.', '_', '~', ' ', '\t', '\n', '\r', '@', '#',
     '?', '/', ':', '\\', '%', '"', '<', '>', '`', '{', '}', '^', '|', '[', ']', ';', '=', '&', '+',
@@ -27,10 +27,16 @@ const SECRET_CHARS: &[char] = &[
 const SPLITTING: [char; 5] = ['@', '#', '?', '/', ':'];
 
 /// A secret: single characters, and runs of letters and digits long enough
-/// to be a piece or a line of their own.
-fn secret() -> impl Strategy<Value = String> {
+/// to be a piece or a line of their own; with `*`, the mask's character,
+/// among them when `masks` is set.
+fn secret(masks: bool) -> impl Strategy<Value = String> {
+    let chars: Vec<char> = SECRET_CHARS
+        .iter()
+        .copied()
+        .chain(masks.then_some('*'))
+        .collect();
     let chunk = prop_oneof![
-        3 => select(SECRET_CHARS).prop_map(String::from),
+        3 => select(chars).prop_map(String::from),
         1 => "[A-Za-z0-9]{8,10}",
     ];
     prop::collection::vec(chunk, 1..=8).prop_map(|chunks| chunks.concat())
@@ -260,9 +266,9 @@ struct Case {
     shown: Vec<String>,
 }
 
-fn case() -> impl Strategy<Value = Case> {
+fn case(masks: bool) -> impl Strategy<Value = Case> {
     (
-        prop::collection::vec(secret(), 1..=3),
+        prop::collection::vec(secret(masks), 1..=3),
         prop::collection::vec(stretch(), 1..=6),
     )
         .prop_map(|(secrets, stretches)| {
@@ -286,6 +292,33 @@ fn case() -> impl Strategy<Value = Case> {
                 shown,
             }
         })
+}
+
+/// Whether `secret` shows in `masked` other than through a mask: an
+/// occurrence that has a `*` of a run of three or more, which a mask is part
+/// of, could be that mask and the text beside it, so it doesn't count.
+fn shows(masked: &str, secret: &str) -> bool {
+    let bytes = masked.as_bytes();
+    let mut in_mask = vec![false; bytes.len()];
+    let mut start = 0;
+    for at in 0..=bytes.len() {
+        if bytes.get(at) != Some(&b'*') {
+            if at.saturating_sub(start) >= 3
+                && let Some(run) = in_mask.get_mut(start..at)
+            {
+                run.fill(true);
+            }
+            start = at.saturating_add(1);
+        }
+    }
+    (0..bytes.len()).any(|at| {
+        masked
+            .get(at..)
+            .is_some_and(|rest| rest.starts_with(secret))
+            && in_mask
+                .get(at..at.saturating_add(secret.len()))
+                .is_some_and(|span| !span.contains(&true))
+    })
 }
 
 fn redactor(secrets: &[String]) -> Redactor {
@@ -331,19 +364,27 @@ proptest! {
     #![proptest_config(crate::properties::config())]
 
     #[test]
-    fn no_secret_shows_in_a_masked_text_in_any_form_the_redactor_masks(case in case()) {
-        let masked = redactor(&case.secrets).redact(&case.text);
-        for secret in case.shown.iter().chain(&case.secrets) {
-            prop_assert!(
-                !masked.contains(secret.as_str()),
-                "{secret:?} shows in {masked:?}, masked from {:?}",
-                case.text
-            );
+    fn no_secret_shows_in_a_masked_text_in_any_form_the_redactor_masks(case in case(true)) {
+        let redactor = redactor(&case.secrets);
+        let once = redactor.redact(&case.text);
+        // A second pass may mask more when a secret holds `*` (#287), but
+        // never reveals one.
+        let twice = redactor.redact(&once);
+        for masked in [&once, &twice] {
+            for secret in case.shown.iter().chain(&case.secrets) {
+                prop_assert!(
+                    !shows(masked, secret),
+                    "{secret:?} shows in {masked:?}, masked from {:?}",
+                    case.text
+                );
+            }
         }
     }
 
+    /// Only for secrets without `*`: one with it can make up a mask and the
+    /// text beside it, which a second pass masks too (#287).
     #[test]
-    fn masking_a_masked_text_changes_nothing(case in case()) {
+    fn masking_a_masked_text_changes_nothing(case in case(false)) {
         let redactor = redactor(&case.secrets);
         let once = redactor.redact(&case.text);
         prop_assert_eq!(redactor.redact(&once), once);

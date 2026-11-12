@@ -224,6 +224,13 @@ fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
 /// else of it shows in text on its own (see `partial_needles`). Secrets that
 /// overlap or touch are replaced as one span. Masking a text compares each of
 /// its bytes at most twice per needle, whatever the needles and the text are.
+///
+/// Masking a masked text again is not always idempotent: when a secret holds
+/// `*`, the character of [`REDACTED`], a mask and the text beside it can make
+/// up the secret, and a second pass masks that too (secret `*?`: `*??` masks
+/// to `***?`, and that to `*****`). A second pass only ever masks more, never
+/// reveals what the first masked (I4). Matches inside a mask are not skipped:
+/// a real `*` beside a secret would then leave part of it unmasked (#287).
 #[derive(Clone, Default)]
 pub struct Redactor {
     needles: Vec<Needle>,
@@ -950,6 +957,24 @@ mod tests {
         let redactor = redactor(&["abcdefghij", "defghijklm"]);
         assert_eq!(redactor.redact("abcdefghijklm"), "***");
         assert_eq!(redactor.redact("x abcdefghijklm y"), "x *** y");
+    }
+
+    #[test]
+    fn a_second_pass_over_a_secret_with_the_mask_character_never_reveals() {
+        // #287: it may mask more, but what is left besides masks is what the
+        // first pass left, in order, and never more of it.
+        let redactor = redactor(&["*?"]);
+        let once = redactor.redact("*??");
+        let twice = redactor.redact(&once);
+        assert!(!once.contains("??"), "{once:?}");
+        let mut first = once.chars().filter(|&c| c != '*');
+        assert!(
+            twice
+                .chars()
+                .filter(|&c| c != '*')
+                .all(|c| first.any(|f| f == c)),
+            "{once:?} then {twice:?}"
+        );
     }
 
     #[test]
