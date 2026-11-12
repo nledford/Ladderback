@@ -45,6 +45,8 @@ mod secrets_steps;
 
 #[path = "steps/adopt.rs"]
 mod adopt_steps;
+#[path = "steps/cache.rs"]
+mod cache_steps;
 #[path = "steps/cli_output.rs"]
 mod cli_output_steps;
 #[path = "steps/forget.rs"]
@@ -92,6 +94,7 @@ struct Agent {
     interop: interop_steps::InteropE2e,
     adopt: adopt_steps::AdoptE2e,
     maintenance: maintenance_steps::MaintenanceE2e,
+    cache: cache_steps::CacheE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -135,6 +138,7 @@ impl Agent {
             forget: forget_steps::ForgetE2e::default(),
             interop: interop_steps::InteropE2e::default(),
             adopt: adopt_steps::AdoptE2e::default(),
+            cache: cache_steps::CacheE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
         }
     }

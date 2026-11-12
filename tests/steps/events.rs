@@ -88,6 +88,11 @@ impl Events {
         testkit::daemon::data_dir(&Self::root(agent))
     }
 
+    /// The cache folder of that daemon.
+    pub(crate) fn cache_dir(agent: &Agent) -> PathBuf {
+        testkit::daemon::cache_dir(&Self::root(agent))
+    }
+
     /// The process ID of the daemon that is serving.
     pub(crate) fn pid(&self) -> u32 {
         self.daemon().child.id()
@@ -368,7 +373,9 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
         std::collections::BTreeMap::from([(
             alias,
             domain::planning::RepositoryConfig {
-                id: None,
+                // What the configuration recorded when the repository was
+                // connected, once the scenario has made it known.
+                id: agent.backup.id.clone(),
                 settings: domain::planning::RepositorySettings {
                     repository: repository.to_str().expect("a UTF-8 path").to_owned(),
                     repo_hot: None,

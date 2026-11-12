@@ -75,4 +75,20 @@ mod tests {
         let _first = CacheLock::acquire(&root.path().join("0")).unwrap();
         let _second = CacheLock::acquire(&root.path().join("1")).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_folders_a_lock_makes_are_the_owners_alone_under_a_wider_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = |dir: &Path| fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let repository = root.path().join("ab");
+        let slot = repository.join("0");
+        let _lock = CacheLock::acquire(&slot).unwrap();
+        assert_eq!(mode(&repository), 0o700, "the repository's folder");
+        assert_eq!(mode(&slot), 0o700, "the slot");
+        assert_eq!(mode(root.path()), 0o755, "the root is left as it was");
+    }
 }
