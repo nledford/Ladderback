@@ -467,9 +467,9 @@ mod tests {
     use std::path::Path;
 
     use domain::planning::{
-        AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, Hooks, Hostname,
-        KeepCount, Maintenance, Plan, RepositoryConfig, RepositorySettings, RetentionPolicy,
-        Schedule, Source,
+        AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks,
+        Hostname, KeepCount, Maintenance, Plan, RepositoryConfig, RepositorySettings,
+        RetentionPolicy, Schedule, Source,
     };
     use domain::secrets::SecretRef;
     use domain::{PlanId, RepositoryAlias};
@@ -811,6 +811,23 @@ keep-daily = 7
                 "[agent]\nconcurrency = 1        # how many operations run at once\nnice    =   10\n\n",
                 ""
             ))
+        );
+    }
+
+    /// A hook list written as tables of its own is written again as the
+    /// daemon writes it, under `[hooks]`, when it changes.
+    #[test]
+    fn a_hook_list_written_as_tables_is_written_whole_when_it_changes() {
+        let written = "schema = 1\n\n# Say so first.\n[[hooks.run-before]]\ncommand = \"echo\"   # a greeting\nargs = [\"one\"]\n";
+        let saved = changed(written, |parts| {
+            parts
+                .hooks
+                .run_before
+                .push(HookEntry::parse("echo two").expect("a hook"));
+        });
+        assert_eq!(
+            saved.as_deref(),
+            Some("schema = 1\n\n[hooks]\nrun-before = [\"echo one\", \"echo two\"]\n")
         );
     }
 
