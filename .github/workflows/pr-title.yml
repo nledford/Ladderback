@@ -4,8 +4,7 @@
 #
 # A workflow of its own, so that editing a title re-runs this check alone, not
 # every job in ci.yml. `synchronize` runs it too, so every head commit has the
-# check. Not a required check: the maintainer may add "Pull request title" to
-# the ruleset once it has proved stable.
+# check. A required check (ruleset "Protect main"): don't rename it.
 name: PR title
 
 on:
