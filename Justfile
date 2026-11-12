@@ -20,6 +20,10 @@ mutants_packages := "--package domain --package app --package api --package l10n
 # artifacts change together.
 release_flags := "--no-default-features"
 
+# The container engine `msrv` runs: $DOCKER when set, else `docker` when it is
+# installed, else `podman`.
+container := env("DOCKER", `command -v docker >/dev/null && echo docker || echo podman`)
+
 # List available workflows.
 [group('help')]
 default:
@@ -104,19 +108,21 @@ deny:
 # Linux because macOS 27 can't load the proc-macro libraries 1.94 builds.
 # RUSTUP_TOOLCHAIN names the image's own toolchain: rust-toolchain.toml would
 # otherwise swap in stable, and the check would prove nothing. The target folder
-# and the Cargo home are Docker volumes, so a second run is quick; `docker volume
-# rm ladderback-msrv-target ladderback-msrv-cargo` frees them.
-[doc('Build the workspace, wasm32 included, with the MSRV in Docker (decision 47).')]
+# and the Cargo home are named volumes, so a second run is quick; `docker volume
+# rm ladderback-msrv-target ladderback-msrv-cargo` frees them. It uses `docker`
+# when present and `podman` otherwise (Fedora); `DOCKER=podman just msrv` picks
+# one. The image is named in full because podman won't guess a registry.
+[doc('Build the workspace, wasm32 included, with the MSRV in a container (decision 47).')]
 [group('quality')]
 msrv:
     #!/usr/bin/env bash
     set -euo pipefail
     version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
     if [ -z "$version" ]; then echo 'msrv: Cargo.toml declares no rust-version' >&2; exit 1; fi
-    docker run --rm \
+    {{ container }} run --rm \
         -v '{{ root }}':/src:ro -v ladderback-msrv-target:/target -v ladderback-msrv-cargo:/cargo \
         -e CARGO_TARGET_DIR=/target -e CARGO_HOME=/cargo -e CARGO_PROFILE_DEV_DEBUG=0 -w /src \
-        "rust:$version" bash -euo pipefail -c '
+        "docker.io/library/rust:$version" bash -euo pipefail -c '
             export RUSTUP_TOOLCHAIN="$(cd / && rustup default | cut -d " " -f 1)"
             rustup target add wasm32-unknown-unknown
             rustc --version
@@ -263,8 +269,8 @@ serve: build
 # setup, and the daemon listens on a free port, never `serve`'s 9898. Arguments
 # replace `serve`, and paths are relative to where you run it: `just try
 # import-profile demo.toml` imports into the same scratch configuration. A
-# keyring password source still uses the login keychain. Delete the folder to
-# start over.
+# keyring password source still uses your real OS keyring (the Keychain on
+# macOS, the Secret Service on Linux). Delete the folder to start over.
 [doc('Run ladderback on scratch folders and a free port (default: serve).')]
 [group('dev')]
 [no-cd]
