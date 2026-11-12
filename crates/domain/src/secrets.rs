@@ -1161,6 +1161,17 @@ mod tests {
         assert_eq!(go_quoted("CANARY\u{1}"), Some(r"CANARY\x01".to_owned()));
     }
 
+    /// A character is quoted as Go quotes it whatever Rust toolchain builds
+    /// Ladderback: Rust 1.100's `Debug` escapes a combining mark even after
+    /// a letter, and prints U+0558, which Unicode 17, Go 1.27's, hasn't
+    /// assigned (#406).
+    #[test]
+    fn a_character_is_quoted_as_go_quotes_it_whatever_the_toolchain() {
+        // Nonspacing, enclosing and spacing marks.
+        assert_eq!(go_quoted("CANARY e\u{301}\u{489}\u{9be}"), None);
+        assert_eq!(go_quoted("CANARY\u{558}"), Some(r"CANARY\u0558".to_owned()));
+    }
+
     /// Every character is quoted as Go 1.27.3's `strconv.Quote` quotes it
     /// (Unicode 17): the count of characters Go escapes and an FNV-1a hash
     /// of every quoted form, each followed by a line break, in order, are
