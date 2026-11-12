@@ -43,7 +43,13 @@ impl ConfigStore for InMemoryConfigStore {
         read: &RepositoryConfig,
         id: &RepositoryId,
     ) -> Result<(), RecordError> {
-        let _ = (alias, read, id);
-        todo!()
+        let mut saved = self.saved();
+        let empty = AgentConfig::default();
+        let current = saved.as_ref().unwrap_or(&empty);
+        let recorded = current
+            .record_id(alias, read, id)
+            .map_err(RecordError::NotRecorded)?;
+        *saved = Some(recorded);
+        Ok(())
     }
 }

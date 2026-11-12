@@ -156,8 +156,13 @@ impl ResolveRepository {
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
     ) -> Result<ResolvedRepository, ResolveError> {
-        let _ = (alias, entry, SavedEntry::clone);
-        todo!()
+        let mut resolved = self.resolve(&entry.settings).await?;
+        resolved.access.id = entry.id.clone();
+        resolved.access.entry = Some(SavedEntry {
+            alias: alias.clone(),
+            entry: entry.clone(),
+        });
+        Ok(resolved)
     }
 }
 

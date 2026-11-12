@@ -5,13 +5,18 @@
 //! The engine is where every job's open reports back, so the record is made
 //! there, once, for every kind of job.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::planning::NotRecorded;
 use domain::{OperationId, RepositoryAlias, RepositoryId};
+use futures::StreamExt;
+use futures::future::{self, Either};
 
-use crate::ports::{ConfigError, ConfigStore, Engine, EngineError, Job, NotInPlace, RunningJob};
+use crate::ports::{
+    ConfigError, ConfigStore, Engine, EngineError, EngineEvent, Job, NotInPlace, RecordError,
+    RunningJob, SavedEntry,
+};
 
 /// The daemon's configuration write lock: held across every read-modify-write
 /// of the configuration the daemon makes, so two of them can't undo each
@@ -21,7 +26,7 @@ pub type ConfigWrites = futures::lock::Mutex<()>;
 /// What became of the ID of a repository a job opened, whose entry recorded
 /// none when the job was made. Nothing here is a secret: an alias and a
 /// repository ID name a repository, they don't open it (I4).
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Recording {
     /// The ID is recorded in the entry.
     Recorded {
@@ -57,6 +62,23 @@ pub enum Recording {
     },
 }
 
+impl Recording {
+    /// Whether nothing but a person's edit of the file changes it: the next
+    /// open meets it again, so it is told once a run, not at every job.
+    fn lasts(&self) -> bool {
+        matches!(
+            self,
+            Self::NotRecorded {
+                why: NotRecorded::SameRepository { .. },
+                ..
+            } | Self::NotInPlace {
+                why: NotInPlace::Form | NotInPlace::ReadBack | NotInPlace::TooLarge,
+                ..
+            }
+        )
+    }
+}
+
 /// An [`Engine`] that records, in the entry a job was made from, the ID of
 /// the repository the job opened, when the entry records none. It does so
 /// when the job reports its start, which names the repository it opened, and
@@ -65,15 +87,23 @@ pub enum Recording {
 /// can't be made changes nothing about the job.
 pub struct RecordOpened {
     inner: Arc<dyn Engine>,
+    recorder: Arc<Recorder>,
+}
+
+/// What every job's record goes through.
+struct Recorder {
     config: Arc<dyn ConfigStore>,
     writes: Arc<ConfigWrites>,
     report: Arc<dyn Fn(Recording) + Send + Sync>,
+    /// The lasting outcomes told so far.
+    told: Mutex<Vec<Recording>>,
 }
 
 impl RecordOpened {
     /// Records through `config`, holding `writes`, the lock every other
     /// write of the daemon's configuration holds, and tells `report` what
-    /// became of each ID it was given.
+    /// became of each ID it was given: an ID an earlier job recorded is not
+    /// told, and an outcome only a person's edit changes is told once.
     pub fn new(
         inner: Arc<dyn Engine>,
         config: Arc<dyn ConfigStore>,
@@ -82,9 +112,12 @@ impl RecordOpened {
     ) -> Self {
         Self {
             inner,
-            config,
-            writes,
-            report,
+            recorder: Arc::new(Recorder {
+                config,
+                writes,
+                report,
+                told: Mutex::new(Vec::new()),
+            }),
         }
     }
 }
@@ -92,8 +125,83 @@ impl RecordOpened {
 #[async_trait]
 impl Engine for RecordOpened {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
-        let _ = (&self.inner, &self.config, &self.writes, &self.report, op, job);
-        todo!()
+        // An access names the ID its entry records (`resolve_saved`), so a
+        // job that names none was made from an entry that records none. One
+        // that names an ID its entry doesn't record was made by an operation
+        // that identified the repository first, and that job recorded it.
+        let unrecorded = job
+            .access()
+            .filter(|access| access.id.is_none())
+            .and_then(|access| access.entry.clone());
+        let running = self.inner.run(op, job).await?;
+        let Some(saved) = unrecorded else {
+            return Ok(running);
+        };
+        let recorder = Arc::clone(&self.recorder);
+        let mut pending = Some(saved);
+        let events = running
+            .events
+            .then(move |event| {
+                let opened = match &event {
+                    EngineEvent::Started {
+                        repository: Some(id),
+                        ..
+                    } => pending.take().map(|saved| (saved, id.clone())),
+                    _ => None,
+                };
+                match opened {
+                    None => Either::Left(future::ready(event)),
+                    Some((saved, id)) => {
+                        let recorder = Arc::clone(&recorder);
+                        Either::Right(async move {
+                            recorder.tell(recorder.record(saved, id).await);
+                            event
+                        })
+                    }
+                }
+            })
+            .boxed();
+        Ok(RunningJob {
+            events,
+            control: running.control,
+        })
+    }
+}
+
+impl Recorder {
+    /// Records `id` in `saved`'s entry, unless another write of the
+    /// configuration holds `writes`: a job never waits for one.
+    async fn record(&self, saved: SavedEntry, id: RepositoryId) -> Recording {
+        let SavedEntry { alias, entry } = saved;
+        let Some(_writing) = self.writes.try_lock() else {
+            return Recording::Busy { alias, id };
+        };
+        match self.config.record_id(&alias, &entry, &id).await {
+            Ok(()) => Recording::Recorded { alias, id },
+            Err(RecordError::NotRecorded(why)) => Recording::NotRecorded { alias, id, why },
+            Err(RecordError::NotInPlace(why)) => Recording::NotInPlace { alias, id, why },
+            Err(RecordError::Store(error)) => Recording::Failed { alias, id, error },
+        }
+    }
+
+    /// Tells `report` about `recording`, unless an earlier job recorded the
+    /// ID, or it lasts and was told already.
+    fn tell(&self, recording: Recording) {
+        if let Recording::NotRecorded {
+            why: NotRecorded::Recorded,
+            ..
+        } = recording
+        {
+            return;
+        }
+        if recording.lasts() {
+            let mut told = self.told.lock().unwrap_or_else(PoisonError::into_inner);
+            if told.contains(&recording) {
+                return;
+            }
+            told.push(recording.clone());
+        }
+        (self.report)(recording);
     }
 }
 
@@ -377,7 +485,11 @@ mod tests {
             let kind = job.kind();
             let store = holding(vec![("demo", unrecorded.clone())]).await;
             let (engine, reports) = recording(&store, &writes, events.clone());
-            assert_eq!(run(&engine, job).await, events, "{kind:?}: the events pass on");
+            assert_eq!(
+                run(&engine, job).await,
+                events,
+                "{kind:?}: the events pass on"
+            );
             let mut recorded = unrecorded.clone();
             recorded.id = Some(opened());
             assert_eq!(entry_of(&store, "demo").await, recorded, "{kind:?}");
@@ -443,7 +555,8 @@ mod tests {
         let mut edited = entry("/srv/demo/cold", None);
         edited.maintenance = Maintenance::Local;
         save(&store.store, vec![("demo", edited.clone())]).await;
-        let (engine, reports) = recording(&store, &writes, vec![started(Some(opened())), succeeded()]);
+        let (engine, reports) =
+            recording(&store, &writes, vec![started(Some(opened())), succeeded()]);
         run(&engine, Job::Ls(read)).await;
         assert_eq!(entry_of(&store, "demo").await, edited);
         assert_eq!(
@@ -467,10 +580,13 @@ mod tests {
         moved.settings.repo_hot = Some("/srv/elsewhere/hot".to_owned());
         save(&store.store, vec![("demo", moved.clone())]).await;
         let (engine, _) = recording(&store, &writes, vec![started(Some(opened())), succeeded()]);
-        run(&engine, Job::Check(CheckJob {
-            repository: read,
-            read_data: false,
-        }))
+        run(
+            &engine,
+            Job::Check(CheckJob {
+                repository: read,
+                read_data: false,
+            }),
+        )
         .await;
         assert_eq!(entry_of(&store, "demo").await, moved);
     }
