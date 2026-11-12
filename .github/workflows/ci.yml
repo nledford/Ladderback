@@ -32,9 +32,14 @@ permissions:
 # On pull requests only a push (`synchronize`) may cancel a run; any other
 # pull request run (opened, reopened) gets a group of its own, so a required
 # check is never left cancelled on the commit being merged (see red-first.yml).
-# Pushes to main, the nightly run and manual runs share one group and queue.
+# The nightly run and manual runs get a group of their own too: GitHub keeps
+# one pending run per group and cancels the older one when another queues, so
+# sharing main's queue, nightly run 43208497343 (2026-11-12) was cancelled
+# before any job started, when a push to main queued behind it; and a running
+# nightly (the full mutation run takes up to 180 minutes) held main's push CI
+# behind it. Only pushes to main share one group, and queue.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && github.event.action != 'synchronize' && github.run_id || 'serial' }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ ((github.event_name == 'pull_request' && github.event.action != 'synchronize') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || 'serial' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -55,7 +60,7 @@ jobs:
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
@@ -87,7 +92,7 @@ jobs:
           echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
 
   check:
-    name: Check (${{ matrix.os }})
+    name: Check (${{ matrix.name }})
     needs: changes
     # A docs-only pull request skips every step but not the job. A matrix job
     # that its own `if` skips never creates the per-leg checks the ruleset
@@ -97,8 +102,15 @@ jobs:
     if: ${{ !cancelled() && github.event_name != 'schedule' }}
     strategy:
       fail-fast: false
+      # `name` is the leg's name in the check the ruleset requires, so it
+      # stays `ubuntu-latest` and `macos-latest`; `os` is the runner image,
+      # pinned, and a pull request of its own bumps it (development.md §13.8).
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - name: ubuntu-latest
+            os: ubuntu-26.04
+          - name: macos-latest
+            os: macos-26
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -121,11 +133,13 @@ jobs:
       # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
       # code). Formatting, the wasm32 clippy, the journey and doc-path lints,
       # the architecture checks and the contrast gate give one answer
-      # anywhere, so they run on Linux alone; macOS needs no Node then.
+      # anywhere, so they run on Linux alone; macOS needs no Node then. Every
+      # setup-node reads Node's major version from ui-tests/.nvmrc, which a
+      # pull request of its own bumps (development.md §13.8).
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
           cache: npm
           cache-dependency-path: ui-tests/package-lock.json
       - if: needs.changes.outputs.docs-only != 'true'
@@ -155,28 +169,33 @@ jobs:
         run: just test
         env:
           NEXTEST_PROFILE: ci
+      # Kept 14 days, not the repository's default of 90: a report is read
+      # while its failure is fresh, and two weeks still covers a run looked at
+      # after a week away. The same holds for both `mutants.out` uploads below.
       - if: always() && needs.changes.outputs.docs-only != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: junit-${{ matrix.os }}
+          name: junit-${{ matrix.name }}
           path: target/nextest/ci/junit.xml
+          retention-days: 14
 
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
           cache: npm
           cache-dependency-path: ui-tests/package-lock.json
       # trunk downloads wasm-bindgen and wasm-opt (binaryen) from GitHub
@@ -210,21 +229,22 @@ jobs:
     name: Wasm tests (Node)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it. Its
-      # own cache key, not Check's (top of this file).
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
+      # Its own cache key, not Check's (top of this file).
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
         with:
           cache-generation: v1-wasm
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just
@@ -243,7 +263,7 @@ jobs:
     name: Workflow lint (actionlint, zizmor)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,13 +289,14 @@ jobs:
     name: Release-build tests (no default features)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -295,23 +316,19 @@ jobs:
   # The dependency tree against deny.toml: RustSec advisories, licences, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
   # schedule, because an advisory can appear with no change to the code; a
-  # scheduled run notifies no one, so a failed one opens an issue, as
-  # `mutants-nightly` does. Not a required check: the maintainer may add it to
-  # the ruleset once it has proved stable. It fetches the advisory database,
-  # so a GitHub outage can fail it for a reason that isn't a dependency's.
+  # scheduled run notifies no one, so a failed one opens an issue (`deny-report`
+  # below), as `mutants-nightly` does. Not a required check: the maintainer may
+  # add it to the ruleset once it has proved stable. It fetches the advisory
+  # database, so a GitHub outage can fail it for a reason that isn't a
+  # dependency's.
   deny:
     name: Dependencies (cargo-deny)
     needs: changes
     # `changes` is skipped on a push, the nightly run and a manual run; with
     # `!cancelled()` this job runs then, and only a docs-only pull request skips it.
     if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
-    # `issues: write` is for the nightly report below; a pull request from a
-    # fork gets a read-only token whatever this says.
-    permissions:
-      contents: read
-      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -323,28 +340,37 @@ jobs:
         with:
           tool: just,cargo-deny
       - run: just deny
-      # Only on the nightly run, and only on a failure of this job's own
-      # steps. The title is fixed, so a second failure finds the open issue.
-      - if: failure() && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Nightly dependency check failed"
-          body="The nightly dependency check (\`just deny\`) failed: $RUN_URL. A new RustSec advisory is the usual cause; the job's log names it."
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
-          fi
+
+  # A failed nightly `deny` opens an issue, or comments on the open one. A job
+  # of its own, as release-builds.yml's `report` is, so only it holds
+  # `issues: write`, and `deny`, which runs a pull request's code (its
+  # Cargo.lock and deny.toml), doesn't. Its name matches no required check.
+  deny-report:
+    name: Report a failed nightly dependency check
+    needs: deny
+    # Only on the nightly run, and only when `deny` failed, not when it was
+    # cancelled. The title is fixed, so a second failure finds the open issue.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    # One report at a time, so two failed runs don't both open an issue.
+    concurrency:
+      group: ci-deny-report
+      cancel-in-progress: false
+    permissions:
+      issues: write # to open or comment on the issue; no checkout, so no contents
+    steps:
+      # `$/`: the action from the commit this workflow runs, with no checkout.
+      - uses: $/.github/actions/report-nightly-failure
+        with:
+          title: Nightly dependency check failed
+          body: "The nightly dependency check (`just deny`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec advisory is the usual cause; the job's log names it."
 
   mutants:
     name: Mutation testing (changed code)
     needs: changes
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -352,6 +378,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -365,13 +392,14 @@ jobs:
         with:
           name: mutants.out
           path: mutants.out
+          retention-days: 14
 
   # A scheduled run notifies no one, so a failure opens an issue, or comments
   # on the one already open, rather than going unseen.
   mutants-nightly:
     name: Mutation testing (full)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     permissions:
       contents: read
@@ -381,6 +409,7 @@ jobs:
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -392,19 +421,11 @@ jobs:
         with:
           name: mutants.out
           path: mutants.out
+          retention-days: 14
       # Only on a failure of this job's own steps (a timeout counts), not on
       # a cancel. The title is fixed, so a second failure finds the open issue.
       - if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Nightly mutation run failed"
-          body="The full mutation run (\`just mutants-all\`) failed: $RUN_URL. The run's \`mutants.out\` artifact lists the missed mutants and timeouts."
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
-          fi
+        uses: $/.github/actions/report-nightly-failure
+        with:
+          title: Nightly mutation run failed
+          body: "The full mutation run (`just mutants-all`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The run's `mutants.out` artifact lists the missed mutants and timeouts."

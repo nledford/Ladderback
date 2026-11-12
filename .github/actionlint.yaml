@@ -1,4 +1,11 @@
 # actionlint's settings (`just lint-workflows`).
+self-hosted-runner:
+  # GitHub-hosted runner labels newer than actionlint 1.7.12's list, which it
+  # would report as unknown: the pinned Ubuntu image (development.md §13.8).
+  # Listed here only so actionlint accepts them; they are GitHub's own. Remove
+  # once actionlint knows them: rhysd/actionlint#682.
+  labels:
+    - ubuntu-26.04
 paths:
   .github/workflows/*.yml:
     ignore:

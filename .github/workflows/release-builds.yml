@@ -59,7 +59,7 @@ jobs:
             os: ubuntu-22.04-arm
           # arm64 only: dist can't build a universal binary yet (dist #77).
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-26
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -73,7 +73,7 @@ jobs:
       # Trunk's pre-build hook installs Tailwind with npm (crates/web/Trunk.toml).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: lts/*
+          node-version-file: ui-tests/.nvmrc
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,trunk
@@ -120,7 +120,7 @@ jobs:
     name: Report a failed nightly release build
     needs: build
     if: failure() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     # One report at a time, so two failed runs don't both open an issue.
     concurrency:
@@ -129,16 +129,8 @@ jobs:
     permissions:
       issues: write # to open or comment on the issue; no checkout, so no contents
     steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Nightly release build failed"
-          body="The nightly release build (\`just release-build\`, \`just smoke-release\`) failed: $RUN_URL. Each failed job's summary has the smoke test's table, and its archive is a run artifact."
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
-          fi
+      # `$/`: the action from the commit this workflow runs, with no checkout.
+      - uses: $/.github/actions/report-nightly-failure
+        with:
+          title: Nightly release build failed
+          body: "The nightly release build (`just release-build`, `just smoke-release`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Each failed job's summary has the smoke test's table, and its archive is a run artifact."

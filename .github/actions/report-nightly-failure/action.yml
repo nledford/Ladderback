@@ -1,0 +1,38 @@
+# Opens an issue for a failed nightly run, or comments on the open one, for
+# ci.yml's `deny-report` and `mutants-nightly` and release-builds.yml's
+# `report`: a scheduled run notifies no one, so without it a failure would go
+# unseen. Use it as `uses: $/.github/actions/report-nightly-failure`: GitHub
+# fetches the action from the commit the workflow runs, so the job needs no
+# checkout. The job needs `issues: write` and nothing else; the action uses the
+# job's own token.
+#
+# The open issue is found by its exact title, so give each kind of failure a
+# fixed one, and a second failure comments on the issue the first opened. A new
+# issue gets the `bug` label.
+name: Report a failed nightly run
+description: Opens an issue with the given title, or comments on the open one with that exact title.
+inputs:
+  title:
+    description: The issue's title, fixed for each kind of failure.
+    required: true
+  body:
+    description: The new issue's body, or the comment on the open one. Markdown.
+    required: true
+runs:
+  using: composite
+  steps:
+    # The inputs reach the shell as environment variables, never inside the
+    # shell text, and jq reads the title from the environment too.
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TITLE: ${{ inputs.title }}
+        BODY: ${{ inputs.body }}
+      run: |
+        number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" \
+          --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+        if [ -n "$number" ]; then
+          gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+        else
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label bug --body "$BODY"
+        fi
