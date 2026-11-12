@@ -158,7 +158,9 @@ fn a_session_ends_on_the_twelfth_hour_unused_exactly() {
 fn a_session_ends_thirty_days_after_it_started_however_it_is_used() {
     let mut sessions = Sessions::default();
     let session = sessions.start(token(1), token(2), PASSWORD, at(0));
-    let lifetime = SESSION_LIFETIME.as_secs();
+    // Thirty days, written out: a lifetime read back from the constant would
+    // follow any change to it.
+    let lifetime = 30 * 24 * 3600;
     assert_eq!(session.ends_at(), at(lifetime));
     for hour in 1..(lifetime / 3600) {
         assert!(
@@ -407,4 +409,50 @@ fn a_full_table_forgets_quiet_clients_before_any_that_waits() {
         Err(SignedDuration::from_secs(1))
     );
     assert_eq!(waits.attempt(v4(1), at(day)), Ok(()));
+}
+
+#[test]
+fn making_room_forgets_every_client_quiet_for_a_whole_day() {
+    let mut waits = SignInWaits::default();
+    let day = FORGET_AFTER.as_secs();
+    waits.attempt(v4(1), at(0)).unwrap();
+    waits.attempt(v4(2), at(0)).unwrap();
+    for index in 2..u32::try_from(MAX_CLIENTS).unwrap() {
+        let address = Ipv4Addr::from(0x0a00_0000 + index);
+        waits
+            .attempt(Client::of(IpAddr::V4(address)), at(day))
+            .unwrap();
+    }
+    assert_eq!(waits.len(), MAX_CLIENTS);
+    // Both went quiet exactly a day ago: both are forgotten, not only the one
+    // a full table would have to let go.
+    waits.attempt(v4(3), at(day)).unwrap();
+    assert_eq!(waits.len(), MAX_CLIENTS - 1);
+}
+
+#[test]
+fn a_table_is_empty_until_it_holds_something() {
+    let mut waits = SignInWaits::default();
+    assert!(waits.is_empty());
+    waits.attempt(v4(1), at(0)).unwrap();
+    assert!(!waits.is_empty());
+    let mut sessions = Sessions::default();
+    assert!(sessions.is_empty());
+    sessions.start(token(1), token(2), PASSWORD, at(0));
+    assert!(!sessions.is_empty());
+}
+
+#[test]
+fn debug_names_a_password_or_a_token_but_never_shows_it() {
+    let password = format!(
+        "{:?}",
+        Password::parse("demo-admin-pass".to_owned()).unwrap()
+    );
+    assert!(!password.contains("demo-admin-pass"), "{password}");
+    assert!(password.contains("Password"), "the type helps: {password}");
+    let token = token(0xab);
+    let shown = format!("{token:?}");
+    assert!(!shown.contains(&token.to_text()), "{shown}");
+    assert!(!shown.contains("abab"), "{shown}");
+    assert!(shown.contains("Token"), "the type helps: {shown}");
 }

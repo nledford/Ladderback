@@ -3570,6 +3570,18 @@ mod repository_request_tests {
     }
 
     #[test]
+    fn debug_of_a_sign_in_names_it_but_never_the_password_typed() {
+        let shown = format!(
+            "{:?}",
+            super::SignInDto {
+                password: "demo-admin-pass".into()
+            }
+        );
+        assert!(!shown.contains("demo-admin-pass"), "{shown}");
+        assert!(shown.contains("SignInDto"), "the type helps: {shown}");
+    }
+
+    #[test]
     fn a_repository_that_did_not_answer_is_a_code_with_no_arguments() {
         assert_eq!(
             to_string(&ErrorCode::RepositoryTimedOut).unwrap(),

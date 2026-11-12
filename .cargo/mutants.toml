@@ -92,6 +92,10 @@ exclude_re = [
     # `O_NONBLOCK` and `O_NOCTTY` are separate bits, so `|` and `^` give the
     # same flags. `&` (no flags, so opening a FIFO blocks) is caught.
     'crates/adapters/secrets/src/file\.rs.*: replace \| with \^ in read$',
+    # A token's byte is a high hex digit shifted left four bits and a low one
+    # below it: the two never share a bit, so `|` and `^` give the same byte.
+    # A token that parses to other bytes (`&`) is caught.
+    'crates/domain/src/access\.rs.*: replace \| with \^ in Token::parse$',
     # `Os::get` is the call to the session's own store (the macOS keychain,
     # the Secret Service); what its errors become is `failure`, which is
     # tested. Its test, `the_os_keyring_keeps_and_gives_back_a_secret`,

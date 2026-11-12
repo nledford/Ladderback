@@ -195,6 +195,22 @@ fn no_randomness_starts_no_session_and_keeps_the_wait() {
 }
 
 #[test]
+fn each_address_that_failed_is_remembered_on_its_own() {
+    let clock = clock();
+    let access = access(&clock);
+    assert_eq!(access.remembered_addresses(), 0);
+    let wrong = password("not-the-password");
+    for address in [HOME, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11))] {
+        access
+            .sign_in(address, &wrong)
+            .now_or_never()
+            .unwrap()
+            .unwrap_err();
+    }
+    assert_eq!(access.remembered_addresses(), 2);
+}
+
+#[test]
 fn signing_out_ends_the_session_it_names() {
     let clock = clock();
     let access = access(&clock);
