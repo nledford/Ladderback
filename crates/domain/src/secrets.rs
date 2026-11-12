@@ -349,7 +349,7 @@ impl Redactor {
                 let raw = partial_needles(value);
                 let escaped: Vec<String> = std::iter::once(value)
                     .chain(raw.iter().map(String::as_str))
-                    .filter_map(debug_escaped)
+                    .flat_map(|form| debug_escaped(form).into_iter().chain(go_quoted(form)))
                     .collect();
                 url_needles(value).into_iter().chain(raw).chain(escaped)
             })
@@ -581,6 +581,91 @@ fn debug_escaped(secret: &str) -> Option<String> {
     let quoted = format!("{secret:?}");
     let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
     (inner != secret).then(|| inner.to_owned())
+}
+
+/// A secret, or a raw form of it, as Go's `strconv.Quote` writes it between
+/// the quotes, where that differs from it: rclone, written in Go, quotes
+/// what it can't serve as `%q` does (`Failed to create file system for
+/// "…"`), and the worker and the daemon log what it writes (#331). Go
+/// escapes `"` and `\`, writes `\a`, `\b`, `\f`, `\n`, `\r`, `\t` and `\v`
+/// for those, and any other character it doesn't print ([`go_prints`]) as
+/// `\x01` below the space and for DEL, else as `\u200b` or `\U000e0001`.
+/// Like `Debug`, it escapes each character on its own, so this form is in
+/// the quoted text wherever the secret is in the text quoted. Where it is
+/// the `Debug` form (a secret whose only escaped characters are `"`, `\`,
+/// tab or a line break), `Redactor::new` drops the duplicate.
+fn go_quoted(secret: &str) -> Option<String> {
+    use std::fmt::Write;
+    let mut quoted = String::with_capacity(secret.len());
+    for c in secret.chars() {
+        let code = u32::from(c);
+        // Writing to a `String` can't fail.
+        let _ = match c {
+            '"' | '\\' => write!(quoted, "\\{c}"),
+            '\u{7}' => quoted.write_str("\\a"),
+            '\u{8}' => quoted.write_str("\\b"),
+            '\u{c}' => quoted.write_str("\\f"),
+            '\n' => quoted.write_str("\\n"),
+            '\r' => quoted.write_str("\\r"),
+            '\t' => quoted.write_str("\\t"),
+            '\u{b}' => quoted.write_str("\\v"),
+            _ if go_prints(c) => quoted.write_char(c),
+            '\0'..='\u{1f}' | '\u{7f}' => write!(quoted, "\\x{code:02x}"),
+            '\u{80}'..='\u{ffff}' => write!(quoted, "\\u{code:04x}"),
+            _ => write!(quoted, "\\U{code:08x}"),
+        };
+    }
+    (quoted != secret).then_some(quoted)
+}
+
+/// The characters Rust's `Debug` escapes that are neither control, format,
+/// separator, private-use nor unassigned characters, and so print in Go:
+/// the default-ignorable marks and letters (the combining grapheme joiner,
+/// variation selectors, the Hangul fillers), which `Debug` escapes in newer
+/// Rust versions (1.99 does; 1.97 printed them).
+const DEBUG_ESCAPES_GO_PRINTS: [std::ops::RangeInclusive<char>; 9] = [
+    '\u{34f}'..='\u{34f}',
+    '\u{115f}'..='\u{1160}',
+    '\u{17b4}'..='\u{17b5}',
+    '\u{180b}'..='\u{180d}',
+    '\u{180f}'..='\u{180f}',
+    '\u{3164}'..='\u{3164}',
+    '\u{fe00}'..='\u{fe0f}',
+    '\u{ffa0}'..='\u{ffa0}',
+    '\u{e0100}'..='\u{e01ef}',
+];
+
+/// Whether Go's `strconv.Quote` writes `c` as it is (`"` and `\` aside):
+/// whether `unicode.IsPrint` takes it, a letter, mark, number, punctuation
+/// or symbol, or the space. Rust's `Debug` leaves the characters of those
+/// categories unescaped (its `core::unicode::printable` tables), apart from
+/// three escapes of its own: `'`, which `str::escape_debug` escapes; the
+/// characters of [`DEBUG_ESCAPES_GO_PRINTS`]; and a grapheme extender (a
+/// combining character among them), which `str::escape_debug` escapes only
+/// at the start of a text, so `c` is asked after a space. Both read the
+/// categories from Unicode's tables, so this is Go's answer wherever the
+/// two Unicode versions agree; a character one version has assigned and
+/// the other not is printed by one and escaped by the other, and then a
+/// secret holding it is not masked as Go quotes it (technical design
+/// §10.2).
+fn go_prints(c: char) -> bool {
+    if c == '\''
+        || DEBUG_ESCAPES_GO_PRINTS
+            .iter()
+            .any(|range| range.contains(&c))
+    {
+        return true;
+    }
+    let mut pair = [b' '; 5];
+    let Some(after) = pair.get_mut(1..) else {
+        return false;
+    };
+    // Four bytes hold any character.
+    let len = c.encode_utf8(after).len();
+    match pair.get(..=len).map(std::str::from_utf8) {
+        Some(Ok(text)) => text.escape_debug().skip(1).eq([c]),
+        _ => false,
+    }
 }
 
 /// Every password the userinfo of the URL inside a repository string may
@@ -1065,6 +1150,34 @@ mod tests {
         ] {
             assert_eq!(by_line.redact(&format!("\"{quoted}\"")), r#""***""#);
         }
+    }
+
+    /// A secret Go prints as it is, `'` and a combining character included,
+    /// adds no needle: only what Go escapes costs one.
+    #[test]
+    fn a_secret_go_prints_as_it_is_has_no_go_quoted_form() {
+        assert_eq!(go_quoted("CANARY 'plain' e\u{301}"), None);
+        assert_eq!(go_quoted("CANARY\u{1}"), Some(r"CANARY\x01".to_owned()));
+    }
+
+    /// Every character is quoted as Go 1.27.3's `strconv.Quote` quotes it
+    /// (Unicode 17): the count of characters Go escapes and an FNV-1a hash
+    /// of every quoted form, each followed by a line break, in order, are
+    /// Go's own. [`go_prints`] asks Rust's `Debug`, whose tables change with
+    /// the toolchain: when this fails, quote every character with Go again
+    /// and correct [`DEBUG_ESCAPES_GO_PRINTS`] (technical design §10.2).
+    #[test]
+    fn every_character_is_quoted_as_go_quotes_it() {
+        let mut escaped = 0_u32;
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for c in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+            let text = c.to_string();
+            let form = go_quoted(&text).inspect(|_| escaped += 1).unwrap_or(text);
+            for byte in form.bytes().chain(*b"\n") {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        assert_eq!((escaped, hash), (952_453, 0x7b11_61e7_95fe_c298));
     }
 
     #[test]
