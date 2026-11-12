@@ -26,6 +26,10 @@ Feature: The shared components in the gallery
     Then the table "Demo repositories" is sorted by repository ascending
     And the polite region reads "Sorted by repository, ascending."
 
+  Scenario: The table's sort button sits in its column header apart from the header's text
+    When I open the component gallery
+    Then the button "Sort by repository" sits inside the column header "Repository", apart from its text
+
   Scenario: A form field error is shown, describes the input and is announced
     When I open the component gallery
     And I press Tab until focus is on the button "Check the repository name"

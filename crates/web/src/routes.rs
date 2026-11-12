@@ -258,7 +258,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
                 Shown::Table => {
                     view! {
-                        <table>
+                        <table class="operations">
                             <caption class="text-muted">{caption.clone()}</caption>
                             <thead>
                                 <tr>
@@ -271,31 +271,33 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             _ => "descending",
                                         }
                                     >
-                                        {started_column.clone()}
-                                        <button
-                                            type="button"
-                                            on:click=move |_| {
-                                                // The first press is the newest
-                                                // first: the history is already
-                                                // the daemon's newest first, so
-                                                // the sort's own orders follow.
-                                                let next = match sort.get_untracked() {
-                                                    SortOrder::History
-                                                    | SortOrder::OldestFirst => SortOrder::NewestFirst,
-                                                    SortOrder::NewestFirst => SortOrder::OldestFirst,
-                                                };
-                                                sort.set(next);
-                                                say(
-                                                    Politeness::Polite,
-                                                    match next {
-                                                        SortOrder::OldestFirst => &oldest,
-                                                        _ => &newest,
-                                                    },
-                                                );
-                                            }
-                                        >
-                                            {sort_label.clone()}
-                                        </button>
+                                        <span class="sort-header">
+                                            {started_column.clone()}
+                                            <button
+                                                type="button"
+                                                on:click=move |_| {
+                                                    // The first press is the newest
+                                                    // first: the history is already
+                                                    // the daemon's newest first, so
+                                                    // the sort's own orders follow.
+                                                    let next = match sort.get_untracked() {
+                                                        SortOrder::History
+                                                        | SortOrder::OldestFirst => SortOrder::NewestFirst,
+                                                        SortOrder::NewestFirst => SortOrder::OldestFirst,
+                                                    };
+                                                    sort.set(next);
+                                                    say(
+                                                        Politeness::Polite,
+                                                        match next {
+                                                            SortOrder::OldestFirst => &oldest,
+                                                            _ => &newest,
+                                                        },
+                                                    );
+                                                }
+                                            >
+                                                {sort_label.clone()}
+                                            </button>
+                                        </span>
                                     </th>
                                     <th scope="col">{result_column.clone()}</th>
                                     <th scope="col">{actions_column.clone()}</th>

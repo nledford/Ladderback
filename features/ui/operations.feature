@@ -55,3 +55,71 @@ Feature: Each row of the Operations page names its operation and says what it di
     When the daemon gives the answer it held back
     Then the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
     And the row "demo-docs" of the table "Operations" lists "5 files" in its "Result" column
+
+  # The table's columns keep the widths they open with: a run that starts,
+  # shows its progress and ends changes what its row says, never where the
+  # columns are, so the table doesn't jump under the reader's eyes. The sort
+  # button sits in the Started header beside its text, never over it, and on a
+  # small screen or with larger text it goes below the text. Data tables are
+  # read as a grid, so on a small screen a word breaks inside only when it is
+  # longer than its column is wide (WCAG 1.4.10), and nothing in a cell runs
+  # over the next column, even at 320 px with 200 % text.
+
+  Scenario Outline: The columns of the Operations table keep their widths as a run starts, shows its progress and ends
+    Given the daemon reports a queued backup of "demo-home"
+    And a viewport of <width> by <height> pixels
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Queued"
+    And the widths of the columns of the table "Operations" are noted
+    And the daemon reports that the backup of "demo-home" has started
+    And the daemon reports 4 steps of progress of the backup of "demo-home"
+    Then the progress bar "Backup progress" shows 100 percent
+    And the columns of the table "Operations" keep the widths noted
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    When the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
+    And the columns of the table "Operations" keep the widths noted
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+
+    Examples:
+      | width | height |
+      | 1280  | 800    |
+      | 320   | 256    |
+
+  Scenario Outline: The sort button sits in the Started header apart from its text
+    Given the daemon reports two finished backups of "demo-home"
+    And a viewport of <width> by <height> pixels
+    When I open the address "/operations"
+    And the table "Operations" has 2 rows
+    Then the button "Sort by started" sits inside the column header "Started", apart from its text
+    And the button "Sort by started" sits on one line
+    And the page has no accessibility violations
+
+    Examples:
+      | width | height |
+      | 1280  | 800    |
+      | 800   | 600    |
+
+  Scenario: The Operations page reflows with larger text and wider spacing while a run shows its progress and when it ends
+    Given the daemon reports a running backup of "demo-home"
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the reader increases the text spacing
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 4 steps of progress of the backup of "demo-home"
+    Then the progress bar "Backup progress" shows 100 percent
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    And no text is clipped
+    And the button "Sort by started" sits inside the column header "Started", apart from its text
+    And the row header "demo-home" breaks a word only where the word is longer than a line
+    And the button "Cancel demo-home" breaks a word only where the word is longer than a line
+    And the page has no accessibility violations
+    When the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    And no text is clipped
