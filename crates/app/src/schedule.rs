@@ -445,10 +445,15 @@ impl Scheduler {
     }
 
     /// What follows a backup of `end.plan` that ended (§5). A success or a
-    /// cancel ends the plan's retries. A failure is retried when the plan
-    /// has a retry policy and no run of it is going: the first retry of a
-    /// series after a run that wasn't the series' retry, else the next one.
+    /// cancel ends the plan's retries. A failure of a run the schedule
+    /// started is retried when the plan has a retry policy and no run of it
+    /// is going: the first retry of a series after a run that wasn't the
+    /// series' retry, else the next one. A failure of a run a person or
+    /// another program asked for leaves the plan's retries as they were.
     async fn ended(&self, plans: &mut Plans, end: RunEnd) {
+        if end.outcome == RunOutcome::Failed && !RetrySchedule::retried(end.trigger) {
+            return;
+        }
         let series = match plans.retries.remove(&end.plan) {
             Some(Retrying::Started(retry)) if end.trigger == Trigger::Retry => Some(retry),
             Some(Retrying::Pending(_)) => {

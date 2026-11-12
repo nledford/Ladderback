@@ -94,7 +94,10 @@ impl RetrySchedule {
     /// person or another program asked for is theirs to retry: they see it
     /// fail and decide (decision 76).
     pub fn retried(trigger: Trigger) -> bool {
-        todo!("whether a failed run that {trigger:?} started is retried")
+        match trigger {
+            Trigger::Schedule | Trigger::CatchUp | Trigger::Retry => true,
+            Trigger::Manual | Trigger::Hub | Trigger::Mcp => false,
+        }
     }
 
     /// Retry `attempt`, waiting after a failure at `failed_at`, unless it
