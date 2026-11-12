@@ -407,6 +407,50 @@ mod tests {
         );
     }
 
+    // The page reads the history once its events stream is open (#305), so
+    // news told before that read can reach the page after it: what the read
+    // already has, the news must not take back or count twice.
+
+    #[test]
+    fn a_start_heard_after_a_read_that_has_the_run_further_along_changes_nothing() {
+        for (status, finished) in [
+            ("running", false),
+            ("succeeded", true),
+            ("failed", true),
+            ("cancelled", true),
+        ] {
+            let mut state =
+                OperationsState::from_history(vec![summary(FIRST, status, true, finished)], None);
+            let read = state.clone();
+            state.apply(&UiEvent::OperationStarted {
+                operation: id(FIRST),
+                repository: Some("demo".to_owned()),
+                started_at: "2026-11-09T10:00:09Z".to_owned(),
+            });
+            assert_eq!(state, read, "a {status} row");
+        }
+    }
+
+    #[test]
+    fn progress_and_warnings_heard_after_a_read_that_has_the_end_change_nothing() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "succeeded", true, true)], None);
+        state.rows[0].summary.status = "succeeded-with-warnings".to_owned();
+        state.rows[0].summary.warning_codes = vec![WarningCode::SourceUnreadable];
+        let read = state.clone();
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            current: 3,
+            total: Some(10),
+        });
+        state.apply(&UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        });
+        assert_eq!(state, read);
+    }
+
     #[test]
     fn a_progress_event_updates_only_the_live_part_of_the_row() {
         let mut state =

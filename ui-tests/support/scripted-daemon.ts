@@ -14,7 +14,7 @@
 
 import type { BrowserContext, WebSocketRoute } from "playwright";
 
-// The page opens its events stream once it has read the history.
+// How long a step waits for the page to open, or ask for, its events stream.
 const STREAM_PATIENCE_MS = 10_000;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -48,6 +48,10 @@ export class ScriptedDaemon {
   /** The readings of the history the page asked for, with its events stream
    *  open, while one was held back. */
   #readsBesideTheHeld = 0;
+  /** Whether the next events stream the page asks for is held back. */
+  #holdTheOpening = false;
+  /** Opens the events stream held back, once the page has asked for one. */
+  #openTheHeld: (() => void) | null = null;
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -105,9 +109,54 @@ export class ScriptedDaemon {
         },
       }),
     );
-    await context.routeWebSocket("**/api/v1/events", (stream) => {
+    await context.routeWebSocket("**/api/v1/events", async (stream) => {
+      // The page sees its stream open once this handler returns.
+      if (this.#holdTheOpening) {
+        this.#holdTheOpening = false;
+        const { promise, resolve } = Promise.withResolvers<void>();
+        this.#openTheHeld = resolve;
+        await promise;
+      }
       this.#stream = stream;
     });
+  }
+
+  /** Holds back the opening of the next events stream the page asks for,
+   *  until `openTheHeldStream`. */
+  holdTheNextStream(): void {
+    this.#holdTheOpening = true;
+  }
+
+  /** Waits until the page has asked for the stream held back. */
+  async #untilAStreamIsHeld(): Promise<void> {
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (this.#openTheHeld === null) {
+      if (Date.now() > end) throw new Error("the page never asked for an events stream");
+      await sleep(50);
+    }
+  }
+
+  /** Opens the events stream held back. */
+  async openTheHeldStream(): Promise<void> {
+    await this.#untilAStreamIsHeld();
+    const open = this.#openTheHeld;
+    this.#openTheHeld = null;
+    open?.();
+  }
+
+  /** The backup of `plan` starts while the page has asked for its events
+   *  stream and it is not open yet: the history says so, and the news goes
+   *  to no page. */
+  async startsUnheard(plan: string, startedAt: string): Promise<void> {
+    await this.#untilAStreamIsHeld();
+    this.#begin(plan, startedAt);
+  }
+
+  /** The history has the backup of `plan` running since `startedAt`. */
+  #begin(plan: string, startedAt: string): void {
+    const backup = this.#backupOf(plan);
+    backup.status = "running";
+    backup["started-at"] = startedAt;
   }
 
   /** Holds back the answer to the page's next reading of the history, until
@@ -159,8 +208,11 @@ export class ScriptedDaemon {
     this.#stream.send(JSON.stringify(event));
   }
 
-  /** The backup of `plan` begins. */
+  /** The backup of `plan` begins: its log says it is running before the page
+   *  is told, as the daemon's own run tells of a start only after the write
+   *  that says so (#305). */
   async starts(plan: string, startedAt: string): Promise<void> {
+    this.#begin(plan, startedAt);
     await this.#tell({
       type: "operation-started",
       operation: this.#backupOf(plan).id,

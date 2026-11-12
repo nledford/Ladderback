@@ -1,7 +1,7 @@
 //! Steps for `features/execution/announcement.feature`, for the fake-backed
 //! acceptance runner: a page that reads the history whenever it hears an
-//! operation ended, as a client that refetches on the news does, and a log
-//! that can't take an operation's end.
+//! operation started or ended, as a client that refetches on the news does,
+//! and a log that can't take an operation's end.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -30,8 +30,8 @@ pub struct Heard {
     pub read: Option<OperationDetail>,
 }
 
-/// A page that, on hearing an operation ended, reads the history for it:
-/// the client the end event has to be safe for.
+/// A page that, on hearing an operation started or ended, reads the history
+/// for it: the client the news has to be safe for.
 struct Page {
     history: Arc<dyn OperationStore>,
     heard: Mutex<Vec<Heard>>,
@@ -40,12 +40,13 @@ struct Page {
 #[async_trait]
 impl EventBus for Page {
     async fn publish(&self, news: UiEvent) {
-        let ended = match &news {
-            UiEvent::OperationSucceeded { operation, .. }
+        let told = match &news {
+            UiEvent::OperationStarted { operation, .. }
+            | UiEvent::OperationSucceeded { operation, .. }
             | UiEvent::OperationFailed { operation, .. } => Uuid::parse_str(operation).ok(),
             _ => None,
         };
-        let read = match ended {
+        let read = match told {
             Some(uuid) => self
                 .history
                 .get(OperationId::from_uuid(uuid))
@@ -168,7 +169,7 @@ impl AnnouncementWorld {
     }
 }
 
-#[given("a page that reads the history whenever it hears an operation ended")]
+#[given("a page that reads the history whenever it hears an operation started or ended")]
 fn a_page(agent: &mut Agent) {
     agent.announcement.page = Some(Arc::new(Page {
         history: agent.store.clone(),
@@ -186,11 +187,66 @@ fn log_never_answers(agent: &mut Agent) {
     agent.announcement.fault = Some(Fault::NeverAnswers);
 }
 
-/// The one piece of news the page heard.
+/// The one end the page heard.
 fn the_news(agent: &Agent) -> Heard {
-    let mut heard = agent.announcement.heard();
-    assert_eq!(heard.len(), 1, "one piece of news: {heard:?}");
-    heard.remove(0)
+    let mut ends: Vec<Heard> = agent
+        .announcement
+        .heard()
+        .into_iter()
+        .filter(|heard| {
+            matches!(
+                heard.news,
+                UiEvent::OperationSucceeded { .. } | UiEvent::OperationFailed { .. }
+            )
+        })
+        .collect();
+    assert_eq!(ends.len(), 1, "one end: {ends:?}");
+    ends.remove(0)
+}
+
+/// The one start the page heard.
+fn the_start(agent: &Agent) -> Heard {
+    let mut starts: Vec<Heard> = agent
+        .announcement
+        .heard()
+        .into_iter()
+        .filter(|heard| matches!(heard.news, UiEvent::OperationStarted { .. }))
+        .collect();
+    assert_eq!(starts.len(), 1, "one start: {starts:?}");
+    starts.remove(0)
+}
+
+#[then("the page hears the operation started")]
+fn hears_start(agent: &mut Agent) {
+    let operation = agent.operation();
+    let UiEvent::OperationStarted {
+        operation: heard,
+        started_at,
+        ..
+    } = the_start(agent).news
+    else {
+        panic!("the page heard something other than a start");
+    };
+    assert_eq!(heard, operation.id().as_uuid().hyphenated().to_string());
+    assert_eq!(
+        started_at,
+        operation
+            .started_at()
+            .expect("the operation started")
+            .to_string()
+    );
+}
+
+#[then("the history the page read on hearing it started holds the operation as running")]
+fn page_read_the_start(agent: &mut Agent) {
+    assert_eq!(
+        the_start(agent)
+            .read
+            .expect("the history held the operation when the page read it")
+            .record
+            .status,
+        OperationStatus::Running
+    );
 }
 
 #[then("the page hears the operation succeeded")]

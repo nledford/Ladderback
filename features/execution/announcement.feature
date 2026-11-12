@@ -1,12 +1,18 @@
-Feature: Announcing how an operation ended
-  A page is told how an operation ended (technical design §4.4) only once
-  the history can say it too: a page that reads the history on hearing the
-  news finds the end there. A log that can't take the end doesn't hold the
-  news back. The page hears it all the same, and the history shows what the
-  log last had.
+Feature: Announcing how an operation started and ended
+  A page is told an operation started, or how it ended (technical design
+  §4.4), only once the history can say it too: a page that reads the history
+  on hearing the news finds the operation running, or ended, there. A log
+  that can't take the end doesn't hold the news back. The page hears it all
+  the same, and the history shows what the log last had.
 
   Background:
-    Given a page that reads the history whenever it hears an operation ended
+    Given a page that reads the history whenever it hears an operation started or ended
+
+  Scenario: A page that hears an operation started finds it running in the history
+    Given the engine will complete the operation in 3 steps of 1 minute each
+    When the agent runs the operation
+    Then the page hears the operation started
+    And the history the page read on hearing it started holds the operation as running
 
   Scenario: A page that hears an operation succeeded finds it succeeded in the history
     Given the engine will complete the operation in 3 steps of 1 minute each
@@ -52,9 +58,11 @@ Feature: Announcing how an operation ended
     Then the page hears the operation succeeded
     And the history the page read holds the operation as it ended
 
-  Scenario: A forget that runs as several jobs is heard to end once, when all of them have
+  Scenario: A forget that runs as several jobs is heard to start once and end once, when all of them have
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 12000 snapshots of the plan "home"
     When the owner forgets the repository
-    Then the page hears the operation succeeded
+    Then the page hears the operation started
+    And the history the page read on hearing it started holds the operation as running
+    And the page hears the operation succeeded
     And the history the page read holds the operation as it ended

@@ -1,11 +1,13 @@
-//! The order a run does things in, against the news of its end (technical
-//! design §4.4, §9; #134): a page that hears an operation ended and then
-//! reads the history must find the end there, so the news waits for the
-//! run's last write to the log, and for the hooks that come before it. The
-//! scenarios of `features/execution/announcement.feature` play a page that
-//! reads the history on the news; these hold the log's write for as long as
-//! they like, record the order of everything a run does, and cover each way
-//! a run can fail.
+//! The order a run does things in, against the news of its start and its end
+//! (technical design §4.4, §9; #134, #305): a page that hears an operation
+//! started or ended and then reads the history must find it there, so the
+//! news of the start waits for the write that says the operation is running,
+//! and the news of the end for the run's last write to the log and for the
+//! hooks that come before it. The scenarios of
+//! `features/execution/announcement.feature` play a page that reads the
+//! history on the news; these hold the log's write for as long as they like,
+//! record the order of everything a run does, and cover each way a run can
+//! fail.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,6 +64,15 @@ fn failed_saying(detail: &str) -> EngineEvent {
     EngineEvent::Failed(FailureReason::EngineFailed {
         detail: detail.to_owned(),
     })
+}
+
+/// The news that the operation these tests run started, at `at`.
+fn started_at(at: Timestamp) -> UiEvent {
+    UiEvent::OperationStarted {
+        operation: ID.to_owned(),
+        repository: None,
+        started_at: at.to_string(),
+    }
 }
 
 /// The news that the operation these tests run ended well, at `at`.
@@ -136,37 +147,50 @@ impl Engine for Refuses {
     }
 }
 
-/// An operation log that takes every write but an operation's end at once,
-/// and holds that one until the test lets it through.
-struct HeldEnd {
+/// An operation log that takes every write at once but the one it holds,
+/// the start's or the end's, and holds that one until the test lets it
+/// through.
+struct Held {
     inner: InMemoryOperationStore,
+    holds: fn(&OperationStatus) -> bool,
     arrived: Notify,
     open: watch::Sender<bool>,
 }
 
-impl HeldEnd {
-    fn new() -> Self {
+impl Held {
+    fn new(holds: fn(&OperationStatus) -> bool) -> Self {
         Self {
             inner: InMemoryOperationStore::new(),
+            holds,
             arrived: Notify::new(),
             open: watch::channel(false).0,
         }
     }
 
-    /// Waits until the run has handed the log the write of its end.
-    async fn end_arrived(&self) {
-        tokio::time::timeout(Duration::from_secs(5), self.arrived.notified())
-            .await
-            .expect("the run reached the write of its end");
+    /// A log that holds the write of an operation's end.
+    fn end() -> Self {
+        Self::new(OperationStatus::is_finished)
     }
 
-    fn let_the_end_through(&self) {
+    /// A log that holds the write that says an operation is running.
+    fn start() -> Self {
+        Self::new(|status| *status == OperationStatus::Running)
+    }
+
+    /// Waits until the run has handed the log the write it holds.
+    async fn arrived(&self) {
+        tokio::time::timeout(Duration::from_secs(5), self.arrived.notified())
+            .await
+            .expect("the run reached the write the log holds");
+    }
+
+    fn let_it_through(&self) {
         self.open.send_replace(true);
     }
 }
 
 #[async_trait]
-impl OperationStore for HeldEnd {
+impl OperationStore for Held {
     async fn fail_unfinished(
         &self,
         reason: &domain::execution::FailureReason,
@@ -179,7 +203,7 @@ impl OperationStore for HeldEnd {
         operation: &Operation,
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
-        if operation.status().is_finished() {
+        if (self.holds)(operation.status()) {
             self.arrived.notify_one();
             let _ = self.open.subscribe().wait_for(|open| *open).await;
         }
@@ -228,14 +252,14 @@ async fn run_heard_by_a_page(engine: impl Engine + 'static) -> (Finished, Vec<Ui
     (ended, heard_so_far(&mut page))
 }
 
-/// The issue's own test: a log that holds the write of the end, and a page
+/// #134's own test: a log that holds the write of the end, and a page
 /// that must hear nothing of the end until that write is let through. The
 /// clock is one nobody moves, so the run never gives up on the write.
 #[tokio::test]
 async fn the_end_is_not_announced_until_the_log_has_it() {
     let bus = Arc::new(BroadcastEventBus::new());
     let mut page = bus.subscribe().await;
-    let store = Arc::new(HeldEnd::new());
+    let store = Arc::new(Held::end());
     let use_case = RunOperation::new(
         Arc::new(Plays::then_ends(vec![started(), succeeded()])),
         Arc::new(FakeClock::new(t(0))),
@@ -248,10 +272,10 @@ async fn the_end_is_not_announced_until_the_log_has_it() {
             .await
     });
 
-    store.end_arrived().await;
+    store.arrived().await;
     assert_eq!(
         heard_so_far(&mut page),
-        [],
+        [started_at(t(0))],
         "the page heard the end before the log had it"
     );
     assert_eq!(
@@ -260,7 +284,7 @@ async fn the_end_is_not_announced_until_the_log_has_it() {
         "the log has had the end"
     );
 
-    store.let_the_end_through();
+    store.let_it_through();
     let ended = tokio::time::timeout(Duration::from_secs(5), running)
         .await
         .expect("the run ended once the log took its end")
@@ -271,6 +295,148 @@ async fn the_end_is_not_announced_until_the_log_has_it() {
         store.get(id()).await.unwrap().unwrap().record.status,
         OperationStatus::Succeeded,
         "the page heard the end, and the log has it"
+    );
+}
+
+/// #305's own test: a log that holds the write that says the operation is
+/// running, and a page that must hear nothing of the start until that write
+/// is let through. A page that read the history on hearing of the start
+/// earlier could find the operation still queued, and, its events stream
+/// open only after the start, never learn it ran.
+#[tokio::test]
+async fn the_start_is_not_announced_until_the_log_has_it() {
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let store = Arc::new(Held::start());
+    let use_case = RunOperation::new(
+        Arc::new(Plays::then_waits(vec![started()])),
+        Arc::new(FakeClock::new(t(0))),
+        store.clone(),
+    )
+    .with_events(bus);
+    let _running = tokio::spawn(async move {
+        use_case
+            .run(id(), Trigger::Manual, job(None), future::pending())
+            .await
+    });
+
+    store.arrived().await;
+    assert_eq!(
+        heard_so_far(&mut page),
+        [],
+        "the page heard the start before the log had it"
+    );
+    assert_eq!(
+        store.get(id()).await.unwrap().unwrap().record.status,
+        OperationStatus::Queued,
+        "the log has had the start"
+    );
+
+    store.let_it_through();
+    let news = tokio::time::timeout(Duration::from_secs(5), page.next())
+        .await
+        .expect("the page hears the start once the log has it");
+    assert_eq!(news, Some(started_at(t(0))));
+    assert_eq!(
+        store.get(id()).await.unwrap().unwrap().record.status,
+        OperationStatus::Running,
+        "the page heard the start, and the log has it"
+    );
+}
+
+/// A log that refuses the write that says the operation is running doesn't
+/// keep the page from hearing it started: the history then shows it queued,
+/// as an end the log refused shows it running, and the page never goes back
+/// on a status it heard.
+#[tokio::test]
+async fn a_start_the_log_refuses_is_announced_all_the_same() {
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let store = Arc::new(RefusesTheStart(InMemoryOperationStore::new()));
+    let use_case = RunOperation::new(
+        Arc::new(Plays::then_waits(vec![started()])),
+        Arc::new(FakeClock::new(t(0))),
+        store,
+    )
+    .with_events(bus);
+    let _running = tokio::spawn(async move {
+        use_case
+            .run(id(), Trigger::Manual, job(None), future::pending())
+            .await
+    });
+    let news = tokio::time::timeout(Duration::from_secs(5), page.next())
+        .await
+        .expect("the page hears the start");
+    assert_eq!(news, Some(started_at(t(0))));
+}
+
+/// An operation log that refuses the write that says an operation is
+/// running, and takes every other.
+struct RefusesTheStart(InMemoryOperationStore);
+
+#[async_trait]
+impl OperationStore for RefusesTheStart {
+    async fn fail_unfinished(
+        &self,
+        reason: &domain::execution::FailureReason,
+    ) -> Result<u64, StoreError> {
+        self.0.fail_unfinished(reason).await
+    }
+
+    async fn save(
+        &self,
+        operation: &Operation,
+        result: Option<&EngineResult>,
+    ) -> Result<(), StoreError> {
+        if *operation.status() == OperationStatus::Running {
+            return Err(StoreError::Unavailable {
+                detail: "disk I/O error".to_owned(),
+            });
+        }
+        self.0.save(operation, result).await
+    }
+
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        self.0.try_start(operation).await
+    }
+
+    async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
+        self.0.get(id).await
+    }
+
+    async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+        self.0.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
+        self.0.ever_succeeded(plan).await
+    }
+}
+
+/// A job whose access names no repository ID, as a first job's does (its
+/// entry records none yet, decision 57): the page still hears which
+/// repository it started on, the one the engine says it opened.
+#[tokio::test]
+async fn a_first_jobs_start_names_the_repository_the_engine_opened() {
+    let opened = "b".repeat(64);
+    let (_, news) = run_heard_by_a_page(Plays::then_ends(vec![
+        EngineEvent::Started {
+            index_read_at: t(0),
+            repository: Some(domain::RepositoryId::parse(&opened).unwrap()),
+        },
+        succeeded(),
+    ]))
+    .await;
+    assert_eq!(
+        news,
+        [
+            UiEvent::OperationStarted {
+                operation: ID.to_owned(),
+                repository: Some(opened),
+                started_at: t(0).to_string(),
+            },
+            succeeded_at(t(0)),
+        ]
     );
 }
 
@@ -374,6 +540,7 @@ struct NotesNews {
 impl EventBus for NotesNews {
     async fn publish(&self, event: UiEvent) {
         match event {
+            UiEvent::OperationStarted { .. } => self.journal.note("announce started"),
             UiEvent::OperationSucceeded { .. } => self.journal.note("announce succeeded"),
             UiEvent::OperationFailed { .. } => self.journal.note("announce failed"),
             _ => {}
@@ -440,6 +607,7 @@ async fn a_success_is_announced_after_its_hooks_and_the_write_of_its_end() {
             "write queued",
             "hook before",
             "write running",
+            "announce started",
             "hook after",
             "hook finally",
             "write succeeded",
@@ -456,6 +624,7 @@ async fn a_failure_is_announced_after_its_hooks_and_the_write_of_its_end() {
             "write queued",
             "hook before",
             "write running",
+            "announce started",
             "hook failed",
             "hook finally",
             "write failed",
@@ -517,7 +686,13 @@ async fn an_engine_that_stops_without_a_result_is_announced_as_exited() {
             reason: FailureReason::EngineExited { exit_code: None }
         }
     );
-    assert_eq!(news, [failed_at(t(0), ErrorCode::EngineExited, vec![])]);
+    assert_eq!(
+        news,
+        [
+            started_at(t(0)),
+            failed_at(t(0), ErrorCode::EngineExited, vec![])
+        ]
+    );
 }
 
 #[tokio::test]
@@ -553,7 +728,11 @@ async fn a_run_stopped_by_its_deadline_is_announced_as_failed() {
     for _ in 0..10 {
         tokio::task::yield_now().await;
     }
-    assert_eq!(heard_so_far(&mut page), [], "the run is still working");
+    assert_eq!(
+        heard_so_far(&mut page),
+        [started_at(t(0))],
+        "the run is still working"
+    );
 
     clock.advance(budget);
     let ended = tokio::time::timeout(Duration::from_secs(5), running)

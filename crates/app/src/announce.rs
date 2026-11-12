@@ -1,14 +1,40 @@
-//! What a page is told when an operation ends (technical design §4.4).
+//! What a page is told when an operation starts and when it ends (technical
+//! design §4.4).
 //!
-//! The run that records an operation tells of its end once, after its last
-//! write to the log is done, so a page that reads the history on the news
-//! finds the end there. The engine's own end is no news: only the run knows
-//! when the ending hooks have run and the log has the end.
+//! The run that records an operation tells of each once the log has it: its
+//! start after the write that says it is running, its end after its last
+//! write, so a page that reads the history on the news finds it there. The
+//! engine's own start and end are no news: only the run knows when the log
+//! has them.
 
 use api::{ErrorCode, MsgArg, UiEvent};
+use domain::RepositoryId;
 use domain::execution::{FailureReason, Operation, OperationStatus};
 
 use crate::ports::EventBus;
+
+/// The news that `operation` started: what is running, on which repository,
+/// and when it started, as the log has it. `opened` is the repository the
+/// engine says it opened, for a job that knew no ID when it was made (a
+/// first job, decision 57). `None` for an operation that is not running.
+pub fn start_of(operation: &Operation, opened: Option<&RepositoryId>) -> Option<UiEvent> {
+    let _ = (operation, opened);
+    todo!()
+}
+
+/// Tells `events`, when a run has a bus, that `operation` started, as
+/// [`start_of`] has it. A run calls it once, after the write that says the
+/// operation is running: whether the log took that write, refused it or was
+/// given up on after [`SAVE_BOUND`](crate::log_write::SAVE_BOUND), the news
+/// goes out.
+pub(crate) async fn announce_start(
+    events: Option<&dyn EventBus>,
+    operation: &Operation,
+    opened: Option<&RepositoryId>,
+) {
+    let _ = (events, operation, opened);
+    todo!()
+}
 
 /// The news that `operation` ended: a success or a failure, with the time it
 /// finished. `None` for an operation that has not ended, and for a cancelled
@@ -185,6 +211,63 @@ mod tests {
     fn an_operation_that_has_not_ended_is_not_announced() {
         assert_eq!(end_of(&queued()), None);
         assert_eq!(end_of(&running()), None);
+    }
+
+    fn repository(digit: &str) -> RepositoryId {
+        RepositoryId::parse(&digit.repeat(64)).expect("a repository ID")
+    }
+
+    #[test]
+    fn a_start_is_announced_with_the_time_the_log_has() {
+        assert_eq!(
+            start_of(&running(), None),
+            Some(UiEvent::OperationStarted {
+                operation: ID.to_owned(),
+                repository: None,
+                started_at: t(1).to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_start_names_the_repository_the_job_knew_before_the_one_the_engine_opened() {
+        let mut operation = Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            OperationKind::Backup,
+            Trigger::Manual,
+            Target {
+                plan: None,
+                repository: Some(repository("a")),
+            },
+            t(0),
+        );
+        operation.start(t(1)).expect("a queued operation starts");
+        let Some(UiEvent::OperationStarted {
+            repository: named, ..
+        }) = start_of(&operation, Some(&repository("b")))
+        else {
+            panic!("a running operation is announced");
+        };
+        assert_eq!(named, Some("a".repeat(64)));
+    }
+
+    #[test]
+    fn a_first_jobs_start_names_the_repository_the_engine_opened() {
+        let Some(UiEvent::OperationStarted {
+            repository: named, ..
+        }) = start_of(&running(), Some(&repository("b")))
+        else {
+            panic!("a running operation is announced");
+        };
+        assert_eq!(named, Some("b".repeat(64)));
+    }
+
+    #[test]
+    fn only_a_running_operation_is_announced_as_started() {
+        assert_eq!(start_of(&queued(), None), None);
+        let mut ended = running();
+        ended.succeed(t(60)).expect("a running operation ends");
+        assert_eq!(start_of(&ended, None), None);
     }
 
     #[test]
