@@ -196,10 +196,10 @@ Feature: Secret references in a repository's settings
       And the field is invalid because it has more than 16 references
 
     Scenario: A field with as many references as the limit is resolved
-      Given the environment variable "DEMO_X" is "a"
+      Given the environment variable "DEMO_X" is "/a"
       And the repository is 16 references to the variable "DEMO_X"
       When the repository is resolved
-      Then the resolved repository is "aaaaaaaaaaaaaaaa"
+      Then the resolved repository is "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"
 
     Scenario: A field longer than the limit fails
       Given the repository is 65537 bytes of text
@@ -215,8 +215,8 @@ Feature: Secret references in a repository's settings
   Rule: A field never expands to more than 64 KiB
 
     Scenario: A reference that fills the limit is resolved
-      Given the environment variable "DEMO_BIG" holds 65536 bytes of text
-      And the repository is "${DEMO_BIG}"
+      Given the environment variable "DEMO_BIG" holds 65535 bytes of text
+      And the repository is "/${DEMO_BIG}"
       When the repository is resolved
       Then the resolved repository has 65536 bytes
 

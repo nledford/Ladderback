@@ -84,6 +84,11 @@ fn filler(bytes: usize) -> String {
     "a".repeat(bytes)
 }
 
+/// A location of exactly `bytes` bytes: a full path, which a job takes.
+fn location_filler(bytes: usize) -> String {
+    format!("/{}", filler(bytes.saturating_sub(1)))
+}
+
 /// Bytes that aren't UTF-8.
 const NOT_TEXT: &[u8] = &[0xff, 0xfe, 0xfd];
 
@@ -259,7 +264,7 @@ fn repository_is(agent: &mut Agent, repository: String) {
 
 #[given(expr = "the repository is {int} bytes of text")]
 fn repository_is_bytes(agent: &mut Agent, bytes: usize) {
-    agent.secrets.settings.repository = filler(bytes);
+    agent.secrets.settings.repository = location_filler(bytes);
 }
 
 #[given(expr = "the repository is {int} references to the variable {string}")]
@@ -269,7 +274,7 @@ fn repository_is_references(agent: &mut Agent, count: usize, name: String) {
 
 #[given(expr = "the repository is {int} bytes of text followed by {string}")]
 fn repository_is_bytes_then(agent: &mut Agent, bytes: usize, rest: String) {
-    agent.secrets.settings.repository = filler(bytes) + &rest;
+    agent.secrets.settings.repository = location_filler(bytes) + &rest;
 }
 
 /// `count` environment variables `DEMO_SECRET_1` on, each a different

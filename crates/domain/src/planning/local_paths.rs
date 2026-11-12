@@ -6,8 +6,8 @@
 //! how the daemon was started.
 //!
 //! A field is judged by what is known of it before a job resolves its
-//! `${…}` references: the text up to the first one. What a reference holds
-//! is checked by nothing here.
+//! `${…}` references: the text up to the first one. A location a job has
+//! resolved is judged whole, by [`is_relative_location`].
 
 use crate::secrets::{CommandLine, Part, SecretRef, Template};
 
@@ -78,8 +78,8 @@ impl RepositorySettings {
 /// reference replaced by what it held), names a folder on this machine by a
 /// relative path, read as [`RepositorySettings::relative_path`] reads a
 /// location all of which is known.
-pub fn is_relative_location(_location: &str) -> bool {
-    todo!()
+pub fn is_relative_location(location: &str) -> bool {
+    read_location(location, true).is_some_and(|location| location.relative)
 }
 
 /// Whether a program is named by a relative path: with a `/` in it, and not
@@ -150,11 +150,16 @@ struct Location {
 /// when rustic refuses the scheme.
 fn location(value: &str) -> Option<Location> {
     let Known { head, whole } = Known::of(value)?;
+    read_location(&head, whole)
+}
+
+/// [`location`], from `head`, what is known of it, and whether that is all.
+fn read_location(head: &str, whole: bool) -> Option<Location> {
     let Some((scheme, rest)) = head.split_once(':') else {
         // A `/` before any `:` leaves no scheme a reference could finish.
         return (whole || head.contains('/')).then(|| Location {
             backend: Backend::Local,
-            relative: starts_relative(&head, whole),
+            relative: starts_relative(head, whole),
         });
     };
     let (backend, relative) = match scheme {

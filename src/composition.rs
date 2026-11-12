@@ -1806,7 +1806,7 @@ async fn secret_refusal(
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
-        Cause::RelativePath => todo!(),
+        Cause::RelativePath => refusal(ErrorCode::RepositoryPathRelative, vec![field()], None),
         Cause::Invalid(template) => {
             let mut args = vec![field()];
             if let Some(at) = template_error_place(template) {

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use domain::RepositoryAlias;
-use domain::planning::{RepositoryConfig, RepositorySettings};
+use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
     MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Reference,
     SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError, TooMuchToMask,
@@ -260,6 +260,20 @@ fn refuse_supplied_prefix(
     Ok(())
 }
 
+/// A location a reference decides is judged only once it is expanded: one
+/// that names a folder on this machine by a relative path would be read from
+/// the daemon's working directory (#247). The refusal holds nothing of the
+/// expansion, which may be a secret.
+fn refuse_relative_location(field: Field, expanded: &str) -> Result<(), ResolveError> {
+    if is_relative_location(expanded) {
+        return Err(ResolveError {
+            field,
+            cause: Cause::RelativePath,
+        });
+    }
+    Ok(())
+}
+
 /// The secrets counted are past what a redactor masks.
 fn too_much_to_mask(_: TooMuchToMask) -> Cause {
     Cause::TooMuchToMask {
@@ -299,6 +313,7 @@ impl Run<'_> {
     async fn location(&mut self, field: Field, text: &str) -> Result<String, ResolveError> {
         let expanded = self.expand(field.clone(), text).await?;
         refuse_supplied_prefix(field.clone(), text, &expanded)?;
+        refuse_relative_location(field.clone(), &expanded)?;
         self.masked
             .location(&expanded)
             .map_err(|too_much| ResolveError {
