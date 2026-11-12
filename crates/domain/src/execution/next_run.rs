@@ -9,11 +9,11 @@
 
 use super::Trigger;
 use crate::planning::{NoNextRun, Schedule};
-use crate::{TimeZone, Timestamp};
+use crate::{SignedDuration, TimeZone, Timestamp};
 
 /// A number the `Random` port drew, uniformly over every `u64`. A run's
 /// jitter is the same share of the stretch it may be spread over as the
-/// draw is of `u64::MAX`.
+/// draw is of 2^64, the count of every `u64`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RandomDraw(u64);
 
@@ -49,8 +49,9 @@ impl NextRun {
         started: Timestamp,
         draw: RandomDraw,
     ) -> Result<Self, NoNextRun> {
-        let _ = (schedule, zone, started, draw);
-        todo!()
+        let moment = schedule.cadence().moment_after(started, zone)?;
+        let stretch = stretch(schedule, zone, moment)?;
+        Self::scheduled(moment, share(stretch, draw))
     }
 
     /// What becomes of the `planned` run when the agent starts or wakes at
@@ -70,15 +71,62 @@ impl NextRun {
         now: Timestamp,
         draw: RandomDraw,
     ) -> Result<Self, NoNextRun> {
-        let _ = (schedule, zone, planned, now, draw);
-        todo!()
+        if planned <= now {
+            if schedule.catch_up() {
+                return Ok(Self {
+                    at: now,
+                    trigger: Trigger::CatchUp,
+                });
+            }
+            return Self::after(schedule, zone, now, draw);
+        }
+        let moment = schedule.cadence().moment_after(now, zone)?;
+        let stretch = stretch(schedule, zone, moment)?;
+        if planned.duration_since(moment) <= stretch {
+            return Self::scheduled(planned, SignedDuration::ZERO);
+        }
+        Self::scheduled(moment, share(stretch, draw))
     }
+
+    fn scheduled(moment: Timestamp, jitter: SignedDuration) -> Result<Self, NoNextRun> {
+        Ok(Self {
+            at: moment.checked_add(jitter).map_err(|_| NoNextRun)?,
+            trigger: Trigger::Schedule,
+        })
+    }
+}
+
+/// How far after `moment` jitter may put its run: the schedule's jitter,
+/// ending a millisecond before the schedule's following moment.
+fn stretch(
+    schedule: &Schedule,
+    zone: &TimeZone,
+    moment: Timestamp,
+) -> Result<SignedDuration, NoNextRun> {
+    let Some(jitter) = schedule.jitter() else {
+        return Ok(SignedDuration::ZERO);
+    };
+    let following = schedule.cadence().moment_after(moment, zone)?;
+    let before_following = moment
+        .duration_until(following)
+        .checked_sub(SignedDuration::from_millis(1))
+        .ok_or(NoNextRun)?;
+    Ok(jitter.min(before_following).max(SignedDuration::ZERO))
+}
+
+/// The share of `stretch`, in whole milliseconds from none to all of it,
+/// that `draw` is of every `u64`: the draw times the stretch's milliseconds
+/// plus one, shifted down by 64 bits, which is below the milliseconds plus
+/// one for every draw.
+fn share(stretch: SignedDuration, draw: RandomDraw) -> SignedDuration {
+    let millis = u64::try_from(stretch.as_millis()).unwrap_or(0);
+    let share = (u128::from(draw.0) * (u128::from(millis) + 1)) >> 64;
+    SignedDuration::from_millis(i64::try_from(share).unwrap_or(0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SignedDuration;
     use crate::planning::{CronExpression, Interval};
 
     const MIDDLE: RandomDraw = RandomDraw::new(1 << 63);

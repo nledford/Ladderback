@@ -3,12 +3,12 @@
 //! convenient.
 
 use croner::parser::{CronParser, Seconds, Year};
-use jiff::SignedDuration;
-use jiff::Timestamp;
-use jiff::tz::TimeZone;
+use jiff::civil::DateTime;
+use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
+use jiff::{SignedDuration, Timestamp};
 
 use super::duration::within_limits;
-use super::{InvalidValue, MAX_DURATION, ValueKind};
+use super::{InvalidValue, MAX_DURATION, ValueKind, format_duration};
 
 /// The most bytes a cron expression takes. Every value of every field, listed
 /// one by one, fits in 360; the cap bounds what the parser is handed.
@@ -33,12 +33,7 @@ impl CronExpression {
         if text.len() > MAX_CRON_BYTES {
             return Err(refused());
         }
-        let cron = CronParser::builder()
-            .seconds(Seconds::Disallowed)
-            .year(Year::Disallowed)
-            .build()
-            .parse(text)
-            .map_err(|_| refused())?;
+        let cron = parser().parse(text).map_err(|_| refused())?;
         // A leap year, so that `0 0 29 2 *` has a next moment; the search
         // gives up at a year of croner's choosing, and that is a refusal.
         let from = jiff::civil::date(2024, 1, 1).at(0, 0, 0, 0);
@@ -58,9 +53,78 @@ impl CronExpression {
     /// zone repeats, as when the clocks go back, runs once, the first time
     /// round.
     pub fn next_after(&self, after: Timestamp, zone: &TimeZone) -> Result<Timestamp, NoNextRun> {
-        let _ = (after, zone);
-        todo!()
+        // The expression was read once already; reading it again can't fail.
+        let cron = parser().parse(&self.0).map_err(|_| NoNextRun)?;
+        // croner walks the plain wall clock, which knows no time zone, and
+        // the moment it finds is given its instant here. That instant never
+        // comes before the instant of an earlier moment. Every moment up to
+        // `after`'s own wall-clock time has an instant at or before `after`,
+        // and so, when `after` is the second time round of a stretch the
+        // clocks repeat, does every moment left in that stretch: they ran the
+        // first time round, so the search starts where the stretch ends.
+        let wall = zone.to_datetime(after);
+        let moment = match repeat_end(zone, after, wall)? {
+            Some(end) => cron.find_next_occurrence(&end, true),
+            None => cron.find_next_occurrence(&wall, false),
+        }
+        .map_err(|_| NoNextRun)?;
+        first_instant(zone, moment)
     }
+}
+
+/// The parser of every cron expression: five fields, as [`CronExpression`]
+/// says.
+fn parser() -> CronParser {
+    CronParser::builder()
+        .seconds(Seconds::Disallowed)
+        .year(Year::Disallowed)
+        .build()
+}
+
+/// The instant a moment at the wall-clock time `moment` runs at in `zone`:
+/// its only instant; the first of two, when the clocks go back and repeat
+/// it; and the instant they jump, when they go forward past it.
+fn first_instant(zone: &TimeZone, moment: DateTime) -> Result<Timestamp, NoNextRun> {
+    let ambiguous = zone.to_ambiguous_timestamp(moment);
+    // For a skipped time, the earlier instant reads it with the offset from
+    // after the jump, which puts it before the jump.
+    let earlier = ambiguous.earlier().map_err(|_| NoNextRun)?;
+    match ambiguous.offset() {
+        AmbiguousOffset::Gap { after, .. } => change_to(zone, earlier, after),
+        AmbiguousOffset::Unambiguous { .. } | AmbiguousOffset::Fold { .. } => Ok(earlier),
+    }
+}
+
+/// Where the wall-clock stretch the clocks repeat ends, when `after`, at
+/// `wall` on the wall clock, is in that stretch the second time round.
+fn repeat_end(
+    zone: &TimeZone,
+    after: Timestamp,
+    wall: DateTime,
+) -> Result<Option<DateTime>, NoNextRun> {
+    let ambiguous = zone.to_ambiguous_timestamp(wall);
+    let AmbiguousOffset::Fold {
+        before,
+        after: back,
+    } = ambiguous.offset()
+    else {
+        return Ok(None);
+    };
+    let first_time_round = ambiguous.earlier().map_err(|_| NoNextRun)?;
+    if first_time_round == after {
+        return Ok(None);
+    }
+    // The stretch ends at the wall-clock time the clocks went back from.
+    let change = change_to(zone, first_time_round, back)?;
+    Ok(Some(before.to_datetime(change)))
+}
+
+/// The first change of the clocks after `instant` that sets them to `offset`.
+fn change_to(zone: &TimeZone, instant: Timestamp, offset: Offset) -> Result<Timestamp, NoNextRun> {
+    zone.following(instant)
+        .find(|change| change.offset() == offset)
+        .map(|change| change.timestamp())
+        .ok_or(NoNextRun)
 }
 
 /// The shortest interval a plan may run at: 1 minute, a cron expression's
@@ -77,8 +141,14 @@ pub struct Interval(SignedDuration);
 
 impl Interval {
     pub fn new(interval: SignedDuration) -> Result<Self, InvalidValue> {
-        let _ = (interval, MAX_DURATION);
-        todo!()
+        if interval < MIN_INTERVAL || interval > MAX_DURATION {
+            Err(InvalidValue::new(
+                ValueKind::Interval,
+                format_duration(interval),
+            ))
+        } else {
+            Ok(Self(interval))
+        }
     }
 
     pub fn get(self) -> SignedDuration {
@@ -110,8 +180,10 @@ impl Cadence {
     /// The first moment strictly after `after`: a cron expression's next
     /// moment on the wall clock of `zone`, or the interval after `after`.
     pub fn moment_after(&self, after: Timestamp, zone: &TimeZone) -> Result<Timestamp, NoNextRun> {
-        let _ = (after, zone);
-        todo!()
+        match self {
+            Self::Cron(cron) => cron.next_after(after, zone),
+            Self::Every(interval) => after.checked_add(interval.get()).map_err(|_| NoNextRun),
+        }
     }
 }
 
