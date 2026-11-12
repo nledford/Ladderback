@@ -57,7 +57,7 @@ impl Daemon {
             Some(rust_log) => command.env("RUST_LOG", rust_log),
             None => command.env_remove("RUST_LOG"),
         };
-        let mut child = command.spawn().expect("ladderback serve started");
+        let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback serve started");
         let stderr = child.stderr.take().expect("a piped stderr");
         // A thread reads the lines, so that waiting for one can have a limit.
         let (sender, receiver) = mpsc::channel();
@@ -105,10 +105,10 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         // SIGTERM is what systemd and launchd send: the daemon stops serving
         // and exits. `kill` sends it without a crate of its own for that.
-        let asked = Command::new("kill")
-            .arg("-TERM")
-            .arg(self.child.id().to_string())
-            .status()
+        let mut kill = Command::new("kill");
+        kill.arg("-TERM").arg(self.child.id().to_string());
+        let asked = spawn_gate::hold(|| kill.spawn())
+            .and_then(|mut kill| kill.wait())
             .is_ok_and(|status| status.success());
         let deadline = Instant::now() + Duration::from_secs(5);
         while asked && Instant::now() < deadline {

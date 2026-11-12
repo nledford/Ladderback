@@ -319,6 +319,8 @@ mod tests {
         assert_eq!(posix_tag(&padded(MAX_NAME_LEN + 1)), None);
     }
 
+    // A process start: through the spawn gate, which wasm has no use for.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_process_environment_is_read_through_the_four_variables() {
         // The test changes no variable of this process. It runs itself again
@@ -334,14 +336,19 @@ mod tests {
             assert_eq!(read.lang.as_deref(), Some("en_GB"));
             return;
         }
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", NAME, "--nocapture"])
+        let mut copy = std::process::Command::new(std::env::current_exe().unwrap());
+        copy.args(["--exact", NAME, "--nocapture"])
             .env(IN_COPY, "1")
             .env("LANGUAGE", "fr:de")
             .env("LC_ALL", "fr_FR.UTF-8")
             .env("LC_MESSAGES", "de_DE")
             .env("LANG", "en_GB")
-            .output()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let output = spawn_gate::hold(|| copy.spawn())
+            .unwrap()
+            .wait_with_output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);

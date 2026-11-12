@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 app.workspace = true
 domain.workspace = true
+spawn-gate.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
 
@@ -20,6 +21,7 @@ nix = { workspace = true, features = ["signal"] }
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 tempfile.workspace = true
+testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 uuid.workspace = true
 

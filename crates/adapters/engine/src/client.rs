@@ -253,8 +253,12 @@ impl Engine for WorkerEngine {
         // The worker leads a process group of its own: see `signal_group`.
         #[cfg(unix)]
         command.process_group(0);
-        let mut child = command
-            .spawn()
+        // Through the spawn gate: no other start inherits the worker's
+        // pipes, its stdin above all, and it inherits none of theirs. Waited
+        // for on the blocking pool: a start in flight may stall (decision 58).
+        let mut child = spawn_gate::hold_blocking(move || command.spawn())
+            .await
+            .and_then(std::convert::identity)
             .map_err(|e| failed_to_start(&self.program, e))?;
         let Some(mut stdin) = child.stdin.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdin"));
@@ -2010,6 +2014,58 @@ mod tests {
             }))
         );
         assert!(events.next().await.is_none());
+    }
+
+    /// A worker inherits no descriptor that another start in the daemon has
+    /// open: it starts through the spawn gate, so it waits while a pipe
+    /// that is not yet close-on-exec is open, as another worker's, a hook's
+    /// or a password command's pipes are for a moment where the platform
+    /// has no `pipe2` (#234). A worker that held another's stdin would keep
+    /// it from the end of its job until it ended itself. The script exits 4
+    /// if it inherited a descriptor, 3 if not.
+    #[tokio::test]
+    async fn a_worker_inherits_no_pipe_another_start_has_open() {
+        let pipe = testkit::inheritable::InheritablePipe::open();
+        let [read, write] = pipe.numbers();
+        // No pipeline and no `$(…)`: either makes a pipe the test could find.
+        let script = concat!(
+            "found=no; for n; do if [ -e /dev/fd/$n ]; then found=yes; fi; done\n",
+            "cat >/dev/null; if [ $found = yes ]; then exit 4; fi; exit 3"
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script, "sh", &read, &write]);
+        let RunningJob { mut events, .. } = run(&engine).await;
+        assert_eq!(
+            events.next().await,
+            Some(EngineEvent::Failed(FailureReason::EngineExited {
+                exit_code: Some(3)
+            }))
+        );
+    }
+
+    /// A worker waits for the spawn gate off the runtime's threads: a start
+    /// whose `exec` stalls holds the gate, and a run that waited for it on a
+    /// runtime thread would stop every other task of that thread meanwhile.
+    /// Here the gate is let go by a task of the same one-thread runtime, so
+    /// it can be only while the run waits elsewhere.
+    #[tokio::test]
+    async fn a_worker_waits_for_the_gate_off_the_runtime() {
+        let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(2));
+        let engine = WorkerEngine::new("sh", ["-c", "cat >/dev/null; exit 3"]);
+        let let_go = async {
+            tokio::task::yield_now().await;
+            let _ = release.send(());
+        };
+        let (RunningJob { mut events, .. }, ()) = tokio::join!(run(&engine), let_go);
+        assert_eq!(
+            events.next().await,
+            Some(EngineEvent::Failed(FailureReason::EngineExited {
+                exit_code: Some(3)
+            }))
+        );
+        assert!(
+            stalled.join().unwrap(),
+            "the run waited for the gate on the runtime's thread"
+        );
     }
 
     #[tokio::test]

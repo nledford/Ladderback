@@ -90,7 +90,7 @@ fn spawn_daemon(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
     // Folders of its own, not the platform's, and not those of another daemon
     // this scenario started.
     testkit::daemon::isolate(&mut command, &scratch.join(format!("daemon-{started}")));
-    let mut child = command
+    command
         .arg("serve")
         .args(args)
         .stdin(Stdio::null())
@@ -100,9 +100,8 @@ fn spawn_daemon(scratch: &Path, args: &[&str]) -> (Child, Outcome) {
         // pseudolocale asks for: `C` makes the program ignore `LANGUAGE`,
         // which is removed too.
         .env("LC_ALL", "C")
-        .env_remove("LANGUAGE")
-        .spawn()
-        .expect("ladderback starts");
+        .env_remove("LANGUAGE");
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
     let began = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();

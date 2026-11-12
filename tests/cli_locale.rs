@@ -51,7 +51,7 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .to_string();
     let mut command = Command::new(LADDERBACK);
     testkit::daemon::isolate(&mut command, &scratch);
-    let mut child = command
+    command
         .args(["serve", "--listen", &address])
         // `LC_ALL`, `LC_MESSAGES` and `LANG` decide first: a `C` among them,
         // as a container sets, makes the program ignore `LANGUAGE`.
@@ -61,9 +61,8 @@ fn serve_on_a_taken_address(language: &str) -> Said {
         .env("LANGUAGE", language)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("ladderback serve started");
+        .stderr(Stdio::piped());
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback serve started");
     let deadline = Instant::now() + FAILS_WITHIN;
     let status = loop {
         match child.try_wait().expect("the daemon can be waited for") {
@@ -157,14 +156,18 @@ fn serve_with_a_bad_allowed_host(language: &str, name: &str) -> String {
     std::fs::create_dir_all(&scratch).expect("the scratch dir is made");
     let mut command = Command::new(LADDERBACK);
     testkit::daemon::isolate(&mut command, &scratch);
-    let output = command
+    command
         .args(["serve", "--listen", "127.0.0.1:0", "--allowed-host", name])
         .env_remove("LC_ALL")
         .env_remove("LC_MESSAGES")
         .env_remove("LANG")
         .env("LANGUAGE", language)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = spawn_gate::hold(|| command.spawn())
+        .expect("ladderback serve ran")
+        .wait_with_output()
         .expect("ladderback serve ran");
     let _ = std::fs::remove_dir_all(&scratch);
     assert_eq!(output.status.code(), Some(2), "a refused argument exits 2");

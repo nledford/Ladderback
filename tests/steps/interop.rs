@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
@@ -110,9 +110,11 @@ fn file_text(agent: &Agent, step: &Step) -> String {
 
 /// The write end of a pipe whose reader has gone: a stream nothing can be
 /// written to, as the standard output of a command in a pipeline whose next
-/// command has ended.
+/// command has ended. Made through the spawn gate, so no child another
+/// scenario starts meanwhile inherits the read end and keeps the pipe
+/// readable (#255, decision 58).
 pub(super) fn pipe_without_reader() -> std::io::PipeWriter {
-    let (reader, writer) = std::io::pipe().expect("a pipe");
+    let (reader, writer) = spawn_gate::hold(std::io::pipe).expect("a pipe");
     drop(reader);
     writer
 }
@@ -142,14 +144,24 @@ pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     for (name, value) in &agent.interop.env {
         command.env(name, value);
     }
-    // `output` leaves a stream it is given as it is.
+    // What `output` would do, but started through the spawn gate.
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if agent.interop.stdout_unread {
         command.stdout(pipe_without_reader());
     }
     if agent.interop.stderr_unread {
         command.stderr(pipe_without_reader());
     }
-    let output = blocking(move || command.output().expect("ladderback runs")).await;
+    let output = blocking(move || {
+        spawn_gate::hold(|| command.spawn())
+            .expect("ladderback runs")
+            .wait_with_output()
+            .expect("ladderback ran")
+    })
+    .await;
     agent.interop.ran = Some(Ran {
         success: output.status.success(),
         code: output.status.code(),
@@ -332,7 +344,16 @@ fn removes_config(agent: &mut Agent) {
 async fn rustic_dry_run(agent: &mut Agent) {
     // Placed right before rustic is run, so that a machine without it says
     // so, and everything before still ran.
-    let installed = blocking(|| Command::new("rustic").arg("--version").output().is_ok()).await;
+    let installed = blocking(|| {
+        let mut version = Command::new("rustic");
+        version
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        spawn_gate::hold(|| version.spawn()).is_ok_and(|mut child| child.wait().is_ok())
+    })
+    .await;
     if !installed {
         agent.interop.rustic_missing = true;
         testkit::skip!("rustic is not on the PATH");
@@ -355,7 +376,8 @@ async fn rustic_dry_run(agent: &mut Agent) {
     let work = work_dir(agent);
     let home = home_dir(agent);
     let output = blocking(move || {
-        Command::new("rustic")
+        let mut rustic = Command::new("rustic");
+        rustic
             .args(["-P"])
             .arg(&profile)
             .args(["forget", "--dry-run", "--json"])
@@ -364,8 +386,13 @@ async fn rustic_dry_run(agent: &mut Agent) {
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("HOME", home)
             .env("RUSTIC_NO_CACHE", "true")
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        spawn_gate::hold(|| rustic.spawn())
             .expect("rustic runs")
+            .wait_with_output()
+            .expect("rustic ran")
     })
     .await;
     assert!(

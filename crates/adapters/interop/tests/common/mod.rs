@@ -96,9 +96,10 @@ impl Scratch {
 /// rest of the process, which ends with the test run.
 #[cfg(unix)]
 pub fn fifo(path: &Path) -> Option<()> {
-    let made = std::process::Command::new("mkfifo")
-        .arg(path)
-        .status()
+    let mut mkfifo = std::process::Command::new("mkfifo");
+    mkfifo.arg(path);
+    let made = spawn_gate::hold(|| mkfifo.spawn())
+        .and_then(|mut child| child.wait())
         .is_ok_and(|status| status.success());
     if !made {
         return None;

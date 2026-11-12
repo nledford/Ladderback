@@ -1,6 +1,8 @@
 //! The hooks adapter: a [`HookRunner`] that spawns each hook's command as a
 //! process, without a shell, in a process group of its own, with the
-//! worker's scrubbed environment (components.md §4.1, security.md §10.2).
+//! worker's scrubbed environment (components.md §4.1, security.md §10.2),
+//! through the spawn gate (decision 58), so a hook inherits no other child's
+//! pipes and no other child inherits its pipes.
 //!
 //! A hook that outlives its timeout is stopped with SIGTERM to its group and
 //! SIGKILL after a grace, the sequence the password-command runner
@@ -179,7 +181,13 @@ impl ProcessHookRunner {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
-        let child = match command.spawn() {
+        // Through the spawn gate: no other start inherits the hook's pipes,
+        // and the hook inherits none of theirs. Waited for on the blocking
+        // pool: a start in flight may stall (decision 58).
+        let started = spawn_gate::hold_blocking(move || command.spawn())
+            .await
+            .and_then(std::convert::identity);
+        let child = match started {
             Ok(child) => child,
             // The platform's message names the reason; the command line
             // itself may hold a secret and never appears.
@@ -213,24 +221,28 @@ impl ProcessHookRunner {
         let outcome = captured
             .read(&mut running.child, &mut pipes, self.timeout)
             .await;
-        match outcome {
+        let status = match outcome {
             // The hook ran to its end and was reaped: what it left running
             // is its business, and the group is not signalled any more.
-            Ok(Some(status)) => (exit_status(status), captured),
+            Ok(Some(status)) => exit_status(status),
             Err(error) => {
                 running.kill_and_reap().await;
-                (
-                    HookStatus::NotStarted {
-                        detail: error.to_string(),
-                    },
-                    captured,
-                )
+                HookStatus::NotStarted {
+                    detail: error.to_string(),
+                }
             }
             Ok(None) => {
                 running.terminate_and_reap(&mut pipes).await;
-                (HookStatus::TimedOut, captured)
+                HookStatus::TimedOut
             }
-        }
+        };
+        // Let go through the spawn gate: a start in flight may have copied
+        // the read ends into a child that has not run `exec` yet, and holds
+        // the gate until it has. Once the gate is ours, no copy is left, so
+        // what a descendant writes from here on fails (decision 58). The
+        // pool lets go even if this call is dropped while it waits.
+        let _ = spawn_gate::hold_blocking(move || drop(pipes)).await;
+        (status, captured)
     }
 }
 

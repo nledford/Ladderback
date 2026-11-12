@@ -1670,6 +1670,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "spawn-gate",
  "tempfile",
  "testkit",
  "tokio",
@@ -2351,7 +2352,9 @@ dependencies = [
  "async-trait",
  "domain",
  "nix 0.31.3",
+ "spawn-gate",
  "tempfile",
+ "testkit",
  "tokio",
  "uuid",
 ]
@@ -2921,6 +2924,7 @@ dependencies = [
  "domain",
  "rustic_core",
  "serde",
+ "spawn-gate",
  "tempfile",
  "testkit",
  "tokio",
@@ -3174,6 +3178,7 @@ dependencies = [
  "l10n",
  "proc-macro2",
  "serde_json",
+ "spawn-gate",
  "unic-langid",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -3205,6 +3210,7 @@ dependencies = [
  "secrets",
  "serde",
  "serde_json",
+ "spawn-gate",
  "sqlx",
  "store",
  "tempfile",
@@ -5915,6 +5921,7 @@ dependencies = [
  "domain",
  "keyring",
  "nix 0.31.3",
+ "spawn-gate",
  "tempfile",
  "testkit",
  "tokio",
@@ -6343,6 +6350,13 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spawn-gate"
+version = "0.1.1"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
@@ -6811,6 +6825,10 @@ dependencies = [
 [[package]]
 name = "testkit"
 version = "0.1.1"
+dependencies = [
+ "nix 0.31.3",
+ "spawn-gate",
+]
 
 [[package]]
 name = "textwrap"

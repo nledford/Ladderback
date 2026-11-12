@@ -11,6 +11,7 @@ publish.workspace = true
 api.workspace = true
 app.workspace = true
 domain.workspace = true
+spawn-gate.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 futures.workspace = true

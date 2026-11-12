@@ -123,10 +123,9 @@ fn daemon_command(scratch: &Path, options: &str, env: &[(String, String)]) -> Co
 fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]) -> String {
     let log_path = scratch.join("serve-output.log");
     let log = File::create(&log_path).expect("a log file for the daemon");
-    let mut child = daemon_command(scratch, options, env)
-        .stderr(log)
-        .spawn()
-        .expect("ladderback starts");
+    let mut command = daemon_command(scratch, options, env);
+    command.stderr(log);
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
     let began = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();
@@ -156,10 +155,9 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
 /// can be written to, and waits for it to end by itself. Runs on a blocking
 /// thread: see [`blocking`].
 fn serve_without_a_reader(scratch: &Path, options: &str, env: &[(String, String)]) -> Ran {
-    let mut child = daemon_command(scratch, options, env)
-        .stderr(pipe_without_reader())
-        .spawn()
-        .expect("ladderback starts");
+    let mut command = daemon_command(scratch, options, env);
+    command.stderr(pipe_without_reader());
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
     let began = Instant::now();
     loop {
         if let Some(status) = child.try_wait().expect("the daemon's status") {

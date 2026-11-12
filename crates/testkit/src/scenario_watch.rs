@@ -171,7 +171,7 @@ impl Running {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     use super::*;
 
@@ -260,14 +260,19 @@ mod tests {
             return;
         }
         let begun = Instant::now();
-        let child = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "scenario_watch::tests::a_scenario_over_the_limit_stops_the_process_and_is_named",
-                "--nocapture",
-            ])
-            .env(HUNG_RUN_ENV, "1")
-            .output()
+        let mut hung = Command::new(std::env::current_exe().unwrap());
+        hung.args([
+            "--exact",
+            "scenario_watch::tests::a_scenario_over_the_limit_stops_the_process_and_is_named",
+            "--nocapture",
+        ])
+        .env(HUNG_RUN_ENV, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        let child = spawn_gate::hold(|| hung.spawn())
+            .unwrap()
+            .wait_with_output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&child.stderr);
         assert_eq!(child.status.code(), Some(1), "stderr: {stderr}");

@@ -8,7 +8,7 @@ root := justfile_directory()
 # The crates mutation testing gates (technical design §13.1). Add a crate here
 # when it lands, so `mutants` and `mutants-all` both cover it; one added later
 # is mutated whole by the `mutants` run of the pull request that adds it.
-mutants_packages := "--package domain --package app --package api --package l10n --package config-adapter --package web --package hooks --package interop --package secrets"
+mutants_packages := "--package domain --package app --package api --package l10n --package config-adapter --package web --package hooks --package interop --package secrets --package spawn-gate"
 
 # The cargo flags a release build is made with (technical design §12.1): the
 # development pseudolocales and the component gallery stay out. `architecture`

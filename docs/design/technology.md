@@ -44,6 +44,8 @@ ladderback/
 │  │                          # (feature "fakes"); tests/acceptance.rs runs non-@e2e scenarios
 │  ├─ api/                    # wasm-safe DTOs: REST, UiEvent, sync protocol (the published language)
 │  ├─ testkit/                # test support, a dev-dependency only: `skip!`, `daemon::isolate` (§13.5)
+│  ├─ spawn-gate/             # the spawn gate: one child process starts at a time (decision 58); shared by every
+│  │                          # adapter that starts a child, and by the @e2e runner
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
 │  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,
 │  │                          # browser-intl, pseudo); build.rs generates message IDs from en-US
