@@ -23,6 +23,7 @@ pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, NotRecorded, Viol
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
+pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
@@ -75,6 +76,20 @@ pub enum ValueKind {
     Options,
     /// The program of a hook: a name looked up on `PATH`, or an absolute path.
     HookProgram,
+    /// A notification rule's event: not one of the names §11 lists that the
+    /// agent emits, or a rule that names none.
+    NotificationEvent,
+    /// The name of a notification channel or rule: not a slug.
+    NotificationName,
+    /// A channel's `kind`: not `webhook`, `ntfy` nor `healthchecks`.
+    ChannelKind,
+    /// A rule's template: empty, too long, a placeholder not on the list, or
+    /// a brace left open. The template's text is never kept: it may hold
+    /// anything.
+    NotificationTemplate,
+    /// A channel's Basic `username`: empty, too long, or holding a `:` or a
+    /// control character.
+    ChannelUsername,
 }
 
 /// A value the model refuses. `value` is the text as it was written, except

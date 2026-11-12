@@ -480,6 +480,7 @@ async fn save(
         repositories,
         loaded.plans().to_vec(),
     )
+    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
     .map_err(unwritable)?;
     config.save(&saved).await.map_err(RepositoryError::Config)
 }
@@ -509,6 +510,7 @@ async fn record(
         repositories,
         loaded.plans().to_vec(),
     )
+    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
     .map_err(unwritable)?;
     config
         .save(&recorded)
@@ -992,6 +994,80 @@ mod tests {
         );
     }
 
+    /// The rules and channels of a configuration: one channel, and one rule
+    /// that sends it every failed backup.
+    #[allow(clippy::panic)]
+    fn notifications() -> domain::notifications::Notifications {
+        use domain::notifications::{
+            Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
+        };
+        let ops = ChannelName::parse("ops").unwrap_or_else(|e| panic!("a name: {e:?}"));
+        let channel = Channel::new(
+            ChannelKind::Ntfy,
+            SecretRef::Env("DEMO_TOPIC_URL".to_owned()),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("a channel: {e:?}"));
+        let rule = Rule::new(
+            [EventKind::BackupFailed].into(),
+            ops.clone(),
+            Default::default(),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("a rule: {e:?}"));
+        let name = RuleName::parse("failures").unwrap_or_else(|e| panic!("a name: {e:?}"));
+        Notifications::new(
+            BTreeMap::from([(ops, channel)]),
+            BTreeMap::from([(name, rule)]),
+        )
+        .unwrap_or_else(|e| panic!("rules that name their channel: {e:?}"))
+    }
+
+    /// Gives the configuration in `config` the rules and channels of
+    /// [`notifications`].
+    #[allow(clippy::panic)]
+    async fn with_notifications(config: &InMemoryConfigStore) {
+        let loaded = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        let with = loaded
+            .with_notifications(notifications())
+            .unwrap_or_else(|e| panic!("rules for no plan in particular: {e:?}"));
+        config
+            .save(&with)
+            .await
+            .unwrap_or_else(|e| panic!("saved: {e:?}"));
+    }
+
+    #[tokio::test]
+    async fn connecting_keeps_the_notification_rules_and_channels() {
+        let engine = Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        });
+        let config = Arc::new(InMemoryConfigStore::new());
+        with_notifications(&config).await;
+        let use_case = ConnectRepository::new(
+            clock(),
+            engine,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+        );
+        assert_eq!(
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
+            Ok(id())
+        );
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(saved.repositories().len(), 1);
+        assert_eq!(saved.notifications(), &notifications());
+    }
+
     #[tokio::test]
     async fn a_failed_test_leaves_the_configuration_unchanged() {
         let engine = Arc::new(Scripted {
@@ -1370,6 +1446,29 @@ mod tests {
         assert_eq!(after.plans(), before.plans());
         assert_eq!(after.agent(), before.agent());
         assert_eq!(after.hooks(), before.hooks());
+    }
+
+    #[tokio::test]
+    async fn recording_a_created_repositorys_id_keeps_the_notification_rules_and_channels() {
+        let (_, config, use_case) =
+            saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
+        with_notifications(&config).await;
+        use_case
+            .init_saved(op(), &alias(), &found_none().await)
+            .await
+            .unwrap_or_else(|e| panic!("the entry is found: {e:?}"));
+        let after = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        assert_eq!(
+            after
+                .repository(&alias())
+                .and_then(|entry| entry.id.clone()),
+            Some(id()),
+            "the ID is recorded"
+        );
+        assert_eq!(after.notifications(), &notifications());
     }
 
     /// An entry that records a repository ID names a repository Ladderback

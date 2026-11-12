@@ -11,6 +11,7 @@ members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -29,6 +30,7 @@ default-members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
     "crates/adapters/store",
@@ -56,6 +58,7 @@ l10n = { path = "crates/l10n", default-features = false }
 config-adapter = { path = "crates/adapters/config" }
 engine = { path = "crates/adapters/engine" }
 hooks = { path = "crates/adapters/hooks" }
+notify-adapter = { path = "crates/adapters/notify" }
 interop = { path = "crates/adapters/interop" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
@@ -137,6 +140,10 @@ proc-macro2 = "1.0.107"
 # the default `fork` and `timeout` features run each case in a child process,
 # which no property here needs, and pull in `rusty-fork` and `tempfile`.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+# The notifications adapter's HTTP client (technical design §8.2, §11): no
+# defaults, rustls for TLS. Already in the tree through `rustic_backend`, with
+# these features and more, so it adds no package.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased
 # (technical design §2.1). The `engine` crate depends on them, and so do the
@@ -289,6 +296,7 @@ domain.workspace = true
 env_logger.workspace = true
 hooks.workspace = true
 log.workspace = true
+notify-adapter.workspace = true
 platform.workspace = true
 secrets.workspace = true
 serde.workspace = true

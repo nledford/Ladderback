@@ -5,6 +5,7 @@ mod config_store;
 mod engine;
 mod event_bus;
 mod hooks;
+mod notifier;
 mod operation_store;
 mod platform;
 mod profiles;
@@ -30,6 +31,9 @@ pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,
+};
+pub use notifier::{
+    Credentials, DELIVERY_TIMEOUT, Destination, Message, Notification, Notifier, NotifyError,
 };
 pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,

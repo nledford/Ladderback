@@ -70,6 +70,9 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Wake | The machine waking from sleep, or its clock set forward: wall-clock time ran more than 2 min ahead of monotonic time between two samples of the clocks 30 s apart. A run missed meanwhile can catch up, and a catch-up run after a wake first waits up to 2 min for the network (§5) |
 | Overlap policy | What a plan does when its next run comes due while its last run is still going (running, or waiting in the persistent queue): `skip` it (the default) or `queue` it to start once the last one ends (`Overlap`, §5). A plan runs one backup at a time and never has two runs waiting |
 | Concurrency limit | How many backups the agent runs at once, across all its plans: its `concurrency`, 1 unless the configuration says otherwise. A backup beyond it waits in the persistent queue for a running one to end (`BackupQueue`, §5) |
+| Notification rule | Which **events** an agent tells, for which plans (all when it names none), and the **channel** it tells them to: `events → channel` (§11). An event is a fact Execution reports, named as `backup.failed` |
+| Channel | Where a notification goes: a webhook, an ntfy topic or a healthchecks check, by its URL. The URL, and the token or password it signs in with, are secrets, read only when a notification is sent |
+| Template | A rule's own text for its messages, with placeholders for the event's facts (`{plan}`, `{code}`, …) and nothing else, so it can't hold a secret (I4). Without one, the message is the catalog's text in the agent's locale |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
 
 **Bounded contexts.**
@@ -84,7 +87,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | **Fleet** | Supporting | `Agent` (root; identity, hostname), `PairingToken` (single use, TTL), `HostnameRegistry` domain service | Unique hostnames; tokens used once; re-pairing reuses identity |
 | **Profile interop** | Supporting | Anti-corruption layer only (`adapters/interop`): translates rustic profiles to and from Planning | List replacement, hook order, `[snapshot-filter]` export rules (§6.2) |
 | **Secrets** | Generic | `SecretRef`, `Redactor` (replaces every resolved secret value, and its common encodings, with `***`) | No secret in logs, templates or sync messages (I4) |
-| **Notifications, auth** | Generic | Notification rules over domain events; sessions | — |
+| **Notifications, auth** | Generic | `Notifications` (the channels and the rules, owned by `AgentConfig`), value objects `Channel`, `Rule`, `Template`, `EventKind`; sessions | A rule names a channel and plans the configuration has; a channel holds no secret as text and starts no program by a relative path; a template reads only an event's facts (I4) |
 
 **Context map.** Planning feeds Execution (plans become operations) and, through the hub, Maintenance (published plans carry retention). Execution emits domain events that Maintenance, notifications and the sync outbox consume. Two anti-corruption layers keep foreign models out: profile interop for rustic's TOML model, and the engine adapter for `rustic_core`'s types. The sync protocol in `api` is the published language between agent and hub; `app` speaks its own `AgentReport` and `HubCommand` types, and the sync adapter translates.
 

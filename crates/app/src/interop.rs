@@ -175,19 +175,18 @@ impl ImportProfile {
             repositories.insert(repository.clone(), profile.repository);
         }
 
-        let saved =
-            AgentConfig::new(agent, hooks, repositories, plans).map_err(
-                |violation| match violation {
-                    Violation::DuplicatePlan { plan, .. } => ImportError::PlanTaken(plan),
-                    violation => ImportError::Config(ConfigError::Invalid {
-                        file: String::new(),
-                        key: None,
-                        at: None,
-                        problem: Problem::Violation(violation),
-                        detail: String::new(),
-                    }),
-                },
-            )?;
+        let saved = AgentConfig::new(agent, hooks, repositories, plans)
+            .and_then(|config| config.with_notifications(loaded.notifications().clone()))
+            .map_err(|violation| match violation {
+                Violation::DuplicatePlan { plan, .. } => ImportError::PlanTaken(plan),
+                violation => ImportError::Config(ConfigError::Invalid {
+                    file: String::new(),
+                    key: None,
+                    at: None,
+                    problem: Problem::Violation(violation),
+                    detail: String::new(),
+                }),
+            })?;
         self.config
             .save(&saved)
             .await
@@ -408,6 +407,54 @@ mod tests {
         assert!(programs(&hooks.run_after)[1].contains("their-after"));
         assert!(programs(&hooks.run_failed)[0].contains("own-failed"));
         assert!(programs(&hooks.run_finally)[1].contains("their-finally"));
+    }
+
+    /// The rules and channels of a configuration: one channel, and one rule
+    /// that sends it every failed backup.
+    fn notifications() -> domain::notifications::Notifications {
+        use domain::notifications::{
+            Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
+        };
+        let ops = ChannelName::parse("ops").expect("a channel name");
+        Notifications::new(
+            BTreeMap::from([(
+                ops.clone(),
+                Channel::new(
+                    ChannelKind::Ntfy,
+                    SecretRef::Env("DEMO_TOPIC_URL".to_owned()),
+                    None,
+                )
+                .expect("a channel"),
+            )]),
+            BTreeMap::from([(
+                RuleName::parse("failures").expect("a rule name"),
+                Rule::new(
+                    [EventKind::BackupFailed].into(),
+                    ops,
+                    Default::default(),
+                    None,
+                )
+                .expect("a rule"),
+            )]),
+        )
+        .expect("rules that name their channel")
+    }
+
+    #[tokio::test]
+    async fn an_import_keeps_the_notification_rules_and_channels() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        config
+            .save(
+                &AgentConfig::default()
+                    .with_notifications(notifications())
+                    .expect("rules for no plan in particular"),
+            )
+            .await
+            .expect("saved");
+        import(&config, profile(vec![plan("home", None)], Hooks::default()))
+            .await
+            .expect("imported");
+        assert_eq!(saved(&config).await.notifications(), &notifications());
     }
 
     #[tokio::test]

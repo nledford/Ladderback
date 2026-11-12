@@ -2,10 +2,14 @@
 //! type that knows what it may be. Every refusal names the key and, when the
 //! text is the file's own, the place; none of them holds a value of the file.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Problem};
 use domain::execution::plan_tags::UserTag;
+use domain::notifications::{
+    Auth, Channel, ChannelError, ChannelKind, ChannelName, ChannelSecret, EventKind, Notifications,
+    Rule, RuleName, Template, Username,
+};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
     Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice,
@@ -18,8 +22,8 @@ use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
 
 use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
-    AgentTable, FileTable, HookEntryTable, HookValue, HooksTable, PlanTable, RepositoryTable,
-    RetentionTable, RetryTable, ScheduleTable,
+    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, NotificationsTable,
+    PlanTable, RepositoryTable, RetentionTable, RetryTable, RuleTable, ScheduleTable,
 };
 use crate::zone::schedule_zone;
 
@@ -107,7 +111,13 @@ pub(crate) fn config(reader: &Reader<'_, '_>, file: FileTable) -> Read<AgentConf
     for (index, table) in file.plans.unwrap_or_default().into_iter().enumerate() {
         plans.push(plan(reader, &root.key("plans").index(index), table)?);
     }
+    let (channels, rules) = notifications(
+        reader,
+        &root.key("notifications"),
+        file.notifications.unwrap_or_default(),
+    )?;
     AgentConfig::new(agent, hooks, repositories, plans)
+        .and_then(|config| config.with_notifications(Notifications::new(channels, rules)?))
         .map_err(|violation| violated(reader, &root, violation))
 }
 
@@ -127,6 +137,18 @@ fn violated(reader: &Reader<'_, '_>, root: &Path, violation: Violation) -> Confi
             );
             let path = entry(second);
             return reader.error(&path, Spot::Key, Problem::Violation(violation), detail);
+        }
+        Violation::UnknownChannel { rule, .. } | Violation::UnknownRulePlan { rule, .. } => {
+            let key = match &violation {
+                Violation::UnknownChannel { .. } => "channel",
+                _ => "plans",
+            };
+            let path = root
+                .key("notifications")
+                .key("rules")
+                .key(rule.as_str())
+                .key(key);
+            return reader.refuse(&path, Problem::Violation(violation));
         }
     };
     let path = root.key("plans").index(index).key(key);
@@ -320,33 +342,196 @@ fn password_ref(
     path: &Path,
     given: [Option<String>; 5],
 ) -> Read<SecretRef> {
-    let password = |problem| reader.refuse(path, Problem::Password(problem));
+    secret_ref(reader, path, "password", given, Problem::Password)?
+        .ok_or_else(|| reader.refuse(path, Problem::Password(PasswordProblem::Missing)))
+}
+
+/// The secret given by at most one of the keys `<name>`, `<name>-command`,
+/// `<name>-keyring`, `<name>-file` and `<name>-env`, in that order, of the
+/// table at `path`; `None` when none is there. A refusal is `problem` of
+/// what is wrong.
+fn secret_ref(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    name: &str,
+    given: [Option<String>; 5],
+    problem: fn(PasswordProblem) -> Problem,
+) -> Read<Option<SecretRef>> {
     let mut present = given
         .into_iter()
         .enumerate()
         .filter_map(|(at, text)| text.map(|text| (at, text)));
     let Some((at, text)) = present.next() else {
-        return Err(password(PasswordProblem::Missing));
+        return Ok(None);
     };
     if present.next().is_some() {
-        return Err(password(PasswordProblem::Several));
+        return Err(reader.refuse(path, problem(PasswordProblem::Several)));
     }
-    let at_key = |key: &str, problem| reader.refuse(&path.key(key), Problem::Password(problem));
-    match at {
-        0 => Ok(SecretRef::Inline(SecretValue::new(text))),
+    let at_key =
+        |key: &str, wrong| reader.refuse(&path.key(&format!("{name}-{key}")), problem(wrong));
+    let secret = match at {
+        0 => SecretRef::Inline(SecretValue::new(text)),
         1 => CommandLine::parse(&text)
             .map(SecretRef::Command)
-            .map_err(|_| at_key("password-command", PasswordProblem::BadCommand)),
+            .map_err(|_| at_key("command", PasswordProblem::BadCommand))?,
         2 => KeyringEntry::parse(&text)
             .map(SecretRef::Keyring)
-            .map_err(|_| at_key("password-keyring", PasswordProblem::NotAKeyringEntry)),
-        3 if text.starts_with('/') => Ok(SecretRef::File {
+            .map_err(|_| at_key("keyring", PasswordProblem::NotAKeyringEntry))?,
+        3 if text.starts_with('/') => SecretRef::File {
             path: text,
             read: FileRead::FirstLine,
-        }),
-        3 => Err(at_key("password-file", PasswordProblem::RelativeFile)),
-        _ => Ok(SecretRef::Env(text)),
+        },
+        3 => return Err(at_key("file", PasswordProblem::RelativeFile)),
+        _ => SecretRef::Env(text),
+    };
+    Ok(Some(secret))
+}
+
+/// The channels and rules of `[notifications]`, each refused at its own
+/// table. Whether each rule names a channel and plans the file has is the
+/// configuration's to check.
+fn notifications(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    table: NotificationsTable,
+) -> Read<(BTreeMap<ChannelName, Channel>, BTreeMap<RuleName, Rule>)> {
+    let mut channels = BTreeMap::new();
+    for (name, table) in table.channels.unwrap_or_default() {
+        let path = path.key("channels").key(&name);
+        let name = ChannelName::parse(&name).map_err(|invalid| {
+            reader.error(
+                &path,
+                Spot::Key,
+                Problem::Value(invalid.kind),
+                String::new(),
+            )
+        })?;
+        channels.insert(name, channel(reader, &path, table)?);
     }
+    let mut rules = BTreeMap::new();
+    for (name, table) in table.rules.unwrap_or_default() {
+        let path = path.key("rules").key(&name);
+        let name = RuleName::parse(&name).map_err(|invalid| {
+            reader.error(
+                &path,
+                Spot::Key,
+                Problem::Value(invalid.kind),
+                String::new(),
+            )
+        })?;
+        rules.insert(name, rule(reader, &path, table)?);
+    }
+    Ok((channels, rules))
+}
+
+fn channel(reader: &Reader<'_, '_>, path: &Path, table: ChannelTable) -> Read<Channel> {
+    let ChannelTable {
+        kind,
+        url_command,
+        url_keyring,
+        url_file,
+        url_env,
+        token_command,
+        token_keyring,
+        token_file,
+        token_env,
+        username,
+        password_command,
+        password_keyring,
+        password_file,
+        password_env,
+    } = table;
+    let kind = reader.required(path, "kind", kind)?;
+    let kind = reader.value(&path.key("kind"), ChannelKind::parse(&kind))?;
+    let secret = |name, given| secret_ref(reader, path, name, given, Problem::Secret);
+    let url = secret("url", [None, url_command, url_keyring, url_file, url_env])?
+        .ok_or_else(|| reader.refuse(path, Problem::Secret(PasswordProblem::Missing)))?;
+    if !kind.takes_auth() {
+        // A kind that signs in with nothing has no key to sign in with.
+        let signs_in = [
+            ("token-command", &token_command),
+            ("token-keyring", &token_keyring),
+            ("token-file", &token_file),
+            ("token-env", &token_env),
+            ("username", &username),
+            ("password-command", &password_command),
+            ("password-keyring", &password_keyring),
+            ("password-file", &password_file),
+            ("password-env", &password_env),
+        ];
+        if let Some((key, _)) = signs_in.iter().find(|(_, given)| given.is_some()) {
+            let path = path.key(key);
+            return Err(reader.error(&path, Spot::Key, Problem::UnknownKey, String::new()));
+        }
+    }
+    let token = secret(
+        "token",
+        [None, token_command, token_keyring, token_file, token_env],
+    )?;
+    let password = secret(
+        "password",
+        [
+            None,
+            password_command,
+            password_keyring,
+            password_file,
+            password_env,
+        ],
+    )?;
+    let several = || reader.refuse(path, Problem::Secret(PasswordProblem::Several));
+    let auth = match (token, username, password) {
+        (None, None, None) => None,
+        (Some(token), None, None) => Some(Auth::Bearer(token)),
+        (Some(_), _, _) => return Err(several()),
+        (None, Some(name), Some(password)) => Some(Auth::Basic {
+            username: reader.value(&path.key("username"), Username::parse(&name))?,
+            password,
+        }),
+        (None, Some(_), None) => {
+            return Err(reader.refuse(path, Problem::Secret(PasswordProblem::Missing)));
+        }
+        (None, None, Some(_)) => return reader.required(path, "username", None),
+    };
+    // A secret as text and keys a kind doesn't take were refused above; a
+    // command started by a relative path is refused at its key, as a
+    // repository's `password-command` is.
+    Channel::new(kind, url, auth).map_err(|error| match error {
+        ChannelError::RelativeProgram(which) => {
+            let key = match which {
+                ChannelSecret::Url => "url-command",
+                ChannelSecret::Token => "token-command",
+                ChannelSecret::Password => "password-command",
+            };
+            reader.refuse(
+                &path.key(key),
+                Problem::Secret(PasswordProblem::RelativeProgram),
+            )
+        }
+        ChannelError::InlineSecret | ChannelError::AuthNotTaken => several(),
+    })
+}
+
+fn rule(reader: &Reader<'_, '_>, path: &Path, table: RuleTable) -> Read<Rule> {
+    let events_path = path.key("events");
+    let mut events = BTreeSet::new();
+    for (index, text) in reader
+        .required(path, "events", table.events)?
+        .iter()
+        .enumerate()
+    {
+        events.insert(reader.value(&events_path.index(index), EventKind::parse(text))?);
+    }
+    let channel = reader.required(path, "channel", table.channel)?;
+    let channel = reader.value(&path.key("channel"), ChannelName::parse(&channel))?;
+    let mut plans = BTreeSet::new();
+    for (index, text) in table.plans.unwrap_or_default().iter().enumerate() {
+        plans.insert(reader.id(&path.key("plans").index(index), PlanId::parse(text))?);
+    }
+    let template = table
+        .template
+        .map(|text| reader.value(&path.key("template"), Template::parse(&text)))
+        .transpose()?;
+    reader.value(&events_path, Rule::new(events, channel, plans, template))
 }
 
 fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {

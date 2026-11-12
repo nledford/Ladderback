@@ -46,6 +46,8 @@ mod secrets_steps;
 mod hooks_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/notifications.rs"]
+mod notifications_steps;
 #[path = "steps/recovery.rs"]
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
@@ -76,6 +78,7 @@ struct Agent {
     preview: preview_steps::PreviewWorld,
     schedule: schedule_steps::ScheduleWorld,
     scheduler: scheduler_steps::SchedulerWorld,
+    notifications: notifications_steps::NotificationsWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -117,6 +120,7 @@ impl Agent {
             recovery: Default::default(),
             announcement: Default::default(),
             preview: Default::default(),
+            notifications: Default::default(),
         }
     }
 

@@ -18,6 +18,8 @@ use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 
 use app::conditions::NetworkWait;
+use app::notifications::{Notify, Report};
+use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
 use app::ports::SecretResolver;
 use app::ports::{
@@ -56,6 +58,7 @@ use http_adapter::{
     RepositoriesError, SecretRefusal, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
+use notify_adapter::HttpNotifier;
 use platform::SystemClock;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
 use platform::random::OsRandom;
@@ -362,6 +365,7 @@ async fn state_over(
         workers = workers.with_cache_root(dir);
     }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
+    notify_over(bus.as_ref(), Arc::clone(&config), Arc::clone(&store)).await;
     // One lock for every write of the configuration the daemon makes: a
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
@@ -420,6 +424,65 @@ async fn state_over(
         },
         background,
     ))
+}
+
+/// Tells the channels of the agent's notification rules of the news on `bus`
+/// for as long as the daemon runs (§11). A notification that wasn't delivered
+/// is said in the log by its warning code, never with a secret (I4), and an
+/// event the configuration couldn't be read for by the configuration's error
+/// code. A client that can't be built is said once, and nothing is sent.
+async fn notify_over(
+    bus: &dyn EventBus,
+    config: Arc<dyn ConfigStore>,
+    store: Arc<dyn OperationStore>,
+) {
+    let localizer = || l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+    let notifier = match HttpNotifier::new(localizer(), DELIVERY_TIMEOUT) {
+        Ok(notifier) => notifier,
+        Err(error) => {
+            log::warn!("no notification is sent: {error}");
+            return;
+        }
+    };
+    let notify = Notify::new(
+        config,
+        store,
+        Arc::new(SystemSecrets::default()),
+        Arc::new(notifier),
+    );
+    // Subscribed before any run can start, so no news is missed.
+    let news = bus.subscribe().await;
+    let localizer = localizer();
+    tokio::spawn(async move {
+        notify
+            .run(news, |report| {
+                log::warn!("{}", report_line(&localizer, &report))
+            })
+            .await;
+    });
+}
+
+/// What telling an event left to report, as the log says it, by its code: a
+/// notification that wasn't delivered, with the event, the rule, the channel
+/// and why; or a configuration that couldn't be read, as its code's message
+/// says it.
+fn report_line(localizer: &l10n::Localizer, report: &Report) -> String {
+    match report {
+        Report::Undelivered(undelivered) => {
+            let args = [
+                ("event", text(undelivered.event.name())),
+                ("rule", text(undelivered.rule.as_str())),
+                ("channel", text(undelivered.channel.as_str())),
+                ("reason", text(undelivered.reason.reason())),
+            ];
+            let message = localizer.warning(WarningCode::NotificationUndelivered, &args, None);
+            format!("{:?}: {message}", WarningCode::NotificationUndelivered)
+        }
+        Report::ConfigUnavailable(error) => config_unusable(error.clone(), |code, args, detail| {
+            let message = localizer.error(code, &args, detail.as_deref());
+            format!("no notification was sent for an event: {code:?}: {message}")
+        }),
+    }
 }
 
 /// The folder the workers keep rustic's caches in (§4.1): `dir`, made for
@@ -5857,6 +5920,64 @@ mod tests {
         let shown = english().error(refusal.code, &refusal.args, refusal.detail.as_deref());
         assert!(shown.problems().is_empty(), "{:?}", shown.problems());
         shown.into_text()
+    }
+
+    #[test]
+    fn an_event_told_while_the_configuration_cant_be_read_is_logged_by_its_code() {
+        let line = report_line(
+            &english(),
+            &Report::ConfigUnavailable(ConfigError::Unavailable {
+                file: "/home/demo/.config/ladderback/config.toml".to_owned(),
+                detail: "permission denied".to_owned(),
+            }),
+        );
+        for expected in [
+            "ConfigUnavailable",
+            "/home/demo/.config/ladderback/config.toml",
+            "permission denied",
+        ] {
+            assert!(line.contains(expected), "{expected} in {line}");
+        }
+    }
+
+    /// The notifier says an unusable configuration by the code, the arguments
+    /// and the detail every route refuses it with, whichever way it can't be
+    /// used.
+    #[test]
+    fn each_way_a_configuration_cant_be_used_is_logged_as_the_routes_refuse_it() {
+        for (error, code, args, detail) in
+            super::repository_service_tests::unusable_configurations()
+        {
+            let message = english().error(code, &args, detail);
+            assert_eq!(
+                report_line(&english(), &Report::ConfigUnavailable(error.clone())),
+                format!("no notification was sent for an event: {code:?}: {message}"),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_notification_not_delivered_is_logged_by_its_code() {
+        use domain::notifications::{ChannelName, EventKind, RuleName};
+        let line = report_line(
+            &english(),
+            &Report::Undelivered(app::notifications::Undelivered {
+                event: EventKind::BackupFailed,
+                rule: RuleName::parse("failures").expect("a rule name"),
+                channel: ChannelName::parse("ops").expect("a channel name"),
+                reason: app::notifications::Unsent::Delivery(app::ports::NotifyError::TimedOut),
+            }),
+        );
+        for expected in [
+            "NotificationUndelivered",
+            "backup.failed",
+            "failures",
+            "ops",
+            "did not answer in time",
+        ] {
+            assert!(line.contains(expected), "{expected} in {line}");
+        }
     }
 
     fn invalid(key: Option<&str>, at: Option<(usize, usize)>) -> ImportError {

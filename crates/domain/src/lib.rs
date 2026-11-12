@@ -16,6 +16,7 @@
 pub mod execution;
 mod ids;
 pub mod maintenance;
+pub mod notifications;
 pub mod planning;
 #[cfg(test)]
 mod properties;

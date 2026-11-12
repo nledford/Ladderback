@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
+use crate::notifications::{ChannelName, Notifications, RuleName};
 use crate::{PlanId, RepositoryAlias, RepositoryId};
 
 use super::{
@@ -97,6 +98,13 @@ pub enum Violation {
         first: RepositoryAlias,
         second: RepositoryAlias,
     },
+    /// A notification rule sends to a channel the configuration doesn't have.
+    UnknownChannel {
+        rule: RuleName,
+        channel: ChannelName,
+    },
+    /// A notification rule is for a plan the configuration doesn't have.
+    UnknownRulePlan { rule: RuleName, plan: PlanId },
 }
 
 impl std::fmt::Display for Violation {
@@ -135,6 +143,7 @@ pub struct AgentConfig {
     hooks: Hooks,
     repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
     plans: Vec<Plan>,
+    notifications: Notifications,
 }
 
 impl AgentConfig {
@@ -189,7 +198,36 @@ impl AgentConfig {
             hooks,
             repositories,
             plans,
+            notifications: Notifications::default(),
         })
+    }
+
+    /// The configuration with `notifications` as its notification rules and
+    /// channels, unless a rule names a plan the configuration doesn't have:
+    /// [`Violation::UnknownRulePlan`], for the first such rule in name order
+    /// and its first such plan.
+    pub fn with_notifications(self, notifications: Notifications) -> Result<Self, Violation> {
+        for (name, rule) in notifications.rules() {
+            let unknown = rule
+                .plans()
+                .iter()
+                .find(|plan| !self.plans.iter().any(|known| &known.id == *plan));
+            if let Some(plan) = unknown {
+                return Err(Violation::UnknownRulePlan {
+                    rule: name.clone(),
+                    plan: plan.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            notifications,
+            ..self
+        })
+    }
+
+    /// The notification rules and the channels they send to (§11).
+    pub fn notifications(&self) -> &Notifications {
+        &self.notifications
     }
 
     pub fn agent(&self) -> &AgentSettings {
