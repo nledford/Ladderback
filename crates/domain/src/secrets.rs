@@ -13,6 +13,7 @@ mod source;
 mod template;
 
 pub use command::{CommandLine, CommandLineError};
+pub(crate) use inline::MAX_RCLONE_DEPTH;
 use inline::rclone_credentials;
 pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,

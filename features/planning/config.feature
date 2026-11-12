@@ -285,6 +285,33 @@ Feature: An agent's configuration
       Then the load is refused because the path "repositories.nas.repository" is not an absolute path
       And the refusal points at line 4 of the config file
 
+    Scenario: An rclone location on this machine's disk named by a relative path is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rclone::local:backups/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because the path "repositories.nas.repository" is not an absolute path
+      And the refusal points at line 4 of the config file
+
+    Scenario: An rclone flag that names a file by a relative path is refused where it is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rclone:demo-remote:backups"
+        password-env = "DEMO_PASSWORD"
+        options = { rclone-command = "rclone serve restic --log-file rclone.log" }
+        """
+      When the agent loads the config file
+      Then the load is refused because the path "repositories.nas.options.rclone-command" is not an absolute path
+      And the refusal points at line 6 of the config file
+
     Scenario: A file with two entries for one location is refused, naming both
       Given a config file holding:
         """

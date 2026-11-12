@@ -591,6 +591,41 @@ Feature: Import a rustic profile
       And the refusal points at line 3 of the profile
       And no config file was written
 
+    Scenario: An rclone location on this machine's disk must be an absolute path
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "rclone::local:backups/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.repository"
+      And the refusal points at line 2 of the profile
+      And no config file was written
+
+    Scenario: An rclone flag must name its file or program by name or by an absolute path
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "rclone:demo-remote:backups"
+        password-file = "{scratch}/password"
+
+        [repository.options]
+        rclone-command = "rclone serve restic --password-command ./get-config-pass"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.options.rclone-command"
+      And the refusal points at line 6 of the profile
+      And no config file was written
+
     Scenario: Tags Ladderback keeps for itself are dropped
       Given a rustic profile "nas.toml" holding:
         """
