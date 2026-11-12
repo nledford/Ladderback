@@ -58,7 +58,11 @@ impl OperationsState {
 
     /// Applies one live event. An event about an operation the state doesn't
     /// hold is ignored: the missed part of the story is what the next
-    /// initial fetch brings back, never a half-invented row.
+    /// initial fetch brings back, never a half-invented row. Nor does an
+    /// event take a row back: the page reads the history again once its
+    /// stream is open (#305), so news told before that read can arrive after
+    /// it. A start moves only a queued row, and progress and warnings reach
+    /// only a row that has not ended.
     pub(crate) fn apply(&mut self, event: &UiEvent) {
         match event {
             UiEvent::OperationStarted {
@@ -66,7 +70,9 @@ impl OperationsState {
                 started_at,
                 ..
             } => {
-                if let Some(row) = self.row_mut(operation) {
+                if let Some(row) = self.row_mut(operation)
+                    && rank(&row.summary.status) == QUEUED
+                {
                     row.summary.status = "running".to_owned();
                     row.summary.started_at = Some(started_at.clone());
                 }
@@ -76,7 +82,7 @@ impl OperationsState {
                 current,
                 total,
             } => {
-                if let Some(row) = self.row_mut(operation) {
+                if let Some(row) = self.live_row_mut(operation) {
                     row.progress = Some(Progress {
                         current: *current,
                         total: *total,
@@ -86,7 +92,7 @@ impl OperationsState {
             UiEvent::OperationWarning {
                 operation, code, ..
             } => {
-                if let Some(row) = self.row_mut(operation) {
+                if let Some(row) = self.live_row_mut(operation) {
                     row.summary.warning_codes.push(*code);
                 }
             }
@@ -125,12 +131,13 @@ impl OperationsState {
     }
 
     /// Merges a page the page just re-read: the settle-poll after a cancel
-    /// (a cancelled run emits no `UiEvent`), the re-read a run's end asks for
-    /// and the refetch a reconnect starts from. The page is the source of
-    /// truth for what it holds, but it never regresses a status an event
-    /// advanced — a `Started` event can beat the store's own write — and a
-    /// live row the page doesn't hold yet stays, newest: dropping it would
-    /// unshow a run the reader is watching.
+    /// (a cancelled run emits no `UiEvent`), the re-read a run's end asks for,
+    /// the one each opened stream starts and the refetch a reconnect starts
+    /// from. The page is the source of truth for what it holds, but it never
+    /// regresses a status an event advanced — the store can answer with what
+    /// it held before the news the stream told since — and a live row the
+    /// page doesn't hold yet stays, newest: dropping it would unshow a run
+    /// the reader is watching.
     pub(crate) fn merge(&mut self, page: OperationsPageDto) {
         let mut held: HashMap<String, OperationRow> = self
             .rows
@@ -178,6 +185,12 @@ impl OperationsState {
         self.rows.iter_mut().find(|row| row.summary.id == operation)
     }
 
+    /// The row of `operation`, when the state holds it and it has not ended.
+    fn live_row_mut(&mut self, operation: &str) -> Option<&mut OperationRow> {
+        self.row_mut(operation)
+            .filter(|row| rank(&row.summary.status) < TERMINAL)
+    }
+
     /// The row of `operation`, when the state holds it: how a row's view reads
     /// what it shows, so that an update to another row does not reach it.
     pub(crate) fn row(&self, operation: &str) -> Option<&OperationRow> {
@@ -185,14 +198,15 @@ impl OperationsState {
     }
 }
 
-/// Where a status stands in an operation's life: still queued, running, or
+/// Where a status stands in an operation's life: still `QUEUED`, running, or
 /// ended. Every ended status is `TERMINAL`; only their common rank matters
 /// here, because an operation ends once.
+const QUEUED: u8 = 0;
 const TERMINAL: u8 = 2;
 
 fn rank(status: &str) -> u8 {
     match status {
-        "queued" => 0,
+        "queued" => QUEUED,
         "running" => 1,
         _ => TERMINAL,
     }
@@ -250,25 +264,27 @@ pub(crate) const REREAD_PATIENCE: Duration = Duration::from_secs(10);
 /// page waits for the next end, or the stream's re-fetch, to read it.
 const REREAD_RETRIES: u32 = 3;
 
-/// The page's re-reads of its operations, one at a time. An end that arrives
-/// while one is out may be newer than what that one reads, so it is owed one
-/// more, after it; any number of ends then are owed that same one, because a
-/// read finds every end told before it. A re-read that gets no history is
-/// tried again, later each time, a few times: the end it was for carries no
-/// result, so without it the row would show none until the page is reloaded.
+/// The page's re-reads of its operations, one at a time. An end, or the
+/// events stream opening, that arrives while one is out may be newer than
+/// what that one reads, so it is owed one more, after it; any number of them
+/// then are owed that same one, because a read finds everything told before
+/// it. A re-read that gets no history is tried again, later each time, a few
+/// times: the end it was for carries no result, so without it the row would
+/// show none until the page is reloaded.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Rereads {
     /// A re-read is out, or waits to be tried again.
     reading: bool,
-    /// An end arrived while it was out: one more is owed.
+    /// An end, or a stream opening, arrived while it was out: one more is owed.
     owed: bool,
     /// How many tries in a row got no history.
     failed: u32,
 }
 
 impl Rereads {
-    /// An end arrived: whether to start a re-read now. With one out, the
-    /// answer is no, and one more is owed after it.
+    /// An end arrived, or the events stream opened: whether to start a
+    /// re-read now. With one out, the answer is no, and one more is owed
+    /// after it.
     pub(crate) fn ask(&mut self) -> bool {
         if self.reading {
             self.owed = true;
@@ -405,6 +421,50 @@ mod tests {
             row.summary.started_at.as_deref(),
             Some("2026-11-09T10:00:01Z")
         );
+    }
+
+    // The page reads the history once its events stream is open (#305), so
+    // news told before that read can reach the page after it: what the read
+    // already has, the news must not take back or count twice.
+
+    #[test]
+    fn a_start_heard_after_a_read_that_has_the_run_further_along_changes_nothing() {
+        for (status, finished) in [
+            ("running", false),
+            ("succeeded", true),
+            ("failed", true),
+            ("cancelled", true),
+        ] {
+            let mut state =
+                OperationsState::from_history(vec![summary(FIRST, status, true, finished)], None);
+            let read = state.clone();
+            state.apply(&UiEvent::OperationStarted {
+                operation: id(FIRST),
+                repository: Some("demo".to_owned()),
+                started_at: "2026-11-09T10:00:09Z".to_owned(),
+            });
+            assert_eq!(state, read, "a {status} row");
+        }
+    }
+
+    #[test]
+    fn progress_and_warnings_heard_after_a_read_that_has_the_end_change_nothing() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "succeeded", true, true)], None);
+        state.rows[0].summary.status = "succeeded-with-warnings".to_owned();
+        state.rows[0].summary.warning_codes = vec![WarningCode::SourceUnreadable];
+        let read = state.clone();
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            current: 3,
+            total: Some(10),
+        });
+        state.apply(&UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        });
+        assert_eq!(state, read);
     }
 
     #[test]

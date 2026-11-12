@@ -6,6 +6,8 @@
 //! browser journeys (`@ui`) cover it instead, the `live.rs` precedent.
 
 use std::cell::Cell;
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -15,10 +17,10 @@ use crate::backend::{
 };
 use crate::maintenance::{self, Kind, Next, Watch, Watched};
 use api::{ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, UiEvent};
-use futures::StreamExt;
+use futures::{Sink, StreamExt};
 use gloo_net::http::Request;
-use gloo_net::websocket::Message;
 use gloo_net::websocket::futures::WebSocket;
+use gloo_net::websocket::{Message, State};
 use leptos::prelude::{RwSignal, Set, Update};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
@@ -155,10 +157,11 @@ pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
 /// `state`, then opens the events stream and applies each event to `state`.
 /// When the stream drops, it waits `backend::reconnect_backoff` and starts
 /// over with the fetch: the history is the source of truth a reconnect
-/// returns to, never a guess at what was missed. A fetch that fails at any
-/// point of the loop leaves the page in `Phase::Unreachable`, and the loop
-/// keeps trying with the same backoff, so a daemon that comes back is a page
-/// that heals.
+/// returns to, never a guess at what was missed. Each stream that opens
+/// reads the history once more (`stream`). A fetch that fails at any point
+/// of the loop leaves the page in `Phase::Unreachable`, and the loop keeps
+/// trying with the same backoff, so a daemon that comes back is a page that
+/// heals.
 pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSignal<Phase>) {
     let base = base.to_owned();
     spawn_local(async move {
@@ -202,10 +205,22 @@ pub(crate) fn watch(base: &str, state: RwSignal<OperationsState>, phase: RwSigna
 /// holds no operation for is ignored here too: the reconnect's re-fetch is
 /// what brings the whole story, never a half-invented row. The end of a run
 /// is read again from the history, which has what the run produced.
+///
+/// The page hears nothing told before its stream opened, such as the start
+/// of a run its first read had queued (#305), so the history is read again
+/// once the stream is open, as an end's re-read is, one at a time. The
+/// events are applied meanwhile; neither `apply` nor `merge` takes a row
+/// back for the order the two arrive in.
 async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell<Rereads>>) {
     let Ok(mut socket) = WebSocket::open(&events_url(base)) else {
         return;
     };
+    // Ready once the socket has opened or failed: gloo wakes it on either.
+    let _ = poll_fn(|cx| Pin::new(&mut socket).poll_ready(cx)).await;
+    if !matches!(socket.state(), State::Open) {
+        return;
+    }
+    reread(base, *state, Rc::clone(rereads));
     while let Some(Ok(message)) = socket.next().await {
         if let Message::Text(text) = message
             && let Ok(event) = serde_json::from_str::<UiEvent>(&text)
@@ -218,11 +233,12 @@ async fn stream(base: &str, state: &RwSignal<OperationsState>, rereads: &Rc<Cell
     }
 }
 
-/// Reads the history into `state` again after a run's end, as
-/// `backend::Rereads` paces it: one read out at a time, one more after it
-/// when another end arrived meanwhile, and a few tries again, later each
-/// time, when a read gets no history in `REREAD_PATIENCE`. `rereads` is the
-/// one `watch` keeps across its reconnects.
+/// Reads the history into `state` again after a run's end or a stream's
+/// opening, as `backend::Rereads` paces it: one read out at a time, one more
+/// after it when another end or opening arrived meanwhile, and a few tries
+/// again, later each time, when a read gets no history in
+/// `REREAD_PATIENCE`. `rereads` is the one `watch` keeps across its
+/// reconnects, so no number of reconnects has more than two reads waiting.
 fn reread(base: &str, state: RwSignal<OperationsState>, rereads: Rc<Cell<Rereads>>) {
     if !turn(&rereads, Rereads::ask) {
         return;

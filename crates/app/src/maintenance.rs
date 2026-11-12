@@ -35,7 +35,7 @@ use futures::StreamExt;
 use futures::future::{FusedFuture, FutureExt};
 use futures::select_biased;
 
-use crate::announce::announce_end;
+use crate::announce::{announce_end, announce_start};
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
@@ -986,6 +986,9 @@ impl RunMaintenance {
             job,
             partition: _,
         } = prepared;
+        // The log has had the operation running since `start` stored it, so
+        // the news can go out now, once however many jobs the run takes (#305).
+        announce_start(self.events.as_deref(), &operation, None).await;
         let mut result = None;
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());

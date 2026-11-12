@@ -173,6 +173,18 @@ When("the daemon reports that the backup of {string} has started", async functio
   await scripted(this).starts(plan, "2026-11-09T10:00:05Z");
 });
 
+When("the daemon holds back the opening of the page's events stream", function (this: BrowserWorld) {
+  scripted(this).holdTheNextStream();
+});
+
+When("the backup of {string} starts before the page's events stream is open", async function (this: BrowserWorld, plan: string) {
+  await scripted(this).startsUnheard(plan, "2026-11-09T10:00:05Z");
+});
+
+When("the daemon opens the events stream it held back", async function (this: BrowserWorld) {
+  await scripted(this).openTheHeldStream();
+});
+
 When("the daemon reports {int} steps of progress of the backup of {string}", async function (this: BrowserWorld, steps: number, plan: string) {
   await scripted(this).progresses(plan, steps);
 });

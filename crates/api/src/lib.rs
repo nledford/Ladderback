@@ -1667,13 +1667,17 @@ impl SnapshotDto {
 /// One live update the daemon pushes to a connected page over the events
 /// WebSocket (technical design §4.4): what an operation reported, or that an
 /// agent came or went. Identifiers are text, counts are numbers, and times
-/// are RFC 3339 strings. The daemon forwards the worker's started, progress
-/// and warning events unchanged: coalescing is the worker's, once (§4.1).
-/// How an operation ended is announced by the run that recorded it (§4.4).
+/// are RFC 3339 strings. The daemon forwards an operation's progress and
+/// warning events unchanged: coalescing is the worker's, once (§4.1). How an
+/// operation started and how it ended are announced by the run that recorded
+/// them, once the history has each (§4.4): a page that reads the history on
+/// hearing either finds it there. A read that is no operation tells nothing:
+/// no start, end, progress or warning.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum UiEvent {
-    /// An operation left the queue and is running.
+    /// An operation left the queue and is running, and the history says so.
+    /// `started_at` is the history's start time.
     OperationStarted {
         operation: String,
         repository: Option<String>,

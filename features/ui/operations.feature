@@ -56,6 +56,18 @@ Feature: Each row of the Operations page names its operation and says what it di
     Then the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
     And the row "demo-docs" of the table "Operations" lists "5 files" in its "Result" column
 
+  # A run can start while the page is still opening its events stream, so
+  # the news of the start goes out before the page listens (#305). The page
+  # reads the history once its stream is open, and the run shows as running
+  # all the same.
+  Scenario: A run that starts while the page opens its events stream shows as running
+    Given the daemon reports a queued backup of "demo-home"
+    And the daemon holds back the opening of the page's events stream
+    When I open the address "/operations"
+    And the backup of "demo-home" starts before the page's events stream is open
+    And the daemon opens the events stream it held back
+    Then the row "demo-home" of the table "Operations" shows "Running" in its "Status" column
+
   # The table's columns keep the widths they open with: a run that starts,
   # shows its progress and ends changes what its row says, never where the
   # columns are, so the table doesn't jump under the reader's eyes. The sort
