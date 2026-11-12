@@ -1,7 +1,10 @@
 //! Execution context: one operation's lifecycle (technical design §3.1).
 
 pub mod deadline;
+pub mod next_run;
 pub mod plan_tags;
+#[cfg(test)]
+mod properties;
 
 use serde::{Deserialize, Serialize};
 

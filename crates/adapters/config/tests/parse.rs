@@ -81,7 +81,7 @@ fn the_agent_table_is_read() {
 fn a_schedule_that_says_only_when_keeps_the_other_defaults() {
     let plan = plan_of(&base_with("schedule = { cron = \"0 * * * *\" }\n"));
     let schedule = plan.schedule.expect("a schedule");
-    assert_eq!(schedule.cron().as_str(), "0 * * * *");
+    assert_eq!(schedule.cron().map(|cron| cron.as_str()), Some("0 * * * *"));
     assert_eq!(schedule.jitter(), None);
     assert!(schedule.catch_up(), "a missed run is made up for");
     assert!(!schedule.on_ac_power(), "any power source will do");

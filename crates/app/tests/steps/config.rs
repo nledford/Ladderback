@@ -68,6 +68,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::Nice => "nice",
             ValueKind::Cron => "cron",
             ValueKind::Duration => "duration",
+            ValueKind::Interval => "interval",
             ValueKind::Attempts => "attempts",
             ValueKind::KeepCount => "keep-count",
             ValueKind::KeepWithin => "keep-within",
@@ -400,7 +401,8 @@ fn refused_for_no_sources(agent: &mut Agent, number: usize, plan: String) {
 
 #[then(expr = "the plan {string} runs on the cron expression {string}")]
 fn runs_on(agent: &mut Agent, id: String, cron: String) {
-    assert_eq!(agent.config.schedule(&id).cron().as_str(), cron);
+    let expression = agent.config.schedule(&id).cron().map(|cron| cron.as_str());
+    assert_eq!(expression, Some(cron.as_str()));
 }
 
 #[then(expr = "the plan {string} makes up for a run it missed")]
