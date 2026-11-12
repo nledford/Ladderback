@@ -443,7 +443,7 @@ async fn run_plan(
             vec![("plan", api::MsgArg::Text(plan))],
         ),
         Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(StartError::Unavailable { .. }) => todo!(),
+        Err(StartError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
@@ -525,7 +525,7 @@ async fn cancel_operation(
 async fn list_plans(State(state): State<AppState>) -> Response {
     match state.catalog.plans().await {
         Ok(plans) => (StatusCode::OK, axum::Json(plans)).into_response(),
-        Err(error) => catalog_refused(error),
+        Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
@@ -534,18 +534,19 @@ async fn list_plans(State(state): State<AppState>) -> Response {
 async fn list_repositories(State(state): State<AppState>) -> Response {
     match state.catalog.repositories().await {
         Ok(repositories) => (StatusCode::OK, axum::Json(repositories)).into_response(),
-        Err(error) => catalog_refused(error),
+        Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 
-/// A list the configuration can't answer: 503 with the `config-*` code, its
-/// arguments and the store's words, as a save of it is refused.
-fn catalog_refused(error: CatalogError) -> Response {
-    match error {
-        CatalogError::Unavailable { code, args, detail } => {
-            refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
-        }
-    }
+/// What the daemon can't answer just now, as the configuration or the engine
+/// stands: 503 with the code, its arguments and the store's words. A
+/// configuration is refused as a save of it is, wherever it is read.
+fn unavailable(
+    code: api::ErrorCode,
+    args: Vec<(&'static str, api::MsgArg)>,
+    detail: Option<String>,
+) -> Response {
+    refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
 }
 
 /// One repository's snapshots, newest first, fetched live (§9): a read is
@@ -562,7 +563,7 @@ async fn list_snapshots(
             vec![("alias", api::MsgArg::Text(alias))],
         ),
         Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(SnapshotsError::Unavailable { .. }) => todo!(),
+        Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
 

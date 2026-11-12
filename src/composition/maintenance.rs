@@ -384,7 +384,8 @@ async fn refusal(
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
-        MaintenanceError::Unavailable(_) => todo!(),
+        // The configuration is refused as a save of it is (#347).
+        MaintenanceError::Unavailable(error) => super::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
         MaintenanceError::Engine { detail } => {
             unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
@@ -418,15 +419,16 @@ async fn refusal(
 
 /// A secret of `repository`'s settings that couldn't be resolved, as the
 /// refusal the route answers with. A configuration that can't be read now is
-/// told without naming the file, as the use case tells it, and a repository
-/// the configuration no longer holds is unknown.
+/// refused as a save of it is (#347), and a repository the configuration no
+/// longer holds is unknown.
 async fn secret_refused(
     config: &dyn ConfigStore,
     repository: &RepositoryAlias,
     error: &ResolveError,
 ) -> MaintenanceRefusal {
-    let Ok(loaded) = config.load().await else {
-        return unavailable(ErrorCode::ConfigUnavailable, Vec::new(), None);
+    let loaded = match config.load().await {
+        Ok(loaded) => loaded,
+        Err(unusable) => return super::config_unusable(unusable, unavailable),
     };
     match loaded.repository(repository) {
         Some(found) => MaintenanceRefusal::SecretRefused(

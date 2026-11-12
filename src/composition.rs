@@ -712,11 +712,13 @@ struct PlanRunner {
 impl Operations for PlanRunner {
     async fn start_backup(&self, plan: String) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
-        let config = self
-            .config
-            .load()
-            .await
-            .map_err(|_| -> StartError { todo!() })?;
+        let config = self.config.load().await.map_err(|error| {
+            config_unusable(error, |code, args, detail| StartError::Unavailable {
+                code,
+                args,
+                detail,
+            })
+        })?;
         let plan = config.plan(&id).ok_or(StartError::UnknownPlan)?;
         let repository = config
             .repository(&plan.repository)
@@ -1398,11 +1400,13 @@ impl Catalog for ConfigCatalog {
         // An alias no repository could have is as unknown as one the
         // configuration happens not to have.
         let alias = RepositoryAlias::parse(&alias).map_err(|_| SnapshotsError::Unknown)?;
-        let config = self
-            .config
-            .load()
-            .await
-            .map_err(|_| -> SnapshotsError { todo!() })?;
+        let config = self.config.load().await.map_err(|error| {
+            config_unusable(error, |code, args, detail| SnapshotsError::Unavailable {
+                code,
+                args,
+                detail,
+            })
+        })?;
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
         let listing = ListSnapshots::new(
             Arc::clone(&self.engine),

@@ -705,7 +705,10 @@ impl RunMaintenance {
 
     /// The configuration, as it is now.
     async fn load(&self) -> Result<AgentConfig, MaintenanceError> {
-        self.config.load().await.map_err(|_| todo!())
+        self.config
+            .load()
+            .await
+            .map_err(|error| MaintenanceError::Unavailable(Box::new(error)))
     }
 
     /// The configuration, once it shows that this agent maintains the
