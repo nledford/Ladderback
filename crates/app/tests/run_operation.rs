@@ -1142,6 +1142,31 @@ async fn an_engine_that_cannot_start_is_logged_with_the_platforms_own_message() 
     );
 }
 
+/// An engine that refuses a job for more secrets than it masks fails the
+/// operation with that reason, typed, never with words of its own (§10.2).
+#[tokio::test]
+async fn an_engine_that_cannot_mask_the_jobs_secrets_fails_it_with_the_typed_reason() {
+    let store = log();
+    let ended = refused(
+        EngineError::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        },
+        store.clone(),
+    )
+    .await;
+    let failed = OperationStatus::Failed {
+        reason: FailureReason::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        },
+    };
+    assert_eq!(ended.operation.status(), &failed);
+    assert_eq!(ended.operation.started_at(), None);
+    assert_logged_as_it_ended(&store, &ended).await;
+    assert_eq!(logged(&store).await.record.status, failed);
+}
+
 /// Backups never depend on the database (§9): a log that can't be written
 /// is reported and nothing else.
 #[tokio::test]

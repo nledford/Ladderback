@@ -59,6 +59,25 @@ pub enum EngineError {
     /// then sent nothing is not this error: `run` doesn't wait for it, and
     /// its events fail with `FailureReason::EngineStartTimedOut` instead.
     StartTimedOut,
+    /// The engine refused the job before starting it: the job's secrets,
+    /// with whatever else the engine masks in what it shows (the proxy
+    /// credentials of its environment), come to more than `limit` bytes,
+    /// more than it masks (I4, §10.2). `field` names where they passed it,
+    /// such as `HTTPS_PROXY`, and is `None` when the job's own secrets did.
+    SecretsTooLargeToMask { field: Option<String>, limit: usize },
+}
+
+/// What an operation the engine never started failed with.
+impl From<EngineError> for FailureReason {
+    fn from(error: EngineError) -> Self {
+        match error {
+            EngineError::Unavailable { detail } => Self::EngineUnavailable { detail },
+            EngineError::StartTimedOut => Self::EngineStartTimedOut,
+            EngineError::SecretsTooLargeToMask { field, limit } => {
+                Self::SecretsTooLargeToMask { field, limit }
+            }
+        }
+    }
 }
 
 /// What an operation should do.
@@ -491,6 +510,46 @@ mod tests {
             options_cold: BTreeMap::new(),
             secrets: Vec::new(),
             id,
+        }
+    }
+
+    #[test]
+    fn an_engine_that_never_started_the_job_fails_it_with_the_reason_of_its_refusal() {
+        for (error, reason) in [
+            (
+                EngineError::Unavailable {
+                    detail: "no such program".to_owned(),
+                },
+                FailureReason::EngineUnavailable {
+                    detail: "no such program".to_owned(),
+                },
+            ),
+            (
+                EngineError::StartTimedOut,
+                FailureReason::EngineStartTimedOut,
+            ),
+            (
+                EngineError::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+                FailureReason::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+            ),
+            (
+                EngineError::SecretsTooLargeToMask {
+                    field: None,
+                    limit: 262_144,
+                },
+                FailureReason::SecretsTooLargeToMask {
+                    field: None,
+                    limit: 262_144,
+                },
+            ),
+        ] {
+            assert_eq!(FailureReason::from(error), reason);
         }
     }
 

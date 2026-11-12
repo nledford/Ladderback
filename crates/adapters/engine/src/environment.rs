@@ -72,11 +72,20 @@ const PROXY_URLS: [&str; 6] = [
 /// environment, where a program it starts uses them, so the daemon can't
 /// keep them from the worker; it masks them wherever its output shows them.
 pub(crate) fn proxy_credentials(vars: &[(OsString, OsString)]) -> Vec<SecretValue> {
-    vars.iter()
-        .filter(|(name, _)| PROXY_URLS.iter().any(|proxy| name == proxy))
-        .filter_map(|(_, value)| value.to_str())
-        .flat_map(url_credentials)
+    proxy_credentials_by_variable(vars)
+        .flat_map(|(_, credentials)| credentials)
         .collect()
+}
+
+/// The credentials of each proxy URL of `vars`, with the variable it is in,
+/// in the order of `vars`.
+pub(crate) fn proxy_credentials_by_variable(
+    vars: &[(OsString, OsString)],
+) -> impl Iterator<Item = (&'static str, Vec<SecretValue>)> + '_ {
+    vars.iter().filter_map(|(name, value)| {
+        let variable = PROXY_URLS.into_iter().find(|proxy| name == proxy)?;
+        Some((variable, url_credentials(value.to_str()?)))
+    })
 }
 
 #[cfg(test)]

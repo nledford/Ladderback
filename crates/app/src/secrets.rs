@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, Part, Reference, SecretError, SecretRef, SecretValue,
-    SecretWarning, Template, TemplateError, has_reference, too_many_rclone_credentials,
+    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Reference,
+    SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError, TooMuchToMask,
+    has_reference, too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SecretResolver};
@@ -54,6 +55,11 @@ pub enum Cause {
     /// each is a secret to look for in every text a job shows, so a job
     /// takes no more.
     TooManyCredentials { limit: usize },
+    /// The secrets of the repository, each counted once, come to more than
+    /// `limit` bytes ([`MAX_MASKED_BYTES`](domain::secrets::MAX_MASKED_BYTES))
+    /// with this field's: more than a job masks, so the job can't run (I4).
+    /// Nothing after this field is read.
+    TooMuchToMask { limit: usize },
 }
 
 /// The first field that couldn't be resolved, tried in the order password,
@@ -89,7 +95,9 @@ impl ResolveRepository {
 
     /// Each distinct reference is read once, so a value can't change between
     /// two places that use it. What they resolved to is in `access.secrets`,
-    /// for the engine to hide wherever it reports text.
+    /// for the engine to hide wherever it reports text. The secrets a job
+    /// would mask are counted as they are found, and the first field that
+    /// takes them past what a redactor masks fails: nothing after it is read.
     pub async fn resolve(
         &self,
         settings: &RepositorySettings,
@@ -101,16 +109,14 @@ impl ResolveRepository {
             values: BTreeMap::new(),
             secrets: Vec::new(),
             warnings: Vec::new(),
+            masked: MaskedSecrets::default(),
         };
         let password = run.password(&settings.password).await?;
-        let repository = run.expand(Field::Repository, &settings.repository).await?;
-        refuse_supplied_prefix(Field::Repository, &settings.repository, &repository)?;
+        let repository = run
+            .location(Field::Repository, &settings.repository)
+            .await?;
         let repo_hot = match &settings.repo_hot {
-            Some(text) => {
-                let hot = run.expand(Field::RepoHot, text).await?;
-                refuse_supplied_prefix(Field::RepoHot, text, &hot)?;
-                Some(hot)
-            }
+            Some(text) => Some(run.location(Field::RepoHot, text).await?),
             None => None,
         };
         let options = run.expand_all(&settings.options, Field::Option).await?;
@@ -224,28 +230,55 @@ fn refuse_supplied_prefix(
     Ok(())
 }
 
-/// One resolution: what it has read so far.
+/// The secrets counted are past what a redactor masks.
+fn too_much_to_mask(_: TooMuchToMask) -> Cause {
+    Cause::TooMuchToMask {
+        limit: MAX_MASKED_BYTES,
+    }
+}
+
+/// One resolution: what it has read so far, and the secrets a job would
+/// mask, counted.
 struct Run<'a> {
     resolver: &'a dyn SecretResolver,
     values: BTreeMap<Reference, SecretValue>,
     secrets: Vec<SecretValue>,
     warnings: Vec<SecretWarning>,
+    masked: MaskedSecrets,
 }
 
 impl Run<'_> {
     async fn password(&mut self, password: &SecretRef) -> Result<SecretValue, ResolveError> {
+        let fail = |cause| ResolveError {
+            field: Field::Password,
+            cause,
+        };
         let resolved = self
             .resolver
             .resolve(password)
             .await
-            .map_err(|error| ResolveError {
-                field: Field::Password,
-                cause: Cause::Unresolved(error),
-            })?;
+            .map_err(|error| fail(Cause::Unresolved(error)))?;
         self.warn(resolved.warnings);
+        self.masked
+            .secret(&resolved.value)
+            .map_err(|too_much| fail(too_much_to_mask(too_much)))?;
         Ok(resolved.value)
     }
 
+    /// A location with its references in, and its secrets counted.
+    async fn location(&mut self, field: Field, text: &str) -> Result<String, ResolveError> {
+        let expanded = self.expand(field.clone(), text).await?;
+        refuse_supplied_prefix(field.clone(), text, &expanded)?;
+        self.masked
+            .location(&expanded)
+            .map_err(|too_much| ResolveError {
+                field,
+                cause: too_much_to_mask(too_much),
+            })?;
+        Ok(expanded)
+    }
+
+    /// Options with their references in, and their secrets counted.
     async fn expand_all(
         &mut self,
         options: &BTreeMap<String, String>,
@@ -253,7 +286,14 @@ impl Run<'_> {
     ) -> Result<BTreeMap<String, String>, ResolveError> {
         let mut expanded = BTreeMap::new();
         for (name, text) in options {
-            expanded.insert(name.clone(), self.expand(field(name.clone()), text).await?);
+            let value = self.expand(field(name.clone()), text).await?;
+            self.masked
+                .option(name, &value)
+                .map_err(|too_much| ResolveError {
+                    field: field(name.clone()),
+                    cause: too_much_to_mask(too_much),
+                })?;
+            expanded.insert(name.clone(), value);
         }
         Ok(expanded)
     }
@@ -273,10 +313,7 @@ impl Run<'_> {
             let piece = match part {
                 Part::Text(text) => text.as_str(),
                 Part::Reference(reference) => {
-                    resolved = self
-                        .value(reference)
-                        .await
-                        .map_err(|error| fail(Cause::Unresolved(error)))?;
+                    resolved = self.value(reference).await.map_err(fail)?;
                     resolved.expose()
                 }
             };
@@ -290,12 +327,20 @@ impl Run<'_> {
         Ok(expanded)
     }
 
-    async fn value(&mut self, reference: &Reference) -> Result<SecretValue, SecretError> {
+    /// What `reference` resolves to, read once, and counted when first read.
+    async fn value(&mut self, reference: &Reference) -> Result<SecretValue, Cause> {
         if let Some(value) = self.values.get(reference) {
             return Ok(value.clone());
         }
-        let resolved = self.resolver.resolve(&reference.secret_ref()).await?;
+        let resolved = self
+            .resolver
+            .resolve(&reference.secret_ref())
+            .await
+            .map_err(Cause::Unresolved)?;
         self.warn(resolved.warnings);
+        self.masked
+            .secret(&resolved.value)
+            .map_err(too_much_to_mask)?;
         self.secrets.push(resolved.value.clone());
         self.values
             .insert(reference.clone(), resolved.value.clone());

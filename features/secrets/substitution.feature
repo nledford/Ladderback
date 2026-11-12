@@ -247,6 +247,48 @@ Feature: Secret references in a repository's settings
       When the repository is resolved
       Then the resolved option "note" has 65536 bytes
 
+  Rule: The secrets of one job come to at most 256 KiB
+    A job masks each of its secrets wherever it shows text, in every form a
+    program may print it, which takes about 250 bytes of the daemon's memory
+    per byte of secret. So the secrets a job masks (its password, what its
+    references give and the secrets written in its settings, each counted
+    once) come to at most 256 KiB. A repository with more is refused where
+    they pass it, before the rest is read: a job whose secrets can't be
+    masked doesn't run (I4).
+
+    Background:
+      Given different secrets that come to 262144 bytes with the password, in the options "note-1" to "note-4"
+      And the environment variable "DEMO_ONE_MORE" is "z"
+
+    Scenario: Secrets that come to the limit are resolved, and one byte more is refused before the rest is read
+      Given the option "note-5" is "${DEMO_ONE_MORE}"
+      And the option "note-9" is "${DEMO_LATER}"
+      When the repository is resolved
+      Then the resolution fails for the field "options.note-5"
+      And the secrets are refused because together they come to more than 262144 bytes
+      And the variable "DEMO_LATER" was read 0 times
+
+    Scenario: A secret written in the settings counts toward the limit
+      Given the option "secret_access_key" is "demo-key"
+      When the repository is resolved
+      Then the resolution fails for the field "options.secret_access_key"
+      And the secrets are refused because together they come to more than 262144 bytes
+
+    Scenario: A password written in the repository's location counts toward the limit
+      Given the repository is "rest:https://demo:z@nas/repo"
+      When the repository is resolved
+      Then the resolution fails for the field "options.note-4"
+      And the secrets are refused because together they come to more than 262144 bytes
+
+    Scenario: A secret used in several places counts once
+      Given the option "note-5" is "${DEMO_SECRET_1}"
+      And the option "token" is "${DEMO_SECRET_2}"
+      And the hot option "note" is "${DEMO_SECRET_3}"
+      And the cold option "note" is "${DEMO_ONE_MORE}"
+      When the repository is resolved
+      Then the resolution fails for the field "options-cold.note"
+      And the secrets are refused because together they come to more than 262144 bytes
+
   Rule: The password comes from its own source
 
     Scenario: A password written in the settings

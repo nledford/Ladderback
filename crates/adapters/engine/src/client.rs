@@ -17,7 +17,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Warning, WarningKind};
-use domain::secrets::{Redactor, RepositorySecrets, SecretValue};
+use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -217,8 +217,10 @@ impl Engine for WorkerEngine {
             _ => None,
         };
         // What the worker starts with, and so what its proxy settings are:
-        // a proxy URL's credentials are masked like the job's own secrets.
+        // a proxy URL's credentials are masked like the job's own secrets,
+        // and a job past what is masked is not started (§10.2).
         let environment = environment::scrubbed(self.base_environment());
+        refuse_too_much_to_mask(&job, &environment)?;
         let redactor = job_redactor(&job, environment::proxy_credentials(&environment));
         let spec = serde_json::to_vec(&JobSpec {
             op_id: op,
@@ -1197,6 +1199,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SecretCommandTimedOut
                 | ErrorCode::SecretInProcessArguments
                 | ErrorCode::SecretExpansionTooLong
+                | ErrorCode::SecretsTooLargeToMask
                 | ErrorCode::TemplateInvalid
                 | ErrorCode::LocationTooManyCredentials
                 | ErrorCode::RepositoryPathRelative
@@ -1258,19 +1261,56 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     }
 }
 
+/// The repository a job opens, and so the secrets it holds; a fake job
+/// opens none.
+fn access_of(job: &Job) -> Option<&RepositoryAccess> {
+    match job {
+        Job::Fake(_) => None,
+        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => Some(access),
+        Job::Backup(job) => Some(&job.repository),
+        Job::Forget(job) => Some(&job.repository),
+        Job::Rewrite(job) => Some(&job.repository),
+        Job::Prune(job) | Job::PrunePlan(job) => Some(&job.repository),
+        Job::Check(job) => Some(&job.repository),
+    }
+}
+
+/// Refuses a job whose secrets, with the proxy credentials of the worker's
+/// `environment`, come to more than a redactor masks: its redactor would
+/// mask every text whole, so a worker would run with nothing it says
+/// readable (§10.2). They are counted before any redactor is built, the
+/// job's own first, then each proxy variable's, and the refusal names the
+/// variable at which they passed the cap, or none when the job's own did.
+fn refuse_too_much_to_mask(
+    job: &Job,
+    environment: &[(OsString, OsString)],
+) -> Result<(), EngineError> {
+    let too_much = |field: Option<&str>| EngineError::SecretsTooLargeToMask {
+        field: field.map(str::to_owned),
+        limit: MAX_MASKED_BYTES,
+    };
+    let mut masked = MaskedSecrets::default();
+    if let Some(access) = access_of(job) {
+        masked
+            .repository(access.known_secrets())
+            .map_err(|_| too_much(None))?;
+    }
+    for (variable, credentials) in environment::proxy_credentials_by_variable(environment) {
+        credentials
+            .iter()
+            .try_for_each(|credential| masked.secret(credential))
+            .map_err(|_| too_much(Some(variable)))?;
+    }
+    Ok(())
+}
+
 /// What masks the job's secrets: the worker's stderr is logged through it,
 /// and so are the events. `extra` is what else must not show, the proxy
 /// credentials of the worker's environment. A fake job has no secrets of its
 /// own.
 fn job_redactor(job: &Job, extra: Vec<SecretValue>) -> Redactor {
-    let access = match job {
-        Job::Fake(_) => return Redactor::new(&extra),
-        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access,
-        Job::Backup(job) => &job.repository,
-        Job::Forget(job) => &job.repository,
-        Job::Rewrite(job) => &job.repository,
-        Job::Prune(job) | Job::PrunePlan(job) => &job.repository,
-        Job::Check(job) => &job.repository,
+    let Some(access) = access_of(job) else {
+        return Redactor::new(&extra);
     };
     let resolved: Vec<SecretValue> = access.secrets.iter().cloned().chain(extra).collect();
     Redactor::for_repository(RepositorySecrets {
@@ -2921,6 +2961,76 @@ mod tests {
         assert!(
             matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
             "the error should name the cap: {error:?}"
+        );
+    }
+
+    /// The job's redactor masks its secrets and the proxy credentials of the
+    /// worker's environment. Up to the cap a worker is started; past it none
+    /// is, since its redactor would mask every text whole (I4, technical
+    /// design §10.2): the refusal is typed, with the cap and the proxy
+    /// variable whose password took the secrets past it, or no setting when
+    /// the job's own secrets are past it.
+    #[tokio::test]
+    async fn a_job_whose_secrets_and_proxy_credentials_pass_the_cap_is_refused_before_a_worker_starts()
+     {
+        use domain::secrets::{MAX_MASKED_BYTES, MAX_SECRET_BYTES};
+        let password = "hunter2-demo";
+        let of = |total: usize| -> Vec<String> {
+            let count = total.div_ceil(MAX_SECRET_BYTES);
+            (0..count)
+                .map(|at| {
+                    let letter = char::from(b'a' + u8::try_from(at).unwrap());
+                    letter
+                        .to_string()
+                        .repeat(total / count + usize::from(at < total % count))
+                })
+                .collect()
+        };
+        // A program that can't start: only the check before spawning
+        // refuses with the cap.
+        let start = |secrets: Vec<String>, environment: Vec<(&'static str, &'static str)>| {
+            let engine = WorkerEngine::new("/nonexistent/ladderback-worker", ["worker"])
+                .with_environment(environment);
+            async move {
+                let secrets: Vec<&str> = secrets.iter().map(String::as_str).collect();
+                engine
+                    .run(
+                        OperationId::from_uuid(Uuid::from_u128(1)),
+                        identify(password, &secrets),
+                    )
+                    .await
+                    .err()
+                    .expect("the program can't start")
+            }
+        };
+        let rest = MAX_MASKED_BYTES - password.len();
+        let at_the_cap = start(of(rest), vec![("NO_PROXY", "demo:p")]).await;
+        assert!(
+            matches!(&at_the_cap, EngineError::Unavailable { .. }),
+            "a worker should have been started: {at_the_cap:?}"
+        );
+        let past = start(
+            of(rest),
+            vec![
+                ("HTTP_PROXY", "http://proxy.demo:3128"),
+                ("HTTPS_PROXY", "http://demo:p@proxy.demo:3128"),
+            ],
+        )
+        .await;
+        assert_eq!(
+            past,
+            EngineError::SecretsTooLargeToMask {
+                field: Some("HTTPS_PROXY".to_owned()),
+                limit: MAX_MASKED_BYTES,
+            }
+        );
+        let own = start(of(rest + 1), Vec::new()).await;
+        assert_eq!(
+            own,
+            EngineError::SecretsTooLargeToMask {
+                field: None,
+                limit: MAX_MASKED_BYTES,
+            }
         );
     }
 

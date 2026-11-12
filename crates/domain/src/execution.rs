@@ -98,6 +98,14 @@ pub enum FailureReason {
     /// before the engine started (I4, §6.1). `exit_code` is the hook's exit
     /// status, or `None` when it timed out or could not be started.
     HookFailed { exit_code: Option<i32> },
+    /// The engine refused to start the job: its secrets, with the proxy
+    /// credentials of the engine's environment, come to more than `limit`
+    /// bytes ([`MAX_MASKED_BYTES`](crate::secrets::MAX_MASKED_BYTES)), more
+    /// than it masks in what the job shows (I4, §10.2). `field` names the
+    /// setting at which they passed it, the proxy variable such as
+    /// `HTTPS_PROXY`, and is `None` when the job's own secrets did. Neither is
+    /// a secret or tells one.
+    SecretsTooLargeToMask { field: Option<String>, limit: usize },
     /// The daemon stopped while the operation was queued or running, so the
     /// operation never reached its end: a crash, a kill, a power cut or a
     /// restart left it unfinished in the log, and the next start ended it as
@@ -120,6 +128,7 @@ impl FailureReason {
             Self::EngineStartTimedOut => "engine-start-timed-out",
             Self::EngineExitTimedOut => "engine-exit-timed-out",
             Self::HookFailed { .. } => "hook-failed",
+            Self::SecretsTooLargeToMask { .. } => "secrets-too-large-to-mask",
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
@@ -972,6 +981,15 @@ mod tests {
     #[test]
     fn a_daemon_that_stopped_codes_as_daemon_stopped() {
         assert_eq!(FailureReason::DaemonStopped.code(), "daemon-stopped");
+    }
+
+    #[test]
+    fn a_job_with_too_much_to_mask_codes_as_secrets_too_large_to_mask() {
+        let reason = FailureReason::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        };
+        assert_eq!(reason.code(), "secrets-too-large-to-mask");
     }
 
     #[test]

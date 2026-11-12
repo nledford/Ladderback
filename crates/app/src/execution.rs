@@ -13,8 +13,8 @@ use futures::{FutureExt, StreamExt, select_biased};
 use crate::announce::announce_end;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome,
-    HookPhase, HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
+    Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
+    HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
 };
 
 /// Runs one operation on the engine and records its lifecycle in the
@@ -186,13 +186,7 @@ impl RunOperation {
         } = match self.engine.run(run.operation.id(), job).await {
             Ok(running) => running,
             Err(error) => {
-                let reason = match error {
-                    EngineError::Unavailable { detail } => {
-                        FailureReason::EngineUnavailable { detail }
-                    }
-                    EngineError::StartTimedOut => FailureReason::EngineStartTimedOut,
-                };
-                self.fail(run, reason);
+                self.fail(run, FailureReason::from(error));
                 return;
             }
         };
