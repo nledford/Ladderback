@@ -351,19 +351,11 @@ jobs:
     permissions:
       issues: write # to open or comment on the issue; no checkout, so no contents
     steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Nightly dependency check failed"
-          body="The nightly dependency check (\`just deny\`) failed: $RUN_URL. A new RustSec advisory is the usual cause; the job's log names it."
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
-          fi
+      # `$/`: the action from the commit this workflow runs, with no checkout.
+      - uses: $/.github/actions/report-nightly-failure
+        with:
+          title: Nightly dependency check failed
+          body: "The nightly dependency check (`just deny`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec advisory is the usual cause; the job's log names it."
 
   mutants:
     name: Mutation testing (changed code)
@@ -424,16 +416,7 @@ jobs:
       # Only on a failure of this job's own steps (a timeout counts), not on
       # a cancel. The title is fixed, so a second failure finds the open issue.
       - if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Nightly mutation run failed"
-          body="The full mutation run (\`just mutants-all\`) failed: $RUN_URL. The run's \`mutants.out\` artifact lists the missed mutants and timeouts."
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body "$body"
-          fi
+        uses: $/.github/actions/report-nightly-failure
+        with:
+          title: Nightly mutation run failed
+          body: "The full mutation run (`just mutants-all`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The run's `mutants.out` artifact lists the missed mutants and timeouts."
