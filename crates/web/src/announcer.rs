@@ -105,6 +105,15 @@ pub(crate) struct Announcer<C> {
     window_ends: Option<Duration>,
     /// How many modal dialogs are open.
     open_modals: usize,
+    /// Whether the reader has paused live updates.
+    paused: bool,
+    /// Polite events waiting for the resume, in arrival order.
+    paused_polite: Vec<String>,
+    /// Assertive events waiting for the resume, in arrival order.
+    paused_assertive: Vec<String>,
+    /// What the pause said, which a resume replaces while it is not yet
+    /// written.
+    paused_said: Option<String>,
     polite_set: Option<PendingSet>,
     assertive_set: Option<PendingSet>,
 }
@@ -117,6 +126,10 @@ impl<C: Clock> Announcer<C> {
             held_assertive: Vec::new(),
             window_ends: None,
             open_modals: 0,
+            paused: false,
+            paused_polite: Vec::new(),
+            paused_assertive: Vec::new(),
+            paused_said: None,
             polite_set: None,
             assertive_set: None,
         }
@@ -130,6 +143,13 @@ impl<C: Clock> Announcer<C> {
             text,
         } = announcement;
         if kind == Kind::Progress || text.trim().is_empty() {
+            return Vec::new();
+        }
+        if kind == Kind::Event && self.paused {
+            match politeness {
+                Politeness::Polite => hold(&mut self.paused_polite, text),
+                Politeness::Assertive => hold(&mut self.paused_assertive, text),
+            }
             return Vec::new();
         }
         match politeness {
@@ -175,8 +195,15 @@ impl<C: Clock> Announcer<C> {
     /// once rather than after a merge window, so a resume soon after never
     /// joins it. Returns the writes due now.
     pub(crate) fn pause(&mut self, said: String) -> Vec<Effect> {
-        let _ = said;
-        todo!("pause the announcer")
+        self.paused = true;
+        // What came before the pause, still in its window, is said with it,
+        // first: nothing that happened before the press follows its answer.
+        hold(&mut self.held, said.clone());
+        self.paused_said = Some(said);
+        if self.open_modals > 0 {
+            return Vec::new();
+        }
+        self.flush_held()
     }
 
     /// The reader resumed live updates: `summary`, what changed meanwhile,
@@ -184,8 +211,47 @@ impl<C: Clock> Announcer<C> {
     /// region at once, assertive first. Behind an open modal they wait for it
     /// to close instead. A resume while not paused is ignored.
     pub(crate) fn resume(&mut self, summary: Option<String>) -> Vec<Effect> {
-        let _ = summary;
-        todo!("resume the announcer")
+        if !self.paused {
+            return Vec::new();
+        }
+        self.paused = false;
+        // A pause not yet written is stale: the resume says what is true now.
+        // The pause may have joined a write already queued, as its last text:
+        // only the pause leaves it.
+        if let Some(said) = self.paused_said.take() {
+            let before = self.polite_set.as_ref().and_then(|pending| {
+                pending
+                    .text
+                    .strip_suffix(said.as_str())
+                    .map(|before| before.trim_end().to_owned())
+            });
+            match before {
+                Some(before) if before.is_empty() => self.polite_set = None,
+                Some(before) => {
+                    if let Some(pending) = self.polite_set.as_mut() {
+                        pending.text = before;
+                    }
+                }
+                None => {}
+            }
+            self.held.retain(|text| *text != said);
+        }
+        let mut polite = Vec::new();
+        let waited = std::mem::take(&mut self.paused_polite);
+        let replies = std::mem::take(&mut self.held);
+        for text in summary.into_iter().chain(waited).chain(replies) {
+            hold(&mut polite, text);
+        }
+        self.held = polite;
+        for text in std::mem::take(&mut self.paused_assertive) {
+            hold(&mut self.held_assertive, text);
+        }
+        if self.open_modals > 0 {
+            return Vec::new();
+        }
+        let mut effects = self.flush_held_assertive();
+        effects.extend(self.flush_held());
+        effects
     }
 
     /// The writes that have come due since the last call. While a modal is
@@ -870,6 +936,18 @@ mod tests {
         assert_eq!(page.pause(), []);
         assert_eq!(page.announcer.modal_closed(), [Clear(Polite)]);
         assert_eq!(page.poll_at(50), [set(Polite, "Live updates are paused.")]);
+    }
+
+    #[test]
+    fn a_resume_before_the_pause_is_written_replaces_it() {
+        let mut page = Page::new();
+        assert_eq!(page.pause(), [Clear(Polite)]);
+        page.at(10);
+        assert_eq!(page.resume("Live updates are on again."), [Clear(Polite)]);
+        assert_eq!(
+            page.writes_between(11, 5_000),
+            [(60, set(Polite, "Live updates are on again."))]
+        );
     }
 
     #[test]
