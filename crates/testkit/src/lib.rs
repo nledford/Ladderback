@@ -14,10 +14,15 @@
 //!
 //! [`inheritable::InheritablePipe`] is how a test shows that what starts a
 //! child waits for the spawn gate.
+//!
+//! [`net::connect`] is how a test opens a TCP connection to a daemon: one
+//! that is open when it is returned, which `TcpStream::connect` on macOS is
+//! not when a signal interrupts it.
 
 pub mod daemon;
 #[cfg(unix)]
 pub mod inheritable;
+pub mod net;
 pub mod scenario_watch;
 
 use std::fs::OpenOptions;

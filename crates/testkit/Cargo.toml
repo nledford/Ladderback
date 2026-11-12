@@ -14,5 +14,14 @@ spawn-gate.workspace = true
 # `pipe` makes a pipe that is not close-on-exec: `inheritable`.
 nix.workspace = true
 
+[dev-dependencies]
+# A `SIGCHLD` handler, as tokio installs in a test process that starts a
+# `tokio::process` child, and a listener with a short accept queue: `net`.
+tokio = { workspace = true, features = ["net", "rt", "signal"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# `pthread` signals one thread: `net`'s test.
+nix = { workspace = true, features = ["pthread"] }
+
 [lints]
 workspace = true
