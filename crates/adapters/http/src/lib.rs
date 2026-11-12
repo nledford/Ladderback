@@ -419,7 +419,7 @@ async fn run_plan(
             api::ErrorCode::PlanUnknown,
             vec![("plan", api::MsgArg::Text(plan))],
         ),
-        Err(StartError::SecretRefused(_)) => todo!(),
+        Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(StartError::Unavailable) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             api::ErrorCode::ConfigUnavailable,
