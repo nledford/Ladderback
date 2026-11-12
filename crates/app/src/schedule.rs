@@ -344,10 +344,131 @@ fn same_runs(held: &Schedule, read: &Schedule) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use domain::planning::{CronExpression, Schedule, ScheduleZone};
-    use domain::{SignedDuration, TimeZone};
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex, PoisonError};
 
-    use super::{same_runs, zone_of};
+    use async_trait::async_trait;
+    use domain::execution::next_run::NextRun;
+    use domain::execution::wake::WAKE_CHECK_EVERY;
+    use domain::execution::{Operation, Trigger};
+    use domain::planning::{CronExpression, Schedule, ScheduleZone};
+    use domain::{PlanId, SignedDuration, TimeZone, Timestamp};
+
+    use super::{PlanRuns, Planned, ScheduleReport, Scheduler, same_runs, zone_of};
+    use crate::fakes::{
+        FakeClock, FakeNetwork, FakePower, InMemoryConfigStore, InMemoryScheduleStore, SeededRandom,
+    };
+
+    /// The runs the scheduler starts, in order.
+    #[derive(Default)]
+    struct Started(Mutex<Vec<(PlanId, Trigger)>>);
+
+    impl Started {
+        fn runs(&self) -> Vec<(PlanId, Trigger)> {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    #[async_trait]
+    impl PlanRuns for Started {
+        async fn start(&self, plan: &PlanId, trigger: Trigger) {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((plan.clone(), trigger));
+        }
+
+        async fn resume(&self, _: Operation) {}
+
+        fn report(&self, _: ScheduleReport) {}
+    }
+
+    fn at(text: &str) -> Timestamp {
+        text.parse().unwrap()
+    }
+
+    fn home() -> PlanId {
+        PlanId::parse("home").unwrap()
+    }
+
+    fn scheduler(now: &str, runs: Arc<Started>) -> Scheduler {
+        Scheduler {
+            clock: Arc::new(FakeClock::new(at(now))),
+            random: Arc::new(SeededRandom::new(7)),
+            schedules: Arc::new(InMemoryScheduleStore::new()),
+            config: Arc::new(InMemoryConfigStore::new()),
+            power: Arc::new(FakePower::new()),
+            network: Arc::new(FakeNetwork::new()),
+            runs,
+            zone: TimeZone::UTC,
+        }
+    }
+
+    /// The plan `home`, scheduled daily at 03:00, with its next run at `next`.
+    fn home_planned_for(next: &str) -> BTreeMap<PlanId, Planned> {
+        BTreeMap::from([(
+            home(),
+            Planned {
+                schedule: daily(),
+                next: Some(NextRun {
+                    at: at(next),
+                    trigger: Trigger::Schedule,
+                }),
+                after_wake: false,
+            },
+        )])
+    }
+
+    // These three would otherwise be asserted only by the scheduler
+    // scenarios, where a loop that never sleeps spins inside one poll: a
+    // mutant there hangs the acceptance run instead of failing it.
+
+    #[tokio::test]
+    async fn a_run_planned_for_now_starts_now_and_plans_the_one_after() {
+        let runs = Arc::new(Started::default());
+        let scheduler = scheduler("2026-06-10T03:00:00Z", runs.clone());
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        scheduler.start_due(&mut planned).await;
+        assert_eq!(runs.runs(), vec![(home(), Trigger::Schedule)]);
+        assert_eq!(
+            planned[&home()].next.map(|next| next.at),
+            Some(at("2026-06-11T03:00:00Z"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_run_a_second_away_waits() {
+        let runs = Arc::new(Started::default());
+        let scheduler = scheduler("2026-06-10T02:59:59Z", runs.clone());
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        scheduler.start_due(&mut planned).await;
+        assert_eq!(runs.runs(), vec![]);
+        assert_eq!(
+            planned[&home()].next.map(|next| next.at),
+            Some(at("2026-06-10T03:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn the_loop_sleeps_until_the_first_planned_run_and_at_most_until_its_wake_check() {
+        let scheduler = scheduler("2026-06-10T02:59:50Z", Arc::new(Started::default()));
+        assert_eq!(
+            scheduler.until_next(&home_planned_for("2026-06-10T03:00:00Z")),
+            SignedDuration::from_secs(10)
+        );
+        assert_eq!(
+            scheduler.until_next(&home_planned_for("2026-06-10T04:00:00Z")),
+            WAKE_CHECK_EVERY
+        );
+        assert_eq!(scheduler.until_next(&BTreeMap::new()), WAKE_CHECK_EVERY);
+        assert_eq!(
+            scheduler.until_next(&home_planned_for("2026-06-10T02:00:00Z")),
+            SignedDuration::ZERO
+        );
+    }
 
     fn daily() -> Schedule {
         Schedule::new(CronExpression::parse("0 3 * * *").unwrap())
