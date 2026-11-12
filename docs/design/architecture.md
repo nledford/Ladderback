@@ -63,6 +63,8 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Deadline | The latest time a backup may write its snapshot (I3) |
 | Prune margin | 1 h + the longest recorded prune on that repository |
 | Catch-up | One run in place of any number of runs missed while the agent was off or asleep |
+| Next run | When a plan runs next: the schedule's next moment after the last run started (a cron expression's on the wall clock of its zone, or an `every` interval in real time), plus jitter; planned when a run starts and kept while the agent is away (§5) |
+| Jitter | How far after its moment a run may be put, so that machines on one schedule don't start at once; never as far as the schedule's following moment |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
 
 **Bounded contexts.**
