@@ -3805,7 +3805,8 @@ mod tests {
         assert!(
             said.iter().any(|(level, line)| *level == log::Level::Warn
                 && line.contains(&hyphenated)
-                && line.contains("the configuration can't be read")),
+                && line.contains("the configuration can't be read")
+                && line.contains("(ConfigInvalid)")),
             "the log says why the backup ended: {said:?}"
         );
     }
@@ -8500,6 +8501,58 @@ mod repository_service_tests {
                 "{error:?}"
             );
             assert_eq!(jobs(&scripted), 0, "{error:?}");
+        }
+    }
+
+    /// A scheduled run over a configuration the daemon can't use doesn't
+    /// start: nothing is queued and the engine is never asked, and the log
+    /// names the plan and the configuration's code (#347), never the store's
+    /// own words, which may quote a line of the file (I4).
+    #[tokio::test]
+    async fn a_scheduled_run_over_a_configuration_that_cannot_be_used_queues_nothing_and_logs_its_code()
+     {
+        capture();
+        let plan = domain::PlanId::try_from("home".to_owned()).expect("a plan ID");
+        for (error, code, _, detail) in unusable_configurations() {
+            let scripted = engine();
+            let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+            let runner = PlanRunner {
+                config: Arc::new(Broken(error.clone())),
+                resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+                agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+                engine: scripted.clone(),
+                retention: Arc::new(engine::RusticRetention),
+                store: store.clone(),
+                registry: Arc::new(CancelRegistry::new()),
+                hooks: Arc::new(ProcessHookRunner::new()),
+                events: Arc::new(BroadcastEventBus::new()),
+            };
+
+            PlanRuns::start(&runner, &plan, Trigger::Schedule).await;
+
+            assert_eq!(jobs(&scripted), 0, "{error:?}");
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            assert!(history.operations.is_empty(), "{error:?}: {history:?}");
+            let said = captured_log::lines();
+            let line = said
+                .iter()
+                .find(|(level, line)| {
+                    *level == log::Level::Warn
+                        && line.contains("run of plan home didn't start")
+                        && line.contains(&format!("({code:?})"))
+                })
+                .map(|(_, line)| line);
+            let line =
+                line.unwrap_or_else(|| panic!("{error:?}: no warning names {code:?}: {said:?}"));
+            if let Some(detail) = detail {
+                assert!(
+                    !line.contains(detail),
+                    "{error:?}: the log quotes the store: {line}"
+                );
+            }
         }
     }
 
