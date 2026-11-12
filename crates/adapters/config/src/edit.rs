@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use domain::planning::AgentConfig;
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, TableLike};
+use toml_edit::{ArrayOfTables, Decor, DocumentMut, Item, RawString, Table, TableLike};
 
 use crate::schema::{Schemas, over_cap, parse, render_as};
 
@@ -71,26 +71,49 @@ fn merged(text: &str, base: &str, new: &str) -> Option<String> {
     let mut doc: DocumentMut = text.parse().ok()?;
     let base: DocumentMut = base.parse().ok()?;
     let new: DocumentMut = new.parse().ok()?;
-    merge(doc.as_table_mut(), Some(base.as_table()), new.as_table());
+    let mut left = Left::default();
+    merge(
+        doc.as_table_mut(),
+        Some(base.as_table()),
+        new.as_table(),
+        0,
+        &mut left,
+    );
+    left.put_back(&mut doc);
     Some(doc.to_string())
 }
 
 /// Makes the change from `base` to `new`, a table in the daemon's layout
-/// before and after the save, in `mine`, that table as the file writes it.
-fn merge(mine: &mut Table, base: Option<&dyn TableLike>, new: &dyn TableLike) {
+/// before and after the save, in `mine`, that table as the file writes it,
+/// whose body is written under the header at position `at` or its own.
+fn merge(
+    mine: &mut Table,
+    base: Option<&dyn TableLike>,
+    new: &dyn TableLike,
+    at: isize,
+    left: &mut Left,
+) {
+    let at = header_at(mine).unwrap_or(at);
     for (key, item) in new.iter() {
-        set(mine, key, base.and_then(|base| base.get(key)), item);
+        set(
+            mine,
+            key,
+            base.and_then(|base| base.get(key)),
+            item,
+            at,
+            left,
+        );
     }
     for (key, _) in base.into_iter().flat_map(TableLike::iter) {
         if !new.contains_key(key) {
-            mine.remove(key);
+            remove(mine, key, at, left);
         }
     }
 }
 
 /// Makes `key` of `mine` say what `new` says, where `base` is what it said
 /// before the save, both in the daemon's layout.
-fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item) {
+fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item, at: isize, left: &mut Left) {
     let Some(item) = mine.get_mut(key) else {
         if !same(base, new) {
             mine.insert(key, placed(new));
@@ -99,10 +122,10 @@ fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item) {
     };
     match (item, new.as_table_like(), new) {
         (Item::Table(table), Some(new), _) => {
-            merge(table, base.and_then(Item::as_table_like), new);
+            merge(table, base.and_then(Item::as_table_like), new, at, left);
         }
         (Item::ArrayOfTables(tables), _, Item::ArrayOfTables(new)) => {
-            plans(tables, base.and_then(Item::as_array_of_tables), new);
+            plans(tables, base.and_then(Item::as_array_of_tables), new, left);
         }
         (item, _, _) => {
             if !same(base, new) {
@@ -112,11 +135,247 @@ fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item) {
     }
 }
 
+/// Removes `key` from `mine`, whose body is written under the header at
+/// position `at`, with the comment directly above it: what is written
+/// above that comment's blank line stays where it is.
+fn remove(mine: &mut Table, key: &str, at: isize, left: &mut Left) {
+    let Some(index) = mine.iter().position(|(name, _)| name == key) else {
+        return;
+    };
+    let Some((key, item)) = mine.remove_entry(key) else {
+        return;
+    };
+    if !in_body(&item) {
+        left.headers(&item);
+        return;
+    }
+    let kept = above(prefix(key.leaf_decor()));
+    if kept.is_empty() {
+        return;
+    }
+    match mine.iter_mut().skip(index).find(|(_, item)| in_body(item)) {
+        Some((mut next, _)) => {
+            let decor = next.leaf_decor_mut();
+            let mut text = kept.to_owned();
+            join(&mut text, prefix(decor));
+            decor.set_prefix(text);
+        }
+        None => left.0.push((at, Gap::Setting(kept.to_owned()))),
+    }
+}
+
+/// Whether `item` is written in the body of its table, not under a header
+/// of its own.
+fn in_body(item: &Item) -> bool {
+    item.is_value() || item.as_table().is_some_and(Table::is_dotted)
+}
+
+/// The position of `table`'s header in the file, if it is written under
+/// one the file has: a table only implied, by a header under it or by
+/// dotted keys, has none.
+fn header_at(table: &Table) -> Option<isize> {
+    table.position()
+}
+
+/// The text written before an entry, from the end of the line before.
+fn prefix(decor: &Decor) -> &str {
+    decor
+        .prefix()
+        .and_then(RawString::as_str)
+        .unwrap_or_default()
+}
+
+/// What the entries a save removed leave of the text before them, by the
+/// position of the header they were written under or had, until every
+/// change is made.
+#[derive(Default)]
+struct Left(Vec<(isize, Gap)>);
+
+/// The text before a removed entry.
+enum Gap {
+    /// What is written above the comment of a setting that was the last
+    /// one of its table.
+    Setting(String),
+    /// All that was written before a table's header.
+    Header(String),
+}
+
+impl Left {
+    /// Leaves the text before each header of `item`, removed.
+    fn headers(&mut self, item: &Item) {
+        match item {
+            Item::Table(table) => self.header(table),
+            Item::ArrayOfTables(tables) => tables.iter().for_each(|table| self.header(table)),
+            Item::None | Item::Value(_) => {}
+        }
+    }
+
+    /// Leaves the text before the header of `table`, removed, or before
+    /// each header in it when it has none.
+    fn header(&mut self, table: &Table) {
+        match header_at(table) {
+            Some(at) => self
+                .0
+                .push((at, Gap::Header(prefix(table.decor()).to_owned()))),
+            None => table.iter().for_each(|(_, item)| self.headers(item)),
+        }
+    }
+
+    /// Puts what the removed entries leave before the next header the file
+    /// still has, or at its end.
+    fn put_back(mut self, doc: &mut DocumentMut) {
+        self.0.sort_by_key(|(at, _)| *at);
+        let mut kept = Vec::new();
+        each_header(doc.as_table_mut(), &mut |at, _| kept.push(at));
+        kept.sort_unstable();
+        let mut before: HashMap<isize, Vec<Gap>> = HashMap::new();
+        let mut end = Vec::new();
+        for (was, gap) in self.0 {
+            match kept.get(kept.partition_point(|at| *at <= was)) {
+                Some(at) => before.entry(*at).or_default().push(gap),
+                None => end.push(gap),
+            }
+        }
+        each_header(doc.as_table_mut(), &mut |at, table| {
+            if let Some(gap) = before.remove(&at) {
+                let text = filled(gap, prefix(table.decor()), false);
+                table.decor_mut().set_prefix(text);
+            }
+        });
+        if !end.is_empty() {
+            let text = filled(end, doc.trailing().as_str().unwrap_or_default(), true);
+            doc.set_trailing(text);
+        }
+    }
+}
+
+/// Calls `f` with each table under `table` written under a header of its
+/// own, and that header's position.
+fn each_header(table: &mut Table, f: &mut impl FnMut(isize, &mut Table)) {
+    for (_, item) in table.iter_mut() {
+        match item {
+            Item::Table(table) => each_header_from(table, f),
+            Item::ArrayOfTables(tables) => {
+                for table in tables.iter_mut() {
+                    each_header_from(table, f);
+                }
+            }
+            Item::None | Item::Value(_) => {}
+        }
+    }
+}
+
+/// Calls `f` with `table`, if it is written under a header of its own, and
+/// with each table under it that is.
+fn each_header_from(table: &mut Table, f: &mut impl FnMut(isize, &mut Table)) {
+    if let Some(at) = header_at(table) {
+        f(at, table);
+    }
+    each_header(table, f);
+}
+
+/// The text before a header, or at the `end` of the file: `own`, what is
+/// written there, after what the removed entries of `gap` leave. A
+/// removed table goes with the comment directly above its header and the
+/// lines written directly below its last setting; a removed setting goes
+/// with the comment directly above it.
+fn filled(gap: Vec<Gap>, own: &str, end: bool) -> String {
+    let mut text = String::new();
+    let mut after_header = false;
+    for gap in gap {
+        match gap {
+            Gap::Setting(kept) => {
+                join(&mut text, &kept);
+                after_header = false;
+            }
+            Gap::Header(before) => {
+                let before = if after_header {
+                    below(&before, false)
+                } else {
+                    &before
+                };
+                join(&mut text, above(before));
+                after_header = true;
+            }
+        }
+    }
+    let own = if after_header { below(own, end) } else { own };
+    if end && own.trim().is_empty() {
+        // Blank lines that went before a removed table end no file.
+        let blank: usize = text
+            .split_inclusive('\n')
+            .rev()
+            .take_while(|line| is_blank(line))
+            .map(str::len)
+            .sum();
+        text.truncate(text.len() - blank);
+    }
+    join(&mut text, own);
+    text
+}
+
+/// `before`, the text before an entry, up to and with its last blank
+/// line: what is above the comment directly over the entry.
+fn above(before: &str) -> &str {
+    let mut end = 0;
+    let mut read = 0;
+    for line in before.split_inclusive('\n') {
+        read += line.len();
+        if is_blank(line) {
+            end = read;
+        }
+    }
+    &before[..end]
+}
+
+/// `after`, the text after an entry removed, from its first blank line:
+/// the lines directly below the entry's last are its own. With no blank
+/// line, they are those of the entry that follows, or the file's `end`.
+fn below(after: &str, end: bool) -> &str {
+    let mut read = 0;
+    for line in after.split_inclusive('\n') {
+        if is_blank(line) {
+            return &after[read..];
+        }
+        read += line.len();
+    }
+    if end { "" } else { after }
+}
+
+/// Adds `more` to `text`, one blank line where both have one at the join.
+fn join(text: &mut String, more: &str) {
+    let mut more = more;
+    if ends_blank(text) {
+        while let Some((line, rest)) = more.split_once('\n') {
+            if !line.trim().is_empty() {
+                break;
+            }
+            more = rest;
+        }
+    }
+    text.push_str(more);
+}
+
+/// Whether the last line of `text` is a whole blank one.
+fn ends_blank(text: &str) -> bool {
+    text.split_inclusive('\n').next_back().is_some_and(is_blank)
+}
+
+/// Whether `line` is a whole blank line.
+fn is_blank(line: &str) -> bool {
+    line.ends_with('\n') && line.trim().is_empty()
+}
+
 /// Makes the change from `base` to `new` in `mine`, the plans as the file
 /// writes them, each found by its ID, in the order of `new`: a plan kept is
 /// changed where it is written, one added follows the last, and one
 /// removed goes with what is written in it.
-fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTables) {
+fn plans(
+    mine: &mut ArrayOfTables,
+    base: Option<&ArrayOfTables>,
+    new: &ArrayOfTables,
+    left: &mut Left,
+) {
     // By ID, not by a search per plan: a file may hold thousands of them.
     let mut old: HashMap<String, Table> = std::mem::take(mine)
         .into_iter()
@@ -132,7 +391,7 @@ fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTa
         let table = match old.remove(id) {
             Some(mut table) => {
                 let was = was.get(id).map(|was| *was as &dyn TableLike);
-                merge(&mut table, was, plan);
+                merge(&mut table, was, plan, 0, left);
                 table
             }
             None => {
@@ -143,6 +402,7 @@ fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTa
         };
         mine.push(table);
     }
+    old.values().for_each(|table| left.header(table));
 }
 
 /// A plan's ID, which every plan has: the configuration was read.
