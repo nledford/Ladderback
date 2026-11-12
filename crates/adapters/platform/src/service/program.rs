@@ -4,6 +4,8 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use domain::service::ServicePath;
+
 /// The path the service file names for this program, which the system gives
 /// as `exe` (`std::env::current_exe`), run as `ran` (its first argument) with
 /// `search` for its `PATH`.
@@ -14,7 +16,9 @@ use std::path::{Path, PathBuf};
 /// the path is the one the person ran, when it is the same file as `exe` and
 /// a service file can name it: `ran` itself when it is absolute, or, when it
 /// is a bare name, the first folder of `search` that holds it, as a shell
-/// finds it. Otherwise it is `exe` with its links, `.` and `..` resolved, as
+/// finds it. Otherwise it is `exe` as the system gives it, which macOS gives
+/// as the program was started, links and all, when a service file can name
+/// it; and failing that `exe` with its links, `.` and `..` resolved, as
 /// Linux gives it.
 ///
 /// # Errors
@@ -25,11 +29,31 @@ pub fn program_path(
     ran: Option<&OsStr>,
     search: Option<&OsStr>,
 ) -> io::Result<PathBuf> {
-    let _ = (exe, ran, search);
-    todo!()
+    let real = std::fs::canonicalize(exe)?;
+    let is_this_program = |candidate: &Path| {
+        ServicePath::parse(candidate).is_ok()
+            && std::fs::canonicalize(candidate).is_ok_and(|found| found == real)
+    };
+    let found = ran.map(Path::new).and_then(|ran| {
+        if ran.is_absolute() {
+            Some(ran.to_path_buf()).filter(|ran| is_this_program(ran))
+        } else if ran.file_name() == Some(ran.as_os_str()) {
+            search
+                .into_iter()
+                .flat_map(std::env::split_paths)
+                .map(|folder| folder.join(ran))
+                .find(|candidate| is_this_program(candidate))
+        } else {
+            // Relative to a working folder the service doesn't have.
+            None
+        }
+    });
+    let found = found.or_else(|| Some(exe.to_path_buf()).filter(|exe| is_this_program(exe)));
+    Ok(found.unwrap_or(real))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::os::unix::fs::symlink;
