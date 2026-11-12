@@ -7,7 +7,7 @@
 //! catalog message and its arguments, and `serve` prints it and fails — never
 //! a silent empty configuration or a panic.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
@@ -43,8 +43,8 @@ use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SourceName, Template, TemplateError,
 };
-use domain::{AgentId, OperationId, PlanId};
-use engine::WorkerEngine;
+use domain::{AgentId, OperationId, PlanId, RepositoryId};
+use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
@@ -216,6 +216,7 @@ async fn daemon_at(
     ));
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
+    let recorded = recorded_repositories(&loaded);
     let database = data_dir.join("ladderback.db");
     let log = OperationLog {
         store: Arc::new(
@@ -227,7 +228,7 @@ async fn daemon_at(
     };
     // Every refusal from here on closes the log first: the refused daemon
     // leaves it as tidy as one that served and stopped.
-    match state_over(config, &data_dir, cache_dir, &log).await {
+    match state_over(config, &data_dir, cache_dir, recorded, &log).await {
         Ok(state) => Ok(Daemon {
             state,
             log,
@@ -242,11 +243,14 @@ async fn daemon_at(
 }
 
 /// The router's state over the operation log `log`, once it has ended what
-/// an earlier run left unfinished, or why the daemon cannot serve.
+/// an earlier run left unfinished, or why the daemon cannot serve. The
+/// workers' cache folder is tidied first, keeping the caches of the
+/// repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
     data_dir: &std::path::Path,
     cache_dir: Option<std::path::PathBuf>,
+    recorded: Recorded,
     log: &OperationLog,
 ) -> Result<AppState, Refused> {
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
@@ -273,6 +277,7 @@ async fn state_over(
     })?;
     let mut workers = WorkerEngine::new(program, ["worker"]);
     if let Some(dir) = workers_cache(cache_dir) {
+        tidy_workers_cache(&dir, recorded).await;
         workers = workers.with_cache_root(dir);
     }
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
@@ -391,6 +396,59 @@ fn log_recording(recording: Recording) {
             id.as_str(),
             alias.as_str()
         ),
+    }
+}
+
+/// The repositories the entries of `config` record. While an entry records
+/// no ID, its repository's cache may be any in the cache folder (§16
+/// decision 61).
+fn recorded_repositories(config: &domain::planning::AgentConfig) -> Recorded {
+    config
+        .repositories()
+        .values()
+        .map(|repository| repository.id.clone())
+        .collect::<Option<BTreeSet<RepositoryId>>>()
+        .map_or(Recorded::NotAllKnown, Recorded::Exactly)
+}
+
+/// Tidies the workers' cache folder `dir` before any worker runs (§4.1,
+/// §16 decision 61), keeping the caches of the repositories `recorded`
+/// names, and says in the log what went and its size. Nothing here stops
+/// the daemon from starting.
+async fn tidy_workers_cache(dir: &std::path::Path, recorded: Recorded) {
+    let root = dir.to_owned();
+    let tidied = tokio::task::spawn_blocking(move || {
+        engine::tidy_cache(&root, &recorded, std::time::SystemTime::now())
+    })
+    .await;
+    match tidied {
+        Ok(tidying) => log_tidying(&tidying),
+        Err(error) => log::warn!("the cache folder {} was not tidied: {error}", dir.display()),
+    }
+}
+
+/// Says in the log what tidying the cache removed, and what it couldn't.
+fn log_tidying(tidying: &engine::CacheTidying) {
+    for removed in &tidying.removed {
+        let (id, count, bytes) = (removed.repository.as_str(), removed.count, removed.bytes);
+        match removed.what {
+            RemovedKind::Unrecorded => log::info!(
+                "removed the cache of repository {id}, which no repository entry records: {count} cache slot(s), {bytes} bytes"
+            ),
+            RemovedKind::SpareSlots => {
+                log::info!("removed {count} spare cache slot(s) of repository {id}: {bytes} bytes")
+            }
+            RemovedKind::UnfinishedFiles => log::info!(
+                "removed {count} unfinished cache file(s) of repository {id}: {bytes} bytes"
+            ),
+        }
+    }
+    for failed in &tidying.failed {
+        log::warn!(
+            "the cache {} could not be tidied: {}",
+            failed.path.display(),
+            failed.error
+        );
     }
 }
 

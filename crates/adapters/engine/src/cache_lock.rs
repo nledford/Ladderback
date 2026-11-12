@@ -29,21 +29,53 @@ impl CacheLock {
     }
 
     /// Locks `dir`, which must be there already: nothing is made. Fails with
-    /// [`io::ErrorKind::WouldBlock`] when another process holds the lock.
+    /// [`io::ErrorKind::WouldBlock`] when another process holds the lock, or
+    /// held it and removed the folder meanwhile (see [`Self::lock`]).
     pub(crate) fn hold(dir: &Path) -> io::Result<Self> {
         Self::lock(dir, File::open(dir)?)
     }
 
-    /// Locks `directory`, the folder opened at `dir`.
+    /// Locks `directory`, the folder opened at `dir`. Tidying the cache
+    /// removes a slot while it holds the slot's lock, so a folder opened
+    /// just before may be locked just after it is gone, and a folder made
+    /// again at `dir` would be nobody's. The lock then counts as held: it
+    /// is only taken while `dir` still names that folder, not a link.
     fn lock(dir: &Path, directory: File) -> io::Result<Self> {
         match directory.try_lock() {
-            Ok(()) => Ok(Self {
-                _directory: directory,
-            }),
-            Err(TryLockError::WouldBlock) => Err(io::ErrorKind::WouldBlock.into()),
-            Err(TryLockError::Error(error)) => Err(error),
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(io::ErrorKind::WouldBlock.into()),
+            Err(TryLockError::Error(error)) => return Err(error),
         }
+        let at_path = match fs::symlink_metadata(dir) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            Err(error) => return Err(error),
+        };
+        if !is_same_folder(&directory.metadata()?, &at_path) {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
+        Ok(Self {
+            _directory: directory,
+        })
     }
+}
+
+/// Whether `opened` and `at_path` are the one folder. A link at the path
+/// has its own identity, not that of what it points to.
+#[cfg(unix)]
+fn is_same_folder(opened: &fs::Metadata, at_path: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    (opened.dev(), opened.ino()) == (at_path.dev(), at_path.ino())
+}
+
+/// Whether `opened` and `at_path` are the one folder, as far as can be told
+/// without a file's identity: Ladderback targets macOS and Linux.
+#[cfg(not(unix))]
+fn is_same_folder(_opened: &fs::Metadata, at_path: &fs::Metadata) -> bool {
+    at_path.is_dir()
 }
 
 /// Makes `dir`, and every folder missing above it, readable and writable by

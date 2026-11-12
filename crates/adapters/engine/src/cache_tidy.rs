@@ -12,13 +12,16 @@
 //! never is.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use domain::RepositoryId;
 
-use crate::worker::tmp_files::STALE_AFTER;
+use crate::cache_lock::CacheLock;
+use crate::client::MAX_CACHE_SLOTS;
+use crate::worker::tmp_files::{STALE_AFTER, is_id_temporary};
 
 /// What tidying the cache folder removed, and what it couldn't.
 #[derive(Debug, Default)]
@@ -77,13 +80,250 @@ pub enum Recorded {
 ///   and then its folder if that is empty; while an entry records no ID,
 ///   no repository counts as one no entry records;
 /// - every other repository loses the slots above the highest one in use:
-///   a slot another process's worker holds, and slot 0, which a lone job
-///   always uses;
+///   a slot another process's worker holds, or one whose lock can't be
+///   looked at, and slot 0, which a lone job always uses;
 /// - every slot a repository keeps loses the unfinished files rustic left
 ///   (`<id>-tmp-`) more than a day old.
 pub fn tidy_cache(root: &Path, recorded: &Recorded, now: SystemTime) -> CacheTidying {
-    let _ = (root, recorded, now);
-    todo!("tidy the cache folder")
+    let mut tidying = CacheTidying::default();
+    let mut repositories: Vec<(RepositoryId, PathBuf)> = entries(root, &mut tidying)
+        .into_iter()
+        .filter(is_folder)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            let id = RepositoryId::parse(name).ok()?;
+            // Only rustic's own form, the one slots are made under.
+            (id.as_str() == name).then(|| (id, entry.path()))
+        })
+        .collect();
+    repositories.sort();
+    for (id, dir) in repositories {
+        // An entry with no ID may be any repository's: keep its folder.
+        let is_recorded = match recorded {
+            Recorded::Exactly(ids) => ids.contains(&id),
+            Recorded::NotAllKnown => true,
+        };
+        tidy_repository(&mut tidying, id, &dir, is_recorded, now);
+    }
+    tidying
+}
+
+/// A slot whose lock this process holds while it decides about the slot.
+struct FreeSlot {
+    number: u32,
+    dir: PathBuf,
+    _lock: CacheLock,
+}
+
+/// Tidies the folder `dir` of the repository `id`.
+fn tidy_repository(
+    tidying: &mut CacheTidying,
+    id: RepositoryId,
+    dir: &Path,
+    is_recorded: bool,
+    now: SystemTime,
+) {
+    let mut free = Vec::new();
+    // Slot 0 is the one a lone job always takes.
+    let mut highest_in_use = 0;
+    for (number, slot) in slots(dir, tidying) {
+        match CacheLock::hold(&slot) {
+            Ok(lock) => free.push(FreeSlot {
+                number,
+                dir: slot,
+                _lock: lock,
+            }),
+            // A running worker's slot, or one that may be.
+            Err(error) => {
+                if error.kind() != io::ErrorKind::WouldBlock {
+                    tidying.failed.push(NotRemoved { path: slot, error });
+                }
+                highest_in_use = highest_in_use.max(number);
+            }
+        }
+    }
+    if !is_recorded {
+        let (count, bytes) = remove_slots(free, tidying);
+        let folder_removed = match fs::remove_dir(dir) {
+            Ok(()) => true,
+            // A slot that is kept, or something that isn't Ladderback's.
+            Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => false,
+            Err(error) => {
+                tidying.failed.push(NotRemoved {
+                    path: dir.to_owned(),
+                    error,
+                });
+                false
+            }
+        };
+        if count > 0 || folder_removed {
+            tidying.removed.push(Removed {
+                repository: id,
+                what: RemovedKind::Unrecorded,
+                count,
+                bytes,
+            });
+        }
+        return;
+    }
+    let (spare, kept): (Vec<_>, Vec<_>) = free
+        .into_iter()
+        .partition(|slot| slot.number > highest_in_use);
+    let (count, bytes) = remove_slots(spare, tidying);
+    if count > 0 {
+        tidying.removed.push(Removed {
+            repository: id.clone(),
+            what: RemovedKind::SpareSlots,
+            count,
+            bytes,
+        });
+    }
+    let (mut count, mut bytes) = (0_u64, 0_u64);
+    for slot in kept {
+        let (removed, size) = remove_unfinished(&slot.dir, now, tidying);
+        count = count.saturating_add(removed);
+        bytes = bytes.saturating_add(size);
+    }
+    if count > 0 {
+        tidying.removed.push(Removed {
+            repository: id,
+            what: RemovedKind::UnfinishedFiles,
+            count,
+            bytes,
+        });
+    }
+}
+
+/// The cache slots in a repository's folder `dir`: real folders, not links,
+/// named by their number as slots are made (`0` to `63`, no leading zero).
+fn slots(dir: &Path, tidying: &mut CacheTidying) -> Vec<(u32, PathBuf)> {
+    let mut slots: Vec<(u32, PathBuf)> = entries(dir, tidying)
+        .into_iter()
+        .filter(is_folder)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            let number = name.parse::<u32>().ok()?;
+            (number < MAX_CACHE_SLOTS && number.to_string() == name).then(|| (number, entry.path()))
+        })
+        .collect();
+    slots.sort();
+    slots
+}
+
+/// Removes `slots`, each while its lock is held, and returns how many were
+/// removed and the size of their files.
+fn remove_slots(slots: Vec<FreeSlot>, tidying: &mut CacheTidying) -> (u64, u64) {
+    let (mut count, mut bytes) = (0_u64, 0_u64);
+    for slot in slots {
+        let size = size_of(&slot.dir);
+        // `remove_dir_all` removes a link it meets, never what it points to.
+        match fs::remove_dir_all(&slot.dir) {
+            Ok(()) => {
+                count = count.saturating_add(1);
+                bytes = bytes.saturating_add(size);
+            }
+            Err(error) => tidying.failed.push(NotRemoved {
+                path: slot.dir.clone(),
+                error,
+            }),
+        }
+    }
+    (count, bytes)
+}
+
+/// Removes the unfinished files rustic left in the slot `dir` more than
+/// [`STALE_AFTER`] before `now`, and returns how many and their size.
+fn remove_unfinished(dir: &Path, now: SystemTime, tidying: &mut CacheTidying) -> (u64, u64) {
+    let (mut count, mut bytes) = (0_u64, 0_u64);
+    let mut folders = vec![dir.to_owned()];
+    while let Some(folder) = folders.pop() {
+        for entry in entries(&folder, tidying) {
+            if is_folder(&entry) {
+                folders.push(entry.path());
+                continue;
+            }
+            // A link named as an unfinished file is not one.
+            let is_file = entry.file_type().is_ok_and(|kind| kind.is_file());
+            if !is_file || !entry.file_name().to_str().is_some_and(is_id_temporary) {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let age = metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok());
+            if !age.is_some_and(|age| age > STALE_AFTER) {
+                continue;
+            }
+            let path = entry.path();
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    count = count.saturating_add(1);
+                    bytes = bytes.saturating_add(metadata.len());
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => tidying.failed.push(NotRemoved { path, error }),
+            }
+        }
+    }
+    (count, bytes)
+}
+
+/// The size of the regular files under `dir`, links not followed. What
+/// can't be read counts as nothing: the size is only for the log.
+fn size_of(dir: &Path) -> u64 {
+    let mut bytes = 0_u64;
+    let mut folders = vec![dir.to_owned()];
+    while let Some(folder) = folders.pop() {
+        let Ok(reader) = fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in reader.flatten() {
+            if is_folder(&entry) {
+                folders.push(entry.path());
+            } else if entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                let size = entry.metadata().map_or(0, |metadata| metadata.len());
+                bytes = bytes.saturating_add(size);
+            }
+        }
+    }
+    bytes
+}
+
+/// Whether `entry` is a folder. `DirEntry::file_type` doesn't follow a
+/// link, so a link to a folder is not one.
+fn is_folder(entry: &fs::DirEntry) -> bool {
+    entry.file_type().is_ok_and(|kind| kind.is_dir())
+}
+
+/// The entries of `dir`. A folder that can't be read, or an entry that
+/// can't, is noted in `tidying`.
+fn entries(dir: &Path, tidying: &mut CacheTidying) -> Vec<fs::DirEntry> {
+    let reader = match fs::read_dir(dir) {
+        Ok(reader) => reader,
+        Err(error) => {
+            tidying.failed.push(NotRemoved {
+                path: dir.to_owned(),
+                error,
+            });
+            return Vec::new();
+        }
+    };
+    let mut entries = Vec::new();
+    for entry in reader {
+        match entry {
+            Ok(entry) => entries.push(entry),
+            Err(error) => tidying.failed.push(NotRemoved {
+                path: dir.to_owned(),
+                error,
+            }),
+        }
+    }
+    entries
 }
 
 #[cfg(test)]
