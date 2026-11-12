@@ -198,6 +198,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
+        | ErrorCode::SecretKeyringUnavailable
         | ErrorCode::SecretNotText
         | ErrorCode::SecretTooLarge
         | ErrorCode::SecretCommandFailed

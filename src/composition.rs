@@ -1695,7 +1695,13 @@ async fn secret_refusal(
                     named,
                     Some(masked_detail(&redactor, detail)),
                 ),
-                Problem::KeyringUnavailable { .. } => todo!(),
+                // The platform's words about the service, never about a
+                // secret it gave: none was read. Masked all the same.
+                Problem::KeyringUnavailable { detail } => refusal(
+                    ErrorCode::SecretKeyringUnavailable,
+                    named,
+                    Some(masked_detail(&redactor, detail)),
+                ),
                 Problem::NotUnicode => refusal(ErrorCode::SecretNotText, named, None),
                 Problem::TooLarge { limit } => refusal(
                     ErrorCode::SecretTooLarge,
