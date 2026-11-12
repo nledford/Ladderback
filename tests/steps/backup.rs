@@ -576,6 +576,8 @@ pub struct BackupSetup {
     pub agent_hostname: Option<domain::planning::Hostname>,
     /// The plan's source filter, written to the daemon's configuration.
     pub filter: domain::planning::SourceFilter,
+    /// The plan's own hooks, written to the daemon's configuration.
+    pub plan_hooks: domain::planning::Hooks,
     /// The repository ID the job names as the one it must open (§7.3):
     /// what the configuration recorded when the repository was connected.
     pub id: Option<RepositoryId>,

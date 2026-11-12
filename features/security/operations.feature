@@ -10,14 +10,18 @@ Feature: The operation lifecycle
   Background:
     Given Ladderback is serving on loopback with the plan "home"
 
+  # A plan's after hook that waits until it is let go holds its backup
+  # running: an operation has not ended until its ending hooks have, so the
+  # history page finds it running however soon the engine finishes its part.
   Scenario: A started backup appears in the history page, first running, then succeeded
-    Given the plan's source holds many more files
+    Given the plan's after hook waits until it is let go
     When the daemon starts a backup of the plan "home"
     Then the history page shows the operation running
-    And the history page shows the operation succeeded
+    When the plan's after hook is let go
+    Then the history page shows the operation succeeded
 
   Scenario: A page that arrives while a backup runs still sees it
-    Given the plan's source holds many more files
+    Given the plan's after hook waits until it is let go
     When the daemon starts a backup of the plan "home"
     Then the history page shows the operation running
 

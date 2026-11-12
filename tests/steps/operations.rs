@@ -24,7 +24,8 @@ use super::Agent;
 /// How long a page may wait for an operation to reach the expected state.
 const STATE_TIMEOUT: Duration = Duration::from_secs(120);
 /// How many more demo files a "many more files" source holds, so a backup
-/// runs long enough to be seen running and cancelled.
+/// runs long enough for what a scenario does while it runs: cancel it, look
+/// at its cache slot, start another beside it.
 const MANY_FILES: usize = 3000;
 
 /// What the operation-lifecycle scenarios keep between steps.
@@ -344,6 +345,43 @@ async fn a_finally_hook(agent: &mut Agent) {
         mark.to_str().expect("a hook mark path without spaces")
     );
     save_config_with_hooks(agent, Some(command)).await;
+}
+
+/// The file a held after hook waits on, in the scenario's scratch folder.
+fn after_hook_hold(agent: &Agent) -> PathBuf {
+    agent.scratch().join("after-hook-holds")
+}
+
+/// The script of an after hook that waits while the file `$1` is there and
+/// the daemon that started it is alive. A hook keeps the daemon's `PATH`.
+const WAIT_WHILE_HELD: &str =
+    "while [ -e \"$1\" ] && kill -0 \"$PPID\" 2>/dev/null; do sleep 0.05; done";
+
+/// A plan whose after hook runs until the scenario lets it go. A backup stays
+/// running in the log until its ending hooks have run, since a failing after
+/// hook still changes how it ended (`features/planning/hooks.feature`), so a
+/// backup of the plan is certain to be seen running, however soon the engine
+/// finishes, and it ends as it would have once the hook is let go. The hook
+/// also ends once its daemon is gone, or the scenario's folder with the file
+/// it waits on: a scenario that ends, or fails, leaves no hook behind.
+#[given("the plan's after hook waits until it is let go")]
+async fn an_after_hook_that_waits(agent: &mut Agent) {
+    let hold = after_hook_hold(agent);
+    std::fs::write(&hold, b"").expect("the file the after hook waits on");
+    let hold = hold.to_str().expect("a UTF-8 scratch path").to_owned();
+    let wait = domain::planning::HookEntry::new(
+        "/bin/sh",
+        ["-c", WAIT_WHILE_HELD, "after-hook", hold.as_str()],
+        domain::planning::OnFailure::Error,
+    )
+    .expect("a hook that runs /bin/sh");
+    agent.backup.plan_hooks.run_after = vec![wait];
+    super::events_steps::save_daemon_config(agent, None).await;
+}
+
+#[when("the plan's after hook is let go")]
+fn the_after_hook_is_let_go(agent: &mut Agent) {
+    std::fs::remove_file(after_hook_hold(agent)).expect("the after hook was held");
 }
 
 #[when(expr = "the daemon starts a backup of the plan {string}")]
