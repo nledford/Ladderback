@@ -3,6 +3,7 @@
 //! written. Recording a repository's ID adds one key this way (decision 57),
 //! and a save sets, adds and removes the settings it changes (decision 69).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use domain::planning::AgentConfig;
@@ -116,14 +117,22 @@ fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item) {
 /// changed where it is written, one added follows the last, and one
 /// removed goes with what is written in it.
 fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTables) {
-    let mut old: Vec<Table> = std::mem::take(mine).into_iter().collect();
+    // By ID, not by a search per plan: a file may hold thousands of them.
+    let mut old: HashMap<String, Table> = std::mem::take(mine)
+        .into_iter()
+        .filter_map(|table| Some((id_of(&table)?.to_owned(), table)))
+        .collect();
+    let was: HashMap<&str, &Table> = base
+        .into_iter()
+        .flat_map(ArrayOfTables::iter)
+        .filter_map(|table| Some((id_of(table)?, table)))
+        .collect();
     for plan in new.iter() {
-        let id = id_of(plan);
-        let table = match old.iter().position(|table| id_of(table) == id) {
-            Some(at) => {
-                let mut table = old.remove(at);
-                let was = base.and_then(|base| base.iter().find(|table| id_of(table) == id));
-                merge(&mut table, was.map(|was| was as &dyn TableLike), plan);
+        let id = id_of(plan).unwrap_or_default();
+        let table = match old.remove(id) {
+            Some(mut table) => {
+                let was = was.get(id).map(|was| *was as &dyn TableLike);
+                merge(&mut table, was, plan);
                 table
             }
             None => {
@@ -136,6 +145,7 @@ fn plans(mine: &mut ArrayOfTables, base: Option<&ArrayOfTables>, new: &ArrayOfTa
     }
 }
 
+/// A plan's ID, which every plan has: the configuration was read.
 fn id_of(plan: &Table) -> Option<&str> {
     plan.get("id").and_then(Item::as_str)
 }
@@ -580,5 +590,45 @@ keep-daily = 7
             parts.agent.hostname = Some(Hostname::parse("demo-host").expect("a hostname"));
         });
         assert_eq!(saved, None);
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use std::path::Path;
+
+    use domain::PlanId;
+
+    use super::saved;
+    use crate::schema::{CURRENT_SCHEMA, Schemas, parse, render_as};
+
+    /// The plan removed is the one with that ID, with what is written in it,
+    /// not the first one written.
+    #[test]
+    fn a_plan_a_save_removes_goes_with_what_is_written_in_it() {
+        let head = "schema = 1\n\n[repositories.nas]\nrepository = \"/srv/demo-repo\"\npassword-env = \"DEMO_PASSWORD\"\n";
+        let home = "\n# Home.\n[[plans]]\nid = \"home\"\nrepository = \"nas\"\nsources = [\"/home/demo\"]   # all of it\n";
+        let docs = "\n# Docs.\n[[plans]]\nid = \"docs\"\nrepository = \"nas\"\nsources = [\"/home/demo/docs\"]  # docs only\n";
+        let written = format!("{head}{home}{docs}");
+        let file = Path::new("config.toml");
+        let schemas = Schemas::production();
+        let read = parse(file, &written, &schemas).expect("parses").config;
+        let home_id = PlanId::parse("home").expect("an ID");
+        let config = domain::planning::AgentConfig::new(
+            read.agent().clone(),
+            read.hooks().clone(),
+            read.repositories().clone(),
+            read.plans()
+                .iter()
+                .filter(|plan| plan.id != home_id)
+                .cloned()
+                .collect(),
+        )
+        .expect("valid");
+        let rendered = render_as(file, &config, CURRENT_SCHEMA).expect("renders");
+        assert_eq!(
+            saved(file, &written, &config, &rendered, &schemas),
+            Some(format!("{head}{docs}"))
+        );
     }
 }
