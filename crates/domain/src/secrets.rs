@@ -1018,6 +1018,55 @@ mod tests {
         }
     }
 
+    /// rclone, written in Go, quotes what it can't serve as `%q` does
+    /// (`Failed to create file system for "…"`): a control character as
+    /// `\x01` or `\a`, a format character, a separator other than the space,
+    /// a private-use or unassigned character as `\u200b` or `\U000e0001`, and
+    /// a combining character as it is, where `Debug` escapes it (#331). The
+    /// quoted forms are Go's own, from `strconv.Quote`.
+    #[test]
+    fn a_secret_is_replaced_as_go_quotes_it() {
+        let masked = "CRITICAL: Failed to create file system for \
+                      \":s3,secret_access_key=***:demo-bucket/repo\": demo error";
+        for (secret, quoted) in [
+            (
+                "CANARY\u{1}bell\u{7}del\u{7f}nul\u{0}",
+                r"CANARY\x01bell\adel\x7fnul\x00",
+            ),
+            ("CANARY\u{8}\u{c}\u{b}\r", r"CANARY\b\f\v\r"),
+            (
+                "CANARY\u{200b}zw\u{85}nel\u{a0}nbsp\u{2028}ls\u{e000}pua\u{378}na\u{e0001}tag\u{ffff}",
+                r"CANARY\u200bzw\u0085nel\u00a0nbsp\u2028ls\ue000pua\u0378na\U000e0001tag\uffff",
+            ),
+            (
+                "CANARY'it\"s\\e\u{301}\t\u{1}",
+                "CANARY'it\\\"s\\\\e\u{301}\\t\\x01",
+            ),
+            // A variation selector, the combining grapheme joiner and a
+            // Hangul filler print in Go; newer Rust's `Debug` escapes them.
+            (
+                "CANARY\u{fe0f}\u{34f}\u{115f}\u{1}",
+                "CANARY\u{fe0f}\u{34f}\u{115f}\\x01",
+            ),
+        ] {
+            let line = format!(
+                "CRITICAL: Failed to create file system for \
+                 \":s3,secret_access_key={quoted}:demo-bucket/repo\": demo error"
+            );
+            assert_eq!(redactor(&[secret]).redact(&line), masked, "{secret:?}");
+        }
+        // Its other raw forms too: without the white space around it, and
+        // each line of one that spans lines.
+        let by_line = redactor(&["  CANARY\u{1}line-one\nCANARY\u{7f}line-two\n"]);
+        for quoted in [
+            r"CANARY\x01line-one\nCANARY\x7fline-two",
+            r"CANARY\x01line-one",
+            r"CANARY\x7fline-two",
+        ] {
+            assert_eq!(by_line.redact(&format!("\"{quoted}\"")), r#""***""#);
+        }
+    }
+
     #[test]
     fn a_secret_containing_another_is_replaced_whole() {
         let redactor = redactor(&["abc", "abcdef"]);
