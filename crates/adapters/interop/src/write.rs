@@ -335,11 +335,51 @@ fn password(
         ),
         SecretRef::Env(name) => ("password-command", command_line("printenv", [name])),
         SecretRef::Keyring(entry) => {
-            let _ = (entry, keyring, path, notices);
-            todo!()
+            let program = keyring.program();
+            if !path.iter().any(|folder| runnable(&folder.join(program))) {
+                notices.push(ProfileNotice::KeyringCommandMissing {
+                    program: program.to_owned(),
+                });
+            }
+            ("password-command", keyring_command(entry, keyring))
         }
         SecretRef::Inline(_) => return Err(ExportRefusal::InlineSecret),
     })
+}
+
+/// Whether `file` is a file that can be run: what a shell, and rustic,
+/// would find on the `PATH`.
+fn runnable(file: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    file.metadata()
+        .is_ok_and(|found| found.is_file() && found.permissions().mode() & 0o111 != 0)
+}
+
+/// The command that prints the secret of a keyring entry (§10.2).
+fn keyring_command(entry: &KeyringEntry, keyring: KeyringCommand) -> String {
+    match keyring {
+        KeyringCommand::Security => command_line(
+            "security",
+            [
+                "find-generic-password",
+                "-s",
+                entry.service(),
+                "-a",
+                entry.name(),
+                "-w",
+            ],
+        ),
+        KeyringCommand::SecretTool => command_line(
+            "secret-tool",
+            [
+                "lookup",
+                "service",
+                entry.service(),
+                "username",
+                entry.name(),
+            ],
+        ),
+    }
 }
 
 // --- Commands ----------------------------------------------------------------

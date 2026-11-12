@@ -124,6 +124,14 @@ impl KeyringCommand {
             Self::SecretTool
         }
     }
+
+    /// The program the command runs.
+    pub(crate) const fn program(self) -> &'static str {
+        match self {
+            Self::Security => "security",
+            Self::SecretTool => "secret-tool",
+        }
+    }
 }
 
 /// Writes a plan as a profile `rustic -P` accepts.
@@ -148,9 +156,17 @@ impl RusticProfileWriter {
     }
 }
 
-/// The folders a program is looked for in on `path`, first to last.
+/// The folders a program is looked for in on `path`, first to last, as
+/// `execvp` looks: `/usr/bin` and `/bin` when it is unset. An empty or
+/// relative entry is left out: it names a folder by the one rustic will run
+/// in, which the export can't know.
 fn folders(path: Option<&OsStr>) -> Vec<PathBuf> {
-    std::env::split_paths(path.unwrap_or_default()).collect()
+    match path {
+        Some(path) => std::env::split_paths(path)
+            .filter(|folder| folder.is_absolute())
+            .collect(),
+        None => vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+    }
 }
 
 impl ProfileWriter for RusticProfileWriter {

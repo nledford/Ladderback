@@ -1177,7 +1177,10 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::ProfileSettingKept,
             vec![("repository", text(repository)), ("setting", text(setting))],
         ),
-        ProfileNotice::KeyringCommandMissing { .. } => todo!(),
+        ProfileNotice::KeyringCommandMissing { program } => (
+            WarningCode::ProfileKeyringCommandMissing,
+            vec![("program", text(program))],
+        ),
     };
     Notice { code, args }
 }
