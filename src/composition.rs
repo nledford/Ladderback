@@ -490,7 +490,8 @@ struct EventEngine {
 impl Engine for EventEngine {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
         // What the started event can name: the repository's ID, when the job
-        // knows it already.
+        // knows it already. A first job's entry records none yet (decision
+        // 57); its start names the repository the engine says it opened.
         let repository = match &job {
             Job::Backup(backup) => backup.repository.id.clone(),
             _ => None,
@@ -538,9 +539,15 @@ impl Publish {
     fn ui(&mut self, event: &EngineEvent) -> Option<UiEvent> {
         use EngineEvent as E;
         match event {
-            E::Started { index_read_at, .. } => Some(UiEvent::OperationStarted {
+            E::Started {
+                index_read_at,
+                repository,
+            } => Some(UiEvent::OperationStarted {
                 operation: self.operation.clone(),
-                repository: self.repository.clone(),
+                repository: self
+                    .repository
+                    .clone()
+                    .or_else(|| repository.as_ref().map(|id| id.as_str().to_owned())),
                 started_at: index_read_at.to_string(),
             }),
             E::Progress(progress) => self.progress_ui(progress),
