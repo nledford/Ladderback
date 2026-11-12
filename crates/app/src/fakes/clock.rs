@@ -61,6 +61,14 @@ impl FakeClock {
         state.move_to(to);
     }
 
+    /// The machine sleeps for `by`: wall-clock time moves on, monotonic
+    /// time stands still. A sleeper on wall-clock time whose deadline passes
+    /// wakes; one on monotonic time waits on for the rest of its time.
+    pub fn suspend(&self, by: SignedDuration) {
+        let _ = by;
+        todo!()
+    }
+
     /// How many sleepers are waiting for time to move. A test driving a
     /// manual clock waits for one before each [`advance`](Self::advance):
     /// moving time before the sleeper registers would skip its deadline.
@@ -80,6 +88,10 @@ impl Clock for FakeClock {
         self.lock().now
     }
 
+    fn monotonic(&self) -> SignedDuration {
+        todo!()
+    }
+
     async fn sleep_until(&self, deadline: Timestamp) {
         let woken = {
             let mut state = self.lock();
@@ -97,5 +109,10 @@ impl Clock for FakeClock {
         // The sender lives in `state` until the deadline passes, so this only
         // errors if the clock itself is dropped; then nobody can advance it.
         let _ = woken.await;
+    }
+
+    async fn sleep(&self, duration: SignedDuration) {
+        let _ = duration;
+        todo!()
     }
 }

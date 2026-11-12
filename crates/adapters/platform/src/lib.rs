@@ -1,6 +1,6 @@
-//! Platform adapter: the operating system's clocks and the agent ID file.
-//! Power, network and the identity key arrive with later milestones
-//! (technical design §3.2).
+//! Platform adapter: the operating system's clocks, what powers the machine
+//! and whether it is online, and the agent ID file. The identity key arrives
+//! with a later milestone (technical design §3.2).
 
 #![deny(
     clippy::unwrap_used,
@@ -14,10 +14,12 @@
 pub mod agent_id;
 pub mod data_dir_lock;
 pub mod dirs;
+pub mod network;
+pub mod power;
 
 use app::ports::Clock;
 use async_trait::async_trait;
-use domain::Timestamp;
+use domain::{SignedDuration, Timestamp};
 
 /// Wall-clock time from the OS, timers from tokio.
 #[derive(Clone, Copy, Debug, Default)]
@@ -27,6 +29,10 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     fn now(&self) -> Timestamp {
         Timestamp::now()
+    }
+
+    fn monotonic(&self) -> SignedDuration {
+        todo!()
     }
 
     async fn sleep_until(&self, deadline: Timestamp) {
@@ -44,6 +50,11 @@ impl Clock for SystemClock {
             }
             tokio::time::sleep(remaining.min(MAX_NAP)).await;
         }
+    }
+
+    async fn sleep(&self, duration: SignedDuration) {
+        let _ = duration;
+        todo!()
     }
 }
 

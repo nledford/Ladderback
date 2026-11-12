@@ -548,7 +548,13 @@ impl Clock for SettableClock {
         *self.0.lock().expect("the clock")
     }
 
+    fn monotonic(&self) -> domain::SignedDuration {
+        domain::SignedDuration::ZERO
+    }
+
     async fn sleep_until(&self, _deadline: domain::Timestamp) {}
+
+    async fn sleep(&self, _duration: domain::SignedDuration) {}
 }
 
 #[tokio::test]

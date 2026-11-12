@@ -15,6 +15,7 @@
 )]
 
 pub mod announce;
+pub mod conditions;
 pub mod event_bus;
 pub mod execution;
 pub mod history;

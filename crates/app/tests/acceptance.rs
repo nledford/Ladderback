@@ -17,6 +17,9 @@ use testkit::scenario_watch::ScenarioWatch;
 #[path = "steps/announcement.rs"]
 mod announcement_steps;
 
+#[path = "steps/conditions.rs"]
+mod conditions_steps;
+
 #[path = "steps/config.rs"]
 mod config_steps;
 
@@ -61,6 +64,7 @@ struct Agent {
     hooks: hooks_steps::HooksWorld,
     secrets: secrets_steps::SecretsWorld,
     config: config_steps::ConfigWorld,
+    conditions: conditions_steps::ConditionsWorld,
     maintenance: maintenance_steps::MaintenanceWorld,
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
@@ -100,6 +104,7 @@ impl Agent {
             secrets: Default::default(),
             config: Default::default(),
             schedule: Default::default(),
+            conditions: Default::default(),
             maintenance: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),
