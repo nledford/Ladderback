@@ -1051,3 +1051,17 @@ fn pinned_rust_installed_once(agent: &mut Agent) {
         "{calls:?}"
     );
 }
+
+#[then(expr = "the release was built with {string}, the Rust the owner's environment names")]
+fn release_built_with_environment(agent: &mut Agent, rust: String) {
+    assert_eq!(built_with(agent, "install --locked --path ."), rust);
+}
+
+#[then(expr = "standard output doesn't say {string}")]
+fn stdout_doesnt_say(agent: &mut Agent, text: String) {
+    let stdout = &ran(agent).stdout;
+    assert!(
+        !stdout.contains(&text),
+        "standard output says {text:?}: {stdout}"
+    );
+}

@@ -187,6 +187,14 @@ Feature: Install Ladderback with one command
       And standard error says "wasm32-unknown-unknown"
       And no release was installed
 
+    Scenario: Without rustup, the Rust the owner's environment names is left as it is
+      Given Rust "1.100.0" is installed without rustup
+      And the owner's environment sets RUSTC to "/opt/rust-1.100.0/bin/rustc"
+      When the owner runs the install script with "--yes"
+      Then the command exits with status 0
+      And the release was built with "/opt/rust-1.100.0/bin/rustc", the Rust the owner's environment names
+      And standard output doesn't say "Ignoring"
+
     Scenario: Without rustup, a missing just is named with where to get it
       Given Rust "1.100.0" is installed without rustup
       And just isn't installed
