@@ -10,8 +10,9 @@
 
 use app::ports::{ConfigError, Problem};
 use domain::planning::{
-    AgentConfig, AgentSettings, GlobFile, GroupBy, HookEntry, Hooks, KeepCount, KeepWithin,
-    Maintenance, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
+    AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
+    KeepWithin, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy,
+    Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
@@ -270,6 +271,7 @@ fn plan(plan: &Plan) -> PlanTable {
         exclude_if_xattr: some_if_any(&filter.exclude_if_xattr),
         one_file_system: filter.one_file_system.then_some(true),
         schedule: plan.schedule.as_ref().map(schedule),
+        overlap: (plan.overlap != Overlap::Skip).then(|| plan.overlap.as_str().to_owned()),
         retry: plan.retry.as_ref().map(retry),
         hooks: hooks(&plan.hooks),
         retention: retention(&plan.retention),
@@ -279,6 +281,11 @@ fn plan(plan: &Plan) -> PlanTable {
 fn schedule(schedule: &Schedule) -> ScheduleTable {
     ScheduleTable {
         cron: schedule.cron().map(|cron| cron.as_str().to_owned()),
+        every: match schedule.cadence() {
+            Cadence::Every(every) => Some(format_duration(every.get())),
+            Cadence::Cron(_) => None,
+        },
+        timezone: schedule.zone().map(|zone| zone.name().to_owned()),
         jitter: schedule.jitter().map(format_duration),
         catch_up: (!schedule.catch_up()).then_some(false),
         on_ac_power: schedule.on_ac_power().then_some(true),

@@ -14,7 +14,8 @@ pub(crate) fn schedule_zone(
     name: &str,
     database: &TimeZoneDatabase,
 ) -> Result<ScheduleZone, InvalidValue> {
-    todo!("{name} {database:?}")
+    let zone = database.get(name).map_err(|_| refused(name))?;
+    ScheduleZone::new(name, zone)
 }
 
 fn refused(name: &str) -> InvalidValue {

@@ -103,6 +103,7 @@ table! {
         exclude_if_xattr: Vec<String>,
         one_file_system: bool,
         schedule: ScheduleTable,
+        overlap: String,
         retry: RetryTable,
         hooks: HooksTable,
         retention: RetentionTable,
@@ -110,8 +111,11 @@ table! {
 }
 
 table! {
+    /// A schedule. Exactly one of `cron` and `every` is set.
     ScheduleTable {
         cron: String,
+        every: String,
+        timezone: String,
         jitter: String,
         catch_up: bool,
         on_ac_power: bool,
