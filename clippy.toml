@@ -10,3 +10,10 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+
+# On macOS, a signal that interrupts `TcpStream::connect` can make it return a
+# stream that is not connected yet (testkit/src/net.rs, #170). `domain` and
+# `app` don't need this line: their clippy.toml bans the whole type.
+disallowed-methods = [
+    { path = "std::net::TcpStream::connect", reason = "on macOS a signal makes it return a stream not yet connected: use testkit::net::connect in a test, TcpStream::connect_timeout elsewhere" },
+]

@@ -4,7 +4,7 @@
 //! itself.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -153,7 +153,7 @@ fn header_is(line: &str, name: &str) -> bool {
 
 /// Sends `request` over a new connection and reads one response.
 fn exchange(addr: SocketAddr, request: &Request) -> Response {
-    let mut stream = TcpStream::connect(addr).expect("a connection to the daemon");
+    let mut stream = testkit::net::connect(addr).expect("a connection to the daemon");
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
         .expect("a read timeout");

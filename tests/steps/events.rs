@@ -8,7 +8,7 @@
 //! at a folder of the scenario's scratch folder; its data folder is another.
 
 use std::io::{BufRead, BufReader};
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
@@ -282,7 +282,7 @@ enum Outcome {
 /// and body, nothing parsed further.
 fn post(agent: &Agent, path: &str, body: &str) -> (u16, String) {
     let addr = agent.events.daemon().addr;
-    let mut stream = TcpStream::connect(addr).expect("the daemon accepts a connection");
+    let mut stream = testkit::net::connect(addr).expect("the daemon accepts a connection");
     let request = format!(
         "POST {path} HTTP/1.1\r\nHost: {}\r\nOrigin: http://{addr}\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -504,7 +504,7 @@ async fn each_learns_finished(agent: &mut Agent) {
 #[then("the daemon is still serving")]
 fn still_serving(agent: &mut Agent) {
     let addr = agent.events.daemon().addr;
-    let mut stream = TcpStream::connect(addr).expect("the daemon accepts a connection");
+    let mut stream = testkit::net::connect(addr).expect("the daemon accepts a connection");
     use std::io::{Read, Write};
     let request = format!("GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream

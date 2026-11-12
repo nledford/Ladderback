@@ -7,7 +7,6 @@
 //! against the stubbed routes (development.md §13.1).
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -143,7 +142,7 @@ pub(crate) fn exchange_at(
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    let mut stream = TcpStream::connect(addr).expect("a connection to the daemon");
+    let mut stream = testkit::net::connect(addr).expect("a connection to the daemon");
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .expect("a read timeout");
