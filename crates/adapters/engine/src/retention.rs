@@ -118,9 +118,10 @@ fn evaluate(
     .map_err(|error| engine(redactor, error))?
     .open(&Credentials::password(spec.password.clone()))
     .map_err(|error| engine(redactor, error))?;
-    // The repository's own snapshot files, not the listing's: a calendar
-    // rule counts each snapshot on the calendar of the offset its file
-    // records, which the listing's `Timestamp` has lost (§16, decision 56).
+    // The repository's own snapshot files, not the listing's summaries:
+    // rustic's `ForgetGroups` takes the files, and a calendar rule counts
+    // each snapshot on the calendar of the offset its file records (§16,
+    // decision 56).
     let snapshots: Vec<SnapshotFile> = repository
         .get_all_snapshots()
         .map_err(|error| engine(redactor, error))?

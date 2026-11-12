@@ -732,7 +732,17 @@ pub(crate) fn taken(
     offset: Option<api::ClockOffset>,
     viewer: impl FnOnce(jiff::Timestamp) -> jiff::tz::Offset,
 ) -> Taken {
-    todo!("{raw} {offset:?} {:?}", viewer(jiff::Timestamp::UNIX_EPOCH))
+    let Ok(at) = jiff::Timestamp::from_str(raw) else {
+        return Taken::Unread;
+    };
+    let Some(offset) = offset.map(api::ClockOffset::get) else {
+        return Taken::Instant(at);
+    };
+    Taken::Clock {
+        reading: offset.to_datetime(at),
+        offset,
+        named: viewer(at) != offset,
+    }
 }
 
 /// A listed snapshot's time as the page writes it ([`taken`]). The host
@@ -751,9 +761,51 @@ pub(crate) fn snapshot_time(
     viewer: impl FnOnce(jiff::Timestamp) -> jiff::tz::Offset,
     writes_instants: bool,
 ) -> String {
-    todo!(
-        "{localizer:?} {raw} {offset:?} {zone:?} {:?} {writes_instants}",
-        viewer(jiff::Timestamp::UNIX_EPOCH)
+    let (reading, offset, named) = match taken(raw, offset, viewer) {
+        Taken::Unread => return raw.to_owned(),
+        Taken::Instant(_) => return instant(localizer, raw, zone),
+        Taken::Clock {
+            reading,
+            offset,
+            named,
+        } => (reading, offset, named),
+    };
+    // The host writes the reading as it writes an instant read in UTC, which
+    // shows no zone. A reading past the last instant is no instant to hand it.
+    let hosted = jiff::tz::TimeZone::UTC
+        .to_timestamp(reading)
+        .ok()
+        .filter(|_| writes_instants);
+    let (when, named) = match hosted {
+        Some(as_if_utc) => (
+            text_with(
+                localizer,
+                msg::UI_INSTANT,
+                &[(
+                    "when",
+                    MsgArg::Timestamp {
+                        utc_ms: as_if_utc.as_millisecond(),
+                        zone: None,
+                    },
+                )],
+            ),
+            named,
+        ),
+        None => (reading.strftime("%Y-%m-%d %H:%M:%S").to_string(), true),
+    };
+    if !named {
+        return when;
+    }
+    text_with(
+        localizer,
+        msg::UI_SNAPSHOT_TIME_OFFSET,
+        &[
+            ("when", MsgArg::Text(when)),
+            (
+                "offset",
+                MsgArg::Text(api::ClockOffset::new(offset).to_string()),
+            ),
+        ],
     )
 }
 

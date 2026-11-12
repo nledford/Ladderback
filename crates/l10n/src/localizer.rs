@@ -80,6 +80,9 @@ impl fmt::Display for Formatted {
 pub struct Localizer {
     locales: Vec<LanguageIdentifier>,
     bundles: Vec<Bundle>,
+    /// Whether the host the bundles were built with writes a locale's
+    /// instants ([`format::writes_instants`]).
+    writes: fn(&LanguageIdentifier) -> bool,
 }
 
 impl fmt::Debug for Localizer {
@@ -131,7 +134,11 @@ impl Localizer {
                 locales.push(locale);
             }
         }
-        Self { locales, bundles }
+        Self {
+            locales,
+            bundles,
+            writes: format::writes_instants::<H>,
+        }
     }
 
     /// Whether a value put into a message is wrapped in Unicode isolation
@@ -173,7 +180,11 @@ impl Localizer {
     /// so (§8.4): a page that shows a clock reading rather than an instant
     /// writes that reading itself there (§16, decision 56).
     pub fn writes_instants(&self) -> bool {
-        todo!("{:?}", self.locales)
+        // A pseudolocale's bundle is in the locale of its source.
+        self.bundles
+            .iter()
+            .flat_map(|bundle| &bundle.locales)
+            .all(|locale| (self.writes)(locale))
     }
 
     /// The message `id`, with `args` for its variables. At most 32 arguments

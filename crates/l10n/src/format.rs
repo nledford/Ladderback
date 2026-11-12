@@ -241,7 +241,7 @@ pub(crate) type Active = NoHost;
 /// leaving them to [`plain_instant`], which reads every instant in UTC and
 /// says so.
 pub(crate) fn writes_instants<H: Host>(locale: &LanguageIdentifier) -> bool {
-    todo!("{locale}")
+    H::Instants::new(locale, Style::DEFAULT).is_some()
 }
 
 #[cfg(any(

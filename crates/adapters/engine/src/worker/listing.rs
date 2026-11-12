@@ -93,7 +93,7 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
 /// The offset of the clock that took a snapshot, in seconds east of UTC:
 /// the one its time was recorded with (§3.1, §16 decision 56).
 fn clock_offset(time: &jiff::Zoned) -> i32 {
-    todo!("{time}")
+    time.offset().seconds()
 }
 
 /// The snapshots of a repository as a listing is sent: newest first, in

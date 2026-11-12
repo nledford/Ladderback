@@ -18,6 +18,7 @@ use api::{
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
+use leptos::wasm_bindgen::JsValue;
 
 use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
 use crate::live::say;
@@ -25,7 +26,7 @@ use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
 use crate::repositories::{Sentence, repository_notes};
-use crate::routes::{Empty, PageHeading, instant, refusal, short_id, text_with};
+use crate::routes::{Empty, PageHeading, refusal, short_id, snapshot_time, text_with};
 use crate::text;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
@@ -625,10 +626,16 @@ fn plan_view(page: Page, index: usize, plan: PlanGroupDto) -> impl IntoView {
 /// A listed snapshot's time names its clock's offset only when it differs
 /// from this one (`routes::taken`, §16, decision 56). The browser knows the
 /// zone it reads its own clock in even where `jiff`'s copy of the zones has
-/// no such name. It runs only in a browser: `formatting.rs` tests it in
+/// no such name. An answer no clock could give (none, or one past
+/// ±25:59:59) is UTC's, the zone the page's formatter reads an instant in
+/// without one. It runs only in a browser: `formatting.rs` tests it in
 /// `just test-wasm`.
 pub(crate) fn viewer_offset(at: jiff::Timestamp) -> jiff::tz::Offset {
-    todo!("{at}")
+    let date = web_sys::js_sys::Date::new(&JsValue::from_f64(at.as_millisecond() as f64));
+    // Minutes behind UTC, which can have a fraction for an old local mean
+    // time; `as` makes no answer (NaN) zero and saturates a huge one.
+    let seconds = (-date.get_timezone_offset() * 60.0).round() as i32;
+    jiff::tz::Offset::from_seconds(seconds).unwrap_or(jiff::tz::Offset::UTC)
 }
 
 /// A list of snapshots: the table of the ones listed, newest first as the
@@ -639,10 +646,19 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
     }
     let localizer = page.localizer.get_value();
     let zone = page.viewer.get_value();
+    // Whether the host writes this locale's instants, asked once per table.
+    let writes_instants = localizer.writes_instants();
     let body = snapshots
         .into_iter()
         .map(|snapshot| {
-            let shown = instant(&localizer, &snapshot.time, zone.as_ref());
+            let shown = snapshot_time(
+                &localizer,
+                &snapshot.time,
+                snapshot.offset,
+                zone.as_ref(),
+                viewer_offset,
+                writes_instants,
+            );
             view! {
                 <tr>
                     <td>{short_id(&snapshot.id)}</td>

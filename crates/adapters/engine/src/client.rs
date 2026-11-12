@@ -740,7 +740,7 @@ fn weight(snapshot: &SnapshotSummary) -> usize {
 /// The offset a worker reported, in seconds east of UTC, or `None` when no
 /// clock can run at it (beyond ±25:59:59).
 fn offset_of(seconds: i32) -> Option<domain::Offset> {
-    todo!("{seconds}")
+    domain::Offset::from_seconds(seconds).ok()
 }
 
 /// What a [`Listing`] made of one event of the worker's.

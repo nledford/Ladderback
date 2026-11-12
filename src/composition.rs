@@ -1507,7 +1507,10 @@ fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::Inv
         snapshot.tags.clone(),
         snapshot.paths.clone(),
     )
-    .map(|dto| dto.truncated(snapshot.paths_truncated, snapshot.tags_truncated))
+    .map(|dto| {
+        dto.truncated(snapshot.paths_truncated, snapshot.tags_truncated)
+            .taken_at_offset(snapshot.offset)
+    })
 }
 
 /// Tests, connects and initialises repositories for the API (§4.2): each

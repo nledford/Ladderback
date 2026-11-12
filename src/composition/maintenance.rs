@@ -179,6 +179,7 @@ fn snapshot_dto(alias: &RepositoryAlias, snapshot: &Snapshot) -> Option<api::Sna
         snapshot.tags.clone(),
         snapshot.paths.clone(),
     )
+    .map(|dto| dto.taken_at_offset(snapshot.offset))
     .map_err(|problem| {
         log::error!(
             "a snapshot of {} the page cannot show: {problem:?}",

@@ -1639,13 +1639,56 @@ impl std::str::FromStr for ClockOffset {
     /// `±HH:MM` or `±HH:MM:SS`, nothing else: no `Z`, no zone name, no
     /// space.
     fn from_str(text: &str) -> Result<Self, InvalidOffset> {
-        todo!("{text}")
+        let bytes = text.as_bytes();
+        let sign = match bytes.first() {
+            Some(b'+') => 1,
+            Some(b'-') => -1,
+            _ => return Err(InvalidOffset),
+        };
+        // Two digits at `at`, at most `max`.
+        let pair = |at: usize, max: i32| -> Result<i32, InvalidOffset> {
+            match (bytes.get(at), bytes.get(at + 1)) {
+                (Some(&high), Some(&low)) if high.is_ascii_digit() && low.is_ascii_digit() => {
+                    let value = i32::from(high - b'0') * 10 + i32::from(low - b'0');
+                    if value <= max {
+                        Ok(value)
+                    } else {
+                        Err(InvalidOffset)
+                    }
+                }
+                _ => Err(InvalidOffset),
+            }
+        };
+        let seconds = match bytes.len() {
+            6 | 9 if bytes.get(3) == Some(&b':') => {
+                let mut seconds = pair(1, 25)? * 3600 + pair(4, 59)? * 60;
+                if bytes.len() == 9 {
+                    if bytes.get(6) != Some(&b':') {
+                        return Err(InvalidOffset);
+                    }
+                    seconds += pair(7, 59)?;
+                }
+                seconds
+            }
+            _ => return Err(InvalidOffset),
+        };
+        jiff::tz::Offset::from_seconds(sign * seconds)
+            .map(Self)
+            .map_err(|_| InvalidOffset)
     }
 }
 
 impl std::fmt::Display for ClockOffset {
-    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let seconds = self.0.seconds();
+        let sign = if seconds < 0 { '-' } else { '+' };
+        let magnitude = seconds.unsigned_abs();
+        let (hours, minutes, rest) = (magnitude / 3600, magnitude / 60 % 60, magnitude % 60);
+        write!(f, "{sign}{hours:02}:{minutes:02}")?;
+        if rest != 0 {
+            write!(f, ":{rest:02}")?;
+        }
+        Ok(())
     }
 }
 
