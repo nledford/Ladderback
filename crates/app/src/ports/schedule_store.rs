@@ -25,7 +25,7 @@ pub struct PendingRetry {
 /// Keeps each scheduled plan's planned run between the agent's starts, so a
 /// run that passed while the agent was off is made up for when it comes back
 /// (§5, decision 60), and each plan's pending retry, so a retry planned
-/// before a restart runs after it (decision NN).
+/// before a restart runs after it (decision 76).
 ///
 /// Contract (checked by `contract::schedule_store`):
 /// - [`planned_runs`](Self::planned_runs) returns every planned run kept, one

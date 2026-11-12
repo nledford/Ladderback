@@ -3,6 +3,7 @@
 Configured on the hub (or on a standalone agent). Each **notification rule** is **events → channel**:
 
 - Events: `backup.started`, `backup.succeeded`, `backup.failed`, `backup.warning`, `backup.missed` (no success within N × interval), `backup.retrying`, `forget.failed`, `prune.failed`, `prune.refused` (`keep-delete` too small for the margin, §7.3), `check.failed`, `check.errors`, `agent.offline` (> N min), `repo.unmanaged_groups`, `repo.claim_rejected`, `repo.maintenance_paused` (lease not renewed, repo now shared, or not configured on the hub).
+- **As built.** The agent emits `backup.retrying` when it plans a retry of a failed backup (§5): the operation that failed, its plan, which attempt of how many, and when it runs (`UiEvent::BackupRetrying`, decision 76). `backup.missed` isn't emitted yet.
 - Channels: generic webhook (JSON), ntfy, Gotify, Discord/Slack webhook, SMTP.
 - **Templates.** Default message text comes from the `notify.ftl` catalog in the configured locale (§8.4). Users may override it with their own templates, which are not localized. Webhook bodies are JSON with stable, unlocalized keys, event names and error codes, plus a localized `message` field. Templates never receive secrets (I4).
 - **healthchecks.io-style pings per plan**: `start`, `success` and `fail` URLs. These are the most robust "it silently stopped" detector, because they work even when the whole Ladderback system is down.
