@@ -125,7 +125,7 @@ fn is_config_temporary(name: &str) -> bool {
 
 /// The name the local backend gives the temporary file of a key, snapshot,
 /// index or pack: `<64 lowercase hex digits>-tmp-…`.
-fn is_id_temporary(name: &str) -> bool {
+pub(crate) fn is_id_temporary(name: &str) -> bool {
     let Some((id, _)) = name.split_once("-tmp-") else {
         return false;
     };

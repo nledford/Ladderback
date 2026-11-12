@@ -25,15 +25,57 @@ impl CacheLock {
     /// [`io::ErrorKind::WouldBlock`] when another process holds the lock.
     pub(crate) fn acquire(dir: &Path) -> io::Result<Self> {
         create_private_dir(dir)?;
-        let directory = File::open(dir)?;
-        match directory.try_lock() {
-            Ok(()) => Ok(Self {
-                _directory: directory,
-            }),
-            Err(TryLockError::WouldBlock) => Err(io::ErrorKind::WouldBlock.into()),
-            Err(TryLockError::Error(error)) => Err(error),
-        }
+        Self::hold(dir)
     }
+
+    /// Locks `dir`, which must be there already: nothing is made. Fails with
+    /// [`io::ErrorKind::WouldBlock`] when another process holds the lock, or
+    /// held it and removed the folder meanwhile (see [`Self::lock`]).
+    pub(crate) fn hold(dir: &Path) -> io::Result<Self> {
+        Self::lock(dir, File::open(dir)?)
+    }
+
+    /// Locks `directory`, the folder opened at `dir`. Tidying the cache
+    /// removes a slot while it holds the slot's lock, so a folder opened
+    /// just before may be locked just after it is gone, and a folder made
+    /// again at `dir` would be nobody's. The lock then counts as held: it
+    /// is only taken while `dir` still names that folder, not a link.
+    fn lock(dir: &Path, directory: File) -> io::Result<Self> {
+        match directory.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(io::ErrorKind::WouldBlock.into()),
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+        let at_path = match fs::symlink_metadata(dir) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            Err(error) => return Err(error),
+        };
+        if !is_same_folder(&directory.metadata()?, &at_path) {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
+        Ok(Self {
+            _directory: directory,
+        })
+    }
+}
+
+/// Whether `opened` and `at_path` are the one folder. A link at the path
+/// has its own identity, not that of what it points to.
+#[cfg(unix)]
+fn is_same_folder(opened: &fs::Metadata, at_path: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    (opened.dev(), opened.ino()) == (at_path.dev(), at_path.ino())
+}
+
+/// Whether `opened` and `at_path` are the one folder, as far as can be told
+/// without a file's identity: Ladderback targets macOS and Linux.
+#[cfg(not(unix))]
+fn is_same_folder(_opened: &fs::Metadata, at_path: &fs::Metadata) -> bool {
+    at_path.is_dir()
 }
 
 /// Makes `dir`, and every folder missing above it, readable and writable by
@@ -87,6 +129,56 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let _first = CacheLock::acquire(&root.path().join("0")).unwrap();
         let _second = CacheLock::acquire(&root.path().join("1")).unwrap();
+    }
+
+    /// Another process may remove a folder while it holds its lock, as
+    /// tidying the cache removes a spare slot, after this one opened the
+    /// folder and before it locks it. The lock would then be on a folder no
+    /// path names, and the folder made again at the path nobody's: it is
+    /// refused as held, and the folder made again is free.
+    #[test]
+    fn a_folder_removed_after_it_was_opened_is_not_held() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("0");
+        fs::create_dir(&dir).unwrap();
+        let opened = File::open(&dir).unwrap();
+        fs::remove_dir(&dir).unwrap();
+
+        let gone = CacheLock::lock(&dir, opened).expect_err("the folder is gone");
+
+        assert_eq!(gone.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn a_folder_made_again_after_the_old_one_was_opened_is_not_held_through_it() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("0");
+        fs::create_dir(&dir).unwrap();
+        let opened = File::open(&dir).unwrap();
+        fs::remove_dir(&dir).unwrap();
+        fs::create_dir(&dir).unwrap();
+
+        let moved = CacheLock::lock(&dir, opened).expect_err("another folder is at the path");
+
+        assert_eq!(moved.kind(), io::ErrorKind::WouldBlock);
+        CacheLock::hold(&dir).expect("the folder made again is free");
+    }
+
+    /// A link put where the folder was is not the folder, even one to it.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_swapped_for_a_link_after_it_was_opened_is_not_held() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("0");
+        let elsewhere = root.path().join("elsewhere");
+        fs::create_dir(&dir).unwrap();
+        let opened = File::open(&dir).unwrap();
+        fs::rename(&dir, &elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &dir).unwrap();
+
+        let swapped = CacheLock::lock(&dir, opened).expect_err("a link is at the path");
+
+        assert_eq!(swapped.kind(), io::ErrorKind::WouldBlock);
     }
 
     #[cfg(unix)]

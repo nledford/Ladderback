@@ -58,7 +58,7 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The most cache slots one repository gets. Looking for a free one stops
 /// here, so a lock that is wrongly always held can't send the search on to
 /// the end of the numbers.
-const MAX_CACHE_SLOTS: u32 = 64;
+pub(crate) const MAX_CACHE_SLOTS: u32 = 64;
 
 /// Runs each operation in a new worker process: `program args…`, normally
 /// `ladderback worker`. A worker leads a process group of its own, and every
