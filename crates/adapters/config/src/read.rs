@@ -9,8 +9,9 @@ use domain::execution::plan_tags::UserTag;
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
     Hostname, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Plan,
-    RepositoryConfig, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source,
-    SourceFilter, Violation, check_location, check_option_value, check_options, parse_duration,
+    RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule,
+    Source, SourceFilter, ValueKind, Violation, check_location, check_option_value, check_options,
+    parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -253,21 +254,47 @@ fn repository(
         Some(text) => reader.value(&path.key("group-by"), GroupBy::parse(&text))?,
         None => GroupBy::default(),
     };
+    let settings = RepositorySettings {
+        repository,
+        repo_hot,
+        password,
+        options: options.unwrap_or_default(),
+        options_hot: options_hot.unwrap_or_default(),
+        options_cold: options_cold.unwrap_or_default(),
+    };
+    if let Some(field) = settings.relative_path() {
+        let (path, problem) = match field {
+            RepositoryField::Repository => (path.key("repository"), Problem::Value(LOCAL_PATH)),
+            RepositoryField::RepoHot => (path.key("repo-hot"), Problem::Value(LOCAL_PATH)),
+            RepositoryField::PasswordCommand => (
+                path.key("password-command"),
+                Problem::Password(PasswordProblem::RelativeProgram),
+            ),
+            RepositoryField::Option(name) => {
+                (path.key("options").key(&name), Problem::Value(LOCAL_PATH))
+            }
+            RepositoryField::OptionHot(name) => (
+                path.key("options-hot").key(&name),
+                Problem::Value(LOCAL_PATH),
+            ),
+            RepositoryField::OptionCold(name) => (
+                path.key("options-cold").key(&name),
+                Problem::Value(LOCAL_PATH),
+            ),
+        };
+        return Err(reader.refuse(&path, problem));
+    }
     Ok(RepositoryConfig {
         id,
-        settings: RepositorySettings {
-            repository,
-            repo_hot,
-            password,
-            options: options.unwrap_or_default(),
-            options_hot: options_hot.unwrap_or_default(),
-            options_cold: options_cold.unwrap_or_default(),
-        },
+        settings,
         maintenance,
         group_by,
         hooks: hooks(reader, &path.key("hooks"), hooks_table.unwrap_or_default())?,
     })
 }
+
+/// What a relative path a repository's settings name is refused as.
+const LOCAL_PATH: ValueKind = ValueKind::LocalPath;
 
 /// A table of options a job can take, refused at the table when it holds too
 /// many and at the value when one is too long (`check_options`,

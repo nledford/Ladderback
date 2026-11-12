@@ -122,6 +122,9 @@ pub enum PasswordProblem {
     NotAKeyringEntry,
     /// `password-command` can't be split into words.
     BadCommand,
+    /// `password-command` starts its program by a relative path, which the
+    /// daemon's working directory would decide.
+    RelativeProgram,
 }
 
 impl std::fmt::Display for ConfigError {

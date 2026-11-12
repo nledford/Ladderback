@@ -339,6 +339,11 @@ error-template-invalid = { $at ->
 # rclone is a program's name: keep it as it is.
 error-location-too-many-credentials = The repository's { $field } is an rclone connection string with more credentials written in it than a job takes. Keep rclone's credentials in its own configuration file, and name the remote that holds them in the location instead.
 
+# A setting names a file, a folder or a program on this computer by a relative path, such as backups/repo or ~/backups.
+# $field (text): where in the settings it is.
+# The slash is the character a full path starts with: keep it as it is.
+error-repository-path-relative = The repository's { $field } is a path that does not start with /, so it would be read from whichever folder { -brand-name } was started in. Write it in full, starting with /.
+
 ## Profile codes: importing and exporting a rustic profile (technical design §6.2)
 
 # The profile, or a profile it uses, could not be read.

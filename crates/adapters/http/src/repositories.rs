@@ -63,8 +63,9 @@ pub struct SecretRefusal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RepositoriesError {
     /// The request parsed as JSON of the right shape, but holds a value the
-    /// settings can't take: a relative password file, a keyring entry that
-    /// is not `service/name`.
+    /// settings can't take: an empty password or location, a keyring entry
+    /// that is not `service/name`, or settings over a cap (a location or an
+    /// option value over 64 KiB, more than 64 options).
     InvalidBody,
     /// The configuration holds no repository under `alias`.
     Unknown { alias: String },
@@ -83,6 +84,10 @@ pub enum RepositoriesError {
     /// No repository is at the location: it is a folder on this machine
     /// holding nothing of a repository (decision 53).
     NotFound,
+    /// A setting names a path on this machine by a relative one, which the
+    /// daemon would read from its own working directory: `field` is the
+    /// setting as the configuration names it (`repository`, `password`).
+    PathRelative { field: String },
     /// A secret couldn't be resolved, or a setting with a reference isn't
     /// valid: the refusal says which, with the setting it is about.
     SecretRefused(SecretRefusal),
@@ -223,6 +228,12 @@ fn refusal(error: &RepositoriesError) -> Response {
             StatusCode::NOT_FOUND,
             ErrorCode::RepositoryNotFound,
             Vec::new(),
+            None,
+        ),
+        RepositoriesError::PathRelative { field } => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::RepositoryPathRelative,
+            text("field", field),
             None,
         ),
         RepositoriesError::SecretRefused(secret) => secret_refusal(secret),

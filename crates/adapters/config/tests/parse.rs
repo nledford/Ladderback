@@ -342,6 +342,34 @@ fn a_password_source_that_is_not_one_is_refused_where_it_is_written() {
     );
 }
 
+// The command runs in the daemon's working directory, as a hook does.
+#[test]
+fn a_password_command_that_starts_a_program_by_a_relative_path_is_refused_where_it_is_written() {
+    for command in ["./get-pass", "bin/get-pass --vault CANARY-vault"] {
+        let text = repository_with(&format!("password-command = \"{command}\"\n"));
+        let relative = invalid(parsed(&text));
+        assert_eq!(
+            relative.problem,
+            Problem::Password(PasswordProblem::RelativeProgram),
+            "{command}"
+        );
+        assert_eq!(
+            relative.key.as_deref(),
+            Some("repositories.nas.password-command")
+        );
+        assert_eq!(
+            relative.at,
+            Some(position_of(&text, &format!("\"{command}\"")))
+        );
+        assert!(!format!("{relative:?}").contains("CANARY"), "{relative:?}");
+    }
+    // A name is looked up on `PATH`; an absolute path is one file.
+    for command in ["get-pass --vault demo", "/usr/local/bin/get-pass"] {
+        let text = repository_with(&format!("password-command = \"{command}\"\n"));
+        assert!(parsed(&text).is_ok(), "{command}");
+    }
+}
+
 #[test]
 fn a_password_command_that_cannot_be_split_is_refused_without_repeating_it() {
     let text = repository_with("password-command = \"get-secret --token hunter2 'oops\"\n");
@@ -658,6 +686,167 @@ fn a_long_option_or_one_option_too_many_is_refused_where_it_is_written() {
         assert_eq!(error.key, Some(format!("repositories.nas.{table}")));
         assert_eq!(error.at, Some(position_of(&many, "{ o0")));
     }
+}
+
+/// A repository at `location`, with `lines` after its password.
+fn located(location: &str, lines: &str) -> String {
+    format!(
+        "schema = 1\n\n[repositories.nas]\nrepository = \"{location}\"\n\
+         password-env = \"DEMO_PASSWORD\"\n{lines}"
+    )
+}
+
+// rustic and the programs it starts run in the daemon's working directory, so
+// a relative path there would mean whatever folder the daemon started in.
+#[test]
+fn a_relative_path_on_this_machine_is_refused_at_its_repository_and_key() {
+    assert_refused_where_written([
+        refused(
+            located("backups/repo", ""),
+            "repositories.nas.repository",
+            ValueKind::LocalPath,
+            "\"backups/repo\"",
+        ),
+        refused(
+            located("local:repo", ""),
+            "repositories.nas.repository",
+            ValueKind::LocalPath,
+            "\"local:repo\"",
+        ),
+        refused(
+            located("/srv/demo-repo", "repo-hot = \"./hot\"\n"),
+            "repositories.nas.repo-hot",
+            ValueKind::LocalPath,
+            "\"./hot\"",
+        ),
+        refused(
+            located("opendal:fs", "options = { root = \"backups\" }\n"),
+            "repositories.nas.options.root",
+            ValueKind::LocalPath,
+            "\"backups\"",
+        ),
+        refused(
+            located(
+                "rest:https://nas.example/repo",
+                "options-cold = { http-cacert = \"certs/ca.pem\" }\n",
+            ),
+            "repositories.nas.options-cold.http-cacert",
+            ValueKind::LocalPath,
+            "\"certs/ca.pem\"",
+        ),
+        refused(
+            located(
+                "/srv/demo-repo",
+                "repo-hot = \"opendal:sftp\"\n\n[repositories.nas.options-hot]\nkey = \"id_demo\"\n",
+            ),
+            "repositories.nas.options-hot.key",
+            ValueKind::LocalPath,
+            "\"id_demo\"",
+        ),
+        refused(
+            located(
+                "rclone:nas:backups",
+                "options = { rclone-command = \"./rclone serve restic\" }\n",
+            ),
+            "repositories.nas.options.rclone-command",
+            ValueKind::LocalPath,
+            "\"./rclone serve restic\"",
+        ),
+    ]);
+    // What rustic doesn't read from the working directory, or what is known
+    // only when a job starts.
+    for text in [
+        located("rclone:nas:backups/repo", ""),
+        located("rest:https://nas.example/repo", ""),
+        located("opendal:s3", "options = { root = \"backups\" }\n"),
+        located("${DEMO_REPOSITORY}", ""),
+    ] {
+        assert!(parsed(&text).is_ok(), "{text}");
+    }
+}
+
+// A value both over its cap and relative is refused for its length, which
+// is checked as the table is read, before the settings are whole (#236).
+#[test]
+fn a_relative_path_over_its_cap_is_refused_for_its_length() {
+    let long = |cap: usize| format!("backups/{}", "r".repeat(cap));
+    for (text, key, kind) in [
+        (
+            located(&long(MAX_LOCATION_BYTES), ""),
+            "repositories.nas.repository",
+            ValueKind::Location,
+        ),
+        (
+            located(
+                "opendal:fs",
+                &format!(
+                    "options = {{ root = \"{}\" }}\n",
+                    long(MAX_OPTION_VALUE_BYTES)
+                ),
+            ),
+            "repositories.nas.options.root",
+            ValueKind::OptionValue,
+        ),
+    ] {
+        let error = invalid(parsed(&text));
+        assert_eq!(error.problem, Problem::Value(kind), "{key}");
+        assert_eq!(error.key.as_deref(), Some(key));
+    }
+}
+
+// Two different settings are refused in the order the reader reads them: the
+// caps as the table is read, the password sources after it.
+#[test]
+fn a_location_over_its_cap_is_refused_before_a_relative_password_file() {
+    let long = format!("/{}", "r".repeat(MAX_LOCATION_BYTES));
+    let text = format!(
+        "schema = 1\n\n[repositories.nas]\nrepository = \"{long}\"\n\
+         password-file = \"relative/pw\"\n"
+    );
+    let error = invalid(parsed(&text));
+    assert_eq!(error.problem, Problem::Value(ValueKind::Location));
+    assert_eq!(error.key.as_deref(), Some("repositories.nas.repository"));
+}
+
+// A hook runs in the daemon's working directory too.
+#[test]
+fn a_hook_that_starts_a_program_by_a_relative_path_is_refused_where_it_is_written() {
+    assert_refused_where_written([
+        refused(
+            base_with("hooks = { run-before = [\"./notify.sh --done\"] }\n"),
+            "plans[0].hooks.run-before[0]",
+            ValueKind::HookProgram,
+            "\"./notify.sh --done\"",
+        ),
+        refused(
+            base_with(
+                "hooks = { run-after = [{ command = \"bin/notify\", args = [\"done\"] }] }\n",
+            ),
+            "plans[0].hooks.run-after[0].command",
+            ValueKind::HookProgram,
+            "\"bin/notify\"",
+        ),
+        refused(
+            "schema = 1\n\n[hooks]\nrun-failed = [\"~/bin/notify\"]\n".to_owned(),
+            "hooks.run-failed[0]",
+            ValueKind::HookProgram,
+            "\"~/bin/notify\"",
+        ),
+        refused(
+            located(
+                "/srv/demo-repo",
+                "\n[repositories.nas.hooks]\nrun-finally = [\"../notify\"]\n",
+            ),
+            "repositories.nas.hooks.run-finally[0]",
+            ValueKind::HookProgram,
+            "\"../notify\"",
+        ),
+    ]);
+    let text = located(
+        "/srv/demo-repo",
+        "hooks = { run-before = [\"notify-send done\", \"/usr/local/bin/notify\"] }\n",
+    );
+    assert!(parsed(&text).is_ok(), "{text}");
 }
 
 #[test]

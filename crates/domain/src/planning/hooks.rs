@@ -4,6 +4,7 @@
 
 use crate::secrets::CommandLine;
 
+use super::local_paths::is_relative_program;
 use super::{InvalidValue, ValueKind};
 
 /// What a failing hook does to the operation it runs for, as rustic's
@@ -45,6 +46,16 @@ fn no_command() -> InvalidValue {
     InvalidValue::new(ValueKind::HookCommand, "")
 }
 
+/// `command`, unless it starts its program by a relative path: a hook runs
+/// in the daemon's working directory, which would decide what that names.
+/// The refusal holds the program and none of its arguments.
+fn runnable(command: CommandLine) -> Result<CommandLine, InvalidValue> {
+    if is_relative_program(command.program()) {
+        return Err(InvalidValue::new(ValueKind::HookProgram, command.program()));
+    }
+    Ok(command)
+}
+
 /// One command to run, and what its failure means.
 ///
 /// An error never repeats the command: a command line may hold a secret
@@ -58,18 +69,19 @@ pub struct HookEntry {
 impl HookEntry {
     /// An entry written as one string: split into words the way a POSIX
     /// shell splits them, as rustic does, and run without a shell. A failure
-    /// is an error, as for rustic.
+    /// is an error, as for rustic. The program is a name on `PATH` or an
+    /// absolute path.
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
         let command = CommandLine::parse(text).map_err(|_| no_command())?;
         Ok(Self {
-            command,
+            command: runnable(command)?,
             on_failure: OnFailure::default(),
         })
     }
 
     /// An entry written as a table: the program and each argument are taken
     /// as they are, with nothing split, so a path with a space in it is one
-    /// word.
+    /// word. The program is a name on `PATH` or an absolute path.
     pub fn new(
         program: &str,
         args: impl IntoIterator<Item = impl Into<String>>,
@@ -77,7 +89,7 @@ impl HookEntry {
     ) -> Result<Self, InvalidValue> {
         let command = CommandLine::new(program, args).map_err(|_| no_command())?;
         Ok(Self {
-            command,
+            command: runnable(command)?,
             on_failure,
         })
     }
@@ -174,6 +186,34 @@ mod tests {
         );
         let leaky = HookEntry::parse("notify --token hunter2 'never closed").unwrap_err();
         assert!(!format!("{leaky:?}{leaky}").contains("hunter2"));
+    }
+
+    // A hook runs in the daemon's working directory, so a program named by a
+    // relative path would be a different one, or none, by how it was started.
+    #[test]
+    fn only_a_program_named_by_a_relative_path_is_refused_with_the_program_alone() {
+        for (text, program) in [
+            ("./notify.sh --token hunter2", "./notify.sh"),
+            ("bin/notify --token hunter2", "bin/notify"),
+            ("../notify", "../notify"),
+            ("~/bin/notify", "~/bin/notify"),
+            ("'demo tools/notify' done", "demo tools/notify"),
+        ] {
+            let refused = Err(InvalidValue::new(ValueKind::HookProgram, program));
+            assert_eq!(HookEntry::parse(text), refused, "{text:?}");
+            assert_eq!(
+                HookEntry::new(program, ["--token", "hunter2"], OnFailure::Warn),
+                refused,
+                "{program:?}"
+            );
+        }
+        // A name is looked up on `PATH`, and an absolute path is the same
+        // file wherever the daemon started.
+        for program in ["notify-send", "~notify", "..", "/usr/local/bin/notify"] {
+            assert_eq!(entry(program).command.program(), program);
+            let hook = HookEntry::new(program, ["done"], OnFailure::Ignore).unwrap();
+            assert_eq!(hook.command.program(), program);
+        }
     }
 
     #[test]

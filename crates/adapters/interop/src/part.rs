@@ -65,6 +65,21 @@ pub(crate) struct Repository {
     pub password_file: Option<String>,
     pub password_command: Option<CommandLine>,
     pub hooks: Hooks,
+    /// Where the settings above are written, for a refusal that is found
+    /// only once they are merged.
+    pub places: Places,
+}
+
+/// Where each of a repository's settings that may name a path is written:
+/// the place of the value the merge keeps.
+#[derive(Default)]
+pub(crate) struct Places {
+    pub repository: Option<Located>,
+    pub repo_hot: Option<Located>,
+    pub password_command: Option<Located>,
+    pub options: BTreeMap<String, Located>,
+    pub options_hot: BTreeMap<String, Located>,
+    pub options_cold: BTreeMap<String, Located>,
 }
 
 /// The settings `[backup]` and a snapshot entry both have.
@@ -150,6 +165,18 @@ impl Repository {
         merge_options(&mut self.options_hot, used.options_hot);
         merge_options(&mut self.options_cold, used.options_cold);
         append_hooks(&mut self.hooks, used.hooks);
+        self.places.merge(used.places);
+    }
+}
+
+impl Places {
+    fn merge(&mut self, used: Self) {
+        take_if_none(&mut self.repository, used.repository);
+        take_if_none(&mut self.repo_hot, used.repo_hot);
+        take_if_none(&mut self.password_command, used.password_command);
+        merge_options(&mut self.options, used.options);
+        merge_options(&mut self.options_hot, used.options_hot);
+        merge_options(&mut self.options_cold, used.options_cold);
     }
 }
 
@@ -216,7 +243,7 @@ fn replace_if_empty<T>(own: &mut Vec<T>, used: Vec<T>) {
     }
 }
 
-fn merge_options(own: &mut BTreeMap<String, String>, used: BTreeMap<String, String>) {
+fn merge_options<T>(own: &mut BTreeMap<String, T>, used: BTreeMap<String, T>) {
     for (key, value) in used {
         own.entry(key).or_insert(value);
     }

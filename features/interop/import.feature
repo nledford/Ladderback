@@ -540,6 +540,57 @@ Feature: Import a rustic profile
       And the refusal points at line 4 of the profile
       And no config file was written
 
+    Scenario: A local repository must be an absolute path, as rustic reads it from wherever it was started
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "backups/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.repository"
+      And the refusal points at line 2 of the profile
+      And no config file was written
+
+    Scenario: A hook must start its program by name or by an absolute path
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [global.hooks]
+        run-before = ["./notify.sh --starting"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "global.hooks.run-before[0]"
+      And the refusal points at line 6 of the profile
+      And no config file was written
+
+    Scenario: A password command must start its program by name or by an absolute path
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-command = "./get-pass --vault demo"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused naming "repository.password-command"
+      And the refusal points at line 3 of the profile
+      And no config file was written
+
     Scenario: Tags Ladderback keeps for itself are dropped
       Given a rustic profile "nas.toml" holding:
         """

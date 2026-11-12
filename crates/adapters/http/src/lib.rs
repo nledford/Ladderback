@@ -1861,6 +1861,9 @@ mod tests {
                     location: "/exists".to_owned(),
                 }),
                 "/not-found" => Err(RepositoriesError::NotFound),
+                "/relative" => Err(RepositoriesError::PathRelative {
+                    field: "repo-hot".to_owned(),
+                }),
                 "/secret" => Err(RepositoriesError::SecretRefused(SecretRefusal {
                     code: api::ErrorCode::SecretMissing,
                     args: vec![
@@ -2092,6 +2095,11 @@ mod tests {
                 json!({"code": "repository-exists", "args": {"location": text("/exists")}}),
             ),
             ("/not-found", 404, json!({"code": "repository-not-found"})),
+            (
+                "/relative",
+                422,
+                json!({"code": "repository-path-relative", "args": {"field": text("repo-hot")}}),
+            ),
             (
                 "/secret",
                 422,

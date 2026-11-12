@@ -62,6 +62,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::Hostname => "hostname",
             ValueKind::Source => "source",
             ValueKind::GlobFile => "glob-file",
+            ValueKind::LocalPath => "local-path",
             ValueKind::Locale => "locale",
             ValueKind::Concurrency => "concurrency",
             ValueKind::Nice => "nice",
@@ -77,6 +78,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::Location => "location",
             ValueKind::OptionValue => "option-value",
             ValueKind::Options => "options",
+            ValueKind::HookProgram => "hook-program",
         };
         Self {
             kind,
@@ -211,7 +213,7 @@ fn read(kind: &str, text: &str) -> Result<Option<HookEntry>, Refusal> {
         "maintenance" => value(Maintenance::parse(text)),
         "group-by" => value(GroupBy::parse(text)),
         "on-failure" => value(OnFailure::parse(text)),
-        "hook-command" => HookEntry::parse(text).map(Some).map_err(Refusal::from),
+        "hook-command" | "hook-program" => HookEntry::parse(text).map(Some).map_err(Refusal::from),
         other => panic!("the scenario reads a value of the unknown kind {other}"),
     }
 }

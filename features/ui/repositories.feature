@@ -95,6 +95,20 @@ Feature: Repositories page
     And the page shows a message containing "There is no repository at this location."
     And the page doesn't show "Check the location and the password, then try again."
 
+  Scenario: A location written as a relative path is refused at the location, saying to write it in full
+    Given a daemon with a scratch demo repository and no repositories
+    When I open the address "/repositories"
+    And I press Tab until focus is on the textbox "Location"
+    And I type "backups/demo-repo"
+    And I press Tab until focus is on the textbox "Password"
+    And I type "demo-password"
+    And I press Tab until focus is on the button "Test the repository"
+    And I press Enter
+    Then focus is on the heading "There is 1 problem with the form"
+    And the page shows a message containing "Write it in full, starting with /."
+    And the field "Location" is marked invalid
+    And the page has no accessibility violations
+
   Scenario: A form missing its location and password names both, and each problem links to its field
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
