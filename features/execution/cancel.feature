@@ -26,13 +26,17 @@ Feature: Cancelling an operation
     And the repository has no snapshots
     And the history shows the operation as it ended
 
+  # The 128 GiB file keeps the backup from ending before the cancel lands,
+  # however soon it has saved the new data; the next backup goes without it.
   @e2e
   Scenario: A cancelled backup keeps the data it saved for the next backup
     Given a new repository that saves data in packs of 1 MiB
     And a plan "home" backing up a folder with 128 MiB of new data
+    And the folder also holds a 128 GiB file
     When the agent backs up the plan and the user cancels it once the repository holds 2 packs
     Then the operation ends as cancelled
     And the repository has no snapshots
     And a check of the repository finds nothing to warn about
-    When the agent backs up the plan
+    When the 128 GiB file is removed from the folder
+    And the agent backs up the plan
     Then the backup adds less data than the folder holds

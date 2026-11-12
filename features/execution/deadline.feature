@@ -32,14 +32,18 @@ Feature: Backup deadline
     And the repository has no snapshots
     And the history shows the operation as it ended
 
+  # The 128 GiB file keeps the backup from ending before its deadline passes,
+  # however soon it has saved the new data; the next backup goes without it.
   @e2e
   Scenario: A backup stopped at its deadline keeps the data it saved for the next backup
     Given a new repository that saves data in packs of 1 MiB
     And a plan "home" backing up a folder with 128 MiB of new data
+    And the folder also holds a 128 GiB file
     When the agent backs up the plan and its deadline passes once the repository holds 2 packs
     Then the operation ends as failed because its deadline passed
     And the repository has no snapshots
     And a check of the repository finds nothing to warn about
     And the history shows the operation as it ended
-    When the agent backs up the plan
+    When the 128 GiB file is removed from the folder
+    And the agent backs up the plan
     Then the backup adds less data than the folder holds
