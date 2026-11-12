@@ -1089,7 +1089,10 @@ mod tests {
     }
 
     // A sleep that never waits spins the loop inside one poll, so the
-    // retry scenarios would hang instead of failing.
+    // retry scenarios would hang instead of failing. The fake clock never
+    // ends the sleep, so an end that never arrives (a sender that drops it,
+    // a reader that never hears it) would hang this test too: five real
+    // seconds bound the wait, so that fails instead.
     #[tokio::test]
     async fn a_backup_that_ends_before_the_sleep_does_wakes_the_loop_with_its_end() {
         let (sender, ends) = crate::retry::run_ends();
@@ -1099,10 +1102,12 @@ mod tests {
         };
         let end = home_ended(Trigger::Schedule, RunOutcome::Failed);
         sender.send(end.clone());
-        assert_eq!(
-            scheduler.sleep(SignedDuration::from_hours(1)).await,
-            Some(end)
-        );
+        let woke = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            scheduler.sleep(SignedDuration::from_hours(1)),
+        )
+        .await;
+        assert_eq!(woke, Ok(Some(end)), "the end never woke the sleep");
     }
 
     #[tokio::test]
