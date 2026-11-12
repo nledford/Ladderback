@@ -177,6 +177,7 @@ jobs:
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -221,8 +222,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it. Its
-      # own cache key, not Check's (top of this file).
+      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
+      # Its own cache key, not Check's (top of this file).
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
         with:
@@ -281,6 +283,7 @@ jobs:
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -370,6 +373,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -399,6 +403,7 @@ jobs:
         with:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      - run: rustup toolchain install
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
