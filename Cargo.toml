@@ -151,7 +151,7 @@ tokio-tungstenite = { version = "0.26.2", default-features = false, features = [
 # the config adapter reports is the first one in the file.
 toml = { version = "1.2.1", features = ["preserve_order"] }
 # The config adapter adds a recorded repository ID to `config.toml` as the
-# person wrote it, keeping every other byte (decision NN); already in the
+# person wrote it, keeping every other byte (decision 57); already in the
 # tree through `proc-macro-crate`.
 toml_edit = "0.25.19"
 tower = "0.5.3"

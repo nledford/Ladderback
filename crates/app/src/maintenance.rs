@@ -724,7 +724,7 @@ impl RunMaintenance {
     /// names the repository ID the configuration recorded for it, when it
     /// recorded one, so the engine opens that repository or none (§7.3),
     /// and the entry it was made from, so the ID it opens is recorded in an
-    /// entry that records none (§6.1, decision NN).
+    /// entry that records none (§6.1, decision 57).
     async fn open(
         &self,
         config: &AgentConfig,

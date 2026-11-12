@@ -630,7 +630,7 @@ impl Operations for PlanRunner {
         // The engine opens only the repository the configuration recorded,
         // when it recorded one (§7.3), and the job carries the entry it was
         // made from, so the ID it opens is recorded in an entry that records
-        // none (§6.1, decision NN).
+        // none (§6.1, decision 57).
         let resolved = self
             .resolve
             .resolve_saved(&plan.repository, repository)
@@ -3515,7 +3515,7 @@ mod tests {
     /// Every job that opens a saved repository carries the entry it was made
     /// from, as it was read: the listing, the reads behind the history view
     /// and a backup. The daemon records in that entry the ID of the
-    /// repository the job opened, when it records none (§6.1, decision NN).
+    /// repository the job opened, when it records none (§6.1, decision 57).
     #[tokio::test]
     async fn every_job_carries_the_entry_it_was_made_from() {
         let (mut runner, _entered, open_gate, scratch) = runner_at_a_gate().await;

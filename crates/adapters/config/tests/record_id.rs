@@ -1,6 +1,6 @@
 //! `FileConfigStore::record_id` on a real file: the daemon adds one line to
 //! a file a person may have written by hand, and leaves every other byte
-//! alone, or writes nothing (technical design §6.1, decision NN).
+//! alone, or writes nothing (technical design §6.1, decision 57).
 
 mod support;
 

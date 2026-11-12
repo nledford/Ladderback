@@ -1,5 +1,5 @@
 //! Recording a repository ID in the file as a person wrote it (§6.1,
-//! decision NN): one key added to one entry, every other byte left alone,
+//! decision 57): one key added to one entry, every other byte left alone,
 //! and the result read back before it may replace the file.
 
 use std::path::Path;

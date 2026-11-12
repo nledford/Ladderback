@@ -150,7 +150,7 @@ impl ResolveRepository {
     /// access names the repository ID the entry records, so the engine opens
     /// that repository or none (§7.3), and the entry as it was read, so the
     /// daemon can record the ID of the repository the job opens in an entry
-    /// that records none (§6.1, decision NN).
+    /// that records none (§6.1, decision 57).
     pub async fn resolve_saved(
         &self,
         alias: &RepositoryAlias,

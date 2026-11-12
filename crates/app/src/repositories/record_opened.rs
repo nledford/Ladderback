@@ -1,5 +1,5 @@
 //! Recording the ID of a saved repository the first time a job opens it
-//! (§6.1, decision NN). An entry written by hand or imported from a profile
+//! (§6.1, decision 57). An entry written by hand or imported from a profile
 //! records no repository ID, since Ladderback never opened it; the first job
 //! that opens it, of whatever kind, has the daemon record the ID it read.
 //! The engine is where every job's open reports back, so the record is made

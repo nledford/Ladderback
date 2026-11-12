@@ -234,7 +234,7 @@ impl AgentConfig {
     }
 
     /// The configuration with `id`, the repository a job opened, recorded
-    /// as the repository ID of the entry `alias` (§6.1, decision NN), the
+    /// as the repository ID of the entry `alias` (§6.1, decision 57), the
     /// rest of it as it is. Recorded only while that entry is still `read`,
     /// the entry as the job that opened the repository read it, and records
     /// no ID; and only when no other entry is that repository, by the rule

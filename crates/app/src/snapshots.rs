@@ -40,7 +40,7 @@ impl ListSnapshots {
     /// `entry`, saved under `alias`, names, newest first. The engine lists
     /// the repository the entry records the ID of, or none (§7.3), and the
     /// daemon records the ID of the one it opened in an entry that records
-    /// none (§6.1, decision NN).
+    /// none (§6.1, decision 57).
     pub async fn list(
         &self,
         op: OperationId,
@@ -231,7 +231,7 @@ mod tests {
 
     /// The listing's job carries the entry it was made from, as it was read,
     /// so the daemon can record in it the ID of the repository the job opens
-    /// (§6.1, decision NN).
+    /// (§6.1, decision 57).
     #[tokio::test]
     async fn a_listing_carries_the_entry_it_was_made_from() {
         let engine = Arc::new(Scripted {

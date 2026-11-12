@@ -206,7 +206,7 @@ pub struct RepositoryAccess {
     /// The configuration entry the job was made from, when it was made from
     /// one, as the job read it. The engine doesn't use it: the daemon
     /// records in it the ID of the repository the job opened, when the entry
-    /// records none (§6.1, decision NN). `None` for a repository a request
+    /// records none (§6.1, decision 57). `None` for a repository a request
     /// gave, which no entry holds yet.
     pub entry: Option<SavedEntry>,
 }

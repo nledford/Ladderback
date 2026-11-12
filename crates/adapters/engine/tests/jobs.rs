@@ -661,7 +661,7 @@ fn started_with(events: &[EngineEvent]) -> Option<domain::RepositoryId> {
 
 /// Every job that opens a repository names, as it starts, the ID of the one
 /// it opened, so the daemon can record it in an entry that records none
-/// (§6.1, decision NN). Both halves of a hot/cold repository hold one ID. An
+/// (§6.1, decision 57). Both halves of a hot/cold repository hold one ID. An
 /// initialisation opens none: the repository it makes is new, and its ID is
 /// in the result.
 #[tokio::test]

@@ -31,7 +31,7 @@ pub trait ConfigStore: Send + Sync {
 
     /// Records `id`, the repository a job opened, as the repository ID of
     /// the entry `alias`, which the job read as `read`, and changes nothing
-    /// else (§6.1, decision NN). The daemon does this on its own, in a file
+    /// else (§6.1, decision 57). The daemon does this on its own, in a file
     /// a person may have written by hand, so a store keeps everything else
     /// it holds as it is, down to how it is written, and writes nothing when
     /// it can't: [`AgentConfig::record_id`] decides whether the ID is
