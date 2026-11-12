@@ -126,7 +126,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let ops = RwSignal::new(OperationsState::default());
     let phase = RwSignal::new(Phase::Loading);
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
-    let error = RwSignal::<Option<String>>::new(None);
+    // A start or a cancel the daemon refused, its own words marked (§8.4).
+    let error = RwSignal::<Option<Sentence>>::new(None);
     let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
     ws::watch(&base, ops, phase);
@@ -237,7 +238,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             on_pause=on_pause
             on_resume=on_resume
         />
-        {move || error.get().map(|text| view! { <p role="alert">{text}</p> })}
+        {move || error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })}
         {move || {
             plans_refused
                 .get()
@@ -291,7 +292,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
-                                                    error.set(Some(refusal(
+                                                    error.set(Some(refused_sentence(
                                                         &error_localizer,
                                                         code,
                                                         &args,
@@ -423,7 +424,7 @@ fn row_view(
     page: Pausable,
     cancelled: StoredValue<HashSet<String>>,
     id: String,
-    error: RwSignal<Option<String>>,
+    error: RwSignal<Option<Sentence>>,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     // Its refusals are worded in the same language as the rest of it.
@@ -568,7 +569,7 @@ fn row_view(
                                                     cancelled.update_value(|cancelled| {
                                                         cancelled.remove(&operation);
                                                     });
-                                                    error.set(Some(refusal(
+                                                    error.set(Some(refused_sentence(
                                                         &error_localizer,
                                                         code,
                                                         &args,
