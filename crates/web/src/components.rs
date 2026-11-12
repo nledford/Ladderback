@@ -330,7 +330,10 @@ pub fn SortableTable(
 /// and clears it. The caller decides when `error` is `Some`; the caller
 /// announces it politely (as the gallery's button does) or moves focus to an
 /// [`ErrorSummary`]. `kind` is the input's `type`: `password` for a secret,
-/// which the browser then never shows.
+/// which the browser then never shows. `autocomplete` is the input's token
+/// (1.3.5): `off` unless the field has a known purpose, such as
+/// `current-password` for the admin password, which a password manager then
+/// fills in (3.3.8).
 #[component]
 pub fn FormField(
     id: &'static str,
@@ -341,7 +344,6 @@ pub fn FormField(
     #[prop(default = "text")] kind: &'static str,
     #[prop(default = "off")] autocomplete: &'static str,
 ) -> impl IntoView {
-    let _ = autocomplete;
     let described_by = format!("{id}-description");
     let error_id = format!("{id}-error");
     // Clones for the reactive closures, which outlive this scope.
@@ -354,7 +356,7 @@ pub fn FormField(
             <input
                 id=id
                 type=kind
-                autocomplete="off"
+                autocomplete=autocomplete
                 prop:value=move || value.get()
                 on:input=move |event| value.set(event_target_value(&event))
                 aria-describedby=move || {

@@ -67,7 +67,12 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let phase = RwSignal::new(Phase::Loading);
     // The configured plans; `None` until the read answers.
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
+    // A read the daemon refused, a session that ended and was not signed in
+    // again among the reasons: said in the list's place, as the daemon said
+    // it. Only no answer at all is a daemon that can't be reached.
+    let refused = RwSignal::<Option<Sentence>>::new(None);
     let url = format!("{}/api/v1/plans", ws::origin());
+    let read_localizer = Arc::clone(&localizer);
     spawn_local(async move {
         let read = ws::get::<PlansDto>(&url).await;
         // The reader may have followed a link before the answer came: the
@@ -80,7 +85,16 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                 plans.set(Some(read.plans));
                 phase.set(Phase::Ready);
             }
-            Some(Got::Refused(..)) | None => phase.set(Phase::Unreachable),
+            Some(Got::Refused(code, args, detail)) => {
+                refused.set(Some(refused_sentence(
+                    &read_localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                )));
+                phase.set(Phase::Ready);
+            }
+            None => phase.set(Phase::Unreachable),
         }
     });
     // Each next run is written in the viewer's own zone, as every instant the
@@ -96,8 +110,11 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => match plans.get() {
-                Some(plans) if !plans.is_empty() => {
+            Phase::Ready => match (refused.get(), plans.get()) {
+                (Some(sentence), _) => {
+                    view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                }
+                (None, Some(plans)) if !plans.is_empty() => {
                     view! {
                         <table class="plans">
                             <caption class="text-muted">{caption.clone()}</caption>

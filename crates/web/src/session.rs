@@ -34,14 +34,19 @@ pub(crate) enum Standing {
 impl Standing {
     /// What the daemon's answer to `GET /api/v1/session` means; `None` is no
     /// answer the page could read.
-    pub(crate) fn of(_read: Option<&SessionDto>) -> Self {
-        todo!()
+    pub(crate) fn of(read: Option<&SessionDto>) -> Self {
+        match read.map(|session| session.sign_in) {
+            Some(SignInStateDto::Off) => Self::Off,
+            Some(SignInStateDto::SignedOut) => Self::SignedOut,
+            Some(SignInStateDto::SignedIn) => Self::SignedIn,
+            None => Self::Unread,
+        }
     }
 
     /// Whether the page shows the pages of the app, rather than the sign-in
     /// page or nothing yet.
     pub(crate) fn shows_pages(self) -> bool {
-        todo!()
+        matches!(self, Self::Off | Self::SignedIn | Self::Unread)
     }
 }
 
@@ -58,8 +63,14 @@ impl Title {
     /// The title the page takes when its standing turns from `previous` (none
     /// on the first answer) to `now`; `None` keeps the title the page has,
     /// which the address named when it loaded.
-    pub(crate) fn on(_previous: Option<Standing>, _now: Standing) -> Option<Self> {
-        todo!()
+    pub(crate) fn on(previous: Option<Standing>, now: Standing) -> Option<Self> {
+        if now == Standing::SignedOut {
+            Some(Self::SignIn)
+        } else if previous == Some(Standing::SignedOut) {
+            Some(Self::Address)
+        } else {
+            None
+        }
     }
 }
 
@@ -92,16 +103,29 @@ impl Resend {
     /// What follows an answer of `status` with `body`; `token_read` is
     /// whether the page has already read a fresh token for this request,
     /// which it does once: a second refusal is the request's answer.
-    pub(crate) fn after(_status: u16, _body: &str, _token_read: bool) -> Self {
-        todo!()
+    pub(crate) fn after(status: u16, body: &str, token_read: bool) -> Self {
+        let code = || {
+            serde_json::from_str::<Refusal>(body)
+                .ok()
+                .map(|refusal| refusal.code)
+        };
+        match status {
+            401 if code() == Some(ErrorCode::SignInRequired) => Self::OnceSignedIn,
+            403 if !token_read && code() == Some(ErrorCode::CsrfTokenInvalid) => {
+                Self::WithFreshToken
+            }
+            _ => Self::No,
+        }
     }
 }
 
 /// What the sign-in form lacks before it is sent: the admin password, when
 /// nothing was typed. What was typed is sent as it is, spaces and all: a
 /// password is never trimmed.
-pub(crate) fn lacking(_password: &str) -> Option<MessageId> {
-    todo!()
+pub(crate) fn lacking(password: &str) -> Option<MessageId> {
+    password
+        .is_empty()
+        .then_some(msg::UI_SIGN_IN_PASSWORD_REQUIRED)
 }
 
 /// How long before a session would end unused the page warns, and offers to
@@ -116,8 +140,10 @@ pub(crate) const WARNING_LEAD_MS: i64 = 120_000;
 /// lifetime is 30 days, so a longer wait is taken a day at a time.
 pub(crate) const LONGEST_WAIT_MS: u32 = 86_400_000;
 
-fn millis(_seconds: u64) -> i64 {
-    todo!()
+fn millis(seconds: u64) -> i64 {
+    i64::try_from(seconds)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000)
 }
 
 /// A live session, as a sign-in or the session route gave it: the CSRF token
@@ -132,8 +158,18 @@ impl Signed {
     /// The live session `read` says the page has, in answer to a request
     /// sent at `sent`; `None` when it says the page has none, or leaves out
     /// its CSRF token or how long it lasts.
-    pub(crate) fn of(_read: &SessionDto, _sent: i64) -> Option<Self> {
-        todo!()
+    pub(crate) fn of(read: &SessionDto, sent: i64) -> Option<Self> {
+        if read.sign_in != SignInStateDto::SignedIn {
+            return None;
+        }
+        Some(Self {
+            csrf: read.csrf_token.clone()?,
+            lease: Lease::new(
+                millis(read.idle_seconds?),
+                millis(read.ends_in_seconds?),
+                sent,
+            ),
+        })
     }
 }
 
@@ -166,28 +202,55 @@ impl Lease {
     /// `ends_in_ms` left however it is used, as the daemon said in answer to
     /// a request sent at `sent`, which was a use. The daemon counted from
     /// when the request reached it, a little later.
-    fn new(_idle_ms: i64, _ends_in_ms: i64, _sent: i64) -> Self {
-        todo!()
+    fn new(idle_ms: i64, ends_in_ms: i64, sent: i64) -> Self {
+        Self {
+            idle_ms,
+            used_at: sent,
+            ends_at: sent.saturating_add(ends_in_ms),
+        }
     }
 
     /// The lease once a request sent at `at` has used the session again.
-    pub(crate) fn used(self, _at: i64) -> Self {
-        todo!()
+    pub(crate) fn used(self, at: i64) -> Self {
+        Self {
+            used_at: self.used_at.max(at),
+            ..self
+        }
     }
 
     /// Where the lease stands at `now`. Once a session would end unused no
     /// sooner than its lifetime ends it, using it can't keep it, so there is
     /// nothing to offer: 2.2.1's 20-hour exception covers that end, and the
     /// page says nothing until it comes.
-    pub(crate) fn at(self, _now: i64) -> Stand {
-        todo!()
+    pub(crate) fn at(self, now: i64) -> Stand {
+        let idle_ends = self.used_at.saturating_add(self.idle_ms);
+        if idle_ends >= self.ends_at {
+            return if now < self.ends_at {
+                Stand::Quiet {
+                    until: self.ends_at,
+                }
+            } else {
+                Stand::Ended
+            };
+        }
+        let warn_at = idle_ends.saturating_sub(WARNING_LEAD_MS);
+        if now < warn_at {
+            Stand::Quiet { until: warn_at }
+        } else if now < idle_ends {
+            Stand::Warning { until: idle_ends }
+        } else {
+            Stand::Ended
+        }
     }
 }
 
 /// How long a timer set at `now` waits for `until`: nothing once it has
 /// passed, and at most [`LONGEST_WAIT_MS`], after which the page looks again.
-pub(crate) fn wait_ms(_now: i64, _until: i64) -> u32 {
-    todo!()
+pub(crate) fn wait_ms(now: i64, until: i64) -> u32 {
+    let wait = until
+        .saturating_sub(now)
+        .clamp(0, i64::from(LONGEST_WAIT_MS));
+    u32::try_from(wait).unwrap_or(LONGEST_WAIT_MS)
 }
 
 /// What a sign-in came back with.
@@ -206,16 +269,28 @@ pub(crate) enum Answer {
 impl Answer {
     /// What `POST /api/v1/session`, sent at `sent`, answered with `status`
     /// and `body`.
-    pub(crate) fn of(_status: u16, _body: &str, _sent: i64) -> Self {
-        todo!()
+    pub(crate) fn of(status: u16, body: &str, sent: i64) -> Self {
+        if succeeded(status) {
+            let Ok(read) = serde_json::from_str::<SessionDto>(body) else {
+                return Self::Unreadable;
+            };
+            if read.sign_in == SignInStateDto::Off {
+                return Self::Off;
+            }
+            return Signed::of(&read, sent).map_or(Self::Unreadable, Self::SignedIn);
+        }
+        match serde_json::from_str::<Refusal>(body) {
+            Ok(refusal) => Self::Refused(refusal.code, refusal.args.into_iter().collect()),
+            Err(_) => Self::Unreadable,
+        }
     }
 }
 
 /// Whether a sign-in refused with `code` is about what was typed, so the
 /// field is marked invalid: a wrong password is; a wait, or a password the
 /// daemon could not check, is not.
-pub(crate) fn about_the_password(_code: ErrorCode) -> bool {
-    todo!()
+pub(crate) fn about_the_password(code: ErrorCode) -> bool {
+    code == ErrorCode::SignInFailed
 }
 
 #[cfg(test)]
