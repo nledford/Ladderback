@@ -3,14 +3,15 @@ Feature: Retries of a failed backup
   backoff }` retries it at most `attempts` times, the first after `backoff`
   and each after twice the wait before it, at most an hour. Retries stop at
   the plan's next scheduled run, as it was planned when the failed run ended,
-  and a success or a cancel ends them. A backup a person started is theirs:
-  its failure starts no retries and leaves the plan's own as they were. A
-  retry waits its turn in the persistent queue, as any backup does, under the
-  agent's concurrency limit; it is skipped when a run of its plan is still
-  going, whatever the plan's overlap policy, since that run takes its place.
-  The agent announces each retry it plans, and a retry it planned is kept
-  across a restart (technical design §5). Times here are written with their
-  offset from UTC.
+  and a success or a cancel of any run of the plan ends them, a retry already
+  waiting its turn included. A backup a person started is theirs: its failure
+  starts no retries and leaves the plan's own as they were. A retry waits its
+  turn in the persistent queue, as any backup does, under the agent's
+  concurrency limit; it is skipped when a run of its plan is still going,
+  whatever the plan's overlap policy, since that run takes its place. The
+  agent announces each retry it plans, and a retry it planned is kept across
+  a restart; attempts lowered below a pending retry drop it (technical design
+  §5). Times here are written with their offset from UTC.
 
   Scenario: A failed backup is retried after the back-off
     Given the agent starts at "2026-06-10 02:50+00:00"
