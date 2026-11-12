@@ -98,7 +98,7 @@ Decide by what the code knows about. The full layout is §8.3; the rule behind i
 | The browser and the DOM | `crates/web` |
 | Wiring adapters together | `src/main.rs` and its `composition` module (`src/composition.rs`, `src/composition/`) only |
 
-Adding or changing an error or warning code, a port, a gated crate, a package's first `wasm_bindgen_test` or a shared UI component: follow its checklist in [development.md §13.7](docs/design/development.md#137-changes-that-touch-several-places). Leave out a step and something breaks later, often far from the edit.
+Adding or changing an error or warning code, a port, a workspace crate, a gated crate, a package's first `wasm_bindgen_test` or a shared UI component: follow its checklist in [development.md §13.7](docs/design/development.md#137-changes-that-touch-several-places). Leave out a step and something breaks later, often far from the edit.
 
 ## How to work: BDD, DDD and TDD
 

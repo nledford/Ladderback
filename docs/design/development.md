@@ -172,6 +172,13 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`.
 4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone.
 
+#### 13.7.6 A workspace crate
+
+1. Its path in `members` and `default-members` in the root `Cargo.toml` (`default-members` leaves out `crates/web`, which builds for wasm32).
+2. A `[[package]]` entry in `release-plz.toml` whose `git_tag_name` no tag matches, in the change that creates the crate. release-plz reads each package from the tree of its last `vX.Y.Z` tag, so a crate missing there stops the release PR with `cannot find package "<name>" in workspace` (§12.1).
+3. Once a release's tag holds the crate, a pull request after it removes that entry: with it, the crate would look unreleased, and its own `feat` commits would bump only the patch version.
+4. If its code is gated, §13.7.3.
+
 ### 13.8 Pull requests and merging
 
 `AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass, the required check names, CI's pinned Node and runner images, and the `release` label.
