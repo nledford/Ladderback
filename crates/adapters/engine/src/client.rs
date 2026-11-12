@@ -3,9 +3,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use api::{ErrorCode, WarningCode};
@@ -20,7 +22,7 @@ use domain::execution::{FailureReason, Warning, WarningKind};
 use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, ReadBuf};
 use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use tokio::sync::{mpsc, watch};
 
@@ -64,9 +66,11 @@ const MAX_CACHE_SLOTS: u32 = 64;
 /// it.
 ///
 /// Stopping a job sends SIGTERM to the worker alone and, after a grace
-/// period, SIGKILL to the group. Dropping a [`RunningJob`] before its result
-/// kills the worker at once; after the result, the worker gets a grace
-/// period to finish its cleanup.
+/// period, SIGKILL to the group. While the stop waits, what the worker still
+/// writes is read and dropped, so a backup winding down is never held by a
+/// full event pipe. Dropping a [`RunningJob`] before its result kills the
+/// worker at once; after the result, the worker gets a grace period to
+/// finish its cleanup.
 ///
 /// A worker that hangs doesn't hold the daemon. One that doesn't take its
 /// job within the start timeout, and one that closes its output but is still
@@ -308,8 +312,12 @@ impl Engine for WorkerEngine {
             redactor.clone(),
         ));
         let stopped = Arc::new(AtomicBool::new(false));
+        let pipe = EventPipe {
+            stdout: Arc::new(Mutex::new(stdout)),
+            stopped: Arc::clone(&stopped),
+        };
         let reading = Reading {
-            stdout: BufReader::new(stdout),
+            stdout: BufReader::new(ForEvents(pipe.clone())),
             line: Vec::new(),
             exited: exited.clone(),
             commands: commands.clone(),
@@ -327,6 +335,7 @@ impl Engine for WorkerEngine {
                 commands,
                 exited,
                 stopped,
+                pipe: ForStop(pipe),
             }),
         })
     }
@@ -603,11 +612,59 @@ fn signal_worker(_leader: Option<u32>, _signal: Signal) -> bool {
     false
 }
 
+/// The worker's stdout, shared by the job's events and its stop. A pipe
+/// keeps the waker of one reader only, so the two never read it at once:
+/// the events read it until the job is stopped and find it ended from then
+/// on ([`ForEvents`]), and the stop reads and drops what the worker still
+/// writes until it exits ([`ForStop`]). Each read takes the pipe for that
+/// one poll only, so a read of the events left pending, as a `select!` that
+/// took another branch leaves it, never keeps the stop from reading.
+#[derive(Clone)]
+struct EventPipe {
+    stdout: Arc<Mutex<ChildStdout>>,
+    stopped: Arc<AtomicBool>,
+}
+
+/// [`EventPipe`] as the job's events read it.
+struct ForEvents(EventPipe);
+
+impl AsyncRead for ForEvents {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut stdout = self.0.stdout.lock().unwrap_or_else(PoisonError::into_inner);
+        // Looked at under the lock, which the stop takes for its first read
+        // only once it has set the flag: no read of the events comes after
+        // that one, to take the waker it left.
+        if self.0.stopped.load(Ordering::SeqCst) {
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut *stdout).poll_read(cx, buf)
+    }
+}
+
+/// [`EventPipe`] as the stop reads it.
+struct ForStop(EventPipe);
+
+impl AsyncRead for ForStop {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut stdout = self.0.stdout.lock().unwrap_or_else(PoisonError::into_inner);
+        Pin::new(&mut *stdout).poll_read(cx, buf)
+    }
+}
+
 /// Stops one job.
 struct Control {
     commands: mpsc::UnboundedSender<Order>,
     exited: watch::Receiver<Exited>,
     stopped: Arc<AtomicBool>,
+    pipe: ForStop,
 }
 
 #[async_trait]
@@ -616,13 +673,28 @@ impl JobControl for Control {
         // The job's events end here, whatever the worker still writes.
         self.stopped.store(true, Ordering::SeqCst);
         let _ = self.commands.send(Order::Stop);
-        let _ = self.exited.wait_for(Option::is_some).await;
+        // What the worker writes until it exits is read and dropped: a
+        // backup winding down (§4.1) whose writer is blocked on a full pipe
+        // would otherwise never save its index, and the grace's SIGKILL
+        // would leave its packs unindexed. Nothing read here is delivered or
+        // logged. A pipe that ends or fails first leaves the wait for the
+        // exit, which the grace bounds.
+        let pipe = &mut self.pipe;
+        let drained = async {
+            let _ = tokio::io::copy(pipe, &mut tokio::io::sink()).await;
+            std::future::pending::<()>().await;
+        };
+        tokio::select! {
+            biased;
+            _ = self.exited.wait_for(Option::is_some) => {}
+            () = drained => {}
+        }
     }
 }
 
 /// The events of one job, read from the worker's stdout.
 struct Reading {
-    stdout: BufReader<ChildStdout>,
+    stdout: BufReader<ForEvents>,
     line: Vec<u8>,
     exited: watch::Receiver<Exited>,
     commands: mpsc::UnboundedSender<Order>,
@@ -901,10 +973,7 @@ enum Line {
 
 /// Reads one line, newline included, into `line`, holding at most
 /// [`MAX_EVENT_LINE`] bytes of it before the newline.
-async fn read_line(
-    reader: &mut BufReader<ChildStdout>,
-    line: &mut Vec<u8>,
-) -> std::io::Result<Line> {
+async fn read_line(reader: &mut BufReader<ForEvents>, line: &mut Vec<u8>) -> std::io::Result<Line> {
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
@@ -3928,5 +3997,36 @@ mod tests {
             events.is_empty(),
             "a stopped job's events ended with {events:?}"
         );
+    }
+
+    /// A stop returns once the job has stopped, not when the worker's output
+    /// ends: one that closes its output and ignores SIGTERM is waited for
+    /// until the grace's SIGKILL.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stop_waits_for_the_exit_of_a_worker_whose_output_ended_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("worker.pid");
+        let script = format!(
+            "trap '' TERM; cat >/dev/null; exec >&-; echo $$ >'{}'; exec sleep 30",
+            pid_file.display()
+        );
+        let grace = Duration::from_secs(1);
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]).with_stop_grace(grace);
+        let RunningJob {
+            events: _events,
+            mut control,
+        } = run(&engine).await;
+        // The process id is written once SIGTERM is ignored and the output
+        // is closed.
+        let worker = pid_from(&pid_file).await;
+        let began = Instant::now();
+        control.stop().await;
+        let took = began.elapsed();
+        assert!(
+            took >= grace,
+            "the stop returned after {took:?}, before the grace's SIGKILL"
+        );
+        assert!(gone_soon(worker).await, "the worker outlived its stop");
     }
 }
