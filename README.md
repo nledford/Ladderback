@@ -48,7 +48,23 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Installation
 
-Releases don't come with binaries yet, so you build one from source, on Linux or macOS.
+Releases don't come with binaries yet, so you build one from source, on Linux or macOS. One command does it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
+```
+
+It checks the tools the build needs, listed under "By hand" below, and installs those that need no administrator rights (rustup, just and trunk) after asking you once. Those that need them, a C compiler, git and Node.js 20 or newer, it never installs: it names the missing ones with the command that installs them and stops, and it never runs `sudo`. It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script builds the newest release, not `main` ([decision 79](docs/design/decisions/79-a-from-source-install-script.md)). To update, run it again. Options go after `bash -s --`: `--yes` installs the missing tools without asking, `--dir <folder>` keeps the source elsewhere, and what follows `--` goes to `just install`, so `bash -s -- -- --root ~/.local` installs into `~/.local/bin`. `--help` lists them.
+
+To read the script before it runs, download it, read it, then run it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+### By hand
 
 You need:
 
@@ -74,7 +90,9 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 (cd crates/web && trunk build --release --no-default-features) && cargo install --locked --path . --no-default-features
 ```
 
-Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with sign-in, below). Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run `git fetch --tags`, the same `git checkout` line, and `just install` again, which replaces the installed binary.
+### After installing
+
+Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with sign-in, below). Its configuration and data live in your platform's config and data folders ([technical design §4.2](docs/design/components.md#42-daemon-agent), "Config"). To update, run the install command again, or by hand `git fetch --tags`, the same `git checkout` line, and `just install`; either replaces the installed binary.
 
 To run it in the background instead, from each login on, run `ladderback install-service` as yourself, not under `sudo`. On Linux it writes a systemd user unit and has systemd start it; on macOS it writes a launchd agent, which logs to `~/Library/Logs/ladderback.log`. The service runs `ladderback serve` with no options, so it listens on `http://127.0.0.1:9898`. On Linux a user's services stop when the user logs out, and the command says to run `loginctl enable-linger` to keep it running. After an update, run `ladderback install-service` again: it replaces the service and starts it on the new binary. `ladderback remove-service` stops the service and removes its file. [Decision 64](docs/design/decisions/64-installing-the-agent-as-a-user-service.md) says what the service file holds.
 

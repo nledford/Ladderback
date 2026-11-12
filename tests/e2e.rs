@@ -51,6 +51,8 @@ mod cache_steps;
 mod cli_output_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/install_script.rs"]
+mod install_script_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
 #[path = "steps/maintenance.rs"]
@@ -103,6 +105,7 @@ struct Agent {
     maintenance: maintenance_steps::MaintenanceE2e,
     cache: cache_steps::CacheE2e,
     service: service_steps::ServiceE2e,
+    install: install_script_steps::InstallScriptE2e,
     notifications: notifications_steps::NotificationsE2e,
 }
 
@@ -150,6 +153,7 @@ impl Agent {
             adopt: adopt_steps::AdoptE2e::default(),
             cache: cache_steps::CacheE2e::default(),
             service: service_steps::ServiceE2e::default(),
+            install: install_script_steps::InstallScriptE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
             notifications: notifications_steps::NotificationsE2e::default(),
         }
