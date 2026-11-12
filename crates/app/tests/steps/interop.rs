@@ -550,7 +550,7 @@ async fn made_from_repository(agent: &mut Agent, name: String) {
 
 #[then(expr = "the profile carries the agent's hostname {string}")]
 fn carries_hostname(agent: &mut Agent, name: String) {
-    assert_eq!(rendered(agent).agent_hostname, Some(hostname(&name)));
+    assert_eq!(rendered(agent).agent.hostname, Some(hostname(&name)));
 }
 
 #[then("the profile carries the agent's hooks")]

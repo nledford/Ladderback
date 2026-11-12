@@ -84,7 +84,9 @@ pub(crate) fn render(
     if let Some(label) = &plan.label {
         out.string("label", label);
     }
-    if let Some(host) = plan.host.as_ref().or(export.agent_hostname.as_ref()) {
+    // No machine-name fallback: rustic takes this machine's name itself when
+    // the profile names no host, as the engine does.
+    if let Some(host) = plan.snapshot_host(&export.agent) {
         out.string("host", host.as_str());
     }
     let [plan_tag, agent_tag] = export.tags.tags();
