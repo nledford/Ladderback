@@ -9,6 +9,8 @@
 //! `${…}` references: the text up to the first one. A location a job has
 //! resolved is judged whole, by [`is_relative_location`].
 
+mod rclone;
+
 use crate::secrets::{CommandLine, Part, SecretRef, Template};
 
 use super::RepositorySettings;
@@ -164,7 +166,7 @@ fn read_location(head: &str, whole: bool) -> Option<Location> {
     };
     let (backend, relative) = match scheme {
         "local" => (Backend::Local, starts_relative(rest, whole)),
-        "rclone" => (Backend::Rclone, rclone_folder_relative(rest, whole)),
+        "rclone" => (Backend::Rclone, rclone::location_relative(rest, whole)),
         "rest" => (Backend::Rest, false),
         // rustic gives OpenDAL the text up to the next `:` as the service.
         "opendal" => {
@@ -180,17 +182,6 @@ fn read_location(head: &str, whole: bool) -> Option<Location> {
         _ => return None,
     };
     Some(Location { backend, relative })
-}
-
-/// Whether rclone reads `path`, what a location has after `rclone:`, as a
-/// folder on this machine named by a relative path: one with no `remote:`
-/// before its first `/` (a remote's name has no `/`), and not starting with
-/// one. Without either, a reference could still make it a remote.
-fn rclone_folder_relative(path: &str, whole: bool) -> bool {
-    match path.find([':', '/']) {
-        Some(at) => at > 0 && path[at..].starts_with('/'),
-        None => whole,
-    }
 }
 
 impl Backend {
@@ -232,10 +223,11 @@ fn is_opendal_file(service: &str, name: &str) -> bool {
 }
 
 /// Whether the command line `value` starts its program by a relative path,
-/// or, for rclone, names its configuration file by one (`--config`). A
-/// command with a reference in it is split only once the job resolves it,
-/// and one that can't be split is rustic's to refuse.
-fn runs_relative(value: &str, rclone: bool) -> bool {
+/// or, for rclone, has a flag that names a file, a folder or a program by
+/// one ([`rclone::flags_relative`]). A command with a reference in it is
+/// split only once the job resolves it, and one that can't be split is
+/// rustic's to refuse.
+fn runs_relative(value: &str, starts_rclone: bool) -> bool {
     let Ok(template) = Template::parse(value) else {
         return false;
     };
@@ -246,21 +238,8 @@ fn runs_relative(value: &str, rclone: bool) -> bool {
     let Ok(command) = CommandLine::parse(text) else {
         return false;
     };
-    if is_relative_program(command.program()) {
-        return true;
-    }
-    let mut args = command.args().iter();
-    while rclone && let Some(arg) = args.next() {
-        let config = if arg == "--config" {
-            args.next().map(String::as_str)
-        } else {
-            arg.strip_prefix("--config=")
-        };
-        if config.is_some_and(|path| !path.is_empty() && !path.starts_with('/')) {
-            return true;
-        }
-    }
-    false
+    is_relative_program(command.program())
+        || (starts_rclone && rclone::flags_relative(command.args()))
 }
 
 #[cfg(test)]

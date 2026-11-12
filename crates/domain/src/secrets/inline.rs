@@ -166,10 +166,11 @@ fn rclone_remote(location: &str) -> Option<&str> {
     Some(rest.strip_prefix(':').unwrap_or(rest))
 }
 
-/// How many levels deep an rclone location is read for credentials: the
+/// How many levels deep an rclone location is read for credentials, and for
+/// what it names on this machine (`planning::local_paths::rclone`): the
 /// location itself is the first, and a location written in the value of
 /// one of its settings (crypt's `remote=':s3,…:bucket'`) the next.
-const MAX_RCLONE_DEPTH: usize = 4;
+pub(crate) const MAX_RCLONE_DEPTH: usize = 4;
 
 /// One location of an rclone location: the location itself, or one written
 /// in the value of a setting of another.
