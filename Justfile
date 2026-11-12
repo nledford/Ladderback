@@ -395,6 +395,21 @@ release-preview:
 web-release:
     cd crates/web && trunk build --release {{ release_flags }}
 
+# Installs the ladderback binary built from this checkout with `cargo install`,
+# into Cargo's bin folder (`~/.cargo/bin`, or `bin` under `--root <dir>`). It is
+# built as a release archive is (§12.1): with `release_flags`, so it has no
+# pseudolocales and no gallery, and with the `dist` profile (the `release`
+# profile with thin LTO), so the installed binary matches the archives. It
+# embeds the web UI that `web-release` builds first: `cargo install` from a git
+# URL can't build that UI, so this checkout is the way in. The daemon starts its
+# own workers, so this one binary is all an installation needs. Arguments go to
+# `cargo install`: `just install --root ~/.local` installs into `~/.local/bin`.
+[doc('Install the ladderback release binary from this checkout (arguments go to cargo install).')]
+[group('release')]
+[positional-arguments]
+install *args: web-release
+    cargo install --locked --path . --profile dist {{ release_flags }} "$@"
+
 # Builds the release archive for `target` as the Release builds workflow does
 # (§12.1): the web UI with the release flags, which the binary embeds, then
 # cargo-dist's `dist build` (dist-workspace.toml), which builds the daemon with
