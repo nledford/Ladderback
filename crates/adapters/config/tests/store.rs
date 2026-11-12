@@ -321,6 +321,25 @@ async fn a_save_over_a_file_keeps_that_file_in_the_history() {
 }
 
 #[tokio::test]
+async fn a_save_over_a_file_a_person_wrote_changes_only_what_it_changes() {
+    let scratch = Scratch::new();
+    let written = "# By hand.\nschema = 1\n\n[agent]\nconcurrency = 2   # two at once\n";
+    scratch.write(written);
+    let store = scratch.store();
+    assert_eq!(store.load().await, Ok(with_concurrency(2)));
+
+    store.save(&with_concurrency(3)).await.expect("saved");
+    assert_eq!(
+        scratch.read(),
+        written.replace("concurrency = 2 ", "concurrency = 3 ")
+    );
+    let kept = scratch.history();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].1, written.as_bytes(), "the file before, as it was");
+    assert_eq!(store.load().await, Ok(with_concurrency(3)));
+}
+
+#[tokio::test]
 async fn saves_in_the_same_millisecond_are_kept_apart_and_sort_in_order() {
     let scratch = Scratch::new();
     let store = scratch.store();
@@ -617,8 +636,8 @@ async fn a_save_through_a_symlinked_config_keeps_the_link_and_writes_its_target(
     linked.link_is_kept(&linked.target);
     assert_eq!(
         std::fs::read_to_string(&linked.target).expect("the target"),
-        render(&scratch.path, &with_concurrency(2)).expect("written"),
-        "the file behind the link has the new version"
+        "schema = 1\n\n[agent]\nconcurrency = 2\n# mine\n",
+        "the file behind the link has the new version, edited in"
     );
     assert_eq!(mode_of(&linked.target), 0o600);
     assert_eq!(store.load().await, Ok(with_concurrency(2)));
