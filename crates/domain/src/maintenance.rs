@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::execution::plan_tags;
-use crate::planning::{Maintenance, Plan, RetentionPolicy};
+use crate::planning::{AgentSettings, Maintenance, Plan, RetentionPolicy};
 use crate::{AgentId, PlanId, SnapshotId, Timestamp};
 
 mod other_hosts;
@@ -271,19 +271,22 @@ impl AdoptSelection {
         })
     }
 
-    /// The unmanaged group whose host, label and paths equal `into`'s host,
-    /// label and sources (`into`'s host is `host`'s when the plan doesn't
-    /// name one, and its label an empty one), and every other plan that
-    /// would claim the same group. The paths are compared exactly, in order,
-    /// so the caller hands in plans whose sources are already normalized the
-    /// way the engine records a snapshot's paths (decision 26).
+    /// The unmanaged group whose host, label and paths equal `into`'s
+    /// snapshot host, label and sources (the host is [`Plan::snapshot_host`],
+    /// else `machine`, the name the engine records when neither the plan nor
+    /// `agent` names one, and the label an empty one when the plan has
+    /// none), and every other plan that would claim the same group. The
+    /// paths are compared exactly, in order, so the caller hands in plans
+    /// whose sources are already normalized the way the engine records a
+    /// snapshot's paths (decision 26).
     pub fn unmanaged<'a>(
         partition: &'a Partition,
-        hostname: &str,
+        agent: &AgentSettings,
+        machine: &str,
         into: &'a Plan,
         plans: &'a [Plan],
     ) -> Result<&'a UnmanagedGroup, AdoptionRefusal> {
-        let key = |plan: &Plan| adoption_key(plan, hostname);
+        let key = |plan: &Plan| adoption_key(plan, agent, machine);
         let mine = key(into);
         let Some(group) = partition.unmanaged.iter().find(|group| {
             (group.hostname.as_str(), &group.label, &group.paths) == (&mine.0, &mine.1, &mine.2)
@@ -304,20 +307,22 @@ impl AdoptSelection {
         }
     }
 
-    /// The plans that would adopt each of `groups`: every plan whose host,
-    /// label and sources equal the group's, in `plans`' order, one list per
-    /// group in the groups' order. None when no plan would, one when it is
-    /// clear which does, several when which one takes the history is the
+    /// The plans that would adopt each of `groups`: every plan whose
+    /// snapshot host (`machine` when neither the plan nor `agent` names
+    /// one), label and sources equal the group's, in `plans`' order, one list
+    /// per group in the groups' order. None when no plan would, one when it
+    /// is clear which does, several when which one takes the history is the
     /// person's decision (the same key `unmanaged` matches by, so a group
     /// listed with one claimant is one an adoption into that plan finds).
     pub fn claimants(
         groups: &[UnmanagedGroup],
-        hostname: &str,
+        agent: &AgentSettings,
+        machine: &str,
         plans: &[Plan],
     ) -> Vec<Vec<PlanId>> {
         let keys: Vec<_> = plans
             .iter()
-            .map(|plan| (&plan.id, adoption_key(plan, hostname)))
+            .map(|plan| (&plan.id, adoption_key(plan, agent, machine)))
             .collect();
         groups
             .iter()
@@ -334,15 +339,18 @@ impl AdoptSelection {
 }
 
 /// The host, label and sources an adoption matches a plan by, as the engine
-/// records them on a snapshot of the plan: the plan's own host, or
-/// `hostname` when it names none, its label or an empty one, and its sources
-/// in order.
-fn adoption_key(plan: &Plan, hostname: &str) -> (String, String, Vec<String>) {
+/// records them on a snapshot of the plan: its snapshot host
+/// ([`Plan::snapshot_host`]), or `machine` when that names none, its label
+/// or an empty one, and its sources in order.
+fn adoption_key(
+    plan: &Plan,
+    agent: &AgentSettings,
+    machine: &str,
+) -> (String, String, Vec<String>) {
     (
-        plan.host
-            .as_ref()
-            .map(|host| host.as_str().to_owned())
-            .unwrap_or_else(|| hostname.to_owned()),
+        plan.snapshot_host(agent)
+            .map_or(machine, |host| host.as_str())
+            .to_owned(),
         plan.label.clone().unwrap_or_default(),
         plan.sources
             .iter()
@@ -745,9 +753,28 @@ mod tests {
         assert!(partition.is_empty());
     }
 
-    /// The plans that claim `group`, as `claimants` tells it of one group.
+    /// The name the engine records on a snapshot when neither the plan nor
+    /// the agent names a host: this machine's own.
+    const MACHINE: &str = "demo-machine";
+
+    /// An agent whose `hostname` is `hostname`.
+    fn agent_named(hostname: &str) -> AgentSettings {
+        AgentSettings {
+            hostname: Some(crate::planning::Hostname::parse(hostname).expect("a hostname")),
+            ..AgentSettings::default()
+        }
+    }
+
+    /// The plans that claim `group`, as `claimants` tells it of one group,
+    /// on an agent whose `hostname` is `hostname`.
     fn claimants_of(group: &UnmanagedGroup, hostname: &str, plans: &[Plan]) -> Vec<PlanId> {
-        AdoptSelection::claimants(std::slice::from_ref(group), hostname, plans).remove(0)
+        AdoptSelection::claimants(
+            std::slice::from_ref(group),
+            &agent_named(hostname),
+            MACHINE,
+            plans,
+        )
+        .remove(0)
     }
 
     /// A plan whose host, label and sources match the untagged snapshots'
@@ -791,8 +818,14 @@ mod tests {
             ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
         let home = full_plan("home", "/home/demo");
         let plans = vec![home.clone()];
-        let group = AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans)
-            .expect("the plan matches its own history");
+        let group = AdoptSelection::unmanaged(
+            &partition,
+            &agent_named("demo-host"),
+            MACHINE,
+            &home,
+            &plans,
+        )
+        .expect("the plan matches its own history");
         assert_eq!(group.snapshots.len(), 2);
     }
 
@@ -804,7 +837,13 @@ mod tests {
         let photos = full_plan("photos", "/srv/photos");
         let plans = vec![photos.clone()];
         assert_eq!(
-            AdoptSelection::unmanaged(&partition, "demo-host", &photos, &plans),
+            AdoptSelection::unmanaged(
+                &partition,
+                &agent_named("demo-host"),
+                MACHINE,
+                &photos,
+                &plans
+            ),
             Err(AdoptionRefusal::NoMatch)
         );
     }
@@ -818,7 +857,13 @@ mod tests {
         let mirror = full_plan("mirror", "/home/demo");
         let plans = vec![home.clone(), mirror.clone()];
         assert_eq!(
-            AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans),
+            AdoptSelection::unmanaged(
+                &partition,
+                &agent_named("demo-host"),
+                MACHINE,
+                &home,
+                &plans
+            ),
             Err(AdoptionRefusal::Ambiguous {
                 plans: vec![
                     PlanId::parse("home").expect("a plan"),
@@ -837,7 +882,14 @@ mod tests {
         home.host = None;
         let plans = vec![home.clone()];
         assert!(
-            AdoptSelection::unmanaged(&partition, "demo-host", &home, &plans).is_ok(),
+            AdoptSelection::unmanaged(
+                &partition,
+                &agent_named("demo-host"),
+                MACHINE,
+                &home,
+                &plans
+            )
+            .is_ok(),
             "the agent's hostname stands in"
         );
     }
@@ -1172,7 +1224,8 @@ mod tests {
             .iter()
             .zip(AdoptSelection::claimants(
                 &partition.unmanaged,
-                "demo-host",
+                &agent_named("demo-host"),
+                MACHINE,
                 &candidates,
             ))
             .map(|(group, plans)| (group.paths.join(","), plans))
@@ -1184,7 +1237,47 @@ mod tests {
                 ("/srv/photos".to_owned(), vec![plan("photos")]),
             ]
         );
-        assert!(AdoptSelection::claimants(&[], "demo-host", &candidates).is_empty());
+        assert!(
+            AdoptSelection::claimants(&[], &agent_named("demo-host"), MACHINE, &candidates)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_plan_naming_no_host_on_an_agent_naming_none_claims_by_the_machines_name() {
+        let partition = ForgetSelection::partition(&[untagged(1)], &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let mut home = full_plan("home", "/home/demo");
+        home.host = None;
+        let candidates = vec![home];
+        let claimed = |machine: &str| {
+            AdoptSelection::claimants(
+                std::slice::from_ref(&group),
+                &AgentSettings::default(),
+                machine,
+                &candidates,
+            )
+            .remove(0)
+        };
+        assert_eq!(claimed("demo-host"), [plan("home")]);
+        assert_eq!(claimed("another-host"), Vec::<PlanId>::new());
+    }
+
+    #[test]
+    fn a_plans_own_host_wins_over_the_agents_hostname_and_the_machines_name() {
+        let partition = ForgetSelection::partition(&[untagged(1)], &agent(), &plans(&[]));
+        let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
+        let candidates = vec![full_plan("home", "/home/demo")];
+        assert_eq!(
+            AdoptSelection::claimants(
+                std::slice::from_ref(&group),
+                &agent_named("another-host"),
+                "another-machine",
+                &candidates,
+            )
+            .remove(0),
+            [plan("home")]
+        );
     }
 
     #[test]

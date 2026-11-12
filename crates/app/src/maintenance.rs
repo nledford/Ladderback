@@ -327,8 +327,8 @@ pub struct RunMaintenance {
     retention: Arc<dyn Retention>,
     config: Arc<dyn ConfigStore>,
     agent: AgentId,
-    /// The host name this agent's own backups carry: the fallback a plan
-    /// without a host of its own matches an unmanaged group by.
+    /// This machine's own name, which the engine records on a snapshot when
+    /// neither its plan nor the agent names a host (`Plan::snapshot_host`).
     hostname: String,
     /// A plan's sources as the engine records them, so adoption's matching
     /// compares like with like.
@@ -655,14 +655,18 @@ impl RunMaintenance {
                 .filter_map(|(_, result)| result.ok())
                 .collect()
         };
-        let hostname = self.host_of(&config);
         let other_hosts = self.other_hosts_in(&config, alias, &partition);
         // Which plan takes orphaned history is the person's choice, so every
         // plan of the repository is offered, to a group an adoption can name:
         // it names both tags, so a group missing one can't be adopted.
         let every_plan: Vec<PlanId> = plans.iter().map(|plan| plan.id.clone()).collect();
         let mut owned = partition.managed;
-        let claimants = AdoptSelection::claimants(&partition.unmanaged, &hostname, &normalized);
+        let claimants = AdoptSelection::claimants(
+            &partition.unmanaged,
+            config.agent(),
+            &self.hostname,
+            &normalized,
+        );
         Ok(RepositoryGroups {
             plans: managed
                 .iter()
@@ -870,15 +874,21 @@ impl RunMaintenance {
                     .ok_or(MaintenanceError::UnknownPlan {
                         plan: adoption.into.clone(),
                     })?;
-                AdoptSelection::unmanaged(&partition, &self.host_of(config), into, &normalized)
-                    .map_err(|refusal| match refusal {
-                        AdoptionRefusal::NoMatch => MaintenanceError::AdoptionNoMatch,
-                        AdoptionRefusal::Ambiguous { plans } => {
-                            MaintenanceError::AdoptionAmbiguous { plans }
-                        }
-                    })?
-                    .snapshots
-                    .clone()
+                AdoptSelection::unmanaged(
+                    &partition,
+                    config.agent(),
+                    &self.hostname,
+                    into,
+                    &normalized,
+                )
+                .map_err(|refusal| match refusal {
+                    AdoptionRefusal::NoMatch => MaintenanceError::AdoptionNoMatch,
+                    AdoptionRefusal::Ambiguous { plans } => {
+                        MaintenanceError::AdoptionAmbiguous { plans }
+                    }
+                })?
+                .snapshots
+                .clone()
             }
         };
         Ok((partition, group))
@@ -953,17 +963,6 @@ impl RunMaintenance {
             &self.hostname,
             &snapshots,
         ))
-    }
-
-    /// The host name a plan that names none matches an unmanaged group by:
-    /// the configuration's, else this agent's own.
-    fn host_of(&self, config: &AgentConfig) -> String {
-        config
-            .agent()
-            .hostname
-            .as_ref()
-            .map(|host| host.as_str().to_owned())
-            .unwrap_or_else(|| self.hostname.clone())
     }
 
     /// Runs the prepared job to its end, playing the engine's events into
