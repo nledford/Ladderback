@@ -400,6 +400,102 @@ Feature: An agent's configuration
       And the history of the config file holds the old file exactly as it was written
       And the config file now says it is in version 2
 
+    Scenario: A comment a person wrote survives a save
+      Given a config file holding:
+        """
+        # The demo laptop's agent, written by hand.
+        schema = 1
+
+        [agent]
+        concurrency = 1        # how many operations run at once
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        maintenance = "none"   # the hub may own it later
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded with the repository "cloud" at "/srv/demo-cloud" added
+      Then the config file reads:
+        """
+        # The demo laptop's agent, written by hand.
+        schema = 1
+
+        [agent]
+        concurrency = 1        # how many operations run at once
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        maintenance = "none"   # the hub may own it later
+
+        [repositories.cloud]
+        repository = "/srv/demo-cloud"
+        password-env = "DEMO_PASSWORD"
+        """
+      And the history of the config file holds the old file exactly as it was written
+
+    Scenario: A setting a save changes is changed where it is written, beside its comment
+      Given a config file holding:
+        """
+        schema = 1
+
+        [agent]
+        nice = 10
+        concurrency = 1        # how many operations run at once
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded with 2 operations at a time
+      Then the config file reads:
+        """
+        schema = 1
+
+        [agent]
+        nice = 10
+        concurrency = 2        # how many operations run at once
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        """
+
+    Scenario: A repository a save removes goes with the comment directly above it, and what is above that stays
+      Given a config file holding:
+        """
+        schema = 1
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        # password-env = "OLD_PASSWORD"
+
+        # The old USB drive, retired.
+        [repositories.usb]
+        repository = "/Volumes/demo-usb/repo"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded without the repository "usb"
+      Then the config file reads:
+        """
+        schema = 1
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+        # password-env = "OLD_PASSWORD"
+        """
+
   @e2e
   Rule: A secret written in the file is pointed out when the daemon starts, by its setting and never its value
 

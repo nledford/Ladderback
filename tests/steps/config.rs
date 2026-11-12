@@ -2,6 +2,7 @@
 //! writes a real file in the scenario's scratch folder, so the scenarios follow
 //! what a person who edits the file sees (technical design §6.1).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,8 +11,12 @@ use app::ports::{ConfigError, ConfigStore, Problem};
 use config_adapter::{FileConfigStore, MigrationError, Schemas};
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
-use domain::PlanId;
-use domain::planning::{AgentConfig, ValueKind};
+use domain::planning::{
+    AgentConfig, AgentSettings, Concurrency, GroupBy, Hooks, Maintenance, RepositoryConfig,
+    RepositorySettings, ValueKind,
+};
+use domain::secrets::SecretRef;
+use domain::{PlanId, RepositoryAlias};
 use platform::SystemClock;
 
 use super::Agent;
@@ -168,6 +173,67 @@ async fn saves(agent: &mut Agent) {
     store(agent).save(&config).await.expect("the save");
 }
 
+/// Saves the configuration loaded, with its parts changed by `change`.
+async fn saves_changed(
+    agent: &mut Agent,
+    change: impl FnOnce(&mut AgentSettings, &mut BTreeMap<RepositoryAlias, RepositoryConfig>),
+) {
+    let loaded = loaded(agent);
+    let mut settings = loaded.agent().clone();
+    let mut repositories = loaded.repositories().clone();
+    change(&mut settings, &mut repositories);
+    let config = AgentConfig::new(
+        settings,
+        loaded.hooks().clone(),
+        repositories,
+        loaded.plans().to_vec(),
+    )
+    .expect("a valid configuration");
+    store(agent).save(&config).await.expect("the save");
+}
+
+#[when(
+    expr = "the agent saves the configuration it loaded with the repository {string} at {string} added"
+)]
+async fn saves_with_repository(agent: &mut Agent, alias: String, location: String) {
+    let entry = RepositoryConfig {
+        settings: RepositorySettings {
+            repository: location,
+            repo_hot: None,
+            password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        },
+        id: None,
+        maintenance: Maintenance::default(),
+        group_by: GroupBy::default(),
+        hooks: Hooks::default(),
+    };
+    let alias = RepositoryAlias::parse(&alias).expect("an alias");
+    saves_changed(agent, |_, repositories| {
+        repositories.insert(alias, entry);
+    })
+    .await;
+}
+
+#[when(expr = "the agent saves the configuration it loaded with {int} operations at a time")]
+async fn saves_with_concurrency(agent: &mut Agent, concurrency: i64) {
+    let concurrency = Concurrency::new(concurrency).expect("a concurrency");
+    saves_changed(agent, |settings, _| settings.concurrency = concurrency).await;
+}
+
+#[when(expr = "the agent saves the configuration it loaded without the repository {string}")]
+async fn saves_without_repository(agent: &mut Agent, alias: String) {
+    let alias = RepositoryAlias::parse(&alias).expect("an alias");
+    saves_changed(agent, |_, repositories| {
+        repositories
+            .remove(&alias)
+            .expect("the repository was there");
+    })
+    .await;
+}
+
 #[then(expr = "the agent has the plan {string} backing up {string} into {string}")]
 fn has_the_plan(agent: &mut Agent, id: String, source: String, repository: String) {
     let plan = loaded(agent)
@@ -191,6 +257,15 @@ fn hostname_is(agent: &mut Agent, hostname: String) {
 fn file_is_as_written(agent: &mut Agent) {
     let now = fs::read_to_string(config_path(agent)).expect("the config file");
     assert_eq!(Some(&now), agent.config.written.as_ref());
+}
+
+#[then(expr = "the config file reads:")]
+fn file_reads(agent: &mut Agent, step: &Step) {
+    let text = step.docstring.as_deref().expect("the step has a text");
+    // As `a config file holding:` writes it: the file ends with a newline.
+    let expected = format!("{}\n", in_scratch(agent, text.trim_start_matches('\n')));
+    let now = fs::read_to_string(config_path(agent)).expect("the config file");
+    assert_eq!(now, expected);
 }
 
 #[then(expr = "the load is refused because the key {string} is unknown")]
