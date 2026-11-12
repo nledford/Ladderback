@@ -219,7 +219,14 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
     // The rule holds from here on.
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true), (5, true)]
+        [
+            (1, true),
+            (2, true),
+            (3, true),
+            (4, true),
+            (5, true),
+            (6, true)
+        ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
     assert_eq!(
@@ -269,7 +276,14 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
     assert_eq!(rows_of_operations(&mut raw, &everything).await, before);
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true), (5, true)]
+        [
+            (1, true),
+            (2, true),
+            (3, true),
+            (4, true),
+            (5, true),
+            (6, true)
+        ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
     assert_eq!(
@@ -317,7 +331,14 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
     );
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true), (5, true)]
+        [
+            (1, true),
+            (2, true),
+            (3, true),
+            (4, true),
+            (5, true),
+            (6, true)
+        ]
     );
     let check = store
         .get(id(0x60))
@@ -394,7 +415,14 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
     );
     assert_eq!(
         applied_versions(&mut raw).await,
-        [(1, true), (2, true), (3, true), (4, true), (5, true)]
+        [
+            (1, true),
+            (2, true),
+            (3, true),
+            (4, true),
+            (5, true),
+            (6, true)
+        ]
     );
     let index: Option<String> = sqlx::query_scalar(
         "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'ops_succeeded_by_plan'",

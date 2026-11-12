@@ -220,9 +220,7 @@ fn run_daemon(
         state,
         log: operation_log,
         lock,
-        // Kept for the daemon's life; the scheduler (#274) is the first to
-        // ask them.
-        conditions: _conditions,
+        background,
     } = match runtime.block_on(composition::daemon()) {
         Ok(daemon) => daemon,
         Err(refused) => {
@@ -254,15 +252,22 @@ fn run_daemon(
                 &[("detail", text(error))],
             )?,
         }
+        // The queue's leftovers and the scheduler start once the daemon
+        // listens, and stop with it: they run on what the log still holds
+        // open (§5, decision 73).
+        let scheduled = tokio::spawn(background.run());
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(hosts),
             state,
         );
-        match axum::serve(listener, app)
+        let served = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
-            .await
-        {
+            .await;
+        // No run starts once the daemon stops serving; one already started
+        // ends as the runtime drops it, and the next start recovers it.
+        scheduled.abort();
+        match served {
             Ok(()) => Ok(ExitCode::SUCCESS),
             Err(error) => {
                 say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])?;

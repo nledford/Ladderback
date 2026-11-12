@@ -2293,12 +2293,20 @@ pub struct OperationsPageDto {
 }
 
 /// One plan of the plans list, as the daemon tells the web UI: the ID a
-/// start request names, and the repository its backups go to.
+/// start request names, the repository its backups go to, and when it runs
+/// on its own (§5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PlanSummaryDto {
     pub id: String,
     pub repository: String,
+    /// Whether the plan has a schedule. A plan without one runs only when
+    /// it is started.
+    pub scheduled: bool,
+    /// The scheduler's planned run of a scheduled plan, RFC 3339 in UTC;
+    /// `None` while the scheduler has planned none (it hasn't yet, or the
+    /// schedule has no run left).
+    pub next_run: Option<String>,
 }
 
 /// The plans list: what the operations page offers to start.
@@ -3113,14 +3121,24 @@ mod catalog_dto_tests {
     #[test]
     fn the_catalog_lists_carry_their_own_field_names() {
         let plans = PlansDto {
-            plans: vec![PlanSummaryDto {
-                id: "demo-home".to_owned(),
-                repository: "demo".to_owned(),
-            }],
+            plans: vec![
+                PlanSummaryDto {
+                    id: "demo-home".to_owned(),
+                    repository: "demo".to_owned(),
+                    scheduled: true,
+                    next_run: Some("2026-11-13T03:00:00Z".to_owned()),
+                },
+                PlanSummaryDto {
+                    id: "demo-docs".to_owned(),
+                    repository: "demo".to_owned(),
+                    scheduled: false,
+                    next_run: None,
+                },
+            ],
         };
         assert_eq!(
             to_string(&plans).unwrap(),
-            r#"{"plans":[{"id":"demo-home","repository":"demo"}]}"#
+            r#"{"plans":[{"id":"demo-home","repository":"demo","scheduled":true,"next-run":"2026-11-13T03:00:00Z"},{"id":"demo-docs","repository":"demo","scheduled":false,"next-run":null}]}"#
         );
         assert_eq!(
             from_str::<PlansDto>(&to_string(&plans).unwrap()).unwrap(),

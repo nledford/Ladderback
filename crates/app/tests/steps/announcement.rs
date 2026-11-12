@@ -81,11 +81,11 @@ struct FaultyLog {
 
 #[async_trait]
 impl OperationStore for FaultyLog {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(

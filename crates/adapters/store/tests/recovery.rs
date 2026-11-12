@@ -1,12 +1,21 @@
 //! What the SQLite store does to a log a stopped daemon left behind: the
-//! unfinished operations end failed with `daemon-stopped`, in the columns and
-//! across opens of the same file, and a failure part way through ends none.
+//! running operations end failed with `daemon-stopped`, in the columns and
+//! across opens of the same file, a failure part way through ends none, and
+//! the queued ones are handed back as they were, to run again (decision 73).
 
 mod support;
 
 use app::ports::{OperationDetail, OperationRecord, OperationStore, Start, StoreError};
 use domain::execution::{FailureReason, OperationKind, OperationStatus};
 use support::*;
+
+/// How many running operations recovery ended, or why it couldn't.
+async fn ended(store: &store::SqliteStore) -> Result<u64, StoreError> {
+    store
+        .recover(&FailureReason::DaemonStopped)
+        .await
+        .map(|recovered| recovered.ended)
+}
 
 fn daemon_stopped() -> OperationStatus {
     OperationStatus::Failed {
@@ -15,7 +24,7 @@ fn daemon_stopped() -> OperationStatus {
 }
 
 #[tokio::test]
-async fn an_operation_a_closed_store_left_running_is_ended_by_the_next_one_to_open() {
+async fn an_operation_a_closed_store_left_running_is_ended_and_a_queued_one_handed_back() {
     let scratch = Scratch::new();
     let running = with_warnings(started(queued_backup(0x10)), 2);
     let waiting = queued_backup(0x11);
@@ -35,42 +44,83 @@ async fn an_operation_a_closed_store_left_running_is_ended_by_the_next_one_to_op
     };
 
     let second = scratch.open().await;
-    let count = within(
+    let recovered = within(
         30,
         "recovery",
-        second.fail_unfinished(&FailureReason::DaemonStopped),
+        second.recover(&FailureReason::DaemonStopped),
     )
-    .await;
-    assert_eq!(count, Ok(2), "both unfinished operations are ended");
-    for op in [&running, &waiting] {
-        assert_eq!(
-            second.get(op.id()).await,
-            Ok(Some(ended(op))),
-            "operation {} reads as failed: daemon-stopped",
-            op.id().as_uuid()
-        );
-    }
+    .await
+    .expect("recovery works");
+    assert_eq!(recovered.ended, 1, "the running operation is ended");
+    assert_eq!(
+        recovered.queued,
+        vec![OperationRecord::of(&waiting, None)],
+        "the queued one is handed back as it was queued"
+    );
+    assert_eq!(recovered.unreadable, Vec::new());
+    assert_eq!(second.get(running.id()).await, Ok(Some(ended(&running))));
+    assert_eq!(
+        second.get(waiting.id()).await,
+        Ok(Some(detail_of(&waiting, None))),
+        "the queued operation is still queued"
+    );
     second.close().await;
 
     let third = scratch.open().await;
-    for op in [&running, &waiting] {
-        assert_eq!(
-            third.get(op.id()).await,
-            Ok(Some(ended(op))),
-            "operation {} is still failed when the file is opened again",
-            op.id().as_uuid()
-        );
-    }
     assert_eq!(
-        third.fail_unfinished(&FailureReason::DaemonStopped).await,
-        Ok(0),
-        "nothing is left to end"
+        third.get(running.id()).await,
+        Ok(Some(ended(&running))),
+        "the running operation is still failed when the file is opened again"
     );
+    let again = third
+        .recover(&FailureReason::DaemonStopped)
+        .await
+        .expect("recovery works");
+    assert_eq!(again.ended, 0, "nothing is left to end");
+    assert_eq!(again.queued, vec![OperationRecord::of(&waiting, None)]);
     third.close().await;
 }
 
 #[tokio::test]
-async fn recovery_changes_only_the_status_and_failure_columns_of_unfinished_rows() {
+async fn queued_operations_come_back_oldest_first_and_an_unreadable_one_is_reported() {
+    let scratch = Scratch::new();
+    let store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    save(&store, &queued_backup(0x22), None).await;
+    save(&store, &queued_backup(0x20), None).await;
+    save(&store, &queued_backup(0x21), None).await;
+    save(&store, &succeeded(queued_backup(0x23)), None).await;
+    // A trigger this build doesn't know, as a later version might write.
+    sqlx::query("UPDATE operations SET trigger = 'teleport' WHERE id = ?")
+        .bind(id_text(0x21))
+        .execute(&mut raw)
+        .await
+        .expect("the row is changed");
+    let before = stored_row(&mut raw, 0x21).await;
+
+    let recovered = store
+        .recover(&FailureReason::DaemonStopped)
+        .await
+        .expect("an unreadable queued row doesn't refuse the start");
+    assert_eq!(
+        recovered.queued,
+        vec![
+            OperationRecord::of(&queued_backup(0x20), None),
+            OperationRecord::of(&queued_backup(0x22), None),
+        ],
+        "oldest first, which is ID order"
+    );
+    assert_eq!(recovered.unreadable.len(), 1, "{recovered:?}");
+    assert_eq!(
+        stored_row(&mut raw, 0x21).await,
+        before,
+        "the unreadable row is left as it was"
+    );
+    store.close().await;
+}
+
+#[tokio::test]
+async fn recovery_changes_only_the_status_and_failure_columns_of_running_rows() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
     let mut raw = scratch.raw().await;
@@ -120,26 +170,23 @@ async fn recovery_changes_only_the_status_and_failure_columns_of_unfinished_rows
     save(&store, &cancelled, None).await;
     save(&store, &warned, None).await;
 
-    let unfinished = [0x10, 0x11];
-    let finished = [0x12, 0x13, 0x14, 0x15, 0x16];
+    let running = [0x10];
+    let unchanged = [0x11, 0x12, 0x13, 0x14, 0x15, 0x16];
     let mut rows_before = Vec::new();
     let mut warnings_before = Vec::new();
-    for n in unfinished.into_iter().chain(finished) {
+    for n in running.into_iter().chain(unchanged) {
         rows_before.push((n, stored_row(&mut raw, n).await));
         warnings_before.push((n, stored_warnings(&mut raw, n).await));
     }
 
-    assert_eq!(
-        store.fail_unfinished(&FailureReason::DaemonStopped).await,
-        Ok(2)
-    );
+    assert_eq!(ended(&store).await, Ok(1));
 
     for ((n, before), (_, warnings)) in rows_before.into_iter().zip(warnings_before) {
         let after = stored_row(&mut raw, n).await;
-        if unfinished.contains(&n) {
+        if running.contains(&n) {
             assert!(
-                before.status == "queued" || before.status == "running",
-                "operation {n:#x} was unfinished: {before:?}"
+                before.status == "running",
+                "operation {n:#x} was running: {before:?}"
             );
             let expected = Stored {
                 status: "failed".to_owned(),
@@ -153,7 +200,7 @@ async fn recovery_changes_only_the_status_and_failure_columns_of_unfinished_rows
                 "only the status and failure columns of {n:#x} changed"
             );
         } else {
-            assert_eq!(after, before, "finished row {n:#x} is identical");
+            assert_eq!(after, before, "queued or finished row {n:#x} is identical");
         }
         assert_eq!(
             stored_warnings(&mut raw, n).await,
@@ -208,7 +255,7 @@ async fn a_failure_part_way_through_leaves_every_row_as_it_was() {
         .await
         .expect("the fault is set up");
 
-    let outcome = store.fail_unfinished(&FailureReason::DaemonStopped).await;
+    let outcome = ended(&store).await;
     assert!(
         matches!(outcome, Err(StoreError::Unavailable { .. })),
         "{outcome:?}"
@@ -247,10 +294,7 @@ async fn recovery_frees_the_repository_a_running_maintenance_operation_held_acro
         "the unique index holds the repository while the prune runs: {blocked:?}"
     );
 
-    assert_eq!(
-        store.fail_unfinished(&FailureReason::DaemonStopped).await,
-        Ok(1)
-    );
+    assert_eq!(ended(&store).await, Ok(1));
 
     let next = started(queued_on_repository(0x12, OperationKind::Prune));
     save(&store, &next, None).await;

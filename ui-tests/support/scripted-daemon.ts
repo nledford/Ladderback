@@ -110,6 +110,8 @@ export class ScriptedDaemon {
           plans: [...new Set(this.#operations.map((operation) => operation.plan))].map((id) => ({
             id,
             repository: "demo",
+            scheduled: false,
+            "next-run": null,
           })),
         },
       }),

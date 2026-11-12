@@ -960,6 +960,8 @@ mod tests {
                 plans: vec![api::PlanSummaryDto {
                     id: "home".to_owned(),
                     repository: "demo".to_owned(),
+                    scheduled: false,
+                    next_run: None,
                 }],
             })
         }
@@ -1874,7 +1876,7 @@ mod tests {
         assert_eq!(plans.status(), StatusCode::OK);
         assert_eq!(
             body(plans).await,
-            r#"{"plans":[{"id":"home","repository":"demo"}]}"#
+            r#"{"plans":[{"id":"home","repository":"demo","scheduled":false,"next-run":null}]}"#
         );
 
         let repositories = get("/api/v1/repositories").await;

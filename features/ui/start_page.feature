@@ -22,6 +22,30 @@ Feature: Start page
       | more contrast  |
       | reduced motion |
 
+  Scenario: The start page lists each plan with when it runs next
+    Given the browser is in the time zone "Asia/Kolkata"
+    And a demo plan "demo-home" on the schedule "0 3 * * *" and a demo plan "demo-photos" without one
+    When I open the web UI
+    Then the table "Plans" has the row "demo-home"
+    And the row "demo-home" of the table "Plans" shows its planned run in its "Next run" column in the time zone "Asia/Kolkata"
+    And the row "demo-photos" of the table "Plans" shows "When started from Operations" in its "Next run" column
+    And the page has no accessibility violations
+    When I press Tab until focus is on the link "Start a backup from the Operations page"
+    And I press Enter
+    Then focus is on the main heading "Operations"
+
+  Scenario Outline: The start page's plans are in the language of the page
+    Given a demo plan "demo-home" on the schedule "0 3 * * *" and a demo plan "demo-photos" without one
+    When I open the address "/?locale=<locale>"
+    Then the page shows the row "demo-photos"
+    And every visible text but the data of the tables and lists is transformed
+    And the page has no accessibility violations
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |
+
   Scenario: The skip link moves keyboard focus to the content
     When I open the web UI
     And I press Tab

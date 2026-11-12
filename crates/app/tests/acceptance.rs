@@ -52,6 +52,8 @@ mod recovery_steps;
 mod repositories_steps;
 #[path = "steps/schedule.rs"]
 mod schedule_steps;
+#[path = "steps/scheduler.rs"]
+mod scheduler_steps;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -73,6 +75,7 @@ struct Agent {
     announcement: announcement_steps::AnnouncementWorld,
     preview: preview_steps::PreviewWorld,
     schedule: schedule_steps::ScheduleWorld,
+    scheduler: scheduler_steps::SchedulerWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -101,6 +104,7 @@ impl Agent {
                 deadline_budget: None,
             },
             finished: None,
+            scheduler: Default::default(),
             secrets: Default::default(),
             config: Default::default(),
             schedule: Default::default(),

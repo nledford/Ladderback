@@ -14,7 +14,7 @@ use crate::{SignedDuration, TimeZone, Timestamp};
 /// A number the `Random` port drew, uniformly over every `u64`. A run's
 /// jitter is the same share of the stretch it may be spread over as the
 /// draw is of 2^64, the count of every `u64`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RandomDraw(u64);
 
 impl RandomDraw {

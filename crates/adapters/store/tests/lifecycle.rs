@@ -273,8 +273,8 @@ enum Write {
 }
 
 impl Write {
-    /// What the store holds before the write: `fail_unfinished` needs a
-    /// running operation to end.
+    /// What the store holds before the write: `recover` needs a running
+    /// operation to end.
     async fn prepare(self, store: &SqliteStore) {
         if let Write::FailUnfinished = self {
             save(store, &with_warnings(started(queued_backup(0x10)), 3), None).await;
@@ -298,8 +298,8 @@ impl Write {
                     Ok(())
                 }
                 Write::FailUnfinished => {
-                    let ended = store.fail_unfinished(&FailureReason::DaemonStopped).await?;
-                    assert_eq!(ended, 1);
+                    let recovered = store.recover(&FailureReason::DaemonStopped).await?;
+                    assert_eq!(recovered.ended, 1);
                     Ok(())
                 }
             }

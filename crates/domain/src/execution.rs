@@ -271,6 +271,18 @@ pub struct Target {
     pub repository: Option<RepositoryId>,
 }
 
+impl Target {
+    /// Whether a job that opens `repository` (`None`: a repository whose ID
+    /// isn't known yet) works on the repository this target names. A target
+    /// that names none was made before its repository's ID was known, so no
+    /// repository can be told apart from it.
+    pub fn is_on(&self, repository: Option<&RepositoryId>) -> bool {
+        self.repository
+            .as_ref()
+            .is_none_or(|named| Some(named) == repository)
+    }
+}
+
 /// One run of one action. Aggregate root of the Execution context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operation {
@@ -547,6 +559,32 @@ mod tests {
                 .unwrap();
         }
         op
+    }
+
+    fn repository(digit: &str) -> RepositoryId {
+        RepositoryId::parse(&digit.repeat(64)).unwrap()
+    }
+
+    fn on(repository: Option<RepositoryId>) -> Target {
+        Target {
+            plan: None,
+            repository,
+        }
+    }
+
+    #[test]
+    fn a_target_is_on_the_repository_it_names_and_on_no_other() {
+        let named = on(Some(repository("a")));
+        assert!(named.is_on(Some(&repository("a"))));
+        assert!(!named.is_on(Some(&repository("b"))));
+        assert!(!named.is_on(None));
+    }
+
+    #[test]
+    fn a_target_that_names_no_repository_is_on_any() {
+        let unnamed = on(None);
+        assert!(unnamed.is_on(Some(&repository("a"))));
+        assert!(unnamed.is_on(None));
     }
 
     #[test]

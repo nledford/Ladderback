@@ -191,11 +191,11 @@ impl Held {
 
 #[async_trait]
 impl OperationStore for Held {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(
@@ -409,11 +409,11 @@ struct RefusesTheStart(InMemoryOperationStore);
 
 #[async_trait]
 impl OperationStore for RefusesTheStart {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.0.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.0.recover(reason).await
     }
 
     async fn save(
@@ -506,11 +506,11 @@ struct NotesWrites {
 
 #[async_trait]
 impl OperationStore for NotesWrites {
-    async fn fail_unfinished(
+    async fn recover(
         &self,
         reason: &domain::execution::FailureReason,
-    ) -> Result<u64, StoreError> {
-        self.inner.fail_unfinished(reason).await
+    ) -> Result<app::ports::Recovered, StoreError> {
+        self.inner.recover(reason).await
     }
 
     async fn save(
