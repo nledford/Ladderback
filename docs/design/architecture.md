@@ -42,6 +42,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 |---|---|
 | Agent | One machine running `ladderback serve`, identified by its agent ID |
 | Hub | The agent running `--hub`; holds the registry, ownership and aggregated history |
+| Service | An agent the user's **service manager** runs in the background, from login on: a systemd user unit on Linux, a launchd agent on macOS. Its **service file** says what the manager runs: this `ladderback` program's `serve`. `ladderback install-service` writes the file and has the manager start it; `ladderback remove-service` has the manager stop it and removes the file (§12) |
 | Plan | What to back up, from which agent, into which repository, when, and how long to keep it |
 | Repository | A rustic repository, identified by its **repository ID**. An **alias** is one agent's local name for it |
 | Operation | One run of one action (backup, forget, prune, check, restore, …) with a lifecycle: `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed { reason }` / `Cancelled`. A missed deadline is `Failed { reason: DeadlinePassed }` |
@@ -171,6 +172,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `Identity` | The agent's Ed25519 key: public key and signing | Key file in the data dir | Fixed test key |
 | `PowerSupply` | AC power or battery (§16, decision 63) | `/sys/class/power_supply` on Linux, `pmset -g batt` on macOS | Scripted fake |
 | `Network` | Whether the machine is online (§16, decision 63) | `/sys/class/net` on Linux, `scutil --nwi` on macOS | Scripted fake |
+| `ServiceManager` | Install, start, stop and remove the agent's user service (§12, decision 64) | systemd user unit through `systemctl --user` on Linux, launchd agent through `launchctl` on macOS | In-memory fake |
 | `EventPublisher` | Deliver domain events to in-process subscribers (UI, outbox, notifications) | Broadcast channel | Recording fake |
 | `Notifier` | Deliver a rendered notification | reqwest, lettre | Recording fake |
 | `HubLink` / `AgentLink` | Send `AgentReport`s to the hub / `HubCommand`s to an agent | WebSocket sync | In-memory pair |

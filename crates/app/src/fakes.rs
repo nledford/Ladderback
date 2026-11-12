@@ -11,6 +11,7 @@ mod platform;
 mod profiles;
 mod retention;
 mod secrets;
+mod service;
 mod sources;
 
 pub use clock::FakeClock;
@@ -23,4 +24,5 @@ pub use platform::{FakeNetwork, FakePower};
 pub use profiles::{FakeProfileReader, FakeProfileWriter};
 pub use retention::FakeRetention;
 pub use secrets::{FakeSecrets, Script};
+pub use service::FakeServiceManager;
 pub use sources::FakeSources;

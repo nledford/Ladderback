@@ -10,6 +10,7 @@ mod platform;
 mod profiles;
 mod retention;
 mod secrets;
+mod service;
 mod sources;
 
 pub use clock::Clock;
@@ -38,4 +39,5 @@ pub use profiles::{
 };
 pub use retention::{Retention, RetentionError};
 pub use secrets::{Resolved, SecretResolver};
+pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 pub use sources::{NormalizeSources, SourcesError};

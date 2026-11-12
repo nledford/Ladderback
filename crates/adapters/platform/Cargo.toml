@@ -1,6 +1,6 @@
 [package]
 name = "platform"
-description = "Platform adapter: system clock, power source, network state and agent ID"
+description = "Platform adapter: system clock, power source, network state, agent ID, folders and the user's service manager"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,14 +12,25 @@ hostname = "0.4"
 app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
+# The manager's command line as a person would type it, in a refusal.
+shell-words.workspace = true
 spawn-gate.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 
+[target.'cfg(unix)'.dependencies]
+# The user's ID: a launchd agent lives in the `gui/<uid>` domain.
+nix = { workspace = true, features = ["user"] }
+
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 tempfile.workspace = true
+testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# A umask, for a test of the service file's mode.
+nix = { workspace = true, features = ["fs", "user"] }
 
 [lints]
 workspace = true

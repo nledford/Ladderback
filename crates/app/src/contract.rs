@@ -11,3 +11,4 @@ pub mod operation_store;
 pub mod power;
 pub mod profiles;
 pub mod secrets;
+pub mod service;

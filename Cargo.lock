@@ -4770,8 +4770,11 @@ dependencies = [
  "async-trait",
  "domain",
  "hostname",
+ "nix 0.31.3",
+ "shell-words",
  "spawn-gate",
  "tempfile",
+ "testkit",
  "tokio",
  "uuid",
 ]

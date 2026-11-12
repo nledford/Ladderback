@@ -1,6 +1,7 @@
 //! Platform adapter: the operating system's clocks, what powers the machine
-//! and whether it is online, and the agent ID file. The identity key arrives
-//! with a later milestone (technical design §3.2).
+//! and whether it is online, the agent ID file, and the user's service
+//! manager. The identity key arrives with a later milestone (technical design
+//! §3.2).
 
 #![deny(
     clippy::unwrap_used,
@@ -16,6 +17,7 @@ pub mod data_dir_lock;
 pub mod dirs;
 pub mod network;
 pub mod power;
+pub mod service;
 mod source;
 
 use app::ports::Clock;

@@ -61,6 +61,8 @@ mod plan_settings_steps;
 mod repositories_steps;
 #[path = "steps/restart.rs"]
 mod restart_steps;
+#[path = "steps/service.rs"]
+mod service_steps;
 #[path = "steps/shutdown.rs"]
 mod shutdown_steps;
 #[path = "steps/snapshots.rs"]
@@ -95,6 +97,7 @@ struct Agent {
     adopt: adopt_steps::AdoptE2e,
     maintenance: maintenance_steps::MaintenanceE2e,
     cache: cache_steps::CacheE2e,
+    service: service_steps::ServiceE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -139,6 +142,7 @@ impl Agent {
             interop: interop_steps::InteropE2e::default(),
             adopt: adopt_steps::AdoptE2e::default(),
             cache: cache_steps::CacheE2e::default(),
+            service: service_steps::ServiceE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
         }
     }

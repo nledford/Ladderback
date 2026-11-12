@@ -1,6 +1,7 @@
 ### Ladderback's own command-line messages. The program prints each after its
 ### name and a colon (`ladderback: listening on …`); `clap`'s help and usage
-### errors are not here and stay in English.
+### errors are not here and stay in English, but for the descriptions of the
+### service commands (`cli-help-*`).
 
 # The daemon is up. Scripts and the UI tests read the address after "listening on".
 # $url (text): where the web UI answers, such as http://127.0.0.1:9898.
@@ -120,3 +121,85 @@ cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }
 # A command could not write what it had to say, and ended with status 1: the disk is full, say. A reader that has gone is not this case: the command ends quietly with 141.
 # $detail (text): the operating system's message. It is shown as it came.
 cli-cannot-write-output = cannot write the result: { $detail }
+
+## The service (operations §12): `ladderback install-service` and `ladderback remove-service`.
+
+# What `install-service` does, in its `--help`.
+# `install-service` is the command, typed as it is: keep it a string literal.
+cli-help-install-service = Install this agent as a service of your user: the service manager runs it in the background, now and from each login on. On Linux that is a systemd user unit, on macOS a launchd agent.
+
+# What `remove-service` does, in its `--help`.
+# `install-service` is the command, typed as it is: keep it a string literal.
+cli-help-remove-service = Stop the service that { "install-service" } installed, and remove its service file.
+
+# The service file was written and the service manager started the service.
+# $file (text): the service file's path.
+cli-service-installed = installed the service { $file }: it runs now, and from each login on
+
+# A service was installed already: its file was written again, and the service manager started it again.
+# $file (text): the service file's path.
+cli-service-replaced = replaced the service { $file } and started it again
+
+# Linux only, after an install: a user's services stop when the user logs out, unless the user lingers.
+# `loginctl enable-linger` is a command, typed as it is: keep it a string literal.
+cli-service-linger = to keep it running while you are logged out, run { "loginctl enable-linger" }
+
+# The service manager stopped the service, and its file was removed.
+# $file (text): the service file's path.
+cli-service-removed = removed the service { $file }: it no longer runs
+
+# There was no service file, so nothing was asked of the service manager.
+# $file (text): where the service file would be.
+cli-service-not-installed = no service to remove: { $file } is not there
+
+# The service file is kept under the home folder, and there is none.
+cli-service-no-home = no home folder to keep the service file in: run as a user with a home directory
+
+# The command was run as root, as under `sudo`. A user service is the user's: as root it would be root's service, with root's files.
+cli-service-as-root = a user service is not installed or removed as root: run this command as the user the service is for, without sudo
+
+# This system has no service manager Ladderback can install a service with.
+cli-service-unsupported = this system has no service manager { -brand-name } knows: it installs a service with systemd on Linux and with launchd on macOS
+
+# The service file would name this program's path, and that path cannot be
+# written into one. One message for each reason, since a command-line message
+# shows each argument as it is given.
+# $path (text): the program's path, with any control character shown as an escape.
+cli-service-program-relative = cannot install the service: its file cannot name this program's path, { $path }, which is relative. Run { -brand-name } from a path without one.
+
+# `..` is typed as it is: keep it a string literal.
+# $path (text): the program's path, with any control character shown as an escape.
+cli-service-program-steps-up = cannot install the service: its file cannot name this program's path, { $path }, which steps up a folder with { ".." }. Run { -brand-name } from a path without one.
+
+# $path (text): the program's path, with any control character shown as an escape.
+cli-service-program-control = cannot install the service: its file cannot name this program's path, { $path }, which holds a control character. Run { -brand-name } from a path without one.
+
+# $path (text): the program's path, with any control character shown as an escape.
+cli-service-program-quote = cannot install the service: its file cannot name this program's path, { $path }, which holds a quote or a backslash. Run { -brand-name } from a path without one.
+
+# $path (text): the program's path, with any control character shown as an escape.
+cli-service-program-not-text = cannot install the service: its file cannot name this program's path, { $path }, which is not text. Run { -brand-name } from a path without one.
+
+# The service file could not be written, read or removed.
+# $file (text): the service file's path.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-service-file-error = cannot change the service file { $file }: { $detail }
+
+# The service manager's program could not be started: it is not installed, or not on the PATH.
+# $command (text): the command that was run, as a person would type it.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-service-manager-missing = cannot run { $command }: { $detail }
+
+# The service manager's program ended with an error.
+# $command (text): the command that was run, as a person would type it.
+# $said (text): what it printed, in its own words. It is shown as it came.
+cli-service-manager-refused = { $command } failed: { $said }
+
+# The service manager's program did not end within the time it is given, and was stopped.
+# $command (text): the command that was run, as a person would type it.
+# $limit (duration): how long it was given.
+cli-service-manager-silent = { $command } did not answer within { $limit }, so { -brand-name } stopped it
+
+# A file is at the service file's place that `install-service` did not write: a unit written by hand, or a link such as the one `systemctl mask` makes. Neither command replaces nor removes it.
+# $file (text): the service file's path.
+cli-service-not-ours = { $file } is not a service file { -brand-name } wrote, so { -brand-name } leaves it as it is
