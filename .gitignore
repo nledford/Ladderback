@@ -1,5 +1,6 @@
 /target
 /crates/web/dist
+/crates/web/tw-out.css
 /mutants.out*
 node_modules/
 /ui-tests/reports
