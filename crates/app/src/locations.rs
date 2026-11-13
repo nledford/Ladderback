@@ -77,7 +77,6 @@ pub struct ChooseLocation {
     link: Arc<dyn NetworkLink>,
     resolve: ResolveRepository,
     report: Arc<dyn Fn(LocationReport) + Send + Sync>,
-    bound: SignedDuration,
 }
 
 /// The probe that runs now, so a stop of the job stops it too.
@@ -102,13 +101,7 @@ impl ChooseLocation {
             link,
             resolve,
             report,
-            bound: SignedDuration::from_secs(LOCATION_PROBE_SECONDS),
         }
-    }
-
-    /// The same, with each probe bounded by `bound` instead.
-    pub fn with_probe_bound(self, bound: SignedDuration) -> Self {
-        Self { bound, ..self }
     }
 
     /// Chooses the location `access` opens, for operation `op`: the access
@@ -332,8 +325,9 @@ impl ChooseLocation {
     }
 
     /// Probes one location, resolved: a worker of its own that opens it with
-    /// no cache (it names no repository), bounded by `self.bound`, and
-    /// stopped when the bound runs out or the job is stopped.
+    /// no cache (it names no repository), bounded by
+    /// [`LOCATION_PROBE_SECONDS`] on the clock, and stopped when the bound
+    /// runs out or the job is stopped.
     async fn probe(
         &self,
         op: OperationId,
@@ -361,7 +355,11 @@ impl ChooseLocation {
             return LocationOutcome::Silent;
         }
         let mut answer = std::pin::pin!(answered(events).fuse());
-        let mut bound = std::pin::pin!(self.clock.sleep(self.bound).fuse());
+        let mut bound = std::pin::pin!(
+            self.clock
+                .sleep(SignedDuration::from_secs(LOCATION_PROBE_SECONDS))
+                .fuse()
+        );
         let found = select_biased! {
             found = answer => found,
             () = bound => None,
