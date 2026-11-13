@@ -1639,14 +1639,19 @@ mod read_timeout_tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use domain::secrets::SecretValue;
-    use domain::{OperationId, SignedDuration, Timestamp, Uuid};
+    use domain::planning::{Maintenance, RepositoryConfig, RepositorySettings};
+    use domain::secrets::{SecretRef, SecretValue};
+    use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid};
     use futures::StreamExt;
     use futures::stream;
 
-    use super::{MaintenanceError, READ_TIMEOUT, run_read};
-    use crate::fakes::FakeClock;
-    use crate::ports::{Engine, EngineError, Job, JobControl, RepositoryAccess, RunningJob};
+    use super::{MaintenanceError, READ_TIMEOUT, list, run_read};
+    use crate::fakes::{FakeClock, InMemoryConfigStore};
+    use crate::ports::{
+        Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, RepositoryAccess,
+        RunningJob, SavedEntry,
+    };
+    use crate::repositories::{ConfigWrites, RecordOpened};
 
     struct Nothing;
 
@@ -1712,6 +1717,78 @@ mod read_timeout_tests {
             .expect("the read ends when the timeout does")
             .expect("the read task ran");
         assert_eq!(outcome.unwrap_err(), MaintenanceError::TimedOut);
+    }
+
+    /// Identifies the repository it is asked to, and refuses every other
+    /// job, as an engine that can no longer be started does.
+    struct RefusesAfterIdentify;
+
+    #[async_trait]
+    impl Engine for RefusesAfterIdentify {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if !matches!(job, Job::Identify(_)) {
+                return Err(EngineError::Unavailable {
+                    detail: "no such file or directory".to_owned(),
+                });
+            }
+            let id = RepositoryId::parse(&"a".repeat(64)).expect("a repository ID");
+            Ok(RunningJob {
+                events: stream::iter([
+                    EngineEvent::Started {
+                        index_read_at: Timestamp::UNIX_EPOCH,
+                        repository: Some(id.clone()),
+                    },
+                    EngineEvent::Succeeded(EngineResult::Repository { id }),
+                ])
+                .boxed(),
+                control: Box::new(Nothing),
+            })
+        }
+    }
+
+    /// A read of a repository whose entry records no ID runs after an
+    /// identify (decision 81); an engine that refuses it then refuses the
+    /// read as it would have refused it alone.
+    #[tokio::test]
+    async fn a_read_the_engine_refuses_after_its_identify_is_refused_as_the_engine_refused_it() {
+        let engine = RecordOpened::new(
+            Arc::new(RefusesAfterIdentify),
+            Arc::new(InMemoryConfigStore::new()),
+            Arc::new(ConfigWrites::new(())),
+            Arc::new(|_| {}),
+        );
+        let mut unrecorded = access();
+        unrecorded.entry = Some(SavedEntry {
+            alias: RepositoryAlias::parse("demo").expect("an alias"),
+            entry: RepositoryConfig {
+                settings: RepositorySettings {
+                    repository: "/srv/demo/repo".to_owned(),
+                    repo_hot: None,
+                    password: SecretRef::Inline(SecretValue::new("demo-password")),
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                },
+                id: None,
+                maintenance: Maintenance::None,
+                group_by: Default::default(),
+                hooks: Default::default(),
+            },
+        });
+        let clock = FakeClock::new(Timestamp::UNIX_EPOCH);
+        let refused = list(
+            &engine,
+            &clock,
+            OperationId::from_uuid(Uuid::from_u128(1)),
+            unrecorded,
+        )
+        .await;
+        assert_eq!(
+            refused,
+            Err(MaintenanceError::Engine {
+                detail: "no such file or directory".to_owned(),
+            })
+        );
     }
 }
 

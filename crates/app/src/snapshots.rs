@@ -95,10 +95,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{ListSnapshots, SnapshotError};
-    use crate::fakes::FakeSecrets;
+    use crate::fakes::{FakeSecrets, InMemoryConfigStore};
     use crate::ports::{
         Engine, EngineError, EngineResult, Job, JobControl, RunningJob, SavedEntry, SnapshotSummary,
     };
+    use crate::repositories::{ConfigWrites, RecordOpened};
     use crate::secrets::ResolveRepository;
 
     /// An engine that answers an `Ls` job with the scripted outcome, and
@@ -275,6 +276,54 @@ mod tests {
         assert_eq!(
             use_case.list(op(), &alias(), &entry(None)).await,
             Err(SnapshotError::Failed(reason))
+        );
+    }
+
+    /// Identifies the repository it is asked to, and refuses every other
+    /// job, as an engine that can no longer be started does.
+    struct RefusesAfterIdentify;
+
+    #[async_trait]
+    impl Engine for RefusesAfterIdentify {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if !matches!(job, Job::Identify(_)) {
+                return Err(EngineError::Unavailable {
+                    detail: "no such file or directory".to_owned(),
+                });
+            }
+            Ok(RunningJob {
+                events: Box::pin(futures::stream::iter([
+                    EngineEvent::Started {
+                        index_read_at: Timestamp::UNIX_EPOCH,
+                        repository: Some(repository()),
+                    },
+                    EngineEvent::Succeeded(EngineResult::Repository { id: repository() }),
+                ])),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    /// The listing of a repository whose entry records no ID runs after an
+    /// identify (decision 81); an engine that refuses it then refuses the
+    /// listing as it would have refused it alone.
+    #[tokio::test]
+    async fn a_listing_the_engine_refuses_after_its_identify_is_refused_as_the_engine_refused_it() {
+        let engine = RecordOpened::new(
+            Arc::new(RefusesAfterIdentify),
+            Arc::new(InMemoryConfigStore::new()),
+            Arc::new(ConfigWrites::new(())),
+            Arc::new(|_| {}),
+        );
+        let use_case = ListSnapshots::new(
+            Arc::new(engine),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        );
+        assert_eq!(
+            use_case.list(op(), &alias(), &entry(None)).await,
+            Err(SnapshotError::Engine(EngineError::Unavailable {
+                detail: "no such file or directory".to_owned(),
+            }))
         );
     }
 }
