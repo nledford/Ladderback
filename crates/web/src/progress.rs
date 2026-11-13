@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use api::{MsgArg, OperationStep, ProgressUnit};
-use l10n::MessageId;
+use l10n::{MessageId, msg};
 
 use crate::backend::Progress;
 
@@ -146,6 +146,62 @@ impl<H: Clear> Wake<H> {
     pub(crate) fn clear(&mut self) {
         todo!()
     }
+}
+
+/// A run's progress as a whole percent of its total. A total of nothing or
+/// zero cannot be a share, so there is none rather than a wrong one. A count
+/// past its total is all of it: both come from a worker's report, so the
+/// count is held to the total first, and the product is taken in `u128`,
+/// where a `u64` times 100 can't overflow.
+pub(crate) fn percent(current: u64, total: Option<u64>) -> Option<u8> {
+    total.filter(|total| *total > 0).map(|total| {
+        let share = u128::from(current.min(total)) * 100 / u128::from(total);
+        u8::try_from(share).unwrap_or(100)
+    })
+}
+
+/// What a bar's Status cell says of its run's progress besides the bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProgressText {
+    /// The step's message above the bar, while the bar shows a percentage.
+    pub(crate) above: Option<MessageId>,
+    /// What stands beside the bar while it shows no percentage: the step's
+    /// message, or that the run is working when it names none this build
+    /// knows.
+    pub(crate) unknown: MessageId,
+}
+
+/// What `progress` says of the step its run is in (§4.4; §16, decision 82).
+pub(crate) fn progress_text(progress: &Progress) -> ProgressText {
+    let step = progress.step.and_then(step_message);
+    let with_percent = percent(progress.current, progress.total).is_some();
+    ProgressText {
+        above: step.filter(|_| with_percent),
+        unknown: step.unwrap_or(msg::UI_PROGRESS_WORKING),
+    }
+}
+
+/// The message of `step`; `None` for one this build doesn't know.
+pub(crate) fn step_message(step: api::OperationStep) -> Option<MessageId> {
+    use api::OperationStep as S;
+    Some(match step {
+        S::ReadingIndex => msg::UI_STEP_READING_INDEX,
+        S::GettingSnapshots => msg::UI_STEP_GETTING_SNAPSHOTS,
+        S::BackingUp => msg::UI_STEP_BACKING_UP,
+        S::ListingPacks => msg::UI_STEP_LISTING_PACKS,
+        S::CheckingCache => msg::UI_STEP_CHECKING_CACHE,
+        S::CheckingHotRepository => msg::UI_STEP_CHECKING_HOT_REPOSITORY,
+        S::CheckingTrees => msg::UI_STEP_CHECKING_TREES,
+        S::ReadingPackData => msg::UI_STEP_READING_PACK_DATA,
+        S::FindingUsedData => msg::UI_STEP_FINDING_USED_DATA,
+        S::MarkingUnusedPacks => msg::UI_STEP_MARKING_UNUSED_PACKS,
+        S::Repacking => msg::UI_STEP_REPACKING,
+        S::RebuildingIndex => msg::UI_STEP_REBUILDING_INDEX,
+        S::DeletingUnusedData => msg::UI_STEP_DELETING_UNUSED_DATA,
+        S::DeletingSnapshots => msg::UI_STEP_DELETING_SNAPSHOTS,
+        S::SavingSnapshots => msg::UI_STEP_SAVING_SNAPSHOTS,
+        S::Unknown => return None,
+    })
 }
 
 #[cfg(test)]
@@ -639,5 +695,112 @@ mod tests {
         let (next, next_cleared) = timer();
         wake.set(next);
         assert!(!next_cleared.get());
+    }
+
+    /// A run says the step it is in: beside its bar while the bar shows no
+    /// percentage, and above it while it shows one, so the percentage is
+    /// read as that step's. A step it doesn't know, or none, is working.
+    #[test]
+    fn a_row_says_its_step_beside_a_bar_with_no_percentage_and_above_one_with_one() {
+        use api::OperationStep as S;
+        let at = |step, total| {
+            progress_text(&Progress {
+                step,
+                unit: ProgressUnit::Count,
+                current: 3,
+                total,
+            })
+        };
+        assert_eq!(
+            at(Some(S::BackingUp), None),
+            ProgressText {
+                above: None,
+                unknown: msg::UI_STEP_BACKING_UP
+            }
+        );
+        assert_eq!(
+            at(Some(S::ReadingIndex), Some(10)),
+            ProgressText {
+                above: Some(msg::UI_STEP_READING_INDEX),
+                unknown: msg::UI_STEP_READING_INDEX
+            }
+        );
+        for step in [None, Some(S::Unknown)] {
+            for total in [None, Some(10)] {
+                assert_eq!(
+                    at(step, total),
+                    ProgressText {
+                        above: None,
+                        unknown: msg::UI_PROGRESS_WORKING
+                    },
+                    "{step:?} of {total:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn each_step_has_a_message_of_its_own() {
+        use api::OperationStep as S;
+        let messages = [
+            (S::ReadingIndex, msg::UI_STEP_READING_INDEX),
+            (S::GettingSnapshots, msg::UI_STEP_GETTING_SNAPSHOTS),
+            (S::BackingUp, msg::UI_STEP_BACKING_UP),
+            (S::ListingPacks, msg::UI_STEP_LISTING_PACKS),
+            (S::CheckingCache, msg::UI_STEP_CHECKING_CACHE),
+            (
+                S::CheckingHotRepository,
+                msg::UI_STEP_CHECKING_HOT_REPOSITORY,
+            ),
+            (S::CheckingTrees, msg::UI_STEP_CHECKING_TREES),
+            (S::ReadingPackData, msg::UI_STEP_READING_PACK_DATA),
+            (S::FindingUsedData, msg::UI_STEP_FINDING_USED_DATA),
+            (S::MarkingUnusedPacks, msg::UI_STEP_MARKING_UNUSED_PACKS),
+            (S::Repacking, msg::UI_STEP_REPACKING),
+            (S::RebuildingIndex, msg::UI_STEP_REBUILDING_INDEX),
+            (S::DeletingUnusedData, msg::UI_STEP_DELETING_UNUSED_DATA),
+            (S::DeletingSnapshots, msg::UI_STEP_DELETING_SNAPSHOTS),
+            (S::SavingSnapshots, msg::UI_STEP_SAVING_SNAPSHOTS),
+        ];
+        for (step, message) in messages {
+            assert_eq!(step_message(step), Some(message), "{step:?}");
+        }
+        assert_eq!(step_message(S::Unknown), None);
+    }
+
+    #[test]
+    fn progress_is_a_whole_percent_of_a_known_total_and_none_without_one() {
+        assert_eq!(percent(3, Some(4)), Some(75));
+        assert_eq!(percent(1, Some(3)), Some(33));
+        assert_eq!(
+            percent(0, Some(3)),
+            Some(0),
+            "nothing of a known total is 0%"
+        );
+        assert_eq!(percent(5, Some(0)), None, "zero of nothing is no share");
+        assert_eq!(percent(9, None), None, "a total not known yet is no share");
+    }
+
+    // Both numbers come from a worker's report, outside the process, and
+    // nothing keeps the count at or under the total: the share stops at 100%
+    // rather than wrapping round to a small number, and no product overflows.
+    #[test]
+    fn progress_is_never_past_a_hundred_percent_nor_wrapped() {
+        assert_eq!(
+            percent(3, Some(1)),
+            Some(100),
+            "three of one is all of it, not 44%"
+        );
+        assert_eq!(
+            percent(101, Some(100)),
+            Some(100),
+            "a count just past its total is all of it, not 101%"
+        );
+        assert_eq!(
+            percent(u64::MAX, Some(u64::MAX)),
+            Some(100),
+            "all of the largest total is all of it"
+        );
+        assert_eq!(percent(1, Some(3)), Some(33));
     }
 }
