@@ -408,14 +408,16 @@ jobs:
           retention-days: 14
 
   # The check the ruleset requires, by this name: it passes only when every
-  # shard passed. It runs when a shard failed or timed out (`!cancelled()` is
-  # about the whole run), so a lost shard fails it rather than leaving it
-  # skipped, which GitHub would count as passing. A docs-only pull request
-  # skips it with the shards, as before.
+  # shard passed. `always()`, not `!cancelled()`: it must run, and so fail,
+  # whenever a shard failed, timed out (a timeout ends a job as cancelled) or
+  # was cancelled, since GitHub counts a skipped required check as passing.
+  # A superseded run's summary then fails on a stale commit, which is
+  # harmless. A docs-only pull request skips it with the shards, as before;
+  # keep the rest of this `if` the same as the shards'.
   mutants:
     name: Mutation testing (changed code)
     needs: [changes, mutants-shard]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ always() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
