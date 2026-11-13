@@ -27,10 +27,10 @@ use crate::operations::{self, Name};
 use crate::pause::{self, Ends, Pausable};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
-    create_saved_path, error_of, field_of, location_heading, location_option, location_rule,
-    location_tested, locations_label, locations_tested, password_source, problems_of,
-    repository_notes, rereads_list, row_refusal, test_locations_label, test_locations_path,
-    tested_announcement,
+    create_saved_path, error_of, field_of, found_at, lists_locations, location_heading,
+    location_option, location_rule, location_tested, locations_label, locations_tested,
+    password_source, problems_of, repository_notes, rereads_list, row_refusal,
+    test_locations_label, test_locations_path, tested_announcement,
 };
 use crate::sign_in::SignInOff;
 use crate::visit::Visit;
@@ -1413,7 +1413,7 @@ fn repository_row(
         .then(|| create_in_row(localizer, base, creates, &row.alias));
     // What the row's last Test found at each location, by position.
     let tested = RwSignal::<Option<Vec<LocationTriedDto>>>::new(None);
-    let several = !row.locations.is_empty();
+    let several = lists_locations(&row.locations);
     let test = several.then(|| test_in_row(localizer, base, creates, &row.alias, tested));
     let place = if several {
         locations_list(localizer, &row.alias, row.locations, tested).into_any()
@@ -1477,17 +1477,13 @@ fn locations_list(
             let localizer = Arc::clone(localizer);
             let found = move || {
                 tested.with(|tested| {
-                    tested
-                        .iter()
-                        .flatten()
-                        .find(|tried| tried.position == position)
-                        .map(|tried| {
-                            location_tested(tried)
-                                .into_iter()
-                                .map(|(id, args)| text_with(&localizer, id, &args))
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        })
+                    found_at(tested.as_deref().unwrap_or_default(), position).map(|tried| {
+                        location_tested(tried)
+                            .into_iter()
+                            .map(|(id, args)| text_with(&localizer, id, &args))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
                 })
             };
             view! {

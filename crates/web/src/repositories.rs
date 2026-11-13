@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 
 use api::{
-    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationAlternativeDto, LocationOptionDto,
-    LocationTriedDto, LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto, RepositoryIdDto,
-    RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
+    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationAlternativeDto, LocationDto,
+    LocationOptionDto, LocationTriedDto, LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto,
+    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 
@@ -442,6 +442,20 @@ pub(crate) fn location_rule(
             Vec::new(),
         )))
         .collect()
+}
+
+/// Whether a row lists its repository's locations, each with what a Test
+/// found there, and offers that Test: only for a repository reached at
+/// several. One of one location reads as its address alone, as before
+/// (decision 80).
+pub(crate) fn lists_locations(locations: &[LocationDto]) -> bool {
+    !locations.is_empty()
+}
+
+/// What the row's last Test found at the location at `position`, from 1;
+/// `None` before a Test, or when it didn't answer for that location.
+pub(crate) fn found_at(tested: &[LocationTriedDto], position: u8) -> Option<&LocationTriedDto> {
+    tested.iter().find(|tried| tried.position == position)
 }
 
 /// What a row's Test found at one location: its outcome, then, when the
@@ -1433,6 +1447,32 @@ mod tests {
             setting.into_iter().map(english_of).nth(1).as_deref(),
             Some("The setting is options.key.")
         );
+    }
+
+    /// A row lists its locations, and offers a Test of them, only for a
+    /// repository reached at several: the daemon lists none for one of one.
+    #[test]
+    fn only_a_repository_reached_at_several_locations_lists_them() {
+        assert!(!lists_locations(&[]));
+        let location = |position| LocationDto {
+            position,
+            repository: "/srv/nas".into(),
+            repo_hot: None,
+            options: Vec::new(),
+            when: Vec::new(),
+        };
+        assert!(lists_locations(&[location(1), location(2)]));
+    }
+
+    /// Each location of a row shows what the last Test found at its own
+    /// position, and nothing when the Test didn't answer for it.
+    #[test]
+    fn a_location_shows_what_the_test_found_at_its_own_position() {
+        let tested = [tried(1, "silent", None), tried(2, "used", None)];
+        assert_eq!(found_at(&tested, 2), Some(&tested[1]));
+        assert_eq!(found_at(&tested, 1), Some(&tested[0]));
+        assert_eq!(found_at(&tested, 3), None);
+        assert_eq!(found_at(&[], 1), None);
     }
 
     #[test]
