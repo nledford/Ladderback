@@ -89,7 +89,7 @@ mod wording;
 mod toast;
 
 use routes::{NotFound, Operations, Repositories, Start};
-use session::{Standing, Title};
+use session::{SignInOffNotice, Standing, Title};
 use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut};
 use snapshots::Snapshots;
 
@@ -196,19 +196,24 @@ fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl I
 /// Asks the daemon where the page stands with sign-in (security §10.1), then
 /// shows the pages, or the sign-in page in their place. A request refused
 /// later for want of a session opens the dialog that asks to sign in again,
-/// over the page as it is.
+/// over the page as it is. With sign-in off on the network, every page says
+/// that anyone who can reach Ladderback can use it.
 #[component]
 fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let standing = RwSignal::new(Standing::Asking);
     // Only a change of standing redraws the page: a page shown stays as it is.
     let shown = Memo::new(move |_| standing.get());
+    let notice = RwSignal::new(SignInOffNotice::None);
     let warning = RwSignal::new(false);
     let ended = RwSignal::new(false);
     provide_context(standing);
+    provide_context(notice);
     ws::watch_session(warning, ended);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
         let read = ws::session().await;
+        // The notice first, so the pages it shows on are drawn with it.
+        notice.set(SignInOffNotice::of(read.as_ref()));
         standing.set(Standing::of(read.as_ref()));
     });
     // The sign-in page has a title of its own; once signed in, the page asked
@@ -226,6 +231,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog = Arc::clone(&localizer);
     let idle = Arc::clone(&localizer);
     let main = NodeRef::<leptos::html::Main>::new();
+    let on_the_network = text(&localizer, msg::UI_SIGN_IN_OFF_NETWORK);
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
         // there. The router takes any click on a same-origin link it was not
@@ -259,6 +265,14 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                 }}
             </header>
             <main id="main" tabindex="-1" node_ref=main>
+                {move || {
+                    (notice.get() == SignInOffNotice::EveryPage)
+                        .then(|| {
+                            view! {
+                                <p id=routes::SIGN_IN_OFF_NETWORK_ID>{on_the_network.clone()}</p>
+                            }
+                        })
+                }}
                 {move || match shown.get() {
                     Standing::Asking => ().into_any(),
                     Standing::SignedOut => {

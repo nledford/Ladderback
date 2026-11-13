@@ -198,20 +198,20 @@ fn refusal(code: ErrorCode) -> Response {
     (status, Json(Refusal { code })).into_response()
 }
 
-/// The startup rule of §10.1 (decision 70). A loopback address may always be
-/// listened on. Any other only with sign-in on, and only for a configured
-/// host name: the request checks then admit that name, and with none every
-/// request from the network would be refused anyway. There is no
-/// trusted-proxy mode.
+/// The startup rule of §10.1 (decisions 70 and 87). A loopback address may
+/// always be listened on. Any other only for a configured host name, with
+/// sign-in on or off: the request checks then admit that name, and with none
+/// every browser request from the network would be refused anyway (the names
+/// guard against DNS rebinding, not who connects). Whether sign-in is on
+/// changes only what the daemon warns. There is no trusted-proxy mode. An
+/// IPv4-mapped loopback such as `[::ffff:127.0.0.1]` counts as the network:
+/// the safe side, since it then needs a configured name.
 pub fn startup_rule(
     addr: SocketAddr,
-    sign_in_on: bool,
     allowed_hosts: &[String],
 ) -> Result<Exposure, StartupRefusal> {
     if addr.ip().is_loopback() {
         Ok(Exposure::Loopback)
-    } else if !sign_in_on {
-        Err(StartupRefusal::SignInOff(addr))
     } else if allowed_hosts.is_empty() {
         Err(StartupRefusal::NoAllowedHost(addr))
     } else {
@@ -233,9 +233,7 @@ pub enum Exposure {
 /// words of its own: the caller says it from the catalog (§8.4).
 #[derive(Debug, PartialEq, Eq)]
 pub enum StartupRefusal {
-    /// No admin password is set, so anyone who reached it could use it.
-    SignInOff(SocketAddr),
-    /// Sign-in is on, but no `--allowed-host` names what the browser asks for.
+    /// No `--allowed-host` names what the browser asks for.
     NoAllowedHost(SocketAddr),
 }
 

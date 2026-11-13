@@ -164,9 +164,10 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             &["Content-Type: application/json"],
         ),
         (
-            msg::CLI_REFUSE_NON_LOOPBACK,
-            &["127.0.0.1", "::1", "ladderback set-password"],
+            msg::CLI_WARN_NETWORK_SIGN_IN_OFF,
+            &["ladderback set-password"],
         ),
+        (msg::UI_SIGN_IN_OFF_NETWORK, &["ladderback set-password"]),
         (
             msg::CLI_REFUSE_NO_ALLOWED_HOST,
             &["--allowed-host", "--allowed-host nas.example.com"],

@@ -5,7 +5,7 @@
 //! and the DOM around them are `ws.rs` and `sign_in.rs`, which the `@ui`
 //! scenarios of `features/security/sign_in.feature` run in a browser.
 
-use api::{ErrorCode, MsgArg, SessionDto, SignInStateDto};
+use api::{ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
 use l10n::{MessageId, msg};
 use serde::Deserialize;
 
@@ -17,8 +17,8 @@ pub(crate) enum Standing {
     /// The daemon has not answered yet: the page shows nothing but its frame.
     #[default]
     Asking,
-    /// No admin password is set: the pages are shown, and the start page
-    /// says that anyone on this machine can use them.
+    /// No admin password is set: the pages are shown, and say who can use
+    /// them (see [`SignInOffNotice`]).
     Off,
     /// Sign-in is on and the page has no live session: the sign-in page is
     /// shown in place of the page asked for.
@@ -70,14 +70,17 @@ impl SignInOffNotice {
     /// The notice the daemon's answer to `GET /api/v1/session` calls for;
     /// `None` is no answer the page could read.
     pub(crate) fn of(read: Option<&SessionDto>) -> Self {
-        let _ = read;
-        todo!()
+        match read.map(|session| (session.sign_in, session.exposure)) {
+            Some((SignInStateDto::Off, ExposureDto::Loopback)) => Self::StartPage,
+            Some((SignInStateDto::Off, ExposureDto::Network)) => Self::EveryPage,
+            Some((SignInStateDto::SignedOut | SignInStateDto::SignedIn, _)) | None => Self::None,
+        }
     }
 
     /// Whether each page's heading is described by this notice, so a screen
     /// reader reads it after the heading that takes focus on arrival.
     pub(crate) fn describes_the_heading(self) -> bool {
-        todo!()
+        self == Self::EveryPage
     }
 }
 

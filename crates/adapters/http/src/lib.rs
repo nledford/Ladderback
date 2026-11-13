@@ -83,6 +83,12 @@ impl axum::extract::FromRef<AppState> for SignIn {
     }
 }
 
+impl axum::extract::FromRef<AppState> for Exposure {
+    fn from_ref(state: &AppState) -> Self {
+        state.exposure
+    }
+}
+
 /// The operations the API asks of the daemon (technical design §4.2): the
 /// M1b start-by-plan route, maintenance (its history groups, its previews
 /// and its start), and E2's cancel and history.

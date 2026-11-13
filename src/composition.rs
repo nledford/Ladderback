@@ -310,10 +310,15 @@ pub(crate) fn sign_in(random: Arc<dyn Random>) -> Result<SignIn, Refused> {
 }
 
 /// What the daemon's router runs against (§4.2), with `sign_in` deciding who
-/// may use it, or why it cannot.
-pub(crate) async fn daemon(sign_in: SignIn) -> Result<Daemon, Refused> {
+/// may use it, or why it cannot, and `exposure` who can reach it, which the
+/// session route tells the page.
+pub(crate) async fn daemon(
+    sign_in: SignIn,
+    exposure: http_adapter::Exposure,
+) -> Result<Daemon, Refused> {
     let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
     daemon.state.sign_in = sign_in;
+    daemon.state.exposure = exposure;
     Ok(daemon)
 }
 

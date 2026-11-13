@@ -24,12 +24,12 @@ cli-cannot-start-runtime = cannot start the async runtime: { $detail }
 # $detail (text): the server's own message. It is shown as it came.
 cli-server-error = server error: { $detail }
 
-# Sign-in is off, so the daemon only listens on loopback addresses.
-# $address (text): the address it was asked to listen on, such as 192.168.1.5:9898.
-# `127.0.0.1` and `::1` are addresses, typed as they are: keep them string literals.
-cli-refuse-non-loopback = refusing to listen on { $address }: sign-in is off, so { -brand-name } only listens on loopback addresses ({ "127.0.0.1" }, { "::1" }). Set an admin password with { "ladderback set-password" } to listen beyond them.
+# Sign-in is off and the daemon listens on an address beyond loopback, so anyone who can reach that address can use it. Printed by the daemon itself, never as a log record, so no log setting hides it.
+# $address (text): the address it listens on, such as 0.0.0.0:9898.
+# `ladderback set-password` is typed as it is: keep it a string literal.
+cli-warn-network-sign-in-off = warning: sign-in is off and { -brand-name } answers on the network at { $address }, so anyone who can reach that address can run and change backups. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
 
-# Sign-in is on, but no host name was configured, so no browser on the network could use the web UI.
+# The daemon was asked to listen beyond loopback, with sign-in on or off, but no host name was configured, so no browser on the network could use the web UI.
 # $address (text): the address it was asked to listen on, such as 0.0.0.0:9898.
 # `--allowed-host` and `nas.example.com` are typed as they are: keep them string literals.
 cli-refuse-no-allowed-host = refusing to listen on { $address }: beyond loopback, { -brand-name } needs the host name browsers reach it by. Give one with { "--allowed-host" }, such as { "--allowed-host nas.example.com" }.

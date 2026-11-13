@@ -3221,7 +3221,7 @@ pub enum ExposureDto {
 impl ExposureDto {
     /// Whether this is loopback, which the session's answer leaves out.
     pub fn is_loopback(&self) -> bool {
-        todo!()
+        *self == Self::Loopback
     }
 }
 
