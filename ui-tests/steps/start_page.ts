@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import AxeBuilder from "@axe-core/playwright";
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContextOptions } from "playwright";
+import { expect } from "playwright/test";
 
-import { journey } from "../support/keyboard.ts";
+import { journey, namePattern } from "../support/keyboard.ts";
 import { DOUBLE_FONT_CSS, TEXT_SPACING_CSS } from "../support/reader-styles.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { type BrowserWorld, repoRoot } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, including the 2.0 and 2.1 criteria (§4.5).
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -67,6 +70,29 @@ Then("focus is on the link {string}", async function (this: BrowserWorld, name: 
   const keys = journey(this.page);
   await keys.assertFocused(keys.byRole("link", { name }), `the link "${name}"`);
 });
+
+// The project's own documentation at the tag of the release this build is,
+// where a reader of that release finds what the page says is there. The
+// section must exist in this checkout, so a renamed heading fails here and not
+// for a reader. GitHub's anchor for a heading is its text in lower case, with
+// spaces as hyphens and other punctuation left out.
+Then(
+  "the link {string} leads to the section {string} of {string} in this release",
+  async function (this: BrowserWorld, name: string, heading: string, file: string) {
+    const manifest = await readFile(path.join(repoRoot, "Cargo.toml"), "utf8");
+    const version = /^\[workspace\.package\]$[^[]*?^version = "([^"]+)"$/m.exec(manifest)?.[1];
+    assert.ok(version, "Cargo.toml's [workspace.package] names no version");
+    const document = await readFile(path.join(repoRoot, file), "utf8");
+    const headings = document.split("\n").filter((line) => /^#+ /.test(line));
+    assert.ok(headings.some((line) => line.replace(/^#+ /, "") === heading), `${file} has no heading "${heading}"`);
+    const anchor = heading.toLowerCase().replace(/[^a-z0-9 -]/g, "").replaceAll(" ", "-");
+    const link = this.page.getByRole("link", { name: namePattern(name) });
+    await expect(link).toHaveAttribute(
+      "href",
+      `https://github.com/nledford/Ladderback/blob/v${version}/${file}#${anchor}`,
+    );
+  },
+);
 
 Then("focus is in the main content", async function (this: BrowserWorld) {
   const keys = journey(this.page);

@@ -24,7 +24,7 @@ import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
 setDefaultTimeout(30_000);
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 /** Where cargo builds this workspace: `target/`, or the `CARGO_TARGET_DIR`
  *  each worktree sets its own. */
