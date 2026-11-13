@@ -33,6 +33,13 @@ use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 #[cfg(not(debug_assertions))]
 use rust_embed::RustEmbed;
+// The release build embeds `crates/web/dist` through rust-embed (`ReleaseUi`);
+// a debug build reads it from disk. Cargo can't make a dependency depend on
+// `debug_assertions`, so a debug build references the crate only to quiet
+// `cargo::unused_dependencies`, which would otherwise warn on every debug
+// build. The lint stays on for every other dependency.
+#[cfg(debug_assertions)]
+use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
 pub use listener::{GatedListener, PeerAddr};
