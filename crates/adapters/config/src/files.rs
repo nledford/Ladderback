@@ -47,7 +47,7 @@ fn private_folder(path: &Path) -> io::Result<()> {
 /// The folder a file is in: `.` for a name on its own.
 fn folder_of(path: &Path) -> &Path {
     match path.parent() {
-        Some(folder) if !folder.as_os_str().is_empty() => folder,
+        Some(folder) if !folder.is_empty() => folder,
         _ => Path::new("."),
     }
 }
