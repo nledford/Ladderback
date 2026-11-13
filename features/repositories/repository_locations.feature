@@ -279,6 +279,7 @@ Feature: A repository reached at several locations
       Examples:
         | address                        | credentials                              | cause                 |
         | rest:http://lan.example.lan/r  | a user and a password in it              | plain-http            |
+        | rest:http://lan.example.lan/r  | a user and a password from a file        | plain-http            |
         | rest:http://lan.example.lan/r  | a credential option                      | plain-http            |
         | rest:https://lan.example.lan/r | the option http-insecure-tls set to true | unchecked-certificate |
         | opendal:s3                     | an http endpoint and a credential option | plain-endpoint        |

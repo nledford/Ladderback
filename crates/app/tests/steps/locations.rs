@@ -675,17 +675,23 @@ async fn one_then_other(agent: &mut Agent, first: String, second: String) {
 fn location_is(agent: &mut Agent, name: String, address: String, credentials: String) {
     let world = &mut agent.locations;
     let user = "demo:canary-pass@";
+    // A file's path holds `/`, which ends a URL's authority anywhere but
+    // inside the reference.
+    let from_file = "${file:/home/user/.config/secrets/lan-userinfo}@";
     let written = match (credentials.as_str(), address.split_once("://")) {
         ("a user and a password in it", Some((scheme, rest))) => format!("{scheme}://{user}{rest}"),
         ("a user and a password in it", None) => {
             world.pending_credentials = Some(user.to_owned());
             address.clone()
         }
+        ("a user and a password from a file", Some((scheme, rest))) => {
+            format!("{scheme}://{from_file}{rest}")
+        }
         _ => address.clone(),
     };
     world.readdress(&name, &written);
     let options: Vec<(&str, &str)> = match credentials.as_str() {
-        "a user and a password in it" => Vec::new(),
+        "a user and a password in it" | "a user and a password from a file" => Vec::new(),
         "a credential option" => vec![("password", "canary-pass")],
         "the option http-insecure-tls set to true" => vec![("http-insecure-tls", "true")],
         "an http endpoint and a credential option" => vec![
@@ -1086,7 +1092,12 @@ fn carries_warning(agent: &mut Agent, _name: String, code: String, position: u8,
 #[then("the warning names neither the address nor a credential")]
 fn warning_names_neither(agent: &mut Agent) {
     let shown = format!("{:?}", agent.locations.listed);
-    for hidden in ["lan.example.lan", "canary-pass", "s3.example.lan"] {
+    for hidden in [
+        "lan.example.lan",
+        "canary-pass",
+        "s3.example.lan",
+        "lan-userinfo",
+    ] {
         assert!(!shown.contains(hidden), "{shown}");
     }
 }
