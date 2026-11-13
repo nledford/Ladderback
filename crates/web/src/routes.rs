@@ -1917,12 +1917,14 @@ mod tests {
         );
         running.progress = Some(crate::backend::Progress {
             step: None,
+            unit: api::ProgressUnit::Count,
             current: 3,
             total: Some(4),
         });
         assert_eq!(progress_percent(&running), Some(Some(75)));
         running.progress = Some(crate::backend::Progress {
             step: None,
+            unit: api::ProgressUnit::Count,
             current: 9,
             total: None,
         });
@@ -1943,6 +1945,7 @@ mod tests {
         let mut at = |step, total| {
             running.progress = Some(crate::backend::Progress {
                 step,
+                unit: api::ProgressUnit::Count,
                 current: 3,
                 total,
             });

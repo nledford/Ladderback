@@ -88,6 +88,27 @@ Then("the page's one progress bar shows no percentage", async function (this: Br
   await expect(this.page.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
 });
 
+// The bar is a stop in the tab order (§4.5), so a keyboard user reaches it
+// as she reaches a control; a page with one bar finds it by its role alone.
+When("I press Tab until focus is on the page's one progress bar", async function (this: BrowserWorld) {
+  const keys = journey(this.page);
+  const bar = keys.byRole("progressbar");
+  const focused = async () => (await bar.count()) === 1 && (await bar.evaluate((el) => el === document.activeElement));
+  for (let presses = 0; presses < 30 && !(await focused()); presses += 1) await keys.press("Tab");
+  assert.ok(await focused(), "focus did not reach the page's one progress bar within 30 Tab presses");
+});
+
+// What a screen reader reads as the bar's value came out of the catalog, the
+// step's message and the amounts' units with it, so each of its words with
+// letters has a transformed one.
+Then("the value text of the page's one progress bar is transformed", async function (this: BrowserWorld) {
+  const bar = this.page.getByRole("progressbar");
+  await expect(bar).toHaveAttribute("aria-valuetext", /%/);
+  const text = (await bar.getAttribute("aria-valuetext")) ?? "";
+  const plain = text.split(/\s+/).filter((word) => /\p{L}/u.test(word) && !NON_ASCII.test(word));
+  assert.deepEqual(plain, [], `words of the value text "${text}" the pseudolocale did not transform`);
+});
+
 // The cell of a running operation's bar says two things in words, its status
 // and the step it is in (a percentage has no letters), and the catalog wrote
 // both, so the pseudolocale transformed both.

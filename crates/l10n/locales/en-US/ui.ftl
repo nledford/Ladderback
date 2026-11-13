@@ -493,6 +493,47 @@ ui-backup-progress = Backup progress
 # walked its whole source, or a step that counts without a total.
 ui-progress-working = Working…
 
+# The name of a running operation's progress bar, which says what it
+# measures, so a check's bar is never announced as a backup's.
+# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
+# any other kind is an operation.
+ui-operation-progress =
+    { $kind ->
+        [backup] Backup progress
+        [forget] Forget progress
+        [prune] Prune progress
+        [check] Check progress
+        [adopt] Adoption progress
+       *[other] Operation progress
+    }
+
+# What a screen reader reads as the value of a progress bar that shows a
+# percentage (§4.5): the step, how far, how much of how much, and the time
+# left once it can be told. It changes at most every 30 seconds.
+# $step (text): the step's own message, such as "Backing up…", or none when the operation names no step.
+# $percent (number): how far, as a whole percent.
+# $done (number or size): how much is done; a size such as 3.1 GiB when the bar counts bytes, a plain number when it counts things.
+# $total (number or size): the whole, in the same unit as $done.
+# $left (text): how the time left is told: none (not known yet), soon (under a minute), minutes or hours.
+# $minutes (number): the whole minutes left, for minutes.
+# $hours (number): the whole hours left, for hours.
+ui-progress-value =
+    { $step ->
+        [none] { NUMBER($percent) }%, { $done } of { $total }
+       *[other] { $step } { NUMBER($percent) }%, { $done } of { $total }
+    }{ $left ->
+        [soon] , less than a minute left
+        [minutes] , about { $minutes ->
+            [one] { $minutes } minute
+           *[other] { $minutes } minutes
+        } left
+        [hours] , about { $hours ->
+            [one] { $hours } hour
+           *[other] { $hours } hours
+        } left
+       *[none] {""}
+    }
+
 ## The step a running operation is in (§4.4; decision 82), beside its
 ## progress bar in place of the percentage, or above a bar that shows one.
 ## Each says what the engine is doing now.

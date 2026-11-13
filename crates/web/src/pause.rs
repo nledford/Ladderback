@@ -279,6 +279,7 @@ mod tests {
                 state.apply(&UiEvent::OperationProgress {
                     operation: id(1),
                     step: None,
+                    unit: api::ProgressUnit::Count,
                     current,
                     total: Some(3),
                 });

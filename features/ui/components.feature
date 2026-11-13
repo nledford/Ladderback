@@ -3,8 +3,9 @@ Feature: The shared components in the gallery
   The shared component set (technical design §4.5) is exercised in the
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a sortable data table, a form field with an announced
-  error, a checkbox, a progress bar whose changes are never announced and
-  which shows no percentage while its size isn't known, a toast and the
+  error, a checkbox, a progress bar a keyboard user can reach, whose changes
+  are never announced and are told at most every 30 seconds, and which shows
+  no percentage while its size isn't known, a toast and the
   control that pauses live updates. Every demo state a
   component can show (loading, empty, error, success, on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
@@ -61,16 +62,26 @@ Feature: The shared components in the gallery
     When I press Space
     Then the checkbox "Send a demo notification" is not checked
 
-  Scenario: The progress bar's value changes without any announcement
+  Scenario: The progress bar is reached by keyboard and its value changes without any announcement
+    Given the page's clock can be moved on
     When I open the component gallery
-    And I press Tab until focus is on the button "Advance the demo progress"
+    And I press Tab until focus is on the progressbar "Demo backup progress"
+    Then the progress bar "Demo backup progress" reads "Backing up… 40%, 4 GiB of 10 GiB"
+    When I press Tab until focus is on the button "Advance the demo progress"
     And I press Enter
+    Then the progress bar "Demo backup progress" is drawn at 80 percent
+    And the progress bar "Demo backup progress" shows 40 percent
+    And the live regions stay silent
+    When the page's clock moves on 30 seconds
     Then the progress bar "Demo backup progress" shows 80 percent
+    And the progress bar "Demo backup progress" reads "Backing up… 80%, 8 GiB of 10 GiB"
     And the live regions stay silent
 
   Scenario: A progress bar whose size isn't known yet shows no percentage
     When I open the component gallery
     Then the progress bar "Demo progress of unknown size" shows no percentage
+    And the progress bar "Demo progress of unknown size" reads "Working…"
+    And the progress bar "Demo progress of a step" reads "Reading the index…"
     And the "Progress" demo has no accessibility violations
 
   Scenario: A toast appears and is announced politely, and its going is not announced

@@ -13,7 +13,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use api::{OperationStep, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode};
+use api::{
+    OperationStep, OperationSummaryDto, OperationsPageDto, ProgressUnit, UiEvent, WarningCode,
+};
 
 /// The live progress of a running operation: the step it is in, when the
 /// daemon names one, and how far that step has come. Transient: never part
@@ -21,6 +23,8 @@ use api::{OperationStep, OperationSummaryDto, OperationsPageDto, UiEvent, Warnin
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Progress {
     pub(crate) step: Option<OperationStep>,
+    /// What the bar counts: bytes, or things such as files or packs.
+    pub(crate) unit: ProgressUnit,
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
 }
@@ -84,10 +88,12 @@ impl OperationsState {
                 step,
                 current,
                 total,
+                ..
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
                     row.progress = Some(Progress {
                         step: *step,
+                        unit: ProgressUnit::Count,
                         current: *current,
                         total: *total,
                     });
@@ -396,7 +402,8 @@ mod tests {
         reconnect_backoff, succeeded,
     };
     use api::{
-        ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode,
+        ErrorCode, OperationResultDto, OperationSummaryDto, OperationsPageDto, ProgressUnit,
+        UiEvent, WarningCode,
     };
 
     /// The full operation ID of a test operation.
@@ -476,6 +483,7 @@ mod tests {
             live.apply(&UiEvent::OperationProgress {
                 operation: id(SECOND),
                 step: None,
+                unit: ProgressUnit::Count,
                 current,
                 total: Some(5),
             });
@@ -596,6 +604,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: None,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         });
@@ -614,6 +623,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: None,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         });
@@ -621,6 +631,7 @@ mod tests {
             state.rows[0].progress,
             Some(Progress {
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 3,
                 total: Some(10)
             })
@@ -637,6 +648,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: Some(api::OperationStep::ReadingIndex),
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         });
@@ -644,6 +656,7 @@ mod tests {
             state.rows[0].progress,
             Some(Progress {
                 step: Some(api::OperationStep::ReadingIndex),
+                unit: ProgressUnit::Count,
                 current: 3,
                 total: Some(10)
             })
@@ -651,6 +664,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: None,
+            unit: ProgressUnit::Count,
             current: 1,
             total: None,
         });
@@ -658,10 +672,32 @@ mod tests {
             state.rows[0].progress,
             Some(Progress {
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 1,
                 total: None
             })
         );
+    }
+
+    /// Each report says what its bar counts, so the row can say its amounts
+    /// as sizes when they are bytes (§16, decision 83).
+    #[test]
+    fn a_progress_event_brings_the_row_what_its_bar_counts() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        for unit in [ProgressUnit::Bytes, ProgressUnit::Count] {
+            state.apply(&UiEvent::OperationProgress {
+                operation: id(FIRST),
+                step: Some(api::OperationStep::BackingUp),
+                unit,
+                current: 3,
+                total: Some(10),
+            });
+            assert_eq!(
+                state.rows[0].progress.map(|progress| progress.unit),
+                Some(unit)
+            );
+        }
     }
 
     #[test]
@@ -670,6 +706,7 @@ mod tests {
             OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
         state.rows[0].progress = Some(Progress {
             step: None,
+            unit: ProgressUnit::Count,
             current: 9,
             total: Some(10),
         });
@@ -700,6 +737,7 @@ mod tests {
             UiEvent::OperationProgress {
                 operation: id(SECOND),
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 1,
                 total: None,
             },
@@ -776,6 +814,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: None,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         });
@@ -792,6 +831,7 @@ mod tests {
             row.progress,
             Some(Progress {
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 3,
                 total: Some(10)
             }),
@@ -896,6 +936,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(SECOND),
             step: None,
+            unit: ProgressUnit::Count,
             current: 4,
             total: Some(9),
         });
@@ -919,6 +960,7 @@ mod tests {
             second.progress,
             Some(Progress {
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 4,
                 total: Some(9)
             })
@@ -979,6 +1021,7 @@ mod tests {
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
             step: None,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         });
@@ -1001,6 +1044,7 @@ mod tests {
             row.progress,
             Some(Progress {
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 3,
                 total: Some(10)
             }),
@@ -1195,6 +1239,7 @@ mod tests {
             UiEvent::OperationProgress {
                 operation: operation.clone(),
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 1,
                 total: Some(3),
             },

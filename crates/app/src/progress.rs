@@ -7,7 +7,7 @@
 
 use api::UiEvent;
 
-use crate::ports::{OperationStep, ProgressEvent};
+use crate::ports::{OperationStep, ProgressEvent, ProgressKind};
 
 /// The most bars of one run kept at once. rustic leaves some bars open for
 /// good (a counter it never finishes), and a worker's events are input from
@@ -15,10 +15,12 @@ use crate::ports::{OperationStep, ProgressEvent};
 pub const MAX_OPEN_BARS: usize = 64;
 
 /// What a page is shown of a run's progress: the step of the bar it sees,
-/// and how far that bar has come, `current` of `total` when it knows one.
+/// what the bar counts, and how far it has come, `current` of `total` when
+/// it knows one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProgressShown {
     pub step: Option<OperationStep>,
+    pub kind: ProgressKind,
     pub current: u64,
     pub total: Option<u64>,
 }
@@ -30,6 +32,7 @@ impl ProgressShown {
         UiEvent::OperationProgress {
             operation,
             step: self.step.map(wire_step),
+            unit: api::ProgressUnit::Count,
             current: self.current,
             total: self.total,
         }
@@ -87,7 +90,7 @@ impl LiveProgress {
             | P::Finish { key } => *key,
         };
         match event {
-            P::Begin { step, .. } => {
+            P::Begin { kind, step, .. } => {
                 self.bars.retain(|(open, _)| *open != key);
                 if self.bars.len() >= MAX_OPEN_BARS {
                     self.bars.remove(0);
@@ -96,6 +99,7 @@ impl LiveProgress {
                     key,
                     ProgressShown {
                         step: *step,
+                        kind: *kind,
                         current: 0,
                         total: None,
                     },
@@ -129,7 +133,6 @@ impl LiveProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::ProgressKind;
 
     fn begin(key: u32, step: Option<OperationStep>) -> ProgressEvent {
         ProgressEvent::Begin {
@@ -142,6 +145,7 @@ mod tests {
     fn shown(step: Option<OperationStep>, current: u64, total: Option<u64>) -> ProgressShown {
         ProgressShown {
             step,
+            kind: ProgressKind::Counter,
             current,
             total,
         }
@@ -326,6 +330,7 @@ mod tests {
             UiEvent::OperationProgress {
                 operation: operation.to_owned(),
                 step: Some(api::OperationStep::ReadingIndex),
+                unit: api::ProgressUnit::Count,
                 current: 3,
                 total: Some(10),
             }
@@ -335,10 +340,36 @@ mod tests {
             UiEvent::OperationProgress {
                 operation: operation.to_owned(),
                 step: None,
+                unit: api::ProgressUnit::Count,
                 current: 0,
                 total: None,
             }
         );
+    }
+
+    /// A bar of bytes tells the page it counts bytes, so the page can show
+    /// its amounts as sizes; a counter or a spinner counts things (§16,
+    /// decision 83).
+    #[test]
+    fn a_bar_tells_the_page_what_it_counts() {
+        for (kind, unit) in [
+            (ProgressKind::Bytes, api::ProgressUnit::Bytes),
+            (ProgressKind::Counter, api::ProgressUnit::Count),
+            (ProgressKind::Spinner, api::ProgressUnit::Count),
+        ] {
+            let mut live = LiveProgress::new();
+            let shown = live
+                .apply(&ProgressEvent::Begin {
+                    key: 0,
+                    kind,
+                    step: Some(OperationStep::BackingUp),
+                })
+                .unwrap();
+            let UiEvent::OperationProgress { unit: on_wire, .. } = shown.ui(String::new()) else {
+                panic!("not a progress event");
+            };
+            assert_eq!(on_wire, unit, "{kind:?}");
+        }
     }
 
     /// Each step goes on the wire as its own code.

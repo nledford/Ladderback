@@ -23,7 +23,7 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 interface Operation {
   id: string;
   plan: string;
-  kind: "backup";
+  kind: "backup" | "check";
   status: string;
   "queued-at": string;
   "started-at": string | null;
@@ -31,7 +31,11 @@ interface Operation {
   "warning-codes": string[];
   "failure-code": string | null;
   result: Record<string, unknown> | null;
+  repository?: string;
 }
+
+/** What a progress bar counts, as the wire names it (decision 83). */
+export type ProgressUnit = "count" | "bytes";
 
 export class ScriptedDaemon {
   /** The history the page reads: the operations as the daemon's wire has
@@ -97,10 +101,37 @@ export class ScriptedDaemon {
     });
   }
 
+  /** Adds a check of the repository `repository` (its alias on this
+   *  agent) to the history, running since `startedAt`. */
+  addRunningCheck(repository: string, startedAt: string): void {
+    this.#operations.unshift({
+      id: `018f0000-0000-7000-8000-${String(this.#operations.length + 1).padStart(12, "0")}`,
+      plan: "",
+      kind: "check",
+      status: "running",
+      "queued-at": startedAt,
+      "started-at": startedAt,
+      "finished-at": null,
+      "warning-codes": [],
+      "failure-code": null,
+      result: null,
+      repository,
+    });
+  }
+
   /** The newest backup of `plan` in the history. */
   #backupOf(plan: string): Operation {
-    const found = this.#operations.find((operation) => operation.plan === plan);
+    const found = this.#operations.find((operation) => operation.kind === "backup" && operation.plan === plan);
     if (found === undefined) throw new Error(`the scripted daemon has no backup of ${plan}`);
+    return found;
+  }
+
+  /** The newest check of `repository` in the history. */
+  #checkOf(repository: string): Operation {
+    const found = this.#operations.find(
+      (operation) => operation.kind === "check" && operation.repository === repository,
+    );
+    if (found === undefined) throw new Error(`the scripted daemon has no check of ${repository}`);
     return found;
   }
 
@@ -131,7 +162,11 @@ export class ScriptedDaemon {
     await context.route("**/api/v1/plans", (route) =>
       route.fulfill({
         json: {
-          plans: [...new Set(this.#operations.map((operation) => operation.plan))].map((id) => ({
+          plans: [
+            ...new Set(
+              this.#operations.filter((operation) => operation.kind === "backup").map((operation) => operation.plan),
+            ),
+          ].map((id) => ({
             id,
             repository: "demo",
             scheduled: false,
@@ -366,9 +401,29 @@ export class ScriptedDaemon {
 
   /** The backup of `plan` reports `current` of `total` (`null`: not known
    *  yet) in the step whose code is `step`, as the daemon does for the bar
-   *  the engine began last. */
-  async progressesInStep(plan: string, step: string, current: number, total: number | null): Promise<void> {
-    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, step, current, total });
+   *  the engine began last; `unit` is what the bar counts, left out as a
+   *  daemon older than it leaves it out. */
+  async progressesInStep(
+    plan: string,
+    step: string,
+    current: number,
+    total: number | null,
+    unit?: ProgressUnit,
+  ): Promise<void> {
+    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, step, unit, current, total });
+  }
+
+  /** The check of `repository` reports `current` of `total` things counted
+   *  in the step whose code is `step`. */
+  async checkProgressesInStep(repository: string, step: string, current: number, total: number): Promise<void> {
+    await this.#tell({
+      type: "operation-progress",
+      operation: this.#checkOf(repository).id,
+      step,
+      unit: "count",
+      current,
+      total,
+    });
   }
 
   /** The backup of `plan` succeeds: its log has the end and what the backup

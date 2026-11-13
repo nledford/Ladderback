@@ -180,7 +180,7 @@ Feature: Accessibility of the app shell
     And the daemon reports that the backup of "demo-home" has started
     And the daemon reports 4 steps of progress of the backup of "demo-home"
     Then the table "Operations" has a row "demo-home" that shows "Running"
-    And the progress bar "Backup progress" shows 100 percent
+    And the progress bar "Backup progress of demo-home" shows 100 percent
     And focus stays on the button "Cancel demo-home"
 
   Scenario: The operations table sorts oldest first on the second press of its sort button
