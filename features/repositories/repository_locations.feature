@@ -315,12 +315,6 @@ Feature: A repository reached at several locations
       When the repositories are listed
       Then the repository "nas" carries no note about its locations' rules
 
-    Scenario: A wired rule is noted where the machine can't tell a wired network from other links
-      Given the location "lan" is eligible only on a wired network
-      And the machine can't tell a wired network from other links
-      When the repositories are listed
-      Then the repository "nas" notes that the location 1's rule asks for a wired network, which this machine can't tell
-
     @ui
     Scenario: The Repositories page says when a location may be tried
       Given the location "public" is eligible only on a wired network

@@ -85,8 +85,6 @@ pub struct LocationsWorld {
     /// Whether the plan "home" is scheduled, and if so whether it retries
     /// a failed run; `None` for a plan that runs only when asked.
     plan_retries: Option<bool>,
-    /// Whether this machine can't tell a wired link from other links.
-    cant_tell_wired: bool,
 }
 
 impl std::fmt::Debug for LocationsWorld {
@@ -1106,11 +1104,6 @@ fn scheduled_with_retry(agent: &mut Agent, plan: String, attempts: u32) {
     agent.locations.plan_retries = Some(true);
 }
 
-#[given("the machine can't tell a wired network from other links")]
-fn cant_tell_wired(agent: &mut Agent) {
-    agent.locations.cant_tell_wired = true;
-}
-
 /// What the Repositories page notes about the rules of the locations of
 /// "nas", with the plan "home" as the scenario sets it.
 fn rule_notes(agent: &Agent) -> Vec<RuleNote> {
@@ -1121,7 +1114,7 @@ fn rule_notes(agent: &Agent) -> Vec<RuleNote> {
         plan.retry = retries
             .then(|| RetryPolicy::new(3, SignedDuration::from_mins(10)).expect("a retry policy"));
     }
-    world.entries[NAS].rule_notes(&[&plan], !world.cant_tell_wired, true)
+    world.entries[NAS].rule_notes(&[&plan], true)
 }
 
 #[then(expr = "the repository {string} notes that every location has a rule")]
@@ -1139,17 +1132,6 @@ fn notes_last_ruled(agent: &mut Agent, _name: String, plan: String) {
         plan: plan_id(&plan),
     };
     assert!(notes.contains(&note), "{notes:?}");
-}
-
-#[then(
-    expr = "the repository {string} notes that the location {int}'s rule asks for a wired network, which this machine can't tell"
-)]
-fn notes_wired_unknown(agent: &mut Agent, _name: String, position: u8) {
-    let notes = rule_notes(agent);
-    assert!(
-        notes.contains(&RuleNote::WiredUnknown { position }),
-        "{notes:?}"
-    );
 }
 
 #[then(expr = "the repository {string} carries no note about its locations' rules")]

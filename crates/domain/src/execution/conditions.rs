@@ -95,19 +95,13 @@ mod tests {
 
     #[test]
     fn a_rule_that_cannot_be_evaluated_never_skips_a_run() {
-        for link in [None, Some(Link::NoRoute), Some(Link::NotWiFi)] {
+        for link in [None, Some(Link::NoRoute)] {
             assert_eq!(
                 location_condition(&[wired(), wired()], link, None),
                 Ok(()),
                 "{link:?}"
             );
         }
-        // One location known not to hold, the other unknown: still a run.
-        let wifi = Some(LocationRule::new(vec![NetworkKind::WiFi.into()]).unwrap());
-        assert_eq!(
-            location_condition(&[wifi, wired()], Some(Link::NotWiFi), None),
-            Ok(())
-        );
     }
 
     #[test]

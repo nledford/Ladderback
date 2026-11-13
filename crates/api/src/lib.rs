@@ -313,10 +313,6 @@ pub enum WarningCode {
     /// has a schedule, doesn't retry a failed run (decision 80): a run that
     /// finds no location usable fails until the next one.
     LocationLastRuledNoRetry,
-    /// The rule of the location at `position`, from 1, asks for a wired
-    /// network, which this machine can't tell from other links (decision
-    /// 80): that alternative never holds here.
-    LocationRuleWiredUnknown,
     /// The rule of the location at `position`, from 1, lists Wi-Fi networks
     /// by name, and this machine couldn't read the name of the one it is on
     /// when it last tried (decision 80): that part of the rule doesn't hold
@@ -932,7 +928,7 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::LocationRuleWiredUnknown | Self::LocationRuleNameUnreadable => &[ArgSpec {
+            Self::LocationRuleNameUnreadable => &[ArgSpec {
                 name: "position",
                 kind: ArgKind::Text,
                 optional: false,

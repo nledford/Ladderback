@@ -480,12 +480,6 @@ fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Port, Plat
     }
 }
 
-/// Whether this machine's reader tells a wired link from other links: both
-/// readers do (decision 80).
-pub fn tells_wired() -> bool {
-    true
-}
-
 /// Whether `ifconfig <interface>` says the interface's medium is Ethernet:
 /// its first `media:` line names a `…base…` medium (`1000baseT`,
 /// `2500Base-T`, `10Gbase-T`), as the medium set (by hand) or the one active,

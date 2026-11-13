@@ -10,7 +10,7 @@ use std::fmt;
 
 use super::repository::Place;
 use super::{
-    InvalidValue, LocationRule, NetworkKind, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+    InvalidValue, LocationRule, Plan, RepositoryConfig, RepositorySettings, ValueKind,
     masked_options,
 };
 use crate::PlanId;
@@ -263,11 +263,6 @@ pub enum RuleNote {
     /// doesn't retry a failed run: a run that finds no location usable, as
     /// while a slow LAN comes up after a wake, fails until the next one.
     LastRuledWithoutRetry { plan: PlanId },
-    /// The rule of the location at `position`, from 1, asks for a wired
-    /// network, which this machine can't tell from other links (macOS until
-    /// a run on Ethernet has shown how a Mac names its wired ports): that
-    /// alternative never holds here.
-    WiredUnknown { position: u8 },
     /// The rule of the location at `position`, from 1, lists Wi-Fi network
     /// names, and this machine can't read the name of the network it is on
     /// (a macOS release that hides it, a Linux machine without
@@ -375,15 +370,9 @@ impl RepositoryConfig {
     }
 
     /// The notes about the entry's locations' rules, given `plans`, the
-    /// plans that back up to it, whether this machine can tell a wired link
-    /// from other links, and whether it can read the Wi-Fi network's name:
-    /// none for an entry whose locations have no rule.
-    pub fn rule_notes(
-        &self,
-        plans: &[&Plan],
-        tells_wired: bool,
-        reads_names: bool,
-    ) -> Vec<RuleNote> {
+    /// plans that back up to it, and whether this machine can read the
+    /// Wi-Fi network's name: none for an entry whose locations have no rule.
+    pub fn rule_notes(&self, plans: &[&Plan], reads_names: bool) -> Vec<RuleNote> {
         let rules = self.location_rules();
         let mut notes = Vec::new();
         if rules.iter().all(Option::is_some) {
@@ -398,16 +387,6 @@ impl RepositoryConfig {
                         plan: plan.id.clone(),
                     }),
             );
-        }
-        if !tells_wired {
-            notes.extend(rules.iter().zip(1u8..).filter_map(|(rule, position)| {
-                rule.filter(|rule| {
-                    rule.alternatives()
-                        .iter()
-                        .any(|alternative| alternative.kind() == NetworkKind::Wired)
-                })
-                .map(|_| RuleNote::WiredUnknown { position })
-            }));
         }
         if !reads_names {
             notes.extend(rules.iter().zip(1u8..).filter_map(|(rule, position)| {
@@ -431,6 +410,7 @@ pub fn check_location_count(further: usize) -> Result<(), InvalidValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::NetworkKind;
 
     fn location(address: &str, options: &[(&str, &str)]) -> Location {
         Location {
@@ -624,23 +604,17 @@ mod tests {
     #[test]
     fn an_entry_whose_locations_have_no_rule_has_no_notes() {
         let entry = entry("/srv/lan", &["/srv/public"], Some("aa"));
-        assert_eq!(
-            entry.rule_notes(&[&plan(true, false)], false, true),
-            Vec::new()
-        );
+        assert_eq!(entry.rule_notes(&[&plan(true, false)], false), Vec::new());
     }
 
     #[test]
     fn every_location_ruled_is_noted_and_one_unruled_location_is_enough_to_drop_it() {
         let mut entry = entry("/srv/lan", &["/srv/public"], Some("aa"));
         entry.locations.first_when = ruled(&[NetworkKind::Wired]);
-        assert_eq!(
-            entry.rule_notes(&[&plan(true, true)], true, true),
-            Vec::new()
-        );
+        assert_eq!(entry.rule_notes(&[&plan(true, true)], true), Vec::new());
         entry.locations.further[0].when = ruled(&[NetworkKind::WiFi]);
         assert_eq!(
-            entry.rule_notes(&[&plan(true, true)], true, true),
+            entry.rule_notes(&[&plan(true, true)], true),
             vec![RuleNote::EveryLocationRuled]
         );
     }
@@ -651,37 +625,16 @@ mod tests {
         entry.locations.further[0].when = ruled(&[NetworkKind::WiFi]);
         let home = PlanId::parse("home").unwrap();
         assert_eq!(
-            entry.rule_notes(&[&plan(true, false)], true, true),
+            entry.rule_notes(&[&plan(true, false)], true),
             vec![RuleNote::LastRuledWithoutRetry { plan: home }]
         );
         // A plan that retries, or that runs only when asked, isn't noted.
-        assert_eq!(
-            entry.rule_notes(&[&plan(true, true)], true, true),
-            Vec::new()
-        );
-        assert_eq!(
-            entry.rule_notes(&[&plan(false, false)], true, true),
-            Vec::new()
-        );
+        assert_eq!(entry.rule_notes(&[&plan(true, true)], true), Vec::new());
+        assert_eq!(entry.rule_notes(&[&plan(false, false)], true), Vec::new());
         // A rule on an earlier location only isn't noted either.
         entry.locations.further[0].when = None;
         entry.locations.first_when = ruled(&[NetworkKind::WiFi]);
-        assert_eq!(
-            entry.rule_notes(&[&plan(true, false)], true, true),
-            Vec::new()
-        );
-    }
-
-    #[test]
-    fn a_wired_alternative_is_noted_by_position_where_the_machine_cant_tell_wired() {
-        let mut entry = entry("/srv/lan", &["/srv/public", "/srv/far"], Some("aa"));
-        entry.locations.further[0].when = ruled(&[NetworkKind::WiFi, NetworkKind::Wired]);
-        entry.locations.first_when = ruled(&[NetworkKind::WiFi]);
-        assert_eq!(
-            entry.rule_notes(&[], false, true),
-            vec![RuleNote::WiredUnknown { position: 2 }]
-        );
-        assert_eq!(entry.rule_notes(&[], true, true), Vec::new());
+        assert_eq!(entry.rule_notes(&[&plan(true, false)], true), Vec::new());
     }
 
     #[test]
@@ -697,10 +650,10 @@ mod tests {
         entry.locations.further[0].when =
             Some(LocationRule::new(vec![NetworkKind::Wired.into(), named]).unwrap());
         assert_eq!(
-            entry.rule_notes(&[], true, false),
+            entry.rule_notes(&[], false),
             vec![RuleNote::NameUnreadable { position: 2 }]
         );
-        assert_eq!(entry.rule_notes(&[], true, true), Vec::new());
+        assert_eq!(entry.rule_notes(&[], true), Vec::new());
     }
 
     #[test]

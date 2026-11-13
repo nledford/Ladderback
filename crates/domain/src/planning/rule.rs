@@ -173,9 +173,6 @@ pub enum Link {
     WiFi,
     /// A tunnel, a bridge, a cellular modem, a phone's tethering.
     Other,
-    /// Not Wi-Fi, and the platform can't tell whether it is wired: macOS
-    /// until a run on Ethernet has shown how a Mac names its wired ports.
-    NotWiFi,
     /// No default route, as just after a wake: nothing says where the next
     /// one will leave by.
     NoRoute,
@@ -214,10 +211,9 @@ impl NetworkKind {
             (Self::Wired, Link::Wired) | (Self::WiFi, Link::WiFi) => RuleVerdict::Holds,
             // Nothing says where the next route leaves by.
             (_, Link::NoRoute) => RuleVerdict::Unknown,
-            // Not Wi-Fi may still be wired: the platform can't tell.
-            (Self::Wired, Link::NotWiFi) => RuleVerdict::Unknown,
-            (Self::Wired, Link::WiFi | Link::Other)
-            | (Self::WiFi, Link::Wired | Link::Other | Link::NotWiFi) => RuleVerdict::NotMet,
+            (Self::Wired, Link::WiFi | Link::Other) | (Self::WiFi, Link::Wired | Link::Other) => {
+                RuleVerdict::NotMet
+            }
         }
     }
 }
@@ -229,8 +225,8 @@ pub enum RuleVerdict {
     Holds,
     /// The link was read, and the rule isn't met on it.
     NotMet,
-    /// The rule can't be evaluated: the link couldn't be read, or the
-    /// platform can't tell what the rule asks. It doesn't hold.
+    /// The rule can't be evaluated: the link or the Wi-Fi network's name
+    /// couldn't be read. It doesn't hold.
     Unknown,
 }
 
@@ -319,7 +315,7 @@ mod tests {
     fn a_wifi_rule_holds_on_wi_fi_only() {
         let wifi = rule(&[NetworkKind::WiFi]);
         assert_eq!(wifi.holds(Some(Link::WiFi), None), RuleVerdict::Holds);
-        for link in [Link::Wired, Link::Other, Link::NotWiFi] {
+        for link in [Link::Wired, Link::Other] {
             assert_eq!(
                 wifi.holds(Some(link), None),
                 RuleVerdict::NotMet,
@@ -351,14 +347,6 @@ mod tests {
     }
 
     #[test]
-    fn a_link_that_may_be_wired_leaves_a_wired_rule_unknown() {
-        assert_eq!(
-            rule(&[NetworkKind::Wired]).holds(Some(Link::NotWiFi), None),
-            RuleVerdict::Unknown
-        );
-    }
-
-    #[test]
     fn a_rule_holds_when_any_alternative_does() {
         let either = rule(&[NetworkKind::Wired, NetworkKind::WiFi]);
         assert_eq!(either.holds(Some(Link::WiFi), None), RuleVerdict::Holds);
@@ -368,18 +356,15 @@ mod tests {
 
     #[test]
     fn an_alternative_that_cannot_be_evaluated_wins_over_one_not_met() {
-        let either = rule(&[NetworkKind::Wired, NetworkKind::WiFi]);
-        // Wired can't be told on this link, and Wi-Fi isn't met: unknown,
-        // whichever is written first.
-        assert_eq!(
-            either.holds(Some(Link::NotWiFi), None),
-            RuleVerdict::Unknown
-        );
-        let reversed = rule(&[NetworkKind::WiFi, NetworkKind::Wired]);
-        assert_eq!(
-            reversed.holds(Some(Link::NotWiFi), None),
-            RuleVerdict::Unknown
-        );
+        // On Wi-Fi with no name read, a wired alternative isn't met and one
+        // that lists names can't be evaluated: unknown, whichever is
+        // written first.
+        let names = only(&["Office"]).alternatives().to_vec();
+        let wired = Alternative::from(NetworkKind::Wired);
+        let either = LocationRule::new([vec![wired.clone()], names.clone()].concat()).unwrap();
+        assert_eq!(either.holds(Some(Link::WiFi), None), RuleVerdict::Unknown);
+        let reversed = LocationRule::new([names, vec![wired]].concat()).unwrap();
+        assert_eq!(reversed.holds(Some(Link::WiFi), None), RuleVerdict::Unknown);
     }
 
     #[test]
@@ -487,7 +472,7 @@ mod tests {
     #[test]
     fn a_name_rule_is_not_met_off_wi_fi_whatever_the_name() {
         for rule in [only(&["Office"]), except(&["Guest"])] {
-            for link in [Link::Wired, Link::Other, Link::NotWiFi] {
+            for link in [Link::Wired, Link::Other] {
                 assert_eq!(
                     rule.holds(Some(link), None),
                     RuleVerdict::NotMet,

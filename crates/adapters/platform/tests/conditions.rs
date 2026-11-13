@@ -887,10 +887,6 @@ impl NetworkLinkHarness for KernelLinkHarness {
         )
     }
 
-    fn wired_reads_as(&self) -> Link {
-        Link::Wired
-    }
-
     fn wifi(&self) -> Arc<dyn NetworkLink> {
         self.machine(
             &default_route("wlp2s0", 600),
@@ -1488,10 +1484,6 @@ impl RouteLinkHarness {
 impl NetworkLinkHarness for RouteLinkHarness {
     fn wired(&self) -> Arc<dyn NetworkLink> {
         Self::link(&route_output("en10"), HARDWARE_PORTS)
-    }
-
-    fn wired_reads_as(&self) -> Link {
-        Link::Wired
     }
 
     fn wifi(&self) -> Arc<dyn NetworkLink> {
