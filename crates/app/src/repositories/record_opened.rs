@@ -234,6 +234,13 @@ impl RecordOpened {
             let RunningJob { events, control } = match inner.run(op, job).await {
                 Ok(running) => running,
                 Err(error) => {
+                    // A job stopped while it started ends with nothing more.
+                    if matches!(
+                        *handed.lock().unwrap_or_else(PoisonError::into_inner),
+                        Phase::Stopped
+                    ) {
+                        return futures::stream::empty().boxed();
+                    }
                     return futures::stream::iter([EngineEvent::Failed(FailureReason::from(
                         error,
                     ))])

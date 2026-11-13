@@ -46,6 +46,11 @@ pub trait JobControl: Send {
     /// Asks the job to stop, waits up to the engine's grace period, then
     /// forces it (for a worker process: SIGTERM, then SIGKILL). Returns once
     /// the job has stopped. Calling it after the job ended does nothing.
+    ///
+    /// A job whose engine is still starting it, as one an identify precedes
+    /// (§16, decision 81), is stopped without waiting for the start: nothing
+    /// more of it is passed on, and the started job is stopped when its
+    /// events are next read, or killed when they are dropped.
     async fn stop(&mut self);
 }
 
