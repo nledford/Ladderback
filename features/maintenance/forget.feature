@@ -135,6 +135,19 @@ Feature: Forget keeps each plan's history within its policy
     Then the forget is refused while the other operation runs
     And the engine was never asked to remove anything
 
+  # An entry imported or connected records no ID until a job identifies the
+  # repository. A forget identifies it before it asks the operation log for
+  # the repository's maintenance slot, so the log can tell it apart (I7).
+  Scenario: A forget of a repository whose entry records no ID still waits for the maintenance running on it
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository's entry records no ID
+    And a maintenance operation is already running on the repository
+    When the owner forgets the repository
+    Then the repository was identified first
+    And the forget is refused, naming the operation running on the repository
+    And the engine was never asked to remove anything
+
   Scenario: A forget that is only assessed holds the repository for no one
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"
