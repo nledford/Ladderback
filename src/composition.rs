@@ -2185,7 +2185,7 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
 /// names it.
 fn path_relative(field: Field) -> RepositoriesError {
     RepositoriesError::PathRelative {
-        field: field_name(&field),
+        field: field.name(),
     }
 }
 
@@ -2262,7 +2262,7 @@ async fn secret_refusal(
     resolver: &dyn SecretResolver,
 ) -> SecretRefusal {
     use domain::secrets::Problem;
-    let field = || ("field", MsgArg::Text(field_name(&error.field)));
+    let field = || ("field", MsgArg::Text(error.field.name()));
     let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
         code,
         args,
@@ -2329,7 +2329,7 @@ async fn secret_refusal(
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
-        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(field_name(&error.field)), *limit),
+        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(error.field.name()), *limit),
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
@@ -2449,19 +2449,6 @@ async fn failure_redactor(
         options_cold: &settings.options_cold,
         resolved: &resolved,
     })
-}
-
-/// Where a secret failed to resolve, as the catalog names it: the setting's
-/// own name in the configuration.
-fn field_name(field: &Field) -> String {
-    match field {
-        Field::Repository => "repository".to_owned(),
-        Field::RepoHot => "repo-hot".to_owned(),
-        Field::Password => "password".to_owned(),
-        Field::Option(name) => format!("options.{name}"),
-        Field::OptionHot(name) => format!("options-hot.{name}"),
-        Field::OptionCold(name) => format!("options-cold.{name}"),
-    }
 }
 
 /// A job that ran and failed: the engine's own words for a failure it

@@ -39,6 +39,21 @@ pub enum Field {
     OptionCold(String),
 }
 
+impl Field {
+    /// The setting's name as the configuration writes it: `repository`,
+    /// `options.<name>`.
+    pub fn name(&self) -> String {
+        match self {
+            Self::Repository => "repository".to_owned(),
+            Self::RepoHot => "repo-hot".to_owned(),
+            Self::Password => "password".to_owned(),
+            Self::Option(name) => format!("options.{name}"),
+            Self::OptionHot(name) => format!("options-hot.{name}"),
+            Self::OptionCold(name) => format!("options-cold.{name}"),
+        }
+    }
+}
+
 /// Why a repository's settings couldn't be resolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cause {

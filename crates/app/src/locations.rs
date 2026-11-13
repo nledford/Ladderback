@@ -25,7 +25,7 @@ use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, ProbeAnswer,
     RepositoryAccess, RunningJob, SavedEntry,
 };
-use crate::secrets::{Cause, JobReferences, ResolveRepository};
+use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository};
 
 /// What the choice tells the daemon's log. Nothing here is a secret or a
 /// network's name: a location is named by its position, from 1.
@@ -149,13 +149,13 @@ impl ChooseLocation {
                     .resolve_location(&settings, &access.password, &mut read)
                     .await
                 {
-                    Err(error) => {
-                        source = Some(match error.cause {
-                            Cause::Unresolved(error) => source_name(&error.source),
-                            _ => format!("{:?}", error.field),
-                        });
-                        LocationOutcome::SecretUnavailable
-                    }
+                    Err(error) => match unusable(error) {
+                        Ok((outcome, named)) => {
+                            source = Some(named);
+                            outcome
+                        }
+                        Err(reason) => return Err((reason, None)),
+                    },
                     Ok(resolved) => {
                         let location = resolved.access;
                         if let Some(cause) = ExposedCredentials::of_location(&Location {
@@ -281,6 +281,36 @@ fn several(access: &RepositoryAccess) -> Option<SavedEntry> {
         .filter(|saved| saved.entry.has_several_locations())
 }
 
+/// Why a location whose settings didn't resolve is skipped, and what the
+/// record names: where an unresolved secret was looked for, else the setting
+/// that can't be used, never a value. Each keeps the code a repository of one
+/// location is refused with, so a template error or a relative path isn't
+/// taken for a secret that couldn't be read. Secrets past what the daemon
+/// masks fail the choice instead, as they fail a job (§10.2).
+fn unusable(error: ResolveError) -> Result<(LocationOutcome, String), FailureReason> {
+    let ResolveError { field, cause } = error;
+    let outcome = match cause {
+        Cause::Unresolved(error) => {
+            return Ok((
+                LocationOutcome::SecretUnavailable,
+                source_name(&error.source),
+            ));
+        }
+        Cause::TooMuchToMask { limit } => {
+            return Err(FailureReason::SecretsTooLargeToMask {
+                field: Some(field.name()),
+                limit,
+            });
+        }
+        Cause::Invalid(_) => LocationOutcome::TemplateInvalid,
+        Cause::RelativePath => LocationOutcome::PathRelative,
+        Cause::ExpansionTooLong { .. } => LocationOutcome::ExpansionTooLong,
+        Cause::ReferenceInProcessArguments => LocationOutcome::ReferenceInProcessArguments,
+        Cause::TooManyCredentials { .. } => LocationOutcome::TooManyCredentials,
+    };
+    Ok((outcome, field.name()))
+}
+
 /// Where a secret was looked for, never its value.
 fn source_name(source: &SourceName) -> String {
     match source {
@@ -303,6 +333,11 @@ fn failure(record: &LocationsRecord) -> FailureReason {
             !matches!(
                 outcome,
                 LocationOutcome::SecretUnavailable
+                    | LocationOutcome::TemplateInvalid
+                    | LocationOutcome::PathRelative
+                    | LocationOutcome::ExpansionTooLong
+                    | LocationOutcome::ReferenceInProcessArguments
+                    | LocationOutcome::TooManyCredentials
                     | LocationOutcome::RuleNotMet
                     | LocationOutcome::RuleUnknown
                     | LocationOutcome::NotTried
@@ -434,5 +469,176 @@ impl Engine for ChooseLocation {
             events,
             control: Box::new(Handover(phase)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use domain::planning::{
+        GroupBy, Hooks, Locations, Maintenance, RepositoryConfig, RepositorySettings,
+    };
+    use domain::secrets::SecretRef;
+    use domain::{Timestamp, Uuid};
+
+    use super::*;
+    use crate::fakes::{FakeClock, FakeSecrets};
+
+    const ID: &str = "4c6f636174696f6e73206f6620746865207265706f7369746f72792066697273";
+
+    /// Every probe finds the repository; the addresses probed are kept.
+    #[derive(Default)]
+    struct Holds(Arc<Mutex<Vec<String>>>);
+
+    struct Gone;
+
+    #[async_trait]
+    impl JobControl for Gone {
+        async fn stop(&mut self) {}
+    }
+
+    #[async_trait]
+    impl Engine for Holds {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if let Job::Probe(access) = &job {
+                self.0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(access.repository.clone());
+            }
+            let id = RepositoryId::parse(ID).expect("an ID");
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Succeeded(EngineResult::Probed(
+                    ProbeAnswer::Holds(id),
+                ))])
+                .boxed(),
+                control: Box::new(Gone),
+            })
+        }
+    }
+
+    /// The choice for an entry whose first location is `first` and whose
+    /// second is `/srv/public`, with `secrets` set as given.
+    async fn choose(
+        first: RepositorySettings,
+        secrets: &[(&str, &str)],
+    ) -> (
+        Result<Located, (FailureReason, Option<LocationsRecord>)>,
+        Vec<String>,
+    ) {
+        let fake = FakeSecrets::default();
+        fake.set_env("NAS_PASSWORD", "demo-password");
+        for (name, value) in secrets {
+            fake.set_env(name, value);
+        }
+        let resolve = ResolveRepository::new(Arc::new(fake));
+        let entry = RepositoryConfig {
+            settings: first,
+            locations: Locations {
+                further: vec![Location {
+                    repository: "/srv/public".to_owned(),
+                    repo_hot: None,
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                }],
+            },
+            id: Some(RepositoryId::parse(ID).expect("an ID")),
+            maintenance: Maintenance::None,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let access = resolve
+            .resolve_saved(&alias, &entry)
+            .await
+            .expect("the password resolves")
+            .access;
+        let probed = Arc::new(Mutex::new(Vec::new()));
+        let choose = ChooseLocation::new(
+            Arc::new(Holds(Arc::clone(&probed))),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let located = choose
+            .locate(OperationId::from_uuid(Uuid::from_u128(1)), access)
+            .await;
+        let probed = probed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        (located, probed)
+    }
+
+    fn first(repository: &str, options: &[(&str, &str)]) -> RepositorySettings {
+        RepositorySettings {
+            repository: repository.to_owned(),
+            repo_hot: None,
+            password: SecretRef::Env("NAS_PASSWORD".to_owned()),
+            options: options
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        }
+    }
+
+    /// The first location's outcome and source, and the position used.
+    fn skipped(
+        located: &Result<Located, (FailureReason, Option<LocationsRecord>)>,
+    ) -> (LocationOutcome, Option<String>, Option<u8>) {
+        let record = located
+            .as_ref()
+            .ok()
+            .and_then(|located| located.record.clone())
+            .expect("a record of the choice");
+        let tried = record.at(1).expect("the first location").clone();
+        (tried.outcome, tried.source, record.used())
+    }
+
+    #[tokio::test]
+    async fn a_location_whose_path_resolves_relative_is_skipped_as_a_relative_path() {
+        let (located, probed) = choose(first("${LAN_REPO}", &[]), &[("LAN_REPO", "srv/lan")]).await;
+        assert_eq!(
+            skipped(&located),
+            (
+                LocationOutcome::PathRelative,
+                Some("repository".to_owned()),
+                Some(2)
+            )
+        );
+        // The relative path is never probed: rustic would read it from
+        // wherever the daemon was started.
+        assert_eq!(probed, vec!["/srv/public".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn a_location_whose_setting_is_no_template_is_skipped_as_one() {
+        let (located, probed) = choose(first("/srv/lan", &[("password", "${LAN_KEY")]), &[]).await;
+        assert_eq!(
+            skipped(&located),
+            (
+                LocationOutcome::TemplateInvalid,
+                Some("options.password".to_owned()),
+                Some(2)
+            )
+        );
+        assert_eq!(probed, vec!["/srv/public".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn a_reference_that_doesnt_resolve_is_skipped_as_an_unavailable_secret() {
+        let (located, _) = choose(first("/srv/lan", &[("password", "${LAN_KEY}")]), &[]).await;
+        assert_eq!(
+            skipped(&located),
+            (
+                LocationOutcome::SecretUnavailable,
+                Some("env LAN_KEY".to_owned()),
+                Some(2)
+            )
+        );
     }
 }

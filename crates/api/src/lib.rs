@@ -290,8 +290,11 @@ pub enum WarningCode {
     /// A location of a repository reached at several was skipped where it
     /// shouldn't have been (decision 80). The argument `position` is the
     /// location's, from 1, and `outcome` why: `other-repository`,
-    /// `secret-unavailable`, `silent`, `refused`, `not-a-repository` or
-    /// `password-not-accepted`. Never an address or a network's name.
+    /// `secret-unavailable`, a setting's refusal code (`template-invalid`,
+    /// `repository-path-relative`, `secret-expansion-too-long`,
+    /// `secret-in-process-arguments`, `location-too-many-credentials`),
+    /// `silent`, `refused`, `not-a-repository` or `password-not-accepted`.
+    /// Never an address or a network's name.
     LocationSkipped,
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The

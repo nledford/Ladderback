@@ -473,10 +473,15 @@ error-profile-export-tag-comma = { -brand-name } did not export the plan, becaus
 
 # A location of a repository reached at several was skipped where it shouldn't have been.
 # $position (text): the location's place in the list, from 1.
-# $outcome (text): why, as a code: other-repository, secret-unavailable, silent, refused, not-a-repository or password-not-accepted.
+# $outcome (text): why, as a code: other-repository, secret-unavailable, template-invalid, repository-path-relative, secret-expansion-too-long, secret-in-process-arguments, location-too-many-credentials, silent, refused, not-a-repository or password-not-accepted.
 warning-location-skipped = { $outcome ->
     [other-repository] Location { $position } holds another repository, so it was not used. Check its address.
     [secret-unavailable] Location { $position } was not tried, because a secret it needs could not be read.
+    [template-invalid] Location { $position } was not tried, because one of its settings is not a valid template. The operation names the setting.
+    [repository-path-relative] Location { $position } was not tried, because one of its paths is relative once resolved. Write an absolute path; the operation names the setting.
+    [secret-expansion-too-long] Location { $position } was not tried, because one of its settings is too long once its references are resolved. The operation names the setting.
+    [secret-in-process-arguments] Location { $position } was not tried, because a setting passed to a program holds a reference, which would show its secret. The operation names the setting.
+    [location-too-many-credentials] Location { $position } was not tried, because its rclone connection string holds more credentials than a job can hide.
     [silent] Location { $position } did not answer, although its rule held.
     [refused] Location { $position } refused its credentials, although its rule held.
     [not-a-repository] Location { $position } holds no repository, although its rule held.

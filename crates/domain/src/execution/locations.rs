@@ -32,6 +32,22 @@ pub enum LocationOutcome {
     PasswordNotAccepted,
     /// A reference of this location didn't resolve.
     SecretUnavailable,
+    /// A setting of this location isn't a valid template. The skip's code is
+    /// the refusal's, `template-invalid`, as for a repository of one
+    /// location.
+    TemplateInvalid,
+    /// A path of this location, resolved, is relative
+    /// (`repository-path-relative`).
+    PathRelative,
+    /// A setting of this location expands to more than a setting holds
+    /// (`secret-expansion-too-long`).
+    ExpansionTooLong,
+    /// A setting of this location that becomes a process's argument holds a
+    /// reference (`secret-in-process-arguments`).
+    ReferenceInProcessArguments,
+    /// An rclone connection string of this location holds more credentials
+    /// than a job masks (`location-too-many-credentials`).
+    TooManyCredentials,
 }
 
 impl LocationOutcome {
@@ -49,17 +65,28 @@ impl LocationOutcome {
             Self::OtherRepository => "other-repository",
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretUnavailable => "secret-unavailable",
+            Self::TemplateInvalid => "template-invalid",
+            Self::PathRelative => "repository-path-relative",
+            Self::ExpansionTooLong => "secret-expansion-too-long",
+            Self::ReferenceInProcessArguments => "secret-in-process-arguments",
+            Self::TooManyCredentials => "location-too-many-credentials",
         }
     }
 
     /// Whether a skip with this outcome is a warning (`location-skipped`):
-    /// always for another repository and an unavailable secret, which are
-    /// wrong on any network; for any skip of a location whose rule held,
+    /// always for another repository, an unavailable secret and settings
+    /// that can't be used, which are wrong on any network; for any skip of a location whose rule held,
     /// since the person said it should work there; and never otherwise, as
     /// an address with no rule may be someone else's on this network.
     pub fn warns(self, rule_held: bool) -> bool {
         match self {
-            Self::OtherRepository | Self::SecretUnavailable => true,
+            Self::OtherRepository
+            | Self::SecretUnavailable
+            | Self::TemplateInvalid
+            | Self::PathRelative
+            | Self::ExpansionTooLong
+            | Self::ReferenceInProcessArguments
+            | Self::TooManyCredentials => true,
             Self::Silent | Self::Refused | Self::NotARepository | Self::PasswordNotAccepted => {
                 rule_held
             }
@@ -78,7 +105,9 @@ pub struct LocationTried {
     pub address: String,
     pub outcome: LocationOutcome,
     /// For [`LocationOutcome::SecretUnavailable`], where the secret was
-    /// looked for (`env LAN_KEY`, `file /etc/…`), never a value.
+    /// looked for (`env LAN_KEY`, `file /etc/…`), never a value; for a
+    /// setting that can't be used, the setting (`repository`,
+    /// `options.http-cacert`).
     pub source: Option<String>,
 }
 
@@ -159,16 +188,33 @@ mod tests {
             OtherRepository,
             PasswordNotAccepted,
             SecretUnavailable,
+            TemplateInvalid,
+            PathRelative,
+            ExpansionTooLong,
+            ReferenceInProcessArguments,
+            TooManyCredentials,
         ];
         let codes: std::collections::BTreeSet<&str> = all.iter().map(|o| o.code()).collect();
         assert_eq!(codes.len(), all.len());
         assert_eq!(NotARepository.code(), "not-a-repository");
+        // A setting's refusal keeps the code a repository of one location
+        // is refused with.
+        assert_eq!(PathRelative.code(), "repository-path-relative");
+        assert_eq!(TemplateInvalid.code(), "template-invalid");
     }
 
     #[test]
     fn a_skip_warns_when_it_is_wrong_on_any_network_or_its_rule_held() {
         use LocationOutcome::*;
-        for outcome in [OtherRepository, SecretUnavailable] {
+        for outcome in [
+            OtherRepository,
+            SecretUnavailable,
+            TemplateInvalid,
+            PathRelative,
+            ExpansionTooLong,
+            ReferenceInProcessArguments,
+            TooManyCredentials,
+        ] {
             assert!(outcome.warns(false), "{outcome:?}");
             assert!(outcome.warns(true), "{outcome:?}");
         }
