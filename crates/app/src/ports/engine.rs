@@ -163,6 +163,19 @@ impl Job {
         }
     }
 
+    /// [`Self::access`], to name the ID an identify found.
+    pub(crate) fn access_mut(&mut self) -> Option<&mut RepositoryAccess> {
+        match self {
+            Self::Fake(_) => None,
+            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => Some(access),
+            Self::Backup(job) => Some(&mut job.repository),
+            Self::Forget(job) => Some(&mut job.repository),
+            Self::Rewrite(job) => Some(&mut job.repository),
+            Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
+            Self::Check(job) => Some(&mut job.repository),
+        }
+    }
+
     /// What the job works on: a backup's plan, and the repository of any job
     /// that opens one whose ID is already known.
     pub fn target(&self) -> Target {

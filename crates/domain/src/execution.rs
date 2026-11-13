@@ -409,8 +409,11 @@ impl Operation {
         at: Timestamp,
         opened: Option<&RepositoryId>,
     ) -> Result<(), LifecycleError> {
-        let _ = (at, opened);
-        todo!()
+        self.start(at)?;
+        if self.target.repository.is_none() {
+            self.target.repository = opened.cloned();
+        }
+        Ok(())
     }
 
     /// Progress only comes from a running operation.

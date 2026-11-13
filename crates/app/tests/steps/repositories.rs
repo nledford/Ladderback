@@ -806,9 +806,15 @@ impl Opens {
 
 #[async_trait]
 impl Engine for Opens {
-    async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+    async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        let mut events = self.events();
+        // An identify reports the ID it found, as the worker's does.
+        if let (Job::Identify(_), Some(EngineEvent::Succeeded(result))) = (&job, events.last_mut())
+        {
+            *result = EngineResult::Repository { id: self.0.clone() };
+        }
         Ok(RunningJob {
-            events: Box::pin(futures::stream::iter(self.events())),
+            events: Box::pin(futures::stream::iter(events)),
             control: Box::new(Stop),
         })
     }

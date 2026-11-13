@@ -8,14 +8,15 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
+use domain::execution::FailureReason;
 use domain::planning::NotRecorded;
 use domain::{OperationId, RepositoryAlias, RepositoryId};
 use futures::StreamExt;
 use futures::future::{self, Either};
 
 use crate::ports::{
-    ConfigError, ConfigStore, Engine, EngineError, EngineEvent, Job, NotInPlace, RecordError,
-    RunningJob, SavedEntry,
+    ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
+    NotInPlace, RecordError, RepositoryAccess, RunningJob, SavedEntry,
 };
 
 /// The daemon's configuration write lock: held across every read-modify-write
@@ -132,11 +133,29 @@ impl Engine for RecordOpened {
         let unrecorded = job
             .access()
             .filter(|access| access.id.is_none())
-            .and_then(|access| access.entry.clone());
-        let running = self.inner.run(op, job).await?;
-        let Some(saved) = unrecorded else {
-            return Ok(running);
+            .and_then(|access| access.entry.clone().map(|saved| (access.clone(), saved)));
+        let Some((access, saved)) = unrecorded else {
+            return self.inner.run(op, job).await;
         };
+        match job {
+            // An identify is how the ID is found, and an initialisation
+            // makes the repository: each records the ID it opened.
+            Job::Identify(_) | Job::Init(_) => self.recording(op, job, saved).await,
+            _ => self.identified_first(op, job, access, saved).await,
+        }
+    }
+}
+
+impl RecordOpened {
+    /// Runs `job` and records, when it starts, the ID of the repository it
+    /// opened in `saved`'s entry. Every event passes on as it came.
+    async fn recording(
+        &self,
+        op: OperationId,
+        job: Job,
+        saved: SavedEntry,
+    ) -> Result<RunningJob, EngineError> {
+        let running = self.inner.run(op, job).await?;
         let recorder = Arc::clone(&self.recorder);
         let mut pending = Some(saved);
         let events = running
@@ -166,6 +185,98 @@ impl Engine for RecordOpened {
             control: running.control,
         })
     }
+
+    /// Runs `job`, whose entry records no ID, after an identify of `access`
+    /// that records the ID (#421): without it the job would run with no
+    /// cache, which the engine keeps by the ID, and its operation would name
+    /// no repository. The job's events are its own, none of the identify's.
+    /// An identify that fails ends the job with its reason, the one the
+    /// job's own open would have given, and the job never runs; one the
+    /// engine can't start refuses the job as it would refuse it. Stopping
+    /// the job stops whichever of the two runs.
+    async fn identified_first(
+        &self,
+        op: OperationId,
+        mut job: Job,
+        access: RepositoryAccess,
+        saved: SavedEntry,
+    ) -> Result<RunningJob, EngineError> {
+        let identify = self.recording(op, Job::Identify(access), saved).await?;
+        let phase = Arc::new(futures::lock::Mutex::new(Phase::Identifying(
+            identify.control,
+        )));
+        let inner = Arc::clone(&self.inner);
+        let handed = Arc::clone(&phase);
+        let found = identify.events;
+        let events = futures::stream::once(async move {
+            let found = identified(found).await;
+            let mut phase = handed.lock().await;
+            if matches!(*phase, Phase::Stopped) {
+                return futures::stream::empty().boxed();
+            }
+            let id = match found {
+                Ok(id) => id,
+                Err(reason) => {
+                    return futures::stream::iter([EngineEvent::Failed(reason)]).boxed();
+                }
+            };
+            if let Some(access) = job.access_mut() {
+                access.id = Some(id);
+            }
+            match inner.run(op, job).await {
+                Ok(running) => {
+                    *phase = Phase::Running(running.control);
+                    running.events
+                }
+                Err(error) => {
+                    futures::stream::iter([EngineEvent::Failed(FailureReason::from(error))]).boxed()
+                }
+            }
+        })
+        .flatten()
+        .boxed();
+        Ok(RunningJob {
+            events,
+            control: Box::new(Handover(phase)),
+        })
+    }
+}
+
+/// Which job of an identified-first run is going.
+enum Phase {
+    Identifying(Box<dyn JobControl>),
+    Running(Box<dyn JobControl>),
+    Stopped,
+}
+
+/// Stops an identified-first run: the identify while it runs, the job once
+/// it does, and nothing is started after.
+struct Handover(Arc<futures::lock::Mutex<Phase>>);
+
+#[async_trait]
+impl JobControl for Handover {
+    async fn stop(&mut self) {
+        let mut phase = self.0.lock().await;
+        if let Phase::Identifying(control) | Phase::Running(control) = &mut *phase {
+            control.stop().await;
+        }
+        *phase = Phase::Stopped;
+    }
+}
+
+/// The ID an identify found, or why it found none.
+async fn identified(
+    mut events: futures::stream::BoxStream<'static, EngineEvent>,
+) -> Result<RepositoryId, FailureReason> {
+    while let Some(event) = events.next().await {
+        match event {
+            EngineEvent::Succeeded(EngineResult::Repository { id }) => return Ok(id),
+            EngineEvent::Failed(reason) => return Err(reason),
+            EngineEvent::Succeeded(_) => break,
+            EngineEvent::Started { .. } | EngineEvent::Progress(_) | EngineEvent::Warning(_) => {}
+        }
+    }
+    Err(FailureReason::EngineExited { exit_code: None })
 }
 
 impl Recorder {

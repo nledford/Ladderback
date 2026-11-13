@@ -383,7 +383,11 @@ impl RunOperation {
     fn apply(&self, run: &mut Run, event: EngineEvent) {
         let at = self.clock.now();
         let applied = match event {
-            EngineEvent::Started { .. } => run.operation.start(at),
+            // A backup queued before its repository's ID was known names
+            // the repository from its start on (§9).
+            EngineEvent::Started { repository, .. } => {
+                run.operation.start_on(at, repository.as_ref())
+            }
             EngineEvent::Progress(_) => run.operation.report_progress(),
             EngineEvent::Warning(warning) => run.operation.record_warning(warning),
             EngineEvent::Succeeded(result) => {
