@@ -141,8 +141,43 @@ impl Location {
     /// NN): an absolute local path, or `rest:https://` whose certificate is
     /// checked. Only such a location is probed before its turn.
     pub fn checks_server_first(&self) -> bool {
-        todo!()
+        let accepts_any_certificate = self.accepts_any_certificate();
+        std::iter::once(self.repository.as_str())
+            .chain(self.repo_hot.as_deref())
+            .all(|address| {
+                address_checks_server_first(address)
+                    && !(accepts_any_certificate
+                        && starts_with_ignore_case(address, "rest:https://"))
+            })
     }
+
+    /// Whether any option set turns the certificate check off: the cold
+    /// backend reads `options` and `options-cold`, the hot one `options` and
+    /// `options-hot`, so one set saying `true` is enough.
+    fn accepts_any_certificate(&self) -> bool {
+        [&self.options, &self.options_hot, &self.options_cold]
+            .into_iter()
+            .flatten()
+            .any(|(key, value)| {
+                key.eq_ignore_ascii_case("http-insecure-tls")
+                    && value.trim().eq_ignore_ascii_case("true")
+            })
+    }
+}
+
+/// Whether one address of a location makes the server prove who it is
+/// before it is sent a credential, or sends none: `local:` and an absolute
+/// path, an absolute path no `:` gives a scheme (rustic reads the text
+/// before the first `:` as one), or `rest:` and an `https://` URL. Anything
+/// else, a reference that may hold any scheme included, doesn't.
+fn address_checks_server_first(address: &str) -> bool {
+    if let Some(path) = address.strip_prefix("local:") {
+        return path.starts_with('/');
+    }
+    if let Some(url) = address.strip_prefix("rest:") {
+        return starts_with_ignore_case(url, "https://");
+    }
+    address.starts_with('/') && !address.contains(':')
 }
 
 impl fmt::Debug for Location {
@@ -342,8 +377,19 @@ impl RepositoryConfig {
     /// rule holds (a location with none holds) and that check the server
     /// first. A location with no verdict doesn't hold.
     pub fn early_probes(&self, verdicts: &[RuleVerdict]) -> Vec<bool> {
-        let _ = verdicts;
-        todo!()
+        let first = Location::of(&self.settings);
+        std::iter::once(&first)
+            .chain(&self.locations.further)
+            .zip(
+                verdicts
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat(RuleVerdict::Unknown)),
+            )
+            .map(|(location, verdict)| {
+                verdict == RuleVerdict::Holds && location.checks_server_first()
+            })
+            .collect()
     }
 
     /// Where each location points, in order, the first included.
