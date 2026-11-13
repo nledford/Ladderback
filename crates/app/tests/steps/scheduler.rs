@@ -1017,6 +1017,7 @@ async fn no_pending_retry(agent: &mut Agent, name: String) {
 }
 
 #[given("the repository's one location is eligible only on a wired network")]
+#[when("the repository's one location is eligible only on a wired network")]
 async fn location_eligible_wired(agent: &mut Agent) {
     agent.scheduler.rule = Some(LocationRule::new(vec![NetworkKind::Wired]).expect("a rule"));
     agent.scheduler.save().await;

@@ -124,6 +124,16 @@ Feature: The scheduler
     And the agent said the run of the plan "home" was skipped because no location's rule holds
     And the next run of the plan "home" is planned for "2026-06-11 03:00+00:00"
 
+  Scenario: A rule given to a location while the agent serves holds from the next run
+    Given the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the machine is on Wi-Fi
+    When the agent serves until "2026-06-10 02:40+00:00"
+    And the repository's one location is eligible only on a wired network
+    And the agent serves until "2026-06-10 03:30+00:00"
+    Then the plan "home" hasn't run
+    And the agent said the run of the plan "home" was skipped because no location's rule holds
+
   Scenario: The network link is read once for the plans due together
     Given the agent starts at "2026-06-10 02:30+00:00"
     And the plan "home" is scheduled "0 3 * * *"
