@@ -2,7 +2,7 @@
 
 **A repository keeps its one `repository` setting as its first location and may list further locations after it, in order; each location has its own backend settings and credentials and an optional rule for when it may be tried. Before a job that opens the repository the daemon walks the list, skips every location whose rule doesn't hold, probes the rest with a bounded check, and uses the first that answers and holds the same repository ID. A rule chooses which address to try, never whether to trust it** (recorded 2026-11-12, §3.1, §5, §6.1, §6.2, §7.3, §9, §10.6; #424). The issue came out of a real run of 0.2.0: a laptop backs up to one REST repository by the server's LAN address at home and by a public HTTPS address away from it, and the person's rustic setup tries the LAN address first. Ladderback had one location per repository, so the imported plan took the slow route even at home, and a person who wanted both had to keep two entries and two plans, which decision 49 forbids for one repository.
 
-The terms are in the glossary first (§3.1): **location**, **location rule**, **network link**, **probe**. The rest of this record is what was decided, with what was rejected and why, the platform evidence for the rules, the parts of the pull request, and the choices the maintainer should confirm. The scenarios are in the appendix, not in `features/`: see "Where the scenarios live".
+The terms are in the glossary first (§3.1): **location**, **location rule**, **network link**, **probe**. The rest of this record is what was decided, with what was rejected and why, the platform evidence for the rules, the parts of the pull request, and the choices the maintainer should confirm. Part 1's scenarios are in `features/repositories/repository_locations.feature`; those of parts 2 and 3 are in the appendix until their parts land: see "Where the scenarios live".
 
 ## Choices to confirm
 
@@ -15,7 +15,7 @@ These are the places where this record chose between reasonable options. Each is
 5. **Unsafe code is not needed**, and the maintainer's authorization of it for the Wi-Fi reader is recorded as a standing rule with its conditions (point 11), not used. Confirm that it is better recorded in §13.5 now than only when a route needs it.
 6. **Linux reads the Wi-Fi name with the `dbus` crate already in the tree** (point 10), not with `nmcli` and not with a new `zbus` dependency. The Linux route is documented, not run: the only machine for this record is a Mac.
 7. **The probe is a short-lived worker per location** (point 5), so a backend that hangs is killed rather than abandoned. The price is that a repository with several locations opens twice per job.
-8. **Scenarios go in the appendix** (below) because no tag keeps a scenario from the runners today. A small change to both Rust runners and the UI runner (a `@later` tag they skip) would let them live in `features/` from this pull request.
+8. **Scenarios of a part not yet built stay in the appendix** (below) because no tag keeps a scenario from the runners today; each part moves its own into `features/` with its steps. A small change to both Rust runners and the UI runner (a `@later` tag they skip) would let them all live in `features/` from the first part.
 9. **A rustic export writes the first location** and says how many it left out (point 9).
 10. **A repository with several locations must record its ID** (point 2): the config refuses `locations` on an entry with no `repository-id`. Without it the first location to answer would define the repository.
 11. **A scheduled run is skipped only when every rule is known not to hold** (point 4); an unreadable rule starts the run and fails it where it is recorded, notified and retried.
@@ -95,7 +95,7 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **Outcomes** (`LocationOutcome`, one code each, never a sentence, §8.4): `used`; skipped as `rule-not-met`, `rule-unknown`, `silent` (no answer by the bound, a refused connection, no route, a name that doesn't resolve), `refused` (it answered and refused the credentials: an HTTP 401 or 403, a failed SSH login), `not-a-repository` (it answers, and no repository's `config` is there), `other-repository` (the ID differs from the repository's), `password-not-accepted` (the repository's password opens nothing there) and `secret-unavailable` (a reference of this location didn't resolve; the code names the source, never a value, §10.2).
 - **The same-repository check.** Every location must hold the repository's ID, and the ID is the one the entry records as `repository-id` (decisions 49 and 57), which a repository with several locations always has (point 2). A location whose ID differs is **refused and never used**, whatever its rule said and wherever it is in the list; the run goes on to the next location, and the skip is a warning (point 8). The cache slot stays keyed by the repository ID (§3.1, decision 59), which is why all locations share one cache: a cache of one repository serves any copy of it, and what the cache holds is by ID and by content hash. A password that opens nothing at a location is `password-not-accepted`, not a failure of the job by itself: an address answered by a different repository gives exactly that answer, and the person's password hasn't changed between two addresses of one repository; if every location that was tried says it, the job fails as a password error (point 6).
 - **Choosing.** The first location, in order, whose rule held and whose probe returned `used`. A repository with one location is not probed: it is opened as before, and its failures are the ones decision 36 and the engine already say.
-- **Every open of the repository goes through the choice.** `ResolveRepository::resolve_saved` makes it and returns the access of the one location chosen, with its position; every job, and the in-process open of `RusticRetention` (which opens the `RepositoryAccess` the use case resolved, to apply a policy for a forget's selection and its preview, decision 49 point 5), therefore uses that location and no other. Retention never opens the first location by default: that would send its credentials on a network the rule excluded, skip the ID check, and hang in the daemon's own process, the case the probe moves into a worker that can be killed. A listing or preview followed by a forget that must open the repository again takes the choice again.
+- **Every open of the repository goes through the choice.** The choice is made by `app::locations::ChooseLocation`, an `Engine` that wraps the daemon's engine, so every job that opens a repository passes through it, whichever path started it (a manual, scheduled, retried or resumed backup, a listing, a check, a maintenance job): when the job is handed to the engine, a job whose access names an entry of several locations is held while the choice runs, then started with the access of the one location chosen, its position recorded. It wraps decision 81's `RecordOpened`, not the other way round, so the record of an opened repository's ID sees the job at its chosen location and never a probe; an entry of several locations always records its ID (point 2), so decision 81's identify never runs before such a job. The in-process open of `RusticRetention` (which opens the `RepositoryAccess` the use case resolved, to apply a policy for a forget's selection and its preview, decision 49 point 5) asks the same choice first (`RunMaintenance::with_locations`, which calls `ChooseLocation::locate`) and opens the location it returns; without a choice to ask, a repository of several locations isn't opened in-process at all (`no-location-usable`). Retention never opens the first location by default: that would send its credentials on a network the rule excluded, skip the ID check, and hang in the daemon's own process, the case the probe moves into a worker that can be killed. A listing or preview followed by a forget that must open the repository again takes the choice again. A stop of the job while a probe runs stops the probe, and nothing is started after it.
 - **A job's cost.** A repository with several locations opens twice per job: once in the probe, once in the job. It reads a few small files and derives the key once more; against a backup this is not measurable, and against hourly runs on a laptop it is a second a run at most. A probe that *kept* its open repository for the job would save it, and needs the job to share the probe's process, which the kill rule above forbids. Rejected for that reason.
 
 ### 6. When nothing is usable
@@ -120,7 +120,7 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **A Wi-Fi name can be copied.** Anyone can start a network with the name of yours. A rule `only = ["Office"]` makes the location eligible on that network, and an address such as `192.168.1.10` can mean another machine there; a network that happens to use the same private range does this without any attack. Whatever answers is then sent the location's credentials. For a REST location over plain HTTP that is the user name and password, in the clear, before any check of the repository's ID (a REST server needs them for the first request, the read of `config`); the ID check comes after the first authenticated request and can't take them back. The repository's *data* stays safe: its password never travels (the key is derived on the machine) and its contents are encrypted. What an impostor gets is the backend credentials and the encrypted data of that run, and it can refuse service (which falls through to the next location).
 - **So a location that sends its credentials where an impostor could read them is warned about**, in the UI and in the log (point 8): `location-plain-http-credentials`, naming the repository and the location's position and a cause, never the address or a credential. The causes are the ones Ladderback can see: `plain-http`, a `rest:` location written `http://` that carries a user and password or a credential option; `unchecked-certificate`, an `https` REST location with `http-insecure-tls` true, which makes rustic accept any certificate, so an impostor reads the credentials as it would on plain HTTP (`danger_accept_invalid_certs`, `reqwest.rs` of `rustic_backend` at the pinned revision); `plain-endpoint`, an OpenDAL location whose `endpoint` or `url` option is an `http://` address and that carries a credential option, and an `rclone:` connection string whose `url` setting is `http://` with a credential, which §10.2 already parses; `plain-ftp`, `opendal:ftp` with a credential. The check runs on the location as written, when the daemon loads the configuration and on the page, and again on the resolved form when the choice resolves it, since `${…}` can hold a scheme or a user and password: a warning from the resolved form is a log line at warning level for that job, never an operation warning (a backup every hour would end `SucceededWithWarnings` for a choice made once). A scheme a reference leaves unknown (`rest:${URL}`) is checked once resolved. An `rclone:` remote set up in rclone's own configuration file is not seen. The warning is not a refusal: a LAN with no TLS is a reasonable thing to have, and a person who has made it a choice keeps it.
 - **Recommend HTTPS on the LAN.** A server on the LAN with its own certificate authority protects the credentials against an impostor, since the impostor can't present a certificate that authority signed. rustic's option is `http-cacert`: the path of a certificate file (PEM) to trust in addition to the system's, read by `rustic_backend`'s HTTP client for REST (`reqwest.rs`, `get_cacert`, at the revision the workspace pins), and `http-tls-client-cert` for a client certificate. The path must be absolute (§6.1). The warning's text names it. Ladderback doesn't read or manage the certificate, and passes the option as written.
-- **Residual risk, stated plainly.** (1) On plain HTTP, whoever answers at the address on a network that passes a rule receives the credentials; the warning is all Ladderback does about it. (2) A Wi-Fi name is a hint about where the machine is, not proof; nothing in the design treats it as one. (3) An impostor that holds an old copy of the repository passes the ID check, and a backup written to it would fork the history from the real one; this is true of any repository whose address can be spoofed, one location or several, and a LAN rule raises the chance, because the address is on a network anyone nearby can join. Only TLS with a trusted authority closes it. (4) A probe sends credentials to whatever answers, as an open does.
+- **Residual risk, stated plainly.** (1) On plain HTTP, whoever answers at the address on a network that passes a rule receives the credentials; the warning is all Ladderback does about it. (2) A Wi-Fi name is a hint about where the machine is, not proof; nothing in the design treats it as one. (3) An impostor that holds an old copy of the repository passes the ID check, and a backup written to it would fork the history from the real one; this is true of any repository whose address can be spoofed, one location or several, and a LAN rule raises the chance, because the address is on a network anyone nearby can join. Only TLS with a trusted authority closes it. (4) A probe sends credentials to whatever answers, as an open does. (5) rustic gives no typed status for a refusal, so the probe tells `refused` by the text of rustic's error chain at the pinned revision (`401 Unauthorized`, `403 Forbidden`, OpenDAL's `PermissionDenied`); three probe tests pin those texts, so an upgrade that changes one fails a test rather than turning a refusal into another outcome (`crates/adapters/engine/src/worker/repository.rs`). (6) An SFTP server that refuses the login says so in no text the probe looks for, so that location is `silent`, not `refused`: information without a rule, as a refusal is, but its row reads "did not answer".
 - **No new place for a secret.** A location's secrets are references like any other (I4). The warning, the log, the operation record and every event name a location by its position and never carry its address with a credential in it (point 8). The network name is not logged (point 3).
 
 ### 8. What is recorded, and what the person sees
@@ -128,14 +128,14 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **The operation** (§9): `operations` gains two nullable columns, `location_no` (the position, from 1, of the location the job used) and `locations_json` (every location of the entry as the run saw it, in order, the ones the choice never reached included: its position, its address as the entry writes it with credentials masked and the text cut at 256 bytes on a character boundary, and its outcome code, `not-tried` for a location after the one used; "location 2 of 2" is read from it). Both stay empty for a repository of one location and for every operation that doesn't open one. The address is kept as the run knew it, for the reason decision 52 kept the alias: the entry may change afterwards. The migration is one-way, as decision 52's was.
 - **When a skip is information and when it is a warning.** `locations_json` and the operation's row show every skip. A skip changes how the operation ended only when it says something is wrong. It is **information** when the location has no rule and the outcome is `silent`, `refused`, `not-a-repository` or `password-not-accepted`: without a rule, the address may be someone else's on this network (a router's login page answers `401`, a printer `404`), and a backup made away from home, where the LAN address is silent every time, is a plain `Succeeded`; and for `rule-not-met` and `rule-unknown`, which say what the machine knew. It is a **warning** (`location-skipped`, with the position and the outcome; the operation ends `SucceededWithWarnings`) when the location's rule *held* and it was skipped all the same, whatever the outcome (the person said it should work on this network: a LAN server that moved or died is found at once, not after months of backups to the public address), and always for `other-repository` and `secret-unavailable`, which are wrong whatever the network. An `other-repository` is also a log line at warning level naming the repository and the position.
 - **The log** says, for each job on a repository with several locations, which location was used and why each earlier one was skipped, as outcome codes with positions, with no address and no network name.
-- **The pages.** The Repositories page lists a repository's locations in order, each with its rule in words, and says "tried first" on the first; its warning rows (`location-plain-http-credentials`, and "every location has a rule" and "the last location has a rule and the plan has no retry") are notes on the row, not errors. **Test** runs the probe for every location, not only the first, and shows each one's outcome, the way a person checks a new address before trusting a backup to it. The Operations page's row for an operation says "Used location 2 of 2" with the address as recorded (credentials masked); the operation's detail lists the earlier locations and their outcomes in the order tried. Status is text and icon, never colour alone (A2).
+- **The pages.** The Repositories page lists the locations of a repository reached at several, in order, in the row's Location cell (a list named "Locations of nas"): each by position, its address masked, its options by name with a value shown only when it is references alone (`${LAN_KEY}`, `domain::secrets::only_references`), and "tried first" on the first, and part 2 adds each location's rule in words; a repository of one location shows its address as before. Its warning rows (`location-plain-http-credentials` now, "every location has a rule" and "the last location has a rule and the plan has no retry" with part 2) are notes on the row, not errors. **Test** runs the probe for every location, past the one a job would use, so each has an outcome of its own, and records nothing: no operation, no repository ID. The API offers it for every entry, one location included; the page offers it on the rows that list several locations, as a row button ("Test the locations of nas") whose outcomes go into that list, one per location, and whose refusal is the row's alert. The Operations page's Result cell says "Used location 2 of 2" with the address as recorded (credentials masked) for every operation whose choice used one, whatever became of the run, after what the run produced. No operation detail view exists yet, so the earlier locations and their outcomes in the order tried are in the API's operation summary (`locations`) only, until that view is built. Status is text and icon, never colour alone (A2).
 - **Maintenance owner and the hub.** Locations are a matter of each machine's own configuration and stay on it: the sync protocol carries the repository's ID and an alias, and the operation records it sends (`OpEvent`) carry no location, no position and no outcome, so the hub learns nothing of where a laptop was from them (an outcome such as `rule-not-met` under a Wi-Fi rule would say so). What Ladderback writes into a log never has an address or a network name, but a log a hub fetches (`FetchLog`) holds what logs hold, rustic's own lines among them, which name the repository's address with credentials masked (§10.2): that is not new, and is a residual risk of §10.6. The hub shows an operation without a location. I1 is keyed by the repository ID, so every location is one repository for ownership; the hub has its own entry and its own locations for a repository it maintains (§7.3), and two agents reach one repository by different locations. A maintenance job (forget, prune, check) chooses a location as a backup does; I7 is unchanged, since it counts one running maintenance operation per repository ID however it was reached.
 - **Duplicates (decision 49).** An entry's locations count as its location, with the rules of decision 49 otherwise unchanged: two entries with one recorded ID are one repository, and it is the ID that decides when both know one; with no ID known to either, two entries are one repository when any location of one is at the same location as any location of the other (same string, hot half and non-credential options; on a drive, its credentials too). Two locations of one entry may not be at one location, and are refused at the second's key (`Value(Location)`). An import into an existing alias at the same location of any of its locations adds the plans to that entry and keeps it. Decision 49's file notes the extension.
 
 ### 9. Import and export
 
 - **Import** is unchanged: a profile has one repository, which becomes the entry's first location and keeps its `repo-hot` and options in it; no rule and no further location is made. Rustic's own `repo-hot` stays inside that location (decision 5): it is the other half of one location, not a second location. Nothing about it is mapped to `locations`.
-- **Export** writes the first location, as the profile's `repository` and its options, and drops `when` with the other Ladderback-only keys. When the entry has more locations, the export says so with a notice (`profile-locations-not-exported`, with the number left out), since rustic has no fallback and the profile will point only at the first address, which may be the one that's silent away from home. *Rejected: the first location without a rule*, which is the likelier to work but would make the export differ from the first line of the entry with no way for the person to see why; the notice is the honest answer.
+- **Export** writes the first location, as the profile's `repository` and its options, and drops `when` with the other Ladderback-only keys. When the entry has more locations, the export says so with a notice (`profile-locations-not-exported`, with the number left out), since rustic has no fallback and the profile will point only at the first address, which may be the one that's silent away from home. The profile writer gives the notice (`ProfileNotice::LocationsNotExported`, the adapter and its fake alike, held by the port's contract suite), as it gives `RetentionEmpty`. *Rejected: the first location without a rule*, which is the likelier to work but would make the export differ from the first line of the entry with no way for the person to see why; the notice is the honest answer.
 
 ### 10. Platform feasibility, shown
 
@@ -192,7 +192,7 @@ Each pull request adds the §13.7 checklists it touches: a port (`NetworkLink`),
 
 ### Where the scenarios live
 
-`features/` holds only scenarios that pass: the acceptance runner is built with `fail_on_skipped()`, and a scenario whose steps nothing defines fails it (shown: a scratch feature with undefined steps failed with "Step doesn't match any function", exit 101), and no tag keeps a scenario from the runners (the acceptance runner skips `@e2e` and `@ui` only; the others run only theirs). So this record's scenarios are in the appendix; the pull request's first commit moves them into `features/` with their steps. A `@later` tag that all three runners skip would let them live in `features/` now; that is a change to test code, kept out of this pull request, and a choice above.
+`features/` holds only scenarios that pass: the acceptance runner is built with `fail_on_skipped()`, and a scenario whose steps nothing defines fails it (shown: a scratch feature with undefined steps failed with "Step doesn't match any function", exit 101), and no tag keeps a scenario from the runners (the acceptance runner skips `@e2e` and `@ui` only; the others run only theirs). So each part's first commit moves its own scenarios from the appendix into `features/` with their steps: part 1's are in `features/repositories/repository_locations.feature`, and the appendix keeps parts 2 and 3 until they land. A `@later` tag that all three runners skip would let them live in `features/` now; that is a change to test code, kept out of this pull request, and a choice above.
 
 ### Rejected, besides what is above
 
@@ -216,163 +216,7 @@ Feature: A repository reached at several locations
     Given a repository "nas" that records its repository ID, with the locations "lan" and "public", in that order
     And the plan "home" backs up to "nas"
 
-  # Part 1
-
-  Scenario: The first location is used when it answers
-    Given the location "lan" answers
-    When the plan "home" runs
-    Then the operation ends as succeeded
-    And the operation used the location "lan"
-    And the location "public" was never tried
-    And the operation shows the location "public" as not tried
-
-  Scenario: The next location is used when the first doesn't answer
-    Given the location "lan" doesn't answer within 8 seconds
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation ends as succeeded
-    And the operation used the location "public"
-    And the operation says the location "lan" was skipped because it didn't answer
-    And the operation has no warnings
-
-  Scenario: A location that holds another repository is refused and never used
-    Given the location "lan" answers with a repository whose ID isn't the repository's
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation ends as succeeded with warnings
-    And the operation warns that the location "lan" held another repository
-    And nothing was written to the other repository
-
-  Scenario Outline: A location with no rule that can't be used is skipped without a warning
-    Given the location "lan" <state>
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation says the location "lan" was skipped because it <reason>
-    And the operation has no warnings
-
-    Examples:
-      | state                                                | reason                              |
-      | answers and refuses its credentials                  | refused its credentials             |
-      | answers and holds no repository                      | held no repository                  |
-      | answers and doesn't accept the repository's password | didn't accept the repository's password |
-
-  Scenario: A reference of a location that doesn't resolve skips that location with a warning
-    Given the location "lan" has a credential reference that doesn't resolve
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation warns that the location "lan" couldn't be tried because a secret was unavailable
-    And the warning names the source and never a value
-
-  Scenario: A password no location accepts is reported as a password error
-    Given both locations answer and don't accept the repository's password
-    When a person runs the plan "home" now
-    Then the operation ends as failed with a password error
-    And the operation doesn't end with the reason "no location usable"
-
-  Scenario: No location answers
-    Given the plan "home" retries up to 3 times
-    And neither location answers
-    When the plan "home" runs as a scheduled run
-    Then the operation ends as failed with the reason "no location usable"
-    And the operation names each location and why it wasn't used
-    And a retry of the plan "home" is scheduled
-
-  Scenario: A manual run with no usable location fails and is not retried
-    Given the plan "home" retries up to 3 times
-    And neither location answers
-    When a person runs the plan "home" now
-    Then the operation ends as failed with the reason "no location usable"
-    And no retry of the plan "home" is scheduled
-
-  Scenario: A job opens only the location the choice made
-    Given the location "lan" doesn't answer
-    And the location "public" answers
-    When a forget is previewed for the repository "nas"
-    Then the repository was opened at the location "public" only
-    And the location "lan" was never opened
-
-  Scenario: A location the job didn't use never had its secrets in the job
-    Given the location "public" carries the canary secret "canary-value" in its options
-    And the location "lan" answers
-    When the plan "home" runs
-    Then the job's worker was given no secret of the location "public"
-    And the canary appears in no log line, event, operation record or page
-
-  Scenario: Locations are refused on a repository that records no ID
-    Given a repository "fresh" that records no repository ID
-    When the configuration gives it a second location
-    Then the configuration is refused at the table of that location
-    And the message says to run a job once or to write the ID
-
-  Scenario: Two locations of one repository may not be at one location
-    When the configuration gives the repository "nas" a second location at the address of its first
-    Then the configuration is refused at the second location's key
-
-  Scenario: A repository with one location is opened without a probe
-    Given a repository "solo" with one location
-    When a backup of "solo" runs
-    Then no location was probed
-    And the operation records no location
-
-  Scenario: The cache slot is the repository's, whichever location is used
-    Given the location "public" is used for one backup and the location "lan" for the next
-    Then both backups read the cache slot named by the repository ID
-    And no probe took a cache slot
-
-  Scenario Outline: A location that sends its credentials where an impostor could read them is warned about
-    Given the location "lan" is "<address>" with <credentials>
-    When the repositories are listed
-    Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "<cause>"
-    And the warning names neither the address nor a credential
-
-    Examples:
-      | address                                                   | credentials                                  | cause                 |
-      | rest:http://lan.example.lan/r                             | a user and a password in it                  | plain-http            |
-      | rest:http://lan.example.lan/r                             | a credential option                          | plain-http            |
-      | rest:https://lan.example.lan/r                            | the option http-insecure-tls set to true     | unchecked-certificate |
-      | opendal:s3                                                | an http endpoint and a credential option     | plain-endpoint        |
-      | opendal:ftp                                               | a credential option                          | plain-ftp             |
-
-  Scenario: A location over HTTPS with credentials and a checked certificate isn't warned about
-    Given the location "lan" is "rest:https://lan.example.lan/r" with a user and a password in it
-    When the repositories are listed
-    Then the repository "nas" carries no warning about its locations
-
-  Scenario: The warning follows a reference once it is resolved
-    Given the location "lan" is "rest:${LAN_URL}" with a user and a password in it
-    And the variable "LAN_URL" holds an http address
-    When the plan "home" runs
-    Then the daemon's log warns that the location 1 sends its credentials over plain HTTP
-    And the operation has no warnings
-
-  @e2e
-  Scenario: A secret of a location is never shown
-    Given the location "lan" carries the canary secret "canary-value" in its option "application_key" as the reference "${LAN_KEY}"
-    When the plan "home" runs
-    Then the canary appears in no log line, event, operation record or page
-    And the Repositories page shows the reference "${LAN_KEY}" and never its value
-
-  @e2e
-  Scenario: An export names the first location and says what it left out
-    When the plan "home" is exported as a rustic profile
-    Then the profile's repository is the location "lan"
-    And the export says that 1 further location was left out
-
-  @ui
-  Scenario: The Repositories page lists the locations and tests each
-    When I open the Repositories page
-    Then the repository "nas" lists the location "lan" first and the location "public" second
-    When I press "Test" for the repository "nas"
-    Then each location shows whether it answers
-
-  @ui
-  Scenario: The Operations page names the location used
-    Given the plan "home" ran and used the location "public"
-    When I open the Operations page
-    Then the row for the plan "home" says "Used location 2 of 2"
+  # Part 1 is in features/repositories/repository_locations.feature.
 
   # Part 2
 
