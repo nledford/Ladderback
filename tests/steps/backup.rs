@@ -382,6 +382,24 @@ fn failed_as_replaced(agent: &mut Agent) {
     );
 }
 
+#[given("the repository is on a REST server that refuses the credentials the agent sends it")]
+async fn on_a_refusing_rest_server(agent: &mut Agent) {
+    agent.backup.location = Some(
+        super::rest_server_steps::location(super::rest_server_steps::WRONG_SERVER_PASSWORD).await,
+    );
+}
+
+#[then("the operation ends as failed because the server refused the credentials")]
+fn failed_as_refused(agent: &mut Agent) {
+    let status = agent.operation().status().clone();
+    assert_eq!(
+        status,
+        domain::execution::OperationStatus::Failed {
+            reason: domain::execution::FailureReason::CredentialsRefused,
+        }
+    );
+}
+
 #[when("the agent backs up the plan")]
 async fn backs_up(agent: &mut Agent) {
     agent.run_backup().await;
@@ -562,6 +580,8 @@ async fn parent_is_plain(agent: &mut Agent) {
 pub struct BackupSetup {
     /// The repository's folder; next to a `hot`, its cold half.
     pub repository: Option<PathBuf>,
+    /// A location the job names in place of `repository`'s folder.
+    pub location: Option<String>,
     pub hot: Option<PathBuf>,
     pub plan: Option<domain::PlanId>,
     pub source: Option<PathBuf>,
@@ -610,7 +630,11 @@ impl Agent {
         let folders = self.repository();
         Job::Backup(BackupJob {
             repository: app::ports::RepositoryAccess {
-                repository: text(&folders.cold).to_owned(),
+                repository: self
+                    .backup
+                    .location
+                    .clone()
+                    .unwrap_or_else(|| text(&folders.cold).to_owned()),
                 repo_hot: folders.hot.as_deref().map(|hot| text(hot).to_owned()),
                 password: domain::secrets::SecretValue::new(PASSWORD),
                 options: Default::default(),

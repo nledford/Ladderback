@@ -95,6 +95,10 @@ pub enum FailureReason {
     /// repository whose latest operation failed this way is one to create
     /// (decision 53).
     RepositoryNotFound,
+    /// The server the repository is on answered and refused the credentials
+    /// it was sent (HTTP 401 or 403), so nothing was opened or written. Not
+    /// a missing repository: the server never said what is there.
+    CredentialsRefused,
     /// The engine's process didn't start the operation in time, so it never
     /// ran: it didn't read its job, or read it and sent nothing (not even a
     /// log line) before the start timeout, and it was killed.
@@ -152,6 +156,7 @@ impl FailureReason {
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
+            Self::CredentialsRefused => todo!(),
             Self::DaemonStopped => "daemon-stopped",
             Self::NoLocationUsable => "no-location-usable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
@@ -1187,6 +1192,14 @@ mod tests {
         assert_eq!(
             FailureReason::RepositoryReplaced.code(),
             "repository-replaced"
+        );
+    }
+
+    #[test]
+    fn a_refusal_of_the_credentials_codes_as_credentials_refused() {
+        assert_eq!(
+            FailureReason::CredentialsRefused.code(),
+            "credentials-refused"
         );
     }
 

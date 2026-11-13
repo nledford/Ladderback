@@ -41,3 +41,8 @@ Feature: Backups
     When the agent backs up the plan
     Then the operation ends as failed because its location holds another repository
     And the repository has no snapshots
+
+  Scenario: A backup to a server that refuses the credentials fails, saying so
+    Given the repository is on a REST server that refuses the credentials the agent sends it
+    When the agent backs up the plan
+    Then the operation ends as failed because the server refused the credentials

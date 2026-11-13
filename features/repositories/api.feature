@@ -31,6 +31,14 @@ Feature: Repositories over HTTP
     Then the refusal has status 404 and the typed code "repository-not-found"
     And the daemon lists no repositories
 
+  Scenario: Testing at a server that refuses the credentials says so, and saves nothing
+    Given a REST server that refuses the credentials the client sends it
+    When the client tests the repository
+    Then the refusal has status 503 and the typed code "credentials-refused"
+    And no answer holds the password
+    And no answer shows "canary-wrong-secret"
+    And the daemon lists no repositories
+
   Scenario: Connecting a repository adds it to the list, without its password
     Given an initialised repository
     When the client connects it as "demo"

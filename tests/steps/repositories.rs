@@ -21,6 +21,7 @@ use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
 use platform::SystemClock;
 use secrets::SystemSecrets;
 
+use super::rest_server_steps::{WRONG_SERVER_PASSWORD, location};
 use super::{Agent, blocking};
 
 /// Not a real secret: the scratch repositories' password.
@@ -80,6 +81,9 @@ fn contents(dir: &Path) -> Vec<(String, Vec<u8>)> {
 #[derive(Default)]
 pub struct RepositoriesSetup {
     cold: Option<PathBuf>,
+    /// A REST server's location, which the client's requests name in place
+    /// of `cold`.
+    rest: Option<String>,
     hot: Option<PathBuf>,
     /// A second repository's location, beside the scenario's own.
     other: Option<PathBuf>,
@@ -402,11 +406,16 @@ use super::operations_steps::{exchange, exchange_at};
 /// The settings a request carries: the scenario's location, its hot half when
 /// it has one, and the password the client has.
 fn api_settings(agent: &Agent) -> serde_json::Value {
-    let cold = agent
-        .repositories
-        .cold
-        .as_ref()
-        .expect("the scenario set a location");
+    let location = match &agent.repositories.rest {
+        Some(rest) => rest.clone(),
+        None => text(
+            agent
+                .repositories
+                .cold
+                .as_ref()
+                .expect("the scenario set a location"),
+        ),
+    };
     let password = match &agent.repositories.api_password_file {
         Some(path) => serde_json::json!({"source": "file", "path": text(path)}),
         None if agent.repositories.api_wrong_password => {
@@ -414,7 +423,7 @@ fn api_settings(agent: &Agent) -> serde_json::Value {
         }
         None => serde_json::json!({"source": "inline", "value": PASSWORD}),
     };
-    let mut settings = serde_json::json!({"repository": text(cold), "password": password});
+    let mut settings = serde_json::json!({"repository": location, "password": password});
     if let Some(hot) = &agent.repositories.hot {
         settings["repo-hot"] = serde_json::json!(text(hot));
     }
@@ -494,6 +503,11 @@ fn api_other_empty_location(agent: &mut Agent) {
     let other = agent.scratch().join("other-repo");
     fs::create_dir_all(&other).expect("the other repository folder");
     agent.repositories.cold = Some(other);
+}
+
+#[given("a REST server that refuses the credentials the client sends it")]
+async fn api_refusing_rest_server(agent: &mut Agent) {
+    agent.repositories.rest = Some(location(WRONG_SERVER_PASSWORD).await);
 }
 
 #[given(expr = "the client has connected it as {string}")]

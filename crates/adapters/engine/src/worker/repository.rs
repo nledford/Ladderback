@@ -685,14 +685,33 @@ mod tests {
 
     /// rustic's REST backend lists no config file when the server answers
     /// the config's request with any status but success, a refusal of the
-    /// credentials included: that is no definite answer, so the job fails
-    /// as it would have.
+    /// credentials included, and opening then says no config file is there.
+    /// The job says the server refused them, as 401 and as 403 alike (#478).
     #[test]
-    fn a_rest_server_that_refuses_the_credentials_is_not_said_to_hold_no_repository() {
+    fn a_rest_server_that_refuses_the_credentials_fails_the_job_as_refused() {
         assert_eq!(
             failed_code(&spec_at(&refusing_rest_server())),
-            api::ErrorCode::OperationFailed
+            api::ErrorCode::CredentialsRefused
         );
+        let forbidding = format!("rest:http://{}/", server_answering("403 Forbidden"));
+        assert_eq!(
+            failed_code(&spec_at(&forbidding)),
+            api::ErrorCode::CredentialsRefused
+        );
+    }
+
+    /// A hot half on a REST server that refuses the credentials fails the job
+    /// as refused too, though the cold half is a repository that opens.
+    #[test]
+    fn a_hot_half_on_a_rest_server_that_refuses_the_credentials_fails_the_job_as_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        init(&cold);
+        let spec = RepositorySpec {
+            repo_hot: Some(refusing_rest_server()),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        assert_eq!(failed_code(&spec), api::ErrorCode::CredentialsRefused);
     }
 
     // The probe of a location (decision 80).

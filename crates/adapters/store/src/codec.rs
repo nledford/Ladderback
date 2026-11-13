@@ -178,6 +178,7 @@ pub(crate) fn encode_failure(
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
         FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
+        FailureReason::CredentialsRefused => todo!(),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -424,6 +425,22 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryReplaced);
+    }
+
+    /// A persisted `credentials-refused` failure reads back as the typed
+    /// reason: no arguments, no detail.
+    #[test]
+    fn credentials_refused_round_trips() {
+        let columns = encode_failure(&FailureReason::CredentialsRefused)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "credentials-refused");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::CredentialsRefused);
     }
 
     /// A persisted `repository-not-found` failure reads back as the typed

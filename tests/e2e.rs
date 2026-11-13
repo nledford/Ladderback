@@ -65,6 +65,8 @@ mod notifications_steps;
 mod plan_settings_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
+#[path = "steps/rest_server.rs"]
+mod rest_server_steps;
 #[path = "steps/restart.rs"]
 mod restart_steps;
 #[path = "steps/service.rs"]
