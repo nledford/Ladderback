@@ -1637,6 +1637,16 @@ mod tests {
         assert_eq!(passwords("rest:https://demo:p@ss@nas/b"), ["p@ss"]);
     }
 
+    /// The last `@` of the authority ends its userinfo, and the last `@` of
+    /// the whole URL another (a raw `/` in a password): both are masked.
+    #[test]
+    fn an_at_sign_in_the_path_leaves_the_password_of_the_authority_found() {
+        assert_eq!(
+            passwords("rest:https://demo:s3cr3t@nas/a@b"),
+            ["s3cr3t", "s3cr3t@nas/a"]
+        );
+    }
+
     #[test]
     fn a_password_that_is_not_valid_percent_encoding_is_taken_as_it_is() {
         assert_eq!(passwords("rest:https://demo:100%@nas/b"), ["100%"]);
