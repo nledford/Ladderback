@@ -1,0 +1,7 @@
+# leptosfmt formats the inside of `view!` blocks, which rustfmt leaves alone
+# (technical design §13.13). These match rustfmt's settings: the workspace has
+# no rustfmt.toml, so rustfmt runs with its defaults for edition 2024.
+max_width = 100
+tab_spaces = 4
+indentation_style = "Spaces"
+newline_style = "Auto"
