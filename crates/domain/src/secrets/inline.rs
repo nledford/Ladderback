@@ -110,10 +110,20 @@ pub(crate) struct Userinfo<'a> {
     pub password_reference: bool,
 }
 
-/// A URL as written in a configuration field: every `${…}` reference is one
-/// opaque piece ([`written_pieces`]), so a `/`, `?`, `#`, `:` or `@` inside
-/// `${file:/path}` ends nothing. The one reading of a URL's authority that
-/// the warnings and the redactor share.
+/// Whether a URL starts after its scheme's `://`, or may lack its scheme, as
+/// a proxy setting may.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scheme {
+    Required,
+    Optional,
+}
+
+/// A URL read for its userinfo, piece by piece: as a configuration field
+/// writes it, each `${…}` reference one opaque piece ([`written_pieces`]),
+/// so a `/`, `?`, `#`, `:` or `@` inside `${file:/path}` ends nothing; or
+/// character by character, as a URL parser reads a text that holds `${…}`
+/// as text (a resolved location, an environment's value). The one reading
+/// of a URL's authority that the warnings and the redactor share.
 pub(crate) struct WrittenUrl<'a> {
     text: &'a str,
     pieces: Vec<Piece>,
@@ -123,32 +133,47 @@ pub(crate) struct WrittenUrl<'a> {
 }
 
 impl<'a> WrittenUrl<'a> {
-    /// The URL in `text`, which starts after the first `://` outside
-    /// references; `None` without one.
+    /// The URL in `text` as a configuration field writes it, which starts
+    /// after the first `://` outside references; `None` without one.
     pub(crate) fn after_scheme(text: &'a str) -> Option<Self> {
-        let (pieces, starts) = written_pieces(text);
-        let scheme = pieces
+        Self::starting(text, written_pieces(text), Scheme::Required)
+    }
+
+    /// The URL in `text` read both ways: as a configuration field writes it
+    /// and, where that reading finds a reference, character by character
+    /// too, for the text may hold `${…}` as text. Each starts after the first
+    /// `://` it reads, or, where `scheme` is optional, at the start of `text`
+    /// without one.
+    pub(crate) fn readings(text: &'a str, scheme: Scheme) -> Vec<Self> {
+        let written = written_pieces(text);
+        let referenced = written.0.contains(&Piece::Reference);
+        let mut readings: Vec<Self> = Self::starting(text, written, scheme).into_iter().collect();
+        if referenced {
+            readings.extend(Self::starting(text, char_pieces(text), scheme));
+        }
+        readings
+    }
+
+    /// The URL `pieces` (with where each starts in `text`) hold, from after
+    /// their first `://`.
+    fn starting(
+        text: &'a str,
+        (pieces, starts): (Vec<Piece>, Vec<usize>),
+        scheme: Scheme,
+    ) -> Option<Self> {
+        let authority = match pieces
             .windows(3)
-            .position(|three| three == [Piece::Char(':'), Piece::Char('/'), Piece::Char('/')])?;
+            .position(|three| three == [Piece::Char(':'), Piece::Char('/'), Piece::Char('/')])
+        {
+            Some(at) => at.saturating_add(3),
+            None if scheme == Scheme::Optional => 0,
+            None => return None,
+        };
         Some(Self {
             text,
             pieces,
             starts,
-            authority: scheme.saturating_add(3),
-        })
-    }
-
-    /// The URL in `text`, after its first `://` outside references, or the
-    /// whole of `text` without one, as a proxy setting may lack its scheme.
-    pub(crate) fn scheme_optional(text: &'a str) -> Self {
-        Self::after_scheme(text).unwrap_or_else(|| {
-            let (pieces, starts) = written_pieces(text);
-            Self {
-                text,
-                pieces,
-                starts,
-                authority: 0,
-            }
+            authority,
         })
     }
 
@@ -548,12 +573,7 @@ enum Piece {
 /// `${`: its `$` is written `$$`.
 fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
     let Ok(template) = Template::parse(text) else {
-        let (pieces, mut starts): (Vec<Piece>, Vec<usize>) = text
-            .char_indices()
-            .map(|(at, c)| (Piece::Char(c), at))
-            .unzip();
-        starts.push(text.len());
-        return (pieces, starts);
+        return char_pieces(text);
     };
     let mut pieces = Vec::with_capacity(text.len());
     let mut starts = Vec::with_capacity(text.len().saturating_add(1));
@@ -582,6 +602,17 @@ fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
         }
     }
     starts.push(at);
+    (pieces, starts)
+}
+
+/// `text` as pieces, one for each character, and where in `text` each
+/// starts, then `text.len()`: `text` read with no reference in it.
+fn char_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
+    let (pieces, mut starts): (Vec<Piece>, Vec<usize>) = text
+        .char_indices()
+        .map(|(at, c)| (Piece::Char(c), at))
+        .unzip();
+    starts.push(text.len());
     (pieces, starts)
 }
 

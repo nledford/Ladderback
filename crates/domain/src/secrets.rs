@@ -16,7 +16,7 @@ mod template;
 pub use command::{CommandLine, CommandLineError};
 pub(crate) use inline::MAX_RCLONE_DEPTH;
 pub(crate) use inline::url_has_userinfo;
-use inline::{AuthorityEnd, Userinfo, WrittenUrl, rclone_credentials};
+use inline::{AuthorityEnd, Scheme, Userinfo, WrittenUrl, rclone_credentials};
 pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
@@ -141,16 +141,17 @@ impl MaskedSecrets {
         self.count(secret.expose())
     }
 
-    /// Counts the secrets a location holds: the password of its URL, and
-    /// the credentials of an rclone connection string.
+    /// Counts the secrets a location holds: what of its URL's userinfo a
+    /// redactor masks, and the credentials of an rclone connection string.
     pub fn location(&mut self, location: &str) -> Result<(), TooMuchToMask> {
         location_secrets(location)
             .iter()
             .try_for_each(|secret| self.secret(secret))
     }
 
-    /// Counts the secrets an option holds: the password of a URL in it, and
-    /// its whole value when its name says it holds a credential.
+    /// Counts the secrets an option holds: what of the userinfo of a URL in
+    /// it a redactor masks, and its whole value when its name says it holds
+    /// a credential.
     pub fn option(&mut self, name: &str, value: &str) -> Result<(), TooMuchToMask> {
         option_secrets(name, value)
             .iter()
@@ -639,13 +640,8 @@ fn go_prints(c: char) -> bool {
 
 /// Every password the userinfo of the URL inside a repository string may
 /// hold, as written and decoded; empty when the string has no URL or the
-/// URL has no password.
-///
-/// The userinfo usually ends at the last `@` before the first `/`, but a raw
-/// `/` in the password ends the authority early, so the last `@` of the
-/// whole string is tried too. Masking part of a path by mistake is the safe
-/// direction. A `${…}` reference is one piece ([`WrittenUrl`]): a `/`, `:`
-/// or `@` in it ends nothing.
+/// URL has no password. Each userinfo the URL may hold is tried
+/// ([`userinfos`]), with a `${…}` reference read as one piece and as text.
 pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
     url_userinfo_parts(repository, |userinfo| userinfo.password)
 }
@@ -668,9 +664,7 @@ fn url_userinfo_parts<'a>(
     text: &'a str,
     part: impl Fn(&Userinfo<'a>) -> Option<&'a str>,
 ) -> Vec<SecretValue> {
-    WrittenUrl::after_scheme(text).map_or_else(Vec::new, |url| {
-        forms(userinfos(&url).iter().filter_map(part))
-    })
+    forms(userinfos(text, Scheme::Required).iter().filter_map(part))
 }
 
 /// Whether a repository string is an rclone connection string that carries a
@@ -696,7 +690,7 @@ pub fn rclone_secret(location: &str) -> bool {
 /// (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty when there
 /// is no userinfo.
 pub fn url_credentials(url: &str) -> Vec<SecretValue> {
-    let userinfos = userinfos(&WrittenUrl::scheme_optional(url));
+    let userinfos = userinfos(url, Scheme::Optional);
     forms(
         userinfos
             .iter()
@@ -711,13 +705,25 @@ pub fn url_credentials(url: &str) -> Vec<SecretValue> {
     )
 }
 
-/// The userinfos a URL's authority and path may hold: the one before the
-/// last `@` of the authority, and the one before the last `@` of the whole
-/// of it, for a raw `/` in a password ends the authority early.
-fn userinfos<'a>(url: &WrittenUrl<'a>) -> Vec<Userinfo<'a>> {
-    [AuthorityEnd::Slash, AuthorityEnd::Text]
-        .into_iter()
-        .filter_map(|end| url.userinfo(end))
+/// The userinfos the URL in `text` may hold, in each of its readings
+/// ([`WrittenUrl::readings`]): the one before the last `@` of the authority
+/// as a URL parser ends it, at its first `/`, `\`, `?` or `#`; the one
+/// before the last `@` up to the first `/`, for a raw `?` or `#` in a
+/// password ends the authority early; and the one before the last `@` of
+/// the whole of it, for a raw `/` does too. Masking part of a path by
+/// mistake is the safe direction.
+fn userinfos(text: &str, scheme: Scheme) -> Vec<Userinfo<'_>> {
+    WrittenUrl::readings(text, scheme)
+        .iter()
+        .flat_map(|url| {
+            [
+                AuthorityEnd::Standard,
+                AuthorityEnd::Slash,
+                AuthorityEnd::Text,
+            ]
+            .into_iter()
+            .filter_map(|end| url.userinfo(end))
+        })
         .collect()
 }
 
