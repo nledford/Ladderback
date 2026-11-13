@@ -32,10 +32,14 @@ use crate::repositories::{
     password_source, problems_of, repository_notes, rereads_list, row_refusal,
     test_locations_label, test_locations_path, tested_announcement,
 };
+use crate::session::SignInOffNotice;
 use crate::sign_in::SignInOff;
 use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
+
+/// The `id` of the notice, on every page, that sign-in is off on the network.
+pub(crate) const SIGN_IN_OFF_NETWORK_ID: &str = "sign-in-off-network";
 
 /// The `<h1>` of a page, with `tabindex="-1"` so that focus can move to it.
 /// When a reader navigates to the page it takes focus as it is shown
@@ -43,13 +47,21 @@ use crate::{page, text};
 #[component]
 pub(crate) fn PageHeading(children: Children) -> impl IntoView {
     let heading = NodeRef::<leptos::html::H1>::new();
+    // With sign-in off on the network, the notice above every page is read
+    // after the heading, which takes focus when a reader navigates (§10.1).
+    let notice = use_context::<RwSignal<SignInOffNotice>>();
+    let described_by = move || {
+        notice
+            .is_some_and(|notice| notice.get().describes_the_heading())
+            .then_some(SIGN_IN_OFF_NETWORK_ID)
+    };
     Effect::new(move |_| {
         if let Some(heading) = heading.get() {
             page::focus_on_arrival(&heading);
         }
     });
     view! {
-        <h1 node_ref=heading tabindex="-1">
+        <h1 node_ref=heading tabindex="-1" aria-describedby=described_by>
             {children()}
         </h1>
     }

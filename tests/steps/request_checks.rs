@@ -5,7 +5,7 @@
 
 use std::assert_matches;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -79,19 +79,30 @@ static LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Starts `ladderback serve` with `args`, and waits until it listens or exits.
 /// The wait is on a blocking thread: see [`blocking`]. The daemon uses the
-/// folders under `home`, or folders of its own.
-async fn start(scratch: &Path, home: Option<&Path>, args: &[&str]) -> (Child, Outcome, PathBuf) {
+/// folders under `home`, or folders of its own; `rust_log`, when given, is
+/// the `RUST_LOG` it logs at.
+async fn start(
+    scratch: &Path,
+    home: Option<&Path>,
+    args: &[&str],
+    rust_log: Option<&'static str>,
+) -> (Child, Outcome, PathBuf) {
     let scratch = scratch.to_owned();
     let home = home.map(Path::to_owned);
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
     blocking(move || {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        spawn_daemon(&scratch, home.as_deref(), &args)
+        spawn_daemon(&scratch, home.as_deref(), &args, rust_log)
     })
     .await
 }
 
-fn spawn_daemon(scratch: &Path, home: Option<&Path>, args: &[&str]) -> (Child, Outcome, PathBuf) {
+fn spawn_daemon(
+    scratch: &Path,
+    home: Option<&Path>,
+    args: &[&str],
+    rust_log: Option<&str>,
+) -> (Child, Outcome, PathBuf) {
     let started = LOGS.fetch_add(1, Ordering::Relaxed);
     let log_path = scratch.join(format!("serve-{started}.log"));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
@@ -111,6 +122,9 @@ fn spawn_daemon(scratch: &Path, home: Option<&Path>, args: &[&str]) -> (Child, O
         // which is removed too.
         .env("LC_ALL", "C")
         .env_remove("LANGUAGE");
+    if let Some(rust_log) = rust_log {
+        command.env("RUST_LOG", rust_log);
+    }
     let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
     let began = Instant::now();
     loop {
@@ -249,12 +263,39 @@ async fn serving(agent: &mut Agent, name: String) {
         agent.scratch(),
         None,
         &["--listen", "127.0.0.1:0", "--allowed-host", &name],
+        None,
     )
     .await;
     match outcome {
         Outcome::Listening(addr) => agent.web.server = Some(Server { child, addr }),
         Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
     }
+}
+
+/// Starts `ladderback serve` on every address with sign-in off and `name` as
+/// its one host name: on the network, as a home server is. Requests reach it
+/// at its loopback address, the same socket, with the `Host` each scenario
+/// sets, so no name has to resolve to it.
+#[given(
+    expr = "Ladderback is serving on every address with sign-in off, configured for the host name {string}"
+)]
+async fn serving_on_the_network(agent: &mut Agent, name: String) {
+    let (child, outcome, log) = start(
+        agent.scratch(),
+        None,
+        &["--listen", "0.0.0.0:0", "--allowed-host", &name],
+        None,
+    )
+    .await;
+    match outcome {
+        Outcome::Listening(addr) => {
+            assert!(addr.ip().is_unspecified(), "listening on {addr}");
+            let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, addr.port()));
+            agent.web.server = Some(Server { child, addr });
+        }
+        Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
+    }
+    agent.web.log = Some(log);
 }
 
 #[given("the request comes from the UI's page")]
@@ -446,9 +487,18 @@ fn no_header(agent: &mut Agent, name: String) {
 
 #[when(expr = "Ladderback is started with the arguments {string}")]
 async fn started_with(agent: &mut Agent, arguments: String) {
+    start_with(agent, &arguments, None).await;
+}
+
+#[when(expr = "Ladderback is started with the log turned off and the arguments {string}")]
+async fn started_with_the_log_off(agent: &mut Agent, arguments: String) {
+    start_with(agent, &arguments, Some("off")).await;
+}
+
+async fn start_with(agent: &mut Agent, arguments: &str, rust_log: Option<&'static str>) {
     let args: Vec<&str> = arguments.split_whitespace().collect();
     let home = agent.web.home.clone();
-    let (child, outcome, log) = start(agent.scratch(), home.as_deref(), &args).await;
+    let (child, outcome, log) = start(agent.scratch(), home.as_deref(), &args, rust_log).await;
     if let Outcome::Listening(addr) = &outcome {
         // Stopped when the scenario ends, as the daemon from the Background.
         agent.web.server = Some(Server { child, addr: *addr });
@@ -465,6 +515,7 @@ pub(crate) async fn serve_on_loopback(agent: &mut Agent) {
         agent.scratch(),
         home.as_deref(),
         &["--listen", "127.0.0.1:0"],
+        None,
     )
     .await;
     match outcome {
@@ -493,6 +544,43 @@ fn log_warns(agent: &mut Agent, words: String) {
     );
 }
 
+/// A line the daemon says itself, after its name, rather than a log record:
+/// no `RUST_LOG` can hide it (§10.1).
+#[then(expr = "Ladderback warns {string}")]
+fn warns(agent: &mut Agent, words: String) {
+    let path = agent.web.log.as_ref().expect("Ladderback was started");
+    let log = std::fs::read_to_string(path).expect("the daemon's log");
+    assert!(
+        log.lines()
+            .any(|line| line.starts_with("ladderback: ") && line.contains(&words)),
+        "Ladderback said nothing saying {words:?} in: {log}"
+    );
+}
+
+/// The warning names the address the daemon took, its port included rather
+/// than the 0 it was asked for, and comes before the line that says where it
+/// listens, which scripts and people read first.
+#[then(
+    expr = "Ladderback warns {string} and the address it listens on, before it says where it listens"
+)]
+fn warns_at_the_listened_address(agent: &mut Agent, words: String) {
+    let Some(Outcome::Listening(addr)) = agent.web.start.as_ref() else {
+        panic!("Ladderback is not listening");
+    };
+    let path = agent.web.log.as_ref().expect("Ladderback was started");
+    let log = std::fs::read_to_string(path).expect("the daemon's log");
+    let said = format!("{words} {addr}");
+    let lines: Vec<&str> = log.lines().collect();
+    let warned = lines
+        .iter()
+        .position(|line| line.starts_with("ladderback: ") && line.contains(&said));
+    let listening = lines.iter().position(|line| line.contains(LISTENING));
+    assert!(
+        matches!((warned, listening), (Some(warned), Some(listening)) if warned < listening),
+        "Ladderback did not say {said:?} before where it listens in: {log}"
+    );
+}
+
 /// The daemon's exit status and log, when it didn't start listening.
 pub(crate) fn exited(agent: &Agent) -> (ExitStatus, &str) {
     match agent.web.start.as_ref().expect("Ladderback was started") {
@@ -506,6 +594,17 @@ fn refuses(agent: &mut Agent) {
     let (status, log) = exited(agent);
     // Exit code 1 is a refusal; a panic (101) or a signal isn't.
     assert_eq!(status.code(), Some(1), "log: {log}");
+}
+
+#[then(expr = "Ladderback refuses to start, naming {string}")]
+fn refuses_naming(agent: &mut Agent, words: String) {
+    let (status, log) = exited(agent);
+    assert_eq!(status.code(), Some(1), "log: {log}");
+    assert!(
+        log.lines()
+            .any(|line| line.starts_with("ladderback: ") && line.contains(&words)),
+        "no refusal naming {words:?} in: {log}"
+    );
 }
 
 #[then(expr = "Ladderback rejects the argument {string}")]

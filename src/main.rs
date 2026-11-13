@@ -52,9 +52,10 @@ struct Cli {
 enum Command {
     /// Run the agent and serve its web UI.
     Serve {
-        /// Address to listen on. Beyond loopback only with sign-in on and an
-        /// `--allowed-host`. Port 0 picks a free port; the address in use is
-        /// printed on startup.
+        /// Address to listen on. Beyond loopback only with an
+        /// `--allowed-host`; with sign-in off it then warns that anyone who
+        /// can reach the address can use it. Port 0 picks a free port; the
+        /// address in use is printed on startup.
         #[arg(long, default_value = "127.0.0.1:9898")]
         listen: SocketAddr,
         /// A host name or address, without a port, that the web UI answers to
@@ -202,7 +203,8 @@ fn run_daemon(
         }
     }
     // Sign-in is decided once, at start, by whether an admin password is
-    // kept (§10.1, decision 70); beyond loopback it needs one and a host name.
+    // kept (§10.1, decisions 70 and 87); beyond loopback the daemon needs a
+    // host name, with sign-in on or off.
     // The one source of randomness, for sign-in's tokens and the scheduler's
     // jitter alike (§3.2).
     let random: Arc<dyn Random> = Arc::new(OsRandom);
@@ -214,22 +216,8 @@ fn run_daemon(
         }
     };
     let sign_in_on = matches!(sign_in, http_adapter::SignIn::On(_));
-    match http_adapter::startup_rule(listen, sign_in_on, &hosts) {
-        Ok(http_adapter::Exposure::Network) => log::warn!(
-            "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
-        ),
-        Ok(http_adapter::Exposure::Loopback) if !sign_in_on => log::warn!(
-            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
-        ),
-        Ok(http_adapter::Exposure::Loopback) => {}
-        Err(http_adapter::StartupRefusal::SignInOff(address)) => {
-            say(
-                localizer,
-                msg::CLI_REFUSE_NON_LOOPBACK,
-                &[("address", text(address))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
+    let exposure = match http_adapter::startup_rule(listen, &hosts) {
+        Ok(exposure) => exposure,
         Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
             say(
                 localizer,
@@ -238,6 +226,17 @@ fn run_daemon(
             )?;
             return Ok(ExitCode::FAILURE);
         }
+    };
+    // Open on the network with sign-in off is said on stderr once the
+    // address is bound (below), not logged: no log setting hides it.
+    match (exposure, sign_in_on) {
+        (http_adapter::Exposure::Network, true) => log::warn!(
+            "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
+        ),
+        (http_adapter::Exposure::Loopback, false) => log::warn!(
+            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
+        ),
+        (http_adapter::Exposure::Network, false) | (http_adapter::Exposure::Loopback, true) => {}
     }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -259,7 +258,7 @@ fn run_daemon(
         log: operation_log,
         lock,
         background,
-    } = match runtime.block_on(composition::daemon(sign_in)) {
+    } = match runtime.block_on(composition::daemon(sign_in, exposure)) {
         Ok(daemon) => daemon,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;
@@ -278,7 +277,16 @@ fn run_daemon(
                 return Ok(ExitCode::FAILURE);
             }
         };
-        match listener.local_addr() {
+        let bound = listener.local_addr();
+        if exposure == http_adapter::Exposure::Network && !sign_in_on {
+            let address = bound.as_ref().map_or(listen, |addr| *addr);
+            say(
+                localizer,
+                msg::CLI_WARN_NETWORK_SIGN_IN_OFF,
+                &[("address", text(address))],
+            )?;
+        }
+        match bound {
             Ok(addr) => say(
                 localizer,
                 msg::CLI_LISTENING,

@@ -1779,6 +1779,7 @@ mod tests {
             csrf_token: Some("ab".to_owned()),
             idle_seconds: Some(43_200),
             ends_in_seconds: Some(60),
+            exposure: ExposureDto::Loopback,
         };
         assert_eq!(
             serde_json::to_value(&signed_in).unwrap(),
@@ -1794,11 +1795,25 @@ mod tests {
             csrf_token: None,
             idle_seconds: None,
             ends_in_seconds: None,
+            exposure: ExposureDto::Loopback,
         };
         assert_eq!(
             serde_json::to_value(&off).unwrap(),
             serde_json::json!({"sign-in": "off"})
         );
+        // Loopback is left out, as before the field existed; the network is
+        // said, and an answer without it reads as loopback.
+        let on_the_network = SessionDto {
+            exposure: ExposureDto::Network,
+            ..off
+        };
+        assert_eq!(
+            serde_json::to_value(&on_the_network).unwrap(),
+            serde_json::json!({"sign-in": "off", "exposure": "network"})
+        );
+        let read: SessionDto =
+            serde_json::from_value(serde_json::json!({"sign-in": "off"})).unwrap();
+        assert_eq!(read.exposure, ExposureDto::Loopback);
     }
 
     #[test]
@@ -3163,7 +3178,9 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// carries the CSRF token its changed requests send as `x-csrf-token`, how
 /// long the session lasts unused (`idle-seconds`), and how long it has left
 /// however it is used (`ends-in-seconds`): the web UI warns before the
-/// first ends it (components §4.5).
+/// first ends it (components §4.5). `exposure` is `network` when the daemon
+/// listens beyond loopback, and left out on loopback, as before it existed:
+/// with sign-in off, the web UI then warns on every page.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3174,6 +3191,8 @@ pub struct SessionDto {
     pub idle_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_in_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "ExposureDto::is_loopback")]
+    pub exposure: ExposureDto,
 }
 
 /// Where a request stands with sign-in.
@@ -3186,6 +3205,24 @@ pub enum SignInStateDto {
     SignedOut,
     /// The request's session is live.
     SignedIn,
+}
+
+/// Who can reach the daemon at the address it listens on (§10.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExposureDto {
+    /// This machine only: a loopback address.
+    #[default]
+    Loopback,
+    /// The network: any other address.
+    Network,
+}
+
+impl ExposureDto {
+    /// Whether this is loopback, which the session's answer leaves out.
+    pub fn is_loopback(&self) -> bool {
+        *self == Self::Loopback
+    }
 }
 
 /// `POST /api/v1/session`: the password, as typed. Never logged or shown

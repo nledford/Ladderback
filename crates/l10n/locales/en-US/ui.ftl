@@ -1289,8 +1289,11 @@ ui-session-ended-title = Sign in again
 # What that dialog says. The page under it stays as it was, so nothing typed there is lost; the request that found the session ended is sent again once signed in.
 ui-session-ended-body = Your session has ended. Sign in again to go on: what you typed on this page is kept, and what you asked for is done once you are signed in.
 
-# The start page's notice when no admin password is set: Ladderback then listens on loopback only, so anyone with an account on this machine can use it. `ladderback set-password` is typed as it is: keep it a string literal.
+# The start page's notice when no admin password is set and Ladderback listens on loopback only, so anyone with an account on this machine can use it. `ladderback set-password` is typed as it is: keep it a string literal.
 ui-sign-in-off = Sign-in is off: anyone on this machine can use { -brand-name }. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+
+# The notice on every page when no admin password is set and Ladderback listens on the network (an address beyond loopback), so anyone who can reach that address can use it. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-sign-in-off-network = Sign-in is off, and { -brand-name } answers on the network: anyone who can reach it can run and change backups. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
 
 # The name and heading of the warning shown 2 minutes before a session would end because the page has not used it for 12 hours (WCAG 2.2.1). It is not shown when the session's 30-day lifetime ends it first.
 ui-idle-warning-title = You will be signed out soon

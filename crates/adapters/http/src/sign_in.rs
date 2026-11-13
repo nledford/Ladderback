@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use api::{ErrorCode, MsgArg, SessionDto, SignInDto, SignInStateDto};
+use api::{ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto, SignInStateDto};
 use app::access::{Access, SignInRefused};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
@@ -22,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
 use domain::access::{Password, SESSION_IDLE, SESSION_LIFETIME, Token};
 
-use crate::{refused, refused_with};
+use crate::{Exposure, refused, refused_with};
 
 /// The session cookie's name.
 pub const COOKIE_NAME: &str = "ladderback-session";
@@ -133,16 +133,21 @@ pub(crate) async fn enforce(
 
 /// `GET /api/v1/session`: whether sign-in is on, and whether the request's
 /// session is live, with its CSRF token when it is.
-pub(crate) async fn current(State(sign_in): State<SignIn>, headers: HeaderMap) -> Response {
+pub(crate) async fn current(
+    State(sign_in): State<SignIn>,
+    State(exposure): State<Exposure>,
+    headers: HeaderMap,
+) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None);
+        return answer(SignInStateDto::Off, None, exposure);
     };
     match session_token(&headers).and_then(|token| access.session(&token)) {
         Some(session) => answer(
             SignInStateDto::SignedIn,
             Some((session.csrf().to_text(), session.ends_in())),
+            exposure,
         ),
-        None => answer(SignInStateDto::SignedOut, None),
+        None => answer(SignInStateDto::SignedOut, None, exposure),
     }
 }
 
@@ -150,9 +155,13 @@ pub(crate) async fn current(State(sign_in): State<SignIn>, headers: HeaderMap) -
 /// cookie can't be read by the page's scripts and is never sent by another
 /// site; it is marked `Secure` when the page that sent the request was served
 /// over HTTPS, as through a TLS-terminating proxy.
-pub(crate) async fn sign_in(State(sign_in): State<SignIn>, request: Request) -> Response {
+pub(crate) async fn sign_in(
+    State(sign_in): State<SignIn>,
+    State(exposure): State<Exposure>,
+    request: Request,
+) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None);
+        return answer(SignInStateDto::Off, None, exposure);
     };
     // Each client's sign-ins wait on their own, keyed by the connection's
     // address (§10.1). A server that didn't hand it over would put every
@@ -193,6 +202,7 @@ pub(crate) async fn sign_in(State(sign_in): State<SignIn>, request: Request) -> 
             let mut response = answer(
                 SignInStateDto::SignedIn,
                 Some((signed_in.csrf.to_text(), SESSION_LIFETIME)),
+                exposure,
             );
             let cookie = format!(
                 "{COOKIE_NAME}={}; Path=/; Max-Age={}; HttpOnly; SameSite=Strict{}",
@@ -235,9 +245,13 @@ pub(crate) async fn sign_in(State(sign_in): State<SignIn>, request: Request) -> 
 /// cookie. A changed request like any other, it carries the session's CSRF
 /// token, so another site can't sign the admin out. A request whose session
 /// has already ended has nothing to end, and is answered as signed out.
-pub(crate) async fn sign_out(State(sign_in): State<SignIn>, headers: HeaderMap) -> Response {
+pub(crate) async fn sign_out(
+    State(sign_in): State<SignIn>,
+    State(exposure): State<Exposure>,
+    headers: HeaderMap,
+) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None);
+        return answer(SignInStateDto::Off, None, exposure);
     };
     if let Some(token) = session_token(&headers)
         && let Some(session) = access.peek(&token)
@@ -247,7 +261,7 @@ pub(crate) async fn sign_out(State(sign_in): State<SignIn>, headers: HeaderMap) 
         }
         access.sign_out(&token);
     }
-    let mut response = answer(SignInStateDto::SignedOut, None);
+    let mut response = answer(SignInStateDto::SignedOut, None, exposure);
     let forget = format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
     if let Ok(value) = HeaderValue::from_str(&forget) {
         response.headers_mut().insert(SET_COOKIE, value);
@@ -274,9 +288,14 @@ fn over_https(headers: &HeaderMap) -> bool {
             .is_some_and(|authority| authority.eq_ignore_ascii_case(host))
 }
 
-/// The session route's answer: where the request stands and, for a live
-/// session, its CSRF token and how long it has left however it is used.
-fn answer(sign_in: SignInStateDto, live: Option<(String, SignedDuration)>) -> Response {
+/// The session route's answer: where the request stands, who can reach the
+/// daemon (so the page can say who can use it with sign-in off) and, for a
+/// live session, its CSRF token and how long it has left however it is used.
+fn answer(
+    sign_in: SignInStateDto,
+    live: Option<(String, SignedDuration)>,
+    exposure: Exposure,
+) -> Response {
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some((csrf, ends_in)) => (
             Some(csrf),
@@ -292,6 +311,10 @@ fn answer(sign_in: SignInStateDto, live: Option<(String, SignedDuration)>) -> Re
             csrf_token,
             idle_seconds,
             ends_in_seconds,
+            exposure: match exposure {
+                Exposure::Loopback => ExposureDto::Loopback,
+                Exposure::Network => ExposureDto::Network,
+            },
         }),
     )
         .into_response()

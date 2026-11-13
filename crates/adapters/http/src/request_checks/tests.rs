@@ -35,6 +35,7 @@ pub(crate) fn test_state() -> AppState {
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
         sign_in: crate::SignIn::Off,
+        exposure: crate::Exposure::Loopback,
     }
 }
 
@@ -730,20 +731,18 @@ fn addr(text: &str) -> SocketAddr {
 }
 
 #[test]
-fn loopback_addresses_may_be_listened_on_with_sign_in_on_or_off() {
+fn loopback_addresses_may_always_be_listened_on() {
     for text in [
         "127.0.0.1:9898",
         "127.0.0.1:0",
         "127.1.2.3:9898",
         "[::1]:9898",
     ] {
-        for on in [false, true] {
-            assert_eq!(
-                startup_rule(addr(text), on, &[]),
-                Ok(Exposure::Loopback),
-                "{text} {on}"
-            );
-        }
+        assert_eq!(
+            startup_rule(addr(text), &[]),
+            Ok(Exposure::Loopback),
+            "{text}"
+        );
     }
 }
 
@@ -759,30 +758,26 @@ const OTHER_ADDRESSES: [&str; 9] = [
     "[::ffff:127.0.0.1]:9898",
 ];
 
+/// Sign-in on or off, the rule is the same (decision 87): it doesn't even
+/// take whether sign-in is on, which changes only what the daemon warns.
 #[test]
-fn other_addresses_may_not_be_listened_on_with_sign_in_off() {
-    let hosts = ["nas.example.com".to_owned()];
+fn other_addresses_may_be_listened_on_for_a_configured_host_name() {
+    let hosts = ["backup.example".to_owned()];
     for text in OTHER_ADDRESSES {
         assert_eq!(
-            startup_rule(addr(text), false, &hosts),
-            Err(StartupRefusal::SignInOff(addr(text))),
+            startup_rule(addr(text), &hosts),
+            Ok(Exposure::Network),
             "{text}"
         );
     }
 }
 
 #[test]
-fn other_addresses_need_sign_in_and_a_configured_host_name() {
-    let hosts = ["nas.example.com".to_owned()];
+fn other_addresses_need_a_configured_host_name() {
     for text in OTHER_ADDRESSES {
         assert_eq!(
-            startup_rule(addr(text), true, &[]),
+            startup_rule(addr(text), &[]),
             Err(StartupRefusal::NoAllowedHost(addr(text))),
-            "{text}"
-        );
-        assert_eq!(
-            startup_rule(addr(text), true, &hosts),
-            Ok(Exposure::Network),
             "{text}"
         );
     }

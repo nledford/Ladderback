@@ -17,7 +17,7 @@ use crate::components::{ErrorSummary, FormField, SummaryItem, recover_focus, tra
 use crate::live::{modal_gone, open_modal};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
-use crate::session::{Answer, Signed, Standing, about_the_password, lacking};
+use crate::session::{Answer, SignInOffNotice, Signed, Standing, about_the_password, lacking};
 use crate::{text, ws};
 
 /// Where a sign-in form stands, which decides how it says a problem: the
@@ -329,13 +329,14 @@ pub(crate) fn SignOut(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -
 }
 
 /// The start page's notice that sign-in is off: anyone on this machine can
-/// use Ladderback, and how to turn sign-in on. Shown only while it is off.
+/// use Ladderback, and how to turn sign-in on. Shown only while it is off on
+/// loopback; on the network every page has a notice of its own (`App`).
 #[component]
 pub(crate) fn SignInOff(localizer: Arc<Localizer>) -> impl IntoView {
-    let standing = use_context::<RwSignal<Standing>>();
-    let notice = text(&localizer, msg::UI_SIGN_IN_OFF);
+    let notice = use_context::<RwSignal<SignInOffNotice>>();
+    let words = text(&localizer, msg::UI_SIGN_IN_OFF);
     move || {
-        (standing.map(|standing| standing.get()) == Some(Standing::Off))
-            .then(|| view! { <p>{notice.clone()}</p> })
+        (notice.map(|notice| notice.get()) == Some(SignInOffNotice::StartPage))
+            .then(|| view! { <p>{words.clone()}</p> })
     }
 }

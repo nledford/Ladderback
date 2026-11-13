@@ -72,11 +72,20 @@ pub struct AppState {
     pub repositories: Arc<dyn Repositories>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
+    /// Who can reach the daemon at the address it listens on, which the
+    /// session route tells the page (§10.1).
+    pub exposure: Exposure,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
     fn from_ref(state: &AppState) -> Self {
         state.sign_in.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Exposure {
+    fn from_ref(state: &AppState) -> Self {
+        state.exposure
     }
 }
 
@@ -1056,6 +1065,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
             sign_in: SignIn::Off,
+            exposure: Exposure::Loopback,
         }
     }
 
@@ -1092,6 +1102,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
             sign_in: SignIn::Off,
+            exposure: Exposure::Loopback,
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2210,6 +2221,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
             sign_in: SignIn::Off,
+            exposure: Exposure::Loopback,
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

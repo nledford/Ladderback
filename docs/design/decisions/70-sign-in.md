@@ -2,6 +2,8 @@
 
 **One admin password, set at the terminal and kept only as an argon2id hash, starts sessions that end 12 hours after a person last used them and 30 days after they started; only what a person does counts as use** (recorded 2026-11-12, §10.1, §4.5; #279). Decision 11 made sign-in optional; this is how it works when it is on. The details are in §10.1.
 
+**Amended by decision 87** (2026-11-13, #503): beyond loopback needs an `--allowed-host`, but no longer sign-in (the "Beyond loopback" point below). With sign-in off there, the daemon warns on stderr, in a line no log setting hides, and every page says that anyone who can reach it can use it.
+
 Why:
 
 - **On or off, decided at start.** Sign-in is on while `admin-password` exists in the data folder, and the daemon decides once, when it starts. A daemon that could turn sign-in on by itself would leave a page open without one; one that turned it off when the file went away would open the API to anyone. A hash file the daemon can't read refuses the start, so a damaged file never means sign-in off.
