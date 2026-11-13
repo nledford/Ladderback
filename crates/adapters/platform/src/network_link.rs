@@ -1,11 +1,11 @@
 //! The machine's network link (technical design §5, decision 80): the kind
 //! of interface its default route leaves by, which a location's rule is
 //! evaluated against. The kernel's routing tables and `/sys/class/net` on
-//! Linux; `route -n get default` and `networksetup -listallhardwareports` on
-//! macOS. The name of the Wi-Fi network that interface has joined, asked only
-//! when a rule lists names: NetworkManager over D-Bus on Linux, and
-//! `system_profiler -json SPAirPortDataType` on macOS. No error repeats a
-//! name: it says where the machine is.
+//! Linux; `route -n get default`, `networksetup -listallhardwareports` and
+//! `ifconfig <interface>` on macOS. The name of the Wi-Fi network that
+//! interface has joined, asked only when a rule lists names: NetworkManager
+//! over D-Bus on Linux, and `system_profiler -json SPAirPortDataType` on
+//! macOS. No error repeats a name: it says where the machine is.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -373,14 +373,27 @@ impl NetworkLink for RouteLink {
     async fn link(&self) -> Result<Link, PlatformError> {
         let interface = self.interface().await?;
         let ports = self.ports.output().await?;
-        hardware_port(self.ports.path.as_path(), &ports, &interface)
+        Ok(
+            match hardware_port(self.ports.path.as_path(), &ports, &interface)? {
+                Port::WiFi => Link::WiFi,
+                Port::Other => {
+                    let media = self.media.output_with(Some(interface.as_ref())).await?;
+                    if ethernet_medium(&media) {
+                        Link::Wired
+                    } else {
+                        Link::Other
+                    }
+                }
+                Port::Absent => Link::Other,
+            },
+        )
     }
 
     /// `None` when the default route's interface isn't the Wi-Fi port.
     async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
         let interface = self.interface().await?;
         let ports = self.ports.output().await?;
-        if hardware_port(self.ports.path.as_path(), &ports, &interface)? != Link::WiFi {
+        if hardware_port(self.ports.path.as_path(), &ports, &interface)? != Port::WiFi {
             return Ok(None);
         }
         let profile = self.profile.output().await?;
@@ -430,11 +443,21 @@ fn current_network(
     }
 }
 
-/// What `networksetup -listallhardwareports` says of `interface`: Wi-Fi for
-/// the Wi-Fi port, not Wi-Fi for any other port (no Mac on Ethernet has been
-/// seen yet, so a wired port can't be told from a bridge, decision 80), and
-/// other for an interface that is no hardware port, as a tunnel is.
-fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Link, PlatformError> {
+/// What `networksetup -listallhardwareports` says of an interface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Port {
+    /// The Wi-Fi port.
+    WiFi,
+    /// Another hardware port: wired when its medium is Ethernet. Its name
+    /// says nothing reliable ("USB 10/100/1G/2.5G LAN" is one, #452).
+    Other,
+    /// No hardware port, as a tunnel.
+    Absent,
+}
+
+/// What `networksetup -listallhardwareports` says of `interface`, and an
+/// error when it lists no port at all.
+fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Port, PlatformError> {
     let mut port = None;
     let mut seen = false;
     for line in ports.lines().map(str::trim) {
@@ -445,28 +468,60 @@ fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Link, Plat
             && device.trim() == interface
         {
             return Ok(match port {
-                Some("Wi-Fi" | "AirPort") => Link::WiFi,
-                _ => Link::NotWiFi,
+                Some("Wi-Fi" | "AirPort") => Port::WiFi,
+                _ => Port::Other,
             });
         }
     }
     if seen {
-        Ok(Link::Other)
+        Ok(Port::Absent)
     } else {
         Err(unrecognized(from, "no hardware port"))
     }
 }
 
-/// Whether this machine's reader tells a wired link from other links: not
-/// on macOS, until a run on Ethernet has shown how a Mac names its wired
-/// ports (decision 80), so a rule's `wired` never holds there.
+/// Whether this machine's reader tells a wired link from other links: both
+/// readers do (decision 80).
 pub fn tells_wired() -> bool {
-    !cfg!(target_os = "macos")
+    true
 }
 
-/// Whether `ifconfig <interface>` says the interface's medium is Ethernet.
-fn ethernet_medium(_ifconfig: &str) -> bool {
-    todo!()
+/// Whether `ifconfig <interface>` says the interface's medium is Ethernet:
+/// its first `media:` line names a `…base…` medium (`1000baseT`,
+/// `2500Base-T`, `10Gbase-T`), as the medium set (by hand) or the one active,
+/// which `ifconfig` adds in brackets when the two differ: `autoselect
+/// (2500Base-T <full-duplex>)` negotiated, `1000baseT <full-duplex> (none)`
+/// set by hand on a port with no link. Every Ethernet medium a Mac's port
+/// can have is such a one in xnu's `bsd/net/if_media.h`
+/// (`IFM_SUBTYPE_ETHERNET_DESCRIPTIONS`), and no 802.11 medium is. Not
+/// Ethernet: `autoselect` with no medium (Wi-Fi, a Thunderbolt port) or with
+/// `(none)` (an Ethernet port with no link: nothing says its kind), `none`
+/// (a port with no link), `<unknown type>` (a bridge), no `media:` line (a
+/// tunnel). `status:` isn't read: a medium says what kind of port it is, as
+/// the kernel's type does on Linux, whatever its carrier.
+fn ethernet_medium(ifconfig: &str) -> bool {
+    let Some(media) = ifconfig
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("media:"))
+    else {
+        return false;
+    };
+    let (set, active) = media
+        .split_once('(')
+        .map_or((media, None), |(set, active)| (set, Some(active)));
+    base_medium(set) || active.is_some_and(base_medium)
+}
+
+/// Whether `media`'s first word is a `…base…` medium: it starts with a digit
+/// and contains `base` in any case.
+fn base_medium(media: &str) -> bool {
+    media.split_whitespace().next().is_some_and(|medium| {
+        medium.starts_with(|c: char| c.is_ascii_digit())
+            && medium
+                .as_bytes()
+                .windows(4)
+                .any(|word| word.eq_ignore_ascii_case(b"base"))
+    })
 }
 
 /// NetworkManager's answer, over D-Bus: its read-only properties only

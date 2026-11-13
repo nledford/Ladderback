@@ -3,7 +3,7 @@
 //! program's output, bounded in size and time. Every surprise is a typed
 //! `PlatformError`, never a guess and never a panic.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -189,7 +189,12 @@ impl Program {
     /// within its timeout gives no answer; it is killed when this returns.
     /// The timeout covers the whole call, the wait for the gate too.
     pub(crate) async fn output(&self) -> Result<String, PlatformError> {
-        tokio::time::timeout(self.timeout, self.run())
+        self.output_with(None).await
+    }
+
+    /// [`output`](Self::output), with `last` after the fixed arguments.
+    pub(crate) async fn output_with(&self, last: Option<&OsStr>) -> Result<String, PlatformError> {
+        tokio::time::timeout(self.timeout, self.run(last))
             .await
             .unwrap_or_else(|_| {
                 Err(PlatformError::TimedOut {
@@ -198,12 +203,13 @@ impl Program {
             })
     }
 
-    /// [`output`](Self::output), without its timeout.
-    async fn run(&self) -> Result<String, PlatformError> {
+    /// [`output_with`](Self::output_with), without its timeout.
+    async fn run(&self, last: Option<&OsStr>) -> Result<String, PlatformError> {
         let from = self.path.as_path();
         let mut command = tokio::process::Command::new(&self.path);
         command
             .args(&self.args)
+            .args(last)
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
