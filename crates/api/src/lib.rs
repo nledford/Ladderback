@@ -317,6 +317,11 @@ pub enum WarningCode {
     /// network, which this machine can't tell from other links (decision
     /// 80): that alternative never holds here.
     LocationRuleWiredUnknown,
+    /// The rule of the location at `position`, from 1, lists Wi-Fi networks
+    /// by name, and this machine couldn't read the name of the one it is on
+    /// when it last tried (decision 80): that part of the rule doesn't hold
+    /// here.
+    LocationRuleNameUnreadable,
     /// An export wrote the repository's first location only: rustic has no
     /// fallback. The argument `count` is how many locations it left out.
     ProfileLocationsNotExported,
@@ -927,7 +932,7 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::LocationRuleWiredUnknown => &[ArgSpec {
+            Self::LocationRuleWiredUnknown | Self::LocationRuleNameUnreadable => &[ArgSpec {
                 name: "position",
                 kind: ArgKind::Text,
                 optional: false,
@@ -2828,6 +2833,14 @@ pub struct LocationAlternativeDto {
     /// The kind of network, as the configuration writes it: `wired` or
     /// `wifi`.
     pub network: String,
+    /// The Wi-Fi networks, by name, it holds on alone (`only`); empty when
+    /// it lists none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// The Wi-Fi networks, by name, it doesn't hold on (`except`); empty
+    /// when it lists none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
 }
 
 /// One option of a location: its name, and its value only when the value

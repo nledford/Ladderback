@@ -1213,6 +1213,14 @@ ui-location-rule = { $network ->
    *[wifi] May be tried on any Wi-Fi network.
 }
 
+# One alternative of a location's rule that lists Wi-Fi networks by name, one line per name: the location may be tried on that network. The location may be tried when any one of its alternatives holds.
+# $name (text): the network's name, as the configuration file lists it.
+ui-location-rule-only = May be tried on the Wi-Fi network “{ $name }”.
+
+# Right after ui-location-rule for a Wi-Fi alternative that leaves networks out by name, one line per name: the location isn't tried on that network.
+# $name (text): the network's name, as the configuration file lists it.
+ui-location-rule-except = Not tried on the Wi-Fi network “{ $name }”.
+
 # Under a location's rule, after its alternatives: where the location isn't tried. A VPN that carries all traffic makes the machine's network link the VPN's.
 ui-location-rule-elsewhere = Skipped on any other network, and behind a VPN that carries all of this machine's traffic.
 

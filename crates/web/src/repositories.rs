@@ -407,20 +407,35 @@ pub(crate) fn location_option(
 }
 
 /// What a location's rule reads as, under the location: each alternative,
-/// any one of which lets it be tried, then where it is skipped. Nothing for
-/// a location with no rule, which is tried on every network.
+/// any one of which lets it be tried, then where it is skipped. An
+/// alternative that lists networks by name reads as a line per name: each
+/// network it is tried on (`only`), or the kind of network, then each one
+/// it isn't tried on (`except`). Nothing for a location with no rule, which
+/// is tried on every network.
 pub(crate) fn location_rule(
     when: &[LocationAlternativeDto],
 ) -> Vec<(MessageId, Vec<(&'static str, MsgArg)>)> {
     if when.is_empty() {
         return Vec::new();
     }
+    let named = |id, names: &[String]| {
+        names
+            .iter()
+            .map(move |name| (id, vec![("name", text(name))]))
+            .collect::<Vec<_>>()
+    };
     when.iter()
-        .map(|alternative| {
-            (
-                msg::UI_LOCATION_RULE,
-                vec![("network", text(&alternative.network))],
-            )
+        .flat_map(|alternative| {
+            if alternative.only.is_empty() {
+                std::iter::once((
+                    msg::UI_LOCATION_RULE,
+                    vec![("network", text(&alternative.network))],
+                ))
+                .chain(named(msg::UI_LOCATION_RULE_EXCEPT, &alternative.except))
+                .collect()
+            } else {
+                named(msg::UI_LOCATION_RULE_ONLY, &alternative.only)
+            }
         })
         .chain(std::iter::once((
             msg::UI_LOCATION_RULE_ELSEWHERE,
@@ -1236,6 +1251,8 @@ mod tests {
     fn a_locations_rule_reads_as_each_alternative_then_where_it_is_skipped() {
         let alternative = |network: &str| LocationAlternativeDto {
             network: network.to_owned(),
+            only: Vec::new(),
+            except: Vec::new(),
         };
         assert_eq!(location_rule(&[]), Vec::new());
         let said: Vec<String> = location_rule(&[alternative("wired"), alternative("wifi")])
@@ -1247,6 +1264,35 @@ mod tests {
             [
                 "May be tried on a wired network.",
                 "May be tried on any Wi-Fi network.",
+                "Skipped on any other network, and behind a VPN that carries all of this machine's traffic.",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rule_that_names_networks_reads_as_a_line_per_name() {
+        let names = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        let only = LocationAlternativeDto {
+            network: "wifi".to_owned(),
+            only: names(&["Office", "Lab"]),
+            except: Vec::new(),
+        };
+        let except = LocationAlternativeDto {
+            network: "wifi".to_owned(),
+            only: Vec::new(),
+            except: names(&["Guest"]),
+        };
+        let said: Vec<String> = location_rule(&[only, except])
+            .into_iter()
+            .map(english_of)
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "May be tried on the Wi-Fi network “Office”.",
+                "May be tried on the Wi-Fi network “Lab”.",
+                "May be tried on any Wi-Fi network.",
+                "Not tried on the Wi-Fi network “Guest”.",
                 "Skipped on any other network, and behind a VPN that carries all of this machine's traffic.",
             ]
         );

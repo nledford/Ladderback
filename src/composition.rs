@@ -19,7 +19,7 @@ use app::interop::{ExportError, ImportError};
 use app::locations::{ChooseLocation, LocationReport};
 use domain::execution::locations::{LocationOutcome, LocationsRecord};
 
-use app::conditions::NetworkWait;
+use app::conditions::{NameWatch, NetworkWait};
 use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
@@ -48,8 +48,8 @@ use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    Location, LocationRule, Maintenance, NotRecorded, Plan, RepositoryConfig, RepositoryField,
-    RepositorySettings, RuleNote,
+    Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan, RepositoryConfig,
+    RepositoryField, RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -150,20 +150,29 @@ pub(crate) struct Daemon {
 
 /// What the conditions before a scheduled run ask the machine (§5): what
 /// powers it, whether it is online, and the network link the rules of a
-/// repository's locations are evaluated against (decision 80).
+/// repository's locations are evaluated against (decision 80), its reads of
+/// the Wi-Fi network's name watched for the Repositories page.
 pub(crate) struct RunConditions {
     pub(crate) power: Arc<dyn PowerSupply>,
     pub(crate) network: Arc<dyn Network>,
-    pub(crate) link: Arc<dyn NetworkLink>,
+    pub(crate) link: Arc<NameWatch>,
 }
 
 impl RunConditions {
-    /// This machine's.
+    /// This machine's. The first name it can't read is said once in the
+    /// log, never with what was read (decision 80).
     fn system() -> Self {
         Self {
             power: platform::power::system_power(),
             network: platform::network::system_network(),
-            link: platform::network_link::system_link(),
+            link: Arc::new(NameWatch::new(
+                platform::network_link::system_link(),
+                || {
+                    log::warn!(
+                        "can't read the name of the Wi-Fi network this machine is on: a location's rule that names Wi-Fi networks doesn't hold here, so that location is skipped; a rule of `wired` or `wifi` alone needs no name"
+                    );
+                },
+            )),
         }
     }
 }
@@ -440,7 +449,7 @@ async fn state_over(
             Arc::new(log_recording),
         )),
         Arc::new(SystemClock),
-        Arc::clone(&conditions.link),
+        Arc::<NameWatch>::clone(&conditions.link),
         resolve.as_ref().clone(),
         Arc::new(log_location),
     ));
@@ -464,7 +473,7 @@ async fn state_over(
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
         Arc::clone(&engine),
-        Arc::clone(&conditions.link),
+        Arc::<NameWatch>::clone(&conditions.link),
         resolve.as_ref().clone(),
         Arc::clone(&config),
         Arc::clone(&store),
@@ -475,6 +484,7 @@ async fn state_over(
         engine,
         operations: Arc::clone(&store),
         schedules: Arc::clone(&schedules),
+        link: Arc::clone(&conditions.link),
     });
     let background = Background {
         runner,
@@ -1863,6 +1873,9 @@ struct ConfigCatalog {
     engine: Arc<dyn Engine>,
     operations: Arc<dyn OperationStore>,
     schedules: Arc<dyn ScheduleStore>,
+    /// Whether this machine reads the Wi-Fi network's name, for the notes
+    /// on rules that name networks (decision 80).
+    link: Arc<NameWatch>,
 }
 
 #[async_trait]
@@ -1907,6 +1920,21 @@ impl Catalog for ConfigCatalog {
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         let offered = self.offers(&config).await;
+        // A rule that names networks is noted when the name can't be read:
+        // the first listing that has one reads it once, in the background,
+        // as the read may take seconds.
+        let names_asked = config.repositories().values().any(|repository| {
+            repository
+                .location_rules()
+                .into_iter()
+                .flatten()
+                .any(LocationRule::asks_name)
+        });
+        if names_asked {
+            let link = Arc::clone(&self.link);
+            tokio::spawn(async move { link.check_once().await });
+        }
+        let reads_names = self.link.reads_names();
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
@@ -1922,6 +1950,7 @@ impl Catalog for ConfigCatalog {
                         repository,
                         &plans,
                         platform::network_link::tells_wired(),
+                        reads_names,
                         offered.contains(alias),
                     )
                 })
@@ -2735,6 +2764,7 @@ fn listed_repository(
     repository: &RepositoryConfig,
     plans: &[&Plan],
     tells_wired: bool,
+    reads_names: bool,
     create_offered: bool,
 ) -> api::RepositoryDto {
     let mut row = repository_row(
@@ -2756,7 +2786,7 @@ fn listed_repository(
         }));
     row.warnings.extend(
         repository
-            .rule_notes(plans, tells_wired, true)
+            .rule_notes(plans, tells_wired, reads_names)
             .into_iter()
             .map(|note| {
                 let (code, args) = match note {
@@ -2771,9 +2801,10 @@ fn listed_repository(
                         api::WarningCode::LocationRuleWiredUnknown,
                         vec![("position".to_owned(), text(position))],
                     ),
-                    RuleNote::NameUnreadable { position } => {
-                        todo!("the note on location {position}'s names")
-                    }
+                    RuleNote::NameUnreadable { position } => (
+                        api::WarningCode::LocationRuleNameUnreadable,
+                        vec![("position".to_owned(), text(position))],
+                    ),
                 };
                 api::WarningDto {
                     code,
@@ -2823,8 +2854,24 @@ fn listed_location(location: &Location, position: u8) -> api::LocationDto {
             .when
             .iter()
             .flat_map(LocationRule::alternatives)
-            .map(|alternative| api::LocationAlternativeDto {
-                network: alternative.kind().as_str().to_owned(),
+            .map(|alternative| {
+                let names = |filter: Option<&NameFilter>| {
+                    filter
+                        .map(|filter| {
+                            filter
+                                .names()
+                                .iter()
+                                .map(|name| name.as_str().to_owned())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let filter = alternative.names();
+                api::LocationAlternativeDto {
+                    network: alternative.kind().as_str().to_owned(),
+                    only: names(filter.filter(|filter| matches!(filter, NameFilter::Only(_)))),
+                    except: names(filter.filter(|filter| matches!(filter, NameFilter::Except(_)))),
+                }
             })
             .collect(),
     }
@@ -3406,7 +3453,7 @@ mod tests {
     fn a_listed_repository_lists_its_locations_in_order_with_references_and_never_a_written_secret()
     {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), &[], true, false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
         let option = |set: &str, name: &str, reference: Option<&str>| api::LocationOptionDto {
             set: set.to_owned(),
             name: name.to_owned(),
@@ -3438,7 +3485,7 @@ mod tests {
     #[test]
     fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), &[], true, false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
         let warning = api::WarningDto {
             code: WarningCode::LocationPlainHttpCredentials,
             args: [
@@ -3472,7 +3519,7 @@ mod tests {
         plan.schedule = Some(domain::planning::Schedule::new(
             domain::planning::Interval::parse("1d").expect("an interval"),
         ));
-        let row = listed_repository(&alias, &entry, &[&plan], false, false);
+        let row = listed_repository(&alias, &entry, &[&plan], false, true, false);
         let when: Vec<Vec<&str>> = row
             .locations
             .iter()
@@ -3505,7 +3552,7 @@ mod tests {
             );
         }
         assert!(
-            listed_repository(&alias, &entry, &[], true, false)
+            listed_repository(&alias, &entry, &[], true, true, false)
                 .warnings
                 .iter()
                 .all(|warning| !matches!(
@@ -3517,11 +3564,75 @@ mod tests {
     }
 
     #[test]
+    fn a_listed_rule_names_its_networks_and_is_noted_where_names_cant_be_read() {
+        use domain::planning::{Alternative, NetworkKind, NetworkName};
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let names = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| NetworkName::parse(name).expect("a name"))
+                .collect()
+        };
+        let wifi = |filter| {
+            LocationRule::new(vec![
+                Alternative::new(NetworkKind::WiFi, filter).expect("an alternative"),
+            ])
+            .expect("a rule")
+        };
+        let mut entry = two_locations();
+        entry.locations.first_when = Some(wifi(Some(NameFilter::Only(names(&["Office", "Lab"])))));
+        entry.locations.further[0].when = Some(wifi(Some(NameFilter::Except(names(&["Guest"])))));
+        let row = listed_repository(&alias, &entry, &[], true, false, false);
+        let when: Vec<(Vec<String>, Vec<String>)> = row
+            .locations
+            .iter()
+            .flat_map(|location| location.when.iter())
+            .map(|alternative| (alternative.only.clone(), alternative.except.clone()))
+            .collect();
+        let owned = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(
+            when,
+            vec![
+                (owned(&["Office", "Lab"]), Vec::new()),
+                (Vec::new(), owned(&["Guest"])),
+            ]
+        );
+        let unreadable: Vec<&api::WarningDto> = row
+            .warnings
+            .iter()
+            .filter(|warning| warning.code == WarningCode::LocationRuleNameUnreadable)
+            .collect();
+        assert_eq!(
+            unreadable
+                .iter()
+                .map(|warning| warning.args.get("position"))
+                .collect::<Vec<_>>(),
+            [
+                Some(&MsgArg::Text("1".to_owned())),
+                Some(&MsgArg::Text("2".to_owned())),
+            ]
+        );
+        assert!(
+            listed_repository(&alias, &entry, &[], true, true, false)
+                .warnings
+                .iter()
+                .all(|warning| warning.code != WarningCode::LocationRuleNameUnreadable),
+            "a machine that reads the name: no note"
+        );
+        let wire = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(
+            wire.pointer("/locations/0/when/0/except"),
+            None,
+            "no empty list on the wire: {wire}"
+        );
+    }
+
+    #[test]
     fn a_listed_repository_of_one_location_lists_no_locations() {
         let alias = RepositoryAlias::parse("demo").expect("an alias");
         let mut entry = two_locations();
         entry.locations = Default::default();
-        let row = listed_repository(&alias, &entry, &[], true, false);
+        let row = listed_repository(&alias, &entry, &[], true, true, false);
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");
@@ -4851,6 +4962,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -4926,6 +5041,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -5019,6 +5138,10 @@ mod tests {
             )),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -5671,6 +5794,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let mut jobs = 0;
         let mut nothing_from = |read: &str, heard: &mut Heard| {
@@ -8846,6 +8973,10 @@ mod repository_service_tests {
             engine,
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         (catalog, scratch)
     }
@@ -8880,6 +9011,10 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules,
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.plans().await.expect("the plans");
         let shown: Vec<(&str, bool, Option<&str>)> = listed
@@ -9254,6 +9389,10 @@ mod repository_service_tests {
                 engine: engine(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                link: Arc::new(NameWatch::new(
+                    Arc::new(app::fakes::FakeNetworkLink::new()),
+                    || {},
+                )),
             };
             let expected = CatalogError::Unavailable {
                 code,
@@ -9285,6 +9424,10 @@ mod repository_service_tests {
                 engine: scripted.clone(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                link: Arc::new(NameWatch::new(
+                    Arc::new(app::fakes::FakeNetworkLink::new()),
+                    || {},
+                )),
             };
             let runner = PlanRunner {
                 config,
@@ -9470,6 +9613,10 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.repositories().await.expect("the list");
         // In the order of the aliases, one row each.
@@ -9603,6 +9750,10 @@ mod repository_service_tests {
             engine: engine(),
             operations,
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.repositories().await.expect("the list");
         listed

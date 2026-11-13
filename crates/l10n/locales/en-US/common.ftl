@@ -515,6 +515,11 @@ warning-location-last-ruled-no-retry = The plan { $plan } doesn't retry a failed
 # `wifi` is a value of the configuration file, typed as it is: keep it a string literal.
 warning-location-rule-wired-unknown = The rule of location { $position } asks for a wired network, which Ladderback can't yet tell apart from other links on this machine, so that part of the rule never holds here. A rule of { "wifi" } works here.
 
+# A location's rule lists Wi-Fi networks by name, and this machine couldn't read the name of the network it is on, so that part of the rule doesn't hold and the location is skipped there.
+# $position (text): the location's place in the list, from 1.
+# `wired` and `wifi` are values of the configuration file, typed as they are: keep them string literals.
+warning-location-rule-name-unreadable = Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location { $position }, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of { "wired" } or { "wifi" } alone needs no name.
+
 # An export wrote the repository's first location only, because a rustic profile has no fallback.
 # $count (count): how many further locations it left out.
 warning-profile-locations-not-exported = { $count ->
