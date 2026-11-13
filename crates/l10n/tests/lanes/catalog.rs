@@ -231,3 +231,68 @@ fn a_duration_reads_in_the_parts_the_catalog_arranges() {
         );
     }
 }
+
+const EXPOSING_CAUSES: [&str; 4] = [
+    "plain-http",
+    "unchecked-certificate",
+    "plain-endpoint",
+    "plain-ftp",
+];
+
+/// The plain-HTTP location warning as English shows it, for one cause and
+/// one `rule` (decision 80, point 7).
+fn exposed(localizer: &Localizer, cause: &str, rule: &str) -> String {
+    let shown = localizer.message(
+        msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+        &[
+            ("position", MsgArg::Text("2".to_owned())),
+            ("cause", MsgArg::Text(cause.to_owned())),
+            ("rule", MsgArg::Text(rule.to_owned())),
+        ],
+    );
+    assert!(shown.problems().is_empty(), "{cause} {rule}: {shown}");
+    shown.text().to_owned()
+}
+
+#[test]
+fn the_plain_http_warning_has_its_own_words_for_every_cause_and_rule() {
+    let localizer = english();
+    let mut seen = BTreeSet::new();
+    for cause in EXPOSING_CAUSES {
+        let ruled = exposed(&localizer, cause, "network");
+        let open = exposed(&localizer, cause, "none");
+        assert!(
+            ruled.contains("its rule can't tell the network it is meant for"),
+            "{cause} with a rule: {ruled}"
+        );
+        assert!(!open.contains("rule"), "{cause} with no rule: {open}");
+        // A variant key that doesn't match falls back to the default text,
+        // which would show up here as a text seen before.
+        assert!(seen.insert(ruled.clone()), "{cause} with a rule: {ruled}");
+        assert!(seen.insert(open.clone()), "{cause} with no rule: {open}");
+    }
+}
+
+#[test]
+fn the_plain_http_warning_gives_http_cacert_a_certificate_authority() {
+    // `http-cacert` names the certificate of the authority that signed the
+    // server's: rustls refuses a self-signed server certificate marked as a
+    // CA (decision 80, point 7), so "the server's own certificate" sends a
+    // person the wrong way.
+    let localizer = english();
+    for cause in EXPOSING_CAUSES {
+        for rule in ["network", "none"] {
+            let shown = exposed(&localizer, cause, rule);
+            if shown.contains("http-cacert") {
+                assert!(
+                    shown.contains("certificate authority"),
+                    "{cause} {rule}: {shown}"
+                );
+                assert!(
+                    !shown.contains("own certificate"),
+                    "{cause} {rule}: {shown}"
+                );
+            }
+        }
+    }
+}

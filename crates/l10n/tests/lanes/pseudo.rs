@@ -192,6 +192,10 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::ERROR_MAINTENANCE_NOT_OWNER,
             &["maintenance = \"local\""],
         ),
+        (
+            msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+            &["http-cacert"],
+        ),
     ];
     let args = [
         ("address", text("192.168.1.5:9898")),
@@ -199,6 +203,9 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("alias", text("demo")),
         ("path", text("/demo/data/admin-password")),
         ("detail", text("permission denied")),
+        ("position", text("2")),
+        ("cause", text("plain-http")),
+        ("rule", text("network")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

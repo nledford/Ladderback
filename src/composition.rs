@@ -2745,9 +2745,9 @@ fn config_unusable<R>(
 /// A configured entry as the repositories list shows it: its row, and for
 /// an entry reached at several locations, each location in order with its
 /// rule; a warning for each location that sends its credentials where an
-/// impostor could read them, by position and cause, never the address; and
-/// the notes about what the locations' rules mean for `plans`, the plans
-/// that back up to it (decision 80).
+/// impostor could read them, by position, cause and whether it has a rule,
+/// never the address; and the notes about what the locations' rules mean
+/// for `plans`, the plans that back up to it (decision 80).
 fn listed_repository(
     alias: &RepositoryAlias,
     repository: &RepositoryConfig,
@@ -2768,6 +2768,7 @@ fn listed_repository(
                 args: [
                     ("position".to_owned(), text(warning.position)),
                     ("cause".to_owned(), text(warning.cause.code())),
+                    ("rule".to_owned(), text(warning.rule_code())),
                 ]
                 .into(),
             }
@@ -3467,18 +3468,33 @@ mod tests {
     }
 
     #[test]
-    fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
+    fn a_listed_repository_warns_of_a_plain_http_location_and_says_whether_it_has_a_rule() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), &[], true, false);
-        let warning = api::WarningDto {
+        let warning = |rule: &str| api::WarningDto {
             code: WarningCode::LocationPlainHttpCredentials,
             args: [
                 ("position".to_owned(), MsgArg::Text("1".to_owned())),
                 ("cause".to_owned(), MsgArg::Text("plain-http".to_owned())),
+                ("rule".to_owned(), MsgArg::Text(rule.to_owned())),
             ]
             .into(),
         };
-        assert!(row.warnings.contains(&warning), "{:?}", row.warnings);
+        let mut entry = two_locations();
+        let row = listed_repository(&alias, &entry, &[], true, false);
+        assert!(
+            row.warnings.contains(&warning("none")),
+            "{:?}",
+            row.warnings
+        );
+        entry.locations.first_when = Some(
+            LocationRule::new(vec![domain::planning::NetworkKind::Wired.into()]).expect("a rule"),
+        );
+        let row = listed_repository(&alias, &entry, &[], true, false);
+        assert!(
+            row.warnings.contains(&warning("network")),
+            "{:?}",
+            row.warnings
+        );
     }
 
     #[test]

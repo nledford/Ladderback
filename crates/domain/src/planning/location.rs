@@ -239,6 +239,19 @@ impl ExposedCredentials {
 pub struct LocationWarning {
     pub position: u8,
     pub cause: ExposedCredentials,
+    /// Whether the location has a rule. Every rule reads the network link,
+    /// which a network made to look like the person's own passes too (a
+    /// travel router's wired link, a copied Wi-Fi name), so a rule keeps
+    /// the credentials from no impostor (decision 80, point 7).
+    pub ruled: bool,
+}
+
+impl LocationWarning {
+    /// The warning's `rule` argument: `network` for a location with a rule,
+    /// `none` for one without.
+    pub fn rule_code(self) -> &'static str {
+        if self.ruled { "network" } else { "none" }
+    }
 }
 
 /// What the Repositories page notes about an entry's locations' rules
@@ -343,18 +356,23 @@ impl RepositoryConfig {
     }
 
     /// The entry's locations whose credentials can be read by whoever
-    /// answers at their address, as written: none for an entry with one
-    /// location, which is unchanged in every way.
+    /// answers at their address, as written, each saying whether it has a
+    /// rule: none for an entry of one location and no rule, which is
+    /// unchanged in every way.
     pub fn location_warnings(&self) -> Vec<LocationWarning> {
-        if !self.has_several_locations() {
+        if !self.chooses_location() {
             return Vec::new();
         }
         std::iter::once(Location::of(&self.settings))
             .chain(self.locations.further.iter().cloned())
+            .zip(self.location_rules())
             .zip(1u8..)
-            .filter_map(|(location, position)| {
-                ExposedCredentials::of_location(&location)
-                    .map(|cause| LocationWarning { position, cause })
+            .filter_map(|((location, rule), position)| {
+                ExposedCredentials::of_location(&location).map(|cause| LocationWarning {
+                    position,
+                    cause,
+                    ruled: rule.is_some(),
+                })
             })
             .collect()
     }
@@ -573,13 +591,15 @@ mod tests {
             entry.location_warnings(),
             vec![LocationWarning {
                 position: 2,
-                cause: ExposedCredentials::PlainHttp
+                cause: ExposedCredentials::PlainHttp,
+                ruled: false,
             }]
         );
     }
 
-    /// A repository of one location is unchanged in every way (decision 80,
-    /// point 2): its plain-HTTP credentials are no location's warning.
+    /// A repository of one location and no rule is unchanged in every way
+    /// (decision 80, point 2): its plain-HTTP credentials are no location's
+    /// warning.
     #[test]
     fn an_entry_of_one_location_is_warned_about_no_location() {
         let lone = location("rest:http://nas/r", &[("password", "${PW2}")]);
@@ -596,6 +616,71 @@ mod tests {
             hooks: super::super::Hooks::default(),
         };
         assert_eq!(entry.location_warnings(), Vec::new());
+    }
+
+    /// A rule reads only the network link, which an impostor's network
+    /// passes too, so the warning says which location has one: a location
+    /// guarded only by a rule is as exposed as one tried on every network.
+    #[test]
+    fn a_warning_says_whether_its_location_has_a_rule() {
+        let mut entry = entry("rest:http://demo:pw@lan.example.lan/r", &[], Some("aa"));
+        entry.locations.further.push(location(
+            "rest:http://nas.home.arpa/r",
+            &[("password", "${PW2}")],
+        ));
+        entry.locations.first_when = ruled(&[NetworkKind::Wired]);
+        assert_eq!(
+            entry.location_warnings(),
+            vec![
+                LocationWarning {
+                    position: 1,
+                    cause: ExposedCredentials::PlainHttp,
+                    ruled: true,
+                },
+                LocationWarning {
+                    position: 2,
+                    cause: ExposedCredentials::PlainHttp,
+                    ruled: false,
+                },
+            ]
+        );
+        entry.locations.first_when = None;
+        entry.locations.further[0].when = ruled(&[NetworkKind::WiFi]);
+        let rules: Vec<bool> = entry
+            .location_warnings()
+            .into_iter()
+            .map(|warning| warning.ruled)
+            .collect();
+        assert_eq!(rules, [false, true]);
+    }
+
+    /// A `when` on a repository of one location makes it a location chosen
+    /// by its rule (decision 80, point 2), so its plain-HTTP credentials are
+    /// warned about as any ruled location's are.
+    #[test]
+    fn an_entry_of_one_location_with_a_rule_is_warned_about() {
+        let mut entry = entry("rest:http://demo:pw@lan.example.lan/r", &[], None);
+        assert_eq!(entry.location_warnings(), Vec::new());
+        entry.locations.first_when = ruled(&[NetworkKind::Wired]);
+        assert_eq!(
+            entry.location_warnings(),
+            vec![LocationWarning {
+                position: 1,
+                cause: ExposedCredentials::PlainHttp,
+                ruled: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_warnings_rule_argument_says_network_or_none() {
+        let warning = |ruled| LocationWarning {
+            position: 1,
+            cause: ExposedCredentials::PlainHttp,
+            ruled,
+        };
+        assert_eq!(warning(true).rule_code(), "network");
+        assert_eq!(warning(false).rule_code(), "none");
     }
 
     fn entry(first: &str, further: &[&str], id: Option<&str>) -> RepositoryConfig {

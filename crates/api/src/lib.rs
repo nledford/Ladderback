@@ -301,9 +301,11 @@ pub enum WarningCode {
     LocationSkipped,
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The
-    /// arguments are `position`, the location's, from 1, and `cause`:
+    /// arguments are `position`, the location's, from 1; `cause`:
     /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
-    /// `plain-ftp`. Never the address or a credential.
+    /// `plain-ftp`; and `rule`: `network` when the location has a rule,
+    /// which a network made to look like the person's own passes too, or
+    /// `none`. Never the address or a credential.
     LocationPlainHttpCredentials,
     /// Every location of a repository has a rule (decision 80): a scheduled
     /// run is skipped on a network where none holds, and any other run fails
@@ -941,6 +943,11 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "cause",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "rule",
                     kind: ArgKind::Text,
                     optional: false,
                 },

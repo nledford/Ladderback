@@ -72,7 +72,11 @@ pub struct LocationsWorld {
     /// Every run's operation as it ended, and its result as it shows.
     operations: Vec<Operation>,
     results: Vec<String>,
-    listed: Vec<LocationWarning>,
+    /// By repository: the warnings the Repositories page lists for its
+    /// locations.
+    listed: BTreeMap<String, Vec<LocationWarning>>,
+    /// The warning a step found, which the next steps look at.
+    warned: Option<LocationWarning>,
     /// The credentials a location's next step writes, when its address
     /// comes from a variable.
     pending_credentials: Option<String>,
@@ -791,7 +795,11 @@ async fn forget_previewed(agent: &mut Agent, repository: String) {
 #[when("the repositories are listed")]
 fn repositories_listed(agent: &mut Agent) {
     let world = &mut agent.locations;
-    world.listed = world.entries[NAS].location_warnings();
+    world.listed = world
+        .entries
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.location_warnings()))
+        .collect();
 }
 
 #[then(expr = "the operation used the location {string}")]
@@ -1078,15 +1086,34 @@ fn no_probe_slot(agent: &mut Agent) {
 #[then(
     expr = "the repository {string} carries the warning {string} for the location {int} with the cause {string}"
 )]
-fn carries_warning(agent: &mut Agent, _name: String, code: String, position: u8, cause: String) {
+fn carries_warning(agent: &mut Agent, name: String, code: String, position: u8, cause: String) {
     assert_eq!(code, "location-plain-http-credentials");
-    let listed = &agent.locations.listed;
-    assert!(
-        listed
-            .iter()
-            .any(|warning| warning.position == position && warning.cause.code() == cause),
-        "{listed:?}"
-    );
+    let listed = agent
+        .locations
+        .listed
+        .get(&name)
+        .cloned()
+        .unwrap_or_default();
+    let warned = listed
+        .iter()
+        .find(|warning| warning.position == position && warning.cause.code() == cause)
+        .copied();
+    assert!(warned.is_some(), "{listed:?}");
+    agent.locations.warned = warned;
+}
+
+#[then(
+    "the warning says the location's rule can't tell the network it is meant for from one made to look like it"
+)]
+fn warning_says_rule_cant_tell(agent: &mut Agent) {
+    let warned = agent.locations.warned.expect("a step found the warning");
+    assert_eq!(warned.rule_code(), "network", "{warned:?}");
+}
+
+#[then("the warning says the location has no rule")]
+fn warning_says_no_rule(agent: &mut Agent) {
+    let warned = agent.locations.warned.expect("a step found the warning");
+    assert_eq!(warned.rule_code(), "none", "{warned:?}");
 }
 
 #[then("the warning names neither the address nor a credential")]
@@ -1151,8 +1178,8 @@ fn carries_no_note(agent: &mut Agent, _name: String) {
 }
 
 #[then(expr = "the repository {string} carries no warning about its locations")]
-fn carries_no_warning(agent: &mut Agent, _name: String) {
-    assert_eq!(agent.locations.listed, Vec::new());
+fn carries_no_warning(agent: &mut Agent, name: String) {
+    assert_eq!(agent.locations.listed.get(&name), Some(&Vec::new()));
 }
 
 #[then(
@@ -1207,6 +1234,20 @@ fn one_location_eligible_wired(agent: &mut Agent, name: String) {
         .get_mut(&name)
         .expect("the repository");
     entry.locations.first_when = Some(rule(&[NetworkKind::Wired]));
+}
+
+#[given(
+    expr = "a repository {string} of one location, {string} with a user and a password in it, eligible only on a wired network"
+)]
+fn one_location_plain_http_wired(agent: &mut Agent, name: String, address: String) {
+    one_location_eligible_wired(agent, name.clone());
+    let (scheme, rest) = address.split_once("://").expect("an address with a scheme");
+    let entry = agent
+        .locations
+        .entries
+        .get_mut(&name)
+        .expect("the repository");
+    entry.settings.repository = format!("{scheme}://demo:canary-pass@{rest}");
 }
 
 #[given(expr = "the location {string} is eligible only on the Wi-Fi network {string}")]

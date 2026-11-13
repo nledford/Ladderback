@@ -285,6 +285,43 @@ Feature: A repository reached at several locations
         | opendal:s3                     | an http endpoint and a credential option | plain-endpoint        |
         | opendal:ftp                    | a credential option                      | plain-ftp             |
 
+    # A rule says where the machine seems to be, not that the network is the
+    # person's own: a travel router gives a wired link, and anyone can name a
+    # Wi-Fi network after theirs (decision 80, point 7). So the warning of a
+    # location with a rule says the rule can't stop an impostor, and points
+    # to HTTPS, which checks the server before the credentials are sent.
+    Scenario Outline: A location whose only guard is a rule is warned that the rule can't tell an imitating network
+      Given the location "lan" is "rest:http://lan.example.lan/r" with a user and a password in it
+      And the location "lan" is eligible <rule>
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
+      And the warning says the location's rule can't tell the network it is meant for from one made to look like it
+
+      Examples:
+        | rule                                |
+        | only on a wired network             |
+        | only on the Wi-Fi network "Office"  |
+        | on any Wi-Fi network except "Guest" |
+
+    Scenario: A location with no rule that sends its credentials over plain HTTP is warned about as tried on every network
+      Given the location "lan" is "rest:http://lan.example.lan/r" with a user and a password in it
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
+      And the warning says the location has no rule
+
+    Scenario: A repository of one location whose only guard is a rule is warned about too
+      Given a repository "solo" of one location, "rest:http://solo.example.lan/r" with a user and a password in it, eligible only on a wired network
+      When the repositories are listed
+      Then the repository "solo" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
+      And the warning says the location's rule can't tell the network it is meant for from one made to look like it
+
+    @ui
+    Scenario: The Repositories page says a rule can't keep a plain-HTTP location's credentials from an impostor
+      Given the location "public" is "rest:http://backup.example.com/laptop" with a user and a password in it
+      And the location "public" is eligible only on a wired network
+      When I open the Repositories page
+      Then the repository "nas" says the rule of location 2 can't tell the network it is meant for from one made to look like it, and recommends HTTPS
+
     Scenario: A location over HTTPS with credentials and a checked certificate isn't warned about
       Given the location "lan" is "rest:https://lan.example.lan/r" with a user and a password in it
       When the repositories are listed
