@@ -19,14 +19,15 @@ fn parent_death_signal_exists() -> bool {
     cfg!(target_os = "linux")
 }
 
-/// A fake job that runs for half a minute unless something stops it.
-fn long_job(spec_file: &Path) {
+/// A fake job of `steps` steps 50 ms apart that ends well unless something
+/// stops it.
+fn fake_job(spec_file: &Path, steps: u32) {
     let spec = JobSpec {
         op_id: OperationId::from_uuid(Uuid::from_u128(1)),
         cache_dir: None,
         watchdog_interval_ms: 50,
         job: JobKind::Fake(FakeJobSpec {
-            steps: 600,
+            steps,
             step_delay_ms: 50,
             warnings: Vec::new(),
             end: FakeEndSpec::Succeed,
@@ -34,6 +35,25 @@ fn long_job(spec_file: &Path) {
         }),
     };
     std::fs::write(spec_file, serde_json::to_vec(&spec).unwrap()).unwrap();
+}
+
+/// A fake job that runs for half a minute unless something stops it.
+fn long_job(spec_file: &Path) {
+    fake_job(spec_file, 600);
+}
+
+/// Waits until the worker writing `events_file` has said that its job
+/// started, which it says only once it has asked to be told of its parent's
+/// death.
+fn until_started(events_file: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !std::fs::read_to_string(events_file).is_ok_and(|events| events.contains("started")) {
+        assert!(
+            Instant::now() < deadline,
+            "the worker never said its job started"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// A zombie isn't running: it ended, and waits for a reaper that may never
@@ -101,4 +121,151 @@ fn a_worker_whose_parent_dies_ends_instead_of_running_on() {
         let _ = kill(pid, Signal::SIGKILL);
     }
     assert!(!survived, "the worker outlived its parent");
+}
+
+/// The kernel tells a worker when the *thread* that started it ends, not
+/// only its process: the daemon starts workers from tokio's blocking pool,
+/// whose threads end after 10 s without work while the daemon lives on. A
+/// backup that outlived that thread was stopped mid-run and failed with the
+/// exit code of a SIGTERM, 143 (#448). Only the daemon's death ends a worker.
+#[test]
+fn a_worker_runs_on_when_the_thread_that_started_it_ends() {
+    if !parent_death_signal_exists() {
+        testkit::skip!("the parent-death signal is a Linux feature");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let spec_file = dir.path().join("spec.json");
+    let events_file = dir.path().join("events");
+    // Two seconds of work: long enough to still be running when the thread
+    // that started it has ended.
+    fake_job(&spec_file, 40);
+
+    // A thread of this process starts the worker, waits until it runs, and
+    // ends; the process, the worker's parent, lives on.
+    let starter = std::thread::spawn({
+        let events_file = events_file.clone();
+        move || {
+            let child = Command::new(env!("CARGO_BIN_EXE_engine-worker"))
+                .stdin(std::fs::File::open(&spec_file).unwrap())
+                .stdout(std::fs::File::create(&events_file).unwrap())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            until_started(&events_file);
+            child
+        }
+    });
+    let mut child = starter.join().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("the worker never ended its two-second job");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "the worker ended ({status}) when the thread that started it ended, while its parent lived on"
+    );
+}
+
+/// Set in the copy of this test binary that plays the daemon in
+/// [`a_worker_ends_with_its_parent_after_the_thread_that_started_it_ended`]:
+/// the folder that holds the job, the events and the copy's report.
+const PLAY_THE_DAEMON: &str = "ENGINE_WORKER_PROCESS_PLAY_THE_DAEMON";
+
+/// A worker that ran on when the thread that started it ended still ends
+/// with the process that started it: the daemon's death, not the first
+/// thread's end, is what a dead daemon's workers are stopped by.
+#[test]
+fn a_worker_ends_with_its_parent_after_the_thread_that_started_it_ended() {
+    if !parent_death_signal_exists() {
+        testkit::skip!("the parent-death signal is a Linux feature");
+    }
+    if let Some(dir) = std::env::var_os(PLAY_THE_DAEMON) {
+        play_the_daemon(Path::new(&dir));
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    long_job(&dir.path().join("spec.json"));
+
+    // The parent: a copy of this test binary that runs only this test. A
+    // thread of it starts the worker and ends; the copy reports whether the
+    // worker ran on, and exits.
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "a_worker_ends_with_its_parent_after_the_thread_that_started_it_ended",
+            "--nocapture",
+        ])
+        .env(PLAY_THE_DAEMON, dir.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "the parent failed: {output:?}");
+    let report = std::fs::read_to_string(dir.path().join("report"))
+        .unwrap_or_else(|_| panic!("the parent wrote no report: {output:?}"));
+    let pid = match report.strip_prefix("running ") {
+        Some(pid) => Pid::from_raw(pid.parse().unwrap()),
+        None => panic!(
+            "the worker ended ({report}) when the thread that started it ended, while its parent lived on"
+        ),
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_running(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let survived = is_running(pid);
+    if survived {
+        // Don't leave it running for the rest of its half minute.
+        let _ = kill(pid, Signal::SIGKILL);
+    }
+    assert!(
+        !survived,
+        "the worker outlived its parent once the thread that started it had ended"
+    );
+}
+
+/// The parent in
+/// [`a_worker_ends_with_its_parent_after_the_thread_that_started_it_ended`]:
+/// a thread starts the worker on the job in `dir` and ends once the job has
+/// started. Two seconds later the report says `running <pid>`, or the
+/// worker's exit status.
+fn play_the_daemon(dir: &Path) {
+    let starter = std::thread::spawn({
+        let dir = dir.to_owned();
+        move || {
+            let events_file = dir.join("events");
+            let child = Command::new(env!("CARGO_BIN_EXE_engine-worker"))
+                .stdin(std::fs::File::open(dir.join("spec.json")).unwrap())
+                .stdout(std::fs::File::create(&events_file).unwrap())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            until_started(&events_file);
+            child
+        }
+    });
+    let mut child = starter.join().unwrap();
+
+    // The kernel signals the worker as the thread ends, which can come a
+    // moment after `join` returns; give the worker time to act on it.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let report = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status.to_string();
+        }
+        if Instant::now() >= deadline {
+            break format!("running {}", child.id());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    std::fs::write(dir.join("report"), report).unwrap();
 }
