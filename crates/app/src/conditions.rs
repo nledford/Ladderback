@@ -396,11 +396,17 @@ mod tests {
         for _ in 0..2 {
             assert_eq!(watch.network_name().now_or_never(), Some(Err(hidden())));
             assert!(!watch.reads_names());
+            // Told at the first failure, and only then.
+            assert_eq!(told.load(Ordering::Relaxed), 1);
         }
-        assert_eq!(told.load(Ordering::Relaxed), 1);
         link.set_name(Ok(None));
         assert_eq!(watch.network_name().now_or_never(), Some(Ok(None)));
         assert!(watch.reads_names());
+        // Once since the daemon started: a later failure is noted, not told.
+        link.set_name(Err(hidden()));
+        assert_eq!(watch.network_name().now_or_never(), Some(Err(hidden())));
+        assert!(!watch.reads_names());
+        assert_eq!(told.load(Ordering::Relaxed), 1);
     }
 
     #[test]

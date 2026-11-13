@@ -3517,8 +3517,8 @@ mod operation_dto_tests {
     use serde_json::{from_str, to_string};
 
     use super::{
-        InvalidOperation, OperationDetailDto, OperationResultDto, OperationSummaryDto,
-        OperationWarningDto, OperationsPageDto, WarningCode,
+        InvalidOperation, LocationTriedDto, OperationDetailDto, OperationResultDto,
+        OperationSummaryDto, OperationWarningDto, OperationsPageDto, WarningCode,
     };
 
     fn summary() -> OperationSummaryDto {
@@ -3542,6 +3542,59 @@ mod operation_dto_tests {
             None,
         )
         .unwrap_or_else(|e| panic!("a valid summary: {e:?}"))
+    }
+
+    /// A summary whose run saw `/srv/lan`, then `/srv/public`, with these
+    /// outcomes.
+    fn of_two(outcomes: [&str; 2]) -> OperationSummaryDto {
+        let tried = |position: u8, address: &str, outcome: &str| LocationTriedDto {
+            position,
+            address: address.to_owned(),
+            outcome: outcome.to_owned(),
+            source: None,
+        };
+        summary().with_locations(vec![
+            tried(1, "/srv/lan", outcomes[0]),
+            tried(2, "/srv/public", outcomes[1]),
+        ])
+    }
+
+    /// A run on a repository reached at several locations names the one it
+    /// used, by position and address, and how many the repository had,
+    /// wherever the used one is in the order; a run that used none, and one
+    /// on a repository of one location, name none (decision 80).
+    #[test]
+    fn a_summary_names_the_location_its_run_used_of_how_many() {
+        let used = |dto: &OperationSummaryDto| {
+            dto.used_location()
+                .map(|(used, count)| (used.position, used.address.clone(), count))
+        };
+        assert_eq!(
+            used(&of_two(["silent", "used"])),
+            Some((2, "/srv/public".to_owned(), 2))
+        );
+        assert_eq!(
+            used(&of_two(["used", "not-tried"])),
+            Some((1, "/srv/lan".to_owned(), 2))
+        );
+        assert_eq!(used(&of_two(["silent", "refused"])), None);
+        assert_eq!(used(&summary()), None);
+    }
+
+    /// The summary carries every location its run saw, on the wire; one of
+    /// a repository of one location leaves the key out.
+    #[test]
+    fn a_summary_carries_the_locations_its_run_saw() {
+        let dto = of_two(["silent", "used"]);
+        let json = to_string(&dto).unwrap();
+        assert!(
+            json.contains(
+                r#""locations":[{"position":1,"address":"/srv/lan","outcome":"silent"},{"position":2,"address":"/srv/public","outcome":"used"}]"#
+            ),
+            "{json}"
+        );
+        assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), dto);
+        assert!(!to_string(&summary()).unwrap().contains("locations"));
     }
 
     #[test]

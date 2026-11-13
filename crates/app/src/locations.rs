@@ -682,6 +682,28 @@ mod tests {
             fake.set_env(name, value);
         }
         let resolve = ResolveRepository::new(Arc::new(fake));
+        let access = nas(&resolve, first).await;
+        let probed = Arc::new(Mutex::new(Vec::new()));
+        let choose = ChooseLocation::new(
+            Arc::new(Holds(Arc::clone(&probed))),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let located = choose
+            .locate(OperationId::from_uuid(Uuid::from_u128(1)), access)
+            .await;
+        let probed = probed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        (located, probed)
+    }
+
+    /// A job's access to the entry "nas", which records the repository's ID
+    /// and whose locations are `first`, then `/srv/public`.
+    async fn nas(resolve: &ResolveRepository, first: RepositorySettings) -> RepositoryAccess {
         let entry = RepositoryConfig {
             settings: first,
             locations: Locations {
@@ -701,27 +723,11 @@ mod tests {
             hooks: Hooks::default(),
         };
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let access = resolve
+        resolve
             .resolve_saved(&alias, &entry)
             .await
             .expect("the password resolves")
-            .access;
-        let probed = Arc::new(Mutex::new(Vec::new()));
-        let choose = ChooseLocation::new(
-            Arc::new(Holds(Arc::clone(&probed))),
-            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
-            Arc::new(FakeNetworkLink::new()),
-            resolve,
-            Arc::new(|_| {}),
-        );
-        let located = choose
-            .locate(OperationId::from_uuid(Uuid::from_u128(1)), access)
-            .await;
-        let probed = probed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        (located, probed)
+            .access
     }
 
     fn first(repository: &str, options: &[(&str, &str)]) -> RepositorySettings {
@@ -874,5 +880,201 @@ mod tests {
             "{tested:?}"
         );
         assert_eq!(probed, Vec::<String>::new());
+    }
+
+    /// Locations whose probe never answers until its worker is stopped, at
+    /// the addresses `silent`; every other probe finds the repository at
+    /// once. Every job is kept, and how many probe workers still run.
+    #[derive(Clone, Default)]
+    struct Sites {
+        silent: Vec<String>,
+        jobs: Arc<Mutex<Vec<Job>>>,
+        running: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Sites {
+        fn silent_at(address: &str) -> Self {
+            Self {
+                silent: vec![address.to_owned()],
+                ..Self::default()
+            }
+        }
+
+        fn running(&self) -> usize {
+            self.running.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn jobs(&self) -> Vec<Job> {
+            self.jobs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    /// A probe's worker that runs until it is stopped: its events end then.
+    struct Worker {
+        running: Arc<std::sync::atomic::AtomicUsize>,
+        end: Option<futures::channel::oneshot::Sender<()>>,
+    }
+
+    #[async_trait]
+    impl JobControl for Worker {
+        async fn stop(&mut self) {
+            if self.end.take().is_some() {
+                self.running
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Engine for Sites {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.jobs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job.clone());
+            let Job::Probe(access) = &job else {
+                return Ok(RunningJob {
+                    events: futures::stream::empty().boxed(),
+                    control: Box::new(Gone),
+                });
+            };
+            if self.silent.contains(&access.repository) {
+                let (end, ended) = futures::channel::oneshot::channel::<()>();
+                self.running
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(RunningJob {
+                    events: futures::stream::once(ended)
+                        .filter_map(|_| futures::future::ready(None::<EngineEvent>))
+                        .boxed(),
+                    control: Box::new(Worker {
+                        running: Arc::clone(&self.running),
+                        end: Some(end),
+                    }),
+                });
+            }
+            Holds::default().run(op, job).await
+        }
+    }
+
+    /// The choice in front of `sites`, on a clock that moves only when the
+    /// test moves it, and a job's access to "nas" (`/srv/lan`, then
+    /// `/srv/public`).
+    async fn choosing(sites: &Sites) -> (ChooseLocation, RepositoryAccess, Arc<FakeClock>) {
+        let secrets = FakeSecrets::default();
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        let resolve = ResolveRepository::new(Arc::new(secrets));
+        let access = nas(&resolve, first("/srv/lan", &[])).await;
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let choose = ChooseLocation::new(
+            Arc::new(sites.clone()),
+            Arc::<FakeClock>::clone(&clock),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        (choose, access, clock)
+    }
+
+    fn op() -> OperationId {
+        OperationId::from_uuid(Uuid::from_u128(1))
+    }
+
+    /// A location that doesn't answer is given up at the probe's bound,
+    /// 8 seconds of monotonic time and not before, its worker is stopped,
+    /// and the next location is probed (decision 80).
+    #[tokio::test]
+    async fn a_location_that_doesnt_answer_is_given_up_at_the_probes_bound() {
+        let sites = Sites::silent_at("/srv/lan");
+        let (choose, access, clock) = choosing(&sites).await;
+        let mut located = choose.locate(op(), access).boxed();
+        assert!(futures::poll!(&mut located).is_pending());
+        let bound = SignedDuration::from_secs(LOCATION_PROBE_SECONDS);
+        clock.advance(bound - SignedDuration::from_nanos(1));
+        assert!(
+            futures::poll!(&mut located).is_pending(),
+            "still waiting on the first location just before the bound"
+        );
+        assert_eq!(sites.running(), 1);
+        clock.advance(SignedDuration::from_nanos(1));
+        let futures::task::Poll::Ready(located) = futures::poll!(&mut located) else {
+            panic!("the choice still waits at the bound");
+        };
+        let record = located
+            .ok()
+            .and_then(|located| located.record)
+            .expect("a location used");
+        let outcomes: Vec<LocationOutcome> =
+            record.locations.iter().map(|tried| tried.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![LocationOutcome::Silent, LocationOutcome::Used]
+        );
+        assert_eq!(
+            sites.running(),
+            0,
+            "the silent location's worker is stopped"
+        );
+    }
+
+    /// A job cancelled while its choice waits on a location's probe ends at
+    /// once, without the clock moving on, with no event and no job run, and
+    /// leaves no probe worker running: the cancel reaches the probe.
+    #[tokio::test]
+    async fn a_job_cancelled_while_its_choice_probes_ends_and_leaves_no_probe_running() {
+        let sites = Sites::silent_at("/srv/lan");
+        let (choose, access, _clock) = choosing(&sites).await;
+        let RunningJob {
+            mut events,
+            mut control,
+        } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        assert!(futures::poll!(events.next()).is_pending());
+        assert_eq!(sites.running(), 1, "the first location's probe runs");
+        control.stop().await;
+        assert_eq!(sites.running(), 0, "the cancel stops the probe");
+        assert!(
+            matches!(events.next().now_or_never(), Some(None)),
+            "the job ends at once, with nothing to say"
+        );
+        assert_eq!(sites.running(), 0);
+        assert!(
+            sites.jobs().iter().all(|job| matches!(job, Job::Probe(_))),
+            "no job opens the repository after a cancel"
+        );
+    }
+
+    /// The job that follows the choice opens the location chosen, alone,
+    /// and carries the entry it was made from, as every job made from one
+    /// does (§6.1, decision 57).
+    #[tokio::test]
+    async fn the_job_after_the_choice_opens_the_location_chosen_and_carries_its_entry() {
+        let sites = Sites::default();
+        let (choose, access, _clock) = choosing(&sites).await;
+        let entry = access.entry.clone();
+        let RunningJob { events, .. } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        drop(events.collect::<Vec<_>>().await);
+        let opened: Vec<RepositoryAccess> = sites
+            .jobs()
+            .into_iter()
+            .filter_map(|job| match job {
+                Job::Ls(access) => Some(access),
+                _ => None,
+            })
+            .collect();
+        let [opened] = opened.as_slice() else {
+            panic!("one job opens the repository: {opened:?}");
+        };
+        assert_eq!(opened.repository, "/srv/lan");
+        assert_eq!(opened.id, Some(RepositoryId::parse(ID).expect("an ID")));
+        assert!(entry.is_some());
+        assert_eq!(opened.entry, entry);
     }
 }
