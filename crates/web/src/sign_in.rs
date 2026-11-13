@@ -133,8 +133,7 @@ fn SignInForm(
                 kind="password"
                 autocomplete="current-password"
             />
-            {(place == Place::Dialog)
-                .then(|| view! { <p role="alert">{move || alert.get()}</p> })}
+            {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}
             <p class="actions">
                 <button type="submit" aria-disabled=move || busy.get().then_some("true")>
                     {text(&localizer, msg::UI_SIGN_IN_SUBMIT)}

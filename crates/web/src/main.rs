@@ -138,14 +138,8 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     view! {
         <Arrival localizer=localizer />
         <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
-            <Route
-                path=path!("/")
-                view=move || view! { <Start localizer=Arc::clone(&start) /> }
-            />
-            <Route
-                path=path!("/_gallery")
-                view=move || gallery_page(Arc::clone(&gallery))
-            />
+            <Route path=path!("/") view=move || view! { <Start localizer=Arc::clone(&start) /> } />
+            <Route path=path!("/_gallery") view=move || gallery_page(Arc::clone(&gallery)) />
             <Route
                 path=path!("/operations")
                 view=move || view! { <Operations localizer=Arc::clone(&operations) /> }
@@ -175,9 +169,15 @@ fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl I
     view! {
         <nav class="site-nav" aria-label=label>
             <ul>
-                <li><A href="/operations">{operations}</A></li>
-                <li><A href="/snapshots">{snapshots}</A></li>
-                <li><A href="/repositories">{repositories}</A></li>
+                <li>
+                    <A href="/operations">{operations}</A>
+                </li>
+                <li>
+                    <A href="/snapshots">{snapshots}</A>
+                </li>
+                <li>
+                    <A href="/repositories">{repositories}</A>
+                </li>
                 {move || {
                     (standing.get() == Standing::SignedIn)
                         .then(|| {
