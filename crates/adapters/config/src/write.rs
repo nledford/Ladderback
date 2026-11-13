@@ -12,15 +12,15 @@ use app::ports::{ConfigError, Problem};
 use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
-    KeepWithin, Location, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy,
-    RetryPolicy, Schedule, format_duration,
+    KeepWithin, Location, LocationRule, Maintenance, Overlap, Plan, RepositoryConfig,
+    RetentionPolicy, RetryPolicy, Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, LocationTable,
-    NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable,
-    RuleTable, ScheduleTable,
+    AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
+    LocationTable, NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable,
+    RetryTable, RuleTable, ScheduleTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -348,6 +348,7 @@ fn repository_table(repository: &RepositoryConfig) -> Result<RepositoryTable, &'
         options_hot: (!settings.options_hot.is_empty()).then(|| settings.options_hot.clone()),
         options_cold: (!settings.options_cold.is_empty()).then(|| settings.options_cold.clone()),
         hooks: hooks(&repository.hooks),
+        when: repository.locations.first_when.as_ref().map(rule_tables),
         locations: (!repository.locations.further.is_empty()).then(|| {
             repository
                 .locations
@@ -385,7 +386,18 @@ fn location_table(location: &Location) -> LocationTable {
         options: (!location.options.is_empty()).then(|| location.options.clone()),
         options_hot: (!location.options_hot.is_empty()).then(|| location.options_hot.clone()),
         options_cold: (!location.options_cold.is_empty()).then(|| location.options_cold.clone()),
+        when: location.when.as_ref().map(rule_tables),
     }
+}
+
+/// A location's `when`, one table per alternative, in order (decision 80).
+fn rule_tables(rule: &LocationRule) -> Vec<AlternativeTable> {
+    rule.alternatives()
+        .iter()
+        .map(|kind| AlternativeTable {
+            network: Some(kind.as_str().to_owned()),
+        })
+        .collect()
 }
 
 fn plan(plan: &Plan) -> PlanTable {

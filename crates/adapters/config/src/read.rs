@@ -12,20 +12,20 @@ use domain::notifications::{
 };
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
-    Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Location, Locations,
-    MAX_LOCATIONS, Maintenance, Nice, OnFailure, Overlap, Plan, RepositoryConfig, RepositoryField,
-    RepositorySettings, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, ValueKind,
-    Violation, check_location, check_location_count, check_option_value, check_options,
-    parse_duration,
+    Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Location, LocationRule,
+    Locations, MAX_LOCATIONS, MAX_RULE_ALTERNATIVES, Maintenance, NetworkKind, Nice, OnFailure,
+    Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy,
+    RetryPolicy, Schedule, Source, SourceFilter, ValueKind, Violation, check_location,
+    check_location_count, check_option_value, check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
 
 use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, LocationTable,
-    NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable, RuleTable,
-    ScheduleTable,
+    AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
+    LocationTable, NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable,
+    RuleTable, ScheduleTable,
 };
 use crate::zone::schedule_zone;
 
@@ -242,6 +242,7 @@ fn repository(
         options_hot,
         options_cold,
         hooks: hooks_table,
+        when,
         locations,
     } = table;
     let repository = reader.required(path, "repository", repository)?;
@@ -283,7 +284,9 @@ fn repository(
         options_cold: options_cold.unwrap_or_default(),
     };
     relative_path(reader, path, &settings)?;
-    let locations = further_locations(reader, path, &settings, locations.unwrap_or_default())?;
+    let first_when = location_rule(reader, path, when)?;
+    let mut locations = further_locations(reader, path, &settings, locations.unwrap_or_default())?;
+    locations.first_when = first_when;
     if !locations.further.is_empty() && id.is_none() {
         // The table of the first further location is where the need for an
         // ID begins; the key that is missing is the repository's.
@@ -387,6 +390,7 @@ fn further_locations(
             options,
             options_hot,
             options_cold,
+            when,
         } = table;
         let repository = reader.required(&path, "repository", repository)?;
         location_values(
@@ -402,7 +406,7 @@ fn further_locations(
             options: options.unwrap_or_default(),
             options_hot: options_hot.unwrap_or_default(),
             options_cold: options_cold.unwrap_or_default(),
-            when: None,
+            when: location_rule(reader, &path, when)?,
         };
         // The password is the repository's, and was checked at its key.
         relative_path(
@@ -416,6 +420,28 @@ fn further_locations(
         first_when: None,
         further,
     })
+}
+
+/// A location's `when`, at `path`, the location's table (decision 80): each
+/// alternative's `network`, refused at its key when it names no kind, then
+/// the list, refused at `when` when it is empty or too long.
+fn location_rule(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    tables: Option<Vec<AlternativeTable>>,
+) -> Read<Option<LocationRule>> {
+    let Some(tables) = tables else {
+        return Ok(None);
+    };
+    let at = path.key("when");
+    let mut kinds = Vec::with_capacity(tables.len().min(MAX_RULE_ALTERNATIVES));
+    for (index, table) in tables.into_iter().enumerate() {
+        let alternative = at.index(index);
+        let AlternativeTable { network } = table;
+        let network = reader.required(&alternative, "network", network)?;
+        kinds.push(reader.value(&alternative.key("network"), NetworkKind::parse(&network))?);
+    }
+    reader.value(&at, LocationRule::new(kinds)).map(Some)
 }
 
 /// What a relative path a repository's settings name is refused as.

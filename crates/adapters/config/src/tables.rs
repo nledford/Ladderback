@@ -81,6 +81,7 @@ table! {
         options_hot: Options,
         options_cold: Options,
         hooks: HooksTable,
+        when: Vec<AlternativeTable>,
         locations: Vec<LocationTable>,
     }
 }
@@ -94,6 +95,15 @@ table! {
         options: Options,
         options_hot: Options,
         options_cold: Options,
+        when: Vec<AlternativeTable>,
+    }
+}
+
+table! {
+    /// One alternative of a location's `when` (decision 80): the kind of
+    /// network the machine must be on.
+    AlternativeTable {
+        network: String,
     }
 }
 
