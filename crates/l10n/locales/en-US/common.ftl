@@ -494,12 +494,21 @@ warning-location-skipped = { $outcome ->
 # A location of a repository sends its credentials where whoever answers at its address can read them, so an impostor on the network could take them.
 # $position (text): the location's place in the list, from 1.
 # $cause (text): why: plain-http, unchecked-certificate, plain-endpoint or plain-ftp.
+# $rule (text): network when the location has a rule about the network the machine is on, which a network made to look like the intended one passes too; none when it has no rule and is tried on every network.
 # `http-cacert` is an option of the configuration, typed as it is: keep it a string literal.
-warning-location-plain-http-credentials = { $cause ->
-    [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Trust the server's own certificate with { "http-cacert" } instead.
-    [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
-    [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
-   *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
+warning-location-plain-http-credentials = { $rule ->
+    [network] { $cause ->
+        [unchecked-certificate] Location { $position } accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
+        [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+        [plain-ftp] Location { $position } sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
+       *[other] Location { $position } sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+    }
+   *[none] { $cause ->
+        [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
+        [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+        [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
+       *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+    }
   }
 
 # Every location of a repository has a rule about the network the machine is on, so on a network where no rule holds, nothing can be tried.

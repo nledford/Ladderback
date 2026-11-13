@@ -250,7 +250,7 @@ impl LocationWarning {
     /// The warning's `rule` argument: `network` for a location with a rule,
     /// `none` for one without.
     pub fn rule_code(self) -> &'static str {
-        todo!()
+        if self.ruled { "network" } else { "none" }
     }
 }
 
@@ -356,20 +356,22 @@ impl RepositoryConfig {
     }
 
     /// The entry's locations whose credentials can be read by whoever
-    /// answers at their address, as written: none for an entry with one
-    /// location, which is unchanged in every way.
+    /// answers at their address, as written, each saying whether it has a
+    /// rule: none for an entry of one location and no rule, which is
+    /// unchanged in every way.
     pub fn location_warnings(&self) -> Vec<LocationWarning> {
-        if !self.has_several_locations() {
+        if !self.chooses_location() {
             return Vec::new();
         }
         std::iter::once(Location::of(&self.settings))
             .chain(self.locations.further.iter().cloned())
+            .zip(self.location_rules())
             .zip(1u8..)
-            .filter_map(|(location, position)| {
+            .filter_map(|((location, rule), position)| {
                 ExposedCredentials::of_location(&location).map(|cause| LocationWarning {
                     position,
                     cause,
-                    ruled: false,
+                    ruled: rule.is_some(),
                 })
             })
             .collect()

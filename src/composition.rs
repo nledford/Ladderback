@@ -2745,9 +2745,9 @@ fn config_unusable<R>(
 /// A configured entry as the repositories list shows it: its row, and for
 /// an entry reached at several locations, each location in order with its
 /// rule; a warning for each location that sends its credentials where an
-/// impostor could read them, by position and cause, never the address; and
-/// the notes about what the locations' rules mean for `plans`, the plans
-/// that back up to it (decision 80).
+/// impostor could read them, by position, cause and whether it has a rule,
+/// never the address; and the notes about what the locations' rules mean
+/// for `plans`, the plans that back up to it (decision 80).
 fn listed_repository(
     alias: &RepositoryAlias,
     repository: &RepositoryConfig,
@@ -2768,6 +2768,7 @@ fn listed_repository(
                 args: [
                     ("position".to_owned(), text(warning.position)),
                     ("cause".to_owned(), text(warning.cause.code())),
+                    ("rule".to_owned(), text(warning.rule_code())),
                 ]
                 .into(),
             }
