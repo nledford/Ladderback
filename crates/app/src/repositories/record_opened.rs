@@ -621,13 +621,17 @@ mod tests {
         *store.saves.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// An identify and an initialisation are the jobs that record the ID
+    /// they opened: every other job of an entry that records no ID runs
+    /// after an identify, which records it.
     #[tokio::test]
-    async fn every_kind_of_job_records_the_id_of_the_repository_it_opened() {
+    async fn an_identify_or_an_initialisation_records_the_id_of_the_repository_it_opened() {
         let writes = Arc::new(ConfigWrites::new(()));
         let events = vec![started(Some(opened())), succeeded()];
         let unrecorded = entry("/srv/demo/cold", None);
         let template = holding(vec![("demo", unrecorded.clone())]).await;
-        for job in every_kind(&access_of(&template, "demo").await) {
+        let access = access_of(&template, "demo").await;
+        for job in [Job::Identify(access.clone()), Job::Init(access)] {
             let kind = job.kind();
             let store = holding(vec![("demo", unrecorded.clone())]).await;
             let (engine, reports) = recording(&store, &writes, events.clone());
@@ -651,15 +655,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_job_that_failed_after_it_opened_the_repository_records_it() {
+    async fn an_identify_or_an_initialisation_that_failed_after_it_opened_the_repository_records_it()
+     {
         let writes = Arc::new(ConfigWrites::new(()));
-        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
         let failed = EngineEvent::Failed(FailureReason::EngineFailed {
-            detail: "a source could not be read".to_owned(),
+            detail: "the repository could not be read".to_owned(),
         });
-        let (engine, _) = recording(&store, &writes, vec![started(Some(opened())), failed]);
-        run(&engine, Job::Ls(access_of(&store, "demo").await)).await;
-        assert_eq!(entry_of(&store, "demo").await.id, Some(opened()));
+        let template = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&template, "demo").await;
+        for job in [Job::Identify(access.clone()), Job::Init(access)] {
+            let kind = job.kind();
+            let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+            let (engine, _) = recording(
+                &store,
+                &writes,
+                vec![started(Some(opened())), failed.clone()],
+            );
+            run(&engine, job).await;
+            assert_eq!(
+                entry_of(&store, "demo").await.id,
+                Some(opened()),
+                "{kind:?}"
+            );
+        }
     }
 
     #[tokio::test]

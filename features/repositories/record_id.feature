@@ -17,7 +17,7 @@ Feature: Recording a saved repository's ID
 
   Rule: The first job that opens a saved repository records its ID in the entry
 
-    Scenario Outline: A <job> of a repository whose entry records no ID records the ID it opened
+    Scenario Outline: A <job> of a repository whose entry records no ID records the ID of the repository its identify opened
       Given the agent has the repository "demo" configured with its settings
       When a <job> of the repository "demo" opens it
       Then the agent has the repository "demo" configured with the repository's ID
