@@ -77,16 +77,14 @@ pub(crate) fn failure(error: keyring::Error, store: OsStore) -> Failure {
     let no_service = matches!(store, OsStore::SecretService)
         && match &error {
             keyring::Error::PlatformFailure(source) | keyring::Error::NoStorageAccess(source) => {
-                #[cfg(target_os = "linux")]
-                {
-                    secret_service_absent(source.as_ref())
-                }
-                // The Secret Service is Linux's alone: no error from
-                // elsewhere says it is missing.
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let _ = source;
-                    false
+                cfg_select! {
+                    target_os = "linux" => { secret_service_absent(source.as_ref()) }
+                    // The Secret Service is Linux's alone: no error from
+                    // elsewhere says it is missing.
+                    _ => {
+                        let _ = source;
+                        false
+                    }
                 }
             }
             _ => false,
