@@ -166,11 +166,14 @@ Feature: Accessibility of the app shell
     Then the table "Operations" shows its "Started" column newest first
     And the polite region comes to contain "Sorted by started, newest first."
 
-  # The daemon is the journey's own in the next two scenarios: its history and
+  # The daemon is the journey's own in the next four scenarios: its history and
   # its events stream say what the steps tell them to, so each update of a row
   # reaches the page when a step sends it, not when a real backup happens to
   # report one. Where a reader has put focus must outlast every update (WCAG
   # 2.4.3): the update is the one thing in the page that was not her doing.
+  # A control the update takes away, as a run's end takes its Cancel button,
+  # hands focus to its row's header, which names the run, so the reader is
+  # still where she was and hears how the run ended as before.
 
   Scenario: Focus stays on a backup's Cancel button while its row updates
     Given the daemon reports a queued backup of "demo-home"
@@ -182,6 +185,31 @@ Feature: Accessibility of the app shell
     Then the table "Operations" has a row "demo-home" that shows "Running"
     And the progress bar "Backup progress of demo-home" shows 100 percent
     And focus stays on the button "Cancel demo-home"
+
+  Scenario: Focus moves to the row's header when the run of the focused Cancel button ends
+    Given the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And I press Tab until focus is on the button "Cancel demo-home"
+    And the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the table "Operations" has a row "demo-home" that shows "Succeeded"
+    And focus is on the row header "demo-home"
+    And the polite region comes to contain "Backup finished."
+
+  # A cancelled run tells of no end on the events stream: the page reads the
+  # history after the press until the run has ended there.
+  Scenario: Focus moves to the row's header when the reader cancels the run of the focused Cancel button
+    Given the daemon reports a running backup of "demo-home"
+    And the daemon accepts each cancel the page asks for, and the run goes on
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And I press Tab until focus is on the button "Cancel demo-home"
+    And I press Enter
+    And the daemon has accepted the cancel of the backup of "demo-home"
+    And the daemon reports that the backup of "demo-home" has been cancelled
+    Then the table "Operations" has a row "demo-home" that shows "Cancelled"
+    And focus is on the row header "demo-home"
+    And the polite region comes to contain "Backup cancelled."
 
   Scenario: The operations table sorts oldest first on the second press of its sort button
     Given the daemon reports two finished backups of "demo-home"

@@ -17,7 +17,7 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
-    sentence_view,
+    hand_focus_when_gone, sentence_view,
 };
 use crate::live::{reply, say};
 use crate::operations::{self, Name};
@@ -638,6 +638,7 @@ fn row_view(
     // The row header's ID, which a control that leaves the row hands focus to.
     let header = format!("operation-{id}");
     let operation = id;
+    let cancel_header = header.clone();
     view! {
         <tr>
             <th scope="row" id=header.clone() tabindex="-1">{name}</th>
@@ -686,6 +687,11 @@ fn row_view(
                     can_cancel
                         .get()
                         .then(|| {
+                            // A run that ends takes its Cancel button away;
+                            // a button that held focus hands it to the row's
+                            // header, which names the run (#438).
+                            let button = NodeRef::<leptos::html::Button>::new();
+                            hand_focus_when_gone(button, cancel_header.clone());
                             let url = url.clone();
                             let connection = connection.clone();
                             let operation = operation.clone();
@@ -693,6 +699,7 @@ fn row_view(
                             let error_localizer = Arc::clone(&error_localizer);
                             view! {
                                 <button
+                                    node_ref=button
                                     type="button"
                                     on:click=move |_| {
                                         let error_localizer = Arc::clone(&error_localizer);
