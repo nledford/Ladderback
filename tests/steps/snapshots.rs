@@ -222,6 +222,7 @@ async fn lists(agent: &mut Agent) {
     // A repository the scenario gave, under an alias of its own, recording
     // no ID: the listing opens whatever is at the location.
     let entry = domain::planning::RepositoryConfig {
+        locations: Default::default(),
         settings,
         id: None,
         maintenance: domain::planning::Maintenance::None,

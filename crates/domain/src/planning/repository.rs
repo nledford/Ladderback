@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use super::{Hooks, InvalidValue, ValueKind};
+use super::{Hooks, InvalidValue, Locations, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
     InlineSecret, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, REDACTED, Redactor,
@@ -333,8 +333,12 @@ impl fmt::Display for GroupBy {
 /// One repository, as an agent's config describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepositoryConfig {
-    /// Where it is and how to open it.
+    /// Where it is and how to open it: its first location, and the
+    /// repository's password.
     pub settings: RepositorySettings,
+    /// The locations after the first, in the order they are tried
+    /// (decision 80): none for a repository reached at one location.
+    pub locations: Locations,
     /// The rustic repository ID Ladderback read when it connected or created
     /// the repository (§7.3). None for an entry written by hand or imported
     /// from a profile: Ladderback never opened those.

@@ -576,6 +576,7 @@ keep-daily = 7
 
     fn entry_at(location: &str) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             settings: RepositorySettings {
                 repository: location.to_owned(),
                 repo_hot: None,

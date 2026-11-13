@@ -485,6 +485,7 @@ fn alias() -> RepositoryAlias {
 
 fn demo_repository() -> RepositoryConfig {
     RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),
@@ -529,6 +530,7 @@ pub fn config_with_plans(plans: &[(&str, &str)], id: fn(&str) -> RepositoryId) -
         repositories.insert(
             repository.clone(),
             RepositoryConfig {
+                locations: Default::default(),
                 id: Some(id(on)),
                 ..demo_repository()
             },

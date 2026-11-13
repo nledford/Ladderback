@@ -822,7 +822,7 @@ impl Engine for EventEngine {
 /// run that read, which keeps none of it (#308).
 fn is_operation(job: &Job) -> bool {
     match job {
-        Job::Identify(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
+        Job::Identify(_) | Job::Probe(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -1415,6 +1415,7 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
+        | EngineResult::Probed(_)
         | EngineResult::Snapshots(_) => None,
     }
 }
@@ -1455,6 +1456,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::CheckWarning => WarningCode::CheckWarning,
         WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
+        WarningKind::LocationSkipped => todo!(),
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -3821,6 +3823,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias.clone(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     // This agent maintains it, so a preview and a run reach
@@ -8341,6 +8344,7 @@ mod repository_service_tests {
                     std::collections::BTreeMap::from([(
                         RepositoryAlias::parse(alias).expect("an alias"),
                         domain::planning::RepositoryConfig {
+                            locations: Default::default(),
                             id: None,
                             settings,
                             maintenance: domain::planning::Maintenance::None,
@@ -8946,6 +8950,7 @@ mod repository_service_tests {
             repositories.insert(
                 alias(name),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings: RepositorySettings {
                         // One location each: two entries at one location
@@ -9073,6 +9078,7 @@ mod repository_service_tests {
     ) -> Vec<(String, bool)> {
         let config = Arc::new(InMemoryConfigStore::new());
         let entry = |name: &str, id| domain::planning::RepositoryConfig {
+            locations: Default::default(),
             settings: domain::planning::RepositorySettings {
                 repository: format!("/srv/{name}/repo"),
                 repo_hot: None,

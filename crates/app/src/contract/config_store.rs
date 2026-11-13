@@ -136,6 +136,7 @@ fn rich() -> Option<AgentConfig> {
         (
             nas.clone(),
             RepositoryConfig {
+                locations: Default::default(),
                 id: Some(RepositoryId::parse(&"0123456789abcdef".repeat(4)).ok()?),
                 settings: RepositorySettings {
                     password: SecretRef::Command(
@@ -169,6 +170,7 @@ fn rich() -> Option<AgentConfig> {
         (
             cloud.clone(),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
@@ -194,6 +196,7 @@ fn rich() -> Option<AgentConfig> {
         (
             usb,
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     password: SecretRef::File {
@@ -218,6 +221,7 @@ fn rich() -> Option<AgentConfig> {
         (
             alias("vault")?,
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     password: SecretRef::Env("DEMO_VAULT_PASSWORD".to_owned()),
@@ -231,6 +235,7 @@ fn rich() -> Option<AgentConfig> {
         (
             alias("scratch")?,
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     password: SecretRef::Inline(SecretValue::new("demo \"inline\" #password")),
@@ -364,6 +369,7 @@ fn rich() -> Option<AgentConfig> {
 fn minimal() -> Option<AgentConfig> {
     let nas = alias("nas")?;
     let repository = RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings: settings("/srv/demo-repo"),
         maintenance: Maintenance::None,

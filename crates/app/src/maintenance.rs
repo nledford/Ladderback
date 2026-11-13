@@ -337,6 +337,9 @@ pub struct RunMaintenance {
     sources: Arc<dyn NormalizeSources>,
     /// Where the end of each run is announced, when anything listens.
     events: Option<Arc<dyn EventBus>>,
+    /// Chooses the location an in-process open of the repository uses, as
+    /// the engine's own choice does for every job (decision 80).
+    locations: Option<Arc<crate::locations::ChooseLocation>>,
 }
 
 impl RunMaintenance {
@@ -363,7 +366,16 @@ impl RunMaintenance {
             hostname,
             sources,
             events: None,
+            locations: None,
         }
+    }
+
+    /// Opens the repository in-process, to apply a retention policy, at the
+    /// location `locations` chooses, never the first by default (decision
+    /// 80).
+    pub fn with_locations(self, locations: Arc<crate::locations::ChooseLocation>) -> Self {
+        let _ = locations;
+        todo!()
     }
 
     /// Announces how each run ends on `events` (§4.4): once, after the last
@@ -1765,6 +1777,7 @@ mod read_timeout_tests {
         unrecorded.entry = Some(SavedEntry {
             alias: RepositoryAlias::parse("demo").expect("an alias"),
             entry: RepositoryConfig {
+                locations: Default::default(),
                 settings: RepositorySettings {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,

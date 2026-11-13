@@ -78,6 +78,7 @@ fn plan() -> PlanId {
 /// backups' starts and failures to the webhook "ops".
 fn config() -> AgentConfig {
     let repository = RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings: RepositorySettings {
             repository: "/srv/nas".to_owned(),

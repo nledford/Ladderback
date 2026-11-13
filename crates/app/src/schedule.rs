@@ -999,6 +999,7 @@ mod tests {
     fn home_retries_docs_does_not() -> AgentConfig {
         let nas = RepositoryAlias::parse("nas").unwrap();
         let repository = RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),

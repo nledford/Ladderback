@@ -92,6 +92,7 @@ fn hostname(name: &str) -> Hostname {
 
 fn demo_repository() -> RepositoryConfig {
     RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),

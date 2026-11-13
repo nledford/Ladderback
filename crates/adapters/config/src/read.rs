@@ -308,6 +308,7 @@ fn repository(
         return Err(reader.refuse(&path, problem));
     }
     Ok(RepositoryConfig {
+        locations: Default::default(),
         id,
         settings,
         maintenance,

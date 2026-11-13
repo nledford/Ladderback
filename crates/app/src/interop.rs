@@ -315,6 +315,7 @@ mod tests {
 
     fn repository() -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),

@@ -97,6 +97,7 @@ impl From<&EngineResult> for Summary {
                 steps_completed: *steps_completed,
             },
             EngineResult::Repository { id } => Self::Repository { id: id.clone() },
+            EngineResult::Probed(_) => todo!(),
             EngineResult::Backup(summary) => Self::Backup {
                 repository: summary.repository.clone(),
                 snapshot: summary.snapshot.clone(),

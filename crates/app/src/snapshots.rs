@@ -184,6 +184,7 @@ mod tests {
     /// The configuration's entry for the repository, recording `id`.
     fn entry(id: Option<RepositoryId>) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             settings: settings(),
             id,
             maintenance: Maintenance::None,

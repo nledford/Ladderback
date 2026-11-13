@@ -562,6 +562,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     maintenance: domain::planning::Maintenance::Local,
@@ -1150,6 +1151,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     maintenance: domain::planning::Maintenance::None,

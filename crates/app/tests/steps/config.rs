@@ -233,6 +233,7 @@ fn a_repository(agent: &mut Agent, name: String) {
     agent.config.repositories.insert(
         alias(&name),
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: format!("/srv/{name}"),

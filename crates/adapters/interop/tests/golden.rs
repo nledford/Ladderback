@@ -72,6 +72,7 @@ fn export() -> PlanExport {
     PlanExport {
         plan,
         repository: RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),

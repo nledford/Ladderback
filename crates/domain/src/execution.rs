@@ -2,6 +2,7 @@
 
 pub mod conditions;
 pub mod deadline;
+pub mod locations;
 pub mod next_run;
 pub mod plan_tags;
 #[cfg(test)]
@@ -189,6 +190,13 @@ pub enum WarningKind {
     /// the first five of them by name, separated by `, `
     /// ([`OtherHosts`](crate::maintenance::OtherHosts)).
     OtherHosts,
+    /// A location of the repository was skipped where it shouldn't have
+    /// been (decision 80): it held another repository, a secret of it was
+    /// unavailable, or its rule held and it couldn't be used all the same.
+    /// `item` is the location's position, from 1, `during` is `location`
+    /// and `detail` the outcome's code; never an address or a network's
+    /// name.
+    LocationSkipped,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }
@@ -306,6 +314,11 @@ pub struct Operation {
     /// its plan names, and for an operation an earlier build logged.
     #[serde(default)]
     repository_alias: Option<RepositoryAlias>,
+    /// Which location of a repository reached at several the run used, and
+    /// why each earlier one was skipped (decision 80). `None` for a
+    /// repository of one location and an operation that opens none.
+    #[serde(default)]
+    locations: Option<locations::LocationsRecord>,
 }
 
 impl Operation {
@@ -328,6 +341,7 @@ impl Operation {
             warnings: Vec::new(),
             warning_count: 0,
             repository_alias: None,
+            locations: None,
         }
     }
 
@@ -343,6 +357,23 @@ impl Operation {
     /// was given ([`Self::with_repository_alias`]).
     pub fn repository_alias(&self) -> Option<&RepositoryAlias> {
         self.repository_alias.as_ref()
+    }
+
+    /// Which location the run used and why each earlier one was skipped,
+    /// for a repository reached at several.
+    pub fn locations(&self) -> Option<&locations::LocationsRecord> {
+        todo!()
+    }
+
+    /// Records the run's choice of location, and the warnings it gives
+    /// (`rule_held` says, by position, whether a location's rule held).
+    pub fn record_locations(
+        &mut self,
+        record: locations::LocationsRecord,
+        rule_held: impl Fn(u8) -> bool,
+    ) -> Result<(), LifecycleError> {
+        let _ = (record, rule_held);
+        todo!()
     }
 
     pub fn id(&self) -> OperationId {

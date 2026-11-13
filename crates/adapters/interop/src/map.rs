@@ -205,6 +205,7 @@ fn repository(
         return Err(relative(&own.places, &field, file));
     }
     Ok(RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings,
         maintenance: if part.forget.prune {

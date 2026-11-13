@@ -467,6 +467,7 @@ mod tests {
     /// A hot/cold entry at `cold`, recording `id`.
     fn entry(cold: &str, id: Option<RepositoryId>) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             settings: RepositorySettings {
                 repository: cold.to_owned(),
                 repo_hot: Some("/srv/demo/hot".to_owned()),

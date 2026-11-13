@@ -424,6 +424,7 @@ impl FakeProfilesHarness {
         };
         self.reader.script(Ok(app::ports::ImportedProfile {
             repository: RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings,
                 maintenance: Maintenance::None,

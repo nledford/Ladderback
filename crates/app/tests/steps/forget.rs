@@ -219,6 +219,7 @@ impl ForgetWorld {
         self.repositories.insert(
             alias(),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     repository: "/srv/demo/repo".to_owned(),
@@ -463,6 +464,7 @@ impl ForgetWorld {
             .iter()
             .map(|job| match job {
                 Job::Identify(_) => "identify",
+                Job::Probe(_) => "probe",
                 Job::Ls(_) => "ls",
                 Job::Forget(_) => "forget",
                 Job::Rewrite(_) => "adopt",

@@ -13,6 +13,7 @@ mod duration;
 mod filter;
 mod hooks;
 mod local_paths;
+mod location;
 mod names;
 mod plan;
 mod repository;
@@ -25,6 +26,10 @@ pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};
+pub use location::{
+    ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
+    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, check_location_count,
+};
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
 pub use repository::{

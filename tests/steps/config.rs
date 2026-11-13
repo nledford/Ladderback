@@ -197,6 +197,7 @@ async fn saves_changed(
 )]
 async fn saves_with_repository(agent: &mut Agent, alias: String, location: String) {
     let entry = RepositoryConfig {
+        locations: Default::default(),
         settings: RepositorySettings {
             repository: location,
             repo_hot: None,

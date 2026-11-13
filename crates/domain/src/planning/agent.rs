@@ -291,6 +291,7 @@ impl AgentConfig {
                 if entry.id.as_ref() == Some(id)
                     && read.id.is_none()
                     && RepositoryConfig {
+                        locations: Default::default(),
                         id: None,
                         ..entry.clone()
                     } == *read =>
@@ -335,6 +336,7 @@ mod tests {
 
     fn repository(maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),
@@ -935,6 +937,7 @@ mod tests {
         for moved in [
             at("/srv/elsewhere", None),
             RepositoryConfig {
+                locations: Default::default(),
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
                     ..location("/srv/demo-repo")

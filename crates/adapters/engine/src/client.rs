@@ -1365,6 +1365,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     match job {
         Job::Fake(_) => None,
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
+        Job::Probe(_) => todo!(),
         Job::Backup(job) => job.repository.id.as_ref(),
         Job::Forget(job) => job.repository.id.as_ref(),
         Job::Rewrite(job) => job.repository.id.as_ref(),
@@ -1419,6 +1420,7 @@ fn access_of(job: &Job) -> Option<&RepositoryAccess> {
     match job {
         Job::Fake(_) => None,
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => Some(access),
+        Job::Probe(_) => todo!(),
         Job::Backup(job) => Some(&job.repository),
         Job::Forget(job) => Some(&job.repository),
         Job::Rewrite(job) => Some(&job.repository),
@@ -1526,6 +1528,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         });
     }
     Ok(match job {
+        Job::Probe(_) => todo!(),
         Job::Fake(FakeJob {
             steps,
             step_delay,
@@ -1549,6 +1552,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::CheckWarning => WarningCode::CheckWarning,
                         WarningKind::CheckError => WarningCode::CheckError,
                         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
+                        WarningKind::LocationSkipped => todo!(),
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,
