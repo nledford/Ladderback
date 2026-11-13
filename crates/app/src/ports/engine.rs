@@ -82,6 +82,28 @@ impl From<EngineError> for FailureReason {
     }
 }
 
+/// The engine's refusal a job's failure stands for, for a caller that
+/// answers a refusal otherwise than a failure. A job the engine is asked to
+/// start after its run began, as a job that runs after an identify does
+/// (decision 81), can't be refused through [`Engine::run`]'s error: its
+/// refusal ends its events as the reason [`From`] gives, and this gives the
+/// refusal back. Only the reasons nothing but a refusal gives are given
+/// back: `EngineStartTimedOut` is also what a worker that took its job and
+/// then sent nothing fails with, so it stays a failure.
+impl TryFrom<FailureReason> for EngineError {
+    type Error = FailureReason;
+
+    fn try_from(reason: FailureReason) -> Result<Self, FailureReason> {
+        match reason {
+            FailureReason::EngineUnavailable { detail } => Ok(Self::Unavailable { detail }),
+            FailureReason::SecretsTooLargeToMask { field, limit } => {
+                Ok(Self::SecretsTooLargeToMask { field, limit })
+            }
+            reason => Err(reason),
+        }
+    }
+}
+
 /// What an operation should do.
 #[allow(
     clippy::large_enum_variant,
@@ -597,6 +619,42 @@ mod tests {
             ),
         ] {
             assert_eq!(FailureReason::from(error), reason);
+        }
+    }
+
+    #[test]
+    fn a_failure_only_a_refusal_gives_is_read_back_as_the_refusal_and_any_other_stays_one() {
+        for error in [
+            EngineError::Unavailable {
+                detail: "no such program".to_owned(),
+            },
+            EngineError::SecretsTooLargeToMask {
+                field: Some("HTTPS_PROXY".to_owned()),
+                limit: 262_144,
+            },
+            EngineError::SecretsTooLargeToMask {
+                field: None,
+                limit: 262_144,
+            },
+        ] {
+            assert_eq!(
+                EngineError::try_from(FailureReason::from(error.clone())),
+                Ok(error)
+            );
+        }
+        for reason in [
+            // A worker that took its job and then sent nothing fails so too.
+            FailureReason::EngineStartTimedOut,
+            FailureReason::JobRejected {
+                detail: "no such job".to_owned(),
+            },
+            FailureReason::EngineFailed {
+                detail: "the password is wrong".to_owned(),
+            },
+            FailureReason::EngineExited { exit_code: None },
+            FailureReason::RepositoryNotFound,
+        ] {
+            assert_eq!(EngineError::try_from(reason.clone()), Err(reason));
         }
     }
 

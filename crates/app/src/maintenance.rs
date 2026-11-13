@@ -1344,7 +1344,11 @@ async fn run_read(
         while let Some(event) = events.next().await {
             match event {
                 EngineEvent::Succeeded(result) => return Ok(result),
-                EngineEvent::Failed(reason) => return Err(MaintenanceError::Failed(reason)),
+                // A refusal after an identify is answered as a refusal before it.
+                EngineEvent::Failed(reason) => {
+                    return Err(EngineError::try_from(reason)
+                        .map_or_else(MaintenanceError::Failed, engine_error));
+                }
                 _ => {}
             }
         }

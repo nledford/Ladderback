@@ -72,7 +72,11 @@ async fn run(
     while let Some(event) = events.next().await {
         match event {
             EngineEvent::Succeeded(EngineResult::Snapshots(snapshots)) => return Ok(snapshots),
-            EngineEvent::Failed(reason) => return Err(SnapshotError::Failed(reason)),
+            // A refusal after an identify is answered as a refusal before it.
+            EngineEvent::Failed(reason) => {
+                return Err(EngineError::try_from(reason)
+                    .map_or_else(SnapshotError::Failed, SnapshotError::Engine));
+            }
             _ => {}
         }
     }
