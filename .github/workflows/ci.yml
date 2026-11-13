@@ -366,12 +366,20 @@ jobs:
           title: Nightly dependency check failed
           body: "The nightly dependency check (`just deny`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec advisory is the usual cause; the job's log names it."
 
-  mutants:
-    name: Mutation testing (changed code)
+  # The pull request's mutants, split over four runners. One runner, even two
+  # mutants at a time, outran the 60-minute limit on a large change (#443:
+  # 371 mutants), so each shard takes every fourth mutant (round-robin, which
+  # spreads the slow `app` mutants evenly) within that limit.
+  mutants-shard:
+    name: Mutation testing (shard ${{ matrix.shard }} of 4)
     needs: changes
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -384,18 +392,36 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,cargo-mutants
-      # Two mutants at a time: each builds in its own copy of the tree, and
-      # the runner has four cores. One at a time, a large change's mutants
-      # outran the 60-minute limit (#443: 371 mutants).
-      - run: just mutants "origin/$BASE_REF" --jobs 2
+      # Two mutants at a time: each builds in its own copy of the tree, and the
+      # runner has four cores. `--caught --unviable` print every outcome as it
+      # comes, so a shard that runs out of time shows how far it got.
+      - run: just mutants "origin/$BASE_REF" --jobs 2 --shard "$SHARD/4" --sharding round-robin --caught --unviable
         env:
           BASE_REF: ${{ github.base_ref }}
-      - if: failure()
+          SHARD: ${{ matrix.shard }}
+      # On a timeout too, which GitHub reports as a cancel, not a failure.
+      - if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants.out
+          name: mutants.out-shard-${{ matrix.shard }}
           path: mutants.out
           retention-days: 14
+
+  # The check the ruleset requires, by this name: it passes only when every
+  # shard passed. It runs when a shard failed or timed out (`!cancelled()` is
+  # about the whole run), so a lost shard fails it rather than leaving it
+  # skipped, which GitHub would count as passing. A docs-only pull request
+  # skips it with the shards, as before.
+  mutants:
+    name: Mutation testing (changed code)
+    needs: [changes, mutants-shard]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - run: test "$SHARDS" = success || { echo "a mutation shard ended $SHARDS"; exit 1; }
+        env:
+          SHARDS: ${{ needs.mutants-shard.result }}
 
   # A scheduled run notifies no one, so a failure opens an issue, or comments
   # on the one already open, rather than going unseen.
