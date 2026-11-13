@@ -150,6 +150,24 @@ Given("the location {string} is eligible only on a wired network", async functio
   await writeFile(configFile, [written.trimEnd(), 'when = [ { network = "wired" } ]', ""].join("\n"));
 });
 
+// The location's folder is replaced by a REST address over plain HTTP whose
+// user and password are a reference, so the configuration holds no secret.
+// Nothing answers there: the page lists the warning without opening it.
+Given(
+  "the location {string} is {string} with a user and a password in it",
+  async function (this: BrowserWorld, name: string, address: string) {
+    const { scratch } = locations(this);
+    const [scheme, rest] = address.split("://");
+    assert.ok(scheme && rest, `"${address}" has a scheme`);
+    const configFile = path.join(scratch, "config", "config.toml");
+    const written = await readFile(configFile, "utf8");
+    const line = `repository = ${JSON.stringify(placeOf(this, name))}`;
+    assert.ok(written.includes(line), `the configuration has no line ${line}`);
+    const moved = `repository = ${JSON.stringify(`${scheme}://demo:\${NAS_PASSWORD}@${rest}`)}`;
+    await writeFile(configFile, written.replace(line, moved));
+  },
+);
+
 When("I open the Repositories page", async function (this: BrowserWorld) {
   await this.open("/repositories");
 });
@@ -273,5 +291,21 @@ Then(
         text.includes("doesn't apply here and the location is skipped")
       );
     }, `the repository ${alias} says this machine can't read the Wi-Fi network's name and the rule doesn't apply`);
+  },
+);
+
+Then(
+  "the repository {string} says the rule of location {int} can't tell the network it is meant for from one made to look like it, and recommends HTTPS",
+  async function (this: BrowserWorld, alias: string, position: number) {
+    const row = this.page.getByRole("row").filter({ hasText: alias });
+    await until(async () => {
+      if ((await row.count()) === 0) return false;
+      const text = await shown(row.first().innerText());
+      return (
+        text.includes(`Location ${position} sends its credentials over plain HTTP`) &&
+        text.includes("its rule can't tell the network it is meant for from one made to look like it") &&
+        text.includes("Use HTTPS")
+      );
+    }, `the repository ${alias} says the rule of location ${position} can't tell the network it is meant for from one made to look like it, and recommends HTTPS`);
   },
 );
