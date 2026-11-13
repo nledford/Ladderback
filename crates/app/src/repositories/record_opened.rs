@@ -991,11 +991,12 @@ mod tests {
     /// An engine that keeps the jobs it is given. An identify finds what
     /// `finds` says; every other job opens [`opened`] and succeeds, or, when
     /// `job_hangs`, runs until it is stopped. A job other than an identify
-    /// is started only once the test lets it go, after [`Keeps::hold_start`].
+    /// is started only once the test lets it go, after [`Keeps::hold_start`],
+    /// and refused when the test sends an error instead.
     struct Keeps {
         finds: Finds,
         job_hangs: bool,
-        held: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+        held: Mutex<Option<futures::channel::oneshot::Receiver<Result<(), EngineError>>>>,
         seen: Mutex<Vec<Job>>,
         stopped: Arc<Mutex<Vec<OperationKind>>>,
         live: Arc<AtomicUsize>,
@@ -1022,8 +1023,9 @@ mod tests {
         }
 
         /// Holds the start of the next job other than an identify until the
-        /// returned sender sends, or is dropped.
-        fn hold_start(&self) -> futures::channel::oneshot::Sender<()> {
+        /// returned sender sends, or is dropped. The start is refused with
+        /// the error it sends.
+        fn hold_start(&self) -> futures::channel::oneshot::Sender<Result<(), EngineError>> {
             let (go, held) = futures::channel::oneshot::channel();
             *self.held.lock().unwrap_or_else(PoisonError::into_inner) = Some(held);
             go
@@ -1055,8 +1057,10 @@ mod tests {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .take();
-                if let Some(held) = held {
-                    let _ = held.await;
+                if let Some(held) = held
+                    && let Ok(Err(error)) = held.await
+                {
+                    return Err(error);
                 }
             }
             let (events, hangs) = match (identify, &self.finds) {
@@ -1332,10 +1336,37 @@ mod tests {
         );
         assert_eq!(keeps.live(), 1, "the job's worker is starting");
         stop_within_bound(&mut control).await;
-        let _ = go.send(());
+        let _ = go.send(Ok(()));
         assert_eq!(rest(events).await, [], "nothing of the job is passed on");
         drop(control);
         assert_eq!(keeps.stopped(), [OperationKind::Backup]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
+    }
+
+    /// A stop while the engine is starting the job, after its identify, and
+    /// the engine then refuses the job: the job was stopped, so its refusal
+    /// is not passed on either.
+    #[tokio::test]
+    async fn stopping_a_job_whose_start_then_fails_passes_nothing_on() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
+        let go = keeps.hold_start();
+        let RunningJob {
+            mut events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        assert_eq!(events.next().now_or_never(), None, "the job is starting");
+        stop_within_bound(&mut control).await;
+        let _ = go.send(Err(EngineError::Unavailable {
+            detail: "the worker couldn't be started".to_owned(),
+        }));
+        assert_eq!(rest(events).await, [], "nothing of the job is passed on");
+        drop(control);
+        assert_eq!(keeps.stopped(), [], "no job was started to stop");
         assert_eq!(keeps.live(), 0, "no worker is left running");
     }
 
