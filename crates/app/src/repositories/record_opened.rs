@@ -193,7 +193,9 @@ impl RecordOpened {
     /// An identify that fails ends the job with its reason, the one the
     /// job's own open would have given, and the job never runs; one the
     /// engine can't start refuses the job as it would refuse it. Stopping
-    /// the job stops whichever of the two runs.
+    /// the job stops whichever of the two runs, and never waits for the
+    /// job's start: a job that starts after it was stopped is stopped
+    /// before anything it reports is passed on.
     async fn identified_first(
         &self,
         op: OperationId,
@@ -202,35 +204,57 @@ impl RecordOpened {
         saved: SavedEntry,
     ) -> Result<RunningJob, EngineError> {
         let identify = self.recording(op, Job::Identify(access), saved).await?;
-        let phase = Arc::new(futures::lock::Mutex::new(Phase::Identifying(
-            identify.control,
-        )));
+        let phase = Arc::new(Mutex::new(Phase::Identifying(identify.control)));
         let inner = Arc::clone(&self.inner);
         let handed = Arc::clone(&phase);
         let found = identify.events;
         let events = futures::stream::once(async move {
             let found = identified(found).await;
-            let mut phase = handed.lock().await;
-            if matches!(*phase, Phase::Stopped) {
-                return futures::stream::empty().boxed();
-            }
-            let id = match found {
-                Ok(id) => id,
-                Err(reason) => {
-                    return futures::stream::iter([EngineEvent::Failed(reason)]).boxed();
+            let id = {
+                let mut phase = handed.lock().unwrap_or_else(PoisonError::into_inner);
+                if matches!(*phase, Phase::Stopped) {
+                    return futures::stream::empty().boxed();
+                }
+                match found {
+                    Ok(id) => {
+                        *phase = Phase::Starting;
+                        id
+                    }
+                    Err(reason) => {
+                        return futures::stream::iter([EngineEvent::Failed(reason)]).boxed();
+                    }
                 }
             };
             if let Some(access) = job.access_mut() {
                 access.id = Some(id);
             }
-            match inner.run(op, job).await {
-                Ok(running) => {
-                    *phase = Phase::Running(running.control);
-                    running.events
-                }
+            // The phase isn't locked while the job starts: a stop that
+            // comes meanwhile returns at once, as nothing may poll this
+            // stream again to finish the start.
+            let RunningJob { events, control } = match inner.run(op, job).await {
+                Ok(running) => running,
                 Err(error) => {
-                    futures::stream::iter([EngineEvent::Failed(FailureReason::from(error))]).boxed()
+                    return futures::stream::iter([EngineEvent::Failed(FailureReason::from(
+                        error,
+                    ))])
+                    .boxed();
                 }
+            };
+            let unwanted = {
+                let mut phase = handed.lock().unwrap_or_else(PoisonError::into_inner);
+                if matches!(*phase, Phase::Stopped) {
+                    Some(control)
+                } else {
+                    *phase = Phase::Running(control);
+                    None
+                }
+            };
+            match unwanted {
+                Some(mut control) => {
+                    control.stop().await;
+                    futures::stream::empty().boxed()
+                }
+                None => events,
             }
         })
         .flatten()
@@ -242,25 +266,30 @@ impl RecordOpened {
     }
 }
 
-/// Which job of an identified-first run is going.
+/// Which job of an identified-first run is going. It is never locked across
+/// an await, so a stop never waits for the job's stream.
 enum Phase {
     Identifying(Box<dyn JobControl>),
+    /// The identify found the ID and the engine is starting the job.
+    Starting,
     Running(Box<dyn JobControl>),
     Stopped,
 }
 
 /// Stops an identified-first run: the identify while it runs, the job once
 /// it does, and nothing is started after.
-struct Handover(Arc<futures::lock::Mutex<Phase>>);
+struct Handover(Arc<Mutex<Phase>>);
 
 #[async_trait]
 impl JobControl for Handover {
     async fn stop(&mut self) {
-        let mut phase = self.0.lock().await;
-        if let Phase::Identifying(control) | Phase::Running(control) = &mut *phase {
+        let going = std::mem::replace(
+            &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
+            Phase::Stopped,
+        );
+        if let Phase::Identifying(mut control) | Phase::Running(mut control) = going {
             control.stop().await;
         }
-        *phase = Phase::Stopped;
     }
 }
 
