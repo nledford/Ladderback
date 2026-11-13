@@ -222,6 +222,16 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         now
     });
     let navigation = Arc::clone(&localizer);
+    // The web UI is built into the binary from the same workspace, so this is
+    // the daemon's version too.
+    let version = routes::text_with(
+        &localizer,
+        msg::UI_VERSION,
+        &[(
+            "version",
+            api::MsgArg::Text(env!("CARGO_PKG_VERSION").to_owned()),
+        )],
+    );
     let pages = Arc::clone(&localizer);
     let dialog = Arc::clone(&localizer);
     let idle = Arc::clone(&localizer);
@@ -254,6 +264,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         .then(|| {
                             view! {
                                 <Navigation localizer=Arc::clone(&navigation) standing=standing />
+                                <p class="site-version">{version.clone()}</p>
                             }
                         })
                 }}

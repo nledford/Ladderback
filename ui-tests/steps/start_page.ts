@@ -79,9 +79,7 @@ Then("focus is on the link {string}", async function (this: BrowserWorld, name: 
 Then(
   "the link {string} leads to the section {string} of {string} in this release",
   async function (this: BrowserWorld, name: string, heading: string, file: string) {
-    const manifest = await readFile(path.join(repoRoot, "Cargo.toml"), "utf8");
-    const version = /^\[workspace\.package\]$[^[]*?^version = "([^"]+)"$/m.exec(manifest)?.[1];
-    assert.ok(version, "Cargo.toml's [workspace.package] names no version");
+    const version = await workspaceVersion();
     const document = await readFile(path.join(repoRoot, file), "utf8");
     const headings = document.split("\n").filter((line) => /^#+ /.test(line));
     assert.ok(headings.some((line) => line.replace(/^#+ /, "") === heading), `${file} has no heading "${heading}"`);
@@ -93,6 +91,42 @@ Then(
     );
   },
 );
+
+// The workspace's version, which the binary and the web UI are built with.
+async function workspaceVersion(): Promise<string> {
+  const manifest = await readFile(path.join(repoRoot, "Cargo.toml"), "utf8");
+  const version = /^\[workspace\.package\]$[^[]*?^version = "([^"]+)"$/m.exec(manifest)?.[1];
+  assert.ok(version, "Cargo.toml's [workspace.package] names no version");
+  return version;
+}
+
+// The version is the header's last part, after the navigation in reading
+// order, and plain text rather than a focus stop (#502).
+Then("the header shows the running version after the navigation", async function (this: BrowserWorld) {
+  const banner = this.page.getByRole("banner");
+  const version = banner.getByText(namePattern(`Version ${await workspaceVersion()}`));
+  await expect(version).toBeVisible();
+  const navigation = banner.getByRole("navigation");
+  await expect(navigation).toBeVisible();
+  const follows = await navigation.evaluate(
+    (nav, shown) => (nav.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    await version.elementHandle(),
+  );
+  assert.ok(follows, "the version comes before the navigation in reading order");
+  assert.equal(await version.evaluate((shown) => shown.matches(":is(a, button, input, [tabindex])")), false);
+  const [shownBox, navigationBox] = [await version.boundingBox(), await navigation.boundingBox()];
+  assert.ok(shownBox && navigationBox);
+  const overlaps =
+    shownBox.x < navigationBox.x + navigationBox.width &&
+    navigationBox.x < shownBox.x + shownBox.width &&
+    shownBox.y < navigationBox.y + navigationBox.height &&
+    navigationBox.y < shownBox.y + shownBox.height;
+  assert.equal(overlaps, false, "the version overlaps the navigation");
+});
+
+Then("the page doesn't show the running version", async function (this: BrowserWorld) {
+  await expect(this.page.getByText(await workspaceVersion())).toHaveCount(0);
+});
 
 Then("focus is in the main content", async function (this: BrowserWorld) {
   const keys = journey(this.page);
