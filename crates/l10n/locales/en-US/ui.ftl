@@ -16,8 +16,18 @@ ui-start-heading = Welcome to { -brand-name }
 # The start page's text above its list of plans.
 ui-start-plans-body = These are the plans in { "config.toml" }, with when each one runs next.
 
-# What the start page says when config.toml has no plan.
-ui-start-no-plans = There are no plans yet. A plan added to { "config.toml" } is listed here with its next run.
+# What the start page says when config.toml has no plan: the order a first
+# plan is made in. A plan backs up to a repository, so it can't be added
+# before one is connected.
+ui-start-no-plans = There are no plans yet. To add one, connect a { -repository } on the Repositories page first, then add a plan for it to { "config.toml" }. Each plan is listed here with its next run.
+
+# The link from the start page, while it has no plans, to the repositories
+# page, where the repository a first plan backs up to is connected.
+ui-start-repositories-link = Connect a { -repository } on the Repositories page
+
+# The link from the start page to where the format of a plan in config.toml is
+# described: the project's technical design, on GitHub, outside this app.
+ui-start-plan-format-link = How to write a plan in { "config.toml" }, on GitHub
 
 # The start page's table of plans: its caption.
 ui-start-caption = Plans
