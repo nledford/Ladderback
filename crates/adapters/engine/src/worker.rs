@@ -76,8 +76,20 @@ impl Exit {
 /// What `ladderback worker` does. Never returns normally: the process exits
 /// with the job's [`Exit`] code, or 74 when the events can't be written.
 pub fn main() -> ExitCode {
+    // Who started the worker, and the signals it stops on, taken before the
+    // kernel is asked for the parent-death signal: one that comes early waits
+    // for its handler instead of ending the worker.
+    #[cfg(unix)]
+    let daemon = std::os::unix::process::parent_id();
+    #[cfg(unix)]
+    let signals = signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGHUP,
+    ]);
     #[cfg(target_os = "linux")]
-    die_with_the_daemon();
+    if signals.is_ok() {
+        die_with_the_daemon();
+    }
     // Descriptor 1 stops being the event pipe: nothing a library prints, or a
     // program the worker starts, can reach the stream or hold it open.
     #[cfg(unix)]
@@ -100,8 +112,12 @@ pub fn main() -> ExitCode {
     }
     let process = Process::real();
     #[cfg(unix)]
-    if let Err(error) = exit_on_sigterm(events.clone(), process.cancel.clone()) {
-        say(&format!("cannot handle SIGTERM: {error}"));
+    if let Err(error) = signals
+        .and_then(|signals| exit_on_signal(signals, daemon, events.clone(), process.cancel.clone()))
+    {
+        say(&format!(
+            "cannot handle SIGTERM or SIGHUP, so a stop can't wind the job down and the daemon's death is noticed only at the next event: {error}"
+        ));
     }
     match run_events(io::stdin().lock(), events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
@@ -119,23 +135,25 @@ fn say(text: &str) {
     let _ = writeln!(io::stderr(), "ladderback worker: {text}");
 }
 
-/// Asks the kernel for a SIGTERM when the process that started this worker
+/// Asks the kernel for a SIGHUP when the process that started this worker
 /// is gone, so a daemon that dies (a crash, the OOM killer, SIGKILL) doesn't
 /// leave workers running against the repository. Linux only: elsewhere a
 /// worker ends at its next event, when its pipe is broken.
 ///
-/// The kernel ties the signal to the parent *thread*, so the daemon must
-/// start workers from a thread that lives as long as it does, as a runtime's
-/// worker threads do. Without this call, nothing bounds a worker whose daemon
-/// died while it was between two events.
+/// The kernel sends it when the parent *thread* ends, too, and the daemon
+/// starts workers on tokio's blocking pool, whose threads end after 10 s
+/// without work while the daemon lives on. So it is SIGHUP, not the daemon's
+/// SIGTERM, and [`exit_on_signal`] stops on it only once the daemon is gone
+/// (#448). Without this call, nothing bounds a worker whose daemon died while
+/// it was between two events.
 #[cfg(target_os = "linux")]
 fn die_with_the_daemon() {
     use nix::sys::prctl::set_pdeathsig;
     use nix::sys::signal::Signal;
 
-    if let Err(error) = set_pdeathsig(Signal::SIGTERM) {
+    if let Err(error) = set_pdeathsig(Signal::SIGHUP) {
         say(&format!(
-            "cannot ask for SIGTERM when the daemon dies: {error}"
+            "cannot ask for SIGHUP when the daemon dies: {error}"
         ));
     }
 }
@@ -382,22 +400,30 @@ const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
 /// stream: a writer stuck on a full pipe must not hold its exit back.
 const LAST_LINE_PATIENCE: Duration = Duration::from_millis(250);
 
-/// On SIGTERM the worker waits for the line it is writing, writes nothing
-/// more and exits. Nothing in rustic needs a clean shutdown: its writes are
-/// safe to interrupt anywhere (§4.1), which the kill-at-random-points test
-/// proves. A backup that is saving data winds down instead (`Cancel`): it
-/// lets rustic save the index of the packs it wrote, writes no snapshot,
-/// and ends the worker itself, with the same code.
+/// On SIGTERM, the daemon's stop, the worker waits for the line it is
+/// writing, writes nothing more and exits. Nothing in rustic needs a clean
+/// shutdown: its writes are safe to interrupt anywhere (§4.1), which the
+/// kill-at-random-points test proves. A backup that is saving data winds down
+/// instead (`Cancel`): it lets rustic save the index of the packs it wrote,
+/// writes no snapshot, and ends the worker itself, with the same code.
+///
+/// A SIGHUP, the parent-death signal (`die_with_the_daemon`), does the same
+/// once the worker's parent is no longer `daemon`, the process that started
+/// it: while the daemon lives, it is only a thread of the daemon that ended.
 #[cfg(unix)]
-fn exit_on_sigterm(events: Events, cancel: Cancel) -> io::Result<()> {
+fn exit_on_signal(
+    mut signals: signal_hook::iterator::Signals,
+    daemon: u32,
+    events: Events,
+    cancel: Cancel,
+) -> io::Result<()> {
     use signal_hook::consts::SIGTERM;
-    use signal_hook::iterator::Signals;
 
-    let mut signals = Signals::new([SIGTERM])?;
     std::thread::Builder::new()
-        .name("sigterm".to_owned())
+        .name("stop-signals".to_owned())
         .spawn(move || {
-            if signals.forever().next().is_some() {
+            let stops = |signal| signal == SIGTERM || std::os::unix::process::parent_id() != daemon;
+            if signals.forever().any(stops) {
                 let after = cancel.request();
                 events.end(None, LAST_LINE_PATIENCE);
                 if after == AfterCancel::WindDown {
