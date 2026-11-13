@@ -7,7 +7,7 @@
 //! engine's own start and end are no news: only the run knows when the log
 //! has them.
 
-use api::{ErrorCode, MsgArg, UiEvent};
+use api::{ErrorCode, ErrorDto, MsgArg, UiEvent};
 use domain::RepositoryId;
 use domain::execution::{FailureReason, Operation, OperationStatus};
 
@@ -65,11 +65,11 @@ pub fn end_of(operation: &Operation) -> Option<UiEvent> {
             })
         }
         OperationStatus::Failed { reason } => {
-            let (code, args) = failure(reason);
+            let failure = failure(reason);
             Some(UiEvent::OperationFailed {
                 operation: id,
-                code,
-                args,
+                code: failure.code,
+                args: failure.positional(),
                 finished_at,
             })
         }
@@ -89,47 +89,12 @@ pub(crate) async fn announce_end(events: Option<&dyn EventBus>, operation: &Oper
     }
 }
 
-/// A failure the runner reports, as the code and arguments the page renders.
-pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
-    use FailureReason as F;
-    fn with_detail(text: &str) -> Vec<MsgArg> {
-        vec![MsgArg::Text(text.to_owned())]
-    }
-    match reason {
-        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
-            (ErrorCode::EngineUnavailable, with_detail(detail))
-        }
-        F::EngineFailed { detail } => (ErrorCode::OperationFailed, with_detail(detail)),
-        F::HookFailed { .. } => (ErrorCode::OperationFailed, Vec::new()),
-        F::EngineExited { exit_code } => (
-            ErrorCode::EngineExited,
-            exit_code
-                .map(|code| MsgArg::Text(code.to_string()))
-                .into_iter()
-                .collect(),
-        ),
-        F::ProtocolViolated { transition } => (
-            ErrorCode::ProtocolViolated,
-            vec![MsgArg::Text(format!("{transition:?}"))],
-        ),
-        F::DeadlinePassed => (ErrorCode::DeadlinePassed, Vec::new()),
-        F::EngineStartTimedOut => (ErrorCode::EngineStartTimedOut, Vec::new()),
-        F::EngineExitTimedOut => (ErrorCode::EngineExitTimedOut, Vec::new()),
-        F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
-        F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
-        F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
-        F::CredentialsRefused => (ErrorCode::CredentialsRefused, Vec::new()),
-        F::SecretsTooLargeToMask { field, limit } => (
-            ErrorCode::SecretsTooLargeToMask,
-            std::iter::once(MsgArg::Bytes(u64::try_from(*limit).unwrap_or(u64::MAX)))
-                .chain(field.as_deref().map(|field| MsgArg::Text(field.to_owned())))
-                .collect(),
-        ),
-        F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
-        F::NoLocationUsable => (ErrorCode::NoLocationUsable, Vec::new()),
-        F::NoLocationRuleHolds => (ErrorCode::NoLocationRuleHolds, Vec::new()),
-        F::PasswordNotAccepted => (ErrorCode::PasswordNotAccepted, Vec::new()),
-    }
+/// Why an operation failed, as a page shows it: the code, the arguments its
+/// message takes, by name, and the engine's own words as the detail, which
+/// the engine masked of every secret of the job (I4).
+pub fn failure(reason: &FailureReason) -> ErrorDto {
+    let _ = (reason, ErrorCode::Unknown, MsgArg::Count(0));
+    todo!()
 }
 
 #[cfg(test)]
@@ -366,7 +331,142 @@ mod tests {
             ),
         ];
         for (reason, code, args) in cases {
-            assert_eq!(failure(&reason), (code, args), "{reason:?}");
+            let mut operation = running();
+            operation
+                .fail(reason.clone(), t(60))
+                .expect("a running operation ends");
+            let Some(UiEvent::OperationFailed {
+                code: told,
+                args: told_args,
+                ..
+            }) = end_of(&operation)
+            else {
+                panic!("a failure is announced: {reason:?}");
+            };
+            assert_eq!((told, told_args), (code, args), "{reason:?}");
+        }
+    }
+
+    /// What a page shows of a failure: its code, its arguments by name, and
+    /// the engine's own words (masked by the engine, I4) as the detail.
+    #[test]
+    fn every_failure_is_shown_by_its_code_its_arguments_by_name_and_the_engines_words() {
+        use ErrorCode as C;
+        use FailureReason as F;
+        let text = |text: &str| MsgArg::Text(text.to_owned());
+        let said = |text: &str| Some(text.to_owned());
+        let cases = [
+            (
+                F::EngineUnavailable {
+                    detail: "no such program".to_owned(),
+                },
+                ErrorDto::new(C::EngineUnavailable, [], said("no such program")),
+            ),
+            (
+                F::JobRejected {
+                    detail: "bad job".to_owned(),
+                },
+                ErrorDto::new(C::EngineUnavailable, [], said("bad job")),
+            ),
+            (
+                F::EngineFailed {
+                    detail: "no key opens the repository".to_owned(),
+                },
+                ErrorDto::new(C::OperationFailed, [], said("no key opens the repository")),
+            ),
+            (
+                F::HookFailed { exit_code: Some(3) },
+                ErrorDto::new(C::OperationFailed, [], None),
+            ),
+            (
+                F::EngineExited { exit_code: Some(3) },
+                ErrorDto::new(C::EngineExited, [("exit_code", text("3"))], None),
+            ),
+            (
+                F::EngineExited { exit_code: None },
+                ErrorDto::new(C::EngineExited, [], None),
+            ),
+            (
+                F::ProtocolViolated {
+                    transition: Transition::Succeed,
+                },
+                ErrorDto::new(C::ProtocolViolated, [("transition", text("Succeed"))], None),
+            ),
+            (
+                F::DeadlinePassed,
+                ErrorDto::new(C::DeadlinePassed, [], None),
+            ),
+            (
+                F::EngineStartTimedOut,
+                ErrorDto::new(C::EngineStartTimedOut, [], None),
+            ),
+            (
+                F::EngineExitTimedOut,
+                ErrorDto::new(C::EngineExitTimedOut, [], None),
+            ),
+            (
+                F::RepositoryExists,
+                ErrorDto::new(C::RepositoryExists, [], None),
+            ),
+            (
+                F::RepositoryReplaced,
+                ErrorDto::new(C::RepositoryReplaced, [], None),
+            ),
+            (
+                F::RepositoryNotFound,
+                ErrorDto::new(C::RepositoryNotFound, [], None),
+            ),
+            (
+                F::CredentialsRefused,
+                ErrorDto::new(C::CredentialsRefused, [], None),
+            ),
+            (F::DaemonStopped, ErrorDto::new(C::DaemonStopped, [], None)),
+            (
+                F::NoLocationUsable,
+                ErrorDto::new(C::NoLocationUsable, [], None),
+            ),
+            (
+                F::NoLocationRuleHolds,
+                ErrorDto::new(C::NoLocationRuleHolds, [], None),
+            ),
+            (
+                F::PasswordNotAccepted,
+                ErrorDto::new(C::PasswordNotAccepted, [], None),
+            ),
+            (
+                F::SecretsTooLargeToMask {
+                    field: Some("HTTPS_PROXY".to_owned()),
+                    limit: 262_144,
+                },
+                ErrorDto::new(
+                    C::SecretsTooLargeToMask,
+                    [
+                        ("limit", MsgArg::Bytes(262_144)),
+                        ("field", text("HTTPS_PROXY")),
+                    ],
+                    None,
+                ),
+            ),
+            (
+                F::SecretsTooLargeToMask {
+                    field: None,
+                    limit: 262_144,
+                },
+                ErrorDto::new(
+                    C::SecretsTooLargeToMask,
+                    [("limit", MsgArg::Bytes(262_144))],
+                    None,
+                ),
+            ),
+        ];
+        for (reason, shown) in cases {
+            assert_eq!(failure(&reason), shown, "{reason:?}");
+            // An event tells it by position; read back, it is the same.
+            assert_eq!(
+                ErrorDto::from_positional(shown.code, &shown.positional()),
+                shown,
+                "{reason:?}"
+            );
         }
     }
 }

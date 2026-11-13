@@ -15,7 +15,7 @@ import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, startServer } from "../support/world.ts";
-import { serveDemoPlans, untilCellLists } from "./live.ts";
+import { rowNamed, serveDemoPlans, table, untilCellLists } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
 const ALIAS = "demo";
@@ -169,6 +169,45 @@ Given("the plan {string} has been backed up {int} times", async function (this: 
 Given("the plan {string} keeps the last {int} snapshots", async function (this: BrowserWorld, plan: string, count: number) {
   await keepLast(this, plan, count);
 });
+
+// The repository keeps its own password; the configuration now gives another,
+// so the engine can't open it. The daemon reads its configuration afresh for
+// every request.
+Given(
+  "the configuration has the password {string} for the repository {string}, which isn't its own",
+  async function (this: BrowserWorld, password: string, alias: string) {
+    const file = configPath(this);
+    const config = await readFile(file, "utf8");
+    const heading = `[repositories.${alias}]\n`;
+    const own = 'password = "demo-password"';
+    const at = config.indexOf(heading);
+    assert.ok(at >= 0, `the config has no repository ${alias}`);
+    const from = config.indexOf(own, at);
+    assert.ok(from >= 0, `the repository ${alias} has no password of its own`);
+    await writeFile(file, config.slice(0, from) + `password = ${JSON.stringify(password)}` + config.slice(from + own.length));
+  },
+);
+
+Given("a backup of the plan {string} has failed", async function (this: BrowserWorld, plan: string) {
+  const { status } = await ended(this, await api(this, "POST", "/api/v1/operations", { plan }), `the backup of ${plan}`);
+  assert.equal(status, "failed", `the backup of ${plan} ended as ${status}`);
+});
+
+// The engine's own words are English whatever the language of the page, and
+// the row marks them so (WCAG 3.1.2, §4.5).
+Then(
+  "the row {string} of the table {string} gives the engine's own words in English in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, column: string) {
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+    const found = rowNamed(this, name, row).first();
+    await found.waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
+    // A cell's role leaves the row header out, so the cells count from after it.
+    const words = found.getByRole("cell").nth(index - 1).locator('[lang="en"]');
+    await words.first().waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
+    assert.notEqual((await words.first().innerText()).replace(ISOLATION_MARKS, "").trim(), "", `the engine's words in the ${column} of the row ${row}`);
+  },
+);
 
 // Another machine's agent: a daemon of its own, whose own data folder gives it
 // its own agent ID, and whose plan of the same name, recording the host `host`

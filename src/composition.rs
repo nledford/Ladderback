@@ -1469,8 +1469,8 @@ fn operation_of(text: &str) -> Option<OperationId> {
 /// something no page could show. The page carries the status; the warning
 /// codes come with the detail, where the kept warnings are.
 fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
-    let failure_code = match &record.status {
-        OperationStatus::Failed { reason } => Some(failure(reason).0),
+    let failure = match &record.status {
+        OperationStatus::Failed { reason } => Some(failure(reason)),
         _ => None,
     };
     api::OperationSummaryDto::new(
@@ -1486,7 +1486,7 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
         record.started_at.map(|at| at.to_string()),
         record.finished_at.map(|at| at.to_string()),
         Vec::new(),
-        failure_code,
+        failure,
         record
             .result
             .as_ref()
@@ -3187,6 +3187,58 @@ mod tests {
             panic!("a backup's result");
         };
         assert_eq!(files, u64::MAX);
+    }
+
+    /// A failed row says why, in the engine's own words, which the engine
+    /// masked; a row that didn't fail has no failure.
+    #[test]
+    fn a_failed_operations_row_carries_its_failure_in_the_engines_words() {
+        let mut backup = logged(OperationKind::Backup, None, None);
+        backup.status = OperationStatus::Failed {
+            reason: FailureReason::EngineFailed {
+                detail: "no key opens the repository".to_owned(),
+            },
+        };
+        assert_eq!(
+            summary(&backup).expect("a row the page can show").failure,
+            Some(api::ErrorDto::new(
+                ErrorCode::OperationFailed,
+                [],
+                Some("no key opens the repository".to_owned())
+            ))
+        );
+        let succeeded = logged(OperationKind::Backup, Some(backed_up(None)), None);
+        assert_eq!(summary(&succeeded).expect("a row").failure, None);
+    }
+
+    /// `/api/v1` is published (§12.1): the failure is a field added beside
+    /// `failure-code`, which keeps its name and value, and a row that didn't
+    /// fail still says `failure-code: null` and has no `failure`.
+    #[test]
+    fn a_failed_operations_row_keeps_its_failure_code_beside_the_failure() {
+        let mut backup = logged(OperationKind::Backup, None, None);
+        backup.status = OperationStatus::Failed {
+            reason: FailureReason::EngineExited { exit_code: Some(3) },
+        };
+        let row = summary(&backup).expect("a row the page can show");
+        let wire = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(
+            wire.get("failure-code"),
+            Some(&serde_json::json!("engine-exited")),
+            "{wire}"
+        );
+        assert_eq!(
+            wire.get("failure"),
+            Some(&serde_json::json!({
+                "code": "engine-exited",
+                "args": {"exit_code": {"type": "text", "value": "3"}},
+            })),
+            "{wire}"
+        );
+        let succeeded = logged(OperationKind::Backup, Some(backed_up(None)), None);
+        let wire = serde_json::to_value(summary(&succeeded).expect("a row")).expect("JSON");
+        assert_eq!(wire.get("failure-code"), Some(&serde_json::Value::Null));
+        assert_eq!(wire.get("failure"), None, "{wire}");
     }
 
     fn demo_settings(password: SecretRef) -> RepositorySettings {

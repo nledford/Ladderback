@@ -31,6 +31,7 @@ interface Operation {
   "finished-at": string | null;
   "warning-codes": string[];
   "failure-code": string | null;
+  failure?: { code: string; args?: Record<string, unknown>; detail?: string };
   result: Record<string, unknown> | null;
   repository?: string;
 }
@@ -480,6 +481,7 @@ export class ScriptedDaemon {
     backup.status = "failed";
     backup["finished-at"] = finishedAt;
     backup["failure-code"] = "operation-failed";
+    backup.failure = { code: "operation-failed" };
     await this.#tell({
       type: "operation-failed",
       operation: backup.id,

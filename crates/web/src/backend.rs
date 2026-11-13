@@ -125,12 +125,13 @@ impl OperationsState {
             UiEvent::OperationFailed {
                 operation,
                 code,
+                args,
                 finished_at,
-                ..
             } => {
                 if let Some(row) = self.row_mut(operation) {
                     row.summary.status = "failed".to_owned();
                     row.summary.failure_code = Some(*code);
+                    row.summary.failure = Some(api::ErrorDto::from_positional(*code, args));
                     row.summary.finished_at = Some(finished_at.clone());
                     row.progress = None;
                 }
@@ -769,12 +770,21 @@ mod tests {
         state.apply(&UiEvent::OperationFailed {
             operation: id(FIRST),
             code: ErrorCode::EngineUnavailable,
-            args: Vec::new(),
+            args: vec![api::MsgArg::Text("no such program".to_owned())],
             finished_at: "2026-11-09T10:05:00Z".to_owned(),
         });
         let row = &state.rows[0];
         assert_eq!(row.summary.status, "failed");
         assert_eq!(row.summary.failure_code, Some(ErrorCode::EngineUnavailable));
+        assert_eq!(
+            row.summary.failure,
+            Some(api::ErrorDto::new(
+                ErrorCode::EngineUnavailable,
+                [],
+                Some("no such program".to_owned())
+            )),
+            "the engine's own words are the detail"
+        );
         assert_eq!(
             row.summary.finished_at.as_deref(),
             Some("2026-11-09T10:05:00Z")
@@ -942,6 +952,7 @@ mod tests {
         });
         let mut failed = summary(FIRST, "failed", true, true);
         failed.failure_code = Some(ErrorCode::RepositoryUnknown);
+        failed.failure = Some(api::ErrorDto::new(ErrorCode::RepositoryUnknown, [], None));
         state.merge(page(vec![failed], None));
         let (second, first) = (&state.rows[0], &state.rows[1]);
         assert_eq!(

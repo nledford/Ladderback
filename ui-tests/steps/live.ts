@@ -61,7 +61,7 @@ async function until<T>(read: () => Promise<T | null>, ms: number, what: string)
 
 /** The table a page shows, by its whole caption. A value in the caption is
  *  wrapped in bidi isolation marks, which a reader never hears (§4.5). */
-function table(world: BrowserWorld, name: string): Locator {
+export function table(world: BrowserWorld, name: string): Locator {
   return world.page.getByRole("table", { name: namePattern(name) });
 }
 
@@ -581,7 +581,7 @@ async function outsideItsCells(grid: Locator): Promise<string[]> {
 
 /** The row of a table that its row header names. A name the catalog wrote
  *  holds its arguments in bidi isolation marks, which a reader never hears. */
-function rowNamed(world: BrowserWorld, name: string, row: string): Locator {
+export function rowNamed(world: BrowserWorld, name: string, row: string): Locator {
   return table(world, name)
     .getByRole("row")
     .filter({ has: world.page.getByRole("rowheader", { name: namePattern(row) }) });

@@ -1102,6 +1102,23 @@ impl ErrorDto {
             detail,
         }
     }
+
+    /// The error as an `operation-failed` event tells it
+    /// ([`UiEvent::OperationFailed`]): its arguments by position, in the
+    /// order [`ErrorCode::args`] declares them, up to the first it lacks,
+    /// then its detail as one more text, when it has one.
+    pub fn positional(&self) -> Vec<MsgArg> {
+        todo!()
+    }
+
+    /// The error an `operation-failed` event of `code` tells with `args`, as
+    /// [`Self::positional`] writes them: each argument named as the code
+    /// declares them, in order, and the first text after those as the
+    /// detail.
+    pub fn from_positional(code: ErrorCode, args: &[MsgArg]) -> Self {
+        let _ = (code, args);
+        todo!()
+    }
 }
 
 /// A typed warning: the code and the arguments its message takes, never the
@@ -1334,6 +1351,89 @@ mod typed_dto_tests {
         assert_eq!(
             from_str::<WarningDto>(r#"{"code":"profile-prune"}"#).unwrap(),
             WarningDto::new(WarningCode::ProfilePrune, [])
+        );
+    }
+
+    /// An event tells a failure's arguments by position: those the code
+    /// declares, in its order, then the engine's own words. Read back, each
+    /// has its name again and the words are the detail.
+    #[test]
+    fn a_failure_told_by_position_reads_back_by_name_with_its_detail() {
+        let cases = [
+            ErrorDto::new(
+                ErrorCode::OperationFailed,
+                [],
+                Some("no key opens the repository".to_owned()),
+            ),
+            ErrorDto::new(ErrorCode::EngineExited, [("exit_code", text("3"))], None),
+            ErrorDto::new(ErrorCode::EngineExited, [], None),
+            ErrorDto::new(
+                ErrorCode::SecretsTooLargeToMask,
+                [
+                    ("limit", MsgArg::Bytes(262_144)),
+                    ("field", text("HTTPS_PROXY")),
+                ],
+                None,
+            ),
+            ErrorDto::new(
+                ErrorCode::SecretsTooLargeToMask,
+                [("limit", MsgArg::Bytes(262_144))],
+                None,
+            ),
+        ];
+        for error in cases {
+            let told = error.positional();
+            assert_eq!(
+                ErrorDto::from_positional(error.code, &told),
+                error,
+                "{told:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_is_told_in_the_order_its_code_declares_then_the_engines_words() {
+        let error = ErrorDto::new(
+            ErrorCode::SecretsTooLargeToMask,
+            [
+                ("field", text("HTTPS_PROXY")),
+                ("limit", MsgArg::Bytes(262_144)),
+            ],
+            None,
+        );
+        assert_eq!(
+            error.positional(),
+            [MsgArg::Bytes(262_144), text("HTTPS_PROXY")],
+            "the declared order, not the names'"
+        );
+        let failed = ErrorDto::new(ErrorCode::OperationFailed, [], Some("said".to_owned()));
+        assert_eq!(failed.positional(), [text("said")]);
+        // An argument the code doesn't declare is not told, and one it
+        // declares that the error lacks ends the arguments told.
+        let odd = ErrorDto::new(
+            ErrorCode::SecretsTooLargeToMask,
+            [("field", text("HTTPS_PROXY")), ("other", text("x"))],
+            Some("said".to_owned()),
+        );
+        assert_eq!(odd.positional(), [text("said")]);
+    }
+
+    #[test]
+    fn a_failure_read_by_position_takes_the_first_text_after_the_declared_ones_as_its_detail() {
+        assert_eq!(
+            ErrorDto::from_positional(
+                ErrorCode::EngineExited,
+                &[text("3"), MsgArg::Count(7), text("said"), text("more")],
+            ),
+            ErrorDto::new(
+                ErrorCode::EngineExited,
+                [("exit_code", text("3"))],
+                Some("said".to_owned())
+            )
+        );
+        assert_eq!(
+            ErrorDto::from_positional(ErrorCode::OperationFailed, &[]),
+            ErrorDto::new(ErrorCode::OperationFailed, [], None)
         );
     }
 }
@@ -2082,6 +2182,8 @@ pub enum UiEvent {
     },
     /// The operation ended badly: announced like [`Self::OperationSucceeded`],
     /// for a failure the run found out itself as well as the engine's own.
+    /// `args` are the failure's arguments by position, then the engine's own
+    /// words ([`ErrorDto::positional`]).
     OperationFailed {
         operation: String,
         code: ErrorCode,
@@ -2629,6 +2731,12 @@ pub struct OperationSummaryDto {
     pub warning_codes: Vec<WarningCode>,
     /// Set when the operation failed.
     pub failure_code: Option<ErrorCode>,
+    /// Why the operation failed, set when it did: the failure's code, the
+    /// arguments its message takes, and the engine's own words, as the
+    /// engine masked them of every secret of the job (I4). Added beside
+    /// `failure-code`, which keeps its place in the published shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<ErrorDto>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<OperationResultDto>,
     /// The alias of the repository a maintenance operation ran on, as it
@@ -2680,7 +2788,8 @@ impl std::error::Error for InvalidOperation {}
 impl OperationSummaryDto {
     /// Builds the summary, refusing an ID that isn't a hyphenated UUID and
     /// a time that isn't RFC 3339, like [`SnapshotDto::new`]. The arity is
-    /// the wire's: one argument per field of the published shape.
+    /// the wire's: one argument per field of the published shape, except
+    /// `failure-code`, which is the code of `failure`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -2691,7 +2800,7 @@ impl OperationSummaryDto {
         started_at: Option<String>,
         finished_at: Option<String>,
         warning_codes: Vec<WarningCode>,
-        failure_code: Option<ErrorCode>,
+        failure: Option<ErrorDto>,
         result: Option<OperationResultDto>,
         repository: Option<String>,
     ) -> Result<Self, InvalidOperation> {
@@ -2715,7 +2824,8 @@ impl OperationSummaryDto {
             started_at,
             finished_at,
             warning_codes,
-            failure_code,
+            failure_code: failure.as_ref().map(|failure| failure.code),
+            failure,
             result,
             repository,
             locations: Vec::new(),
@@ -3643,7 +3753,7 @@ mod operation_dto_tests {
                 dto.started_at,
                 dto.finished_at,
                 dto.warning_codes,
-                dto.failure_code,
+                dto.failure,
                 dto.result,
                 dto.repository,
             ),
@@ -3666,7 +3776,7 @@ mod operation_dto_tests {
                 dto.started_at,
                 dto.finished_at,
                 dto.warning_codes,
-                dto.failure_code,
+                dto.failure,
                 dto.result,
                 dto.repository,
             ),
@@ -3687,7 +3797,7 @@ mod operation_dto_tests {
                 dto.started_at,
                 dto.finished_at,
                 dto.warning_codes,
-                dto.failure_code,
+                dto.failure,
                 dto.result,
                 dto.repository,
             ),

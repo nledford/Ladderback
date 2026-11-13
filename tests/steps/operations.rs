@@ -299,6 +299,16 @@ async fn a_failing_password_command(agent: &mut Agent, printed: String, said: St
     super::events_steps::save_daemon_config(agent, None).await;
 }
 
+#[given(
+    expr = "the plan's repository password in the configuration is {string}, which isn't the repository's"
+)]
+async fn a_wrong_password(agent: &mut Agent, password: String) {
+    agent.backup.password = Some(domain::secrets::SecretRef::Inline(
+        domain::secrets::SecretValue::new(&password),
+    ));
+    super::events_steps::save_daemon_config(agent, None).await;
+}
+
 #[when(expr = "the client starts a backup of the plan {string}")]
 async fn the_client_starts_a_backup(agent: &mut Agent, plan: String) {
     let body = serde_json::json!({ "plan": plan }).to_string();
@@ -686,6 +696,69 @@ async fn shows_succeeded(agent: &mut Agent) {
 async fn shows_cancelled(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     shows_status(agent, &id, "cancelled").await;
+}
+
+#[then("the history page shows the operation failed")]
+async fn shows_failed(agent: &mut Agent) {
+    let id = agent.ops.the_operation();
+    shows_status(agent, &id, "failed").await;
+}
+
+/// The operation `id` as the history page lists it.
+async fn listed(agent: &Agent, id: &str) -> serde_json::Value {
+    let page = history_page(agent, "limit=50").await;
+    page.get("operations")
+        .and_then(|ops| ops.as_array())
+        .and_then(|ops| {
+            ops.iter()
+                .find(|op| op.get("id").and_then(serde_json::Value::as_str) == Some(id))
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("the history page lists {id}: {page}"))
+}
+
+#[then(
+    expr = "the history page gives the operation's failure as {string}, in the engine's own words"
+)]
+async fn gives_the_failure(agent: &mut Agent, code: String) {
+    let id = agent.ops.the_operation();
+    let operation = listed(agent, &id).await;
+    let failure = operation.get("failure");
+    assert_eq!(
+        failure
+            .and_then(|failure| failure.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some(code.as_str()),
+        "the operation's failure: {operation}"
+    );
+    assert!(
+        failure
+            .and_then(|failure| failure.get("detail"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|said| !said.trim().is_empty()),
+        "the engine's own words: {operation}"
+    );
+    assert_eq!(
+        operation
+            .get("failure-code")
+            .and_then(serde_json::Value::as_str),
+        Some(code.as_str()),
+        "the published failure code stays: {operation}"
+    );
+}
+
+#[then(expr = "neither the history page nor the operation's detail shows {string}")]
+async fn neither_shows(agent: &mut Agent, secret: String) {
+    let id = agent.ops.the_operation();
+    let (status, page) = exchange(agent, "GET", "/api/v1/operations?limit=50", "");
+    assert_eq!(status, 200, "the history page answers: {page}");
+    assert!(!page.contains(&secret), "the history page shows the secret");
+    let (status, detail) = exchange(agent, "GET", &format!("/api/v1/operations/{id}"), "");
+    assert_eq!(status, 200, "the operation's detail answers: {detail}");
+    assert!(
+        !detail.contains(&secret),
+        "the operation's detail shows the secret"
+    );
 }
 
 #[then("the history page shows both operations succeeded")]
