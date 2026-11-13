@@ -886,9 +886,12 @@ mod tests {
             resolve,
             Arc::new(|_| {}),
         );
+        // Every probe answers at once, so the choice ends in one poll: a
+        // choice that waits fails here rather than hanging the test run.
         let located = choose
             .locate(OperationId::from_uuid(Uuid::from_u128(1)), access)
-            .await;
+            .now_or_never()
+            .expect("the choice ends at once");
         let probed = probed
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1036,7 +1039,8 @@ mod tests {
             Arc::new(|_| {}),
         )
         .test_each(OperationId::from_uuid(Uuid::from_u128(1)), &saved)
-        .await
+        .now_or_never()
+        .expect("the test ends at once")
         .map(|record| record.locations.iter().map(|tried| tried.outcome).collect());
         let probed = probed
             .lock()
@@ -1212,6 +1216,52 @@ mod tests {
             0,
             "the silent location's worker is stopped"
         );
+    }
+
+    /// A person's Test waits for every location's probe, those started
+    /// early too: a later one still running when an earlier one is used is
+    /// waited for to its own bound, not stopped (decision 86).
+    #[tokio::test]
+    async fn a_test_waits_for_a_later_early_probe_after_an_earlier_location_is_used() {
+        let sites = Sites::silent_at("/srv/public");
+        let (choose, _access, clock) = choosing(&sites).await;
+        let saved = SavedEntry {
+            alias: RepositoryAlias::parse("nas").expect("an alias"),
+            entry: RepositoryConfig {
+                settings: first("/srv/lan", &[]),
+                locations: Locations {
+                    first_when: None,
+                    further: vec![Location {
+                        repository: "/srv/public".to_owned(),
+                        ..Location::default()
+                    }],
+                },
+                id: Some(RepositoryId::parse(ID).expect("an ID")),
+                maintenance: Maintenance::None,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
+            },
+        };
+        let mut tested = choose.test_each(op(), &saved).boxed();
+        assert!(
+            futures::poll!(&mut tested).is_pending(),
+            "the second location's probe is waited for"
+        );
+        clock.advance(SignedDuration::from_secs(LOCATION_PROBE_SECONDS));
+        let futures::task::Poll::Ready(tested) = futures::poll!(&mut tested) else {
+            panic!("the test still waits at the second location's bound");
+        };
+        let outcomes: Vec<LocationOutcome> = tested
+            .expect("a record of the test")
+            .locations
+            .iter()
+            .map(|tried| tried.outcome)
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![LocationOutcome::Used, LocationOutcome::Silent]
+        );
+        assert_eq!(sites.running(), 0);
     }
 
     /// A job cancelled while its choice waits on a location's probe ends at
@@ -1475,9 +1525,15 @@ mod tests {
         let entry = access.entry.clone();
         let RunningJob { events, .. } = choose
             .run(op(), Job::Ls(access))
-            .await
+            .now_or_never()
+            .expect("the choice ends at once")
             .expect("the job starts");
-        drop(events.collect::<Vec<_>>().await);
+        drop(
+            events
+                .collect::<Vec<_>>()
+                .now_or_never()
+                .expect("the job's events end at once"),
+        );
         let opened: Vec<RepositoryAccess> = sites
             .jobs()
             .into_iter()
