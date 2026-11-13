@@ -302,7 +302,9 @@ fn machine_on(agent: &mut Agent, answer: Result<Link, PlatformError>) {
 }
 
 /// An engine that answers each location's probe as the scenario says, and
-/// opens whatever else it is given at once.
+/// opens whatever else it is given at once, but refuses, as the engine does
+/// (§7.3), a job whose access names a repository ID its location doesn't
+/// hold.
 struct Sites {
     answers: Arc<Mutex<BTreeMap<String, Answer>>>,
     jobs: Arc<Mutex<Vec<Job>>>,
@@ -324,6 +326,25 @@ impl Engine for Sites {
             .push(job.clone());
         let at = domain::Timestamp::from_second(1_800_000_000).expect("a time");
         let access = job.access().cloned();
+        if !matches!(job, Job::Probe(_))
+            && let Some(access) = &access
+            && let Some(expected) = &access.id
+            && self
+                .answers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&access.repository)
+                == Some(&Answer::HoldsAnother)
+            && *expected != repository_id(OTHER_ID)
+        {
+            return Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Failed(
+                    domain::execution::FailureReason::RepositoryReplaced,
+                )])
+                .boxed(),
+                control: Box::new(Stop),
+            });
+        }
         let events = match &job {
             Job::Probe(access) => {
                 let answer = self
@@ -876,6 +897,18 @@ fn fails_with(agent: &mut Agent, reason: String) {
         OperationStatus::Failed { reason: failed } => assert_eq!(failed.code(), code(&reason)),
         other => panic!("the operation should have failed, got {other:?}"),
     }
+}
+
+/// The code a repository of one location fails with when another repository
+/// is at its location (§7.3).
+#[then("the operation ends as failed because its location holds another repository")]
+fn fails_as_replaced(agent: &mut Agent) {
+    assert_eq!(
+        agent.locations.operation().status(),
+        &OperationStatus::Failed {
+            reason: domain::execution::FailureReason::RepositoryReplaced,
+        }
+    );
 }
 
 #[then("the operation names each location and why it wasn't used")]

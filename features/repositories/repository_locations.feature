@@ -164,6 +164,15 @@ Feature: A repository reached at several locations
       And no location was probed
       And the repository was opened at the location "solo" only
 
+    Scenario: A repository of one location whose rule holds still refuses another repository
+      Given a repository "solo" with one location that is eligible only on a wired network
+      And the machine is on a wired network
+      And the location "solo" answers with a repository whose ID isn't the repository's
+      When a person runs a backup of "solo" now
+      Then the operation ends as failed because its location holds another repository
+      And no location was probed
+      And the operation records no location
+
   Rule: A run that finds no usable location fails, and only a scheduled one is retried
 
     Scenario: A password no location accepts is reported as a password error
