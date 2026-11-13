@@ -81,6 +81,19 @@ table! {
         options_hot: Options,
         options_cold: Options,
         hooks: HooksTable,
+        locations: Vec<LocationTable>,
+    }
+}
+
+table! {
+    /// One location of a repository after its first (decision 80): the keys
+    /// of a location, and no other.
+    LocationTable {
+        repository: String,
+        repo_hot: String,
+        options: Options,
+        options_hot: Options,
+        options_cold: Options,
     }
 }
 

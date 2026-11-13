@@ -322,24 +322,26 @@ impl Engine for Sites {
                     index_read_at: at,
                     repository: access.as_ref().and_then(|access| access.id.clone()),
                 },
-                EngineEvent::Succeeded(EngineResult::Snapshots(vec![app::ports::SnapshotSummary {
-                    id: domain::SnapshotId::parse(&"5a".repeat(32)).expect("a snapshot ID"),
-                    time: at,
-                    offset: domain::Offset::UTC,
-                    hostname: "demo-machine".to_owned(),
-                    label: String::new(),
-                    tags: vec![
-                        format!(
-                            "{}{}",
-                            domain::execution::plan_tags::AGENT_TAG_PREFIX,
-                            agent_id().as_uuid().hyphenated()
-                        ),
-                        format!("{}{PLAN}", domain::execution::plan_tags::PLAN_TAG_PREFIX),
-                    ],
-                    paths: vec!["/home/demo".to_owned()],
-                    paths_truncated: false,
-                    tags_truncated: false,
-                }])),
+                EngineEvent::Succeeded(EngineResult::Snapshots(vec![
+                    app::ports::SnapshotSummary {
+                        id: domain::SnapshotId::parse(&"5a".repeat(32)).expect("a snapshot ID"),
+                        time: at,
+                        offset: domain::Offset::UTC,
+                        hostname: "demo-machine".to_owned(),
+                        label: String::new(),
+                        tags: vec![
+                            format!(
+                                "{}{}",
+                                domain::execution::plan_tags::AGENT_TAG_PREFIX,
+                                agent_id().as_uuid().hyphenated()
+                            ),
+                            format!("{}{PLAN}", domain::execution::plan_tags::PLAN_TAG_PREFIX),
+                        ],
+                        paths: vec!["/home/demo".to_owned()],
+                        paths_truncated: false,
+                        tags_truncated: false,
+                    },
+                ])),
             ],
             _ => vec![
                 EngineEvent::Started {

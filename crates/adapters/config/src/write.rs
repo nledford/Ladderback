@@ -12,14 +12,15 @@ use app::ports::{ConfigError, Problem};
 use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
-    KeepWithin, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy, RetryPolicy,
-    Schedule, format_duration,
+    KeepWithin, Location, Maintenance, Overlap, Plan, RepositoryConfig, RetentionPolicy,
+    RetryPolicy, Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, NotificationsTable,
-    PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable, RuleTable, ScheduleTable,
+    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, LocationTable,
+    NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable, RetryTable,
+    RuleTable, ScheduleTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -33,7 +34,7 @@ fn glob_files(files: &[GlobFile]) -> Option<Vec<String>> {
 }
 
 /// The text of `tables`: `schema`, then `[agent]` and `[hooks]`, a table for
-/// each repository, a table for each plan with its `[plans.retention]`, and
+/// each repository with a `[[…locations]]` table for each further location, a table for each plan with its `[plans.retention]`, and
 /// a table for each notification channel and rule.
 /// `Err` holds what `toml` said when it couldn't write a value.
 pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
@@ -54,7 +55,7 @@ pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
                             &format!("repositories.{alias}"),
                             false,
                             table,
-                            &[],
+                            &["locations"],
                         )?;
                     }
                 }
@@ -113,7 +114,8 @@ fn line(out: &mut String, key: &str, value: &toml::Value) -> Result<(), String> 
 
 /// A table under `[path]`, or `[[path]]` for the next item of an array of
 /// tables, with its keys on lines of their own, and then the `tables` of it
-/// that get a header too, as `[path.name]`.
+/// that get a header too, as `[path.name]`, or `[[path.name]]` for each item
+/// of an array of tables.
 fn section(
     out: &mut String,
     path: &str,
@@ -135,8 +137,18 @@ fn section(
         }
     }
     for name in tables {
-        if let Some(toml::Value::Table(sub)) = table.get(*name) {
-            section(out, &format!("{path}.{name}"), false, sub, &[])?;
+        match table.get(*name) {
+            Some(toml::Value::Table(sub)) => {
+                section(out, &format!("{path}.{name}"), false, sub, &[])?;
+            }
+            Some(toml::Value::Array(items)) => {
+                for item in items {
+                    if let toml::Value::Table(sub) = item {
+                        section(out, &format!("{path}.{name}"), true, sub, &[])?;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -336,6 +348,14 @@ fn repository_table(repository: &RepositoryConfig) -> Result<RepositoryTable, &'
         options_hot: (!settings.options_hot.is_empty()).then(|| settings.options_hot.clone()),
         options_cold: (!settings.options_cold.is_empty()).then(|| settings.options_cold.clone()),
         hooks: hooks(&repository.hooks),
+        locations: (!repository.locations.further.is_empty()).then(|| {
+            repository
+                .locations
+                .further
+                .iter()
+                .map(location_table)
+                .collect()
+        }),
         ..RepositoryTable::default()
     };
     match &settings.password {
@@ -354,6 +374,18 @@ fn repository_table(repository: &RepositoryConfig) -> Result<RepositoryTable, &'
         SecretRef::Env(name) => table.password_env = Some(name.clone()),
     }
     Ok(table)
+}
+
+/// A location after the first, as its `[[repositories.<alias>.locations]]`
+/// table writes it (decision 80).
+fn location_table(location: &Location) -> LocationTable {
+    LocationTable {
+        repository: Some(location.repository.clone()),
+        repo_hot: location.repo_hot.clone(),
+        options: (!location.options.is_empty()).then(|| location.options.clone()),
+        options_hot: (!location.options_hot.is_empty()).then(|| location.options_hot.clone()),
+        options_cold: (!location.options_cold.is_empty()).then(|| location.options_cold.clone()),
+    }
 }
 
 fn plan(plan: &Plan) -> PlanTable {

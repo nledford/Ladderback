@@ -771,11 +771,7 @@ mod tests {
             testkit::skip!("running as root: permissions don't stop reading a folder");
         }
         let spec = RepositorySpec {
-            options: [(
-                "root".to_owned(),
-                repository.to_string_lossy().into_owned(),
-            )]
-            .into(),
+            options: [("root".to_owned(), repository.to_string_lossy().into_owned())].into(),
             ..spec_at("opendal:fs")
         };
         assert_eq!(probed(&spec).ok(), Some(ProbeResult::Refused));

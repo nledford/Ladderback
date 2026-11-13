@@ -757,9 +757,21 @@ fn config_refused(error: ConfigError) -> Refused {
             problem,
             detail,
         } => {
+            // `repository-id` is required only of a repository with further
+            // locations (decision 80), and the way out is to record it.
+            let needs_id = problem == app::ports::Problem::MissingKey
+                && key
+                    .as_deref()
+                    .is_some_and(|key| key.ends_with(".repository-id"));
             let mut where_ = key.unwrap_or_else(|| "an earlier rule".to_owned());
             if let Some(at) = at {
                 where_ = format!("{where_} (line {}, column {})", at.line, at.column);
+            }
+            if needs_id {
+                return refused(
+                    msg::CLI_CONFIG_LOCATIONS_NEED_ID,
+                    vec![("file", text(file)), ("where", text(where_))],
+                );
             }
             refused(
                 msg::CLI_CONFIG_INVALID,
