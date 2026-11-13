@@ -405,7 +405,7 @@ impl ChooseLocation {
         mut location: RepositoryAccess,
         expected: Option<&RepositoryId>,
         phase: &Probing,
-        mut wanted: oneshot::Receiver<()>,
+        wanted: oneshot::Receiver<()>,
     ) -> LocationOutcome {
         location.id = None;
         location.entry = None;
@@ -416,13 +416,13 @@ impl ChooseLocation {
         let unwanted = {
             let mut current = phase.lock().unwrap_or_else(PoisonError::into_inner);
             match &mut *current {
-                // Nothing is sent on `wanted`: it is still wanted while its
-                // sender lives.
-                Phase::Probing(running) if matches!(wanted.try_recv(), Ok(None)) => {
+                // A probe no longer wanted by now is stopped below, by the
+                // `unwanted` branch, which is ready at once then.
+                Phase::Probing(running) => {
                     running.push((position, control));
                     None
                 }
-                Phase::Probing(_) | Phase::Running(_) | Phase::Stopped => Some(control),
+                Phase::Running(_) | Phase::Stopped => Some(control),
             }
         };
         if let Some(mut control) = unwanted {
