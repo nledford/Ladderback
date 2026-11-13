@@ -15,7 +15,7 @@ use app::contract::network_link::NetworkLinkHarness;
 use app::contract::power::PowerHarness;
 use app::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 use domain::execution::conditions::PowerSource;
-use domain::planning::Link;
+use domain::planning::{CurrentNetworkName, Link};
 use platform::network::{ScutilNetwork, SysfsNetwork};
 use platform::network_link::{KernelLink, RouteLink};
 use platform::power::{PmsetPower, SysfsPower};
@@ -757,6 +757,9 @@ async fn the_system_network_is_this_platforms() {
 struct KernelLinkHarness {
     scratch: tempfile::TempDir,
     machines: AtomicUsize,
+    /// The NetworkManager the machines' names are read from.
+    #[cfg(target_os = "linux")]
+    network_manager: Option<stand_in::NetworkManager>,
 }
 
 /// One made-up interface: its name, whether it is virtual, its attributes,
@@ -788,7 +791,40 @@ impl KernelLinkHarness {
         Self {
             scratch: tempfile::tempdir().expect("a scratch folder"),
             machines: AtomicUsize::new(0),
+            #[cfg(target_os = "linux")]
+            network_manager: None,
         }
+    }
+
+    /// A harness whose machines' names a stand-in NetworkManager gives, on
+    /// a bus of its own; `None` where no `dbus-daemon` can run one.
+    #[cfg(target_os = "linux")]
+    fn with_network_manager() -> Option<Self> {
+        let network_manager = stand_in::NetworkManager::start()?;
+        Some(Self {
+            network_manager: Some(network_manager),
+            ..Self::new()
+        })
+    }
+
+    /// A machine whose default route leaves by a Wi-Fi interface of its
+    /// own, which the stand-in NetworkManager says is `device`; `None` makes
+    /// no device of it.
+    #[cfg(target_os = "linux")]
+    fn on_wifi(&self, device: Option<stand_in::Device>) -> Arc<dyn NetworkLink> {
+        let interface = format!("wl{}", self.machines.load(Ordering::Relaxed));
+        let network_manager = self
+            .network_manager
+            .as_ref()
+            .expect("a stand-in NetworkManager");
+        if let Some(device) = device {
+            network_manager.add(&interface, device);
+        }
+        self.machine(
+            &default_route(&interface, 600),
+            Some(IPV6_UNREACHABLE),
+            &[(interface.as_str(), false, &[("type", "1")], &["phy80211"])],
+        )
     }
 
     fn machine(
@@ -797,6 +833,22 @@ impl KernelLinkHarness {
         ipv6_route: Option<&str>,
         interfaces: &[Interface<'_>],
     ) -> Arc<dyn NetworkLink> {
+        let link = self.kernel_link(route, ipv6_route, interfaces);
+        #[cfg(target_os = "linux")]
+        let link = match &self.network_manager {
+            Some(network_manager) => link.with_bus(network_manager.address()),
+            None => link,
+        };
+        Arc::new(link)
+    }
+
+    /// The reader of a made-up machine, asking the system bus for names.
+    fn kernel_link(
+        &self,
+        route: &str,
+        ipv6_route: Option<&str>,
+        interfaces: &[Interface<'_>],
+    ) -> KernelLink {
         let number = self.machines.fetch_add(1, Ordering::Relaxed);
         let root = self.scratch.path().join(number.to_string());
         let net = root.join("net");
@@ -822,11 +874,7 @@ impl KernelLinkHarness {
         if let Some(text) = ipv6_route {
             std::fs::write(root.join("ipv6_route"), text).expect("the IPv6 routes");
         }
-        Arc::new(KernelLink::at(
-            root.join("route"),
-            root.join("ipv6_route"),
-            net,
-        ))
+        KernelLink::at(root.join("route"), root.join("ipv6_route"), net)
     }
 }
 
@@ -877,30 +925,349 @@ impl NetworkLinkHarness for KernelLinkHarness {
         ))
     }
 
+    #[cfg(target_os = "linux")]
     fn on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine on the Wi-Fi network {name:?}")
+        self.on_wifi(Some(stand_in::Device::wifi(stand_in::Ssid::Bytes(
+            name.as_bytes().to_vec(),
+        ))))
     }
 
+    #[cfg(target_os = "linux")]
     fn on_no_network(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine on no Wi-Fi network")
+        self.on_wifi(Some(stand_in::Device::wifi(stand_in::Ssid::None)))
     }
 
+    /// NetworkManager hides nothing, but a hidden network's access point
+    /// may have no name yet: an empty one.
+    #[cfg(target_os = "linux")]
     fn name_hidden(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine whose platform hides the name")
+        self.on_wifi(Some(stand_in::Device::wifi(stand_in::Ssid::Bytes(
+            Vec::new(),
+        ))))
     }
 
+    /// A bus with no NetworkManager on it.
+    #[cfg(target_os = "linux")]
     fn no_name_reader(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine with no name reader")
+        let link = self.kernel_link(
+            &default_route("wlp2s0", 600),
+            Some(IPV6_UNREACHABLE),
+            &[WLAN0],
+        );
+        let bus = self.scratch.path().join("no-bus");
+        Arc::new(link.with_bus(format!("unix:path={}", bus.display())))
     }
 
+    /// The access point's name as text, not bytes.
+    #[cfg(target_os = "linux")]
     fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink> {
-        todo!("a made-up source this adapter doesn't understand, holding {name:?}")
+        self.on_wifi(Some(stand_in::Device::wifi(stand_in::Ssid::Text(
+            name.to_owned(),
+        ))))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn on_network(&self, _name: &str) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn on_no_network(&self) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn name_hidden(&self) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn no_name_reader(&self) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn name_unrecognized(&self, _name: &str) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
     }
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn the_kernels_routes_and_interfaces_meet_the_network_link_contract() {
-    contract::network_link::run(&KernelLinkHarness::new()).await;
+    let Some(harness) = KernelLinkHarness::with_network_manager() else {
+        testkit::skip!("no dbus-daemon here to run a stand-in NetworkManager on");
+    };
+    contract::network_link::run(&harness).await;
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tokio::test]
+async fn the_kernels_routes_and_interfaces_meet_the_network_link_contract() {
+    testkit::skip!(
+        "the kernel's reader asks NetworkManager for the network's name, which is read only on Linux"
+    );
+}
+
+/// The name is read of the interface the default route leaves by: one that
+/// isn't Wi-Fi has none, and a Wi-Fi interface NetworkManager doesn't know
+/// as Wi-Fi is no answer.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn the_name_is_the_wi_fi_network_the_default_route_leaves_by() {
+    let Some(harness) = KernelLinkHarness::with_network_manager() else {
+        testkit::skip!("no dbus-daemon here to run a stand-in NetworkManager on");
+    };
+    assert_eq!(harness.wired().network_name().await, Ok(None));
+    let mut device = stand_in::Device::wifi(stand_in::Ssid::Bytes(b"Office".to_vec()));
+    device.kind = 1;
+    for link in [harness.on_wifi(Some(device)), harness.on_wifi(None)] {
+        let answer = link.network_name().await;
+        assert!(
+            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+            "{answer:?}"
+        );
+    }
+    let answer = harness.no_route().network_name().await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unreadable { .. })),
+        "a route gone since the link was read is no answer, not \"no network\": {answer:?}"
+    );
+}
+
+/// The kernel says what the link is before NetworkManager is asked: a
+/// machine off Wi-Fi has no network though it has no NetworkManager, as on
+/// macOS, and only a Wi-Fi one finds no answer.
+#[tokio::test]
+async fn a_machine_off_wi_fi_needs_no_networkmanager_to_have_no_network() {
+    let harness = KernelLinkHarness::new();
+    let bus = format!(
+        "unix:path={}",
+        harness.scratch.path().join("no-bus").display()
+    );
+    let wired = harness
+        .kernel_link(&default_route("eth0", 100), None, &[ETH0])
+        .with_bus(bus.clone());
+    assert_eq!(wired.network_name().await, Ok(None));
+    let wifi = harness
+        .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
+        .with_bus(bus);
+    let answer = wifi.network_name().await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unreadable { .. })),
+        "{answer:?}"
+    );
+}
+
+/// NetworkManager on a bus of its own: a `dbus-daemon` with a configuration
+/// of the test's, and a thread that answers `Properties.Get` for the devices
+/// the test adds, as NetworkManager's D-Bus API does.
+#[cfg(target_os = "linux")]
+mod stand_in {
+    use std::io::BufRead;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, PoisonError};
+    use std::time::Duration;
+
+    use dbus::arg::Variant;
+    use dbus::blocking::Connection;
+    use dbus::channel::{Channel, MatchingReceiver, Sender};
+    use dbus::message::MatchRule;
+    use dbus::{Message, Path};
+
+    const SERVICE: &str = "org.freedesktop.NetworkManager";
+    const DEVICES: &str = "/org/freedesktop/NetworkManager/Devices/";
+    const ACCESS_POINTS: &str = "/org/freedesktop/NetworkManager/AccessPoint/";
+
+    /// What the access point says its name is.
+    #[derive(Clone)]
+    pub enum Ssid {
+        /// No access point: the device has joined no network.
+        None,
+        Bytes(Vec<u8>),
+        /// Text where NetworkManager gives bytes.
+        Text(String),
+    }
+
+    #[derive(Clone)]
+    pub struct Device {
+        pub interface: String,
+        pub kind: u32,
+        pub ssid: Ssid,
+    }
+
+    impl Device {
+        pub fn wifi(ssid: Ssid) -> Self {
+            Self {
+                interface: String::new(),
+                kind: 2,
+                ssid,
+            }
+        }
+    }
+
+    pub struct NetworkManager {
+        _scratch: tempfile::TempDir,
+        daemon: std::process::Child,
+        address: String,
+        devices: Arc<Mutex<Vec<Device>>>,
+        stop: Arc<AtomicBool>,
+        answering: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl NetworkManager {
+        /// Starts the bus and the stand-in on it; `None` when there is no
+        /// `dbus-daemon` to start.
+        pub fn start() -> Option<Self> {
+            let scratch = tempfile::tempdir().expect("a scratch folder");
+            let config = scratch.path().join("bus.conf");
+            std::fs::write(
+                &config,
+                format!(
+                    "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
+                     <busconfig><type>session</type><listen>unix:path={}</listen><auth>EXTERNAL</auth>\
+                     <policy context=\"default\"><allow send_destination=\"*\"/><allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
+                    scratch.path().join("bus").display()
+                ),
+            )
+            .expect("the bus's configuration");
+            let mut daemon = std::process::Command::new("dbus-daemon")
+                .arg(format!("--config-file={}", config.display()))
+                .args(["--nofork", "--print-address"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .ok()?;
+            let mut address = String::new();
+            std::io::BufReader::new(daemon.stdout.take().expect("piped"))
+                .read_line(&mut address)
+                .expect("the bus's address");
+            let address = address.trim().to_owned();
+            let devices = Arc::new(Mutex::new(Vec::<Device>::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (ready, owned) = std::sync::mpsc::channel();
+            let answering = {
+                let (address, devices, stop) = (address.clone(), devices.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let mut channel = Channel::open_private(&address).expect("the stand-in's bus");
+                    channel.register().expect("a name on the bus");
+                    let connection = Connection::from(channel);
+                    connection
+                        .request_name(SERVICE, false, true, true)
+                        .expect("NetworkManager's name");
+                    connection.start_receive(
+                        MatchRule::new_method_call(),
+                        Box::new(move |call, connection| {
+                            let devices = devices.lock().unwrap_or_else(PoisonError::into_inner);
+                            let _ = connection.send(answer(&call, &devices));
+                            true
+                        }),
+                    );
+                    let _ = ready.send(());
+                    while !stop.load(Ordering::Relaxed) {
+                        connection
+                            .process(Duration::from_millis(20))
+                            .expect("the stand-in's bus");
+                    }
+                })
+            };
+            owned.recv().expect("the stand-in owns its name");
+            Some(Self {
+                _scratch: scratch,
+                daemon,
+                address,
+                devices,
+                stop,
+                answering: Some(answering),
+            })
+        }
+
+        pub fn address(&self) -> String {
+            self.address.clone()
+        }
+
+        /// A device for `interface`.
+        pub fn add(&self, interface: &str, device: Device) {
+            self.devices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Device {
+                    interface: interface.to_owned(),
+                    ..device
+                });
+        }
+    }
+
+    impl Drop for NetworkManager {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(answering) = self.answering.take() {
+                let _ = answering.join();
+            }
+            let _ = self.daemon.kill();
+            let _ = self.daemon.wait();
+        }
+    }
+
+    /// NetworkManager's answer to `call`: a property of the manager, of a
+    /// device or of an access point, read through `Properties.Get`.
+    fn answer(call: &Message, devices: &[Device]) -> Message {
+        let unknown = || {
+            call.error(
+                &"org.freedesktop.DBus.Error.UnknownProperty".into(),
+                c"no such property",
+            )
+        };
+        let (Some(path), Some(member), Ok((interface, property))) =
+            (call.path(), call.member(), call.read2::<&str, &str>())
+        else {
+            return unknown();
+        };
+        if &*member != "Get" {
+            return unknown();
+        }
+        let reply = call.method_return();
+        let path = &*path;
+        if path == "/org/freedesktop/NetworkManager" && property == "Devices" {
+            let paths: Vec<Path<'static>> = (0..devices.len())
+                .map(|index| Path::from(format!("{DEVICES}{index}")))
+                .collect();
+            return reply.append1(Variant(paths));
+        }
+        if let Some(index) = path.strip_prefix(DEVICES) {
+            let Some(device) = index
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| devices.get(index))
+            else {
+                return unknown();
+            };
+            return match (interface, property) {
+                (_, "Interface") => reply.append1(Variant(device.interface.clone())),
+                (_, "DeviceType") => reply.append1(Variant(device.kind)),
+                (_, "ActiveAccessPoint") => reply.append1(Variant(match device.ssid {
+                    Ssid::None => Path::from("/"),
+                    _ => Path::from(format!("{ACCESS_POINTS}{index}")),
+                })),
+                _ => unknown(),
+            };
+        }
+        if let Some(index) = path.strip_prefix(ACCESS_POINTS) {
+            let Some(device) = index
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| devices.get(index))
+            else {
+                return unknown();
+            };
+            return match (&device.ssid, property) {
+                (Ssid::Bytes(bytes), "Ssid") => reply.append1(Variant(bytes.clone())),
+                (Ssid::Text(text), "Ssid") => reply.append1(Variant(text.clone())),
+                _ => unknown(),
+            };
+        }
+        unknown()
+    }
 }
 
 #[tokio::test]
@@ -997,13 +1364,56 @@ fn route_output(interface: &str) -> String {
 /// prints it, its addresses made up.
 const HARDWARE_PORTS: &str = "\nHardware Port: Ethernet Adapter (en4)\nDevice: en4\nEthernet Address: 02:00:00:00:00:04\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 02:00:00:00:00:05\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 02:00:00:00:00:00\n\nVLAN Configurations\n===================\n";
 
+/// `system_profiler -json SPAirPortDataType` as macOS 27 prints it, cut to
+/// what the reader looks at: the Wi-Fi port `en0`, whose current network is
+/// `current` (`None` leaves the block out), and `awdl0`, whose block has no
+/// name.
+fn profile(current: Option<serde_json::Value>) -> String {
+    let mut en0 = serde_json::json!({
+        "_name": "en0",
+        "spairport_status_information": "spairport_status_connected",
+    });
+    if let Some(current) = current {
+        en0["spairport_current_network_information"] = current;
+    }
+    serde_json::json!({ "SPAirPortDataType": [{
+        "spairport_airport_interfaces": [en0, {
+            "_name": "awdl0",
+            "spairport_current_network_information": {
+                "spairport_network_type": "spairport_network_type_station",
+            },
+        }],
+        "spairport_software_information": {},
+    }]})
+    .to_string()
+}
+
+/// The report of a Mac whose `en0` has joined a network named `name`.
+fn profile_on(name: serde_json::Value) -> String {
+    profile(Some(serde_json::json!({
+        "_name": name,
+        "spairport_network_type": "spairport_network_type_station",
+    })))
+}
+
 struct RouteLinkHarness;
 
 impl RouteLinkHarness {
     fn link(route: &str, ports: &str) -> Arc<dyn NetworkLink> {
+        Self::named(route, ports, &profile_on("Office".into()))
+    }
+
+    /// A Mac whose Wi-Fi report is `profile`, its default route out of
+    /// `en0`.
+    fn on_wifi(profile: &str) -> Arc<dyn NetworkLink> {
+        Self::named(&route_output("en0"), HARDWARE_PORTS, profile)
+    }
+
+    fn named(route: &str, ports: &str, profile: &str) -> Arc<dyn NetworkLink> {
         Arc::new(RouteLink::running(
             ("/bin/sh", &printing(route)[..]),
             ("/bin/sh", &printing(ports)[..]),
+            ("/bin/sh", &printing(profile)[..]),
         ))
     }
 }
@@ -1037,6 +1447,7 @@ impl NetworkLinkHarness for RouteLinkHarness {
                 ][..],
             ),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &printing(&profile(None))[..]),
         ))
     }
 
@@ -1051,27 +1462,36 @@ impl NetworkLinkHarness for RouteLinkHarness {
         Arc::new(RouteLink::running(
             ("/nonexistent/ladderback-demo/route", &["-n".to_owned()][..]),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &printing(&profile(None))[..]),
         ))
     }
 
     fn on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine on the Wi-Fi network {name:?}")
+        Self::on_wifi(&profile_on(name.into()))
     }
 
     fn on_no_network(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine on no Wi-Fi network")
+        Self::on_wifi(&profile(None))
     }
 
     fn name_hidden(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine whose platform hides the name")
+        Self::on_wifi(&profile_on("<redacted>".into()))
     }
 
     fn no_name_reader(&self) -> Arc<dyn NetworkLink> {
-        todo!("a made-up machine with no name reader")
+        Arc::new(RouteLink::running(
+            ("/bin/sh", &printing(&route_output("en0"))[..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            (
+                "/nonexistent/ladderback-demo/system_profiler",
+                &["-json".to_owned()][..],
+            ),
+        ))
     }
 
+    /// The name where the report has a list of names.
     fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink> {
-        todo!("a made-up source this adapter doesn't understand, holding {name:?}")
+        Self::on_wifi(&profile_on(serde_json::json!([name])))
     }
 }
 
@@ -1091,6 +1511,83 @@ async fn networksetup_listing_no_port_is_unrecognized() {
     let answer = RouteLinkHarness::link(&route_output("en0"), "VLAN Configurations\n")
         .link()
         .await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unrecognized { .. })),
+        "{answer:?}"
+    );
+}
+
+/// A name macOS leaves out or empties is withheld, never "no network": a
+/// rule's `except` must not hold on it (decision 80).
+#[tokio::test]
+async fn a_name_the_report_leaves_out_or_empties_is_no_answer() {
+    let no_name = profile(Some(serde_json::json!({
+        "spairport_network_type": "spairport_network_type_station",
+    })));
+    for report in [
+        profile_on("".into()),
+        profile_on("a name of more than thirty-two bytes".into()),
+        no_name,
+    ] {
+        let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
+        assert!(
+            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+            "{answer:?}"
+        );
+    }
+}
+
+/// The name read is the Wi-Fi port's, when the default route leaves by it:
+/// a route out of another port has none, whatever the report says. A report
+/// with no block for the Wi-Fi port, or two, says nothing of it, and one
+/// that isn't JSON or isn't the Wi-Fi report is not understood.
+#[tokio::test]
+async fn the_name_is_the_wi_fi_port_s_when_the_default_route_leaves_by_it() {
+    let link = RouteLinkHarness::named(
+        &route_output("en4"),
+        HARDWARE_PORTS,
+        &profile_on("Office".into()),
+    );
+    assert_eq!(link.network_name().await, Ok(None));
+    let two = profile_on("Office".into()).replace("\"awdl0\"", "\"en0\"");
+    let none = profile_on("Office".into()).replace("\"en0\"", "\"en1\"");
+    for report in [
+        none,
+        two,
+        "Wi-Fi:\n  Current Network Information:".to_owned(),
+        "{\"SPUSBDataType\": []}".to_owned(),
+    ] {
+        let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
+        assert!(
+            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+            "{answer:?}"
+        );
+    }
+}
+
+/// The report runs past the 64 KiB another program is held to: it lists
+/// the networks around. It is read up to 1 MiB.
+#[tokio::test]
+async fn a_wi_fi_report_is_read_up_to_a_mebibyte() {
+    // The report with `bytes` of padding first, printed by a script: an
+    // argument that long is more than Linux passes.
+    let padded = |bytes: usize| {
+        let report = profile_on("Office".into());
+        let rest = report.strip_prefix('{').expect("an object");
+        let script = format!(
+            "printf '{{\"padding\":\"'; head -c {bytes} /dev/zero | tr '\\0' x; printf '\",'; cat <<'EOF'\n{rest}\nEOF"
+        );
+        RouteLink::running(
+            ("/bin/sh", &printing(&route_output("en0"))[..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &["-c".to_owned(), script][..]),
+        )
+    };
+    assert_eq!(
+        padded(200 * 1024).network_name().await,
+        Ok(CurrentNetworkName::new(b"Office"))
+    );
+    let answer = padded(1024 * 1024).network_name().await;
     assert!(
         matches!(answer, Err(PlatformError::Unrecognized { .. })),
         "{answer:?}"

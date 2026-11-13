@@ -153,6 +153,8 @@ pub(crate) struct Program {
     pub(crate) path: PathBuf,
     pub(crate) args: Vec<OsString>,
     pub(crate) timeout: Duration,
+    /// The most bytes of its output read.
+    pub(crate) max_output: u64,
 }
 
 impl Program {
@@ -164,12 +166,23 @@ impl Program {
             path: path.into(),
             args: args.into_iter().map(Into::into).collect(),
             timeout: TIMEOUT,
+            max_output: MAX_OUTPUT_BYTES,
+        }
+    }
+
+    /// This program given `timeout` and `max_output` bytes of output in
+    /// place of the usual 5 s and 64 KiB, for one that is slow or says much.
+    pub(crate) fn with_limits(self, timeout: Duration, max_output: u64) -> Self {
+        Self {
+            timeout,
+            max_output,
+            ..self
         }
     }
 
     /// Runs the program with no environment and nothing on stdin, through
     /// the spawn gate (decision 58), and returns what it printed. A program
-    /// that fails, prints more than [`MAX_OUTPUT_BYTES`] or isn't done
+    /// that fails, prints more than its `max_output` bytes or isn't done
     /// within its timeout gives no answer; it is killed when this returns.
     /// The timeout covers the whole call, the wait for the gate too.
     pub(crate) async fn output(&self) -> Result<String, PlatformError> {
@@ -207,15 +220,16 @@ impl Program {
         let Some(pipe) = stdout.0.as_mut() else {
             return Err(unreadable(from, "its output is not piped"));
         };
+        let max_output = self.max_output;
         let mut bytes = Vec::new();
-        pipe.take(MAX_OUTPUT_BYTES + 1)
+        pipe.take(max_output.saturating_add(1))
             .read_to_end(&mut bytes)
             .await
             .map_err(|error| unreadable(from, error))?;
-        if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_OUTPUT_BYTES) {
+        if u64::try_from(bytes.len()).map_or(true, |len| len > max_output) {
             return Err(unrecognized(
                 from,
-                &format!("more than {MAX_OUTPUT_BYTES} bytes of output"),
+                &format!("more than {max_output} bytes of output"),
             ));
         }
         let status = child

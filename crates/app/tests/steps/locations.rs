@@ -27,8 +27,9 @@ use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
     AgentConfig, AgentSettings, Alternative, CurrentNetworkName, Hooks, Interval, Link, Location,
-    LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind, NetworkName, Plan, RepositoryConfig, RepositorySettings, RetryPolicy,
-    RuleNote, Schedule, Source, SourceFilter,
+    LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind, NetworkName,
+    Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RuleNote, Schedule, Source,
+    SourceFilter,
 };
 use domain::secrets::SecretRef;
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Uuid};
@@ -1262,7 +1263,10 @@ fn network_name_nowhere(agent: &mut Agent, network: String) {
     for text in shown {
         assert!(!text.contains(&network), "{text}");
     }
-    let lan = world.record().at(world.position("lan")).expect("the location");
+    let lan = world
+        .record()
+        .at(world.position("lan"))
+        .expect("the location");
     assert_eq!(lan.outcome, LocationOutcome::RuleNotMet);
 }
 

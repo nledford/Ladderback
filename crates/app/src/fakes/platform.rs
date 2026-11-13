@@ -125,7 +125,7 @@ impl FakeNetworkLink {
     /// What every later [`network_name`](NetworkLink::network_name) call
     /// answers.
     pub fn set_name(&self, answer: Result<Option<CurrentNetworkName>, PlatformError>) {
-        todo!("the fake's name: {}", answer.is_ok())
+        self.name.set(answer);
     }
 
     /// How many times the link was read.

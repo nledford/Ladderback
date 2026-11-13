@@ -407,7 +407,10 @@ impl RepositoryConfig {
             }));
         }
         if !reads_names {
-            todo!("the notes of {} rules on a machine that reads no name", rules.len())
+            notes.extend(rules.iter().zip(1u8..).filter_map(|(rule, position)| {
+                rule.filter(|rule| rule.asks_name())
+                    .map(|_| RuleNote::NameUnreadable { position })
+            }));
         }
         notes
     }
@@ -598,14 +601,20 @@ mod tests {
     #[test]
     fn an_entry_whose_locations_have_no_rule_has_no_notes() {
         let entry = entry("/srv/lan", &["/srv/public"], Some("aa"));
-        assert_eq!(entry.rule_notes(&[&plan(true, false)], false, true), Vec::new());
+        assert_eq!(
+            entry.rule_notes(&[&plan(true, false)], false, true),
+            Vec::new()
+        );
     }
 
     #[test]
     fn every_location_ruled_is_noted_and_one_unruled_location_is_enough_to_drop_it() {
         let mut entry = entry("/srv/lan", &["/srv/public"], Some("aa"));
         entry.locations.first_when = ruled(&[NetworkKind::Wired]);
-        assert_eq!(entry.rule_notes(&[&plan(true, true)], true, true), Vec::new());
+        assert_eq!(
+            entry.rule_notes(&[&plan(true, true)], true, true),
+            Vec::new()
+        );
         entry.locations.further[0].when = ruled(&[NetworkKind::WiFi]);
         assert_eq!(
             entry.rule_notes(&[&plan(true, true)], true, true),
@@ -623,12 +632,21 @@ mod tests {
             vec![RuleNote::LastRuledWithoutRetry { plan: home }]
         );
         // A plan that retries, or that runs only when asked, isn't noted.
-        assert_eq!(entry.rule_notes(&[&plan(true, true)], true, true), Vec::new());
-        assert_eq!(entry.rule_notes(&[&plan(false, false)], true, true), Vec::new());
+        assert_eq!(
+            entry.rule_notes(&[&plan(true, true)], true, true),
+            Vec::new()
+        );
+        assert_eq!(
+            entry.rule_notes(&[&plan(false, false)], true, true),
+            Vec::new()
+        );
         // A rule on an earlier location only isn't noted either.
         entry.locations.further[0].when = None;
         entry.locations.first_when = ruled(&[NetworkKind::WiFi]);
-        assert_eq!(entry.rule_notes(&[&plan(true, false)], true, true), Vec::new());
+        assert_eq!(
+            entry.rule_notes(&[&plan(true, false)], true, true),
+            Vec::new()
+        );
     }
 
     #[test]

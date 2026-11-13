@@ -677,7 +677,9 @@ impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
     }
 
     fn on_network(&self, name: &str) -> Arc<dyn app::ports::NetworkLink> {
-        Self::named(Ok(domain::planning::CurrentNetworkName::new(name.as_bytes())))
+        Self::named(Ok(domain::planning::CurrentNetworkName::new(
+            name.as_bytes(),
+        )))
     }
 
     fn on_no_network(&self) -> Arc<dyn app::ports::NetworkLink> {

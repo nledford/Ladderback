@@ -12,8 +12,8 @@ use app::ports::{ConfigError, Problem};
 use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
-    KeepWithin, Location, LocationRule, Maintenance, NameFilter, NetworkName, Overlap, Plan, RepositoryConfig,
-    RetentionPolicy, RetryPolicy, Schedule, format_duration,
+    KeepWithin, Location, LocationRule, Maintenance, NameFilter, NetworkName, Overlap, Plan,
+    RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 

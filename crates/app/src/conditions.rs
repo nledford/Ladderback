@@ -166,14 +166,17 @@ impl NameWatch {
     /// Whether this machine reads the name, as far as is known: until a
     /// read fails, it is taken to.
     pub fn reads_names(&self) -> bool {
-        todo!("whether names are read: {}", self.unreadable.load(Ordering::Relaxed))
+        !self.unreadable.load(Ordering::Relaxed)
     }
 
     /// Reads the name once per start, the first time a rule with names is
     /// seen, so the page can note a rule this machine can't evaluate before
     /// any run has tried it. Later calls do nothing.
     pub async fn check_once(&self) {
-        todo!("the first check: {}", self.checked.load(Ordering::Relaxed))
+        if !self.checked.swap(true, Ordering::Relaxed) {
+            // What the read found is kept by the watch itself.
+            drop(self.network_name().await);
+        }
     }
 }
 
@@ -185,11 +188,12 @@ impl NetworkLink for NameWatch {
 
     async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
         let answer = self.inner.network_name().await;
-        todo!(
-            "watching a name read: {} {}",
-            answer.is_ok(),
-            self.told.load(Ordering::Relaxed)
-        )
+        let failed = answer.is_err();
+        self.unreadable.store(failed, Ordering::Relaxed);
+        if failed && !self.told.swap(true, Ordering::Relaxed) {
+            (self.tell)();
+        }
+        answer
     }
 }
 

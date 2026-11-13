@@ -3454,7 +3454,8 @@ mod tests {
     fn a_listed_repository_shows_each_locations_rule_and_notes_what_the_rules_mean() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
         let mut entry = two_locations();
-        let wired = LocationRule::new(vec![domain::planning::NetworkKind::Wired.into()]).expect("a rule");
+        let wired =
+            LocationRule::new(vec![domain::planning::NetworkKind::Wired.into()]).expect("a rule");
         entry.locations.first_when = Some(wired.clone());
         entry.locations.further[0].when = Some(
             LocationRule::new(vec![

@@ -259,8 +259,11 @@ impl ChooseLocation {
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
-        for ((settings, verdict), position) in
-            entry.location_settings().into_iter().zip(verdicts).zip(1u8..)
+        for ((settings, verdict), position) in entry
+            .location_settings()
+            .into_iter()
+            .zip(verdicts)
+            .zip(1u8..)
         {
             let address = recorded_address(
                 &Location::of(&settings).masked_address(),

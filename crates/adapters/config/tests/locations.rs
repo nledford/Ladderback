@@ -10,9 +10,9 @@ use app::ports::{ConfigStore, Problem};
 use config_adapter::render;
 use domain::RepositoryAlias;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
-    MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName,
-    ValueKind, Violation,
+    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_NETWORK_NAME_BYTES,
+    MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName, ValueKind,
+    Violation,
 };
 use support::*;
 

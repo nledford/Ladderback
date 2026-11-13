@@ -26,7 +26,10 @@ impl NetworkName {
     /// The name `text` is, refused when empty or longer than a network's
     /// name can be.
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        todo!("a network name in a rule: {}", text.len())
+        if text.is_empty() || text.len() > MAX_NETWORK_NAME_BYTES {
+            return Err(InvalidValue::new(ValueKind::LocationRule, text));
+        }
+        Ok(Self(text.to_owned()))
     }
 
     /// The name as the configuration writes it.
@@ -46,7 +49,7 @@ impl CurrentNetworkName {
     /// The name `bytes` are; `None` when empty or longer than a network's
     /// name can be, which no reader takes for a name.
     pub fn new(bytes: &[u8]) -> Option<Self> {
-        todo!("the current network's name: {}", bytes.len())
+        (!bytes.is_empty() && bytes.len() <= MAX_NETWORK_NAME_BYTES).then(|| Self(bytes.into()))
     }
 }
 
@@ -72,7 +75,15 @@ impl NameFilter {
         only: Option<Vec<NetworkName>>,
         except: Option<Vec<NetworkName>>,
     ) -> Result<Option<Self>, InvalidValue> {
-        todo!("only {:?} and except {:?}", only.is_some(), except.is_some())
+        match (only, except) {
+            (None, None) => Ok(None),
+            (Some(only), None) => Ok(Some(Self::Only(only))),
+            (None, Some(except)) => Ok(Some(Self::Except(except))),
+            (Some(_), Some(_)) => Err(InvalidValue::new(
+                ValueKind::LocationRule,
+                "only and except",
+            )),
+        }
     }
 
     /// The names, in the order written.
@@ -98,7 +109,17 @@ impl Alternative {
         let Some(names) = names else {
             return Ok(Self { kind, names: None });
         };
-        todo!("an alternative of {kind:?} with {} names", names.names().len())
+        let count = names.names().len();
+        if kind != NetworkKind::WiFi || count == 0 || count > MAX_NETWORK_NAMES {
+            return Err(InvalidValue::new(
+                ValueKind::LocationRule,
+                format!("{} with {count} names", kind.as_str()),
+            ));
+        }
+        Ok(Self {
+            kind,
+            names: Some(names),
+        })
     }
 
     /// The kind of network it asks for.
@@ -116,7 +137,21 @@ impl Alternative {
     fn verdict(&self, link: Link, name: Option<&CurrentNetworkName>) -> RuleVerdict {
         let verdict = self.kind.verdict(link);
         match (&self.names, verdict) {
-            (Some(_), RuleVerdict::Holds) => todo!("a name rule on {:?}", name.is_some()),
+            // On Wi-Fi: the name decides, and a name not read can't.
+            (Some(names), RuleVerdict::Holds) => match name {
+                None => RuleVerdict::Unknown,
+                Some(name) => {
+                    let listed = names
+                        .names()
+                        .iter()
+                        .any(|listed| listed.as_str().as_bytes() == &*name.0);
+                    if listed == matches!(names, NameFilter::Only(_)) {
+                        RuleVerdict::Holds
+                    } else {
+                        RuleVerdict::NotMet
+                    }
+                }
+            },
             _ => verdict,
         }
     }
@@ -227,7 +262,9 @@ impl LocationRule {
     /// Whether an alternative lists names, so that evaluating the rule on a
     /// Wi-Fi link needs the network's name.
     pub fn asks_name(&self) -> bool {
-        self.alternatives.iter().any(|alternative| alternative.names.is_some())
+        self.alternatives
+            .iter()
+            .any(|alternative| alternative.names.is_some())
     }
 
     /// Whether the rule holds on `link`, `None` when the link couldn't be
@@ -255,7 +292,14 @@ mod tests {
     use super::*;
 
     fn rule(alternatives: &[NetworkKind]) -> LocationRule {
-        LocationRule::new(alternatives.iter().copied().map(Alternative::from).collect()).unwrap()
+        LocationRule::new(
+            alternatives
+                .iter()
+                .copied()
+                .map(Alternative::from)
+                .collect(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -263,7 +307,11 @@ mod tests {
         let wired = rule(&[NetworkKind::Wired]);
         assert_eq!(wired.holds(Some(Link::Wired), None), RuleVerdict::Holds);
         for link in [Link::WiFi, Link::Other] {
-            assert_eq!(wired.holds(Some(link), None), RuleVerdict::NotMet, "{link:?}");
+            assert_eq!(
+                wired.holds(Some(link), None),
+                RuleVerdict::NotMet,
+                "{link:?}"
+            );
         }
     }
 
@@ -272,14 +320,22 @@ mod tests {
         let wifi = rule(&[NetworkKind::WiFi]);
         assert_eq!(wifi.holds(Some(Link::WiFi), None), RuleVerdict::Holds);
         for link in [Link::Wired, Link::Other, Link::NotWiFi] {
-            assert_eq!(wifi.holds(Some(link), None), RuleVerdict::NotMet, "{link:?}");
+            assert_eq!(
+                wifi.holds(Some(link), None),
+                RuleVerdict::NotMet,
+                "{link:?}"
+            );
         }
     }
 
     #[test]
     fn a_link_that_could_not_be_read_evaluates_no_rule() {
         for kind in [NetworkKind::Wired, NetworkKind::WiFi] {
-            assert_eq!(rule(&[kind]).holds(None, None), RuleVerdict::Unknown, "{kind:?}");
+            assert_eq!(
+                rule(&[kind]).holds(None, None),
+                RuleVerdict::Unknown,
+                "{kind:?}"
+            );
         }
     }
 
@@ -315,9 +371,15 @@ mod tests {
         let either = rule(&[NetworkKind::Wired, NetworkKind::WiFi]);
         // Wired can't be told on this link, and Wi-Fi isn't met: unknown,
         // whichever is written first.
-        assert_eq!(either.holds(Some(Link::NotWiFi), None), RuleVerdict::Unknown);
+        assert_eq!(
+            either.holds(Some(Link::NotWiFi), None),
+            RuleVerdict::Unknown
+        );
         let reversed = rule(&[NetworkKind::WiFi, NetworkKind::Wired]);
-        assert_eq!(reversed.holds(Some(Link::NotWiFi), None), RuleVerdict::Unknown);
+        assert_eq!(
+            reversed.holds(Some(Link::NotWiFi), None),
+            RuleVerdict::Unknown
+        );
     }
 
     #[test]
@@ -327,7 +389,9 @@ mod tests {
             ValueKind::LocationRule
         );
         assert!(LocationRule::new(vec![NetworkKind::WiFi.into(); MAX_RULE_ALTERNATIVES]).is_ok());
-        assert!(LocationRule::new(vec![NetworkKind::WiFi.into(); MAX_RULE_ALTERNATIVES + 1]).is_err());
+        assert!(
+            LocationRule::new(vec![NetworkKind::WiFi.into(); MAX_RULE_ALTERNATIVES + 1]).is_err()
+        );
     }
 
     #[test]
@@ -375,24 +439,42 @@ mod tests {
         assert_eq!(office.holds(wifi, Some(&on(b"Lab"))), RuleVerdict::Holds);
         assert_eq!(office.holds(wifi, Some(&on(b"Guest"))), RuleVerdict::NotMet);
         // Byte for byte, case and all.
-        assert_eq!(office.holds(wifi, Some(&on(b"office"))), RuleVerdict::NotMet);
-        assert_eq!(office.holds(wifi, Some(&on(b"Office "))), RuleVerdict::NotMet);
+        assert_eq!(
+            office.holds(wifi, Some(&on(b"office"))),
+            RuleVerdict::NotMet
+        );
+        assert_eq!(
+            office.holds(wifi, Some(&on(b"Office "))),
+            RuleVerdict::NotMet
+        );
     }
 
     #[test]
     fn an_except_rule_holds_on_any_network_not_listed() {
         let not_guest = except(&["Guest"]);
         let wifi = Some(Link::WiFi);
-        assert_eq!(not_guest.holds(wifi, Some(&on(b"Guest"))), RuleVerdict::NotMet);
-        assert_eq!(not_guest.holds(wifi, Some(&on(b"Office"))), RuleVerdict::Holds);
+        assert_eq!(
+            not_guest.holds(wifi, Some(&on(b"Guest"))),
+            RuleVerdict::NotMet
+        );
+        assert_eq!(
+            not_guest.holds(wifi, Some(&on(b"Office"))),
+            RuleVerdict::Holds
+        );
     }
 
     #[test]
     fn a_name_that_is_not_utf_8_matches_no_listed_name() {
         let latin1 = on(&[0x43, 0x61, 0x66, 0xe9]);
         let wifi = Some(Link::WiFi);
-        assert_eq!(only(&["Café"]).holds(wifi, Some(&latin1)), RuleVerdict::NotMet);
-        assert_eq!(except(&["Café"]).holds(wifi, Some(&latin1)), RuleVerdict::Holds);
+        assert_eq!(
+            only(&["Café"]).holds(wifi, Some(&latin1)),
+            RuleVerdict::NotMet
+        );
+        assert_eq!(
+            except(&["Café"]).holds(wifi, Some(&latin1)),
+            RuleVerdict::Holds
+        );
     }
 
     #[test]
@@ -406,7 +488,11 @@ mod tests {
     fn a_name_rule_is_not_met_off_wi_fi_whatever_the_name() {
         for rule in [only(&["Office"]), except(&["Guest"])] {
             for link in [Link::Wired, Link::Other, Link::NotWiFi] {
-                assert_eq!(rule.holds(Some(link), None), RuleVerdict::NotMet, "{link:?}");
+                assert_eq!(
+                    rule.holds(Some(link), None),
+                    RuleVerdict::NotMet,
+                    "{link:?}"
+                );
             }
             assert_eq!(rule.holds(Some(Link::NoRoute), None), RuleVerdict::Unknown);
         }
@@ -422,7 +508,11 @@ mod tests {
     fn a_listed_name_is_one_to_32_bytes() {
         assert_eq!(NetworkName::parse("Office").unwrap().as_str(), "Office");
         assert!(NetworkName::parse(&"é".repeat(16)).is_ok());
-        for text in [String::new(), "a".repeat(MAX_NETWORK_NAME_BYTES + 1), "é".repeat(17)] {
+        for text in [
+            String::new(),
+            "a".repeat(MAX_NETWORK_NAME_BYTES + 1),
+            "é".repeat(17),
+        ] {
             assert_eq!(
                 NetworkName::parse(&text).unwrap_err().kind,
                 ValueKind::LocationRule,
@@ -446,10 +536,15 @@ mod tests {
         for (kind, names) in [
             (NetworkKind::Wired, NameFilter::Only(listed(1))),
             (NetworkKind::WiFi, NameFilter::Only(Vec::new())),
-            (NetworkKind::WiFi, NameFilter::Except(listed(MAX_NETWORK_NAMES + 1))),
+            (
+                NetworkKind::WiFi,
+                NameFilter::Except(listed(MAX_NETWORK_NAMES + 1)),
+            ),
         ] {
             assert_eq!(
-                Alternative::new(kind, Some(names.clone())).unwrap_err().kind,
+                Alternative::new(kind, Some(names.clone()))
+                    .unwrap_err()
+                    .kind,
                 ValueKind::LocationRule,
                 "{kind:?} {names:?}"
             );
