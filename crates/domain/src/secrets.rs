@@ -298,7 +298,7 @@ thread_local! {
 fn advance(needle: &[u8], borders: &[u32], mut matched: u32, byte: u8) -> u32 {
     loop {
         #[cfg(test)]
-        COMPARED.with(|count| count.set(count.get() + 1));
+        COMPARED.update(|count| count + 1);
         if needle.get(matched as usize) == Some(&byte) {
             // `matched` is the place of a byte of the needle, so one more is
             // at most its length, which a `u32` holds.
@@ -347,7 +347,7 @@ impl Redactor {
             .into_iter()
             .flat_map(|value| {
                 #[cfg(test)]
-                FORMED.with(|count| count.set(count.get() + 1));
+                FORMED.update(|count| count + 1);
                 let raw = partial_needles(value);
                 let escaped: Vec<String> = std::iter::once(value)
                     .chain(raw.iter().map(String::as_str))
