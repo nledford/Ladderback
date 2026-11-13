@@ -25,6 +25,7 @@ use domain::secrets::{SecretValue, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
 use futures::{FutureExt, StreamExt, select_biased};
 
+use crate::conditions::LinkReading;
 use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, NetworkLink,
     ProbeAnswer, RepositoryAccess, RunningJob, SavedEntry,
@@ -142,7 +143,10 @@ impl ChooseLocation {
             // job's own open refuses another repository, as it does for a
             // location with no rule (decision 80, point 2).
             let holds = match saved.entry.location_rules().first().copied().flatten() {
-                Some(rule) => rule.holds(self.link.link().await.ok()) == RuleVerdict::Holds,
+                Some(rule) => {
+                    let mut reading = LinkReading::new(Arc::clone(&self.link));
+                    reading.verdict(rule).await == RuleVerdict::Holds
+                }
                 None => true,
             };
             return if holds {
@@ -224,7 +228,8 @@ impl ChooseLocation {
 
     /// Tries the locations of `saved` in order with the repository's
     /// `password`. The rules are evaluated first, against the network link
-    /// read once and only when a location has one: a location whose rule
+    /// read once and only when a location has one, and its Wi-Fi network's
+    /// name read once and only when a rule lists names: a location whose rule
     /// isn't met, or can't be evaluated, is skipped unresolved and unprobed.
     /// Each other location is resolved and probed, and holds the repository
     /// when its ID is `expected` (any ID when `None`). With
@@ -243,23 +248,25 @@ impl ChooseLocation {
     ) -> Result<(LocationsRecord, Option<RepositoryAccess>), FailureReason> {
         let SavedEntry { alias, entry } = saved;
         let rules = entry.location_rules();
-        let link = if rules.iter().any(Option::is_some) {
-            self.link.link().await.ok()
-        } else {
-            None
-        };
+        let mut reading = LinkReading::new(Arc::clone(&self.link));
+        let mut verdicts = Vec::with_capacity(rules.len());
+        for rule in &rules {
+            verdicts.push(match rule {
+                Some(rule) => reading.verdict(rule).await,
+                None => RuleVerdict::Holds,
+            });
+        }
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
-        for ((settings, rule), position) in
-            entry.location_settings().into_iter().zip(rules).zip(1u8..)
+        for ((settings, verdict), position) in
+            entry.location_settings().into_iter().zip(verdicts).zip(1u8..)
         {
             let address = recorded_address(
                 &Location::of(&settings).masked_address(),
                 MAX_RECORDED_ADDRESS_BYTES,
             );
             let mut source = None;
-            let verdict = rule.map_or(RuleVerdict::Holds, |rule| rule.holds(link));
             let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
                 LocationOutcome::NotTried
             } else if verdict == RuleVerdict::NotMet {

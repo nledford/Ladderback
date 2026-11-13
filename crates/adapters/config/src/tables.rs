@@ -101,9 +101,12 @@ table! {
 
 table! {
     /// One alternative of a location's `when` (decision 80): the kind of
-    /// network the machine must be on.
+    /// network the machine must be on and, for Wi-Fi, the names its network
+    /// may (`only`) or may not (`except`) have.
     AlternativeTable {
         network: String,
+        only: Vec<String>,
+        except: Vec<String>,
     }
 }
 

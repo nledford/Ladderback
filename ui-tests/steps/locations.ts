@@ -14,6 +14,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { journey } from "../support/keyboard.ts";
+import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
 
@@ -31,6 +32,8 @@ interface Locations {
   alias: string;
   /** Each location's folder, by the name the scenario calls it, in order. */
   places: Array<[string, string]>;
+  /** The locations a step gave a rule that names Wi-Fi networks. */
+  named?: string[];
 }
 
 const known = new WeakMap<BrowserWorld, Locations>();
@@ -213,3 +216,62 @@ Then("the row for the plan {string} says {string}", async function (this: Browse
     return (await shown(rows.first().innerText())).includes(words);
   }, `the newest row for ${plan} says "${words}"`);
 });
+
+// The rule is written into the location's own table: the entry's table for
+// the first location, whose keys come right after its header, and the end of
+// the file for the last one.
+Given(
+  "the location {string} is eligible only on the Wi-Fi network {string}",
+  async function (this: BrowserWorld, name: string, network: string) {
+    const { scratch, places, alias } = locations(this);
+    const rule = `when = [ { network = "wifi", only = [${JSON.stringify(network)}] } ]`;
+    const configFile = path.join(scratch, "config", "config.toml");
+    const written = (await readFile(configFile, "utf8")).trimEnd().split("\n");
+    if (places[0]?.[0] === name) {
+      const header = written.indexOf(`[repositories.${alias}]`);
+      assert.ok(header >= 0, `the configuration has no table for ${alias}`);
+      written.splice(header + 1, 0, rule);
+    } else {
+      assert.equal(places.at(-1)?.[0], name, `the location ${name} is the first or the last one`);
+      written.push(rule);
+    }
+    await writeFile(configFile, [...written, ""].join("\n"));
+    known.set(this, { ...locations(this), named: [...(locations(this).named ?? []), name] });
+  },
+);
+
+// What the page says of a name the daemon can't read is the page's, on every
+// OS: the scripted daemon (support/scripted-daemon.ts) adds to the daemon's
+// own list of repositories the note a daemon gives each location whose rule
+// names Wi-Fi networks when its last read of the name failed. That a failed
+// read gives the note is the host tests' (src/composition.rs), and that each
+// platform's reader fails where it should is the contract suite's
+// (crates/adapters/platform/tests/conditions.rs).
+Given("the machine can't read the Wi-Fi network's name", function (this: BrowserWorld) {
+  const { alias, places, named = [] } = locations(this);
+  assert.ok(named.length > 0, "no location has a rule that names Wi-Fi networks: a Given must give one");
+  const daemon = this.scriptedDaemon ?? new ScriptedDaemon();
+  for (const name of named) {
+    const position = places.findIndex(([known]) => known === name) + 1;
+    daemon.warnOfRepository(alias, {
+      code: "location-rule-name-unreadable",
+      args: { position: { type: "text", value: String(position) } },
+    });
+  }
+  this.scriptedDaemon = daemon;
+});
+
+Then(
+  "the repository {string} says this machine can't read the Wi-Fi network's name and the rule doesn't apply",
+  async function (this: BrowserWorld, alias: string) {
+    const row = this.page.getByRole("row").filter({ hasText: alias });
+    await until(async () => {
+      if ((await row.count()) === 0) return false;
+      const text = await shown(row.first().innerText());
+      return (
+        text.includes("can't read the name of the Wi-Fi network this machine is on") &&
+        text.includes("doesn't apply here and the location is skipped")
+      );
+    }, `the repository ${alias} says this machine can't read the Wi-Fi network's name and the rule doesn't apply`);
+  },
+);

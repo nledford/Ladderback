@@ -38,7 +38,10 @@ pub use repository::{
     check_options, masked_options,
 };
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
-pub use rule::{Link, LocationRule, MAX_RULE_ALTERNATIVES, NetworkKind, RuleVerdict};
+pub use rule::{
+    Alternative, CurrentNetworkName, Link, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
+    MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName, RuleVerdict,
+};
 pub use schedule::{
     Cadence, CronExpression, Interval, MIN_INTERVAL, NoNextRun, Schedule, ScheduleZone,
 };

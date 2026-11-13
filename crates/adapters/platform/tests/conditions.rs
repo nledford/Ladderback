@@ -876,6 +876,26 @@ impl NetworkLinkHarness for KernelLinkHarness {
             root.join("net"),
         ))
     }
+
+    fn on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine on the Wi-Fi network {name:?}")
+    }
+
+    fn on_no_network(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine on no Wi-Fi network")
+    }
+
+    fn name_hidden(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine whose platform hides the name")
+    }
+
+    fn no_name_reader(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine with no name reader")
+    }
+
+    fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink> {
+        todo!("a made-up source this adapter doesn't understand, holding {name:?}")
+    }
 }
 
 #[tokio::test]
@@ -1032,6 +1052,26 @@ impl NetworkLinkHarness for RouteLinkHarness {
             ("/nonexistent/ladderback-demo/route", &["-n".to_owned()][..]),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
         ))
+    }
+
+    fn on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine on the Wi-Fi network {name:?}")
+    }
+
+    fn on_no_network(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine on no Wi-Fi network")
+    }
+
+    fn name_hidden(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine whose platform hides the name")
+    }
+
+    fn no_name_reader(&self) -> Arc<dyn NetworkLink> {
+        todo!("a made-up machine with no name reader")
+    }
+
+    fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink> {
+        todo!("a made-up source this adapter doesn't understand, holding {name:?}")
     }
 }
 

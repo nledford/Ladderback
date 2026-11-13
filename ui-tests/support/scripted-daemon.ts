@@ -1,6 +1,7 @@
 // A daemon the journey plays itself (#124): what the operations page reads of
 // it, which is its history, its plans and its events stream, said as the steps
-// say, and, when a step asks, its answers to a start and to a cancel.
+// say, and, when a step asks, its answers to a start and to a cancel and the
+// warnings it adds to a row of the repositories list.
 //
 // A real backup reports progress when it happens to. A journey that must hold
 // the reader's focus on a control while the row beside it updates cannot wait
@@ -36,6 +37,12 @@ interface Operation {
 
 /** What a progress bar counts, as the wire names it (decision 83). */
 export type ProgressUnit = "count" | "bytes";
+
+/** A warning as the daemon's wire has it: a code and its arguments. */
+export interface Warning {
+  code: string;
+  args?: Record<string, { type: string; value: unknown }>;
+}
 
 export class ScriptedDaemon {
   /** The history the page reads: the operations as the daemon's wire has
@@ -74,6 +81,9 @@ export class ScriptedDaemon {
   /** For each reading of the history the page asked for, in order, whether
    *  it marked the request as sent on its own. */
   #backgroundMarks: boolean[] = [];
+  /** The warnings this daemon adds to rows of the repositories list, by the
+   *  repository's alias (`warnOfRepository`). */
+  #repositoryWarnings = new Map<string, Warning[]>();
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -135,6 +145,14 @@ export class ScriptedDaemon {
     return found;
   }
 
+  /** Adds `warning` to the row of `alias` in the repositories list, as the
+   *  daemon gives one when it notes something of that repository; the rest
+   *  of the list is the run's own daemon's answer, and a warning it already
+   *  gives is not given twice. */
+  warnOfRepository(alias: string, warning: Warning): void {
+    this.#repositoryWarnings.set(alias, [...(this.#repositoryWarnings.get(alias) ?? []), warning]);
+  }
+
   /** Answers a context's reads of the daemon with this script. */
   async install(context: BrowserContext): Promise<void> {
     await context.route("**/api/v1/operations/*/cancel", async (route) => {
@@ -175,6 +193,21 @@ export class ScriptedDaemon {
         },
       }),
     );
+    await context.route("**/api/v1/repositories", async (route) => {
+      if (route.request().method() !== "GET" || this.#repositoryWarnings.size === 0) return route.fallback();
+      const response = await route.fetch();
+      const json = (await response.json()) as { repositories: Array<{ alias: string; warnings?: Warning[] }> };
+      const same = (one: Warning, other: Warning) =>
+        one.code === other.code && JSON.stringify(one.args ?? {}) === JSON.stringify(other.args ?? {});
+      for (const row of json.repositories) {
+        const warnings = row.warnings ?? [];
+        for (const added of this.#repositoryWarnings.get(row.alias) ?? []) {
+          if (!warnings.some((given) => same(given, added))) warnings.push(added);
+        }
+        if (warnings.length > 0) row.warnings = warnings;
+      }
+      await route.fulfill({ response, json });
+    });
     await context.routeWebSocket("**/api/v1/events", async (stream) => {
       // The page sees its stream open once this handler returns.
       if (this.#holdTheOpening) {

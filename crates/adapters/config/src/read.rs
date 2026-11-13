@@ -11,9 +11,10 @@ use domain::notifications::{
     Rule, RuleName, Template, Username,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
+    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
     Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Location, LocationRule,
-    Locations, MAX_LOCATIONS, MAX_RULE_ALTERNATIVES, Maintenance, NetworkKind, Nice, OnFailure,
+    Locations, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES, Maintenance, NameFilter,
+    NetworkKind, NetworkName, Nice, OnFailure,
     Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy,
     RetryPolicy, Schedule, Source, SourceFilter, ValueKind, Violation, check_location,
     check_location_count, check_option_value, check_options, parse_duration,
@@ -423,8 +424,11 @@ fn further_locations(
 }
 
 /// A location's `when`, at `path`, the location's table (decision 80): each
-/// alternative's `network`, refused at its key when it names no kind, then
-/// the list, refused at `when` when it is empty or too long.
+/// alternative's `network`, refused at its key when it names no kind, and
+/// its names, each refused at its place when empty or too long, and the
+/// alternative at its place when it has both `only` and `except`, names on a
+/// kind other than Wi-Fi, or a list empty or too long; then the list,
+/// refused at `when` when it is empty or too long.
 fn location_rule(
     reader: &Reader<'_, '_>,
     path: &Path,
@@ -434,14 +438,38 @@ fn location_rule(
         return Ok(None);
     };
     let at = path.key("when");
-    let mut kinds = Vec::with_capacity(tables.len().min(MAX_RULE_ALTERNATIVES));
+    let mut alternatives = Vec::with_capacity(tables.len().min(MAX_RULE_ALTERNATIVES));
     for (index, table) in tables.into_iter().enumerate() {
-        let alternative = at.index(index);
-        let AlternativeTable { network } = table;
-        let network = reader.required(&alternative, "network", network)?;
-        kinds.push(reader.value(&alternative.key("network"), NetworkKind::parse(&network))?);
+        let place = at.index(index);
+        let AlternativeTable {
+            network,
+            only,
+            except,
+        } = table;
+        let network = reader.required(&place, "network", network)?;
+        let kind = reader.value(&place.key("network"), NetworkKind::parse(&network))?;
+        let only = only
+            .map(|names| network_names(reader, &place.key("only"), &names))
+            .transpose()?;
+        let except = except
+            .map(|names| network_names(reader, &place.key("except"), &names))
+            .transpose()?;
+        let names = reader.value(&place, NameFilter::of(only, except))?;
+        alternatives.push(reader.value(&place, Alternative::new(kind, names))?);
     }
-    reader.value(&at, LocationRule::new(kinds)).map(Some)
+    reader.value(&at, LocationRule::new(alternatives)).map(Some)
+}
+
+/// The names of an alternative's `only` or `except`, at `path`, each refused
+/// at its place when it can't be a network's name. The list's length is the
+/// alternative's to refuse; at most one more than it takes is read.
+fn network_names(reader: &Reader<'_, '_>, path: &Path, names: &[String]) -> Read<Vec<NetworkName>> {
+    names
+        .iter()
+        .take(MAX_NETWORK_NAMES.saturating_add(1))
+        .enumerate()
+        .map(|(index, name)| reader.value(&path.index(index), NetworkName::parse(name)))
+        .collect()
 }
 
 /// What a relative path a repository's settings name is refused as.

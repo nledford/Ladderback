@@ -12,7 +12,7 @@ use app::ports::{ConfigError, Problem};
 use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
-    KeepWithin, Location, LocationRule, Maintenance, Overlap, Plan, RepositoryConfig,
+    KeepWithin, Location, LocationRule, Maintenance, NameFilter, NetworkName, Overlap, Plan, RepositoryConfig,
     RetentionPolicy, RetryPolicy, Schedule, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
@@ -394,8 +394,20 @@ fn location_table(location: &Location) -> LocationTable {
 fn rule_tables(rule: &LocationRule) -> Vec<AlternativeTable> {
     rule.alternatives()
         .iter()
-        .map(|kind| AlternativeTable {
-            network: Some(kind.as_str().to_owned()),
+        .map(|alternative| {
+            let names = |names: &[NetworkName]| {
+                Some(names.iter().map(|name| name.as_str().to_owned()).collect())
+            };
+            let (only, except) = match alternative.names() {
+                None => (None, None),
+                Some(NameFilter::Only(listed)) => (names(listed), None),
+                Some(NameFilter::Except(listed)) => (None, names(listed)),
+            };
+            AlternativeTable {
+                network: Some(alternative.kind().as_str().to_owned()),
+                only,
+                except,
+            }
         })
         .collect()
 }

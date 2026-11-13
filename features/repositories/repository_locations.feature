@@ -118,6 +118,34 @@ Feature: A repository reached at several locations
       And the location "lan" was never probed
       And the test says the location "public" answered
 
+    Scenario: A location eligible only on a named Wi-Fi network is tried there
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine is on the Wi-Fi network "Office"
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+    Scenario: A location eligible only on a named Wi-Fi network is skipped on another one
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine is on the Wi-Fi network "Guest"
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+
+    Scenario: A location eligible on any Wi-Fi network except one is skipped on that one
+      Given the location "lan" is eligible on any Wi-Fi network except "Guest"
+      And the machine is on the Wi-Fi network "Guest"
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+
+    Scenario: A network name the machine can't read means the rule doesn't hold
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine can't read the Wi-Fi network's name
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+
   Rule: A run whose locations' rules all fail to hold is skipped or fails
 
     Scenario: A scheduled run is skipped when every location has a rule and none is known to hold
@@ -299,7 +327,20 @@ Feature: A repository reached at several locations
       When I open the Repositories page
       Then the location "public" of the repository "nas" says it may be tried on a wired network
 
+    @ui
+    Scenario: The Repositories page says when this machine can't read the network's name
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine can't read the Wi-Fi network's name
+      When I open the Repositories page
+      Then the repository "nas" says this machine can't read the Wi-Fi network's name and the rule doesn't apply
+
   Rule: What the person sees names a location by its position, never by a secret
+
+    Scenario: The network's name is never logged
+      Given the machine is on the Wi-Fi network "canary-network"
+      And the location "lan" is eligible only on the Wi-Fi network "Office"
+      When the plan "home" runs
+      Then "canary-network" appears in no log line, event or operation record
 
     @e2e
     Scenario: A secret of a location is never shown

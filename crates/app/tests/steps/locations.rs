@@ -26,8 +26,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, Hooks, Interval, Link, Location, LocationRule, LocationWarning,
-    Locations, Maintenance, NetworkKind, Plan, RepositoryConfig, RepositorySettings, RetryPolicy,
+    AgentConfig, AgentSettings, Alternative, CurrentNetworkName, Hooks, Interval, Link, Location,
+    LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind, NetworkName, Plan, RepositoryConfig, RepositorySettings, RetryPolicy,
     RuleNote, Schedule, Source, SourceFilter,
 };
 use domain::secrets::SecretRef;
@@ -297,7 +297,19 @@ impl LocationsWorld {
 
 /// A rule of `kinds`, in order.
 fn rule(kinds: &[NetworkKind]) -> LocationRule {
-    LocationRule::new(kinds.to_vec()).expect("a rule")
+    LocationRule::new(kinds.iter().copied().map(Into::into).collect()).expect("a rule")
+}
+
+/// A rule of one Wi-Fi alternative that lists `names`.
+fn named_rule(names: NameFilter) -> LocationRule {
+    LocationRule::new(vec![
+        Alternative::new(NetworkKind::WiFi, Some(names)).expect("an alternative"),
+    ])
+    .expect("a rule")
+}
+
+fn network_name(name: &str) -> NetworkName {
+    NetworkName::parse(name).expect("a network name")
 }
 
 /// Sets what the machine's network link reads as, for the locations' rules
@@ -305,6 +317,14 @@ fn rule(kinds: &[NetworkKind]) -> LocationRule {
 fn machine_on(agent: &mut Agent, answer: Result<Link, PlatformError>) {
     agent.locations.link.set(answer.clone());
     agent.scheduler.link().set(answer);
+}
+
+/// Sets what the machine's Wi-Fi network's name reads as, for the
+/// locations' rules and the scheduler's alike, with the link on Wi-Fi.
+fn machine_named(agent: &mut Agent, answer: Result<Option<CurrentNetworkName>, PlatformError>) {
+    machine_on(agent, Ok(Link::WiFi));
+    agent.locations.link.set_name(answer.clone());
+    agent.scheduler.link().set_name(answer);
 }
 
 /// An engine that answers each location's probe as the scenario says, and
@@ -1100,7 +1120,7 @@ fn rule_notes(agent: &Agent) -> Vec<RuleNote> {
         plan.retry = retries
             .then(|| RetryPolicy::new(3, SignedDuration::from_mins(10)).expect("a retry policy"));
     }
-    world.entries[NAS].rule_notes(&[&plan], !world.cant_tell_wired)
+    world.entries[NAS].rule_notes(&[&plan], !world.cant_tell_wired, true)
 }
 
 #[then(expr = "the repository {string} notes that every location has a rule")]
@@ -1193,6 +1213,57 @@ fn one_location_eligible_wired(agent: &mut Agent, name: String) {
         .get_mut(&name)
         .expect("the repository");
     entry.locations.first_when = Some(rule(&[NetworkKind::Wired]));
+}
+
+#[given(expr = "the location {string} is eligible only on the Wi-Fi network {string}")]
+fn eligible_only_on(agent: &mut Agent, name: String, network: String) {
+    agent.locations.change_location(&name, |location| {
+        location.when = Some(named_rule(NameFilter::Only(vec![network_name(&network)])));
+    });
+}
+
+#[given(expr = "the location {string} is eligible on any Wi-Fi network except {string}")]
+fn eligible_except(agent: &mut Agent, name: String, network: String) {
+    agent.locations.change_location(&name, |location| {
+        location.when = Some(named_rule(NameFilter::Except(vec![network_name(&network)])));
+    });
+}
+
+#[given(expr = "the machine is on the Wi-Fi network {string}")]
+fn on_named_wifi(agent: &mut Agent, network: String) {
+    let name = CurrentNetworkName::new(network.as_bytes()).expect("a network's name");
+    machine_named(agent, Ok(Some(name)));
+}
+
+#[given("the machine can't read the Wi-Fi network's name")]
+fn name_unreadable(agent: &mut Agent) {
+    machine_named(
+        agent,
+        Err(PlatformError::Unreadable {
+            from: "the demo machine".to_owned(),
+            detail: "the name is hidden".to_owned(),
+        }),
+    );
+}
+
+#[then(expr = "{string} appears in no log line, event or operation record")]
+fn network_name_nowhere(agent: &mut Agent, network: String) {
+    let world = &agent.locations;
+    assert!(
+        world.link.names_asked() > 0,
+        "the name was read, so the check means something"
+    );
+    let shown = [
+        format!("{:?}", world.reports()),
+        format!("{:?}", world.operations),
+        format!("{:?}", world.results),
+        format!("{:?}", world.jobs()),
+    ];
+    for text in shown {
+        assert!(!text.contains(&network), "{text}");
+    }
+    let lan = world.record().at(world.position("lan")).expect("the location");
+    assert_eq!(lan.outcome, LocationOutcome::RuleNotMet);
 }
 
 #[given("the machine is on Wi-Fi")]

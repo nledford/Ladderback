@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use domain::execution::conditions::PowerSource;
-use domain::planning::Link;
+use domain::planning::{CurrentNetworkName, Link};
 
 /// What powers the machine.
 #[async_trait]
@@ -32,6 +32,12 @@ pub trait NetworkLink: Send + Sync {
     /// route. An error is a link the platform couldn't report, never a
     /// guess. No network's name is ever in the answer or its error.
     async fn link(&self) -> Result<Link, PlatformError>;
+
+    /// The name of the Wi-Fi network the machine has joined, `None` when it
+    /// has joined none. Asked only when a rule lists names, as it may be
+    /// slow. An error is a name the platform couldn't read (no reader, a
+    /// reader that failed, a name it hides), and never holds a name.
+    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError>;
 }
 
 /// Why the platform couldn't report what was asked. `from` names where the

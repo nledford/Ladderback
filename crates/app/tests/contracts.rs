@@ -629,6 +629,16 @@ impl FakeNetworkLinkHarness {
         link.set(answer);
         link
     }
+
+    /// On Wi-Fi, with the name answering `answer`.
+    fn named(
+        answer: Result<Option<domain::planning::CurrentNetworkName>, app::ports::PlatformError>,
+    ) -> Arc<dyn app::ports::NetworkLink> {
+        let link = Arc::new(app::fakes::FakeNetworkLink::new());
+        link.set(Ok(domain::planning::Link::WiFi));
+        link.set_name(answer);
+        link
+    }
 }
 
 impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
@@ -663,6 +673,35 @@ impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
         Self::saying(Err(app::ports::PlatformError::Unreadable {
             from: "fake".to_owned(),
             detail: "gone".to_owned(),
+        }))
+    }
+
+    fn on_network(&self, name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Ok(domain::planning::CurrentNetworkName::new(name.as_bytes())))
+    }
+
+    fn on_no_network(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Ok(None))
+    }
+
+    fn name_hidden(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "the name is hidden".to_owned(),
+        }))
+    }
+
+    fn no_name_reader(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "no reader".to_owned(),
+        }))
+    }
+
+    fn name_unrecognized(&self, _name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "two networks".to_owned(),
         }))
     }
 }

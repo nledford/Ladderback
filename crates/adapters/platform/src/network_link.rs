@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use app::ports::{NetworkLink, PlatformError};
 use async_trait::async_trait;
-use domain::planning::Link;
+use domain::planning::{CurrentNetworkName, Link};
 
 use crate::source::{self, Program, attribute, unrecognized};
 
@@ -61,6 +61,10 @@ impl NetworkLink for KernelLink {
     async fn link(&self) -> Result<Link, PlatformError> {
         let reader = self.clone();
         source::blocking(&self.route, self.timeout, move || reader.read()).await
+    }
+
+    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        todo!("NetworkManager over D-Bus: {}", self.route.display())
     }
 }
 
@@ -261,6 +265,10 @@ impl NetworkLink for RouteLink {
             .ok_or_else(|| unrecognized(from, "no interface"))?;
         let ports = self.ports.output().await?;
         hardware_port(self.ports.path.as_path(), &ports, interface)
+    }
+
+    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        todo!("system_profiler -json SPAirPortDataType: {}", self.route.path.display())
     }
 }
 

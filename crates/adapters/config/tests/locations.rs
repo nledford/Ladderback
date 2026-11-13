@@ -10,7 +10,8 @@ use app::ports::{ConfigStore, Problem};
 use config_adapter::render;
 use domain::RepositoryAlias;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_RULE_ALTERNATIVES, NetworkKind,
+    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
+    MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName,
     ValueKind, Violation,
 };
 use support::*;
@@ -193,7 +194,14 @@ fn each_locations_rule_is_read_in_order_and_written_back() {
     ));
     let config = parsed(&text).expect("read").config;
     let entry = &config.repositories()[&RepositoryAlias::parse("nas").expect("an alias")];
-    let kinds = |rule: Option<&LocationRule>| rule.map(|rule| rule.alternatives().to_vec());
+    let kinds = |rule: Option<&LocationRule>| {
+        rule.map(|rule| {
+            rule.alternatives()
+                .iter()
+                .map(|alternative| alternative.kind())
+                .collect::<Vec<_>>()
+        })
+    };
     assert_eq!(
         kinds(entry.locations.first_when.as_ref()),
         Some(vec![NetworkKind::Wired])
@@ -241,12 +249,83 @@ fn a_rule_that_is_empty_too_long_or_of_an_unknown_network_is_refused_at_its_key(
             "{extra}"
         );
     }
-    // An alternative takes `network` and, from part 3, its lists: nothing
-    // else.
+    // An alternative takes `network`, `only` and `except`: nothing else.
     let error = invalid(parsed(&nas(
         "when = [ { network = \"wifi\", ssid = \"Office\" } ]\n",
     )));
     assert_eq!(error.problem, Problem::UnknownKey);
     let error = invalid(parsed(&nas("when = [ { } ]\n")));
     assert_eq!(error.problem, Problem::MissingKey);
+}
+
+#[test]
+fn a_wifi_alternatives_names_are_read_in_order_and_written_back() {
+    let text = nas(&format!(
+        "when = [ {{ network = \"wifi\", only = [\"Office\", \"Lab\"] }} ]\n{}when = [ {{ network = \"wired\" }}, {{ network = \"wifi\", except = [\"Guest\"] }} ]\n",
+        location("rest:https://backup.example.net/r"),
+    ));
+    let config = parsed(&text).expect("read").config;
+    let entry = &config.repositories()[&RepositoryAlias::parse("nas").expect("an alias")];
+    let names = |rule: Option<&LocationRule>| -> Vec<Option<NameFilter>> {
+        rule.expect("a rule")
+            .alternatives()
+            .iter()
+            .map(|alternative| alternative.names().cloned())
+            .collect()
+    };
+    let listed = |names: &[&str]| -> Vec<NetworkName> {
+        names
+            .iter()
+            .map(|name| NetworkName::parse(name).expect("a name"))
+            .collect()
+    };
+    assert_eq!(
+        names(entry.locations.first_when.as_ref()),
+        vec![Some(NameFilter::Only(listed(&["Office", "Lab"])))]
+    );
+    assert_eq!(
+        names(entry.locations.further[0].when.as_ref()),
+        vec![None, Some(NameFilter::Except(listed(&["Guest"])))]
+    );
+    let written = render(Path::new(FILE), &config).expect("written");
+    assert_eq!(parsed(&written).expect("read back").config, config);
+}
+
+#[test]
+fn names_that_cant_be_a_wifi_networks_or_cant_go_together_are_refused_at_their_place() {
+    let seventeen = vec!["\"n\""; MAX_NETWORK_NAMES + 1].join(", ");
+    let long = "a".repeat(MAX_NETWORK_NAME_BYTES + 1);
+    for (alternative, key) in [
+        (
+            "{ network = \"wifi\", only = [\"Office\"], except = [\"Guest\"] }".to_owned(),
+            "repositories.nas.when[0]",
+        ),
+        (
+            "{ network = \"wired\", only = [\"Office\"] }".to_owned(),
+            "repositories.nas.when[0]",
+        ),
+        (
+            "{ network = \"wifi\", only = [] }".to_owned(),
+            "repositories.nas.when[0]",
+        ),
+        (
+            format!("{{ network = \"wifi\", except = [ {seventeen} ] }}"),
+            "repositories.nas.when[0]",
+        ),
+        (
+            format!("{{ network = \"wifi\", only = [\"Office\", \"{long}\"] }}"),
+            "repositories.nas.when[0].only[1]",
+        ),
+        (
+            "{ network = \"wifi\", except = [\"\"] }".to_owned(),
+            "repositories.nas.when[0].except[0]",
+        ),
+    ] {
+        let error = invalid(parsed(&nas(&format!("when = [ {alternative} ]\n"))));
+        assert_eq!(
+            (error.key.as_deref(), error.problem),
+            (Some(key), Problem::Value(ValueKind::LocationRule)),
+            "{alternative}"
+        );
+    }
 }

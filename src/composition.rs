@@ -2756,7 +2756,7 @@ fn listed_repository(
         }));
     row.warnings.extend(
         repository
-            .rule_notes(plans, tells_wired)
+            .rule_notes(plans, tells_wired, true)
             .into_iter()
             .map(|note| {
                 let (code, args) = match note {
@@ -2771,6 +2771,9 @@ fn listed_repository(
                         api::WarningCode::LocationRuleWiredUnknown,
                         vec![("position".to_owned(), text(position))],
                     ),
+                    RuleNote::NameUnreadable { position } => {
+                        todo!("the note on location {position}'s names")
+                    }
                 };
                 api::WarningDto {
                     code,
@@ -2820,8 +2823,8 @@ fn listed_location(location: &Location, position: u8) -> api::LocationDto {
             .when
             .iter()
             .flat_map(LocationRule::alternatives)
-            .map(|kind| api::LocationAlternativeDto {
-                network: kind.as_str().to_owned(),
+            .map(|alternative| api::LocationAlternativeDto {
+                network: alternative.kind().as_str().to_owned(),
             })
             .collect(),
     }
@@ -3451,12 +3454,12 @@ mod tests {
     fn a_listed_repository_shows_each_locations_rule_and_notes_what_the_rules_mean() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
         let mut entry = two_locations();
-        let wired = LocationRule::new(vec![domain::planning::NetworkKind::Wired]).expect("a rule");
+        let wired = LocationRule::new(vec![domain::planning::NetworkKind::Wired.into()]).expect("a rule");
         entry.locations.first_when = Some(wired.clone());
         entry.locations.further[0].when = Some(
             LocationRule::new(vec![
-                domain::planning::NetworkKind::WiFi,
-                domain::planning::NetworkKind::Wired,
+                domain::planning::NetworkKind::WiFi.into(),
+                domain::planning::NetworkKind::Wired.into(),
             ])
             .expect("a rule"),
         );
