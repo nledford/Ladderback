@@ -220,6 +220,13 @@ impl Engine for WorkerEngine {
             }
             _ => None,
         };
+        if let Some(why) = without_cache(&job, self.cache_root.is_some(), slot.is_some()) {
+            log::info!(
+                "operation {}: its {:?} job runs without a cache: {why}",
+                op.as_uuid().hyphenated(),
+                job.kind()
+            );
+        }
         // What the worker starts with, and so what its proxy settings are:
         // a proxy URL's credentials are masked like the job's own secrets,
         // and a job past what is masked is not started (§10.2).
@@ -1394,8 +1401,13 @@ impl std::fmt::Display for NoCache {
 /// cache folder runs every job without one, and the daemon said so once when
 /// it started.
 fn without_cache(job: &Job, cache_root: bool, slot: bool) -> Option<NoCache> {
-    let _ = (job, cache_root, slot);
-    todo!()
+    if !cache_root || slot || access_of(job).is_none() {
+        return None;
+    }
+    Some(match repository_id(job) {
+        None => NoCache::IdUnknown,
+        Some(_) => NoCache::EverySlotTaken,
+    })
 }
 
 /// The repository a job opens, and so the secrets it holds; a fake job
