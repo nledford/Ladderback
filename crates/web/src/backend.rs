@@ -81,13 +81,13 @@ impl OperationsState {
             }
             UiEvent::OperationProgress {
                 operation,
-                step: _,
+                step,
                 current,
                 total,
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
                     row.progress = Some(Progress {
-                        step: None,
+                        step: *step,
                         current: *current,
                         total: *total,
                     });

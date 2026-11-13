@@ -812,12 +812,38 @@ struct ProgressText {
 
 /// What `row` says of the step its run is in (§4.4; §16, decision 82).
 fn progress_text(row: &OperationRow) -> ProgressText {
-    todo!()
+    let step = row
+        .progress
+        .and_then(|progress| progress.step)
+        .and_then(step_message);
+    let with_percent = matches!(progress_percent(row), Some(Some(_)));
+    ProgressText {
+        above: step.filter(|_| with_percent),
+        unknown: step.unwrap_or(msg::UI_PROGRESS_WORKING),
+    }
 }
 
 /// The message of `step`; `None` for one this build doesn't know.
 fn step_message(step: api::OperationStep) -> Option<MessageId> {
-    todo!()
+    use api::OperationStep as S;
+    Some(match step {
+        S::ReadingIndex => msg::UI_STEP_READING_INDEX,
+        S::GettingSnapshots => msg::UI_STEP_GETTING_SNAPSHOTS,
+        S::BackingUp => msg::UI_STEP_BACKING_UP,
+        S::ListingPacks => msg::UI_STEP_LISTING_PACKS,
+        S::CheckingCache => msg::UI_STEP_CHECKING_CACHE,
+        S::CheckingHotRepository => msg::UI_STEP_CHECKING_HOT_REPOSITORY,
+        S::CheckingTrees => msg::UI_STEP_CHECKING_TREES,
+        S::ReadingPackData => msg::UI_STEP_READING_PACK_DATA,
+        S::FindingUsedData => msg::UI_STEP_FINDING_USED_DATA,
+        S::MarkingUnusedPacks => msg::UI_STEP_MARKING_UNUSED_PACKS,
+        S::Repacking => msg::UI_STEP_REPACKING,
+        S::RebuildingIndex => msg::UI_STEP_REBUILDING_INDEX,
+        S::DeletingUnusedData => msg::UI_STEP_DELETING_UNUSED_DATA,
+        S::DeletingSnapshots => msg::UI_STEP_DELETING_SNAPSHOTS,
+        S::SavingSnapshots => msg::UI_STEP_SAVING_SNAPSHOTS,
+        S::Unknown => return None,
+    })
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this

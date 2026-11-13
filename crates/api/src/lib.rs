@@ -370,7 +370,8 @@ pub enum WarningCode {
 /// like [`WarningCode`]: a page that reads a code it doesn't know has
 /// `Unknown`, which it shows as it shows no step. The daemon never sends
 /// `Unknown`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum OperationStep {
     ReadingIndex,
     GettingSnapshots,
@@ -387,19 +388,8 @@ pub enum OperationStep {
     DeletingUnusedData,
     DeletingSnapshots,
     SavingSnapshots,
+    #[serde(other)]
     Unknown,
-}
-
-impl Serialize for OperationStep {
-    fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        todo!()
-    }
-}
-
-impl<'de> Deserialize<'de> for OperationStep {
-    fn deserialize<D: serde::Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        todo!()
-    }
 }
 
 /// A typed message argument. Identifiers, ports, years and hostnames are

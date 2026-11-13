@@ -216,6 +216,13 @@ main:focus {
   border-radius: inherit;
 }
 
+/* The step a running operation is in, beside a bar that shows a percentage:
+   a line of its own above the bar, as the bar's text is a line below it, so
+   the bar keeps the room it is given and a long step wraps in its cell. */
+.progress-step {
+  display: block;
+}
+
 /* A toast: visually above its neighbors while it lasts (§4.5). */
 .toast {
   background-color: var(--surface);

@@ -27,7 +27,35 @@ impl ProgressShown {
     /// The live update that tells a page of `operation`'s progress.
     #[must_use]
     pub fn ui(self, operation: String) -> UiEvent {
-        todo!()
+        UiEvent::OperationProgress {
+            operation,
+            step: self.step.map(wire_step),
+            current: self.current,
+            total: self.total,
+        }
+    }
+}
+
+/// A step as the wire names it.
+fn wire_step(step: OperationStep) -> api::OperationStep {
+    use OperationStep as S;
+    use api::OperationStep as W;
+    match step {
+        S::ReadingIndex => W::ReadingIndex,
+        S::GettingSnapshots => W::GettingSnapshots,
+        S::BackingUp => W::BackingUp,
+        S::ListingPacks => W::ListingPacks,
+        S::CheckingCache => W::CheckingCache,
+        S::CheckingHotRepository => W::CheckingHotRepository,
+        S::CheckingTrees => W::CheckingTrees,
+        S::ReadingPackData => W::ReadingPackData,
+        S::FindingUsedData => W::FindingUsedData,
+        S::MarkingUnusedPacks => W::MarkingUnusedPacks,
+        S::Repacking => W::Repacking,
+        S::RebuildingIndex => W::RebuildingIndex,
+        S::DeletingUnusedData => W::DeletingUnusedData,
+        S::DeletingSnapshots => W::DeletingSnapshots,
+        S::SavingSnapshots => W::SavingSnapshots,
     }
 }
 
@@ -50,7 +78,51 @@ impl LiveProgress {
     /// until the next bar begins or moves. A change to a bar never begun,
     /// or to an older open bar, shows nothing either.
     pub fn apply(&mut self, event: &ProgressEvent) -> Option<ProgressShown> {
-        todo!()
+        use ProgressEvent as P;
+        let key = match event {
+            P::Begin { key, .. }
+            | P::Title { key, .. }
+            | P::Length { key, .. }
+            | P::Advance { key, .. }
+            | P::Finish { key } => *key,
+        };
+        match event {
+            P::Begin { step, .. } => {
+                self.bars.retain(|(open, _)| *open != key);
+                if self.bars.len() >= MAX_OPEN_BARS {
+                    self.bars.remove(0);
+                }
+                self.bars.push((
+                    key,
+                    ProgressShown {
+                        step: *step,
+                        current: 0,
+                        total: None,
+                    },
+                ));
+            }
+            P::Title { step, .. } => self.bar_mut(key)?.step = *step,
+            P::Length { len, .. } => self.bar_mut(key)?.total = Some(*len),
+            P::Advance { by, .. } => {
+                let bar = self.bar_mut(key)?;
+                bar.current = bar.current.saturating_add(*by);
+            }
+            P::Finish { .. } => {
+                self.bars.retain(|(open, _)| *open != key);
+                return None;
+            }
+        }
+        self.bars
+            .last()
+            .filter(|(newest, _)| *newest == key)
+            .map(|(_, shown)| *shown)
+    }
+
+    fn bar_mut(&mut self, key: u32) -> Option<&mut ProgressShown> {
+        self.bars
+            .iter_mut()
+            .find(|(open, _)| *open == key)
+            .map(|(_, shown)| shown)
     }
 }
 
