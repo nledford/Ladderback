@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use api::{
-    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, MsgArg, PasswordDto, PasswordSourceDto,
-    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
+    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationOptionDto, LocationTriedDto,
+    LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto, RepositoryIdDto, RepositoryInitDto,
+    RepositorySettingsDto, TestRepositoryDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 
@@ -356,6 +357,93 @@ pub(crate) fn row_refusal(
             vec![("alias", text(alias))],
         )
     })
+}
+
+/// The route a row's Test posts to: every location of the saved repository
+/// named `alias` is probed, in order, and nothing is recorded (decision 80).
+pub(crate) fn test_locations_path(alias: &str) -> String {
+    format!("/api/v1/repositories/{alias}/test")
+}
+
+/// The name of a row's Test button: it names the row, so each one is told
+/// apart by name alone, and from the form's own Test.
+pub(crate) fn test_locations_label(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    (
+        msg::UI_REPOSITORY_TEST_LOCATIONS,
+        vec![("alias", text(alias))],
+    )
+}
+
+/// The name of a row's list of locations, which names the row.
+pub(crate) fn locations_label(alias: &str) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    (msg::UI_REPOSITORY_LOCATIONS, vec![("alias", text(alias))])
+}
+
+/// What heads a location in its row's list: its place in the order, and,
+/// on the first, that a job tries it first.
+pub(crate) fn location_heading(position: u8) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    let id = if position == 1 {
+        msg::UI_LOCATION_TRIED_FIRST
+    } else {
+        msg::UI_LOCATION_POSITION
+    };
+    (id, vec![("position", MsgArg::Count(u64::from(position)))])
+}
+
+/// What one option of a location reads as: by its name and set, with the
+/// references its value is made of, or saying the value is not shown. A
+/// value written in the configuration may be the secret itself (I4).
+pub(crate) fn location_option(option: &LocationOptionDto) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    let named = [("name", text(&option.name)), ("set", text(&option.set))];
+    match &option.reference {
+        Some(reference) => (
+            msg::UI_LOCATION_OPTION_REFERENCE,
+            [named.to_vec(), vec![("reference", text(reference))]].concat(),
+        ),
+        None => (msg::UI_LOCATION_OPTION_WRITTEN, named.to_vec()),
+    }
+}
+
+/// What a row's Test found at one location: its outcome, then, when the
+/// daemon named one, where a secret was looked for or the setting that
+/// can't be used, never a value.
+pub(crate) fn location_tested(tried: &LocationTriedDto) -> Vec<(MessageId, Vec<(&'static str, MsgArg)>)> {
+    let outcome = ("outcome", text(&tried.outcome));
+    let mut said = vec![(msg::UI_LOCATION_TESTED, vec![outcome.clone()])];
+    if let Some(source) = &tried.source {
+        said.push((
+            msg::UI_LOCATION_TESTED_SOURCE,
+            vec![outcome, ("source", text(source))],
+        ));
+    }
+    said
+}
+
+/// What the daemon's answer to a row's Test says: each location's outcome,
+/// in order, or `None` when it is not that answer.
+pub(crate) fn locations_tested(answer: &str) -> Option<Vec<LocationTriedDto>> {
+    serde_json::from_str::<LocationsTestDto>(answer)
+        .ok()
+        .map(|tested| tested.locations)
+}
+
+/// What the page announces, politely, once a row's Test answered: how many
+/// of the row's locations answer and hold the repository. Focus stays on
+/// the button; each location's own outcome is in its list.
+pub(crate) fn tested_announcement(
+    alias: &str,
+    tested: &[LocationTriedDto],
+) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    let count = |n: usize| MsgArg::Count(u64::try_from(n).unwrap_or(u64::MAX));
+    let answering = tested.iter().filter(|tried| tried.outcome == "used").count();
+    (
+        msg::UI_REPOSITORY_LOCATIONS_TESTED,
+        vec![
+            ("alias", text(alias)),
+            ("answering", count(answering)),
+            ("count", count(tested.len())),
+        ],
+    )
 }
 
 fn text(value: &str) -> MsgArg {
@@ -1085,6 +1173,203 @@ mod tests {
             (msg::UI_REPOSITORY_CREATE, vec![("alias", text("demo"))])
         );
         assert_eq!(english_of(create_label("demo")), "Create demo");
+    }
+
+    #[test]
+    fn a_rows_test_posts_to_the_route_that_probes_each_location() {
+        assert_eq!(
+            test_locations_path("nas"),
+            "/api/v1/repositories/nas/test"
+        );
+    }
+
+    /// The row's Test and its list name the row, so each is told apart by
+    /// name alone, and the row's Test from the form's.
+    #[test]
+    fn a_rows_test_and_its_locations_are_named_after_the_row() {
+        assert_eq!(
+            test_locations_label("nas"),
+            (
+                msg::UI_REPOSITORY_TEST_LOCATIONS,
+                vec![("alias", text("nas"))]
+            )
+        );
+        assert_eq!(
+            english_of(test_locations_label("nas")),
+            "Test the locations of nas"
+        );
+        assert_ne!(
+            english_of(test_locations_label("nas")),
+            english_of((msg::UI_REPOSITORIES_TEST, vec![]))
+        );
+        assert_eq!(english_of(locations_label("nas")), "Locations of nas");
+    }
+
+    #[test]
+    fn the_first_location_says_it_is_tried_first() {
+        assert_eq!(
+            location_heading(1),
+            (
+                msg::UI_LOCATION_TRIED_FIRST,
+                vec![("position", MsgArg::Count(1))]
+            )
+        );
+        assert_eq!(english_of(location_heading(1)), "Location 1, tried first");
+        assert_eq!(
+            location_heading(2),
+            (msg::UI_LOCATION_POSITION, vec![("position", MsgArg::Count(2))])
+        );
+        assert_eq!(english_of(location_heading(2)), "Location 2");
+    }
+
+    /// An option shows the references its value is made of, and a value
+    /// written in the configuration never (I4): the page has only the name.
+    #[test]
+    fn an_option_shows_its_reference_and_says_a_written_value_is_not_shown() {
+        let referenced = LocationOptionDto {
+            set: "options".into(),
+            name: "application_key".into(),
+            reference: Some("${LAN_KEY}".into()),
+        };
+        assert_eq!(
+            location_option(&referenced),
+            (
+                msg::UI_LOCATION_OPTION_REFERENCE,
+                vec![
+                    ("name", text("application_key")),
+                    ("set", text("options")),
+                    ("reference", text("${LAN_KEY}")),
+                ]
+            )
+        );
+        assert_eq!(
+            english_of(location_option(&referenced)),
+            "The option application_key in options comes from ${LAN_KEY}."
+        );
+        let written = LocationOptionDto {
+            reference: None,
+            ..referenced
+        };
+        assert_eq!(
+            location_option(&written),
+            (
+                msg::UI_LOCATION_OPTION_WRITTEN,
+                vec![("name", text("application_key")), ("set", text("options"))]
+            )
+        );
+    }
+
+    fn tried(position: u8, outcome: &str, source: Option<&str>) -> LocationTriedDto {
+        LocationTriedDto {
+            position,
+            address: "/srv/nas".into(),
+            outcome: outcome.into(),
+            source: source.map(str::to_owned),
+        }
+    }
+
+    /// Each outcome a Test can find has words of its own; one the page
+    /// doesn't know reads as a location that couldn't be used, never as one
+    /// that answers.
+    #[test]
+    fn each_outcome_of_a_test_reads_as_what_it_found() {
+        let english = |outcome: &str| {
+            location_tested(&tried(1, outcome, None))
+                .into_iter()
+                .map(english_of)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(english("used"), ["Answers and holds the repository."]);
+        let mut seen = std::collections::BTreeSet::new();
+        for outcome in [
+            "used",
+            "silent",
+            "refused",
+            "not-a-repository",
+            "other-repository",
+            "password-not-accepted",
+            "secret-unavailable",
+            "template-invalid",
+            "repository-path-relative",
+            "secret-expansion-too-long",
+            "secret-in-process-arguments",
+            "location-too-many-credentials",
+        ] {
+            let [said] = english(outcome).try_into().expect("one sentence");
+            assert!(seen.insert(said.clone()), "{outcome} reads as another: {said}");
+        }
+        let [unknown] = english("a-later-outcome").try_into().expect("one sentence");
+        assert_eq!(unknown, "Could not be used.");
+    }
+
+    #[test]
+    fn a_tested_location_names_where_its_secret_was_looked_for() {
+        let said = location_tested(&tried(2, "secret-unavailable", Some("env LAN_KEY")));
+        assert_eq!(
+            said,
+            [
+                (
+                    msg::UI_LOCATION_TESTED,
+                    vec![("outcome", text("secret-unavailable"))]
+                ),
+                (
+                    msg::UI_LOCATION_TESTED_SOURCE,
+                    vec![
+                        ("outcome", text("secret-unavailable")),
+                        ("source", text("env LAN_KEY"))
+                    ]
+                ),
+            ]
+        );
+        let english: Vec<_> = said.into_iter().map(english_of).collect();
+        assert_eq!(
+            english,
+            [
+                "Not tried: a secret it needs could not be read.",
+                "The secret was looked for in env LAN_KEY."
+            ]
+        );
+        let setting = location_tested(&tried(2, "template-invalid", Some("options.key")));
+        assert_eq!(
+            setting.into_iter().map(english_of).nth(1).as_deref(),
+            Some("The setting is options.key.")
+        );
+    }
+
+    #[test]
+    fn a_rows_test_answers_with_each_locations_outcome() {
+        assert_eq!(
+            locations_tested(
+                r#"{"locations":[{"position":1,"address":"/srv/nas","outcome":"used"}]}"#
+            ),
+            Some(vec![tried(1, "used", None)])
+        );
+        assert_eq!(locations_tested(r#"{"id":"abc"}"#), None);
+        assert_eq!(locations_tested("not json"), None);
+    }
+
+    #[test]
+    fn a_finished_test_is_announced_by_how_many_locations_answer() {
+        let tested = [tried(1, "silent", None), tried(2, "used", None)];
+        assert_eq!(
+            tested_announcement("nas", &tested),
+            (
+                msg::UI_REPOSITORY_LOCATIONS_TESTED,
+                vec![
+                    ("alias", text("nas")),
+                    ("answering", MsgArg::Count(1)),
+                    ("count", MsgArg::Count(2)),
+                ]
+            )
+        );
+        assert_eq!(
+            english_of(tested_announcement("nas", &tested)),
+            "Tested nas: 1 of its 2 locations answers and holds the repository."
+        );
+        assert_eq!(
+            english_of(tested_announcement("nas", &[tried(1, "used", None), tried(2, "used", None)])),
+            "Tested nas: 2 of its 2 locations answer and hold the repository."
+        );
     }
 
     #[test]

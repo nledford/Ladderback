@@ -2611,13 +2611,13 @@ impl OperationSummaryDto {
         Self { locations, ..self }
     }
 
-    /// The position of the location the run used, and how many the
-    /// repository had then, when it had several.
-    pub fn used_location(&self) -> Option<(u8, usize)> {
+    /// The location the run used, and how many the repository had then,
+    /// when it had several.
+    pub fn used_location(&self) -> Option<(&LocationTriedDto, usize)> {
         self.locations
             .iter()
             .find(|tried| tried.outcome == "used")
-            .map(|tried| (tried.position, self.locations.len()))
+            .map(|tried| (tried, self.locations.len()))
     }
 }
 

@@ -63,14 +63,31 @@ pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
     }
 }
 
-/// The facts of what `operation` produced, in the order the Result cell
-/// lists them; none for a run that has not succeeded. A fact the log did not
-/// keep, such as the bytes a backup an earlier version ran went through, is
-/// left out, never shown as zero.
+/// The facts of `operation` its Result cell lists, in order: what it
+/// produced, none for a run that has not succeeded, then the location it
+/// used when its repository has several (decision 80), whatever became of
+/// the run. A fact the log did not keep, such as the bytes a backup an
+/// earlier version ran went through, is left out, never shown as zero.
 pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
-    let Some(result) = &operation.result else {
-        return Vec::new();
-    };
+    let mut facts = operation.result.as_ref().map(produced).unwrap_or_default();
+    if let Some((used, count)) = operation.used_location() {
+        facts.push(Words {
+            id: msg::UI_RESULT_USED_LOCATION,
+            args: vec![
+                ("position", MsgArg::Count(u64::from(used.position))),
+                (
+                    "count",
+                    MsgArg::Count(u64::try_from(count).unwrap_or(u64::MAX)),
+                ),
+                ("address", text(&used.address)),
+            ],
+        });
+    }
+    facts
+}
+
+/// What a run that succeeded produced, then how long it took.
+fn produced(result: &OperationResultDto) -> Vec<Words> {
     let mut facts = Vec::new();
     let duration_ms = match result {
         OperationResultDto::Backup {
@@ -541,6 +558,61 @@ mod tests {
     #[test]
     fn a_run_without_a_result_shows_none() {
         assert_eq!(result(&summary("check", "", Some("demo"), None)), []);
+    }
+
+    fn tried(position: u8, address: &str, outcome: &str) -> api::LocationTriedDto {
+        api::LocationTriedDto {
+            position,
+            address: address.to_owned(),
+            outcome: outcome.to_owned(),
+            source: None,
+        }
+    }
+
+    /// The row names the location a run used, with its address as the run
+    /// recorded it, after what the run produced, and whatever became of the
+    /// run: a failed one went there too (decision 80).
+    #[test]
+    fn a_run_on_a_repository_of_several_locations_names_the_one_it_used() {
+        let locations = vec![
+            tried(1, "/srv/lan", "silent"),
+            tried(2, "/srv/public", "used"),
+        ];
+        let used = said(
+            msg::UI_RESULT_USED_LOCATION,
+            &[
+                ("position", MsgArg::Count(2)),
+                ("count", MsgArg::Count(2)),
+                ("address", text("/srv/public")),
+            ],
+        );
+        let mut done = summary(
+            "prune",
+            "",
+            Some("demo"),
+            Some(OperationResultDto::Prune {
+                packs_deleted: 4,
+                duration_ms: 2_000,
+            }),
+        );
+        done.locations.clone_from(&locations);
+        let facts = result(&done);
+        assert_eq!(facts.len(), 3, "{facts:?}");
+        assert_eq!(facts.last(), Some(&used));
+        assert_eq!(
+            english(&used),
+            "Used location 2 of 2: /srv/public",
+            "the words the Operations page shows"
+        );
+
+        let mut failed = summary("check", "", Some("demo"), None);
+        "failed".clone_into(&mut failed.status);
+        failed.locations.clone_from(&locations);
+        assert_eq!(result(&failed), [used]);
+
+        // A run whose choice used none names none.
+        failed.locations = vec![tried(1, "/srv/lan", "silent"), tried(2, "/srv/public", "silent")];
+        assert_eq!(result(&failed), []);
     }
 
     /// A failed run's row says nothing in its Result: why it failed is the

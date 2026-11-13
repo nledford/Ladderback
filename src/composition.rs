@@ -3413,7 +3413,12 @@ mod tests {
         )
         .expect("a summary")
         .with_locations(locations_tried(&record));
-        assert_eq!(summary.used_location(), Some((2, 2)));
+        assert_eq!(
+            summary
+                .used_location()
+                .map(|(used, count)| (used.position, used.address.as_str(), count)),
+            Some((2, "/srv/public", 2))
+        );
         let wire = serde_json::to_value(&summary).expect("a summary is JSON");
         assert_eq!(
             wire["locations"],
