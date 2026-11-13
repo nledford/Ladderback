@@ -1653,6 +1653,22 @@ mod tests {
         );
     }
 
+    /// Read to its first `/` alone, the authority keeps a `?` a parser ends
+    /// it at, and the password before its `@` is masked as well.
+    #[test]
+    fn a_password_with_a_question_mark_is_found_to_the_first_slash() {
+        let found = passwords("rest:https://demo:pw?x@nas.example/a@b");
+        assert!(found.contains(&"pw?x".to_owned()), "{found:?}");
+    }
+
+    /// Without its `://` a repository string holds no URL, so nothing in it
+    /// is a password.
+    #[test]
+    fn a_location_without_a_scheme_separator_has_no_url_password() {
+        assert!(passwords("sftp:demo:pw@nas.example:/r").is_empty());
+        assert!(!url_password_written("sftp:demo:pw@nas.example:/r"));
+    }
+
     /// A URL parser ends an `http` URL's authority at its first `/`, `\`,
     /// `?` or `#`, so the password before the `@` there is one, whatever
     /// `@` follows.
