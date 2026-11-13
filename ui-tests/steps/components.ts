@@ -305,7 +305,9 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Advance the demo progress"
 - progressbar "Demo progress of unknown size"
-- text: Working…`,
+- text: Working…
+- progressbar "Demo progress of a step"
+- text: Reading the index…`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
   - button "Save the demo settings"`,

@@ -25,9 +25,10 @@ use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
     EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
-    OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, ProgressEvent,
-    Random, RunningJob, ScheduleStore, SnapshotSummary,
+    OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random, RunningJob,
+    ScheduleStore, SnapshotSummary,
 };
+use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
 use app::recovery::RecoverOperations;
 use app::repositories::{
@@ -789,7 +790,7 @@ impl Engine for EventEngine {
         let running = self.inner.run(op, job).await?;
         let mut publish = Publish {
             operation,
-            progress: HashMap::new(),
+            progress: LiveProgress::new(),
         };
         let bus = Arc::clone(&self.bus);
         Ok(RunningJob {
@@ -832,18 +833,21 @@ fn is_operation(job: &Job) -> bool {
 }
 
 /// Turns one run's [`EngineEvent`]s into [`UiEvent`]s, but for how the run
-/// started and ended (§4.4). Progress bars are stateful: each key remembers
-/// where it is, so an `Advance` is a number the page can show.
+/// started and ended (§4.4). Of its progress bars, a page is told of the one
+/// [`LiveProgress`] shows: the bar begun last that is still open.
 struct Publish {
     operation: String,
-    progress: HashMap<u32, (u64, Option<u64>)>,
+    progress: LiveProgress,
 }
 
 impl Publish {
     fn ui(&mut self, event: &EngineEvent) -> Option<UiEvent> {
         use EngineEvent as E;
         match event {
-            E::Progress(progress) => self.progress_ui(progress),
+            E::Progress(progress) => self
+                .progress
+                .apply(progress)
+                .map(|shown| shown.ui(self.operation.clone())),
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
                 code: warning_code(warning.kind),
@@ -859,39 +863,6 @@ impl Publish {
             // that doesn't have it yet. The run announces both.
             E::Started { .. } | E::Succeeded(_) | E::Failed(_) => None,
         }
-    }
-
-    /// A progress bar's change as a `current` of `total` event, when it is
-    /// one: a bar beginning, growing or learning its length. A title or a
-    /// bar finishing is nothing a page needs.
-    fn progress_ui(&mut self, progress: &ProgressEvent) -> Option<UiEvent> {
-        use ProgressEvent as P;
-        match progress {
-            P::Begin { key, .. } => {
-                self.progress.insert(*key, (0, None));
-            }
-            P::Length { key, len } => {
-                let bar = self.progress.entry(*key).or_insert((0, None));
-                bar.1 = Some(*len);
-            }
-            P::Advance { key, by } => {
-                let bar = self.progress.entry(*key).or_insert((0, None));
-                bar.0 = bar.0.saturating_add(*by);
-            }
-            P::Title { key, .. } | P::Finish { key } => {
-                self.progress.remove(key);
-                return None;
-            }
-        }
-        let (current, total) = *self.progress.get(match progress {
-            P::Begin { key, .. } | P::Length { key, .. } | P::Advance { key, .. } => key,
-            P::Title { key, .. } | P::Finish { key } => key,
-        })?;
-        Some(UiEvent::OperationProgress {
-            operation: self.operation.clone(),
-            current,
-            total,
-        })
     }
 }
 
@@ -2757,7 +2728,7 @@ mod captured_log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use app::ports::{HookContext, HookOutcome, HookStatus, JobControl};
+    use app::ports::{HookContext, HookOutcome, HookStatus, JobControl, ProgressEvent};
 
     fn listed(paths_truncated: bool, tags_truncated: bool) -> SnapshotSummary {
         SnapshotSummary {
@@ -5186,7 +5157,7 @@ mod tests {
                 EngineEvent::Progress(ProgressEvent::Begin {
                     key: 1,
                     kind: app::ports::ProgressKind::Counter,
-                    prefix: "reading the index".to_owned(),
+                    step: Some(app::ports::OperationStep::ReadingIndex),
                 }),
                 EngineEvent::Warning(domain::execution::Warning {
                     kind: WarningKind::SourceUnreadable,
@@ -6461,7 +6432,7 @@ mod tests {
             assert_eq!(warning_code(kind), code);
             let mut publish = Publish {
                 operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
-                progress: HashMap::new(),
+                progress: LiveProgress::new(),
             };
             let found = EngineEvent::Warning(domain::execution::Warning {
                 kind,

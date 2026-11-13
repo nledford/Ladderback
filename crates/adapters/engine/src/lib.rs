@@ -24,6 +24,7 @@ pub mod job;
 mod log_masking;
 mod rclone;
 mod retention;
+mod step;
 pub mod worker;
 
 pub use cache_tidy::{CacheTidying, NotRemoved, Recorded, Removed, RemovedKind, tidy_cache};

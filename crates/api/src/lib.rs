@@ -365,6 +365,43 @@ pub enum WarningCode {
     Unknown,
 }
 
+/// The step a running operation is in (technical design §3.1, §4.4; §16,
+/// decision 82), on the wire as its kebab-case name: `reading-index`. Closed
+/// like [`WarningCode`]: a page that reads a code it doesn't know has
+/// `Unknown`, which it shows as it shows no step. The daemon never sends
+/// `Unknown`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OperationStep {
+    ReadingIndex,
+    GettingSnapshots,
+    BackingUp,
+    ListingPacks,
+    CheckingCache,
+    CheckingHotRepository,
+    CheckingTrees,
+    ReadingPackData,
+    FindingUsedData,
+    MarkingUnusedPacks,
+    Repacking,
+    RebuildingIndex,
+    DeletingUnusedData,
+    DeletingSnapshots,
+    SavingSnapshots,
+    Unknown,
+}
+
+impl Serialize for OperationStep {
+    fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+        todo!()
+    }
+}
+
+impl<'de> Deserialize<'de> for OperationStep {
+    fn deserialize<D: serde::Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
+        todo!()
+    }
+}
+
 /// A typed message argument. Identifiers, ports, years and hostnames are
 /// `Text`, so they are never formatted as numbers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1907,11 +1944,17 @@ pub enum UiEvent {
         repository: Option<String>,
         started_at: String,
     },
-    /// A running operation moved forward: `current` of `total` steps, when it
-    /// says. Progress is transient: it is never stored, and a subscriber
-    /// whose buffer fills loses the oldest of these first.
+    /// A running operation moved forward: in `step`, `current` of `total`,
+    /// when it says. What a page is shown is one progress bar, the one the
+    /// engine began last and still has open (§4.4), so its numbers are that
+    /// step's. `step` is `null` when the engine names no step this build
+    /// knows, and is left out by a daemon older than the field. Progress is
+    /// transient: it is never stored, and a subscriber whose buffer fills
+    /// loses the oldest of these first.
     OperationProgress {
         operation: String,
+        #[serde(default)]
+        step: Option<OperationStep>,
         current: u64,
         total: Option<u64>,
     },
@@ -2163,6 +2206,7 @@ mod ui_event_tests {
     fn progress() -> UiEvent {
         UiEvent::OperationProgress {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
+            step: None,
             current: 3,
             total: Some(10),
         }
@@ -2251,12 +2295,14 @@ mod ui_event_tests {
             serde_json::json!({
                 "type": "operation-progress",
                 "operation": "018f0000-0000-7000-8000-000000000001",
+                "step": null,
                 "current": 3,
                 "total": 10,
             })
         );
         let wire = to_value(&UiEvent::OperationProgress {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
+            step: None,
             current: 1,
             total: None,
         })
@@ -2283,6 +2329,7 @@ mod ui_event_tests {
             progress(),
             UiEvent::OperationProgress {
                 operation: "018f0000-0000-7000-8000-000000000001".into(),
+                step: None,
                 current: 1,
                 total: None,
             },
@@ -2314,6 +2361,84 @@ mod ui_event_tests {
                 event
             );
         }
+    }
+
+    /// Each step's code on the wire, pinned: a page reads these, and a page
+    /// of another version reads them too.
+    #[test]
+    fn a_progress_event_names_its_step_by_a_code_of_its_own() {
+        use OperationStep as S;
+        for (step, code) in [
+            (S::ReadingIndex, "reading-index"),
+            (S::GettingSnapshots, "getting-snapshots"),
+            (S::BackingUp, "backing-up"),
+            (S::ListingPacks, "listing-packs"),
+            (S::CheckingCache, "checking-cache"),
+            (S::CheckingHotRepository, "checking-hot-repository"),
+            (S::CheckingTrees, "checking-trees"),
+            (S::ReadingPackData, "reading-pack-data"),
+            (S::FindingUsedData, "finding-used-data"),
+            (S::MarkingUnusedPacks, "marking-unused-packs"),
+            (S::Repacking, "repacking"),
+            (S::RebuildingIndex, "rebuilding-index"),
+            (S::DeletingUnusedData, "deleting-unused-data"),
+            (S::DeletingSnapshots, "deleting-snapshots"),
+            (S::SavingSnapshots, "saving-snapshots"),
+        ] {
+            let event = UiEvent::OperationProgress {
+                operation: "018f0000-0000-7000-8000-000000000001".into(),
+                step: Some(step),
+                current: 3,
+                total: Some(10),
+            };
+            let wire = to_value(&event).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::json!({
+                    "type": "operation-progress",
+                    "operation": "018f0000-0000-7000-8000-000000000001",
+                    "step": code,
+                    "current": 3,
+                    "total": 10,
+                })
+            );
+            assert_eq!(from_value::<UiEvent>(wire).unwrap(), event);
+        }
+    }
+
+    /// A page reads the progress of a daemon older than the step as no step,
+    /// and a step newer than itself as one it doesn't know: the progress
+    /// still counts.
+    #[test]
+    fn a_progress_event_with_no_step_or_one_the_page_doesnt_know_still_reads() {
+        let progress_with = |step: Option<Value>| {
+            let mut wire = serde_json::json!({
+                "type": "operation-progress",
+                "operation": "018f0000-0000-7000-8000-000000000001",
+                "current": 3,
+                "total": 10,
+            });
+            if let (Some(step), Some(fields)) = (step, wire.as_object_mut()) {
+                fields.insert("step".to_owned(), step);
+            }
+            from_value::<UiEvent>(wire).unwrap()
+        };
+        let read = |step| UiEvent::OperationProgress {
+            operation: "018f0000-0000-7000-8000-000000000001".into(),
+            step,
+            current: 3,
+            total: Some(10),
+        };
+        assert_eq!(progress_with(None), read(None));
+        assert_eq!(progress_with(Some(Value::Null)), read(None));
+        assert_eq!(
+            progress_with(Some(Value::from("defragmenting"))),
+            read(Some(OperationStep::Unknown))
+        );
+        assert_eq!(
+            progress_with(Some(Value::from("backing-up"))),
+            read(Some(OperationStep::BackingUp))
+        );
     }
 
     #[test]

@@ -564,7 +564,7 @@ pub fn StatusBadge(
 pub fn Progress(
     label: String,
     #[prop(into)] value: Signal<Option<u8>>,
-    unknown: String,
+    #[prop(into)] unknown: Signal<String>,
 ) -> impl IntoView {
     let known = Memo::new(move |_| value.get().is_some());
     view! {
@@ -599,7 +599,7 @@ pub fn Progress(
         <span aria-hidden=move || known.get().then_some("true")>
             {move || match value.get() {
                 Some(value) => format!("{value}%"),
-                None => unknown.clone(),
+                None => unknown.get(),
             }}
         </span>
     }
