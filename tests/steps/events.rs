@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use cucumber::{given, then, when};
@@ -48,6 +49,9 @@ pub struct Events {
     second: Option<Daemon>,
     /// How the daemon ended once it was told to stop.
     stopped: Option<ExitStatus>,
+    /// Variables added to the environment of the daemons the scenario
+    /// starts, as a reference such as `${LAN_KEY}` reads them.
+    pub(crate) env: Vec<(String, String)>,
 }
 
 /// A running daemon, stopped when the scenario ends.
@@ -56,6 +60,8 @@ struct Daemon {
     addr: SocketAddr,
     /// What it logged until it said where it listens.
     start_log: String,
+    /// Everything it logged after that, kept by the thread that drains it.
+    log: Arc<Mutex<String>>,
 }
 
 impl Drop for Daemon {
@@ -103,6 +109,58 @@ impl Events {
     /// What the daemon that is serving logged until it listened.
     pub(crate) fn start_log(&self) -> &str {
         &self.daemon().start_log
+    }
+
+    /// Everything the daemon that is serving has logged so far.
+    pub(crate) fn whole_log(&self) -> String {
+        let daemon = self.daemon();
+        let rest = daemon.log.lock().unwrap_or_else(PoisonError::into_inner);
+        format!("{}{rest}", daemon.start_log)
+    }
+
+    /// How many pages have connected.
+    pub(crate) fn pages_count(&self) -> usize {
+        self.pages.len()
+    }
+
+    /// Whether a daemon is serving.
+    pub(crate) fn serving(&self) -> bool {
+        self.daemon.is_some()
+    }
+
+    /// Reads page `page`'s events until one of `kinds` arrives, and returns
+    /// the text of every event read, that one included.
+    pub(crate) async fn heard(&mut self, page: usize, kinds: &[&str]) -> String {
+        let mut heard = String::new();
+        let page = &mut self.pages[page];
+        let deadline = tokio::time::sleep(EVENT_TIMEOUT);
+        tokio::pin!(deadline);
+        loop {
+            let next = tokio::select! {
+                _ = &mut deadline => panic!(
+                    "no {kinds:?} event within {} s",
+                    EVENT_TIMEOUT.as_secs()
+                ),
+                message = page.socket.next() => message,
+            };
+            let text = match next.expect("the live-updates connection is open") {
+                Ok(Message::Text(text)) => text,
+                Ok(Message::Close(_)) => panic!("the daemon closed the live-updates connection"),
+                Ok(_) => continue,
+                Err(error) => panic!("the live-updates connection broke: {error}"),
+            };
+            heard.push_str(text.as_str());
+            heard.push('\n');
+            let event: serde_json::Value = serde_json::from_str(text.as_str())
+                .unwrap_or_else(|error| panic!("the event is JSON: {error}"));
+            if event
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kinds.contains(&kind))
+            {
+                return heard;
+            }
+        }
     }
 
     /// Kills the daemon with SIGKILL and waits for the process to be gone:
@@ -194,7 +252,8 @@ impl Events {
 /// [`blocking`].
 async fn start(agent: &mut Agent) -> Outcome {
     let root = Events::root(agent);
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root)).await;
+    let env = agent.events.env.clone();
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env)).await;
     if daemon.is_some() {
         agent.events.daemon = daemon;
     }
@@ -204,6 +263,27 @@ async fn start(agent: &mut Agent) -> Outcome {
 /// Starts the daemon again on the folders a stopped one left, for the
 /// scenarios that restart it, and waits until it listens.
 pub(crate) async fn restart(agent: &mut Agent) {
+    serve(agent).await;
+}
+
+/// Starts the daemon on the scenario's folders and waits until it listens,
+/// or says how it ended when it refused to start.
+pub(crate) async fn try_serve(agent: &mut Agent) -> Result<(), (ExitStatus, String)> {
+    match start(agent).await {
+        Outcome::Listening(_) => Ok(()),
+        Outcome::Exited(status, log) => Err((status, log)),
+    }
+}
+
+/// Opens a live-updates connection from the UI's own origin, as page
+/// `agent.events.pages.len()` before the call.
+pub(crate) async fn connect_page(agent: &mut Agent) {
+    let page = connect(agent).await;
+    agent.events.pages.push(page);
+}
+
+/// Starts the daemon on the scenario's folders and waits until it listens.
+pub(crate) async fn serve(agent: &mut Agent) {
     match start(agent).await {
         Outcome::Listening(_) => {}
         Outcome::Exited(status, log) => panic!("ladderback exited with {status}: {log}"),
@@ -214,7 +294,8 @@ pub(crate) async fn restart(agent: &mut Agent) {
 /// keeps what came of it for [`refusal`].
 pub(crate) async fn start_second(agent: &mut Agent) {
     let root = Events::root(agent);
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root)).await;
+    let env = agent.events.env.clone();
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env)).await;
     agent.events.second = daemon;
     agent.events.asked_to_serve = Some(outcome);
 }
@@ -233,9 +314,10 @@ pub(crate) fn refusal(agent: &mut Agent) -> (ExitStatus, String) {
 
 /// Starts the daemon and reads its log until it says where it listens or
 /// exits; the daemon is there when it listens.
-fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
+fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Daemon>, Outcome) {
     let mut command = Command::new(super::LADDERBACK);
     testkit::daemon::isolate(&mut command, root);
+    command.envs(env.iter().map(|(name, value)| (name, value)));
     command
         .args(["serve", "--listen", "127.0.0.1:0"])
         .stderr(Stdio::piped());
@@ -262,12 +344,16 @@ fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
     };
     match listening {
         Some(addr) => {
-            // Keep draining the daemon's log so a full pipe can never block it.
+            // Keep draining the daemon's log so a full pipe can never block it,
+            // and keep it for the steps that read what it said.
+            let kept = Arc::new(Mutex::new(String::new()));
+            let into = Arc::clone(&kept);
             std::thread::spawn(move || {
                 for line in lines.by_ref() {
-                    if line.is_err() {
-                        return;
-                    }
+                    let Ok(line) = line else { return };
+                    let mut log = into.lock().unwrap_or_else(PoisonError::into_inner);
+                    log.push_str(&line);
+                    log.push('\n');
                 }
             });
             (
@@ -275,6 +361,7 @@ fn spawn_daemon(root: &std::path::Path) -> (Option<Daemon>, Outcome) {
                     child,
                     addr,
                     start_log: log,
+                    log: kept,
                 }),
                 Outcome::Listening(addr),
             )
@@ -392,6 +479,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
         std::collections::BTreeMap::from([(
             alias,
             domain::planning::RepositoryConfig {
+                locations: Default::default(),
                 // What the configuration recorded when the repository was
                 // connected, once the scenario has made it known.
                 id: agent.backup.id.clone(),

@@ -101,6 +101,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::CheckWarning => "check-warning",
         WarningKind::CheckError => "check-error",
         WarningKind::OtherHosts => "maintenance-other-hosts",
+        WarningKind::LocationSkipped => "location-skipped",
         WarningKind::Other => "unknown",
     }
 }
@@ -115,6 +116,7 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
         "check-warning" => WarningKind::CheckWarning,
         "check-error" => WarningKind::CheckError,
         "maintenance-other-hosts" => WarningKind::OtherHosts,
+        "location-skipped" => WarningKind::LocationSkipped,
         _ => WarningKind::Other,
     }
 }
@@ -202,6 +204,9 @@ pub(crate) fn encode_failure(
             None,
         ),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
+        FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
+        FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
+        FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
     };
     Ok(FailureColumns {
         code,
@@ -254,6 +259,9 @@ pub(crate) fn decode_failure(
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
+        "no-location-usable" => Ok(FailureReason::NoLocationUsable),
+        "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
+        "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "hook-failed" => Ok(FailureReason::HookFailed {
             exit_code: exit_code(&args)?,
         }),
@@ -348,6 +356,7 @@ mod tests {
             WarningKind::SourceUnreadable,
             WarningKind::Hook,
             WarningKind::MaintenancePartial,
+            WarningKind::LocationSkipped,
             WarningKind::OtherHosts,
             WarningKind::Other,
         ] {

@@ -59,7 +59,10 @@ impl SysfsNetwork {
 impl Network for SysfsNetwork {
     async fn is_online(&self) -> Result<bool, PlatformError> {
         let root = self.root.clone();
-        source::blocking(&self.root, self.timeout, move || read_interfaces(&root)).await
+        source::blocking(self.root.display(), self.timeout, move || {
+            read_interfaces(&root)
+        })
+        .await
     }
 }
 

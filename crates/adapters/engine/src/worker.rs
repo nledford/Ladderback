@@ -332,6 +332,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
     let outcome = match &spec.job {
         JobKind::Fake(job) => fake::run(&ctx, job),
         JobKind::Identify(repository) => jobs::identify(&ctx, repository),
+        JobKind::Probe(repository) => jobs::probe(&ctx, repository),
         JobKind::Init(repository) => jobs::init(&ctx, repository),
         JobKind::Backup(job) => jobs::backup(&ctx, job),
         JobKind::Forget(job) => jobs::forget(&ctx, job),
@@ -379,7 +380,9 @@ fn exit_of_cancelled(events: &Events, cancel: &Cancel) -> Exit {
 fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
     match job {
         JobKind::Fake(_) => None,
-        JobKind::Identify(repository) | JobKind::Init(repository) => Some(repository),
+        JobKind::Identify(repository) | JobKind::Probe(repository) | JobKind::Init(repository) => {
+            Some(repository)
+        }
         JobKind::Ls(repository) => Some(repository),
         JobKind::Backup(job) => Some(&job.repo),
         JobKind::Forget(job) => Some(&job.repo),

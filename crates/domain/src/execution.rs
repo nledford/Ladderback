@@ -2,6 +2,7 @@
 
 pub mod conditions;
 pub mod deadline;
+pub mod locations;
 pub mod next_run;
 pub mod plan_tags;
 #[cfg(test)]
@@ -119,6 +120,18 @@ pub enum FailureReason {
     /// failed (§9). What it did before it stopped is unknown, so it is never
     /// recorded as succeeded.
     DaemonStopped,
+    /// The repository is reached at several locations and none could be
+    /// used (decision 80): each was silent, refused, held no repository or
+    /// another one, or a secret of it was unavailable. The operation's
+    /// locations say why, by position.
+    NoLocationUsable,
+    /// No location's rule held when the job started (decision 80): each
+    /// rule wasn't met on the machine's network link, or couldn't be
+    /// evaluated. The operation's locations say which, by position.
+    NoLocationRuleHolds,
+    /// The repository's password opened nothing at any location tried
+    /// (decision 80): a wrong password is the likelier cause.
+    PasswordNotAccepted,
 }
 
 impl FailureReason {
@@ -140,6 +153,9 @@ impl FailureReason {
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
             Self::DaemonStopped => "daemon-stopped",
+            Self::NoLocationUsable => "no-location-usable",
+            Self::NoLocationRuleHolds => "no-location-rule-holds",
+            Self::PasswordNotAccepted => "password-not-accepted",
         }
     }
 }
@@ -189,6 +205,13 @@ pub enum WarningKind {
     /// the first five of them by name, separated by `, `
     /// ([`OtherHosts`](crate::maintenance::OtherHosts)).
     OtherHosts,
+    /// A location of the repository was skipped where it shouldn't have
+    /// been (decision 80): it held another repository, a secret of it was
+    /// unavailable, or its rule held and it couldn't be used all the same.
+    /// `item` is the location's position, from 1, `during` is `location`
+    /// and `detail` the outcome's code; never an address or a network's
+    /// name.
+    LocationSkipped,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }
@@ -306,6 +329,11 @@ pub struct Operation {
     /// its plan names, and for an operation an earlier build logged.
     #[serde(default)]
     repository_alias: Option<RepositoryAlias>,
+    /// Which location of a repository reached at several the run used, and
+    /// why each earlier one was skipped (decision 80). `None` for a
+    /// repository of one location and an operation that opens none.
+    #[serde(default)]
+    locations: Option<locations::LocationsRecord>,
 }
 
 impl Operation {
@@ -328,6 +356,7 @@ impl Operation {
             warnings: Vec::new(),
             warning_count: 0,
             repository_alias: None,
+            locations: None,
         }
     }
 
@@ -343,6 +372,27 @@ impl Operation {
     /// was given ([`Self::with_repository_alias`]).
     pub fn repository_alias(&self) -> Option<&RepositoryAlias> {
         self.repository_alias.as_ref()
+    }
+
+    /// Which location the run used and why each earlier one was skipped,
+    /// for a repository reached at several.
+    pub fn locations(&self) -> Option<&locations::LocationsRecord> {
+        self.locations.as_ref()
+    }
+
+    /// Records the run's choice of location, and the warnings it gives
+    /// (`rule_held` says, by position, whether a location's rule held).
+    pub fn record_locations(
+        &mut self,
+        record: locations::LocationsRecord,
+        rule_held: impl Fn(u8) -> bool,
+    ) -> Result<(), LifecycleError> {
+        self.require(Transition::RecordWarning, |s| !s.is_finished())?;
+        for warning in record.warnings(rule_held) {
+            self.keep(warning);
+        }
+        self.locations = Some(record);
+        Ok(())
     }
 
     pub fn id(&self) -> OperationId {
@@ -954,6 +1004,36 @@ mod tests {
         op.succeed(t(20)).unwrap();
         assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
         assert_eq!(op.warnings(), &[unreadable("/a"), unreadable("/b")]);
+    }
+
+    #[test]
+    fn a_choice_of_location_is_recorded_with_its_warnings_until_the_operation_ends() {
+        use locations::{LocationOutcome, LocationTried, LocationsRecord};
+        let record = LocationsRecord {
+            locations: vec![
+                LocationTried {
+                    position: 1,
+                    address: "/srv/a".to_owned(),
+                    outcome: LocationOutcome::OtherRepository,
+                    source: None,
+                },
+                LocationTried {
+                    position: 2,
+                    address: "/srv/b".to_owned(),
+                    outcome: LocationOutcome::Used,
+                    source: None,
+                },
+            ],
+        };
+        let mut op = queued();
+        assert_eq!(op.locations(), None);
+        op.record_locations(record.clone(), |_| false).unwrap();
+        assert_eq!(op.locations(), Some(&record));
+        op.start(t(10)).unwrap();
+        op.succeed(t(20)).unwrap();
+        assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
+        assert_eq!(op.warnings().len(), 1);
+        assert!(op.record_locations(record, |_| false).is_err());
     }
 
     #[test]

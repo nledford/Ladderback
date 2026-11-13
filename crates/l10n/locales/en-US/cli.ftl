@@ -135,6 +135,11 @@ cli-config-schema-newer = the configuration { $file } is in schema version { $fo
 # $detail (text): what is wrong, as the reader reported it.
 cli-config-invalid = the configuration { $file } is not valid at { $where }: { $detail }
 
+# The configuration gives a repository further locations, and the repository records no ID.
+# $file (text): the path of the configuration file.
+# $where (text): the setting that is missing and where in the file the first further location is.
+cli-config-locations-need-id = the configuration { $file } gives a repository further locations but no { "repository-id" }, at { $where }, so the daemon did not start. Run a job on it once with its first location only, which records the ID, or write the ID the Repositories page shows as { "repository-id" }.
+
 # An import saved the repository of a profile.
 # $repository (text): the name the repository was saved under.
 # $file (text): the profile's path, as it was given.

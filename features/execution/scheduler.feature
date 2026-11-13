@@ -8,8 +8,11 @@ Feature: The scheduler
   before it starts any run that is due, and the catch-up runs wait together
   for the network first. A cron schedule is read in the time zone it names,
   or on the machine's clock when it names none, and a change to its time
-  zone plans its next run again, as a change to its expression does. Times
-  here are written with their offset from UTC.
+  zone plans its next run again, as a change to its expression does. A run
+  whose repository's every location has a rule known not to hold on the
+  network link the machine is on is skipped, the link read once for the
+  plans due together (decision 80). Times here are written with their offset
+  from UTC.
 
   Scenario: A plan runs at its next run, and its run after that is planned
     Given the agent starts at "2026-06-10 02:30+00:00"
@@ -110,3 +113,36 @@ Feature: The scheduler
     And the agent serves until "2026-06-10 03:30+00:00"
     Then the plan "home" hasn't run
     And the plan "home" has no planned run
+
+  Scenario: A run is skipped when no location of its repository may be tried on this network
+    Given the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the repository's one location is eligible only on a wired network
+    And the machine is on Wi-Fi
+    When the agent serves until "2026-06-10 03:30+00:00"
+    Then the plan "home" hasn't run
+    And the agent said the run of the plan "home" was skipped because no location's rule holds
+    And the next run of the plan "home" is planned for "2026-06-11 03:00+00:00"
+
+  Scenario: A rule given to a location while the agent serves holds from the next run
+    Given the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the machine is on Wi-Fi
+    When the agent serves until "2026-06-10 02:40+00:00"
+    And the repository's one location is eligible only on a wired network
+    And the agent serves until "2026-06-10 03:30+00:00"
+    Then the plan "home" hasn't run
+    And the agent said the run of the plan "home" was skipped because no location's rule holds
+
+  Scenario: The network link is read once for the plans due together
+    Given the agent starts at "2026-06-10 02:30+00:00"
+    And the plan "home" is scheduled "0 3 * * *"
+    And the plan "work" is scheduled "0 3 * * *"
+    And the plan "media" is scheduled "0 3 * * *"
+    And the repository's one location is eligible only on a wired network
+    And the machine is on a wired network
+    When the agent serves until "2026-06-10 03:30+00:00"
+    Then the plan "home" ran once, on schedule, at "2026-06-10 03:00+00:00"
+    And the plan "work" ran once, on schedule, at "2026-06-10 03:00+00:00"
+    And the plan "media" ran once, on schedule, at "2026-06-10 03:00+00:00"
+    And the network link was read once

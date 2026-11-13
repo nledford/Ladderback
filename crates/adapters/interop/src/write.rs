@@ -63,6 +63,12 @@ pub(crate) fn render(
     if plan.retention.is_empty() {
         notices.push(ProfileNotice::RetentionEmpty);
     }
+    // `repository` is the entry's first location: a profile has no room for
+    // the others.
+    let further = export.repository.location_count().saturating_sub(1);
+    if further > 0 {
+        notices.push(ProfileNotice::LocationsNotExported { further });
+    }
     out.section("repository");
     out.string("repository", &repository.location);
     if let Some(hot) = &repository.hot {

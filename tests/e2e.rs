@@ -55,6 +55,8 @@ mod forget_steps;
 mod install_script_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/locations.rs"]
+mod locations_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 #[path = "steps/notifications.rs"]
@@ -101,6 +103,7 @@ struct Agent {
     snapshots: snapshots_steps::SnapshotsSetup,
     forget: forget_steps::ForgetE2e,
     interop: interop_steps::InteropE2e,
+    locations: locations_steps::LocationsE2e,
     adopt: adopt_steps::AdoptE2e,
     maintenance: maintenance_steps::MaintenanceE2e,
     cache: cache_steps::CacheE2e,
@@ -150,6 +153,7 @@ impl Agent {
             snapshots: snapshots_steps::SnapshotsSetup::default(),
             forget: forget_steps::ForgetE2e::default(),
             interop: interop_steps::InteropE2e::default(),
+            locations: locations_steps::LocationsE2e::default(),
             adopt: adopt_steps::AdoptE2e::default(),
             cache: cache_steps::CacheE2e::default(),
             service: service_steps::ServiceE2e::default(),

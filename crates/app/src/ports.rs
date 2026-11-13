@@ -26,8 +26,9 @@ pub use config_store::{
 pub use engine::{
     BackupJob, BackupSummary, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
     EngineResult, FakeEnd, FakeJob, ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS,
-    OperationStep, ProgressEvent, ProgressKind, PruneJob, PrunePlanSummary, PruneSummary,
-    RepositoryAccess, RewriteJob, RewriteSummary, RunningJob, SavedEntry, SnapshotSummary,
+    OperationStep, ProbeAnswer, ProgressEvent, ProgressKind, PruneJob, PrunePlanSummary,
+    PruneSummary, RepositoryAccess, RewriteJob, RewriteSummary, RunningJob, SavedEntry,
+    SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use hooks::{
@@ -41,7 +42,7 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Recovered, Start, StoreError, maintained_repository,
 };
-pub use platform::{Network, PlatformError, PowerSupply};
+pub use platform::{Network, NetworkLink, PlatformError, PowerSupply};
 pub use profiles::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
     ProfileReader, ProfileWriter, RenderedProfile,

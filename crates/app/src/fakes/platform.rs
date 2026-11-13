@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use domain::execution::conditions::PowerSource;
+use domain::planning::{CurrentNetworkName, Link};
 
-use crate::ports::{Network, PlatformError, PowerSupply};
+use crate::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 
 /// One scripted answer, and how often it was asked for.
 struct Scripted<T> {
@@ -98,5 +99,59 @@ impl Default for FakeNetwork {
 impl Network for FakeNetwork {
     async fn is_online(&self) -> Result<bool, PlatformError> {
         self.0.ask()
+    }
+}
+
+/// A network link that reports what it was set to: wired at first, on no
+/// Wi-Fi network.
+pub struct FakeNetworkLink {
+    link: Scripted<Link>,
+    name: Scripted<Option<CurrentNetworkName>>,
+}
+
+impl FakeNetworkLink {
+    pub fn new() -> Self {
+        Self {
+            link: Scripted::new(Link::Wired),
+            name: Scripted::new(None),
+        }
+    }
+
+    /// What every later [`link`](NetworkLink::link) call answers.
+    pub fn set(&self, answer: Result<Link, PlatformError>) {
+        self.link.set(answer);
+    }
+
+    /// What every later [`network_name`](NetworkLink::network_name) call
+    /// answers.
+    pub fn set_name(&self, answer: Result<Option<CurrentNetworkName>, PlatformError>) {
+        self.name.set(answer);
+    }
+
+    /// How many times the link was read.
+    pub fn asked(&self) -> usize {
+        self.link.asked()
+    }
+
+    /// How many times the network's name was read.
+    pub fn names_asked(&self) -> usize {
+        self.name.asked()
+    }
+}
+
+impl Default for FakeNetworkLink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl NetworkLink for FakeNetworkLink {
+    async fn link(&self) -> Result<Link, PlatformError> {
+        self.link.ask()
+    }
+
+    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        self.name.ask()
     }
 }

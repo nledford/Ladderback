@@ -163,7 +163,7 @@ impl AgentConfig {
             let same = repositories
                 .iter()
                 .skip(n.saturating_add(1))
-                .find(|(_, other)| other.is(&entry.settings, entry.id.as_ref()));
+                .find(|(_, other)| other.is_entry(entry));
             if let Some((second, _)) = same {
                 return Err(Violation::SameRepository {
                     first: first.clone(),
@@ -335,6 +335,7 @@ mod tests {
 
     fn repository(maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),
@@ -935,6 +936,7 @@ mod tests {
         for moved in [
             at("/srv/elsewhere", None),
             RepositoryConfig {
+                locations: Default::default(),
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
                     ..location("/srv/demo-repo")

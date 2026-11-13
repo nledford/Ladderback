@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use super::{Hooks, InvalidValue, ValueKind};
+use super::{Hooks, InvalidValue, Locations, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
     InlineSecret, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, REDACTED, Redactor,
@@ -141,13 +141,43 @@ impl RepositorySettings {
     /// so the sets that reach it keep theirs: `options` reach both halves,
     /// `options-hot` the `repo-hot` one and `options-cold` the other.
     pub fn same_location(&self, other: &Self) -> bool {
-        let cold = is_drive(&self.repository);
-        let hot = self.repo_hot.as_deref().is_some_and(is_drive);
+        self.place().is(&other.place())
+    }
+
+    /// Where these settings point, borrowed.
+    pub(super) fn place(&self) -> Place<'_> {
+        Place {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+        }
+    }
+}
+
+/// Where a location points, borrowed from the settings or the further
+/// location that writes it: what [`RepositorySettings::same_location`]
+/// compares.
+pub(super) struct Place<'a> {
+    pub repository: &'a str,
+    pub repo_hot: Option<&'a str>,
+    pub options: &'a BTreeMap<String, String>,
+    pub options_hot: &'a BTreeMap<String, String>,
+    pub options_cold: &'a BTreeMap<String, String>,
+}
+
+impl Place<'_> {
+    /// Whether `other` is the same place, as
+    /// [`RepositorySettings::same_location`] says.
+    pub(super) fn is(&self, other: &Place<'_>) -> bool {
+        let cold = is_drive(self.repository);
+        let hot = self.repo_hot.is_some_and(is_drive);
         self.repository == other.repository
             && self.repo_hot == other.repo_hot
-            && same_places(&self.options, &other.options, cold || hot)
-            && same_places(&self.options_hot, &other.options_hot, hot)
-            && same_places(&self.options_cold, &other.options_cold, cold)
+            && same_places(self.options, other.options, cold || hot)
+            && same_places(self.options_hot, other.options_hot, hot)
+            && same_places(self.options_cold, other.options_cold, cold)
     }
 }
 
@@ -333,8 +363,12 @@ impl fmt::Display for GroupBy {
 /// One repository, as an agent's config describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepositoryConfig {
-    /// Where it is and how to open it.
+    /// Where it is and how to open it: its first location, and the
+    /// repository's password.
     pub settings: RepositorySettings,
+    /// The locations after the first, in the order they are tried
+    /// (decision 80): none for a repository reached at one location.
+    pub locations: Locations,
     /// The rustic repository ID Ladderback read when it connected or created
     /// the repository (§7.3). None for an entry written by hand or imported
     /// from a profile: Ladderback never opened those.
@@ -353,10 +387,21 @@ impl RepositoryConfig {
     /// to hold another repository, and one repository may be reached at two
     /// locations. Otherwise one location is one repository (§7.3), and a
     /// location is the whole of it: [`RepositorySettings::same_location`].
+    /// Any location of the entry counts (decision 80).
     pub fn is(&self, settings: &RepositorySettings, id: Option<&RepositoryId>) -> bool {
         match (self.id.as_ref(), id) {
             (Some(own), Some(id)) => own == id,
-            _ => self.settings.same_location(settings),
+            _ => self.has_location(&settings.place()),
+        }
+    }
+
+    /// Whether `other` is the same repository as this entry, as
+    /// [`is`](Self::is) says, with every location of `other` compared with
+    /// every location of this one when either entry records no ID.
+    pub fn is_entry(&self, other: &RepositoryConfig) -> bool {
+        match (self.id.as_ref(), other.id.as_ref()) {
+            (Some(own), Some(id)) => own == id,
+            _ => other.places().any(|place| self.has_location(&place)),
         }
     }
 }
@@ -638,5 +683,18 @@ mod tests {
             masked_options(&options),
             BTreeMap::from([("endpoint", "***"), ("region", "***")])
         );
+    }
+
+    #[test]
+    fn settings_that_differ_only_in_credentials_point_at_the_same_location() {
+        let mut reopened = settings();
+        reopened.password = SecretRef::Env("PW".to_owned());
+        reopened
+            .options
+            .insert("sas_token".to_owned(), "${TOKEN}".to_owned());
+        assert!(settings().same_location(&reopened));
+        let mut elsewhere = settings();
+        elsewhere.repository = "rest:http://demo:CANARY-url-password@nas.lan/other".to_owned();
+        assert!(!settings().same_location(&elsewhere));
     }
 }

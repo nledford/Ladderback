@@ -26,7 +26,7 @@ use super::{PlanRunner, secret_refusal};
 impl PlanRunner {
     /// The maintenance use case over this runner's parts.
     fn maintenance(&self) -> RunMaintenance {
-        RunMaintenance::new(
+        let maintenance = RunMaintenance::new(
             Arc::clone(&self.engine),
             Arc::new(SystemClock),
             Arc::clone(&self.store),
@@ -37,7 +37,11 @@ impl PlanRunner {
             platform::hostname(),
             Arc::new(engine::RusticSources),
         )
-        .with_events(Arc::clone(&self.events))
+        .with_events(Arc::clone(&self.events));
+        match &self.locations {
+            Some(locations) => maintenance.with_locations(Arc::clone(locations)),
+            None => maintenance,
+        }
     }
 }
 
@@ -478,6 +482,9 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
+        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
+        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
     }
 }
 
@@ -562,6 +569,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     maintenance: domain::planning::Maintenance::Local,
@@ -1150,6 +1158,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     maintenance: domain::planning::Maintenance::None,

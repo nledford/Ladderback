@@ -79,6 +79,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::OnFailure => "on-failure",
             ValueKind::HookCommand => "hook-command",
             ValueKind::Location => "location",
+            ValueKind::LocationRule => "location rule",
             ValueKind::OptionValue => "option-value",
             ValueKind::Options => "options",
             ValueKind::HookProgram => "hook-program",
@@ -233,6 +234,7 @@ fn a_repository(agent: &mut Agent, name: String) {
     agent.config.repositories.insert(
         alias(&name),
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: format!("/srv/{name}"),

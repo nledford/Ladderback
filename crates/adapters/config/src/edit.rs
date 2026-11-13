@@ -124,8 +124,11 @@ fn set(mine: &mut Table, key: &str, base: Option<&Item>, new: &Item, at: isize, 
         (Item::Table(table), Some(new), _) => {
             merge(table, base.and_then(Item::as_table_like), new, at, left);
         }
-        (Item::ArrayOfTables(tables), _, Item::ArrayOfTables(new)) => {
+        (Item::ArrayOfTables(tables), _, Item::ArrayOfTables(new)) if key == "plans" => {
             plans(tables, base.and_then(Item::as_array_of_tables), new, left);
+        }
+        (Item::ArrayOfTables(tables), _, Item::ArrayOfTables(new)) => {
+            by_position(tables, base.and_then(Item::as_array_of_tables), new, left);
         }
         (item, _, _) => {
             if same(base, new) {
@@ -415,6 +418,38 @@ fn plans(
     old.values().for_each(|table| left.header(table));
 }
 
+/// Makes the change from `base` to `new` in `mine`, tables found by their
+/// position, as a repository's further locations are (decision 80): the
+/// order is what they mean. A table kept is changed where it is written,
+/// one added follows the last, and one removed goes with what is written
+/// in it.
+fn by_position(
+    mine: &mut ArrayOfTables,
+    base: Option<&ArrayOfTables>,
+    new: &ArrayOfTables,
+    left: &mut Left,
+) {
+    let mut old = std::mem::take(mine).into_iter();
+    for (index, table) in new.iter().enumerate() {
+        let table = match old.next() {
+            Some(mut kept) => {
+                let was = base
+                    .and_then(|base| base.get(index))
+                    .map(|was| was as &dyn TableLike);
+                merge(&mut kept, was, table, 0, left);
+                kept
+            }
+            None => {
+                let mut added = table.clone();
+                unplace(&mut added);
+                added
+            }
+        };
+        mine.push(table);
+    }
+    old.for_each(|table| left.header(&table));
+}
+
 /// A plan's ID, which every plan has: the configuration was read.
 fn id_of(plan: &Table) -> Option<&str> {
     plan.get("id").and_then(Item::as_str)
@@ -576,6 +611,7 @@ keep-daily = 7
 
     fn entry_at(location: &str) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             settings: RepositorySettings {
                 repository: location.to_owned(),
                 repo_hot: None,

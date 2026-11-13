@@ -370,6 +370,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::post(repositories::create_saved_repository),
         )
         .route(
+            "/api/v1/repositories/{alias}/test",
+            axum::routing::post(repositories::test_saved_repository),
+        )
+        .route(
             "/api/v1/repositories/{alias}/snapshots",
             axum::routing::get(list_snapshots),
         )
@@ -1026,6 +1030,7 @@ mod tests {
                     maintained_here: true,
                     create_offered: false,
                     warnings: Vec::new(),
+                    locations: Vec::new(),
                 }],
             })
         }
@@ -2164,6 +2169,24 @@ mod tests {
                 }),
             }
         }
+
+        async fn test_saved(
+            &self,
+            alias: String,
+        ) -> Result<api::LocationsTestDto, RepositoriesError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match alias.as_str() {
+                "missing" => Err(RepositoriesError::Unknown { alias }),
+                _ => Ok(api::LocationsTestDto {
+                    locations: vec![api::LocationTriedDto {
+                        position: 1,
+                        address: format!("/srv/{alias}"),
+                        outcome: "used".to_owned(),
+                        source: None,
+                    }],
+                }),
+            }
+        }
     }
 
     const TEST: &str = "/api/v1/repositories/_test";
@@ -2258,6 +2281,28 @@ mod tests {
         let (status, answer) = json_of(response).await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(answer, serde_json::json!({"id": "created:demo"}));
+    }
+
+    #[tokio::test]
+    async fn a_test_of_a_saved_repository_answers_each_location_or_a_typed_refusal() {
+        let (response, calls) = post_counted("/api/v1/repositories/nas/test", "{}".into()).await;
+        assert_eq!(calls, 1);
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            answer,
+            serde_json::json!({"locations": [
+                {"position": 1, "address": "/srv/nas", "outcome": "used"}
+            ]})
+        );
+        let (response, _) = post_counted("/api/v1/repositories/missing/test", "{}".into()).await;
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(answer["code"], "repository-unknown");
+        let (response, calls) =
+            post_counted("/api/v1/repositories/nas/test", "not json".into()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(calls, 0, "a body that is not JSON reached the daemon");
     }
 
     #[tokio::test]

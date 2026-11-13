@@ -9,6 +9,7 @@
 use std::fmt::Display;
 
 use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
+use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Warning};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
@@ -16,6 +17,7 @@ use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
 use crate::codec::{self, BadColumn};
+use crate::locations;
 use crate::report::{cap, shown};
 use crate::summary::Summary;
 
@@ -101,6 +103,27 @@ impl Reader<'_> {
         let summary: Summary =
             serde_json::from_str(&text).map_err(|error| self.corrupt("summary_json", error))?;
         Ok(Some(summary.into()))
+    }
+
+    /// The run's choice of location, which must agree with the position of
+    /// the one it used: both columns are set, or neither is when the run
+    /// used none.
+    fn locations(&self) -> Result<Option<LocationsRecord>, StoreError> {
+        let used = self.integer("location_no")?;
+        let Some(text) = self.text("locations_json")? else {
+            return match used {
+                None => Ok(None),
+                Some(_) => Err(self.corrupt("location_no", "is set, but no location is recorded")),
+            };
+        };
+        let record = locations::decode(&text).map_err(|why| self.corrupt("locations_json", why))?;
+        if used != record.used().map(i64::from) {
+            return Err(self.corrupt(
+                "location_no",
+                "is not the position of the location the run used",
+            ));
+        }
+        Ok(Some(record))
     }
 
     /// How the operation ended up, from its status and its error columns.
@@ -256,6 +279,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         })?;
     let repository_alias =
         reader.id_of("repo_alias", "repository alias", RepositoryAlias::parse)?;
+    let locations = reader.locations()?;
 
     Ok(OperationRecord {
         id,
@@ -269,6 +293,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         warning_count,
         result,
         repository_alias,
+        locations,
     })
 }
 

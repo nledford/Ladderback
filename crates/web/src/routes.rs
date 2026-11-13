@@ -5,7 +5,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use api::{ErrorCode, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto};
+use api::{
+    ErrorCode, LocationDto, LocationTriedDto, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto,
+    RepositoryDto,
+};
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -24,8 +27,10 @@ use crate::operations::{self, Name};
 use crate::pause::{self, Ends, Pausable};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
-    create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
-    rereads_list, row_refusal,
+    create_saved_path, error_of, field_of, found_at, lists_locations, location_heading,
+    location_option, location_rule, location_tested, locations_label, locations_tested,
+    password_source, problems_of, repository_notes, rereads_list, row_refusal,
+    test_locations_label, test_locations_path, tested_announcement,
 };
 use crate::sign_in::SignInOff;
 use crate::visit::Visit;
@@ -1383,9 +1388,10 @@ struct RowCreates {
 }
 
 /// One row of the repositories table: the name as the row's header, where the
-/// repository is (the hot half on a line of its own), where its password
-/// comes from, and its Create, when the row offers it (decision 53). Never
-/// the password itself (I4).
+/// repository is (the hot half on a line of its own), or, for a repository
+/// reached at several locations, the list of them in order with its Test
+/// (decision 80), where its password comes from, and its Create, when the
+/// row offers it (decision 53). Never the password itself (I4).
 fn repository_row(
     localizer: &Arc<Localizer>,
     base: &str,
@@ -1405,19 +1411,160 @@ fn repository_row(
     let create = row
         .create_offered
         .then(|| create_in_row(localizer, base, creates, &row.alias));
+    // What the row's last Test found at each location, by position.
+    let tested = RwSignal::<Option<Vec<LocationTriedDto>>>::new(None);
+    let several = lists_locations(&row.locations);
+    let test = several.then(|| test_in_row(localizer, base, creates, &row.alias, tested));
+    let place = if several {
+        locations_list(localizer, &row.alias, row.locations, tested).into_any()
+    } else {
+        view! {
+            <div>{row.repository}</div>
+            {hot.map(|hot| view! { <div>{hot}</div> })}
+        }
+        .into_any()
+    };
     view! {
         <tr>
             <th scope="row">{row.alias}</th>
-            <td class="path">
-                <div>{row.repository}</div>
-                {hot.map(|hot| view! { <div>{hot}</div> })}
-            </td>
+            <td class="path">{place}</td>
             <td class="path">
                 <div>{password}</div>
                 {notes.into_iter().map(|note| view! { <div class="text-muted">{note}</div> }).collect_view()}
             </td>
-            <td>{create}</td>
+            <td>{test} {create}</td>
         </tr>
+    }
+}
+
+/// A row's locations, in the order a job tries them: each headed by its
+/// place, the first saying it is tried first, then its address, its hot
+/// half, its options by name (a value only when it is references alone, I4),
+/// and what the row's last Test found there.
+fn locations_list(
+    localizer: &Arc<Localizer>,
+    alias: &str,
+    locations: Vec<LocationDto>,
+    tested: RwSignal<Option<Vec<LocationTriedDto>>>,
+) -> impl IntoView + use<> {
+    let (id, args) = locations_label(alias);
+    let label = text_with(localizer, id, &args);
+    let items = locations
+        .into_iter()
+        .map(|location| {
+            let (id, args) = location_heading(location.position);
+            let heading = text_with(localizer, id, &args);
+            let hot = location.repo_hot.map(|hot| {
+                text_with(
+                    localizer,
+                    msg::UI_REPOSITORY_HOT,
+                    &[("location", MsgArg::Text(hot))],
+                )
+            });
+            let options: Vec<String> = location
+                .options
+                .iter()
+                .map(|option| {
+                    let (id, args) = location_option(option);
+                    text_with(localizer, id, &args)
+                })
+                .collect();
+            let rule: Vec<String> = location_rule(&location.when)
+                .into_iter()
+                .map(|(id, args)| text_with(localizer, id, &args))
+                .collect();
+            let position = location.position;
+            let localizer = Arc::clone(localizer);
+            let found = move || {
+                tested.with(|tested| {
+                    found_at(tested.as_deref().unwrap_or_default(), position).map(|tried| {
+                        location_tested(tried)
+                            .into_iter()
+                            .map(|(id, args)| text_with(&localizer, id, &args))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                })
+            };
+            view! {
+                <li>
+                    <div>{heading}</div>
+                    <div>{location.repository}</div>
+                    {hot.map(|hot| view! { <div>{hot}</div> })}
+                    {options.into_iter().map(|option| view! { <div class="text-muted">{option}</div> }).collect_view()}
+                    {rule.into_iter().map(|said| view! { <div>{said}</div> }).collect_view()}
+                    {move || found().map(|found| view! { <div>{found}</div> })}
+                </li>
+            }
+        })
+        .collect_view();
+    view! { <ol aria-label=label>{items}</ol> }
+}
+
+/// A row's Test: the button, named after its row, that probes each of the
+/// repository's locations and records nothing. While it works, and once it
+/// answered, the page says so politely and focus stays on the button; what
+/// each location came to is in the row's list. A refusal is the row's alert.
+fn test_in_row(
+    localizer: &Arc<Localizer>,
+    base: &str,
+    creates: RowCreates,
+    alias: &str,
+    tested: RwSignal<Option<Vec<LocationTriedDto>>>,
+) -> impl IntoView + use<> {
+    let (id, args) = test_locations_label(alias);
+    let label = text_with(localizer, id, &args);
+    let url = format!("{base}{}", test_locations_path(alias));
+    let alias = alias.to_owned();
+    let localizer = Arc::clone(localizer);
+    let refused = RwSignal::<Option<String>>::new(None);
+    let busy = RwSignal::new(false);
+    let test = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        refused.set(None);
+        tested.set(None);
+        reply(
+            Politeness::Polite,
+            &text(&localizer, msg::UI_REPOSITORIES_WORKING),
+        );
+        let (url, alias, localizer) = (url.clone(), alias.clone(), Arc::clone(&localizer));
+        spawn_local(async move {
+            let posted = ws::post(&url, &serde_json::Map::new()).await;
+            // The reader may have followed a link while the probes ran: the
+            // page went with it, and there is nobody left to tell.
+            if creates.phase.try_get_untracked().is_none() {
+                return;
+            }
+            // The list may have been drawn again meanwhile, and the row's own
+            // signals went with the row.
+            busy.try_set(false);
+            match posted {
+                Some(Posted::Done(answer)) => match locations_tested(&answer) {
+                    Some(found) => {
+                        let (id, args) = tested_announcement(&alias, &found);
+                        reply(Politeness::Polite, &text_with(&localizer, id, &args));
+                        tested.try_set(Some(found));
+                    }
+                    // An answer that is not the one the route gives is a
+                    // daemon the page cannot talk to.
+                    None => creates.phase.set(Phase::Unreachable),
+                },
+                Some(Posted::Refused(code, args, detail)) => {
+                    refused.try_set(Some(refusal(&localizer, code, &args, detail.as_deref())));
+                }
+                // No answer at all: the page's phase says that its own way.
+                None => creates.phase.set(Phase::Unreachable),
+            }
+        });
+    };
+    view! {
+        <button type="button" on:click=test>
+            {label}
+        </button>
+        {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
     }
 }
 

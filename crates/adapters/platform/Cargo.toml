@@ -15,6 +15,8 @@ async-trait.workspace = true
 argon2.workspace = true
 # The manager's command line as a person would type it, in a refusal.
 shell-words.workspace = true
+# The Wi-Fi report of `system_profiler -json` on macOS (decision 80).
+serde_json.workspace = true
 spawn-gate.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
@@ -23,6 +25,12 @@ uuid = { workspace = true, features = ["v7"] }
 # `term`: the password prompt turns echo off. `user`: the user's ID, as a
 # launchd agent lives in the `gui/<uid>` domain.
 nix = { workspace = true, features = ["term", "user"] }
+
+# The Wi-Fi network's name from NetworkManager (decision 80). `vendored`
+# builds libdbus from source, as `secrets` does, so a bare toolchain image
+# builds it.
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus = { workspace = true, features = ["vendored"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

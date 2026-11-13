@@ -254,6 +254,7 @@ fn back_up(world: &mut NotificationsWorld, plans: &[String], repository: &str) {
     world.repositories.insert(
         alias(repository),
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: format!("/srv/{repository}"),

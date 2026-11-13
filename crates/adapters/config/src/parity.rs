@@ -366,6 +366,7 @@ fn config_grouped_by(group_by: GroupBy) -> domain::planning::AgentConfig {
     use domain::secrets::SecretRef;
 
     let repository = RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings: RepositorySettings {
             repository: "/srv/demo-repo".to_owned(),

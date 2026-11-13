@@ -121,6 +121,11 @@ pub enum Job {
     Fake(FakeJob),
     /// Opens a repository and reports its ID.
     Identify(RepositoryAccess),
+    /// Tries one location of a repository reached at several (decision 80):
+    /// opens it with no cache and writes nothing, and answers with what it
+    /// found there. A read, never written to the operation log; the daemon
+    /// kills it at its bound.
+    Probe(RepositoryAccess),
     /// Initialises a repository at the location, with default key options,
     /// and reports its ID. It refuses when a repository already exists
     /// there, and never overwrites one.
@@ -153,6 +158,7 @@ impl Job {
             Self::Forget(_)
             | Self::Rewrite(_)
             | Self::Identify(_)
+            | Self::Probe(_)
             | Self::Init(_)
             | Self::Prune(_)
             | Self::PrunePlan(_)
@@ -165,7 +171,8 @@ impl Job {
     pub fn kind(&self) -> OperationKind {
         match self {
             Self::Fake(_) => OperationKind::Fake,
-            Self::Identify(_) => OperationKind::Identify,
+            // A probe is never recorded: it is part of the job it chooses for.
+            Self::Identify(_) | Self::Probe(_) => OperationKind::Identify,
             Self::Init(_) => OperationKind::Init,
             Self::Backup(_) => OperationKind::Backup,
             Self::Forget(_) => OperationKind::Forget,
@@ -181,7 +188,10 @@ impl Job {
     pub fn access(&self) -> Option<&RepositoryAccess> {
         match self {
             Self::Fake(_) => None,
-            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => Some(access),
+            Self::Identify(access)
+            | Self::Probe(access)
+            | Self::Init(access)
+            | Self::Ls(access) => Some(access),
             Self::Backup(job) => Some(&job.repository),
             Self::Forget(job) => Some(&job.repository),
             Self::Rewrite(job) => Some(&job.repository),
@@ -194,7 +204,10 @@ impl Job {
     pub(crate) fn access_mut(&mut self) -> Option<&mut RepositoryAccess> {
         match self {
             Self::Fake(_) => None,
-            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => Some(access),
+            Self::Identify(access)
+            | Self::Probe(access)
+            | Self::Init(access)
+            | Self::Ls(access) => Some(access),
             Self::Backup(job) => Some(&mut job.repository),
             Self::Forget(job) => Some(&mut job.repository),
             Self::Rewrite(job) => Some(&mut job.repository),
@@ -417,6 +430,10 @@ pub enum EngineEvent {
     Warning(Warning),
     Succeeded(EngineResult),
     Failed(FailureReason),
+    /// Which location of a repository reached at several the job opens, and
+    /// why each earlier one was skipped (decision 80): the choice made when
+    /// the job started, before any of the job's own events.
+    Located(domain::execution::locations::LocationsRecord),
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names
@@ -512,6 +529,24 @@ pub enum EngineResult {
     Rewrite(RewriteSummary),
     /// A repository's snapshots, newest first.
     Snapshots(Vec<SnapshotSummary>),
+    /// What a [`Job::Probe`] found at its location.
+    Probed(ProbeAnswer),
+}
+
+/// What a probe found at a location that answered. A location that didn't
+/// answer by the bound, refused the connection or has no route ends its
+/// probe without one: it is silent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProbeAnswer {
+    /// A repository the password opens, with this ID.
+    Holds(RepositoryId),
+    /// The location refused the credentials (an HTTP 401 or 403, a failed
+    /// SSH login).
+    Refused,
+    /// The location answers, and no repository's `config` is there.
+    NotARepository,
+    /// A repository is there, and the password opens nothing in it.
+    PasswordNotAccepted,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackupSummary {

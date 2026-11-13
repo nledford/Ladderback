@@ -67,6 +67,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("nas"),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     options: by_name(&[(
@@ -92,6 +93,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("cloud"),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: RepositorySettings {
                     repo_hot: Some("/srv/demo-hot".to_owned()),
@@ -121,6 +123,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("usb"),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: settings(
                     "/media/demo/usb backups",
@@ -137,6 +140,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("vault"),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: settings(
                     "/srv/demo-vault",
@@ -155,6 +159,7 @@ pub fn expected() -> AgentConfig {
         (
             alias("scratch"),
             RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: settings(
                     "/srv/demo-scratch",

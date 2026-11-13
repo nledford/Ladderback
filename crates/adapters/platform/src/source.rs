@@ -58,19 +58,22 @@ pub(crate) fn unrecognized(from: &Path, what: &str) -> PlatformError {
     }
 }
 
-/// Runs `read` on the blocking pool, giving it up after `timeout`. A read
-/// given up keeps its thread until the read returns; the caller has its
-/// answer.
+/// Runs `read` of `from` on the blocking pool, giving it up after
+/// `timeout`. A read given up keeps its thread until the read returns; the
+/// caller has its answer.
 pub(crate) async fn blocking<T: Send + 'static>(
-    root: &Path,
+    from: impl std::fmt::Display,
     timeout: Duration,
     read: impl FnOnce() -> Result<T, PlatformError> + Send + 'static,
 ) -> Result<T, PlatformError> {
     match tokio::time::timeout(timeout, tokio::task::spawn_blocking(read)).await {
         Ok(Ok(answer)) => answer,
-        Ok(Err(joined)) => Err(unreadable(root, joined)),
+        Ok(Err(joined)) => Err(PlatformError::Unreadable {
+            from: from.to_string(),
+            detail: joined.to_string(),
+        }),
         Err(_) => Err(PlatformError::TimedOut {
-            from: root.display().to_string(),
+            from: from.to_string(),
         }),
     }
 }
@@ -121,12 +124,40 @@ pub(crate) fn attribute(entry: &Path, name: &str) -> Result<Option<String>, Plat
     Ok(Some(text.trim().to_owned()))
 }
 
+/// The most bytes read of one table of the kernel's (`/proc/net/route`):
+/// a few lines per route.
+const MAX_TABLE_BYTES: u64 = 64 * 1024;
+
+/// A table of the kernel's, whole; `None` when there is no such file.
+pub(crate) fn table(path: &Path) -> Result<Option<String>, PlatformError> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unreadable(path, error)),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_TABLE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| unreadable(path, error))?;
+    if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_TABLE_BYTES) {
+        return Err(unrecognized(
+            path,
+            &format!("longer than {MAX_TABLE_BYTES} bytes"),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| unrecognized(path, "not UTF-8"))
+}
+
 /// A program the adapter runs, with fixed arguments.
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
     pub(crate) path: PathBuf,
     pub(crate) args: Vec<OsString>,
     pub(crate) timeout: Duration,
+    /// The most bytes of its output read.
+    pub(crate) max_output: u64,
 }
 
 impl Program {
@@ -138,12 +169,23 @@ impl Program {
             path: path.into(),
             args: args.into_iter().map(Into::into).collect(),
             timeout: TIMEOUT,
+            max_output: MAX_OUTPUT_BYTES,
+        }
+    }
+
+    /// This program given `timeout` and `max_output` bytes of output in
+    /// place of the usual 5 s and 64 KiB, for one that is slow or says much.
+    pub(crate) fn with_limits(self, timeout: Duration, max_output: u64) -> Self {
+        Self {
+            timeout,
+            max_output,
+            ..self
         }
     }
 
     /// Runs the program with no environment and nothing on stdin, through
     /// the spawn gate (decision 58), and returns what it printed. A program
-    /// that fails, prints more than [`MAX_OUTPUT_BYTES`] or isn't done
+    /// that fails, prints more than its `max_output` bytes or isn't done
     /// within its timeout gives no answer; it is killed when this returns.
     /// The timeout covers the whole call, the wait for the gate too.
     pub(crate) async fn output(&self) -> Result<String, PlatformError> {
@@ -181,15 +223,16 @@ impl Program {
         let Some(pipe) = stdout.0.as_mut() else {
             return Err(unreadable(from, "its output is not piped"));
         };
+        let max_output = self.max_output;
         let mut bytes = Vec::new();
-        pipe.take(MAX_OUTPUT_BYTES + 1)
+        pipe.take(max_output.saturating_add(1))
             .read_to_end(&mut bytes)
             .await
             .map_err(|error| unreadable(from, error))?;
-        if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_OUTPUT_BYTES) {
+        if u64::try_from(bytes.len()).map_or(true, |len| len > max_output) {
             return Err(unrecognized(
                 from,
-                &format!("more than {MAX_OUTPUT_BYTES} bytes of output"),
+                &format!("more than {max_output} bytes of output"),
             ));
         }
         let status = child

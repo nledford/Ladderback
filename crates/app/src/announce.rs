@@ -125,6 +125,9 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
                 .collect(),
         ),
         F::DaemonStopped => (ErrorCode::DaemonStopped, Vec::new()),
+        F::NoLocationUsable => (ErrorCode::NoLocationUsable, Vec::new()),
+        F::NoLocationRuleHolds => (ErrorCode::NoLocationRuleHolds, Vec::new()),
+        F::PasswordNotAccepted => (ErrorCode::PasswordNotAccepted, Vec::new()),
     }
 }
 

@@ -50,7 +50,10 @@ impl SysfsPower {
 impl PowerSupply for SysfsPower {
     async fn source(&self) -> Result<PowerSource, PlatformError> {
         let root = self.root.clone();
-        source::blocking(&self.root, self.timeout, move || read_supplies(&root)).await
+        source::blocking(self.root.display(), self.timeout, move || {
+            read_supplies(&root)
+        })
+        .await
     }
 }
 

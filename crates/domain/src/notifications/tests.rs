@@ -603,6 +603,7 @@ fn a_rule_must_be_for_plans_the_configuration_has() {
         BTreeMap::from([(
             RepositoryAlias::parse("nas").unwrap(),
             crate::planning::RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings: crate::planning::RepositorySettings {
                     repository: "/srv/demo".to_owned(),

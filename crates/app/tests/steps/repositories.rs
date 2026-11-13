@@ -158,6 +158,7 @@ fn config_recording(
     recorded: Option<RepositoryId>,
 ) -> AgentConfig {
     let repository = RepositoryConfig {
+        locations: Default::default(),
         id: recorded,
         settings: settings.clone(),
         maintenance: Default::default(),
@@ -829,6 +830,7 @@ async fn configured_twice(agent: &mut super::Agent, name: String, other: String)
     elsewhere.repository = "/media/demo/cold".to_owned();
     elsewhere.repo_hot = Some("/media/demo/hot".to_owned());
     let entry = |settings: RepositorySettings| RepositoryConfig {
+        locations: Default::default(),
         id: None,
         settings,
         maintenance: Default::default(),

@@ -9,7 +9,7 @@ macro_rules! select_operations {
         concat!(
             "SELECT id, kind, plan_id, repo_uuid, \"trigger\", status, queued_at, started_at, ",
             "finished_at, snapshot_id, summary_json, error_code, error_args, error_detail, ",
-            "warning_count, repo_alias FROM operations",
+            "warning_count, repo_alias, location_no, locations_json FROM operations",
             $($clause),+
         )
     };
@@ -19,12 +19,13 @@ macro_rules! select_operations {
 /// nothing of an earlier save survives. Parameters, in order: `id`, `agent_id`,
 /// `kind`, `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`,
 /// `started_at`, `finished_at`, `snapshot_id`, `summary_json`, `error_code`,
-/// `error_args`, `error_detail`, `warning_count`, `repo_alias`.
+/// `error_args`, `error_detail`, `warning_count`, `repo_alias`, `location_no`,
+/// `locations_json`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
     "INSERT INTO operations (id, agent_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
-    "error_detail, warning_count, repo_alias) ",
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+    "error_detail, warning_count, repo_alias, location_no, locations_json) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
     "agent_id = excluded.agent_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
@@ -33,7 +34,8 @@ pub(crate) const UPSERT_OPERATION: &str = concat!(
     "snapshot_id = excluded.snapshot_id, summary_json = excluded.summary_json, ",
     "error_code = excluded.error_code, error_args = excluded.error_args, ",
     "error_detail = excluded.error_detail, warning_count = excluded.warning_count, ",
-    "repo_alias = excluded.repo_alias"
+    "repo_alias = excluded.repo_alias, location_no = excluded.location_no, ",
+    "locations_json = excluded.locations_json"
 );
 
 /// Parameter: the operation's ID.

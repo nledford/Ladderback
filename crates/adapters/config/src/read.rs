@@ -11,19 +11,22 @@ use domain::notifications::{
     Rule, RuleName, Template, Username,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, Cadence, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry,
-    Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice,
-    OnFailure, Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings,
-    RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, ValueKind, Violation,
-    check_location, check_option_value, check_options, parse_duration,
+    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, GlobFile,
+    GroupBy, HookEntry, Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale,
+    Location, LocationRule, Locations, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
+    Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap, Plan,
+    RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule,
+    Source, SourceFilter, ValueKind, Violation, check_location, check_location_count,
+    check_option_value, check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
 
 use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
-    AgentTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable, NotificationsTable,
-    PlanTable, RepositoryTable, RetentionTable, RetryTable, RuleTable, ScheduleTable,
+    AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
+    LocationTable, NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable,
+    RuleTable, ScheduleTable,
 };
 use crate::zone::schedule_zone;
 
@@ -240,21 +243,17 @@ fn repository(
         options_hot,
         options_cold,
         hooks: hooks_table,
+        when,
+        locations,
     } = table;
     let repository = reader.required(path, "repository", repository)?;
-    reader.value(&path.key("repository"), check_location(&repository))?;
-    if let Some(hot) = &repo_hot {
-        reader.value(&path.key("repo-hot"), check_location(hot))?;
-    }
-    for (key, table) in [
-        ("options", &options),
-        ("options-hot", &options_hot),
-        ("options-cold", &options_cold),
-    ] {
-        if let Some(table) = table {
-            option_table(reader, &path.key(key), table)?;
-        }
-    }
+    location_values(
+        reader,
+        path,
+        &repository,
+        repo_hot.as_ref(),
+        [&options, &options_hot, &options_cold],
+    )?;
     let id = repository_id
         .map(|text| reader.id(&path.key("repository-id"), RepositoryId::parse(&text)))
         .transpose()?;
@@ -285,35 +284,192 @@ fn repository(
         options_hot: options_hot.unwrap_or_default(),
         options_cold: options_cold.unwrap_or_default(),
     };
-    if let Some(field) = settings.relative_path() {
-        let (path, problem) = match field {
-            RepositoryField::Repository => (path.key("repository"), Problem::Value(LOCAL_PATH)),
-            RepositoryField::RepoHot => (path.key("repo-hot"), Problem::Value(LOCAL_PATH)),
-            RepositoryField::PasswordCommand => (
-                path.key("password-command"),
-                Problem::Password(PasswordProblem::RelativeProgram),
-            ),
-            RepositoryField::Option(name) => {
-                (path.key("options").key(&name), Problem::Value(LOCAL_PATH))
-            }
-            RepositoryField::OptionHot(name) => (
-                path.key("options-hot").key(&name),
-                Problem::Value(LOCAL_PATH),
-            ),
-            RepositoryField::OptionCold(name) => (
-                path.key("options-cold").key(&name),
-                Problem::Value(LOCAL_PATH),
-            ),
-        };
-        return Err(reader.refuse(&path, problem));
+    relative_path(reader, path, &settings)?;
+    let first_when = location_rule(reader, path, when)?;
+    let mut locations = further_locations(reader, path, &settings, locations.unwrap_or_default())?;
+    locations.first_when = first_when;
+    if !locations.further.is_empty() && id.is_none() {
+        // The table of the first further location is where the need for an
+        // ID begins; the key that is missing is the repository's.
+        let mut error = reader.refuse(&path.key("locations").index(0), Problem::MissingKey);
+        if let ConfigError::Invalid { key, .. } = &mut error {
+            *key = path.key("repository-id").text();
+        }
+        return Err(error);
     }
-    Ok(RepositoryConfig {
+    let entry = RepositoryConfig {
+        locations,
         id,
         settings,
         maintenance,
         group_by,
         hooks: hooks(reader, &path.key("hooks"), hooks_table.unwrap_or_default())?,
+    };
+    if let Some(index) = entry.repeated_location() {
+        return Err(reader.refuse(
+            &path.key("locations").index(index).key("repository"),
+            Problem::Value(ValueKind::Location),
+        ));
+    }
+    Ok(entry)
+}
+
+/// Checks the values of one location, at `path`, its table: its
+/// `repository` and `repo-hot` as locations, and its option sets.
+fn location_values(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    repository: &str,
+    repo_hot: Option<&String>,
+    options: [&Option<BTreeMap<String, String>>; 3],
+) -> Read<()> {
+    reader.value(&path.key("repository"), check_location(repository))?;
+    if let Some(hot) = repo_hot {
+        reader.value(&path.key("repo-hot"), check_location(hot))?;
+    }
+    for (key, table) in ["options", "options-hot", "options-cold"]
+        .into_iter()
+        .zip(options)
+    {
+        if let Some(table) = table {
+            option_table(reader, &path.key(key), table)?;
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a location whose settings name a relative path, at the setting
+/// that names it under `path`, the location's table (§6.1).
+fn relative_path(reader: &Reader<'_, '_>, path: &Path, settings: &RepositorySettings) -> Read<()> {
+    let Some(field) = settings.relative_path() else {
+        return Ok(());
+    };
+    let (path, problem) = match field {
+        RepositoryField::Repository => (path.key("repository"), Problem::Value(LOCAL_PATH)),
+        RepositoryField::RepoHot => (path.key("repo-hot"), Problem::Value(LOCAL_PATH)),
+        RepositoryField::PasswordCommand => (
+            path.key("password-command"),
+            Problem::Password(PasswordProblem::RelativeProgram),
+        ),
+        RepositoryField::Option(name) => {
+            (path.key("options").key(&name), Problem::Value(LOCAL_PATH))
+        }
+        RepositoryField::OptionHot(name) => (
+            path.key("options-hot").key(&name),
+            Problem::Value(LOCAL_PATH),
+        ),
+        RepositoryField::OptionCold(name) => (
+            path.key("options-cold").key(&name),
+            Problem::Value(LOCAL_PATH),
+        ),
+    };
+    Err(reader.refuse(&path, problem))
+}
+
+/// The locations after the first (decision 80), each checked as the first
+/// is, at `locations[i]`: at most [`MAX_LOCATIONS`] in all, refused at the
+/// first one over.
+fn further_locations(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    first: &RepositorySettings,
+    tables: Vec<LocationTable>,
+) -> Read<Locations> {
+    if let Err(invalid) = check_location_count(tables.len()) {
+        let over = MAX_LOCATIONS.saturating_sub(1);
+        return Err(reader.refuse(
+            &path.key("locations").index(over),
+            Problem::Value(invalid.kind),
+        ));
+    }
+    let mut further = Vec::with_capacity(tables.len());
+    for (index, table) in tables.into_iter().enumerate() {
+        let path = path.key("locations").index(index);
+        let LocationTable {
+            repository,
+            repo_hot,
+            options,
+            options_hot,
+            options_cold,
+            when,
+        } = table;
+        let repository = reader.required(&path, "repository", repository)?;
+        location_values(
+            reader,
+            &path,
+            &repository,
+            repo_hot.as_ref(),
+            [&options, &options_hot, &options_cold],
+        )?;
+        let location = Location {
+            repository,
+            repo_hot,
+            options: options.unwrap_or_default(),
+            options_hot: options_hot.unwrap_or_default(),
+            options_cold: options_cold.unwrap_or_default(),
+            when: location_rule(reader, &path, when)?,
+        };
+        // The password is the repository's, and was checked at its key.
+        relative_path(
+            reader,
+            &path,
+            &location.with_password(first.password.clone()),
+        )?;
+        further.push(location);
+    }
+    Ok(Locations {
+        first_when: None,
+        further,
     })
+}
+
+/// A location's `when`, at `path`, the location's table (decision 80): each
+/// alternative's `network`, refused at its key when it names no kind, and
+/// its names, each refused at its place when empty or too long, and the
+/// alternative at its place when it has both `only` and `except`, names on a
+/// kind other than Wi-Fi, or a list empty or too long; then the list,
+/// refused at `when` when it is empty or too long.
+fn location_rule(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    tables: Option<Vec<AlternativeTable>>,
+) -> Read<Option<LocationRule>> {
+    let Some(tables) = tables else {
+        return Ok(None);
+    };
+    let at = path.key("when");
+    let mut alternatives = Vec::with_capacity(tables.len().min(MAX_RULE_ALTERNATIVES));
+    for (index, table) in tables.into_iter().enumerate() {
+        let place = at.index(index);
+        let AlternativeTable {
+            network,
+            only,
+            except,
+        } = table;
+        let network = reader.required(&place, "network", network)?;
+        let kind = reader.value(&place.key("network"), NetworkKind::parse(&network))?;
+        let only = only
+            .map(|names| network_names(reader, &place.key("only"), &names))
+            .transpose()?;
+        let except = except
+            .map(|names| network_names(reader, &place.key("except"), &names))
+            .transpose()?;
+        let names = reader.value(&place, NameFilter::of(only, except))?;
+        alternatives.push(reader.value(&place, Alternative::new(kind, names))?);
+    }
+    reader.value(&at, LocationRule::new(alternatives)).map(Some)
+}
+
+/// The names of an alternative's `only` or `except`, at `path`, each refused
+/// at its place when it can't be a network's name. The list's length is the
+/// alternative's to refuse; at most one more than it takes is read.
+fn network_names(reader: &Reader<'_, '_>, path: &Path, names: &[String]) -> Read<Vec<NetworkName>> {
+    names
+        .iter()
+        .take(MAX_NETWORK_NAMES.saturating_add(1))
+        .enumerate()
+        .map(|(index, name)| reader.value(&path.index(index), NetworkName::parse(name)))
+        .collect()
 }
 
 /// What a relative path a repository's settings name is refused as.

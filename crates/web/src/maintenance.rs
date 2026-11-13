@@ -1411,6 +1411,7 @@ mod tests {
             failure_code: None,
             result,
             repository: Some("demo".to_owned()),
+            locations: Vec::new(),
         }
     }
 

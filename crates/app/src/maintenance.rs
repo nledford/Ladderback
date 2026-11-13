@@ -337,6 +337,9 @@ pub struct RunMaintenance {
     sources: Arc<dyn NormalizeSources>,
     /// Where the end of each run is announced, when anything listens.
     events: Option<Arc<dyn EventBus>>,
+    /// Chooses the location an in-process open of the repository uses, as
+    /// the engine's own choice does for every job (decision 80).
+    locations: Option<Arc<crate::locations::ChooseLocation>>,
 }
 
 impl RunMaintenance {
@@ -363,7 +366,44 @@ impl RunMaintenance {
             hostname,
             sources,
             events: None,
+            locations: None,
         }
+    }
+
+    /// Opens the repository in-process, to apply a retention policy, at the
+    /// location `locations` chooses, never the first by default (decision
+    /// 80).
+    pub fn with_locations(self, locations: Arc<crate::locations::ChooseLocation>) -> Self {
+        Self {
+            locations: Some(locations),
+            ..self
+        }
+    }
+
+    /// The access retention opens in-process: the location the choice
+    /// makes now, for a repository reached at several, which a listing
+    /// before it doesn't decide; the access itself for one location. With no
+    /// choice to ask, a repository reached at several isn't opened at all.
+    async fn in_process(
+        &self,
+        op: OperationId,
+        access: &RepositoryAccess,
+    ) -> Result<RepositoryAccess, MaintenanceError> {
+        let several = access
+            .entry
+            .as_ref()
+            .is_some_and(|saved| saved.entry.has_several_locations());
+        if !several {
+            return Ok(access.clone());
+        }
+        let Some(locations) = &self.locations else {
+            return Err(MaintenanceError::Failed(FailureReason::NoLocationUsable));
+        };
+        locations
+            .locate(op, access.clone())
+            .await
+            .map(|located| located.access)
+            .map_err(|(reason, _)| MaintenanceError::Failed(reason))
     }
 
     /// Announces how each run ends on `events` (§4.4): once, after the last
@@ -800,6 +840,7 @@ impl RunMaintenance {
         let plans = plans_of(config, alias);
         let partition = self.partitioned(op, access.clone(), &plans).await?;
         let mut removals = Vec::new();
+        let mut opened: Option<RepositoryAccess> = None;
         for plan in &plans {
             let Some(group) = partition
                 .managed
@@ -818,13 +859,18 @@ impl RunMaintenance {
                     plan: plan.plan.clone(),
                 });
             }
+            let at = match opened.take() {
+                Some(at) => at,
+                None => self.in_process(op, access).await?,
+            };
             let ids = within_read_timeout(
                 self.clock.as_ref(),
                 self.retention
-                    .removes(access, &plan.policy, &group.snapshots)
+                    .removes(&at, &plan.policy, &group.snapshots)
                     .map(|answer| answer.map_err(|error| retention_failed(error, &plan.plan))),
             )
             .await?;
+            opened = Some(at);
             removals.push((plan.plan.clone(), ids));
         }
         let forget = ForgetPreview::new(&partition, removals);
@@ -1002,6 +1048,7 @@ impl RunMaintenance {
         let mut result = None;
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());
+        let ruled = crate::locations::ruled_positions(&job);
         let jobs = split(job);
         let total: usize = jobs.iter().map(names).sum();
         let last = jobs.len().saturating_sub(1);
@@ -1030,6 +1077,7 @@ impl RunMaintenance {
                     cancel.as_mut(),
                     done.as_ref(),
                     total,
+                    &ruled,
                 )
                 .await
             {
@@ -1059,8 +1107,9 @@ impl RunMaintenance {
     /// Plays one engine job's events into the operation until it reports a
     /// result (the operation is left running for the caller to settle) or
     /// the operation ends: failed, or cancelled. `done` is what the jobs
-    /// before this one finished, and `total` how many snapshots the whole
-    /// run names.
+    /// before this one finished, `total` how many snapshots the whole run
+    /// names, and `ruled` the positions of the repository's locations that
+    /// have a rule.
     async fn play(
         &self,
         operation: &mut Operation,
@@ -1068,6 +1117,7 @@ impl RunMaintenance {
         mut cancel: Pin<&mut (impl FusedFuture<Output = ()> + Send)>,
         done: Option<&EngineResult>,
         total: usize,
+        ruled: &[u8],
     ) -> Played {
         let RunningJob {
             events,
@@ -1105,6 +1155,15 @@ impl RunMaintenance {
                             let _ = operation.record_warning(warning);
                         }
                         EngineEvent::Succeeded(reported) => return Played::Reported(reported),
+                        // A run of several jobs keeps the first job's choice:
+                        // the operation says once where it went.
+                        EngineEvent::Located(record) => {
+                            if operation.locations().is_none() {
+                                let _ = operation.record_locations(record, |position| {
+                                    ruled.contains(&position)
+                                });
+                            }
+                        }
                         EngineEvent::Failed(reason) => {
                             note_partial(operation, done, total);
                             let _ = operation.fail(reason, self.clock.now());
@@ -1765,6 +1824,7 @@ mod read_timeout_tests {
         unrecorded.entry = Some(SavedEntry {
             alias: RepositoryAlias::parse("demo").expect("an alias"),
             entry: RepositoryConfig {
+                locations: Default::default(),
                 settings: RepositorySettings {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,

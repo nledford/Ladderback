@@ -2,7 +2,7 @@
 
 **A repository keeps its one `repository` setting as its first location and may list further locations after it, in order; each location has its own backend settings and credentials and an optional rule for when it may be tried. Before a job that opens the repository the daemon walks the list, skips every location whose rule doesn't hold, probes the rest with a bounded check, and uses the first that answers and holds the same repository ID. A rule chooses which address to try, never whether to trust it** (recorded 2026-11-12, §3.1, §5, §6.1, §6.2, §7.3, §9, §10.6; #424). The issue came out of a real run of 0.2.0: a laptop backs up to one REST repository by the server's LAN address at home and by a public HTTPS address away from it, and the person's rustic setup tries the LAN address first. Ladderback had one location per repository, so the imported plan took the slow route even at home, and a person who wanted both had to keep two entries and two plans, which decision 49 forbids for one repository.
 
-The terms are in the glossary first (§3.1): **location**, **location rule**, **network link**, **probe**. The rest of this record is what was decided, with what was rejected and why, the platform evidence for the rules, the parts of the pull request, and the choices the maintainer should confirm. The scenarios are in the appendix, not in `features/`: see "Where the scenarios live".
+The terms are in the glossary first (§3.1): **location**, **location rule**, **network link**, **probe**. The rest of this record is what was decided, with what was rejected and why, the platform evidence for the rules, the parts of the pull request, and the choices the maintainer should confirm. The scenarios of all three parts are in `features/repositories/repository_locations.feature` (and `features/execution/scheduler.feature` for the scheduler's skip): see "Where the scenarios live".
 
 ## Choices to confirm
 
@@ -13,9 +13,9 @@ These are the places where this record chose between reasonable options. Each is
 3. **When a skip is information and when it is a warning** (point 8): a location with no rule that is silent, refuses or isn't the repository is information, so a backup made away from home is a plain `Succeeded`; a location whose rule *held* and was skipped anyway, another repository, and an unresolved reference are warnings.
 4. **The macOS Wi-Fi rule reads the name through `system_profiler`** (point 10), the one route the test showed working for a launchd-started program, with no unsafe code and no new crate; CoreWLAN, the documented API, returned nothing. It is slow (4 to 9 s) and is Apple's human-readable report, so Apple can redact it in a later release; the rule then says it is unavailable and no location depends on it.
 5. **Unsafe code is not needed**, and the maintainer's authorization of it for the Wi-Fi reader is recorded as a standing rule with its conditions (point 11), not used. Confirm that it is better recorded in §13.5 now than only when a route needs it.
-6. **Linux reads the Wi-Fi name with the `dbus` crate already in the tree** (point 10), not with `nmcli` and not with a new `zbus` dependency. The Linux route is documented, not run: the only machine for this record is a Mac.
+6. **Linux reads the Wi-Fi name with the `dbus` crate already in the tree** (point 10), not with `nmcli` and not with a new `zbus` dependency. The Linux reader is tested against a stand-in NetworkManager on a private bus, in Linux CI and in a Linux container; a run on a Linux desktop with NetworkManager is owed, and will be made on the maintainer's Linux machine during his real-world test before the next release (point 12).
 7. **The probe is a short-lived worker per location** (point 5), so a backend that hangs is killed rather than abandoned. The price is that a repository with several locations opens twice per job.
-8. **Scenarios go in the appendix** (below) because no tag keeps a scenario from the runners today. A small change to both Rust runners and the UI runner (a `@later` tag they skip) would let them live in `features/` from this pull request.
+8. **Scenarios of a part not yet built waited in an appendix of this record**, because no tag keeps a scenario from the runners; each part moved its own into `features/` with its steps, and the appendix is gone now that all three have. A small change to both Rust runners and the UI runner (a `@later` tag they skip) would have let them all live in `features/` from the first part.
 9. **A rustic export writes the first location** and says how many it left out (point 9).
 10. **A repository with several locations must record its ID** (point 2): the config refuses `locations` on an entry with no `repository-id`. Without it the first location to answer would define the repository.
 11. **A scheduled run is skipped only when every rule is known not to hold** (point 4); an unreadable rule starts the run and fails it where it is recorded, notified and retried.
@@ -49,7 +49,7 @@ options = { }
 - **Each `[[repositories.<alias>.locations]]` table is one further location**, with the same five location keys and `when`, and no other key. They are tried in the order written, after the first.
 - **No inheritance.** A location's options never apply to another location. A credential written in the first location's `options` is never sent to the second location's server: that would hand one server's key to another. A second location that needs the same option writes it again, as a reference (`${VAR}`, `${file:/abs/path}`) like any other (§10.2). The password sources are the repository's, not a location's, since they open the repository, not a server.
 - **Each location keeps the secret rules of §10.2 and §6.1**: references stay references in `config.toml`, are resolved when a job starts, and are masked wherever they land (I4). **Who resolves what, and when:** the repository's password is resolved once per job and given to every probe and to the job; a location's own references are resolved when that location is about to be probed, never before, and the values are kept for the job (each distinct reference is read once per job, §10.2, so the probe and the job see one value). A reference that doesn't resolve skips that location (`secret-unavailable`, naming the source, never a value) and the choice goes on; it fails nothing else. A worker's `JobSpec` holds only what that worker uses, so a probe's redactor is built from the password's secrets and its one location's, and the job's from the chosen location's; the daemon's own redactor, which masks every text a worker writes, holds the secrets of every location resolved so far in the choice (`Redactor::for_repository` takes the settings of all of them, so none can be left out, as the hot and cold halves of a repository can't, §10.2). The time to resolve a reference is the resolver's own limit (§10.2), not the probe's bound.
-- **Caps.** At most 4 locations in all; `when` has at most 8 entries; `only` and `except` at most 16 names, each at most 32 bytes, the longest a Wi-Fi network name can be. The caps of §6.1 (64 KiB a location, 64 KiB an option, 64 options a set, 16 rclone credentials) apply to each location, and the redactor's 256 KiB of secrets (§10.2) to each worker's own secrets and to the daemon's redactor of the choice, which holds the sum: a choice over the cap fails `secrets-too-large-to-mask` as a job does.
+- **Caps.** At most 4 locations in all; `when` has at most 8 entries; `only` and `except` at most 16 names, each at most 32 bytes, the longest a Wi-Fi network name can be. The caps of §6.1 (64 KiB a location, 64 KiB an option, 64 options a set, 16 rclone credentials) apply to each location, and the redactor's 256 KiB of secrets (§10.2) to each worker's own secrets, the password and its one location's: a location over the cap fails the job `secrets-too-large-to-mask`, as a job of one location does. The daemon keeps no redactor of the choice, as it writes nothing that could hold a location's secret: outcomes are codes, and a source names where a secret was looked for, never its value.
 - **A path in a location is absolute** (§6.1): the rules for `http-cacert` and the rest apply to every location.
 - **The schema stays at version 1.** New optional keys, as decision 72's were: a file that doesn't use them reads as before, and nothing is migrated. A build that predates this decision refuses a file that does, because tables refuse unknown keys; the history keeps the old file (§6.1), so going back means restoring one.
 - **A repository with more than one location records its ID.** `[[repositories.<alias>.locations]]` is refused on an entry that has no `repository-id`, as `MissingKey` at the table, with the way out in the message: run a job on the repository once (a Test or a backup records the ID, decision 57), or write the ID the Repositories page shows. This is what makes the same-repository check mean something: with no recorded ID, whichever location answered first would define the repository, a record that fails (a read-only file, a lost race: decision 57 skips it) would leave two locations that hold two repositories used by turns with every run `Succeeded`, and a hostile first location would win the recording.
@@ -83,9 +83,10 @@ A location's `when` is a list of alternatives; the location is eligible when any
 
 ### 4. Where a rule is evaluated
 
-- **At the scheduler**, with the run conditions, for a run the schedule starts (a scheduled run or a catch-up; a retry goes straight to the check at the start, below, and its failure spends an attempt like any failed retry): if the repository's locations all have a rule and every one is *known not to hold* (the link was read and the rule isn't met), the run is *skipped* the way an unmet condition is (`ScheduleEvent::Skipped`, a new `UnmetCondition::NoLocationRuleHolds`), recorded as a line of the daemon's log naming the plan and the reason, no operation. Next run as usual. **A rule that can't be evaluated never skips a run here:** it may be a platform that hides the name, or a name not readable yet just after a wake, and a skip leaves no operation, no notification and no retry, so every scheduled run could vanish unseen. The run starts, and the check below fails it where it is recorded, notified and retried. One reading of the link is taken per scheduler wake, whatever the number of due plans, and reused for 60 s (`LINK_REUSE`) by the checks at a job's start, so a slow reader (`system_profiler`, 4 to 9 s, point 10) can't stall the loop once per plan; the name is read only when some due plan's rule asks for one, and the read is bounded.
+- **At the scheduler**, with the run conditions, for a run the schedule starts (a scheduled run or a catch-up; a retry goes straight to the check at the start, below, and its failure spends an attempt like any failed retry): if the repository's locations all have a rule and every one is *known not to hold* (the link was read and the rule isn't met), the run is *skipped* the way an unmet condition is (`ScheduleEvent::Skipped`, a new `UnmetCondition::NoLocationRuleHolds`), recorded as a line of the daemon's log naming the plan and the reason, no operation. Next run as usual. **A rule that can't be evaluated never skips a run here:** it may be a platform that hides the name, or a name not readable yet just after a wake, and a skip leaves no operation, no notification and no retry, so every scheduled run could vanish unseen. The run starts, and the check below fails it where it is recorded, notified and retried. One reading of the link is taken per scheduler wake, whatever the number of due plans, so a slow reader (`system_profiler`, 4 to 9 s, point 10) can't stall the loop once per plan; the name is read only when some due plan's rule asks for one, and the read is bounded. The check at a job's start takes a reading of its own. **Reusing the scheduler's reading there for 60 s (`LINK_REUSE`) was not built:** the job's reading decides where the job goes, and the scheduler's only whether a run is skipped, so a reading up to a minute old would choose a location for a network the machine may have left since (a run waits in the queue, and a wake changes the network); the price is a second read per scheduled job, seconds on macOS for a rule with names, before a backup that takes far longer.
 - **At the start of every job that opens the repository**, as the first step of choosing (point 5), because the link may have changed while the run waited in the queue. If no rule holds then, or none can be evaluated, the operation fails with `no-location-rule-holds` (a new `ErrorCode`, naming each location's reason), which a scheduled run retries under decision 76.
 - **A run started by a person, the hub or MCP** isn't skipped: it fails the same way at the start, at once, naming each location's reason, because someone is waiting for an answer.
+- **With the run conditions, in order.** A run condition is checked first: a run whose power condition isn't met is skipped for that reason, and the link isn't read. A power source the platform can't report doesn't hold a run back, so the rules then decide: when they skip the run, the skip names the rules alone. The link is read once for all the plans due together, so their rules see one network, and the rules a plan's run sees are the configuration's as it is when the run comes due: a rule given or changed while the agent serves holds from the next run.
 
 ### 5. The probe and the choice
 
@@ -95,7 +96,7 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **Outcomes** (`LocationOutcome`, one code each, never a sentence, §8.4): `used`; skipped as `rule-not-met`, `rule-unknown`, `silent` (no answer by the bound, a refused connection, no route, a name that doesn't resolve), `refused` (it answered and refused the credentials: an HTTP 401 or 403, a failed SSH login), `not-a-repository` (it answers, and no repository's `config` is there), `other-repository` (the ID differs from the repository's), `password-not-accepted` (the repository's password opens nothing there) and `secret-unavailable` (a reference of this location didn't resolve; the code names the source, never a value, §10.2).
 - **The same-repository check.** Every location must hold the repository's ID, and the ID is the one the entry records as `repository-id` (decisions 49 and 57), which a repository with several locations always has (point 2). A location whose ID differs is **refused and never used**, whatever its rule said and wherever it is in the list; the run goes on to the next location, and the skip is a warning (point 8). The cache slot stays keyed by the repository ID (§3.1, decision 59), which is why all locations share one cache: a cache of one repository serves any copy of it, and what the cache holds is by ID and by content hash. A password that opens nothing at a location is `password-not-accepted`, not a failure of the job by itself: an address answered by a different repository gives exactly that answer, and the person's password hasn't changed between two addresses of one repository; if every location that was tried says it, the job fails as a password error (point 6).
 - **Choosing.** The first location, in order, whose rule held and whose probe returned `used`. A repository with one location is not probed: it is opened as before, and its failures are the ones decision 36 and the engine already say.
-- **Every open of the repository goes through the choice.** `ResolveRepository::resolve_saved` makes it and returns the access of the one location chosen, with its position; every job, and the in-process open of `RusticRetention` (which opens the `RepositoryAccess` the use case resolved, to apply a policy for a forget's selection and its preview, decision 49 point 5), therefore uses that location and no other. Retention never opens the first location by default: that would send its credentials on a network the rule excluded, skip the ID check, and hang in the daemon's own process, the case the probe moves into a worker that can be killed. A listing or preview followed by a forget that must open the repository again takes the choice again.
+- **Every open of the repository goes through the choice.** The choice is made by `app::locations::ChooseLocation`, an `Engine` that wraps the daemon's engine, so every job that opens a repository passes through it, whichever path started it (a manual, scheduled, retried or resumed backup, a listing, a check, a maintenance job): when the job is handed to the engine, a job whose access names an entry of several locations is held while the choice runs, then started with the access of the one location chosen, its position recorded. It wraps decision 81's `RecordOpened`, not the other way round, so the record of an opened repository's ID sees the job at its chosen location and never a probe; an entry of several locations always records its ID (point 2), so decision 81's identify never runs before such a job. The in-process open of `RusticRetention` (which opens the `RepositoryAccess` the use case resolved, to apply a policy for a forget's selection and its preview, decision 49 point 5) asks the same choice first (`RunMaintenance::with_locations`, which calls `ChooseLocation::locate`) and opens the location it returns; without a choice to ask, a repository of several locations isn't opened in-process at all (`no-location-usable`). Retention never opens the first location by default: that would send its credentials on a network the rule excluded, skip the ID check, and hang in the daemon's own process, the case the probe moves into a worker that can be killed. A listing or preview followed by a forget that must open the repository again takes the choice again. A stop of the job while a probe runs stops the probe, and nothing is started after it.
 - **A job's cost.** A repository with several locations opens twice per job: once in the probe, once in the job. It reads a few small files and derives the key once more; against a backup this is not measurable, and against hourly runs on a laptop it is a second a run at most. A probe that *kept* its open repository for the job would save it, and needs the job to share the probe's process, which the kill rule above forbids. Rejected for that reason.
 
 ### 6. When nothing is usable
@@ -120,7 +121,7 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **A Wi-Fi name can be copied.** Anyone can start a network with the name of yours. A rule `only = ["Office"]` makes the location eligible on that network, and an address such as `192.168.1.10` can mean another machine there; a network that happens to use the same private range does this without any attack. Whatever answers is then sent the location's credentials. For a REST location over plain HTTP that is the user name and password, in the clear, before any check of the repository's ID (a REST server needs them for the first request, the read of `config`); the ID check comes after the first authenticated request and can't take them back. The repository's *data* stays safe: its password never travels (the key is derived on the machine) and its contents are encrypted. What an impostor gets is the backend credentials and the encrypted data of that run, and it can refuse service (which falls through to the next location).
 - **So a location that sends its credentials where an impostor could read them is warned about**, in the UI and in the log (point 8): `location-plain-http-credentials`, naming the repository and the location's position and a cause, never the address or a credential. The causes are the ones Ladderback can see: `plain-http`, a `rest:` location written `http://` that carries a user and password or a credential option; `unchecked-certificate`, an `https` REST location with `http-insecure-tls` true, which makes rustic accept any certificate, so an impostor reads the credentials as it would on plain HTTP (`danger_accept_invalid_certs`, `reqwest.rs` of `rustic_backend` at the pinned revision); `plain-endpoint`, an OpenDAL location whose `endpoint` or `url` option is an `http://` address and that carries a credential option, and an `rclone:` connection string whose `url` setting is `http://` with a credential, which §10.2 already parses; `plain-ftp`, `opendal:ftp` with a credential. The check runs on the location as written, when the daemon loads the configuration and on the page, and again on the resolved form when the choice resolves it, since `${…}` can hold a scheme or a user and password: a warning from the resolved form is a log line at warning level for that job, never an operation warning (a backup every hour would end `SucceededWithWarnings` for a choice made once). A scheme a reference leaves unknown (`rest:${URL}`) is checked once resolved. An `rclone:` remote set up in rclone's own configuration file is not seen. The warning is not a refusal: a LAN with no TLS is a reasonable thing to have, and a person who has made it a choice keeps it.
 - **Recommend HTTPS on the LAN.** A server on the LAN with its own certificate authority protects the credentials against an impostor, since the impostor can't present a certificate that authority signed. rustic's option is `http-cacert`: the path of a certificate file (PEM) to trust in addition to the system's, read by `rustic_backend`'s HTTP client for REST (`reqwest.rs`, `get_cacert`, at the revision the workspace pins), and `http-tls-client-cert` for a client certificate. The path must be absolute (§6.1). The warning's text names it. Ladderback doesn't read or manage the certificate, and passes the option as written.
-- **Residual risk, stated plainly.** (1) On plain HTTP, whoever answers at the address on a network that passes a rule receives the credentials; the warning is all Ladderback does about it. (2) A Wi-Fi name is a hint about where the machine is, not proof; nothing in the design treats it as one. (3) An impostor that holds an old copy of the repository passes the ID check, and a backup written to it would fork the history from the real one; this is true of any repository whose address can be spoofed, one location or several, and a LAN rule raises the chance, because the address is on a network anyone nearby can join. Only TLS with a trusted authority closes it. (4) A probe sends credentials to whatever answers, as an open does.
+- **Residual risk, stated plainly.** (1) On plain HTTP, whoever answers at the address on a network that passes a rule receives the credentials; the warning is all Ladderback does about it. (2) A Wi-Fi name is a hint about where the machine is, not proof; nothing in the design treats it as one. (3) An impostor that holds an old copy of the repository passes the ID check, and a backup written to it would fork the history from the real one; this is true of any repository whose address can be spoofed, one location or several, and a LAN rule raises the chance, because the address is on a network anyone nearby can join. Only TLS with a trusted authority closes it. (4) A probe sends credentials to whatever answers, as an open does. (5) rustic gives no typed status for a refusal, so the probe tells `refused` by the text of rustic's error chain at the pinned revision (`401 Unauthorized`, `403 Forbidden`, OpenDAL's `PermissionDenied`); three probe tests pin those texts, so an upgrade that changes one fails a test rather than turning a refusal into another outcome (`crates/adapters/engine/src/worker/repository.rs`). (6) An SFTP server that refuses the login says so in no text the probe looks for, so that location is `silent`, not `refused`: information without a rule, as a refusal is, but its row reads "did not answer". (7) A VPN or other tunnel that carries all of the machine's traffic is its default route, so the link reads as other while it is up (`utun` on macOS; point 10): a `wired` or `wifi` rule doesn't hold then, and a LAN location so ruled is skipped, as is a scheduled run of a repository whose every location is so ruled. The page says so under each rule. A person who backs up through such a VPN leaves that location without a rule, or gives it a rule that the link meets with the VPN up (on Linux, `wg-quick` keeps the physical interface as the default route of the main table, so a `wired` or `wifi` rule still holds there).
 - **No new place for a secret.** A location's secrets are references like any other (I4). The warning, the log, the operation record and every event name a location by its position and never carry its address with a credential in it (point 8). The network name is not logged (point 3).
 
 ### 8. What is recorded, and what the person sees
@@ -128,14 +129,14 @@ A location's `when` is a list of alternatives; the location is eligible when any
 - **The operation** (§9): `operations` gains two nullable columns, `location_no` (the position, from 1, of the location the job used) and `locations_json` (every location of the entry as the run saw it, in order, the ones the choice never reached included: its position, its address as the entry writes it with credentials masked and the text cut at 256 bytes on a character boundary, and its outcome code, `not-tried` for a location after the one used; "location 2 of 2" is read from it). Both stay empty for a repository of one location and for every operation that doesn't open one. The address is kept as the run knew it, for the reason decision 52 kept the alias: the entry may change afterwards. The migration is one-way, as decision 52's was.
 - **When a skip is information and when it is a warning.** `locations_json` and the operation's row show every skip. A skip changes how the operation ended only when it says something is wrong. It is **information** when the location has no rule and the outcome is `silent`, `refused`, `not-a-repository` or `password-not-accepted`: without a rule, the address may be someone else's on this network (a router's login page answers `401`, a printer `404`), and a backup made away from home, where the LAN address is silent every time, is a plain `Succeeded`; and for `rule-not-met` and `rule-unknown`, which say what the machine knew. It is a **warning** (`location-skipped`, with the position and the outcome; the operation ends `SucceededWithWarnings`) when the location's rule *held* and it was skipped all the same, whatever the outcome (the person said it should work on this network: a LAN server that moved or died is found at once, not after months of backups to the public address), and always for `other-repository` and `secret-unavailable`, which are wrong whatever the network. An `other-repository` is also a log line at warning level naming the repository and the position.
 - **The log** says, for each job on a repository with several locations, which location was used and why each earlier one was skipped, as outcome codes with positions, with no address and no network name.
-- **The pages.** The Repositories page lists a repository's locations in order, each with its rule in words, and says "tried first" on the first; its warning rows (`location-plain-http-credentials`, and "every location has a rule" and "the last location has a rule and the plan has no retry") are notes on the row, not errors. **Test** runs the probe for every location, not only the first, and shows each one's outcome, the way a person checks a new address before trusting a backup to it. The Operations page's row for an operation says "Used location 2 of 2" with the address as recorded (credentials masked); the operation's detail lists the earlier locations and their outcomes in the order tried. Status is text and icon, never colour alone (A2).
+- **The pages.** The Repositories page lists the locations of a repository reached at several, in order, in the row's Location cell (a list named "Locations of nas"): each by position, its address masked, its options by name with a value shown only when it is references alone (`${LAN_KEY}`, `domain::secrets::only_references`), and "tried first" on the first, and part 2 adds each location's rule in words; a repository of one location shows its address as before. Its warning rows (`location-plain-http-credentials` now, "every location has a rule" and "the last location has a rule and the plan has no retry" with part 2) are notes on the row, not errors. **Test** runs the probe for every location, past the one a job would use, so each has an outcome of its own, and records nothing: no operation, no repository ID. The API offers it for every entry, one location included; the page offers it on the rows that list several locations, as a row button ("Test the locations of nas") whose outcomes go into that list, one per location, and whose refusal is the row's alert. The Operations page's Result cell says "Used location 2 of 2" with the address as recorded (credentials masked) for every operation whose choice used one, whatever became of the run, after what the run produced. No operation detail view exists yet, so the earlier locations and their outcomes in the order tried are in the API's operation summary (`locations`) only, until that view is built. Status is text and icon, never colour alone (A2).
 - **Maintenance owner and the hub.** Locations are a matter of each machine's own configuration and stay on it: the sync protocol carries the repository's ID and an alias, and the operation records it sends (`OpEvent`) carry no location, no position and no outcome, so the hub learns nothing of where a laptop was from them (an outcome such as `rule-not-met` under a Wi-Fi rule would say so). What Ladderback writes into a log never has an address or a network name, but a log a hub fetches (`FetchLog`) holds what logs hold, rustic's own lines among them, which name the repository's address with credentials masked (§10.2): that is not new, and is a residual risk of §10.6. The hub shows an operation without a location. I1 is keyed by the repository ID, so every location is one repository for ownership; the hub has its own entry and its own locations for a repository it maintains (§7.3), and two agents reach one repository by different locations. A maintenance job (forget, prune, check) chooses a location as a backup does; I7 is unchanged, since it counts one running maintenance operation per repository ID however it was reached.
 - **Duplicates (decision 49).** An entry's locations count as its location, with the rules of decision 49 otherwise unchanged: two entries with one recorded ID are one repository, and it is the ID that decides when both know one; with no ID known to either, two entries are one repository when any location of one is at the same location as any location of the other (same string, hot half and non-credential options; on a drive, its credentials too). Two locations of one entry may not be at one location, and are refused at the second's key (`Value(Location)`). An import into an existing alias at the same location of any of its locations adds the plans to that entry and keeps it. Decision 49's file notes the extension.
 
 ### 9. Import and export
 
 - **Import** is unchanged: a profile has one repository, which becomes the entry's first location and keeps its `repo-hot` and options in it; no rule and no further location is made. Rustic's own `repo-hot` stays inside that location (decision 5): it is the other half of one location, not a second location. Nothing about it is mapped to `locations`.
-- **Export** writes the first location, as the profile's `repository` and its options, and drops `when` with the other Ladderback-only keys. When the entry has more locations, the export says so with a notice (`profile-locations-not-exported`, with the number left out), since rustic has no fallback and the profile will point only at the first address, which may be the one that's silent away from home. *Rejected: the first location without a rule*, which is the likelier to work but would make the export differ from the first line of the entry with no way for the person to see why; the notice is the honest answer.
+- **Export** writes the first location, as the profile's `repository` and its options, and drops `when` with the other Ladderback-only keys. When the entry has more locations, the export says so with a notice (`profile-locations-not-exported`, with the number left out), since rustic has no fallback and the profile will point only at the first address, which may be the one that's silent away from home. The profile writer gives the notice (`ProfileNotice::LocationsNotExported`, the adapter and its fake alike, held by the port's contract suite), as it gives `RetentionEmpty`. *Rejected: the first location without a rule*, which is the likelier to work but would make the export differ from the first line of the entry with no way for the person to see why; the notice is the honest answer.
 
 ### 10. Platform feasibility, shown
 
@@ -159,15 +160,19 @@ What the WireGuard apps do, from their source (wireguard-apple, MIT, `Sources/Wi
 | Question | Linux | macOS |
 |---|---|---|
 | Which interface carries the default route | `/proc/net/route` and `/proc/net/ipv6_route`, the default entry with the lowest metric of either family | `route -n get default`, `interface:` |
-| Wired, Wi-Fi or other | `/sys/class/net/<if>/phy80211` (a symlink the kernel's cfg80211 makes for every wireless interface, `net/wireless/core.c`) or a `wireless` directory (wireless extensions) says Wi-Fi; otherwise `type` is `1` (ARPHRD_ETHER, `if_arp.h`) and the interface isn't virtual (its `/sys/class/net/<if>` link doesn't point under `/sys/devices/virtual/`) says wired; `operstate` and `carrier` as decision 63 reads them | `networksetup -listallhardwareports`: the port whose Device is the interface. "Wi-Fi" is Wi-Fi; a port that isn't Wi-Fi, Bluetooth PAN, Thunderbolt Bridge or a phone's tethering port is wired (port names vary: this Mac lists "Ethernet Adapter (en4)", and what other Macs call theirs is [INFERENCE]); the rest is other. *The Wi-Fi side is shown on this Mac; the wired side isn't, because the Mac was on Wi-Fi* |
+| Wired, Wi-Fi or other | `/sys/class/net/<if>/phy80211` (a symlink the kernel's cfg80211 makes for every wireless interface, `net/wireless/core.c`) or a `wireless` directory (wireless extensions) says Wi-Fi; otherwise `type` is `1` (ARPHRD_ETHER, `if_arp.h`) and the interface isn't virtual (its `/sys/class/net/<if>` link doesn't point under `/sys/devices/virtual/`) says wired; `operstate` and `carrier` as decision 63 reads them | `networksetup -listallhardwareports`: the port whose Device is the interface. "Wi-Fi" is Wi-Fi; a port that isn't Wi-Fi, Bluetooth PAN, Thunderbolt Bridge or a phone's tethering port is wired (port names vary: this Mac lists "Ethernet Adapter (en4)", and what other Macs call theirs is [INFERENCE]); the rest is other. *The Wi-Fi side is shown on this Mac; the wired side isn't, because the Mac was on Wi-Fi.* As built, the Wi-Fi port is Wi-Fi, another hardware port is "not Wi-Fi", and an interface that is no hardware port (a `utun` tunnel) is other |
 | The Wi-Fi network's name | NetworkManager over D-Bus (below) | `system_profiler -json SPAirPortDataType`: the current-network block of the Wi-Fi interface. Shown to work |
 
-- **macOS, the name: the system profile.** `system_profiler -json SPAirPortDataType`, run as decision 63 runs `pmset` and `scutil`: by absolute path (`/usr/sbin/system_profiler`), no environment, through the spawn gate, output bounded to 1 MiB and time to 15 s (it took 4 to 9 s here). Its answer is read as a name only when the Wi-Fi interface's block has a name that isn't `<redacted>` and isn't empty; any other answer is "the name can't be read", and every rule that needs it doesn't hold (point 3). **No unsafe code and no new crate.** Costs: it is slow, so it is read only when a rule asks for names (the kinds of link need no name) and once per choice; and it is a human-oriented report whose redaction Apple has changed before (the other three readers above are already redacted), so a macOS release that redacts it turns every name rule into "unavailable" with the message below, and the person's location with no rule carries on. This is why the rule is *offered* on macOS and not *promised*: the Wi-Fi rule's availability on macOS is a measurement, repeated in the pull request (below), not a property of the design.
-- **macOS, if the name is unreadable.** The Repositories page says, for a rule with names, "Ladderback can't read this Mac's Wi-Fi network name, so this rule doesn't apply and the location is skipped. The rule 'wired' or 'Wi-Fi' needs no name." The same message is in the log once per start; a rule with only kinds is unaffected.
+- **macOS, the name: the system profile.** `system_profiler -json SPAirPortDataType`, run as decision 63 runs `pmset` and `scutil`: by absolute path (`/usr/sbin/system_profiler`), no environment, through the spawn gate, output bounded to 1 MiB and time to 15 s (it took 4 to 9 s here). Its answer is read as a name only when the Wi-Fi interface's block has a name that isn't `<redacted>` and isn't empty; any other answer is "the name can't be read", and every rule that needs it doesn't hold (point 3). **No unsafe code and no new crate.** Costs: it is slow, so it is read only when a rule asks for names (the kinds of link need no name) and once per choice of location; and it is a human-oriented report whose redaction Apple has changed before (the other three readers above are already redacted), so a macOS release that redacts it turns every name rule into "unavailable" with the message below, and the person's location with no rule carries on. This is why the rule is *offered* on macOS and not *promised*: the Wi-Fi rule's availability on macOS is a measurement, repeated in the pull request (below), not a property of the design.
+- **If the name can't be read**, on either platform: every alternative that lists names is `rule-unknown` (point 3), and the Repositories page notes each location whose rule lists names (`location-rule-name-unreadable`, with the position): "Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location 1, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of `wired` or `wifi` alone needs no name." The daemon learns it from its own reads (`app::conditions::NameWatch`, which wraps the port): the note is shown while the last read of the name failed. So that the page can say it before any run has asked, the first listing of the Repositories page that has a rule with names reads the name once per start, in the background, as the read may take seconds (`NameWatch::check_once`); the note shows from the next listing. The first failed read since the start is said once in the daemon's log, with no name. A rule with only kinds is unaffected.
 - **CoreWLAN in-process was rejected**, not for the unsafe it needs (point 11) but because the test showed it returns nothing for a launchd-started binary without a Location grant that a bare binary can't be shown to receive. In objc2-core-wlan 0.3.2 the generated signatures are `pub unsafe fn ssid(&self) -> Option<Retained<NSString>>` (`CWInterface.rs`, line 91), `pub unsafe fn sharedWiFiClient() -> Retained<CWWiFiClient>` (`CWWiFiClient.rs`, line 203) and `pub unsafe fn interface(&self) -> Option<Retained<CWInterface>>` (line 214); a throwaway crate with `#![forbid(unsafe_code)]` failed to compile with three `E0133` errors, one for each. Its licence (`Zlib OR Apache-2.0 OR MIT`), MSRV (1.71), last release (2025-10-04) and size would have been acceptable.
+- **macOS's `wired` is unknown until it is shown.** No run on a Mac on Ethernet was made for part 2, so a hardware port that isn't Wi-Fi reads as "not Wi-Fi" (`Link::NotWiFi`): a `wifi` alternative is decided on it (not met), and a `wired` alternative can't be (`rule-unknown`), so it never holds on macOS and never makes the scheduler skip (point 4). The Repositories page notes each location whose rule asks for a wired network on a machine that can't tell one (`location-rule-wired-unknown`, with the position). A later run on Ethernet that shows how a Mac names its wired ports turns it into a reading.
+- **No default route is unknown.** Just after a wake, or with no network, there is no default route; nothing says where the next one will leave by, so every alternative is `rule-unknown` on both platforms (`Link::NoRoute`), not "not met": the scheduler doesn't skip on it, and a job fails `no-location-rule-holds` and is retried. On macOS, `route -n get default` exits 1 when there's no default route; that exit is read as unreadable, which is unknown as well.
 - **What a VPN does.** The link is the default route's interface, so a full-tunnel VPN makes it "other" on macOS (a `utun` interface), where a Linux `wg-quick` tunnel keeps the physical interface in the main routing table (it routes with a firewall mark): one configuration can behave differently on the two, and a rule that needs wired or Wi-Fi doesn't hold behind a full tunnel. The issue's first row, a LAN address reached through a VPN everywhere, has no rule, which is the intended setup. The page says a rule may not hold behind a VPN.
 - **The gateway's MAC address** (`route` and `arp`, which worked with no special rights from launchd, and `/proc/net/route` with `/proc/net/arp` on Linux) identifies the router rather than the network, needs no permission and works the same on both platforms. **Not adopted as a rule here**: it is spoofable as a name is (ARP carries no proof), changes when the router is replaced, and isn't what the maintainer asked for; but it is the one reader a macOS release can't redact, and `network = "gateway"` is a further alternative the `when` table takes without a schema change. Offered as the answer if the name becomes unreadable for good.
-- **Linux, the name: NetworkManager over D-Bus, with the `dbus` crate already in the build.** The properties are `org.freedesktop.NetworkManager.Device.Wireless.ActiveAccessPoint` (an object path) and `org.freedesktop.NetworkManager.AccessPoint.Ssid` (`ay`, bytes, per NetworkManager's D-Bus API reference). NetworkManager's own bus policy (`org.freedesktop.NetworkManager.conf`) lets the default, unprivileged context use the `DBus.Properties` interface and the `AccessPoint` and `Device.*` interfaces ("read-only properties, no methods"), so no polkit prompt or privilege is needed. Compared: the `dbus` crate 0.9.12 (`Apache-2.0/MIT`, no MSRV declared, last release 2026-07-03, blocking API) is already a workspace dependency (`dbus = { version = "0.9.12", default-features = false }` in the root `Cargo.toml`) and a dependency of `dbus-secret-service`, so it adds no crate to the build; `zbus` 6.2.1 (MIT, MSRV 1.89, released 2026-11-01) is the maintained pure-Rust choice, brings an async runtime's worth of dependencies, and a second version beside the 4.4.0 already in `Cargo.lock` through `secret-service`; the `nmcli` command (`nmcli -t -f ACTIVE,SSID device wifi list`) needs no crate, as the macOS reader, but parses text with its own escaping and shows only networks in the scan list. The `dbus` crate is chosen, called from `spawn_blocking` with the bus's own call timeout, in `crates/adapters/platform` only. A machine with no NetworkManager (a server, or a desktop on iwd alone) has no reader, and the Wi-Fi name rules say "unavailable" there. **Not run here**: this Mac has no NetworkManager; the pull request's tests use a fake bus (stand-in service) and the author runs it once on a Linux desktop and quotes the result.
+- **Linux, the name: NetworkManager over D-Bus, with the `dbus` crate already in the build.** The properties are `org.freedesktop.NetworkManager.Device.Wireless.ActiveAccessPoint` (an object path) and `org.freedesktop.NetworkManager.AccessPoint.Ssid` (`ay`, bytes, per NetworkManager's D-Bus API reference). NetworkManager's own bus policy (`org.freedesktop.NetworkManager.conf`) lets the default, unprivileged context use the `DBus.Properties` interface and the `AccessPoint` and `Device.*` interfaces ("read-only properties, no methods"), so no polkit prompt or privilege is needed. Compared: the `dbus` crate 0.9.12 (`Apache-2.0/MIT`, no MSRV declared, last release 2026-07-03, blocking API) is already a workspace dependency (`dbus = { version = "0.9.12", default-features = false }` in the root `Cargo.toml`) and a dependency of `dbus-secret-service`, so it adds no crate to the build; `zbus` 6.2.1 (MIT, MSRV 1.89, released 2026-11-01) is the maintained pure-Rust choice, brings an async runtime's worth of dependencies, and a second version beside the 4.4.0 already in `Cargo.lock` through `secret-service`; the `nmcli` command (`nmcli -t -f ACTIVE,SSID device wifi list`) needs no crate, as the macOS reader, but parses text with its own escaping and shows only networks in the scan list. The `dbus` crate is chosen, called from `spawn_blocking` with the bus's own call timeout, in `crates/adapters/platform` only. A machine with no NetworkManager (a server, or a desktop on iwd alone) has no reader: on Wi-Fi its name rules don't hold and the page notes them (below). **Not run on a desktop**: the only machine for this record is a Mac. The reader is tested against a stand-in NetworkManager on a private `dbus-daemon` (`crates/adapters/platform/tests/conditions.rs`, `stand_in`), which runs in Linux CI and was run here in a Linux container (Debian, the `rust` image); a run on a desktop with NetworkManager is owed, and will be made on the maintainer's Linux machine during his real-world test before the next release (point 12).
+- **The name, as built (part 3).** On both platforms the kind of the link is read first and the name only for a Wi-Fi interface, so a machine off Wi-Fi answers "no name" (`Ok(None)`) without asking for one: a wired Linux machine needs no NetworkManager, and a Mac on another port runs no `system_profiler`. On Linux the default route's interface is a Wi-Fi one by sysfs, and NetworkManager is asked for that device's active access point and its `Ssid`; an access point of `/` (none) is no name. On macOS the Wi-Fi port's block of the report is read; a block with no current network is no name. Every other answer is an error, never "no name", so a rule's `except` can't hold on a name the platform kept back: no default route at the time of the name's read, a Wi-Fi interface NetworkManager doesn't list or a bus that doesn't answer, a Wi-Fi port without a block in the report or with two, and a name absent, empty, over 32 bytes, `<redacted>` or not text. No error repeats a name or a property's value, only where it was read and the D-Bus error's name. On Linux one bound covers the whole read, the routing table and then NetworkManager, and a read given up names the one it was waiting on: the routing table, or NetworkManager on its bus. The port's contract suite holds both readers and the fake to this (`crates/app/src/contract/network_link.rs`, with stand-in programs on macOS and the stand-in bus on Linux).
+- **The macOS reader, run from launchd.** The built reader was run as a launchd user agent on this Mac (macOS 27.3), on Wi-Fi: it read the link as Wi-Fi and returned a name, in 4.2 s, and the job's last exit code was 0. Only the class of answer was recorded, never the name. The unreadable answers (the redacted literal, an empty name, a program that fails) are covered by the contract suite's stand-in programs rather than by a live run, since this Mac's report isn't redacted.
 - **Which crate, by the rules.** None for macOS. For Linux, `dbus` is already in the tree and in the `deny.toml` allow list (`Apache-2.0`, `MIT`); the `[graph]` targets already include Linux. Added to `crates/adapters/platform` only (§3.2, `AGENTS.md` "Where code goes"): `dbus = { workspace = true }` under `[target.'cfg(target_os = "linux")'.dependencies]`, since nothing in the macOS build uses it, the workspace dependency as it is, with the features the call needs and no more, checked by `just deny` and `just architecture` in the pull request.
 
 ### 11. Unsafe code
@@ -182,17 +187,17 @@ The maintainer authorized unsafe code for a macOS Wi-Fi reader if it were needed
 
 ### 12. Slicing
 
-One pull request off `main`, in three parts, before M3: the maintainer chose to ship the locations with both kinds of rule, so that no release has locations without a rule by Wi-Fi name, the one rule that can keep a LAN location from being tried on a network such as a hotel's (the rules by link alone can't tell one Wi-Fi network from another). Each part is its own group of commits, in this order; the pull request changes behaviour, so it carries the `behaviour` label, a first commit `test:` that fails at run time (§13.1), and the scenarios of all three parts, moved from the appendix into `features/repositories/repository_locations.feature` (and `features/execution/` for the scheduler's skip) with their steps.
+One pull request off `main`, in three parts, before M3: the maintainer chose to ship the locations with both kinds of rule, so that no release has locations without a rule by Wi-Fi name, the one rule that can keep a LAN location from being tried on a network such as a hotel's (the rules by link alone can't tell one Wi-Fi network from another). Each part is its own group of commits, in this order; the pull request changes behaviour, so it carries the `behaviour` label, a first commit `test:` that fails at run time (§13.1), and the scenarios of all three parts in `features/repositories/repository_locations.feature` (and `features/execution/scheduler.feature` for the scheduler's skip) with their steps, each part's moved there by its own `test:` commit.
 
-1. **Ordered locations, the probe, the same-repository check, the record and the warning.** `[[repositories.<alias>.locations]]` in the config (§6.1, with the caps, the file edit of decision 69 and the duplicate rule of point 8); the `Probe` worker job; `ChooseLocation` in `app`; the repository-ID check; `operations.location_no` and `locations_json`; the log lines; the Repositories page's list of locations and its per-location Test; the Operations page's "Used location n of m"; `location-plain-http-credentials`; the export notice. **Value:** the issue's own case, LAN at home and public away. A location with no rule is tried on every network, so a LAN location that carries credentials over plain HTTP should carry a rule by Wi-Fi name (part 3); the warning stands either way, the page says so, and HTTPS on the LAN with `http-cacert` is the setup to recommend (§10.6). **Acceptance:** the part 1 scenarios of the appendix; a person with two locations whose first is silent backs up through the second with a plain `Succeeded`; a location holding another repository is refused and never written to (the `@e2e` check lists the second repository's files and finds none changed); the I4 canary is absent from every log, event, operation record and the page when a location carries one; a repository with no `locations` and no `when` produces byte-identical operations and no probe (a golden test); a forget's preview opens the chosen location only; `just architecture`, `just deny` unchanged. Milestone: the follow-up to 0.2.0, before M3 starts (§14, "what that run turns up is fixed or filed first"): the issue was found by that run.
-2. **The kinds of link: `wired` and `wifi` rules.** `when` in the config; `LocationRule::holds`; the `NetworkLink` port, its fake, its contract suite and its two readers for the link's kind; the scheduler's skip and `no-location-rule-holds`; the page's notes about rules. **Value:** no 8 s wait for a silent LAN away from home, and a LAN location that isn't tried on a network it can't be on. **Acceptance:** the part 2 scenarios; the readers pass the contract suite on Linux and macOS CI with made-up folders and stand-in programs (decision 63's way); on macOS the Wi-Fi side is shown by a run quoted in the pull request, and `wired` ships on macOS only if the author runs it once on a Mac on Ethernet and quotes the result, otherwise it is refused there with "unavailable on macOS" and says so on the page. Its readers are the ones M5's conditions will share (§14).
+1. **Ordered locations, the probe, the same-repository check, the record and the warning.** `[[repositories.<alias>.locations]]` in the config (§6.1, with the caps, the file edit of decision 69 and the duplicate rule of point 8); the `Probe` worker job; `ChooseLocation` in `app`; the repository-ID check; `operations.location_no` and `locations_json`; the log lines; the Repositories page's list of locations and its per-location Test; the Operations page's "Used location n of m"; `location-plain-http-credentials`; the export notice. **Value:** the issue's own case, LAN at home and public away. A location with no rule is tried on every network, so a LAN location that carries credentials over plain HTTP should carry a rule by Wi-Fi name (part 3); the warning stands either way, the page says so, and HTTPS on the LAN with `http-cacert` is the setup to recommend (§10.6). **Acceptance:** the part 1 scenarios; a person with two locations whose first is silent backs up through the second with a plain `Succeeded`; a location holding another repository is refused and never written to (the `@e2e` check lists the second repository's files and finds none changed); the I4 canary is absent from every log, event, operation record and the page when a location carries one; a repository with no `locations` and no `when` produces byte-identical operations and no probe (a golden test); a forget's preview opens the chosen location only; `just architecture`, `just deny` unchanged. Milestone: the follow-up to 0.2.0, before M3 starts (§14, "what that run turns up is fixed or filed first"): the issue was found by that run.
+2. **The kinds of link: `wired` and `wifi` rules.** `when` in the config; `LocationRule::holds`; the `NetworkLink` port, its fake, its contract suite and its two readers for the link's kind; the scheduler's skip and `no-location-rule-holds`; the page's notes about rules. **Value:** no 8 s wait for a silent LAN away from home, and a LAN location that isn't tried on a network it can't be on. **Acceptance:** the part 2 scenarios; the readers pass the contract suite on Linux and macOS CI with made-up folders and stand-in programs (decision 63's way); on macOS the Wi-Fi side is shown by a run quoted in the pull request, and `wired` ships on macOS only if the author runs it once on a Mac on Ethernet and quotes the result, otherwise it is refused there with "unavailable on macOS" and says so on the page. Its readers are the ones M5's conditions will share (§14). **As built:** `when` on the first location and on each further one; `LocationRule::holds` with three verdicts (holds, not met, unknown); the `NetworkLink` port with `KernelLink` (Linux) and `RouteLink` (macOS), its fake and contract suite; `app::conditions::LinkReading`, one reading of the link per choice and per batch of plans due together; the scheduler's skip; `no-location-rule-holds`; a repository of one location with a rule, opened as before when its rule holds and failed `no-location-rule-holds` when it doesn't, with no locations recorded either way; and the page's rule in words with its three notes (`location-every-ruled`, `location-last-ruled-no-retry`, `location-rule-wired-unknown`). No Mac on Ethernet was run, so macOS's `wired` ships as unknown, with the page's note (point 10), rather than refused.
 3. **Wi-Fi network names: `only` and `except`.** The two readers for the name: `dbus` on Linux, `system_profiler` on macOS; the page's "unavailable" messages. **Value:** the WireGuard-like rule people ask for. **Acceptance:** the part 3 scenarios; on macOS the pull request quotes a launchd run showing the name read and an unreadable answer handled (the redacted literal, an empty one, a program that fails), and says on which macOS version; on Linux, a run on a desktop with NetworkManager and the stand-in bus in CI; the name never appears in a log, an event or an operation record (a canary network name).
 
 Each pull request adds the §13.7 checklists it touches: a port (`NetworkLink`), warning and error codes with their messages, and the worker's new job kind.
 
 ### Where the scenarios live
 
-`features/` holds only scenarios that pass: the acceptance runner is built with `fail_on_skipped()`, and a scenario whose steps nothing defines fails it (shown: a scratch feature with undefined steps failed with "Step doesn't match any function", exit 101), and no tag keeps a scenario from the runners (the acceptance runner skips `@e2e` and `@ui` only; the others run only theirs). So this record's scenarios are in the appendix; the pull request's first commit moves them into `features/` with their steps. A `@later` tag that all three runners skip would let them live in `features/` now; that is a change to test code, kept out of this pull request, and a choice above.
+`features/` holds only scenarios that pass: the acceptance runner is built with `fail_on_skipped()`, and a scenario whose steps nothing defines fails it (shown: a scratch feature with undefined steps failed with "Step doesn't match any function", exit 101), and no tag keeps a scenario from the runners (the acceptance runner skips `@e2e` and `@ui` only; the others run only theirs). So each part's first commit moved its own scenarios from an appendix of this record into `features/` with their steps; all three parts' are in `features/repositories/repository_locations.feature` (the scheduler's skip in `features/execution/scheduler.feature`), and the appendix is gone. The `@ui` scenario that says the machine can't read the network's name gives that through the UI runner's scripted daemon, which adds the note to the real daemon's listing: a wired CI runner has no Wi-Fi to fail on, and the daemon's side is held by the composition's tests and the readers' by the contract suite. A `@later` tag that all three runners skip would have let the scenarios live in `features/` from the first part; that is a change to test code, kept out of this pull request, and a choice above.
 
 ### Rejected, besides what is above
 
@@ -201,303 +206,3 @@ Each pull request adds the §13.7 checklists it touches: a port (`NetworkLink`),
 - **Probing without credentials.** A probe that sends none learns only that *something* answers (an impostor answers `401` as well as the server does), and the job then sends the credentials anyway.
 - **A shared Wi-Fi allow-list on the agent.** A name is a property of a location's rule; a list on the agent couples locations and plans that don't otherwise know each other.
 - **Not warning, because the person chose plain HTTP.** The credentials of an impostor's request are the thing the person can't see; the warning costs a line.
-
-## Appendix: the scenarios
-
-Part numbers are the ones in point 12. Step wording is the ubiquitous language of §3.1; steps are written in the pull request's `test:` commit. Untagged scenarios run in the acceptance runner with fakes and the fake clock; `@e2e` scenarios run against the real binary and scratch repositories; `@ui` scenarios use the browser and find elements by role and accessible name.
-
-```gherkin
-Feature: A repository reached at several locations
-  A repository may list its locations in order. Before a job opens it the
-  agent tries each in turn, skips the ones whose rule doesn't hold, and uses
-  the first that answers and holds the same repository (decision 80).
-
-  Background:
-    Given a repository "nas" that records its repository ID, with the locations "lan" and "public", in that order
-    And the plan "home" backs up to "nas"
-
-  # Part 1
-
-  Scenario: The first location is used when it answers
-    Given the location "lan" answers
-    When the plan "home" runs
-    Then the operation ends as succeeded
-    And the operation used the location "lan"
-    And the location "public" was never tried
-    And the operation shows the location "public" as not tried
-
-  Scenario: The next location is used when the first doesn't answer
-    Given the location "lan" doesn't answer within 8 seconds
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation ends as succeeded
-    And the operation used the location "public"
-    And the operation says the location "lan" was skipped because it didn't answer
-    And the operation has no warnings
-
-  Scenario: A location that holds another repository is refused and never used
-    Given the location "lan" answers with a repository whose ID isn't the repository's
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation ends as succeeded with warnings
-    And the operation warns that the location "lan" held another repository
-    And nothing was written to the other repository
-
-  Scenario Outline: A location with no rule that can't be used is skipped without a warning
-    Given the location "lan" <state>
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation says the location "lan" was skipped because it <reason>
-    And the operation has no warnings
-
-    Examples:
-      | state                                                | reason                              |
-      | answers and refuses its credentials                  | refused its credentials             |
-      | answers and holds no repository                      | held no repository                  |
-      | answers and doesn't accept the repository's password | didn't accept the repository's password |
-
-  Scenario: A reference of a location that doesn't resolve skips that location with a warning
-    Given the location "lan" has a credential reference that doesn't resolve
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation warns that the location "lan" couldn't be tried because a secret was unavailable
-    And the warning names the source and never a value
-
-  Scenario: A password no location accepts is reported as a password error
-    Given both locations answer and don't accept the repository's password
-    When a person runs the plan "home" now
-    Then the operation ends as failed with a password error
-    And the operation doesn't end with the reason "no location usable"
-
-  Scenario: No location answers
-    Given the plan "home" retries up to 3 times
-    And neither location answers
-    When the plan "home" runs as a scheduled run
-    Then the operation ends as failed with the reason "no location usable"
-    And the operation names each location and why it wasn't used
-    And a retry of the plan "home" is scheduled
-
-  Scenario: A manual run with no usable location fails and is not retried
-    Given the plan "home" retries up to 3 times
-    And neither location answers
-    When a person runs the plan "home" now
-    Then the operation ends as failed with the reason "no location usable"
-    And no retry of the plan "home" is scheduled
-
-  Scenario: A job opens only the location the choice made
-    Given the location "lan" doesn't answer
-    And the location "public" answers
-    When a forget is previewed for the repository "nas"
-    Then the repository was opened at the location "public" only
-    And the location "lan" was never opened
-
-  Scenario: A location the job didn't use never had its secrets in the job
-    Given the location "public" carries the canary secret "canary-value" in its options
-    And the location "lan" answers
-    When the plan "home" runs
-    Then the job's worker was given no secret of the location "public"
-    And the canary appears in no log line, event, operation record or page
-
-  Scenario: Locations are refused on a repository that records no ID
-    Given a repository "fresh" that records no repository ID
-    When the configuration gives it a second location
-    Then the configuration is refused at the table of that location
-    And the message says to run a job once or to write the ID
-
-  Scenario: Two locations of one repository may not be at one location
-    When the configuration gives the repository "nas" a second location at the address of its first
-    Then the configuration is refused at the second location's key
-
-  Scenario: A repository with one location is opened without a probe
-    Given a repository "solo" with one location
-    When a backup of "solo" runs
-    Then no location was probed
-    And the operation records no location
-
-  Scenario: The cache slot is the repository's, whichever location is used
-    Given the location "public" is used for one backup and the location "lan" for the next
-    Then both backups read the cache slot named by the repository ID
-    And no probe took a cache slot
-
-  Scenario Outline: A location that sends its credentials where an impostor could read them is warned about
-    Given the location "lan" is "<address>" with <credentials>
-    When the repositories are listed
-    Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "<cause>"
-    And the warning names neither the address nor a credential
-
-    Examples:
-      | address                                                   | credentials                                  | cause                 |
-      | rest:http://lan.example.lan/r                             | a user and a password in it                  | plain-http            |
-      | rest:http://lan.example.lan/r                             | a credential option                          | plain-http            |
-      | rest:https://lan.example.lan/r                            | the option http-insecure-tls set to true     | unchecked-certificate |
-      | opendal:s3                                                | an http endpoint and a credential option     | plain-endpoint        |
-      | opendal:ftp                                               | a credential option                          | plain-ftp             |
-
-  Scenario: A location over HTTPS with credentials and a checked certificate isn't warned about
-    Given the location "lan" is "rest:https://lan.example.lan/r" with a user and a password in it
-    When the repositories are listed
-    Then the repository "nas" carries no warning about its locations
-
-  Scenario: The warning follows a reference once it is resolved
-    Given the location "lan" is "rest:${LAN_URL}" with a user and a password in it
-    And the variable "LAN_URL" holds an http address
-    When the plan "home" runs
-    Then the daemon's log warns that the location 1 sends its credentials over plain HTTP
-    And the operation has no warnings
-
-  @e2e
-  Scenario: A secret of a location is never shown
-    Given the location "lan" carries the canary secret "canary-value" in its option "application_key" as the reference "${LAN_KEY}"
-    When the plan "home" runs
-    Then the canary appears in no log line, event, operation record or page
-    And the Repositories page shows the reference "${LAN_KEY}" and never its value
-
-  @e2e
-  Scenario: An export names the first location and says what it left out
-    When the plan "home" is exported as a rustic profile
-    Then the profile's repository is the location "lan"
-    And the export says that 1 further location was left out
-
-  @ui
-  Scenario: The Repositories page lists the locations and tests each
-    When I open the Repositories page
-    Then the repository "nas" lists the location "lan" first and the location "public" second
-    When I press "Test" for the repository "nas"
-    Then each location shows whether it answers
-
-  @ui
-  Scenario: The Operations page names the location used
-    Given the plan "home" ran and used the location "public"
-    When I open the Operations page
-    Then the row for the plan "home" says "Used location 2 of 2"
-
-  # Part 2
-
-  Scenario: A location whose rule doesn't hold is skipped
-    Given the location "lan" is eligible only on a wired network
-    And the machine is on Wi-Fi
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation says the location "lan" was skipped because its rule didn't hold
-    And the location "lan" was never probed
-    And the operation has no warnings
-
-  Scenario: A location whose rule holds is probed and used
-    Given the location "lan" is eligible only on a wired network
-    And the machine is on a wired network
-    And the location "lan" answers
-    When the plan "home" runs
-    Then the operation used the location "lan"
-
-  Scenario: A location whose rule held and that doesn't answer is a warning
-    Given the location "lan" is eligible only on a wired network
-    And the machine is on a wired network
-    And the location "lan" doesn't answer
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation ends as succeeded with warnings
-    And the operation warns that the location "lan" was skipped though its rule held
-
-  Scenario: A rule that can't be evaluated doesn't hold
-    Given the location "lan" is eligible only on a wired network
-    And the machine can't tell what kind of network it is on
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-    And the operation says the location "lan" was skipped because its rule couldn't be evaluated
-
-  Scenario: A scheduled run is skipped when every location has a rule and none is known to hold
-    Given both locations are eligible only on a wired network
-    And the machine is on Wi-Fi
-    When the plan "home" is due
-    Then the run of the plan "home" is skipped because no location's rule holds
-    And no operation is recorded
-
-  Scenario: A scheduled run still starts when a rule can't be evaluated, and fails where it is seen
-    Given the plan "home" retries up to 3 times
-    And both locations are eligible only on a wired network
-    And the machine can't tell what kind of network it is on
-    When the plan "home" is due
-    Then the plan "home" runs
-    And the operation ends as failed with the reason "no location's rule holds"
-    And a retry of the plan "home" is scheduled
-
-  Scenario: A run that waited in the queue while the network changed fails when it starts
-    Given both locations are eligible only on a wired network
-    And a run of the plan "home" is queued while the machine is on a wired network
-    When the machine moves to Wi-Fi before the run starts
-    Then the operation ends as failed with the reason "no location's rule holds"
-
-  Scenario: A manual run fails when no location's rule holds
-    Given both locations are eligible only on a wired network
-    And the machine is on Wi-Fi
-    When a person runs the plan "home" now
-    Then the operation ends as failed with the reason "no location's rule holds"
-    And the operation names each location and why its rule didn't hold
-
-  Scenario: A rule holds when any of its alternatives does
-    Given the location "lan" is eligible on a wired network or on any Wi-Fi network
-    And the machine is on Wi-Fi
-    When the plan "home" runs
-    Then the location "lan" is probed
-
-  Scenario: A rule on a repository of one location is honoured
-    Given a repository "solo" with one location that is eligible only on a wired network
-    And the machine is on Wi-Fi
-    When a person runs a backup of "solo" now
-    Then the operation ends as failed with the reason "no location's rule holds"
-    And no location was probed
-
-  Scenario: The link is read once for the plans due together
-    Given 3 plans are due together and each has a location eligible only on a named Wi-Fi network
-    When the scheduler checks them
-    Then the network link was read once
-
-  # Part 3
-
-  Scenario: A location eligible only on a named Wi-Fi network is tried there
-    Given the location "lan" is eligible only on the Wi-Fi network "Office"
-    And the machine is on the Wi-Fi network "Office"
-    And the location "lan" answers
-    When the plan "home" runs
-    Then the operation used the location "lan"
-
-  Scenario: A location eligible only on a named Wi-Fi network is skipped on another one
-    Given the location "lan" is eligible only on the Wi-Fi network "Office"
-    And the machine is on the Wi-Fi network "Guest"
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-
-  Scenario: A location eligible on any Wi-Fi network except one is skipped on that one
-    Given the location "lan" is eligible on any Wi-Fi network except "Guest"
-    And the machine is on the Wi-Fi network "Guest"
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-
-  Scenario: A network name the machine can't read means the rule doesn't hold
-    Given the location "lan" is eligible only on the Wi-Fi network "Office"
-    And the machine can't read the Wi-Fi network's name
-    And the location "public" answers
-    When the plan "home" runs
-    Then the operation used the location "public"
-
-  @ui
-  Scenario: The Repositories page says when this machine can't read the network's name
-    Given the location "lan" is eligible only on the Wi-Fi network "Office"
-    And the machine can't read the Wi-Fi network's name
-    When I open the Repositories page
-    Then the repository "nas" says this machine can't read the Wi-Fi network's name and the rule doesn't apply
-
-  Scenario: The network's name is never logged
-    Given the machine is on the Wi-Fi network "canary-network"
-    And the location "lan" is eligible only on the Wi-Fi network "Office"
-    When the plan "home" runs
-    Then "canary-network" appears in no log line, event or operation record
-```

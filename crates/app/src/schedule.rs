@@ -28,14 +28,19 @@ use domain::execution::next_run::NextRun;
 use domain::execution::queue::Overlapping;
 use domain::execution::retry::{NoRetry, RetrySchedule, RetryScheduled};
 use domain::execution::wake::WAKE_CHECK_EVERY;
-use domain::planning::{AgentConfig, NoNextRun, Overlap, RetryPolicy, Schedule, ScheduleZone};
+use domain::planning::{
+    AgentConfig, LocationRule, NoNextRun, Overlap, RetryPolicy, Schedule, ScheduleZone,
+};
 use domain::{OperationId, PlanId, SignedDuration, TimeZone, Timestamp};
 use futures::future::{Either, select};
 
-use crate::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
+use crate::conditions::{
+    LinkReading, NetworkWait, PowerCheck, WakeWatch, check_location_rules, check_power,
+    wait_for_network,
+};
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, EventBus, Network, PendingRetry, PlannedRun, PlatformError,
-    PowerSupply, Random, ScheduleStore, StoreError,
+    Clock, ConfigError, ConfigStore, EventBus, Network, NetworkLink, PendingRetry, PlannedRun,
+    PlatformError, PowerSupply, Random, ScheduleStore, StoreError,
 };
 use crate::queue::{Place, RunQueue};
 use crate::recovery::QueuedEnd;
@@ -111,6 +116,9 @@ pub struct Scheduler {
     pub config: Arc<dyn ConfigStore>,
     pub power: Arc<dyn PowerSupply>,
     pub network: Arc<dyn Network>,
+    /// The machine's network link, which the rules of a plan's locations
+    /// are evaluated against, read once for the plans due together.
+    pub link: Arc<dyn NetworkLink>,
     pub runs: Arc<dyn PlanRuns>,
     /// The agent's one queue of backups, which the routes share.
     pub queue: Arc<RunQueue>,
@@ -131,6 +139,9 @@ struct Planned {
     /// What the plan does with a run that comes due while its last one is
     /// still going.
     overlap: Overlap,
+    /// The rule of each location of the plan's repository, in order: a run
+    /// is skipped when every one is known not to hold (decision 80).
+    rules: Vec<Option<LocationRule>>,
     /// `None` once the schedule has no run after its last one.
     next: Option<NextRun>,
     /// A catch-up the agent decided on as it woke: it waits for the network.
@@ -266,13 +277,14 @@ impl Scheduler {
         self.queue.set_limit(config.agent().concurrency);
         let scheduled = scheduled(&config);
         let mut kept = plans.kept.take().unwrap_or_default();
-        for (plan, (schedule, overlap)) in &scheduled {
+        for (plan, (schedule, overlap, rules)) in &scheduled {
             let next = match plans.planned.get_mut(plan) {
                 Some(held) if same_runs(&held.schedule, schedule) => {
-                    // Its conditions and overlap policy may have changed;
-                    // its runs haven't.
+                    // Its conditions, overlap policy and locations' rules may
+                    // have changed; its runs haven't.
                     held.schedule = schedule.clone();
                     held.overlap = *overlap;
+                    held.rules.clone_from(rules);
                     continue;
                 }
                 Some(_) => {
@@ -297,6 +309,7 @@ impl Scheduler {
                 Planned {
                     schedule: schedule.clone(),
                     overlap: *overlap,
+                    rules: rules.clone(),
                     next,
                     after_wake: false,
                 },
@@ -394,18 +407,29 @@ impl Scheduler {
             let waited = wait_for_network(self.clock.as_ref(), self.network.as_ref()).await;
             self.runs.report(ScheduleReport::NetworkWaited(waited));
         }
+        // One reading of the network link for every plan due now, so their
+        // rules all see one network.
+        let mut reading = LinkReading::new(Arc::clone(&self.link));
         for plan in &due {
             let Some(held) = planned.get_mut(plan) else {
                 continue;
             };
             let Some(next) = held.next else { continue };
             held.after_wake = false;
-            match check_power(&held.schedule, self.power.as_ref()).await {
-                PowerCheck::Met => self.start(plan, held, next.trigger, None).await,
-                PowerCheck::Unknown(error) => {
-                    self.start(plan, held, next.trigger, Some(error)).await;
-                }
-                PowerCheck::Unmet(unmet) => self.runs.report(ScheduleReport::Skipped {
+            let power = match check_power(&held.schedule, self.power.as_ref()).await {
+                PowerCheck::Met => Ok(None),
+                PowerCheck::Unknown(error) => Ok(Some(error)),
+                PowerCheck::Unmet(unmet) => Err(unmet),
+            };
+            let checked = match power {
+                Ok(unknown) => check_location_rules(&held.rules, &mut reading)
+                    .await
+                    .map(|()| unknown),
+                Err(unmet) => Err(unmet),
+            };
+            match checked {
+                Ok(unknown) => self.start(plan, held, next.trigger, unknown).await,
+                Err(unmet) => self.runs.report(ScheduleReport::Skipped {
                     plan: plan.clone(),
                     unmet,
                 }),
@@ -648,13 +672,30 @@ impl Scheduler {
     }
 }
 
-/// The plans of `config` that have a schedule, each with its overlap
-/// policy.
-fn scheduled(config: &AgentConfig) -> BTreeMap<PlanId, (Schedule, Overlap)> {
+/// The plans of `config` that have a schedule, each with its overlap policy
+/// and the rule of each location of its repository.
+fn scheduled(
+    config: &AgentConfig,
+) -> BTreeMap<PlanId, (Schedule, Overlap, Vec<Option<LocationRule>>)> {
     config
         .plans()
         .iter()
-        .filter_map(|plan| Some((plan.id.clone(), (plan.schedule.clone()?, plan.overlap))))
+        .filter_map(|plan| {
+            let rules = config
+                .repository(&plan.repository)
+                .map(|repository| {
+                    repository
+                        .location_rules()
+                        .into_iter()
+                        .map(Option::<&LocationRule>::cloned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some((
+                plan.id.clone(),
+                (plan.schedule.clone()?, plan.overlap, rules),
+            ))
+        })
         .collect()
 }
 
@@ -765,6 +806,7 @@ mod tests {
             config: Arc::new(InMemoryConfigStore::new()),
             power: Arc::new(FakePower::new()),
             network: Arc::new(FakeNetwork::new()),
+            link: Arc::new(crate::fakes::FakeNetworkLink::new()),
             runs,
             queue: Arc::new(RunQueue::new()),
             zone: TimeZone::UTC,
@@ -785,6 +827,7 @@ mod tests {
             Planned {
                 schedule: daily(),
                 overlap,
+                rules: Vec::new(),
                 next: Some(NextRun {
                     at: at(next),
                     trigger: Trigger::Schedule,
@@ -999,6 +1042,7 @@ mod tests {
     fn home_retries_docs_does_not() -> AgentConfig {
         let nas = RepositoryAlias::parse("nas").unwrap();
         let repository = RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),

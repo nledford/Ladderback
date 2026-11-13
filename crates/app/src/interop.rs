@@ -120,13 +120,12 @@ impl ImportProfile {
             .await
             .map_err(ImportError::Profile)?;
         // A profile knows no repository ID, so its location alone tells
-        // whether the configuration already holds its repository. The entry
-        // the alias names is looked at first: one location may hold two
-        // entries whose IDs differ, and the alias says which is meant.
+        // whether the configuration already holds its repository, at any of
+        // the entry's locations (decision 80). The entry the alias names is
+        // looked at first: one location may hold two entries whose IDs
+        // differ, and the alias says which is meant.
         let kept = match loaded.repository(&repository) {
-            Some(entry) if entry.settings.same_location(&profile.repository.settings) => {
-                Some(entry)
-            }
+            Some(entry) if entry.is(&profile.repository.settings, None) => Some(entry),
             Some(_) => return Err(ImportError::AliasTaken(repository)),
             None => match loaded.alias_of(&profile.repository.settings, None) {
                 Some(alias) => return Err(ImportError::AlreadyConfigured(alias.clone())),
@@ -315,6 +314,7 @@ mod tests {
 
     fn repository() -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: "/srv/demo-repo".to_owned(),

@@ -463,6 +463,7 @@ async fn save(
     repositories.insert(
         alias.clone(),
         RepositoryConfig {
+            locations: Default::default(),
             id: Some(id.clone()),
             settings: settings.clone(),
             maintenance,
@@ -1328,6 +1329,7 @@ mod tests {
         });
         let config = Arc::new(InMemoryConfigStore::new());
         let entry = domain::planning::RepositoryConfig {
+            locations: Default::default(),
             settings: settings.clone(),
             id: recorded,
             maintenance: Maintenance::None,

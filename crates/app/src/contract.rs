@@ -8,6 +8,7 @@ pub mod engine;
 pub mod event_bus;
 pub mod hooks;
 pub mod network;
+pub mod network_link;
 pub mod notifier;
 pub mod operation_store;
 pub mod power;

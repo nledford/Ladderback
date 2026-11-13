@@ -159,6 +159,7 @@ mod tests {
     /// A repository at `location` that asks for `maintenance`.
     fn repository(location: &str, maintenance: Maintenance) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: location.to_owned(),

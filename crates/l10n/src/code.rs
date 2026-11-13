@@ -101,11 +101,21 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RuntimeUnavailable => msg::ERROR_RUNTIME_UNAVAILABLE,
     MaintenanceSelectionChanged => msg::ERROR_MAINTENANCE_SELECTION_CHANGED,
     RepositoryReadTimedOut => msg::ERROR_REPOSITORY_READ_TIMED_OUT,
+    NoLocationUsable => msg::ERROR_NO_LOCATION_USABLE,
+    NoLocationRuleHolds => msg::ERROR_NO_LOCATION_RULE_HOLDS,
+    PasswordNotAccepted => msg::ERROR_PASSWORD_NOT_ACCEPTED,
     Unknown => msg::ERROR_UNKNOWN,
 });
 
 code_messages!(WARNINGS, warning_message, WarningCode {
     SourceUnreadable => msg::WARNING_SOURCE_UNREADABLE,
+    LocationSkipped => msg::WARNING_LOCATION_SKIPPED,
+    LocationPlainHttpCredentials => msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+    LocationEveryRuled => msg::WARNING_LOCATION_EVERY_RULED,
+    LocationLastRuledNoRetry => msg::WARNING_LOCATION_LAST_RULED_NO_RETRY,
+    LocationRuleWiredUnknown => msg::WARNING_LOCATION_RULE_WIRED_UNKNOWN,
+    LocationRuleNameUnreadable => msg::WARNING_LOCATION_RULE_NAME_UNREADABLE,
+    ProfileLocationsNotExported => msg::WARNING_PROFILE_LOCATIONS_NOT_EXPORTED,
     HookWarning => msg::WARNING_HOOK_WARNING,
     MaintenancePartial => msg::WARNING_MAINTENANCE_PARTIAL,
     CheckWarning => msg::WARNING_CHECK_WARNING,

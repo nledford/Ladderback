@@ -96,6 +96,10 @@ pub enum ProfileNotice {
     /// a refusal: the profile may run on another machine, and nothing in it
     /// is a secret.
     KeyringCommandMissing { program: String },
+    /// An export wrote a repository reached at several locations at its
+    /// first: rustic has no fallback, so the `further` locations after it
+    /// were left out (decision 80).
+    LocationsNotExported { further: usize },
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or

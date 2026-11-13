@@ -17,10 +17,10 @@ use super::convert::{
     prune_plan_result, prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
 };
 use super::listing;
-use super::repository::{new_repository, open, repository_id};
+use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
-    BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, PruneJobSpec,
+    BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, ProbeResult, PruneJobSpec,
     RepositorySpec, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
@@ -30,6 +30,21 @@ pub(crate) fn identify(ctx: &Context, spec: &RepositorySpec) -> Result<Done, Job
     let id = repository_id(&repository)?;
     ctx.start(None, Some(&id))?;
     Ok(Done::Result(OpResult::Repository { id }))
+}
+
+/// Tries one location of a repository reached at several and says what is
+/// there (decision 80). It tells the daemon it has started once it has an
+/// answer, with the ID when it found one.
+pub(crate) fn probe(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let found = location::probe(ctx, spec)?;
+    let id = match &found {
+        ProbeResult::Holds { id } => Some(id),
+        ProbeResult::Refused | ProbeResult::NotARepository | ProbeResult::PasswordNotAccepted => {
+            None
+        }
+    };
+    ctx.start(None, id)?;
+    Ok(Done::Result(OpResult::Probed(found)))
 }
 
 /// Lists the repository's snapshots, newest first. A read: it emits `Started`

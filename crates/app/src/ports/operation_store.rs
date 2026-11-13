@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use domain::execution::locations::LocationsRecord;
 use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
 };
@@ -246,6 +247,10 @@ pub struct OperationRecord {
     /// The alias of the repository a maintenance operation ran on, as it
     /// stood when the run started ([`Operation::repository_alias`]).
     pub repository_alias: Option<RepositoryAlias>,
+    /// Every location of the entry as the run's choice saw it, for a
+    /// repository reached at several ([`Operation::locations`], decision 80);
+    /// `None` for every other operation.
+    pub locations: Option<LocationsRecord>,
 }
 
 impl OperationRecord {
@@ -264,6 +269,7 @@ impl OperationRecord {
             warning_count: operation.warning_count(),
             result: result.cloned(),
             repository_alias: operation.repository_alias().cloned(),
+            locations: operation.locations().cloned(),
         }
     }
 

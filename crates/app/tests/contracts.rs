@@ -424,6 +424,7 @@ impl FakeProfilesHarness {
         };
         self.reader.script(Ok(app::ports::ImportedProfile {
             repository: RepositoryConfig {
+                locations: Default::default(),
                 id: None,
                 settings,
                 maintenance: Maintenance::None,
@@ -615,6 +616,111 @@ impl contract::network::NetworkHarness for FakeNetworkHarness {
 #[tokio::test]
 async fn the_fake_network_meets_the_network_contract() {
     contract::network::run(&FakeNetworkHarness).await;
+}
+
+/// The fake network link, told what to say.
+struct FakeNetworkLinkHarness;
+
+impl FakeNetworkLinkHarness {
+    fn saying(
+        answer: Result<domain::planning::Link, app::ports::PlatformError>,
+    ) -> Arc<dyn app::ports::NetworkLink> {
+        let link = Arc::new(app::fakes::FakeNetworkLink::new());
+        link.set(answer);
+        link
+    }
+
+    /// On Wi-Fi, with the name answering `answer`.
+    fn named(
+        answer: Result<Option<domain::planning::CurrentNetworkName>, app::ports::PlatformError>,
+    ) -> Arc<dyn app::ports::NetworkLink> {
+        let link = Arc::new(app::fakes::FakeNetworkLink::new());
+        link.set(Ok(domain::planning::Link::WiFi));
+        link.set_name(answer);
+        link
+    }
+}
+
+impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
+    fn wired(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::Wired))
+    }
+
+    fn wired_reads_as(&self) -> domain::planning::Link {
+        domain::planning::Link::Wired
+    }
+
+    fn wifi(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::WiFi))
+    }
+
+    fn tunnel(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::Other))
+    }
+
+    fn no_route(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::NoRoute))
+    }
+
+    fn unrecognized(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "maybe".to_owned(),
+        }))
+    }
+
+    fn unreadable(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }))
+    }
+
+    fn on_network(&self, name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Ok(domain::planning::CurrentNetworkName::new(
+            name.as_bytes(),
+        )))
+    }
+
+    fn on_no_network(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Ok(None))
+    }
+
+    fn name_hidden(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "the name is hidden".to_owned(),
+        }))
+    }
+
+    fn no_name_reader(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "no reader".to_owned(),
+        }))
+    }
+
+    fn name_unrecognized(&self, _name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        Self::named(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "two networks".to_owned(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn the_fake_network_link_meets_the_network_link_contract() {
+    contract::network_link::run(&FakeNetworkLinkHarness).await;
+}
+
+#[tokio::test]
+async fn the_fake_network_link_counts_each_reading() {
+    let link = app::fakes::FakeNetworkLink::new();
+    assert_eq!(
+        app::ports::NetworkLink::link(&link).await,
+        Ok(domain::planning::Link::Wired)
+    );
+    assert_eq!(link.asked(), 1);
 }
 
 #[tokio::test]

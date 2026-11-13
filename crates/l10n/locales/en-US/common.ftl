@@ -294,6 +294,15 @@ error-repository-exists = { -brand-name } did not initialise a repository at { $
 # No repository is at the location: it is a folder on this machine holding nothing of a repository, so nothing was opened or written.
 error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.
 
+# A repository reached at several locations had none that could be used: each was silent, refused, held no repository or another one, or a secret of it was unavailable. The operation's detail lists each location and why.
+error-no-location-usable = No location of this repository could be used, so nothing was read or written. The operation lists each location and why it was skipped; check that one of them can be reached, then try again.
+
+# Every location of the repository has a rule for the network it may be tried on, and none held when the job started: the machine was on another kind of network, or couldn't tell which it was on. The operation's detail lists each location and why.
+error-no-location-rule-holds = No location of this repository may be tried on the network this machine is on, so nothing was read or written. The operation lists each location's rule and why it didn't hold; connect to a network one of them allows, or run again later.
+
+# The repository's password opened nothing at any of its locations that answered.
+error-password-not-accepted = The repository's password was not accepted at any of its locations, so nothing was read or written. Check the repository's password, then try again.
+
 # A saved repository's Create was refused because its row doesn't offer it: no backup found the location empty, or one reached the repository there once, so nothing says the location can be reached and holds no repository. Nothing was run.
 error-create-not-offered = This repository wasn't created: { -brand-name } creates one only where a backup found the location empty. Check that the drive or location can be reached, then run a backup.
 
@@ -464,6 +473,59 @@ error-profile-export-url-password = { -brand-name } did not export the plan, bec
 # $tag (text): the tag.
 # The comma is typed as it is: keep it a string literal.
 error-profile-export-tag-comma = { -brand-name } did not export the plan, because its tag { $tag } holds a comma ({ "," }), which rustic reads as two tags. Rename the tag without the comma, then export again.
+
+# A location of a repository reached at several was skipped where it shouldn't have been.
+# $position (text): the location's place in the list, from 1.
+# $outcome (text): why, as a code: other-repository, secret-unavailable, template-invalid, repository-path-relative, secret-expansion-too-long, secret-in-process-arguments, location-too-many-credentials, silent, refused, not-a-repository or password-not-accepted.
+warning-location-skipped = { $outcome ->
+    [other-repository] Location { $position } holds another repository, so it was not used. Check its address.
+    [secret-unavailable] Location { $position } was not tried, because a secret it needs could not be read.
+    [template-invalid] Location { $position } was not tried, because one of its settings is not a valid template. The operation names the setting.
+    [repository-path-relative] Location { $position } was not tried, because one of its paths is relative once resolved. Write an absolute path; the operation names the setting.
+    [secret-expansion-too-long] Location { $position } was not tried, because one of its settings is too long once its references are resolved. The operation names the setting.
+    [secret-in-process-arguments] Location { $position } was not tried, because a setting passed to a program holds a reference, which would show its secret. The operation names the setting.
+    [location-too-many-credentials] Location { $position } was not tried, because its rclone connection string holds more credentials than a job can hide.
+    [silent] Location { $position } did not answer, although its rule held.
+    [refused] Location { $position } refused its credentials, although its rule held.
+    [not-a-repository] Location { $position } holds no repository, although its rule held.
+   *[other] Location { $position } did not accept the repository's password, although its rule held.
+  }
+
+# A location of a repository sends its credentials where whoever answers at its address can read them, so an impostor on the network could take them.
+# $position (text): the location's place in the list, from 1.
+# $cause (text): why: plain-http, unchecked-certificate, plain-endpoint or plain-ftp.
+# `http-cacert` is an option of the configuration, typed as it is: keep it a string literal.
+warning-location-plain-http-credentials = { $cause ->
+    [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Trust the server's own certificate with { "http-cacert" } instead.
+    [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
+    [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
+   *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
+  }
+
+# Every location of a repository has a rule about the network the machine is on, so on a network where no rule holds, nothing can be tried.
+warning-location-every-ruled = Every location of this repository has a rule, so a scheduled run is skipped on a network where none holds, and any other run fails there. Leave one location without a rule to have it tried on every network.
+
+# A repository's last location has a rule about the network the machine is on, and a scheduled plan backing up to it doesn't retry a failed run.
+# $plan (text): the plan's ID, as the configuration file writes it. It is shown as it came.
+# `retry` is a key of the configuration file, typed as it is: keep it a string literal.
+warning-location-last-ruled-no-retry = The plan { $plan } doesn't retry a failed run, and this repository's last location has a rule: when no location can be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
+
+# A location's rule asks for a wired network, and this machine can't yet tell a wired network from other links, so that part of the rule never holds here.
+# $position (text): the location's place in the list, from 1.
+# `wifi` is a value of the configuration file, typed as it is: keep it a string literal.
+warning-location-rule-wired-unknown = The rule of location { $position } asks for a wired network, which Ladderback can't yet tell apart from other links on this machine, so that part of the rule never holds here. A rule of { "wifi" } works here.
+
+# A location's rule lists Wi-Fi networks by name, and this machine couldn't read the name of the network it is on, so that part of the rule doesn't hold and the location is skipped there.
+# $position (text): the location's place in the list, from 1.
+# `wired` and `wifi` are values of the configuration file, typed as they are: keep them string literals.
+warning-location-rule-name-unreadable = Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location { $position }, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of { "wired" } or { "wifi" } alone needs no name.
+
+# An export wrote the repository's first location only, because a rustic profile has no fallback.
+# $count (count): how many further locations it left out.
+warning-profile-locations-not-exported = { $count ->
+    [one] The profile points at the repository's first location only: { $count } further location was left out, because rustic has no fallback.
+   *[other] The profile points at the repository's first location only: { $count } further locations were left out, because rustic has no fallback.
+  }
 
 # The import left out a setting of the profile.
 # $key (text): the setting, as its path in the profile, such as copy or backup.group-by.

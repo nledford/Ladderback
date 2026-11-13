@@ -44,6 +44,11 @@ pub trait Repositories: Send + Sync {
     /// and records only its new ID in the entry. An entry that records an ID
     /// is refused as a repository already there.
     async fn create_saved(&self, alias: String) -> Result<api::RepositoryIdDto, RepositoriesError>;
+
+    /// Probes every location of the repository the configuration holds
+    /// under `alias`, each as a job's choice would, and answers each one's
+    /// outcome (decision 80). Records nothing.
+    async fn test_saved(&self, alias: String) -> Result<api::LocationsTestDto, RepositoriesError>;
 }
 
 /// A refusal for a secret that couldn't be resolved or a template that isn't
@@ -158,6 +163,23 @@ pub(crate) async fn create_saved_repository(
     }
     match state.repositories.create_saved(alias).await {
         Ok(id) => (StatusCode::CREATED, Json(id)).into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
+/// Tests every location of the repository the configuration holds under the
+/// path's alias: the empty JSON body the JSON-body rule asks of every
+/// mutating method.
+pub(crate) async fn test_saved_repository(
+    State(state): State<AppState>,
+    Path(alias): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Response {
+    if body.is_err() {
+        return refusal(&RepositoriesError::InvalidBody);
+    }
+    match state.repositories.test_saved(alias).await {
+        Ok(tested) => (StatusCode::OK, Json(tested)).into_response(),
         Err(error) => refusal(&error),
     }
 }

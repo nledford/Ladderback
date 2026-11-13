@@ -23,6 +23,9 @@ mod conditions_steps;
 #[path = "steps/config.rs"]
 mod config_steps;
 
+#[path = "steps/locations.rs"]
+mod locations_steps;
+
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 
@@ -75,6 +78,7 @@ struct Agent {
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
     interop: interop_steps::InteropWorld,
+    locations: locations_steps::LocationsWorld,
     recovery: recovery_steps::RecoveryWorld,
     announcement: announcement_steps::AnnouncementWorld,
     preview: preview_steps::PreviewWorld,
@@ -121,6 +125,7 @@ impl Agent {
             repositories: Default::default(),
             forget: Default::default(),
             interop: Default::default(),
+            locations: Default::default(),
             recovery: Default::default(),
             announcement: Default::default(),
             preview: Default::default(),

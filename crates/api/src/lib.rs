@@ -78,6 +78,17 @@ pub enum ErrorCode {
     /// No repository is at the location: the engine found an empty folder
     /// on this machine there, so nothing was opened or written.
     RepositoryNotFound,
+    /// A repository reached at several locations had none that could be
+    /// used (decision 80): each was silent, refused, held no repository or
+    /// another one, or a secret of it was unavailable. The operation names
+    /// each location and why, by position.
+    NoLocationUsable,
+    /// No location's rule held when the job started (decision 80). The
+    /// operation names each location and why, by position.
+    NoLocationRuleHolds,
+    /// The repository's password opened nothing at any location tried
+    /// (decision 80).
+    PasswordNotAccepted,
     /// A saved repository's Create was refused because its row doesn't offer
     /// it: no job found its location empty since nothing reached it, so
     /// nothing says the location is reachable and holds no repository
@@ -279,6 +290,41 @@ pub enum ErrorCode {
 #[serde(rename_all = "kebab-case")]
 pub enum WarningCode {
     SourceUnreadable,
+    /// A location of a repository reached at several was skipped where it
+    /// shouldn't have been (decision 80). The argument `position` is the
+    /// location's, from 1, and `outcome` why: `other-repository`,
+    /// `secret-unavailable`, a setting's refusal code (`template-invalid`,
+    /// `repository-path-relative`, `secret-expansion-too-long`,
+    /// `secret-in-process-arguments`, `location-too-many-credentials`),
+    /// `silent`, `refused`, `not-a-repository` or `password-not-accepted`.
+    /// Never an address or a network's name.
+    LocationSkipped,
+    /// A location of a repository sends its credentials where whoever
+    /// answers at its address can read them (decision 80, §10.6). The
+    /// arguments are `position`, the location's, from 1, and `cause`:
+    /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
+    /// `plain-ftp`. Never the address or a credential.
+    LocationPlainHttpCredentials,
+    /// Every location of a repository has a rule (decision 80): a scheduled
+    /// run is skipped on a network where none holds, and any other run fails
+    /// there. No arguments.
+    LocationEveryRuled,
+    /// A repository's last location has a rule and the plan `plan`, which
+    /// has a schedule, doesn't retry a failed run (decision 80): a run that
+    /// finds no location usable fails until the next one.
+    LocationLastRuledNoRetry,
+    /// The rule of the location at `position`, from 1, asks for a wired
+    /// network, which this machine can't tell from other links (decision
+    /// 80): that alternative never holds here.
+    LocationRuleWiredUnknown,
+    /// The rule of the location at `position`, from 1, lists Wi-Fi networks
+    /// by name, and this machine couldn't read the name of the one it is on
+    /// when it last tried (decision 80): that part of the rule doesn't hold
+    /// here.
+    LocationRuleNameUnreadable,
+    /// An export wrote the repository's first location only: rustic has no
+    /// fallback. The argument `count` is how many locations it left out.
+    ProfileLocationsNotExported,
     /// An import left out a setting of the profile that Ladderback has no
     /// place for. The argument `key` is its path in the profile.
     ProfileKeyIgnored,
@@ -592,7 +638,11 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::RepositoryNotFound | Self::CreateNotOffered => &[],
+            Self::RepositoryNotFound
+            | Self::CreateNotOffered
+            | Self::NoLocationUsable
+            | Self::NoLocationRuleHolds
+            | Self::PasswordNotAccepted => &[],
             Self::RepositoryAliasTaken | Self::RepositoryAlreadyConfigured => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -864,6 +914,46 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::LocationSkipped => &[
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "outcome",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::LocationEveryRuled => &[],
+            Self::LocationLastRuledNoRetry => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::LocationRuleWiredUnknown | Self::LocationRuleNameUnreadable => &[ArgSpec {
+                name: "position",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::LocationPlainHttpCredentials => &[
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "cause",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::ProfileLocationsNotExported => &[ArgSpec {
+                name: "count",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
             Self::MaintenancePartial => &[
                 ArgSpec {
                     name: "what",
@@ -1352,6 +1442,7 @@ mod tests {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
             }],
+            locations: Vec::new(),
         };
         let json = serde_json::to_string(&row).unwrap();
         assert_eq!(
@@ -2537,6 +2628,29 @@ pub struct OperationSummaryDto {
     /// and for an operation an earlier version logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// For a repository reached at several locations: every location as the
+    /// run's choice saw it, in order, so a page says "Used location 2 of 2"
+    /// and why each earlier one was skipped (decision 80). Left out for a
+    /// repository of one location and an operation that opens none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<LocationTriedDto>,
+}
+
+impl OperationSummaryDto {
+    /// The same summary, with the locations the run's choice saw.
+    #[must_use]
+    pub fn with_locations(self, locations: Vec<LocationTriedDto>) -> Self {
+        Self { locations, ..self }
+    }
+
+    /// The location the run used, and how many the repository had then,
+    /// when it had several.
+    pub fn used_location(&self) -> Option<(&LocationTriedDto, usize)> {
+        self.locations
+            .iter()
+            .find(|tried| tried.outcome == "used")
+            .map(|tried| (tried, self.locations.len()))
+    }
 }
 
 /// Why an operation DTO can't be: an ID that isn't a UUID, or a time that
@@ -2596,6 +2710,7 @@ impl OperationSummaryDto {
             failure_code,
             result,
             repository,
+            locations: Vec::new(),
         })
     }
 }
@@ -2675,10 +2790,107 @@ pub struct RepositoryDto {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub create_offered: bool,
     /// What the configuration holds that the user should know about this
-    /// repository, one per secret written inline. Left out when there is
-    /// none.
+    /// repository: one per secret written inline, and one
+    /// `location-plain-http-credentials` per location that sends its
+    /// credentials where an impostor could read them (decision 80). Left
+    /// out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningDto>,
+    /// Every location of a repository reached at several, in the order
+    /// they are tried, the first first (decision 80). Left out for a
+    /// repository of one location, which `repository` names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<LocationDto>,
+}
+
+/// One location of a repository reached at several, as the Repositories
+/// page lists it: its address with the credentials written in it masked,
+/// and its options by name. Never a secret (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationDto {
+    /// Its place in the order, from 1.
+    pub position: u8,
+    /// `repository` as the entry writes it, masked.
+    pub repository: String,
+    /// `repo-hot`, masked the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_hot: Option<String>,
+    /// Its options, set by set, each by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<LocationOptionDto>,
+    /// Its rule's alternatives, in the order written, of which any one
+    /// holding lets it be tried. Left out for a location with no rule,
+    /// which is tried on every network.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when: Vec<LocationAlternativeDto>,
+}
+
+/// One alternative of a location's rule (decision 80).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationAlternativeDto {
+    /// The kind of network, as the configuration writes it: `wired` or
+    /// `wifi`.
+    pub network: String,
+    /// The Wi-Fi networks, by name, it holds on alone (`only`); empty when
+    /// it lists none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// The Wi-Fi networks, by name, it doesn't hold on (`except`); empty
+    /// when it lists none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
+}
+
+/// One option of a location: its name, and its value only when the value
+/// is references alone (`${LAN_KEY}`), which say where a secret is and
+/// never hold it. A value written in the configuration is never shown: it
+/// may be the secret.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationOptionDto {
+    /// `options`, `options-hot` or `options-cold`, as the configuration
+    /// names the set.
+    pub set: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+/// What became of one location of a repository reached at several: in an
+/// operation, as the run's choice saw it; in a Test, as its probe found it
+/// (decision 80). Named by its position, never a network's name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationTriedDto {
+    /// Its place in the order, from 1.
+    pub position: u8,
+    /// Its address as the entry wrote it then, credentials masked, at most
+    /// 256 bytes.
+    pub address: String,
+    /// `used` (in a Test: it answers and holds the repository),
+    /// `not-tried`, `rule-not-met`, `rule-unknown`, `silent`, `refused`,
+    /// `not-a-repository`, `other-repository`, `password-not-accepted`,
+    /// `secret-unavailable`, or the refusal code of a setting that can't be
+    /// used (`template-invalid`, `repository-path-relative`,
+    /// `secret-expansion-too-long`, `secret-in-process-arguments`,
+    /// `location-too-many-credentials`).
+    pub outcome: String,
+    /// For a location whose settings didn't resolve: where the secret was
+    /// looked for (`env LAN_KEY`), or the setting that can't be used. Never
+    /// a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+/// The answer to a Test of a saved repository's locations
+/// (`POST /api/v1/repositories/{alias}/test`): each location's outcome, in
+/// order, none `not-tried`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationsTestDto {
+    pub locations: Vec<LocationTriedDto>,
 }
 
 /// Where a configured repository's password comes from, without its value:
@@ -3305,8 +3517,8 @@ mod operation_dto_tests {
     use serde_json::{from_str, to_string};
 
     use super::{
-        InvalidOperation, OperationDetailDto, OperationResultDto, OperationSummaryDto,
-        OperationWarningDto, OperationsPageDto, WarningCode,
+        InvalidOperation, LocationTriedDto, OperationDetailDto, OperationResultDto,
+        OperationSummaryDto, OperationWarningDto, OperationsPageDto, WarningCode,
     };
 
     fn summary() -> OperationSummaryDto {
@@ -3330,6 +3542,59 @@ mod operation_dto_tests {
             None,
         )
         .unwrap_or_else(|e| panic!("a valid summary: {e:?}"))
+    }
+
+    /// A summary whose run saw `/srv/lan`, then `/srv/public`, with these
+    /// outcomes.
+    fn of_two(outcomes: [&str; 2]) -> OperationSummaryDto {
+        let tried = |position: u8, address: &str, outcome: &str| LocationTriedDto {
+            position,
+            address: address.to_owned(),
+            outcome: outcome.to_owned(),
+            source: None,
+        };
+        summary().with_locations(vec![
+            tried(1, "/srv/lan", outcomes[0]),
+            tried(2, "/srv/public", outcomes[1]),
+        ])
+    }
+
+    /// A run on a repository reached at several locations names the one it
+    /// used, by position and address, and how many the repository had,
+    /// wherever the used one is in the order; a run that used none, and one
+    /// on a repository of one location, name none (decision 80).
+    #[test]
+    fn a_summary_names_the_location_its_run_used_of_how_many() {
+        let used = |dto: &OperationSummaryDto| {
+            dto.used_location()
+                .map(|(used, count)| (used.position, used.address.clone(), count))
+        };
+        assert_eq!(
+            used(&of_two(["silent", "used"])),
+            Some((2, "/srv/public".to_owned(), 2))
+        );
+        assert_eq!(
+            used(&of_two(["used", "not-tried"])),
+            Some((1, "/srv/lan".to_owned(), 2))
+        );
+        assert_eq!(used(&of_two(["silent", "refused"])), None);
+        assert_eq!(used(&summary()), None);
+    }
+
+    /// The summary carries every location its run saw, on the wire; one of
+    /// a repository of one location leaves the key out.
+    #[test]
+    fn a_summary_carries_the_locations_its_run_saw() {
+        let dto = of_two(["silent", "used"]);
+        let json = to_string(&dto).unwrap();
+        assert!(
+            json.contains(
+                r#""locations":[{"position":1,"address":"/srv/lan","outcome":"silent"},{"position":2,"address":"/srv/public","outcome":"used"}]"#
+            ),
+            "{json}"
+        );
+        assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), dto);
+        assert!(!to_string(&summary()).unwrap().contains("locations"));
     }
 
     #[test]
@@ -3531,6 +3796,7 @@ mod catalog_dto_tests {
                 maintained_here: false,
                 create_offered: false,
                 warnings: Vec::new(),
+                locations: Vec::new(),
             }],
         };
         assert_eq!(
@@ -3583,6 +3849,7 @@ mod catalog_dto_tests {
             maintained_here: false,
             create_offered: false,
             warnings: Vec::new(),
+            locations: Vec::new(),
         };
         assert_eq!(
             to_string(&row).unwrap(),

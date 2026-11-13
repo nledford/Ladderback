@@ -16,8 +16,10 @@ use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
+use app::locations::{ChooseLocation, LocationReport};
+use domain::execution::locations::{LocationOutcome, LocationsRecord};
 
-use app::conditions::NetworkWait;
+use app::conditions::{NameWatch, NetworkWait};
 use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
@@ -25,8 +27,8 @@ use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
     EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
-    OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random, RunningJob,
-    ScheduleStore, SnapshotSummary,
+    NetworkLink, OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random,
+    RunningJob, ScheduleStore, SnapshotSummary,
 };
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
@@ -45,7 +47,10 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::{Maintenance, NotRecorded, RepositoryField, RepositorySettings};
+use domain::planning::{
+    Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan, RepositoryConfig,
+    RepositoryField, RepositorySettings, RuleNote,
+};
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SourceName, Template, TemplateError,
@@ -144,18 +149,30 @@ pub(crate) struct Daemon {
 }
 
 /// What the conditions before a scheduled run ask the machine (§5): what
-/// powers it and whether it is online.
+/// powers it, whether it is online, and the network link the rules of a
+/// repository's locations are evaluated against (decision 80), its reads of
+/// the Wi-Fi network's name watched for the Repositories page.
 pub(crate) struct RunConditions {
     pub(crate) power: Arc<dyn PowerSupply>,
     pub(crate) network: Arc<dyn Network>,
+    pub(crate) link: Arc<NameWatch>,
 }
 
 impl RunConditions {
-    /// This machine's.
+    /// This machine's. The first name it can't read is said once in the
+    /// log, never with what was read (decision 80).
     fn system() -> Self {
         Self {
             power: platform::power::system_power(),
             network: platform::network::system_network(),
+            link: Arc::new(NameWatch::new(
+                platform::network_link::system_link(),
+                || {
+                    log::warn!(
+                        "can't read the name of the Wi-Fi network this machine is on: a location's rule that names Wi-Fi networks doesn't hold here, so that location is skipped; a rule of `wired` or `wifi` alone needs no name"
+                    );
+                },
+            )),
         }
     }
 }
@@ -191,6 +208,7 @@ impl Background {
             config: self.config,
             power: self.conditions.power,
             network: self.conditions.network,
+            link: self.conditions.link,
             runs,
             queue,
             zone: domain::TimeZone::system(),
@@ -416,22 +434,33 @@ async fn state_over(
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
     let writes = Arc::new(ConfigWrites::default());
-    let engine: Arc<dyn Engine> = Arc::new(RecordOpened::new(
-        Arc::new(EventEngine {
-            inner: Arc::new(workers),
-            bus: Arc::clone(&bus),
-        }),
-        Arc::clone(&config),
-        Arc::clone(&writes),
-        Arc::new(log_recording),
-    ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
+    // The choice of a location comes first (decision 80): a job opens the
+    // location it chose, and the record of an opened repository's ID
+    // (decision 81) sees that job, never a probe.
+    let locations = Arc::new(ChooseLocation::new(
+        Arc::new(RecordOpened::new(
+            Arc::new(EventEngine {
+                inner: Arc::new(workers),
+                bus: Arc::clone(&bus),
+            }),
+            Arc::clone(&config),
+            Arc::clone(&writes),
+            Arc::new(log_recording),
+        )),
+        Arc::new(SystemClock),
+        Arc::<NameWatch>::clone(&conditions.link),
+        resolve.as_ref().clone(),
+        Arc::new(log_location),
+    ));
+    let engine: Arc<dyn Engine> = Arc::<ChooseLocation>::clone(&locations);
     let (run_ends, ends) = app::retry::run_ends();
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         resolve: Arc::clone(&resolve),
         agent_id,
         engine: Arc::clone(&engine),
+        locations: Some(locations),
         store: Arc::clone(&store),
         retention: Arc::new(engine::RusticRetention),
         registry: Arc::new(CancelRegistry::new()),
@@ -444,6 +473,7 @@ async fn state_over(
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
         Arc::clone(&engine),
+        Arc::<NameWatch>::clone(&conditions.link),
         resolve.as_ref().clone(),
         Arc::clone(&config),
         Arc::clone(&store),
@@ -454,6 +484,7 @@ async fn state_over(
         engine,
         operations: Arc::clone(&store),
         schedules: Arc::clone(&schedules),
+        link: Arc::clone(&conditions.link),
     });
     let background = Background {
         runner,
@@ -745,9 +776,21 @@ fn config_refused(error: ConfigError) -> Refused {
             problem,
             detail,
         } => {
+            // `repository-id` is required only of a repository with further
+            // locations (decision 80), and the way out is to record it.
+            let needs_id = problem == app::ports::Problem::MissingKey
+                && key
+                    .as_deref()
+                    .is_some_and(|key| key.ends_with(".repository-id"));
             let mut where_ = key.unwrap_or_else(|| "an earlier rule".to_owned());
             if let Some(at) = at {
                 where_ = format!("{where_} (line {}, column {})", at.line, at.column);
+            }
+            if needs_id {
+                return refused(
+                    msg::CLI_CONFIG_LOCATIONS_NEED_ID,
+                    vec![("file", text(file)), ("where", text(where_))],
+                );
             }
             refused(
                 msg::CLI_CONFIG_INVALID,
@@ -814,6 +857,61 @@ impl Engine for EventEngine {
     }
 }
 
+/// What the choice of a location tells the daemon's log (decision 80): for
+/// each job on a repository reached at several, which location it used and
+/// why each earlier one was skipped, by position and outcome code, never an
+/// address or a network's name.
+fn log_location(report: LocationReport) {
+    match report {
+        LocationReport::ExposedCredentials {
+            alias,
+            position,
+            cause,
+        } => log::warn!(
+            "repository {}: location {position} sends its credentials where whoever answers at its address can read them ({})",
+            alias.as_str(),
+            cause.code()
+        ),
+        LocationReport::OtherRepository { alias, position } => log::warn!(
+            "repository {}: location {position} holds another repository, so it was not used",
+            alias.as_str()
+        ),
+        LocationReport::Chosen { alias, record } => {
+            let count = record.locations.len();
+            let skipped: Vec<String> = record
+                .locations
+                .iter()
+                .filter(|tried| {
+                    !matches!(
+                        tried.outcome,
+                        LocationOutcome::Used | LocationOutcome::NotTried
+                    )
+                })
+                .map(|tried| format!("location {} {}", tried.position, tried.outcome.code()))
+                .collect();
+            let skipped = if skipped.is_empty() {
+                String::new()
+            } else {
+                format!(" (skipped: {})", skipped.join(", "))
+            };
+            match record.used() {
+                Some(used) => {
+                    log::info!(
+                        "repository {}: used location {used} of {count}{skipped}",
+                        alias.as_str()
+                    );
+                }
+                None => {
+                    log::warn!(
+                        "repository {}: no location of {count} could be used{skipped}",
+                        alias.as_str()
+                    )
+                }
+            }
+        }
+    }
+}
+
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
 /// that names a repository, a listing, a prune's plan) and the initialising
@@ -822,7 +920,7 @@ impl Engine for EventEngine {
 /// run that read, which keeps none of it (#308).
 fn is_operation(job: &Job) -> bool {
     match job {
-        Job::Identify(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
+        Job::Identify(_) | Job::Probe(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -861,7 +959,9 @@ impl Publish {
             // operation is running, and its end before the run's ending hooks
             // and final write, so a page told of either could read a history
             // that doesn't have it yet. The run announces both.
-            E::Started { .. } | E::Succeeded(_) | E::Failed(_) => None,
+            // The choice of location is the run's record, which the
+            // operation's row shows once the run writes it.
+            E::Started { .. } | E::Succeeded(_) | E::Failed(_) | E::Located(_) => None,
         }
     }
 }
@@ -874,6 +974,10 @@ struct PlanRunner {
     resolve: Arc<ResolveRepository>,
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
+    /// Chooses the location retention opens in-process for a repository
+    /// reached at several (decision 80); `engine` makes the same choice for
+    /// every job. Without it, such a repository's retention fails.
+    locations: Option<Arc<ChooseLocation>>,
     store: Arc<dyn OperationStore>,
     /// Evaluates each plan's retention for a forget run (§7.3).
     retention: Arc<dyn Retention>,
@@ -1371,6 +1475,15 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .as_ref()
             .map(|alias| alias.as_str().to_owned()),
     )
+    .map(|summary| {
+        summary.with_locations(
+            record
+                .locations
+                .as_ref()
+                .map(locations_tried)
+                .unwrap_or_default(),
+        )
+    })
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
 }
@@ -1415,6 +1528,7 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
+        | EngineResult::Probed(_)
         | EngineResult::Snapshots(_) => None,
     }
 }
@@ -1455,6 +1569,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::CheckWarning => WarningCode::CheckWarning,
         WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
+        WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -1730,6 +1845,13 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::ProfileKeyringCommandMissing,
             vec![("program", text(program))],
         ),
+        ProfileNotice::LocationsNotExported { further } => (
+            WarningCode::ProfileLocationsNotExported,
+            vec![(
+                "count",
+                MsgArg::Count(u64::try_from(further).unwrap_or(u64::MAX)),
+            )],
+        ),
     };
     Notice { code, args }
 }
@@ -1751,6 +1873,9 @@ struct ConfigCatalog {
     engine: Arc<dyn Engine>,
     operations: Arc<dyn OperationStore>,
     schedules: Arc<dyn ScheduleStore>,
+    /// Whether this machine reads the Wi-Fi network's name, for the notes
+    /// on rules that name networks (decision 80).
+    link: Arc<NameWatch>,
 }
 
 #[async_trait]
@@ -1795,15 +1920,37 @@ impl Catalog for ConfigCatalog {
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         let offered = self.offers(&config).await;
+        // A rule that names networks is noted when the name can't be read:
+        // the first listing that has one reads it once, in the background,
+        // as the read may take seconds.
+        let names_asked = config.repositories().values().any(|repository| {
+            repository
+                .location_rules()
+                .into_iter()
+                .flatten()
+                .any(LocationRule::asks_name)
+        });
+        if names_asked {
+            let link = Arc::clone(&self.link);
+            tokio::spawn(async move { link.check_once().await });
+        }
+        let reads_names = self.link.reads_names();
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
                 .iter()
                 .map(|(alias, repository)| {
-                    repository_row(
+                    let plans: Vec<&Plan> = config
+                        .plans()
+                        .iter()
+                        .filter(|plan| &plan.repository == alias)
+                        .collect();
+                    listed_repository(
                         alias,
-                        &repository.settings,
-                        repository.maintenance,
+                        repository,
+                        &plans,
+                        platform::network_link::tells_wired(),
+                        reads_names,
                         offered.contains(alias),
                     )
                 })
@@ -1945,6 +2092,8 @@ fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::Inv
 struct RepositoryService {
     clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
+    /// The network link a Test evaluates the locations' rules against.
+    link: Arc<dyn NetworkLink>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
     /// The operation log, which says whether a saved repository's row
@@ -1959,6 +2108,7 @@ impl RepositoryService {
     fn new(
         clock: Arc<dyn Clock>,
         engine: Arc<dyn Engine>,
+        link: Arc<dyn NetworkLink>,
         resolve: ResolveRepository,
         config: Arc<dyn ConfigStore>,
         operations: Arc<dyn OperationStore>,
@@ -1967,6 +2117,7 @@ impl RepositoryService {
         Self {
             clock,
             engine,
+            link,
             resolve,
             config,
             operations,
@@ -2115,6 +2266,53 @@ impl Repositories for RepositoryService {
             Err(error) => Err(refusal_of(error, &saved.settings).await),
         }
     }
+
+    async fn test_saved(&self, alias: String) -> Result<api::LocationsTestDto, RepositoriesError> {
+        // A name that is no alias is one the configuration can't hold.
+        let Ok(parsed) = RepositoryAlias::parse(&alias) else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        let config = self.config.load().await.map_err(config_refusal)?;
+        let Some(entry) = config.repositories().get(&parsed).cloned() else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        // Probes go through the daemon's own engine, which hands a probe
+        // straight to a worker; the log hears what a job's choice tells it.
+        let saved = app::ports::SavedEntry {
+            alias: parsed,
+            entry,
+        };
+        let tested = ChooseLocation::new(
+            Arc::clone(&self.engine),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.link),
+            self.resolve.clone(),
+            Arc::new(log_location),
+        )
+        .test_each(new_operation(), &saved)
+        .await;
+        match tested {
+            Ok(record) => Ok(api::LocationsTestDto {
+                locations: locations_tried(&record),
+            }),
+            Err(error) => Err(refusal_of(error, &saved.entry.settings).await),
+        }
+    }
+}
+
+/// Every location of a choice or a Test, as the wire carries it: by
+/// position, the address masked as recorded, and the outcome's code.
+fn locations_tried(record: &LocationsRecord) -> Vec<api::LocationTriedDto> {
+    record
+        .locations
+        .iter()
+        .map(|tried| api::LocationTriedDto {
+            position: tried.position,
+            address: tried.address.clone(),
+            outcome: tried.outcome.code().to_owned(),
+            source: tried.source.clone(),
+        })
+        .collect()
 }
 
 /// A fresh operation ID: a UUIDv7, as every operation of the daemon has.
@@ -2181,7 +2379,7 @@ fn settings_of(dto: api::RepositorySettingsDto) -> Result<RepositorySettings, Re
 /// names it.
 fn path_relative(field: Field) -> RepositoriesError {
     RepositoriesError::PathRelative {
-        field: field_name(&field),
+        field: field.name(),
     }
 }
 
@@ -2258,7 +2456,7 @@ async fn secret_refusal(
     resolver: &dyn SecretResolver,
 ) -> SecretRefusal {
     use domain::secrets::Problem;
-    let field = || ("field", MsgArg::Text(field_name(&error.field)));
+    let field = || ("field", MsgArg::Text(error.field.name()));
     let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
         code,
         args,
@@ -2325,7 +2523,7 @@ async fn secret_refusal(
             vec![field(), ("limit", bytes(*limit))],
             None,
         ),
-        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(field_name(&error.field)), *limit),
+        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(error.field.name()), *limit),
         Cause::TooManyCredentials { .. } => {
             refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
         }
@@ -2447,19 +2645,6 @@ async fn failure_redactor(
     })
 }
 
-/// Where a secret failed to resolve, as the catalog names it: the setting's
-/// own name in the configuration.
-fn field_name(field: &Field) -> String {
-    match field {
-        Field::Repository => "repository".to_owned(),
-        Field::RepoHot => "repo-hot".to_owned(),
-        Field::Password => "password".to_owned(),
-        Field::Option(name) => format!("options.{name}"),
-        Field::OptionHot(name) => format!("options-hot.{name}"),
-        Field::OptionCold(name) => format!("options-cold.{name}"),
-    }
-}
-
 /// A job that ran and failed: the engine's own words for a failure it
 /// reports, a typed code for the rest. The engine redacts what it says.
 fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> RepositoriesError {
@@ -2495,6 +2680,9 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
+        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
+        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
     }
 }
 
@@ -2564,6 +2752,131 @@ fn config_unusable<R>(
     }
 }
 
+/// A configured entry as the repositories list shows it: its row, and for
+/// an entry reached at several locations, each location in order with its
+/// rule; a warning for each location that sends its credentials where an
+/// impostor could read them, by position and cause, never the address; and
+/// the notes about what the locations' rules mean for `plans`, the plans
+/// that back up to it, on a machine that can or can't tell a wired link
+/// from other links (decision 80).
+fn listed_repository(
+    alias: &RepositoryAlias,
+    repository: &RepositoryConfig,
+    plans: &[&Plan],
+    tells_wired: bool,
+    reads_names: bool,
+    create_offered: bool,
+) -> api::RepositoryDto {
+    let mut row = repository_row(
+        alias,
+        &repository.settings,
+        repository.maintenance,
+        create_offered,
+    );
+    row.warnings
+        .extend(repository.location_warnings().into_iter().map(|warning| {
+            api::WarningDto {
+                code: api::WarningCode::LocationPlainHttpCredentials,
+                args: [
+                    ("position".to_owned(), text(warning.position)),
+                    ("cause".to_owned(), text(warning.cause.code())),
+                ]
+                .into(),
+            }
+        }));
+    row.warnings.extend(
+        repository
+            .rule_notes(plans, tells_wired, reads_names)
+            .into_iter()
+            .map(|note| {
+                let (code, args) = match note {
+                    RuleNote::EveryLocationRuled => {
+                        (api::WarningCode::LocationEveryRuled, Vec::new())
+                    }
+                    RuleNote::LastRuledWithoutRetry { plan } => (
+                        api::WarningCode::LocationLastRuledNoRetry,
+                        vec![("plan".to_owned(), text(plan.as_str()))],
+                    ),
+                    RuleNote::WiredUnknown { position } => (
+                        api::WarningCode::LocationRuleWiredUnknown,
+                        vec![("position".to_owned(), text(position))],
+                    ),
+                    RuleNote::NameUnreadable { position } => (
+                        api::WarningCode::LocationRuleNameUnreadable,
+                        vec![("position".to_owned(), text(position))],
+                    ),
+                };
+                api::WarningDto {
+                    code,
+                    args: args.into_iter().collect(),
+                }
+            }),
+    );
+    if repository.has_several_locations() {
+        let first = Location {
+            when: repository.locations.first_when.clone(),
+            ..Location::of(&repository.settings)
+        };
+        row.locations = std::iter::once(first)
+            .chain(repository.locations.further.iter().cloned())
+            .zip(1u8..)
+            .map(|(location, position)| listed_location(&location, position))
+            .collect();
+    }
+    row
+}
+
+/// One location of an entry as the list shows it: its address masked, and
+/// each option by name, with its value only when that is references alone.
+fn listed_location(location: &Location, position: u8) -> api::LocationDto {
+    let options = [
+        ("options", &location.options),
+        ("options-hot", &location.options_hot),
+        ("options-cold", &location.options_cold),
+    ]
+    .into_iter()
+    .flat_map(|(set, options)| {
+        options
+            .iter()
+            .map(move |(name, value)| api::LocationOptionDto {
+                set: set.to_owned(),
+                name: name.clone(),
+                reference: domain::secrets::only_references(value).then(|| value.clone()),
+            })
+    })
+    .collect();
+    api::LocationDto {
+        position,
+        repository: location.masked_address(),
+        repo_hot: location.masked_repo_hot(),
+        options,
+        when: location
+            .when
+            .iter()
+            .flat_map(LocationRule::alternatives)
+            .map(|alternative| {
+                let names = |filter: Option<&NameFilter>| {
+                    filter
+                        .map(|filter| {
+                            filter
+                                .names()
+                                .iter()
+                                .map(|name| name.as_str().to_owned())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let filter = alternative.names();
+                api::LocationAlternativeDto {
+                    network: alternative.kind().as_str().to_owned(),
+                    only: names(filter.filter(|filter| matches!(filter, NameFilter::Only(_)))),
+                    except: names(filter.filter(|filter| matches!(filter, NameFilter::Except(_)))),
+                }
+            })
+            .collect(),
+    }
+}
+
 /// One configured repository as a list shows it: its locations masked, and
 /// where its password comes from, never the password (I4). `create_offered`
 /// is whether its row offers to create it (decision 53).
@@ -2608,6 +2921,7 @@ fn repository_row(
                 }
             })
             .collect(),
+        locations: Vec::new(),
     }
 }
 
@@ -2791,6 +3105,7 @@ mod tests {
             warning_count: 0,
             result,
             repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
+            locations: None,
         }
     }
 
@@ -3102,6 +3417,273 @@ mod tests {
                 "{maintenance:?}"
             );
         }
+    }
+
+    /// An entry `nas` reached at `rest:http://lan.example.lan/r` with a user
+    /// and password written in it and a key by reference, then at
+    /// `/srv/public` with a key written in the file.
+    fn two_locations() -> RepositoryConfig {
+        let mut first = demo_settings(SecretRef::Env("NAS_PASSWORD".to_owned()));
+        first.repository = "rest:http://lan:CANARY-url-pass@lan.example.lan/r".to_owned();
+        first
+            .options
+            .insert("application_key".to_owned(), "${LAN_KEY}".to_owned());
+        RepositoryConfig {
+            locations: domain::planning::Locations {
+                first_when: None,
+                further: vec![Location {
+                    repository: "/srv/public".to_owned(),
+                    options_cold: [(
+                        "secret_access_key".to_owned(),
+                        "CANARY-written-key".to_owned(),
+                    )]
+                    .into(),
+                    ..Location::default()
+                }],
+            },
+            id: None,
+            settings: first,
+            maintenance: Maintenance::Local,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_listed_repository_lists_its_locations_in_order_with_references_and_never_a_written_secret()
+    {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
+        let option = |set: &str, name: &str, reference: Option<&str>| api::LocationOptionDto {
+            set: set.to_owned(),
+            name: name.to_owned(),
+            reference: reference.map(str::to_owned),
+        };
+        assert_eq!(
+            row.locations,
+            vec![
+                api::LocationDto {
+                    position: 1,
+                    repository: "rest:http://lan:***@lan.example.lan/r".to_owned(),
+                    repo_hot: None,
+                    options: vec![option("options", "application_key", Some("${LAN_KEY}"))],
+                    when: Vec::new(),
+                },
+                api::LocationDto {
+                    position: 2,
+                    repository: "/srv/public".to_owned(),
+                    repo_hot: None,
+                    options: vec![option("options-cold", "secret_access_key", None)],
+                    when: Vec::new(),
+                },
+            ]
+        );
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        assert!(!wire.contains("CANARY"), "the row shows a secret: {wire}");
+    }
+
+    #[test]
+    fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
+        let warning = api::WarningDto {
+            code: WarningCode::LocationPlainHttpCredentials,
+            args: [
+                ("position".to_owned(), MsgArg::Text("1".to_owned())),
+                ("cause".to_owned(), MsgArg::Text("plain-http".to_owned())),
+            ]
+            .into(),
+        };
+        assert!(row.warnings.contains(&warning), "{:?}", row.warnings);
+    }
+
+    #[test]
+    fn a_listed_repository_shows_each_locations_rule_and_notes_what_the_rules_mean() {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let mut entry = two_locations();
+        let wired =
+            LocationRule::new(vec![domain::planning::NetworkKind::Wired.into()]).expect("a rule");
+        entry.locations.first_when = Some(wired.clone());
+        entry.locations.further[0].when = Some(
+            LocationRule::new(vec![
+                domain::planning::NetworkKind::WiFi.into(),
+                domain::planning::NetworkKind::Wired.into(),
+            ])
+            .expect("a rule"),
+        );
+        let mut plan = Plan::new(
+            PlanId::parse("home").expect("a plan ID"),
+            alias.clone(),
+            Vec::new(),
+        );
+        plan.schedule = Some(domain::planning::Schedule::new(
+            domain::planning::Interval::parse("1d").expect("an interval"),
+        ));
+        let row = listed_repository(&alias, &entry, &[&plan], false, true, false);
+        let when: Vec<Vec<&str>> = row
+            .locations
+            .iter()
+            .map(|location| {
+                location
+                    .when
+                    .iter()
+                    .map(|kind| kind.network.as_str())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(when, vec![vec!["wired"], vec!["wifi", "wired"]]);
+        let note = |code, args: &[(&str, &str)]| api::WarningDto {
+            code,
+            args: args
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), MsgArg::Text((*value).to_owned())))
+                .collect(),
+        };
+        for expected in [
+            note(WarningCode::LocationEveryRuled, &[]),
+            note(WarningCode::LocationLastRuledNoRetry, &[("plan", "home")]),
+            note(WarningCode::LocationRuleWiredUnknown, &[("position", "1")]),
+            note(WarningCode::LocationRuleWiredUnknown, &[("position", "2")]),
+        ] {
+            assert!(
+                row.warnings.contains(&expected),
+                "{expected:?} in {:?}",
+                row.warnings
+            );
+        }
+        assert!(
+            listed_repository(&alias, &entry, &[], true, true, false)
+                .warnings
+                .iter()
+                .all(|warning| !matches!(
+                    warning.code,
+                    WarningCode::LocationLastRuledNoRetry | WarningCode::LocationRuleWiredUnknown
+                )),
+            "no plan and a machine that tells wired: neither note"
+        );
+    }
+
+    #[test]
+    fn a_listed_rule_names_its_networks_and_is_noted_where_names_cant_be_read() {
+        use domain::planning::{Alternative, NetworkKind, NetworkName};
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let names = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| NetworkName::parse(name).expect("a name"))
+                .collect()
+        };
+        let wifi = |filter| {
+            LocationRule::new(vec![
+                Alternative::new(NetworkKind::WiFi, filter).expect("an alternative"),
+            ])
+            .expect("a rule")
+        };
+        let mut entry = two_locations();
+        entry.locations.first_when = Some(wifi(Some(NameFilter::Only(names(&["Office", "Lab"])))));
+        entry.locations.further[0].when = Some(wifi(Some(NameFilter::Except(names(&["Guest"])))));
+        let row = listed_repository(&alias, &entry, &[], true, false, false);
+        let when: Vec<(Vec<String>, Vec<String>)> = row
+            .locations
+            .iter()
+            .flat_map(|location| location.when.iter())
+            .map(|alternative| (alternative.only.clone(), alternative.except.clone()))
+            .collect();
+        let owned = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(
+            when,
+            vec![
+                (owned(&["Office", "Lab"]), Vec::new()),
+                (Vec::new(), owned(&["Guest"])),
+            ]
+        );
+        let unreadable: Vec<&api::WarningDto> = row
+            .warnings
+            .iter()
+            .filter(|warning| warning.code == WarningCode::LocationRuleNameUnreadable)
+            .collect();
+        assert_eq!(
+            unreadable
+                .iter()
+                .map(|warning| warning.args.get("position"))
+                .collect::<Vec<_>>(),
+            [
+                Some(&MsgArg::Text("1".to_owned())),
+                Some(&MsgArg::Text("2".to_owned())),
+            ]
+        );
+        assert!(
+            listed_repository(&alias, &entry, &[], true, true, false)
+                .warnings
+                .iter()
+                .all(|warning| warning.code != WarningCode::LocationRuleNameUnreadable),
+            "a machine that reads the name: no note"
+        );
+        let wire = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(
+            wire.pointer("/locations/0/when/0/except"),
+            None,
+            "no empty list on the wire: {wire}"
+        );
+    }
+
+    #[test]
+    fn a_listed_repository_of_one_location_lists_no_locations() {
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let mut entry = two_locations();
+        entry.locations = Default::default();
+        let row = listed_repository(&alias, &entry, &[], true, true, false);
+        assert_eq!(row.locations, Vec::new());
+        let wire = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(wire.get("locations"), None, "{wire}");
+    }
+
+    #[test]
+    fn an_operations_summary_carries_the_locations_its_choice_saw() {
+        use domain::execution::locations::LocationTried;
+        let tried = |position, address: &str, outcome| LocationTried {
+            position,
+            address: address.to_owned(),
+            outcome,
+            source: None,
+        };
+        let record = LocationsRecord {
+            locations: vec![
+                tried(1, "/srv/lan", LocationOutcome::Silent),
+                tried(2, "/srv/public", LocationOutcome::Used),
+            ],
+        };
+        let summary = api::OperationSummaryDto::new(
+            "018f0000-0000-7000-8000-000000000001".to_owned(),
+            "home".to_owned(),
+            "backup".to_owned(),
+            "succeeded".to_owned(),
+            "2026-11-12T10:00:00Z".to_owned(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .expect("a summary")
+        .with_locations(locations_tried(&record));
+        assert_eq!(
+            summary.used_location().map(|(used, count)| (
+                used.position,
+                used.address.as_str(),
+                count
+            )),
+            Some((2, "/srv/public", 2))
+        );
+        let wire = serde_json::to_value(&summary).expect("a summary is JSON");
+        assert_eq!(
+            wire["locations"],
+            serde_json::json!([
+                {"position": 1, "address": "/srv/lan", "outcome": "silent"},
+                {"position": 2, "address": "/srv/public", "outcome": "used"},
+            ])
+        );
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has
@@ -3821,6 +4403,7 @@ mod tests {
             std::collections::BTreeMap::from([(
                 alias.clone(),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings,
                     // This agent maintains it, so a preview and a run reach
@@ -3853,6 +4436,7 @@ mod tests {
             resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
             agent_id: agent_id::load_or_create(&data_dir).expect("an agent ID"),
             engine: Arc::new(ParkedEngine),
+            locations: None,
             retention: Arc::new(engine::RusticRetention),
             store: Arc::new(
                 SqliteStore::open(&data_dir.join("ladderback.db"))
@@ -4378,6 +4962,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -4453,6 +5041,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -4546,6 +5138,10 @@ mod tests {
             )),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         catalog
             .snapshots("demo".to_owned())
@@ -5198,6 +5794,10 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let mut jobs = 0;
         let mut nothing_from = |read: &str, heard: &mut Heard| {
@@ -6381,6 +6981,14 @@ mod tests {
                 },
                 "demo-nas was already configured, so the profile's plans were added to it, and it kept its own group-by",
             ),
+            (
+                ProfileNotice::LocationsNotExported { further: 1 },
+                "1 further location was left out",
+            ),
+            (
+                ProfileNotice::LocationsNotExported { further: 2 },
+                "2 further locations were left out",
+            ),
         ];
         for (notice, expected) in notices {
             let notice = profile_notice(notice);
@@ -6617,6 +7225,7 @@ mod repository_service_tests {
         RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config,
             Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -6781,6 +7390,7 @@ mod repository_service_tests {
         let answer = RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -6867,6 +7477,7 @@ mod repository_service_tests {
             let service = RepositoryService::new(
                 clock(),
                 engine.clone(),
+                Arc::new(app::fakes::FakeNetworkLink::new()),
                 ResolveRepository::new(Arc::new(secrets)),
                 config.clone(),
                 Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -7129,6 +7740,7 @@ mod repository_service_tests {
         let service = RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
             Arc::new(NoLog),
@@ -7226,6 +7838,7 @@ mod repository_service_tests {
         RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -8341,6 +8954,7 @@ mod repository_service_tests {
                     std::collections::BTreeMap::from([(
                         RepositoryAlias::parse(alias).expect("an alias"),
                         domain::planning::RepositoryConfig {
+                            locations: Default::default(),
                             id: None,
                             settings,
                             maintenance: domain::planning::Maintenance::None,
@@ -8359,6 +8973,10 @@ mod repository_service_tests {
             engine,
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         (catalog, scratch)
     }
@@ -8393,6 +9011,10 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules,
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.plans().await.expect("the plans");
         let shown: Vec<(&str, bool, Option<&str>)> = listed
@@ -8767,6 +9389,10 @@ mod repository_service_tests {
                 engine: engine(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                link: Arc::new(NameWatch::new(
+                    Arc::new(app::fakes::FakeNetworkLink::new()),
+                    || {},
+                )),
             };
             let expected = CatalogError::Unavailable {
                 code,
@@ -8798,12 +9424,17 @@ mod repository_service_tests {
                 engine: scripted.clone(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                link: Arc::new(NameWatch::new(
+                    Arc::new(app::fakes::FakeNetworkLink::new()),
+                    || {},
+                )),
             };
             let runner = PlanRunner {
                 config,
                 resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
                 agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
                 engine: scripted.clone(),
+                locations: None,
                 retention: Arc::new(engine::RusticRetention),
                 store: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 registry: Arc::new(CancelRegistry::new()),
@@ -8848,6 +9479,7 @@ mod repository_service_tests {
                 resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
                 agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
                 engine: scripted.clone(),
+                locations: None,
                 retention: Arc::new(engine::RusticRetention),
                 store: store.clone(),
                 registry: Arc::new(CancelRegistry::new()),
@@ -8946,6 +9578,7 @@ mod repository_service_tests {
             repositories.insert(
                 alias(name),
                 domain::planning::RepositoryConfig {
+                    locations: Default::default(),
                     id: None,
                     settings: RepositorySettings {
                         // One location each: two entries at one location
@@ -8980,6 +9613,10 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.repositories().await.expect("the list");
         // In the order of the aliases, one row each.
@@ -9073,6 +9710,7 @@ mod repository_service_tests {
     ) -> Vec<(String, bool)> {
         let config = Arc::new(InMemoryConfigStore::new());
         let entry = |name: &str, id| domain::planning::RepositoryConfig {
+            locations: Default::default(),
             settings: domain::planning::RepositorySettings {
                 repository: format!("/srv/{name}/repo"),
                 repo_hot: None,
@@ -9112,6 +9750,10 @@ mod repository_service_tests {
             engine: engine(),
             operations,
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            link: Arc::new(NameWatch::new(
+                Arc::new(app::fakes::FakeNetworkLink::new()),
+                || {},
+            )),
         };
         let listed = catalog.repositories().await.expect("the list");
         listed

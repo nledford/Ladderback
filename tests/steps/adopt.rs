@@ -116,6 +116,7 @@ async fn save_config(agent: &mut Agent) {
     repositories.insert(
         alias(),
         RepositoryConfig {
+            locations: Default::default(),
             id: None,
             settings: RepositorySettings {
                 repository: cold.to_str().expect("a UTF-8 path").to_owned(),

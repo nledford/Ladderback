@@ -13,10 +13,12 @@ mod duration;
 mod filter;
 mod hooks;
 mod local_paths;
+mod location;
 mod names;
 mod plan;
 mod repository;
 mod retention;
+mod rule;
 mod schedule;
 
 pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, NotRecorded, Violation};
@@ -25,6 +27,10 @@ pub use filter::SourceFilter;
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};
+pub use location::{
+    ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
+    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, RuleNote, check_location_count,
+};
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
 pub use repository::{
@@ -32,6 +38,10 @@ pub use repository::{
     check_options, masked_options,
 };
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
+pub use rule::{
+    Alternative, CurrentNetworkName, Link, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
+    MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName, RuleVerdict,
+};
 pub use schedule::{
     Cadence, CronExpression, Interval, MIN_INTERVAL, NoNextRun, Schedule, ScheduleZone,
 };
@@ -68,6 +78,10 @@ pub enum ValueKind {
     /// A repository's `repository` or `repo-hot`, longer than
     /// [`MAX_LOCATION_BYTES`](crate::secrets::MAX_LOCATION_BYTES).
     Location,
+    /// A location's `when`: an empty list, more than
+    /// [`MAX_RULE_ALTERNATIVES`](crate::planning::MAX_RULE_ALTERNATIVES)
+    /// alternatives, or a `network` that isn't `wired` nor `wifi`.
+    LocationRule,
     /// The value of an option, longer than
     /// [`MAX_OPTION_VALUE_BYTES`](crate::secrets::MAX_OPTION_VALUE_BYTES).
     OptionValue,

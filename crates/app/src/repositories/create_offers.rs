@@ -149,6 +149,7 @@ mod tests {
     /// The entry of `name`, at a location of its own, recording `id`.
     fn entry(name: &str, id: Option<RepositoryId>) -> RepositoryConfig {
         RepositoryConfig {
+            locations: Default::default(),
             settings: RepositorySettings {
                 repository: format!("/home/demo/scratch/{name}"),
                 repo_hot: None,

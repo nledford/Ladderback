@@ -473,6 +473,13 @@ ui-result-adopted =
 # $duration (duration): that length of time, such as 1 min 5 s.
 ui-result-took = Took { $duration }
 
+# One fact of a run on a repository reached at several locations: the location
+# it used, and its address as the run recorded it.
+# $position (count): the location's place in the repository's order, from 1.
+# $count (count): how many locations the repository had then, at least 2.
+# $address (text): the location's address, with any credentials in it masked. It is shown as it came.
+ui-result-used-location = Used location { $position } of { $count }: { $address }
+
 # The button in the operations header that re-sorts the rows.
 ui-sort-by-started = Sort by started
 
@@ -1151,6 +1158,88 @@ ui-repository-created-id = Its ID is { $id }.
 # Shown in a repository's row when creating it was refused because a repository is already where its entry says. Nothing was written.
 # $alias (text): the name the repository is saved under.
 ui-repository-already-there = There is already a repository at the location of { $alias }, so nothing was created.
+
+# The name of the list, in a repository's row, of the locations a repository reached at several is tried at, in order (decision 80).
+# $alias (text): the name the repository is saved under.
+ui-repository-locations = Locations of { $alias }
+
+# What heads the first location in a repository's list of locations: a job tries it first.
+# $position (count): its place in the order, 1.
+ui-location-tried-first = Location { $position }, tried first
+
+# What heads a later location in a repository's list of locations.
+# $position (count): its place in the order, from 2.
+ui-location-position = Location { $position }
+
+# One option of a location in a repository's list of locations, whose value is made of references to secrets, which say where a secret is and never hold it.
+# $name (text): the option's name, as the configuration file writes it. It is shown as it came.
+# $set (text): the set of options it is in: options, options-hot or options-cold, as the configuration file writes it. It is shown as it came.
+# $reference (text): the value, such as ${LAN_KEY}. It is shown as it came.
+ui-location-option-reference = The option { $name } in { $set } comes from { $reference }.
+
+# One option of a location in a repository's list of locations, whose value is written in the configuration file. The value may be a secret, so it is never shown.
+# $name (text): the option's name, as the configuration file writes it. It is shown as it came.
+# $set (text): the set of options it is in: options, options-hot or options-cold, as the configuration file writes it. It is shown as it came.
+ui-location-option-written = The option { $name } in { $set } is written in the configuration file and not shown.
+
+# The button in the row of a repository reached at several locations that tries each location in turn, without changing anything.
+# $alias (text): the name the repository is saved under.
+ui-repository-test-locations = Test the locations of { $alias }
+
+# What a row's Test found at one location, shown under the location in the repository's list of locations.
+# $outcome (text): what it found, one of the codes below. Not shown.
+ui-location-tested = { $outcome ->
+    [used] Answers and holds the repository.
+    [silent] Did not answer.
+    [refused] Refused its credentials.
+    [not-a-repository] Answers, but holds no repository.
+    [other-repository] Answers, but holds another repository. Check its address.
+    [password-not-accepted] Answers, but did not accept the repository's password.
+    [secret-unavailable] Not tried: a secret it needs could not be read.
+    [template-invalid] Not tried: one of its settings is not a valid template.
+    [repository-path-relative] Not tried: one of its paths is relative once resolved. Write an absolute path.
+    [secret-expansion-too-long] Not tried: one of its settings is too long once its references are resolved.
+    [secret-in-process-arguments] Not tried: a setting passed to a program holds a reference, which would show its secret.
+    [location-too-many-credentials] Not tried: its rclone connection string holds more credentials than a job can hide.
+    [rule-not-met] Not tried: its rule doesn't hold on the network this machine is on.
+    [rule-unknown] Not tried: its rule couldn't be checked on this machine.
+   *[other] Could not be used.
+}
+
+# One alternative of a location's rule, under the location in a repository's list of locations. The location may be tried when any one of its alternatives holds.
+# $network (text): the kind of network the alternative asks for, as the configuration file writes it: wired or wifi. Not shown.
+ui-location-rule = { $network ->
+    [wired] May be tried on a wired network.
+   *[wifi] May be tried on any Wi-Fi network.
+}
+
+# One alternative of a location's rule that lists Wi-Fi networks by name, one line per name: the location may be tried on that network. The location may be tried when any one of its alternatives holds.
+# $name (text): the network's name, as the configuration file lists it.
+ui-location-rule-only = May be tried on the Wi-Fi network “{ $name }”.
+
+# Right after ui-location-rule for a Wi-Fi alternative that leaves networks out by name, one line per name: the location isn't tried on that network.
+# $name (text): the network's name, as the configuration file lists it.
+ui-location-rule-except = Not tried on the Wi-Fi network “{ $name }”.
+
+# Under a location's rule, after its alternatives: where the location isn't tried. A VPN that carries all traffic makes the machine's network link the VPN's.
+ui-location-rule-elsewhere = Skipped on any other network, and behind a VPN that carries all of this machine's traffic.
+
+# Shown right after ui-location-tested, when the daemon named where a secret was looked for or which setting can't be used. Never a value.
+# $outcome (text): what the Test found, as in ui-location-tested. Not shown.
+# $source (text): where the secret was looked for, such as env LAN_KEY, or the setting, such as options.key. It is shown as it came.
+ui-location-tested-source = { $outcome ->
+    [secret-unavailable] The secret was looked for in { $source }.
+   *[other] The setting is { $source }.
+}
+
+# Announced politely when a row's Test of a repository's locations answered. Each location's own outcome is shown in its list.
+# $alias (text): the name the repository is saved under.
+# $answering (count): how many of its locations answer and hold the repository.
+# $count (count): how many locations it has, at least 2.
+ui-repository-locations-tested = { $answering ->
+    [one] Tested { $alias }: { $answering } of its { $count } locations answers and holds the repository.
+   *[other] Tested { $alias }: { $answering } of its { $count } locations answer and hold the repository.
+}
 
 ## Sign-in (security §10.1): the sign-in page, the dialog shown when a session
 ## ends while the page is in use, and the start page's notice that sign-in is off.
