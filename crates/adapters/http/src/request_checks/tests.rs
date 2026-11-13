@@ -35,6 +35,7 @@ pub(crate) fn test_state() -> AppState {
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
         sign_in: crate::SignIn::Off,
+        exposure: crate::Exposure::Loopback,
     }
 }
 
@@ -760,12 +761,23 @@ const OTHER_ADDRESSES: [&str; 9] = [
 ];
 
 #[test]
-fn other_addresses_may_not_be_listened_on_with_sign_in_off() {
-    let hosts = ["nas.example.com".to_owned()];
+fn other_addresses_may_be_listened_on_with_sign_in_off_for_a_configured_host_name() {
+    let hosts = ["backup.example".to_owned()];
     for text in OTHER_ADDRESSES {
         assert_eq!(
             startup_rule(addr(text), false, &hosts),
-            Err(StartupRefusal::SignInOff(addr(text))),
+            Ok(Exposure::Network),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn with_sign_in_off_other_addresses_still_need_a_configured_host_name() {
+    for text in OTHER_ADDRESSES {
+        assert_eq!(
+            startup_rule(addr(text), false, &[]),
+            Err(StartupRefusal::NoAllowedHost(addr(text))),
             "{text}"
         );
     }

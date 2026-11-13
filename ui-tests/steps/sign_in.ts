@@ -61,6 +61,34 @@ Given(
   },
 );
 
+// A daemon of the scenario's own with sign-in off, listening on every address
+// with one host name configured: on the network, as a home server is. The
+// page is opened at the loopback address, which reaches the same daemon and
+// which the request checks always admit, so no name has to resolve to it.
+Given(
+  "a daemon with sign-in off listening on every address for the host name {string}",
+  async function (this: BrowserWorld, name: string) {
+    const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-network-"));
+    const { child, url } = await startServer(folders(scratch), [
+      "--listen",
+      "0.0.0.0:0",
+      "--allowed-host",
+      name,
+    ]);
+    this.ownServer = { child, scratch };
+    const address = new URL(url);
+    address.hostname = "127.0.0.1";
+    this.baseUrl = address.origin;
+  },
+);
+
+// What a screen reader reads after the page's heading, which takes focus when
+// a reader navigates to the page: a notice above it would be passed over.
+Then("the page's heading is described by {string}", async function (this: BrowserWorld, needle: string) {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await expect(this.page.getByRole("heading", { level: 1 })).toHaveAccessibleDescription(new RegExp(escaped));
+});
+
 // The daemon reads the admin password's hash as it checks each session, so
 // one set anew ends every session at once, with no restart.
 When("the admin password is set anew to {string}", async function (this: BrowserWorld, password: string) {

@@ -50,6 +50,37 @@ impl Standing {
     }
 }
 
+/// Which notice says that sign-in is off, and where the page shows it
+/// (§10.1). Sign-in is decided when the daemon starts, so the first answer
+/// decides it for as long as the page is open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SignInOffNotice {
+    /// Sign-in is on, or the daemon could not say: no notice.
+    #[default]
+    None,
+    /// Sign-in is off on loopback: the start page says that anyone on this
+    /// machine can use Ladderback.
+    StartPage,
+    /// Sign-in is off and the daemon answers on the network: every page says
+    /// that anyone who can reach it can use it.
+    EveryPage,
+}
+
+impl SignInOffNotice {
+    /// The notice the daemon's answer to `GET /api/v1/session` calls for;
+    /// `None` is no answer the page could read.
+    pub(crate) fn of(read: Option<&SessionDto>) -> Self {
+        let _ = read;
+        todo!()
+    }
+
+    /// Whether each page's heading is described by this notice, so a screen
+    /// reader reads it after the heading that takes focus on arrival.
+    pub(crate) fn describes_the_heading(self) -> bool {
+        todo!()
+    }
+}
+
 /// What the page's title says once its standing has changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Title {
@@ -303,7 +334,45 @@ mod tests {
             csrf_token: csrf.map(str::to_owned),
             idle_seconds: None,
             ends_in_seconds: None,
+            exposure: api::ExposureDto::Loopback,
         }
+    }
+
+    fn on_the_network(sign_in: SignInStateDto) -> SessionDto {
+        SessionDto {
+            exposure: api::ExposureDto::Network,
+            ..session(sign_in, None)
+        }
+    }
+
+    #[test]
+    fn sign_in_off_is_noted_on_the_start_page_on_loopback_and_on_every_page_on_the_network() {
+        assert_eq!(
+            SignInOffNotice::of(Some(&session(SignInStateDto::Off, None))),
+            SignInOffNotice::StartPage
+        );
+        assert_eq!(
+            SignInOffNotice::of(Some(&on_the_network(SignInStateDto::Off))),
+            SignInOffNotice::EveryPage
+        );
+        for sign_in in [SignInStateDto::SignedOut, SignInStateDto::SignedIn] {
+            assert_eq!(
+                SignInOffNotice::of(Some(&session(sign_in, None))),
+                SignInOffNotice::None
+            );
+            assert_eq!(
+                SignInOffNotice::of(Some(&on_the_network(sign_in))),
+                SignInOffNotice::None
+            );
+        }
+        assert_eq!(SignInOffNotice::of(None), SignInOffNotice::None);
+    }
+
+    #[test]
+    fn only_the_notice_on_every_page_describes_the_heading() {
+        assert!(SignInOffNotice::EveryPage.describes_the_heading());
+        assert!(!SignInOffNotice::StartPage.describes_the_heading());
+        assert!(!SignInOffNotice::None.describes_the_heading());
     }
 
     const HOUR: i64 = 3_600_000;

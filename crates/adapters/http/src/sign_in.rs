@@ -292,6 +292,7 @@ fn answer(sign_in: SignInStateDto, live: Option<(String, SignedDuration)>) -> Re
             csrf_token,
             idle_seconds,
             ends_in_seconds,
+            exposure: api::ExposureDto::Loopback,
         }),
     )
         .into_response()

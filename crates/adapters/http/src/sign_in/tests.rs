@@ -13,7 +13,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::request_checks::tests::{NoUi, test_state};
-use crate::{RequestChecks, router};
+use crate::{Exposure, RequestChecks, router};
 
 const PASSWORD: &str = "demo-admin-pass";
 const OWN_HOST: &str = "127.0.0.1:8080";
@@ -39,8 +39,14 @@ fn on() -> SignIn {
 }
 
 async fn send(sign_in: &SignIn, request: Request) -> Response {
+    send_listening(sign_in, Exposure::Loopback, request).await
+}
+
+/// [`send`] to a daemon that `exposure` says who can reach.
+async fn send_listening(sign_in: &SignIn, exposure: Exposure, request: Request) -> Response {
     let mut state = test_state();
     state.sign_in = sign_in.clone();
+    state.exposure = exposure;
     router(Arc::new(NoUi), RequestChecks::default(), state)
         .oneshot(request)
         .await
@@ -159,6 +165,27 @@ async fn with_sign_in_off_every_request_is_let_through_without_a_session() {
     assert_eq!(
         json(response).await,
         serde_json::json!({ "sign-in": "off" })
+    );
+}
+
+#[tokio::test]
+async fn the_session_route_says_when_the_daemon_answers_on_the_network() {
+    let off = SignIn::Off;
+    let network = Exposure::Network;
+    let response = send_listening(&off, network, get(SESSION_PATH, &[])).await;
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "sign-in": "off", "exposure": "network" })
+    );
+    let response = send_listening(&off, network, sign_in_request(PASSWORD, &[])).await;
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "sign-in": "off", "exposure": "network" })
+    );
+    let response = send_listening(&on(), network, get(SESSION_PATH, &[])).await;
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "sign-in": "signed-out", "exposure": "network" })
     );
 }
 

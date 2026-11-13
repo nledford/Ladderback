@@ -502,6 +502,7 @@ async fn state_over(
             catalog,
             repositories,
             sign_in: SignIn::Off,
+            exposure: http_adapter::Exposure::Loopback,
         },
         background,
     ))

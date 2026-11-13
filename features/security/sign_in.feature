@@ -1,10 +1,10 @@
 Feature: Sign-in
   Sign-in is optional (§10.1, decision 11). With no admin password set, sign-in
-  is off: Ladderback listens on loopback only and says that anyone on this
-  machine can use it. Once `ladderback set-password` has stored the admin
-  password's hash, sign-in is on: the web UI asks for the password, and the API
-  and the events stream answer a session only. The request checks stay on
-  either way.
+  is off: Ladderback says that anyone who can reach it can use it, on this
+  machine or, when it listens on the network, from anywhere that reaches that
+  address. Once `ladderback set-password` has stored the admin password's hash,
+  sign-in is on: the web UI asks for the password, and the API and the events
+  stream answer a session only. The request checks stay on either way.
 
   Rule: The admin password starts a session, and no other password does
 
@@ -164,7 +164,7 @@ Feature: Sign-in
       And the data folder holds no admin password
 
   @e2e
-  Rule: With sign-in on, Ladderback listens beyond loopback only for a configured host name
+  Rule: Beyond loopback, Ladderback listens only for a configured host name, and with sign-in off it warns that anyone who can reach it can use it
 
     Scenario: With sign-in on and a host name configured, Ladderback listens on every address and warns that plain HTTP is unencrypted
       Given the admin password "demo-admin-pass" is set
@@ -175,11 +175,44 @@ Feature: Sign-in
     Scenario: With sign-in on and no host name configured, Ladderback refuses to listen on every address
       Given the admin password "demo-admin-pass" is set
       When Ladderback is started with the arguments "--listen 0.0.0.0:0"
-      Then Ladderback refuses to start
+      Then Ladderback refuses to start, naming "--allowed-host"
 
-    Scenario: With sign-in off, Ladderback refuses to listen on every address, even for a configured host name
-      When Ladderback is started with the arguments "--listen 0.0.0.0:0 --allowed-host nas.demo.test"
-      Then Ladderback refuses to start
+    Scenario: With sign-in off and a host name configured, Ladderback listens on every address and warns that anyone who can reach it can use it
+      When Ladderback is started with the arguments "--listen 0.0.0.0:0 --allowed-host backup.example"
+      Then Ladderback is listening
+      And Ladderback warns "sign-in is off and Ladderback answers on the network at" and the address it listens on, before it says where it listens
+      And Ladderback warns "anyone who can reach that address can run and change backups"
+      And Ladderback warns "ladderback set-password"
+
+    Scenario: With sign-in off, the warning is given even with the log turned off
+      When Ladderback is started with the log turned off and the arguments "--listen 0.0.0.0:0 --allowed-host backup.example"
+      Then Ladderback is listening
+      And Ladderback warns "anyone who can reach that address can run and change backups"
+
+    Scenario: With sign-in off and no host name configured, Ladderback refuses to listen on every address
+      When Ladderback is started with the arguments "--listen 0.0.0.0:0"
+      Then Ladderback refuses to start, naming "--allowed-host"
+
+    Scenario: With sign-in off on the network, the configured host name reaches the API without a session
+      Given Ladderback is serving on every address with sign-in off, configured for the host name "backup.example"
+      And a "GET" request for "/api/v1/plans"
+      And the request has the header "Host: backup.example:{port}"
+      When the request is sent
+      Then the request is answered with status 200
+
+    Scenario Outline: With sign-in off on the network, a rebound name still can't reach the API with a <method> request
+      Given Ladderback is serving on every address with sign-in off, configured for the host name "backup.example"
+      And a "<method>" request for "/api/v1/plans"
+      And the request has the header "Host: evil.example:{port}"
+      And the request has the header "Origin: http://evil.example:{port}"
+      And the request has the header "Content-Type: application/json"
+      When the request is sent
+      Then the request is refused with status 403 and the error code "host-not-allowed"
+
+      Examples:
+        | method |
+        | GET    |
+        | POST   |
 
     Scenario: With sign-in off, the log warns that anyone on this machine can use Ladderback
       When Ladderback is started with the arguments "--listen 127.0.0.1:0"
@@ -482,10 +515,26 @@ Feature: Sign-in
       And the dialog "Sign in again" is closed
 
   @ui
-  Rule: With sign-in off, the web UI says so
+  Rule: With sign-in off, the web UI says so, on every page when Ladderback listens on the network
 
     Scenario: The start page warns that sign-in is off and says how to turn it on
       When I open the web UI
       Then the page shows a message containing "Sign-in is off"
       And the page shows a message containing "ladderback set-password"
       And the page has no accessibility violations
+      And the page doesn't show "answers on the network"
+
+    Scenario: Listening on the network with sign-in off, every page warns that anyone who can reach Ladderback can use it
+      Given a daemon with sign-in off listening on every address for the host name "backup.example"
+      When I open the web UI
+      Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
+      And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
+      And the page shows a message containing "ladderback set-password"
+      And the page doesn't show "anyone on this machine"
+      And the page has no accessibility violations
+      When I open the Repositories page
+      Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
+      And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
+      When I open the Operations page
+      Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
+      And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"

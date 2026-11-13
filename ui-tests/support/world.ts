@@ -65,9 +65,12 @@ export interface Server {
 // Starts one `ladderback serve` in scratch folders of its own, so two
 // daemons never contend on one database (the e2e suites hit that). `extraEnv`
 // names what a caller has already prepared, such as the config folder of a
-// scenario's demo plan.
-export function startServer(extraEnv: Record<string, string> = {}): Promise<Server> {
-  const child = spawn(binary, ["serve", "--listen", "127.0.0.1:0"], {
+// scenario's demo plan; `args` follow `serve`, a loopback address by default.
+export function startServer(
+  extraEnv: Record<string, string> = {},
+  args: string[] = ["--listen", "127.0.0.1:0"],
+): Promise<Server> {
+  const child = spawn(binary, ["serve", ...args], {
     stdio: ["ignore", "inherit", "pipe"],
     // The banner below is read in English, whatever language the machine
     // speaks: `C` makes the daemon ignore LANGUAGE, which is cleared too.
