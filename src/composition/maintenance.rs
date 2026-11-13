@@ -26,7 +26,7 @@ use super::{PlanRunner, secret_refusal};
 impl PlanRunner {
     /// The maintenance use case over this runner's parts.
     fn maintenance(&self) -> RunMaintenance {
-        RunMaintenance::new(
+        let maintenance = RunMaintenance::new(
             Arc::clone(&self.engine),
             Arc::new(SystemClock),
             Arc::clone(&self.store),
@@ -37,7 +37,11 @@ impl PlanRunner {
             platform::hostname(),
             Arc::new(engine::RusticSources),
         )
-        .with_events(Arc::clone(&self.events))
+        .with_events(Arc::clone(&self.events));
+        match &self.locations {
+            Some(locations) => maintenance.with_locations(Arc::clone(locations)),
+            None => maintenance,
+        }
     }
 }
 

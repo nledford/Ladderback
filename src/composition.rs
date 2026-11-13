@@ -16,6 +16,8 @@ use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
+use app::locations::{ChooseLocation, LocationReport};
+use domain::execution::locations::LocationOutcome;
 
 use app::conditions::NetworkWait;
 use app::notifications::{Notify, Report};
@@ -416,22 +418,32 @@ async fn state_over(
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
     let writes = Arc::new(ConfigWrites::default());
-    let engine: Arc<dyn Engine> = Arc::new(RecordOpened::new(
-        Arc::new(EventEngine {
-            inner: Arc::new(workers),
-            bus: Arc::clone(&bus),
-        }),
-        Arc::clone(&config),
-        Arc::clone(&writes),
-        Arc::new(log_recording),
-    ));
     let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
+    // The choice of a location comes first (decision 80): a job opens the
+    // location it chose, and the record of an opened repository's ID
+    // (decision 81) sees that job, never a probe.
+    let locations = Arc::new(ChooseLocation::new(
+        Arc::new(RecordOpened::new(
+            Arc::new(EventEngine {
+                inner: Arc::new(workers),
+                bus: Arc::clone(&bus),
+            }),
+            Arc::clone(&config),
+            Arc::clone(&writes),
+            Arc::new(log_recording),
+        )),
+        Arc::new(SystemClock),
+        resolve.as_ref().clone(),
+        Arc::new(log_location),
+    ));
+    let engine: Arc<dyn Engine> = Arc::<ChooseLocation>::clone(&locations);
     let (run_ends, ends) = app::retry::run_ends();
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         resolve: Arc::clone(&resolve),
         agent_id,
         engine: Arc::clone(&engine),
+        locations: Some(locations),
         store: Arc::clone(&store),
         retention: Arc::new(engine::RusticRetention),
         registry: Arc::new(CancelRegistry::new()),
@@ -814,6 +826,61 @@ impl Engine for EventEngine {
     }
 }
 
+/// What the choice of a location tells the daemon's log (decision 80): for
+/// each job on a repository reached at several, which location it used and
+/// why each earlier one was skipped, by position and outcome code, never an
+/// address or a network's name.
+fn log_location(report: LocationReport) {
+    match report {
+        LocationReport::ExposedCredentials {
+            alias,
+            position,
+            cause,
+        } => log::warn!(
+            "repository {}: location {position} sends its credentials where whoever answers at its address can read them ({})",
+            alias.as_str(),
+            cause.code()
+        ),
+        LocationReport::OtherRepository { alias, position } => log::warn!(
+            "repository {}: location {position} holds another repository, so it was not used",
+            alias.as_str()
+        ),
+        LocationReport::Chosen { alias, record } => {
+            let count = record.locations.len();
+            let skipped: Vec<String> = record
+                .locations
+                .iter()
+                .filter(|tried| {
+                    !matches!(
+                        tried.outcome,
+                        LocationOutcome::Used | LocationOutcome::NotTried
+                    )
+                })
+                .map(|tried| format!("location {} {}", tried.position, tried.outcome.code()))
+                .collect();
+            let skipped = if skipped.is_empty() {
+                String::new()
+            } else {
+                format!(" (skipped: {})", skipped.join(", "))
+            };
+            match record.used() {
+                Some(used) => {
+                    log::info!(
+                        "repository {}: used location {used} of {count}{skipped}",
+                        alias.as_str()
+                    );
+                }
+                None => {
+                    log::warn!(
+                        "repository {}: no location of {count} could be used{skipped}",
+                        alias.as_str()
+                    )
+                }
+            }
+        }
+    }
+}
+
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
 /// that names a repository, a listing, a prune's plan) and the initialising
@@ -876,6 +943,10 @@ struct PlanRunner {
     resolve: Arc<ResolveRepository>,
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
+    /// Chooses the location retention opens in-process for a repository
+    /// reached at several (decision 80); `engine` makes the same choice for
+    /// every job. Without it, such a repository's retention fails.
+    locations: Option<Arc<ChooseLocation>>,
     store: Arc<dyn OperationStore>,
     /// Evaluates each plan's retention for a forget run (§7.3).
     retention: Arc<dyn Retention>,
@@ -3847,6 +3918,7 @@ mod tests {
             resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
             agent_id: agent_id::load_or_create(&data_dir).expect("an agent ID"),
             engine: Arc::new(ParkedEngine),
+            locations: None,
             retention: Arc::new(engine::RusticRetention),
             store: Arc::new(
                 SqliteStore::open(&data_dir.join("ladderback.db"))
@@ -8799,6 +8871,7 @@ mod repository_service_tests {
                 resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
                 agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
                 engine: scripted.clone(),
+                locations: None,
                 retention: Arc::new(engine::RusticRetention),
                 store: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 registry: Arc::new(CancelRegistry::new()),
@@ -8843,6 +8916,7 @@ mod repository_service_tests {
                 resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
                 agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
                 engine: scripted.clone(),
+                locations: None,
                 retention: Arc::new(engine::RusticRetention),
                 store: store.clone(),
                 registry: Arc::new(CancelRegistry::new()),
