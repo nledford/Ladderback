@@ -1647,6 +1647,47 @@ mod tests {
         );
     }
 
+    /// A URL parser ends an `http` URL's authority at its first `/`, `\`,
+    /// `?` or `#`, so the password before the `@` there is one, whatever
+    /// `@` follows.
+    #[test]
+    fn the_password_is_found_where_a_url_parser_ends_the_authority() {
+        for repository in [
+            "rest:http://demo:pw-canary@nas.example\\x@y",
+            "rest:http://demo:pw-canary@nas.example:8000?x@y",
+            "rest:http://demo:pw-canary@nas.example:8000#x@y",
+        ] {
+            let found = passwords(repository);
+            assert!(
+                found.contains(&"pw-canary".to_owned()),
+                "{repository}: {found:?}"
+            );
+        }
+    }
+
+    /// A resolved location, or one an export has taken its escapes out of,
+    /// may hold `${…}` as text: a URL parser reads it character by
+    /// character, and so is it read too, beside the reading as a template.
+    #[test]
+    fn a_reference_written_as_text_hides_no_password() {
+        for (repository, password) in [
+            (
+                "rest:http://demo:pw-canary@x${file:/y}@nas.example/r",
+                "pw-canary",
+            ),
+            (
+                "rest:http://x${file:/y:pw-canary}@nas.example/r",
+                "/y:pw-canary}",
+            ),
+        ] {
+            let found = passwords(repository);
+            assert!(
+                found.contains(&password.to_owned()),
+                "{repository}: {found:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_password_that_is_not_valid_percent_encoding_is_taken_as_it_is() {
         assert_eq!(passwords("rest:https://demo:100%@nas/b"), ["100%"]);
