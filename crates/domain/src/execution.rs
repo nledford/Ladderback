@@ -398,6 +398,21 @@ impl Operation {
         Ok(())
     }
 
+    /// Starts a queued operation whose job opened `opened`, as the engine
+    /// reported when it started. A target queued before its repository's ID
+    /// was known names no repository, and names `opened` from now on, so the
+    /// log says which repository the run is on (§9). A target that names a
+    /// repository keeps it: the engine opens only the repository a job
+    /// names (§7.3).
+    pub fn start_on(
+        &mut self,
+        at: Timestamp,
+        opened: Option<&RepositoryId>,
+    ) -> Result<(), LifecycleError> {
+        let _ = (at, opened);
+        todo!()
+    }
+
     /// Progress only comes from a running operation.
     pub fn report_progress(&self) -> Result<(), LifecycleError> {
         self.require(Transition::ReportProgress, |s| {
@@ -587,6 +602,53 @@ mod tests {
         let unnamed = on(None);
         assert!(unnamed.is_on(Some(&repository("a"))));
         assert!(unnamed.is_on(None));
+    }
+
+    fn queued_on(repository: Option<RepositoryId>) -> Operation {
+        Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(7)),
+            OperationKind::Backup,
+            Trigger::Manual,
+            on(repository),
+            t(0),
+        )
+    }
+
+    #[test]
+    fn an_operation_queued_before_its_repository_was_known_names_the_one_it_started_on() {
+        let mut op = queued_on(None);
+        op.start_on(t(10), Some(&repository("a"))).unwrap();
+        assert_eq!(op.status(), &OperationStatus::Running);
+        assert_eq!(op.started_at(), Some(t(10)));
+        assert_eq!(op.target(), &on(Some(repository("a"))));
+    }
+
+    #[test]
+    fn an_operation_that_names_its_repository_keeps_it_when_it_starts() {
+        let mut op = queued_on(Some(repository("a")));
+        op.start_on(t(10), Some(&repository("b"))).unwrap();
+        assert_eq!(op.target(), &on(Some(repository("a"))));
+        let mut op = queued_on(Some(repository("a")));
+        op.start_on(t(10), None).unwrap();
+        assert_eq!(op.target(), &on(Some(repository("a"))));
+    }
+
+    #[test]
+    fn a_start_that_opened_no_repository_names_none() {
+        let mut op = queued_on(None);
+        op.start_on(t(10), None).unwrap();
+        assert_eq!(op.status(), &OperationStatus::Running);
+        assert_eq!(op.target(), &on(None));
+    }
+
+    #[test]
+    fn an_operation_that_cannot_start_names_no_repository() {
+        let mut op = queued_on(None);
+        op.start(t(5)).unwrap();
+        let error = op.start_on(t(10), Some(&repository("a"))).unwrap_err();
+        assert_eq!(error.transition, Transition::Start);
+        assert_eq!(op.target(), &on(None));
+        assert_eq!(op.started_at(), Some(t(5)));
     }
 
     #[test]

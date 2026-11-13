@@ -211,9 +211,9 @@ mod tests {
     use std::sync::{Arc, Mutex, PoisonError};
 
     use async_trait::async_trait;
-    use domain::execution::FailureReason;
     use domain::execution::deadline::KeepDelete;
     use domain::execution::plan_tags::PlanTags;
+    use domain::execution::{FailureReason, OperationKind};
     use domain::planning::{
         AgentConfig, Maintenance, NotRecorded, RepositoryConfig, RepositorySettings,
     };
@@ -388,8 +388,10 @@ mod tests {
         }
     }
 
+    /// A success, as an identify reports it: the ID of the repository it
+    /// opened. A job that runs after an identify takes its ID from it.
     fn succeeded() -> EngineEvent {
-        EngineEvent::Succeeded(EngineResult::Fake { steps_completed: 1 })
+        EngineEvent::Succeeded(EngineResult::Repository { id: opened() })
     }
 
     /// Every kind of job that opens a repository, over `access`.
@@ -777,5 +779,296 @@ mod tests {
         run(&nothing_opened, Job::Init(access_of(&store, "demo").await)).await;
         assert_eq!(saves(&store), 0);
         assert_eq!(taken(&reports), []);
+    }
+
+    /// What [`Keeps`] finds when it is asked to identify the repository.
+    #[derive(Clone)]
+    enum Finds {
+        /// The repository [`opened`].
+        Repository,
+        /// Nothing: it fails with this reason before it starts, as a worker
+        /// that can't open the repository does.
+        Fails(FailureReason),
+        /// It opens the repository and ends without a result.
+        Nothing,
+        /// It can't be started at all.
+        Refused(EngineError),
+        /// It opens the repository and runs until it is stopped.
+        Hangs,
+    }
+
+    /// A job's control that ends its job's stream when stopped, and notes
+    /// which kind of job it stopped.
+    struct Halts {
+        kind: OperationKind,
+        halt: Option<futures::channel::oneshot::Sender<()>>,
+        stopped: Arc<Mutex<Vec<OperationKind>>>,
+    }
+
+    #[async_trait]
+    impl JobControl for Halts {
+        async fn stop(&mut self) {
+            if let Some(halt) = self.halt.take() {
+                let _ = halt.send(());
+                self.stopped
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(self.kind);
+            }
+        }
+    }
+
+    /// An engine that keeps the jobs it is given. An identify finds what
+    /// `finds` says; every other job opens [`opened`] and succeeds, or, when
+    /// `job_hangs`, runs until it is stopped.
+    struct Keeps {
+        finds: Finds,
+        job_hangs: bool,
+        seen: Mutex<Vec<Job>>,
+        stopped: Arc<Mutex<Vec<OperationKind>>>,
+    }
+
+    impl Keeps {
+        fn seen(&self) -> Vec<Job> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+
+        fn stopped(&self) -> Vec<OperationKind> {
+            self.stopped
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    #[async_trait]
+    impl Engine for Keeps {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let kind = job.kind();
+            let identify = matches!(job, Job::Identify(_));
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            let (events, hangs) = match (identify, &self.finds) {
+                (true, Finds::Refused(error)) => return Err(error.clone()),
+                (true, Finds::Repository) => (vec![started(Some(opened())), succeeded()], false),
+                (true, Finds::Fails(reason)) => (vec![EngineEvent::Failed(reason.clone())], false),
+                (true, Finds::Nothing) => (vec![started(Some(opened()))], false),
+                (true, Finds::Hangs) => (vec![started(Some(opened()))], true),
+                (false, _) if self.job_hangs => (vec![started(Some(opened()))], true),
+                (false, _) => (
+                    vec![
+                        started(Some(opened())),
+                        EngineEvent::Succeeded(EngineResult::Fake { steps_completed: 1 }),
+                    ],
+                    false,
+                ),
+            };
+            let (halt, halted) = futures::channel::oneshot::channel::<()>();
+            let played = futures::stream::iter(events);
+            let events = if hangs {
+                played
+                    .chain(futures::stream::once(halted).filter_map(|_| async { None }))
+                    .boxed()
+            } else {
+                played.boxed()
+            };
+            Ok(RunningJob {
+                events,
+                control: Box::new(Halts {
+                    kind,
+                    halt: Some(halt),
+                    stopped: Arc::clone(&self.stopped),
+                }),
+            })
+        }
+    }
+
+    fn keeping(
+        store: &Arc<Counted>,
+        finds: Finds,
+        job_hangs: bool,
+    ) -> (RecordOpened, Arc<Keeps>, Arc<Mutex<Vec<Recording>>>) {
+        let keeps = Arc::new(Keeps {
+            finds,
+            job_hangs,
+            seen: Mutex::new(Vec::new()),
+            stopped: Arc::new(Mutex::new(Vec::new())),
+        });
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&reports);
+        let engine = RecordOpened::new(
+            Arc::clone(&keeps) as Arc<dyn Engine>,
+            store.clone(),
+            Arc::new(ConfigWrites::new(())),
+            Arc::new(move |recording| {
+                heard
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(recording);
+            }),
+        );
+        (engine, keeps, reports)
+    }
+
+    fn backup(access: &RepositoryAccess) -> Job {
+        every_kind(access)
+            .into_iter()
+            .find(|job| matches!(job, Job::Backup(_)))
+            .expect("a backup")
+    }
+
+    /// A job whose entry records no ID would open the repository without
+    /// knowing it: with no cache, which the engine keeps by the ID, and in
+    /// an operation that names no repository. It runs after an identify,
+    /// with the ID the identify found, which is recorded from that identify.
+    /// An identify, and an initialisation that makes the repository, run as
+    /// they are.
+    #[tokio::test]
+    async fn a_job_of_an_entry_that_records_no_id_runs_after_an_identify_with_the_id_it_found() {
+        let unrecorded = entry("/srv/demo/cold", None);
+        let template = holding(vec![("demo", unrecorded.clone())]).await;
+        let access = access_of(&template, "demo").await;
+        let mut identified = access.clone();
+        identified.id = Some(opened());
+        let mut recorded = unrecorded.clone();
+        recorded.id = Some(opened());
+        for (job, named) in every_kind(&access)
+            .into_iter()
+            .zip(every_kind(&identified))
+            .chain([(Job::Init(access.clone()), Job::Init(access.clone()))])
+        {
+            let kind = job.kind();
+            let store = holding(vec![("demo", unrecorded.clone())]).await;
+            let (engine, keeps, reports) = keeping(&store, Finds::Repository, false);
+            let events = run(&engine, job.clone()).await;
+            if matches!(job, Job::Identify(_) | Job::Init(_)) {
+                assert_eq!(keeps.seen(), [job], "{kind:?} runs alone");
+                continue;
+            }
+            assert_eq!(
+                keeps.seen(),
+                [Job::Identify(access.clone()), named],
+                "{kind:?}: an identify, then the job with the ID it found"
+            );
+            assert_eq!(
+                events,
+                [
+                    started(Some(opened())),
+                    EngineEvent::Succeeded(EngineResult::Fake { steps_completed: 1 }),
+                ],
+                "{kind:?}: the job's own events, and none of the identify's"
+            );
+            assert_eq!(entry_of(&store, "demo").await, recorded, "{kind:?}");
+            assert_eq!(
+                taken(&reports),
+                [Recording::Recorded {
+                    alias: alias("demo"),
+                    id: opened(),
+                }],
+                "{kind:?}: recorded once"
+            );
+        }
+    }
+
+    /// The identify opens the repository as the job would have: when it
+    /// can't, the job ends with the reason the identify gave, which is the
+    /// one the job's own open would have given, and the job never runs
+    /// without the ID.
+    #[tokio::test]
+    async fn a_job_whose_identify_fails_ends_as_the_identify_did_and_never_runs() {
+        let wrong_password = FailureReason::EngineFailed {
+            detail: "the password is wrong".to_owned(),
+        };
+        for (finds, reason) in [
+            (
+                Finds::Fails(FailureReason::RepositoryNotFound),
+                FailureReason::RepositoryNotFound,
+            ),
+            (Finds::Fails(wrong_password.clone()), wrong_password),
+            (
+                Finds::Nothing,
+                FailureReason::EngineExited { exit_code: None },
+            ),
+        ] {
+            let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+            let access = access_of(&store, "demo").await;
+            let (engine, keeps, _) = keeping(&store, finds, false);
+            assert_eq!(
+                run(&engine, backup(&access)).await,
+                [EngineEvent::Failed(reason.clone())],
+                "{reason:?}"
+            );
+            assert_eq!(keeps.seen(), [Job::Identify(access)], "{reason:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_whose_identify_the_engine_cannot_start_is_refused_as_it_would_be() {
+        let refused = EngineError::Unavailable {
+            detail: "no such file or directory".to_owned(),
+        };
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Refused(refused.clone()), false);
+        let Err(error) = engine.run(op(), backup(&access)).await else {
+            panic!("the job was started");
+        };
+        assert_eq!(error, refused);
+        assert_eq!(keeps.seen(), [Job::Identify(access)]);
+    }
+
+    #[tokio::test]
+    async fn stopping_a_job_while_it_identifies_stops_the_identify_and_starts_nothing() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Hangs, false);
+        let RunningJob {
+            events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        control.stop().await;
+        let events: Vec<EngineEvent> =
+            tokio::time::timeout(std::time::Duration::from_secs(5), events.collect())
+                .await
+                .expect("the stream ends once the job is stopped");
+        assert_eq!(events, []);
+        assert_eq!(keeps.seen(), [Job::Identify(access)]);
+        assert_eq!(keeps.stopped(), [OperationKind::Identify]);
+    }
+
+    #[tokio::test]
+    async fn stopping_a_job_after_its_identify_stops_the_job() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let mut identified = access.clone();
+        identified.id = Some(opened());
+        let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
+        let RunningJob {
+            mut events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        assert_eq!(events.next().await, Some(started(Some(opened()))));
+        control.stop().await;
+        let rest: Vec<EngineEvent> =
+            tokio::time::timeout(std::time::Duration::from_secs(5), events.collect())
+                .await
+                .expect("the stream ends once the job is stopped");
+        assert_eq!(rest, []);
+        assert_eq!(
+            keeps.seen(),
+            [Job::Identify(access.clone()), backup(&identified)]
+        );
+        assert_eq!(keeps.stopped(), [OperationKind::Backup]);
     }
 }

@@ -33,7 +33,7 @@ pub struct AdoptE2e {
 }
 
 /// The two tags a snapshot of this agent's plan carries.
-fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
+pub(crate) fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
     [
         format!("ladderback-agent:{}", agent.agent_id.as_uuid().hyphenated()),
         format!("ladderback-plan:{plan}"),

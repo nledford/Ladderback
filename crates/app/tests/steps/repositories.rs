@@ -102,6 +102,8 @@ pub struct RepositoriesWorld {
     read: Option<Job>,
     /// What the last job that opened a saved repository reported.
     ended: Option<Vec<EngineEvent>>,
+    /// The engine the last backup a scenario ran went through.
+    runs: Option<Arc<Runs>>,
 }
 
 impl Default for RepositoriesWorld {
@@ -129,6 +131,7 @@ impl Default for RepositoriesWorld {
             offered: None,
             read: None,
             ended: None,
+            runs: None,
         }
     }
 }
@@ -967,5 +970,142 @@ fn ended_as_reported(agent: &mut super::Agent, _kind: String) {
         agent.repositories.ended.as_ref(),
         Some(&reported),
         "the job's events changed on the way"
+    );
+}
+
+/// An engine for a backup's whole run, which keeps the jobs it is given. An
+/// identify finds what the scenario set the engine to find, or else the
+/// repository `id`; every other job opens `id` and ends well.
+struct Runs {
+    id: RepositoryId,
+    found: Option<Result<RepositoryId, FailureReason>>,
+    seen: Mutex<Vec<Job>>,
+}
+
+impl Runs {
+    fn seen(&self) -> Vec<Job> {
+        self.seen.lock().expect("the jobs").clone()
+    }
+}
+
+#[async_trait]
+impl Engine for Runs {
+    async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        let identify = matches!(job, Job::Identify(_));
+        self.seen.lock().expect("the jobs").push(job);
+        let started = EngineEvent::Started {
+            index_read_at: Timestamp::from_second(1_800_000_000).expect("a time"),
+            repository: Some(self.id.clone()),
+        };
+        let events = match (identify, &self.found) {
+            // A worker that can't open the repository fails before it starts.
+            (true, Some(Err(reason))) => vec![EngineEvent::Failed(reason.clone())],
+            (true, _) => vec![
+                started,
+                EngineEvent::Succeeded(EngineResult::Repository {
+                    id: self.id.clone(),
+                }),
+            ],
+            (false, _) => vec![
+                started,
+                EngineEvent::Succeeded(EngineResult::Fake { steps_completed: 1 }),
+            ],
+        };
+        Ok(RunningJob {
+            events: Box::pin(futures::stream::iter(events)),
+            control: Box::new(Stop),
+        })
+    }
+}
+
+/// Runs a backup made from the saved entry `name` to its end, as the daemon
+/// runs one: through the engine that records opened repositories, into the
+/// operation log.
+#[when(expr = "a backup of the repository {string} runs")]
+async fn backup_runs(agent: &mut super::Agent, name: String) {
+    use app::execution::RunOperation;
+    use app::repositories::{ConfigWrites, RecordOpened};
+    use domain::execution::Trigger;
+    let runs = Arc::new(Runs {
+        id: agent.repositories.id.clone(),
+        found: agent
+            .repositories
+            .engine
+            .found
+            .lock()
+            .expect("what is found")
+            .clone(),
+        seen: Mutex::new(Vec::new()),
+    });
+    let engine = RecordOpened::new(
+        Arc::clone(&runs) as Arc<dyn Engine>,
+        agent.repositories.store.clone(),
+        Arc::new(ConfigWrites::new(())),
+        Arc::new(|_| {}),
+    );
+    let job = job_of(agent, "backup", &name).await;
+    let finished = RunOperation::new(Arc::new(engine), agent.clock.clone(), agent.store.clone())
+        .run(op(), Trigger::Manual, job, futures::future::pending())
+        .await;
+    agent.finished = Some(finished);
+    agent.repositories.runs = Some(runs);
+}
+
+fn ran(agent: &super::Agent) -> Vec<Job> {
+    agent
+        .repositories
+        .runs
+        .as_ref()
+        .expect("a backup ran")
+        .seen()
+}
+
+#[then("the repository was identified first, and the backup ran with the repository's ID")]
+fn identified_then_backed_up(agent: &mut super::Agent) {
+    let seen = ran(agent);
+    let [Job::Identify(looked), Job::Backup(backup)] = seen.as_slice() else {
+        panic!("the engine ran {seen:?}");
+    };
+    assert_eq!(looked.id, None, "the identify looked for the ID");
+    assert_eq!(backup.repository.id, Some(agent.repositories.id.clone()));
+}
+
+#[then("the repository was identified, and nothing else ran")]
+fn identified_alone(agent: &mut super::Agent) {
+    let seen = ran(agent);
+    assert!(
+        matches!(seen.as_slice(), [Job::Identify(_)]),
+        "the engine ran {seen:?}"
+    );
+}
+
+#[then("the operation log names the repository the engine opened")]
+async fn log_names_the_repository(agent: &mut super::Agent) {
+    let logged = agent
+        .store
+        .get(op())
+        .await
+        .expect("the log answers")
+        .expect("the log holds the backup");
+    assert_eq!(
+        logged.record.status,
+        domain::execution::OperationStatus::Succeeded
+    );
+    assert_eq!(
+        logged.record.target.repository,
+        Some(agent.repositories.id.clone())
+    );
+}
+
+#[then("the backup ended as failed because the repository folder is not there")]
+fn backup_failed_as_identified(agent: &mut super::Agent) {
+    let finished = agent.finished.as_ref().expect("a backup ran");
+    assert_eq!(
+        finished.operation.status(),
+        &domain::execution::OperationStatus::Failed {
+            reason: FailureReason::EngineFailed {
+                detail: "the repository folder is not there".to_owned(),
+            },
+        }
     );
 }

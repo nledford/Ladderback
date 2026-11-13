@@ -1363,6 +1363,41 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     }
 }
 
+/// Why a job that opens a repository runs without a cache, for the daemon's
+/// log: a cache is kept by the repository's ID, in a slot no other worker
+/// uses (§4.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NoCache {
+    /// The job names no repository ID: an identify that is run to learn it,
+    /// an initialisation, or a job of a repository a request gave.
+    IdUnknown,
+    /// Every one of the repository's cache slots is held by another worker.
+    EverySlotTaken,
+}
+
+impl std::fmt::Display for NoCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdUnknown => {
+                f.write_str("the repository's ID isn't known to it, and a cache is kept by that ID")
+            }
+            Self::EverySlotTaken => write!(
+                f,
+                "all {MAX_CACHE_SLOTS} of the repository's cache slots are in use by other workers"
+            ),
+        }
+    }
+}
+
+/// Why `job` runs without a cache when the engine has a cache folder
+/// (`cache_root`), and gave it a slot or not (`slot`). An engine with no
+/// cache folder runs every job without one, and the daemon said so once when
+/// it started.
+fn without_cache(job: &Job, cache_root: bool, slot: bool) -> Option<NoCache> {
+    let _ = (job, cache_root, slot);
+    todo!()
+}
+
 /// The repository a job opens, and so the secrets it holds; a fake job
 /// opens none.
 fn access_of(job: &Job) -> Option<&RepositoryAccess> {
@@ -2047,6 +2082,29 @@ mod tests {
             end: FakeEnd::Succeed,
             deadline_budget: None,
         })
+    }
+
+    /// A job that runs without a cache says why in the daemon's log, and
+    /// one that has a slot, opens no repository, or has no cache folder to
+    /// get one from (said once when the daemon started) says nothing.
+    #[test]
+    fn a_job_without_a_cache_is_told_why() {
+        let unknown = Job::Ls(access());
+        let mut named = access();
+        named.id = Some(RepositoryId::parse(&"07".repeat(32)).unwrap());
+        let known = Job::Ls(named);
+        assert_eq!(
+            without_cache(&unknown, true, false),
+            Some(NoCache::IdUnknown)
+        );
+        assert_eq!(
+            without_cache(&known, true, false),
+            Some(NoCache::EverySlotTaken)
+        );
+        assert_eq!(without_cache(&known, true, true), None);
+        assert_eq!(without_cache(&unknown, false, false), None);
+        assert_eq!(without_cache(&known, false, false), None);
+        assert_eq!(without_cache(&fake_job(), true, false), None);
     }
 
     async fn run(engine: &WorkerEngine) -> RunningJob {
