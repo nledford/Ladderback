@@ -474,6 +474,9 @@ mod cache {
         let dir = root.path().join("ladderback");
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        if std::fs::File::create(dir.join("probe")).is_ok() {
+            testkit::skip!("running as root: permissions don't stop writing to a folder");
+        }
         let refused = probe_writable(&dir).expect_err("a read-only folder");
         assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
     }
