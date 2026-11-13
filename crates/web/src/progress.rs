@@ -36,18 +36,67 @@ pub(crate) enum Left {
 /// How fast the step a bar measures goes, from the first report of it the
 /// page saw to the latest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Pace;
+pub(crate) struct Pace {
+    /// The first report of this measure the page saw, and the latest: a
+    /// new step, a new total or a count that went back is a new measure.
+    measure: Option<(Seen, Seen)>,
+}
+
+/// A report, and when the page saw it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seen {
+    step: Option<OperationStep>,
+    total: Option<u64>,
+    current: u64,
+    at: Duration,
+}
 
 impl Pace {
     /// Takes the report `progress`, seen at `now`.
     pub(crate) fn observe(&mut self, progress: &Progress, now: Duration) {
-        let _ = (progress, now);
-        todo!()
+        let seen = Seen {
+            step: progress.step,
+            total: progress.total,
+            current: progress.current,
+            at: now,
+        };
+        let first = match self.measure {
+            Some((first, latest))
+                if latest.step == seen.step
+                    && latest.total == seen.total
+                    && latest.current <= seen.current =>
+            {
+                first
+            }
+            _ => seen,
+        };
+        self.measure = Some((first, seen));
     }
 
-    /// The time left, once there is a pace to tell it by.
+    /// The time left, once there is a pace to tell it by: the rest of the
+    /// total at the average pace since the measure was first seen, once it
+    /// has been watched for [`PACE_AFTER`] and has done a hundredth of its
+    /// total since.
     pub(crate) fn left(&self) -> Option<Left> {
-        todo!()
+        const MINUTE_MS: u128 = 60_000;
+        const HOUR_MS: u128 = 60 * MINUTE_MS;
+        let (first, latest) = self.measure?;
+        let total = latest.total.filter(|total| *total > latest.current)?;
+        let watched = latest.at.checked_sub(first.at)?;
+        let done = latest.current.checked_sub(first.current)?;
+        if watched < PACE_AFTER || done == 0 || u128::from(done) * 100 < u128::from(total) {
+            return None;
+        }
+        let rest = u128::from(total - latest.current);
+        let left_ms = rest * watched.as_millis() / u128::from(done);
+        let whole = |unit: u128| u64::try_from((left_ms + unit / 2) / unit).unwrap_or(u64::MAX);
+        Some(if left_ms < MINUTE_MS {
+            Left::Soon
+        } else if left_ms + MINUTE_MS / 2 < HOUR_MS {
+            Left::Minutes(whole(MINUTE_MS))
+        } else {
+            Left::Hours(whole(HOUR_MS))
+        })
     }
 }
 
@@ -82,37 +131,131 @@ pub(crate) enum Next {
 
 /// What a bar exposes, and when it may change it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Teller;
+pub(crate) struct Teller {
+    pace: Pace,
+    /// What the bar exposes, and since when.
+    told: Option<(Told, Duration)>,
+    /// The latest value, held back until [`HOLD`] after the last told.
+    held: Option<Told>,
+}
 
 impl Teller {
     /// The report `progress` arrives at `now`.
     pub(crate) fn report(&mut self, progress: Progress, now: Duration) -> Next {
-        let _ = (progress, now);
-        todo!()
+        self.pace.observe(&progress, now);
+        let value = told_of(&progress, self.pace.left());
+        let Some((exposed, since)) = self.told else {
+            return self.tell(value, now);
+        };
+        if value == exposed {
+            self.held = None;
+            return Next::Keep;
+        }
+        let due = since.saturating_add(HOLD);
+        if now >= due || at_once(&exposed, &value) {
+            return self.tell(value, now);
+        }
+        self.held = Some(value);
+        Next::WaitUntil(due)
     }
 
     /// The wait the last answer asked for is over at `now`.
     pub(crate) fn wake(&mut self, now: Duration) -> Next {
-        let _ = now;
-        todo!()
+        let (Some(held), Some((_, since))) = (self.held, self.told) else {
+            return Next::Keep;
+        };
+        let due = since.saturating_add(HOLD);
+        if now >= due {
+            self.tell(held, now)
+        } else {
+            Next::WaitUntil(due)
+        }
+    }
+
+    fn tell(&mut self, value: Told, now: Duration) -> Next {
+        self.told = Some((value, now));
+        self.held = None;
+        Next::Tell(value)
     }
 }
 
-/// How long a timer set at `now` waits for the instant `due`.
+/// How long a timer set at `now` waits for the instant `due`: rounded up to
+/// whole milliseconds, the browser timer's unit, so it never fires before
+/// the hold is over only to be set again; nothing once `due` has passed.
 pub(crate) fn wait_for(due: Duration, now: Duration) -> Duration {
-    let _ = (due, now);
-    todo!()
+    let wait = due.saturating_sub(now);
+    match wait.subsec_nanos() % 1_000_000 {
+        0 => wait,
+        part => wait.saturating_add(Duration::from_nanos(u64::from(1_000_000 - part))),
+    }
+}
+
+/// What `progress` tells, with the time `left` when it has a total.
+fn told_of(progress: &Progress, left: Option<Left>) -> Told {
+    Told {
+        step: progress.step,
+        measure: progress
+            .total
+            .zip(percent(progress.current, progress.total))
+            .map(|(total, percent)| Measure {
+                percent,
+                current: progress.current,
+                total,
+                unit: progress.unit,
+                left,
+            }),
+    }
+}
+
+/// Whether `value` is told at once, whatever the hold: a new step, a total
+/// learnt or lost, or the total reached.
+fn at_once(exposed: &Told, value: &Told) -> bool {
+    let reached = |told: &Told| {
+        told.measure
+            .is_some_and(|measure| measure.current >= measure.total)
+    };
+    exposed.step != value.step
+        || exposed.measure.is_some() != value.measure.is_some()
+        || (reached(value) && !reached(exposed))
 }
 
 /// The value text of `told`, worded by `word`: the step and the working
 /// text when there is no total, otherwise the step, the percentage, the
-/// amounts and the time left once known.
+/// amounts and the time left once known. The step is its own message, a
+/// whole clause, which the value's message places: the code joins nothing.
 pub(crate) fn value_text(
     told: &Told,
     word: impl Fn(MessageId, &[(&str, MsgArg)]) -> String,
 ) -> String {
-    let _ = (told, word);
-    todo!()
+    let step = told.step.and_then(step_message);
+    let Some(measure) = told.measure else {
+        return word(step.unwrap_or(msg::UI_PROGRESS_WORKING), &[]);
+    };
+    let amount = |amount| match measure.unit {
+        ProgressUnit::Bytes => MsgArg::Bytes(amount),
+        ProgressUnit::Count | ProgressUnit::Unknown => MsgArg::Count(amount),
+    };
+    let (left, minutes, hours) = match measure.left {
+        None => ("none", 0, 0),
+        Some(Left::Soon) => ("soon", 0, 0),
+        Some(Left::Minutes(minutes)) => ("minutes", minutes, 0),
+        Some(Left::Hours(hours)) => ("hours", 0, hours),
+    };
+    word(
+        msg::UI_PROGRESS_VALUE,
+        &[
+            (
+                "step",
+                MsgArg::Text(step.map_or_else(|| "none".to_owned(), |step| word(step, &[]))),
+            ),
+            ("percent", MsgArg::Count(u64::from(measure.percent))),
+            ("done", amount(measure.current)),
+            ("total", amount(measure.total)),
+            ("left", MsgArg::Text(left.to_owned())),
+            ("minutes", MsgArg::Count(minutes)),
+            ("hours", MsgArg::Count(hours)),
+        ],
+    )
 }
 
 /// What clears a timer the page set: the handle it gave.
@@ -137,14 +280,17 @@ impl<H: Clear> Default for Wake<H> {
 impl<H: Clear> Wake<H> {
     /// Waits on `handle`'s timer, clearing the one waited on before.
     pub(crate) fn set(&mut self, handle: H) {
-        let _ = handle;
-        todo!()
+        if let Some(before) = self.pending.replace(handle) {
+            before.clear();
+        }
     }
 
     /// Clears the timer waited on, if any: the bar told what it held, or
     /// is going.
     pub(crate) fn clear(&mut self) {
-        todo!()
+        if let Some(pending) = self.pending.take() {
+            pending.clear();
+        }
     }
 }
 

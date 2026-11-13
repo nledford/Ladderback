@@ -22,7 +22,6 @@ use crate::components::{
 use crate::live::{reply, say};
 use crate::operations::{self, Name};
 use crate::pause::{self, Ends, Pausable};
-use crate::progress::{ProgressText, percent, progress_text};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
     create_saved_path, error_of, field_of, password_source, problems_of, repository_notes,
@@ -550,6 +549,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// paused it; a cancel waits for its end in the live state, as long as the
 /// reader's visit lasts, and puts its run in `cancelled`, so that its end is
 /// said as the answer to the press.
+///
+/// Its row header takes focus from a script, not from Tab: a control in the
+/// row that goes while it holds focus, as the progress bar does when its run
+/// ends, hands focus to it rather than to the page (WCAG 2.4.3).
 fn row_view(
     localizer: Arc<Localizer>,
     connection: Connection,
@@ -561,9 +564,9 @@ fn row_view(
 ) -> impl IntoView {
     // Its refusals are worded in the same language as the rest of it.
     let error_localizer = Arc::clone(&localizer);
-    // What an operation is and where it ran do not change, so its name and its
-    // Cancel button's label are worded once.
-    let (name, cancel_label) = untrack(|| {
+    // What an operation is and where it ran do not change, so its name, its
+    // Cancel button's label and its progress bar's name are worded once.
+    let (name, cancel_label, progress_label) = untrack(|| {
         page.with(|state| {
             state.row(&id).map(|row| {
                 let name = match operations::name(&row.summary) {
@@ -571,7 +574,12 @@ fn row_view(
                     Name::Words(words) => text_with(&localizer, words.id, &words.args),
                 };
                 let cancel = operations::cancel_label(&row.summary);
-                (name, text_with(&localizer, cancel.id, &cancel.args))
+                let bar = operations::progress_label(&row.summary);
+                (
+                    name,
+                    text_with(&localizer, cancel.id, &cancel.args),
+                    text_with(&localizer, bar.id, &bar.args),
+                )
             })
         })
     })
@@ -600,9 +608,11 @@ fn row_view(
             })
         }
     });
-    let percent = Memo::new({
+    // The run's latest report: none until it has reported, so a row that has
+    // not begun has no bar.
+    let reading = Memo::new({
         let id = id.clone();
-        move |_| page.with(|state| state.row(&id).and_then(progress_percent))
+        move |_| page.with(|state| state.row(&id).and_then(|row| row.progress))
     });
     let result = Memo::new({
         let id = id.clone();
@@ -620,35 +630,17 @@ fn row_view(
         move |_| status.with(|status| badge_of(&localizer, status))
     });
     let can_cancel = Memo::new(move |_| status.with(|status| cancellable(status)));
-    let has_progress = Memo::new(move |_| percent.get().is_some());
-    let said = Memo::new({
-        let id = id.clone();
-        move |_| {
-            page.with(|state| {
-                state.row(&id).and_then(|row| row.progress).map_or(
-                    ProgressText {
-                        above: None,
-                        unknown: msg::UI_PROGRESS_WORKING,
-                    },
-                    |progress| progress_text(&progress),
-                )
-            })
-        }
-    });
+    let has_progress = Memo::new(move |_| reading.get().is_some());
     let result_localizer = Arc::clone(&localizer);
-    let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
-    let step_localizer = Arc::clone(&localizer);
-    let above = Signal::derive({
-        let localizer = Arc::clone(&localizer);
-        move || said.get().above.map(|id| text(&localizer, id))
-    });
-    let unknown = Signal::derive(move || text(&step_localizer, said.get().unknown));
+    let bar_localizer = Arc::clone(&localizer);
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
     let url = format!("{}/api/v1/operations/{id}/cancel", connection.base);
+    // The row header's ID, which a control that leaves the row hands focus to.
+    let header = format!("operation-{id}");
     let operation = id;
     view! {
         <tr>
-            <th scope="row">{name}</th>
+            <th scope="row" id=header.clone() tabindex="-1">{name}</th>
             <td>
                 <StatusBadge
                     state=Signal::derive(move || badge.with(|badge| badge.0))
@@ -659,11 +651,11 @@ fn row_view(
                         .get()
                         .then(|| {
                             view! {
-                                {move || above.get().map(|step| view! { <span class="progress-step">{step}</span> })}
                                 <Progress
+                                    localizer=Arc::clone(&bar_localizer)
                                     label=progress_label.clone()
-                                    value=Signal::derive(move || percent.get().flatten())
-                                    unknown=unknown
+                                    then_focus=header.clone()
+                                    reading=Signal::derive(move || reading.get().unwrap_or_default())
                                 />
                             }
                         })
@@ -790,14 +782,6 @@ fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
         SortOrder::OldestFirst => rows.sort_by(|a, b| key(a).cmp(key(b))),
     }
     rows.into_iter().map(|row| row.summary.id.clone()).collect()
-}
-
-/// How far a row's run has come: `None` until the run has reported any
-/// progress, so a row that has not begun has no bar, and then the bar's
-/// whole percent, `None` while the run doesn't know its total yet.
-fn progress_percent(row: &OperationRow) -> Option<Option<u8>> {
-    row.progress
-        .map(|progress| percent(progress.current, progress.total))
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this
@@ -1847,34 +1831,6 @@ mod tests {
         for sort in [SortOrder::NewestFirst, SortOrder::OldestFirst] {
             assert_eq!(ordered(&rows, sort), [id_of(1), id_of(2)], "{sort:?}");
         }
-    }
-
-    #[test]
-    fn a_row_has_a_bar_once_its_run_has_reported_progress_and_a_value_once_it_knows_its_total() {
-        let mut running = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z");
-        assert_eq!(
-            progress_percent(&running),
-            None,
-            "a run that has reported nothing has no bar"
-        );
-        running.progress = Some(crate::backend::Progress {
-            step: None,
-            unit: api::ProgressUnit::Count,
-            current: 3,
-            total: Some(4),
-        });
-        assert_eq!(progress_percent(&running), Some(Some(75)));
-        running.progress = Some(crate::backend::Progress {
-            step: None,
-            unit: api::ProgressUnit::Count,
-            current: 9,
-            total: None,
-        });
-        assert_eq!(
-            progress_percent(&running),
-            Some(None),
-            "a run of unknown size has a bar with no value, never one at 0%"
-        );
     }
 
     #[test]

@@ -198,7 +198,7 @@ main:focus {
   background-color: var(--badge-success-bg);
 }
 
-/* The demo progress bar: a filled track whose width follows aria-valuenow.
+/* A progress bar: a filled track whose width follows every report.
    The track fills the room it is given, up to 16rem: in a table's cell it
    never widens its column, so the column keeps its width as a run starts
    and ends, and fits a small screen. */
@@ -210,10 +210,13 @@ main:focus {
   max-inline-size: 16rem;
 }
 
+/* The fill moves smoothly to each report; the reduced-motion rule above
+   takes the transition away, and the fill then jumps to the value. */
 .progress-fill {
   background-color: var(--focus);
   block-size: 100%;
   border-radius: inherit;
+  transition: inline-size 0.4s ease-out;
 }
 
 /* The step a running operation is in, beside a bar that shows a percentage:

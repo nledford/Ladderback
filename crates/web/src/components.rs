@@ -8,13 +8,21 @@
 //! announcer ([`crate::live`]) speaks what §4.5 says is spoken, and nothing
 //! else: a progress bar's value is never announced.
 
-use crate::announcer::Politeness;
+use std::sync::Arc;
+
+use crate::announcer::{Clock, Politeness};
+use l10n::Localizer;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 
 use crate::focus::{FocusWrap, focus_wrap};
-use crate::live::{modal_gone, open_modal, pause, reply, resume};
+use crate::live::{PageClock, modal_gone, open_modal, pause, reply, resume};
+use crate::progress::{
+    Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for,
+};
 use crate::repositories::Sentence;
+use crate::routes::text_with;
+use crate::text;
 use crate::toast::{ToastTimers, arrival};
 
 thread_local! {
@@ -539,6 +547,15 @@ pub(crate) fn recover_focus(id: &str) {
     }
 }
 
+/// Whether `element` holds focus now.
+fn holds_focus(element: &web_sys::Element) -> bool {
+    let node: &web_sys::Node = element;
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+        .is_some_and(|active| active.is_same_node(Some(node)))
+}
+
 /// A status badge: a short labeled state on a colored pill, one of
 /// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose
 /// text token on its background token is pair-checked by
@@ -551,31 +568,96 @@ pub fn StatusBadge(
 ) -> impl IntoView {
     view! { <span class=move || format!("badge badge-{}", state.get())>{move || label.get()}</span> }
 }
-/// A progress bar (`role="progressbar"` with `aria-valuenow`, `aria-valuemin`,
-/// `aria-valuemax` and `aria-valuetext`). Its value changes are never
-/// announced: nothing here calls the announcer.
+/// A progress bar (§4.5; §16, decision 83): `role="progressbar"`, named
+/// `label`, and a stop in the tab order, so a keyboard user reaches it and
+/// hears its value whenever she wants. What it draws follows every report
+/// of `reading`: the step above the track while there is a percentage, the
+/// fill, which moves smoothly to it unless the reader asks for less motion,
+/// and the percentage, or the step in its place while there is none. What
+/// it tells a screen reader, `aria-valuenow` and `aria-valuetext` (the step,
+/// the percentage, the amounts and the time left), changes as
+/// [`Teller`] decides: at most every 30 s while the step stays the same, at
+/// once for a new step. It is never announced: nothing here calls the
+/// announcer.
 ///
-/// A `value` of `None` is a bar whose size isn't known yet: indeterminate
-/// (WAI-ARIA `progressbar`), so it has no `aria-valuenow` or
-/// `aria-valuetext` and no track, and `unknown` stands in place of the
-/// percentage, as text a screen reader reads after the bar. It never shows
-/// 0%, which would say that nothing has been done.
+/// Everything it draws is inside the bar, whose children are presentational,
+/// so its focus ring surrounds what a sighted reader sees and a screen reader
+/// hears the value text alone. A reading without a total is indeterminate
+/// (WAI-ARIA `progressbar`): no `aria-valuenow` and no track, and the step,
+/// or that the operation is working, where the percentage stands; never 0%,
+/// which would say that nothing has been done (#422). The one timer that
+/// tells a held value is cleared when the bar goes.
+///
+/// A bar that goes while it holds focus, as one does when its run ends,
+/// hands focus to the element with the ID `then_focus` (a row's header), so
+/// focus never falls to the page (WCAG 2.4.3).
 #[component]
 pub fn Progress(
+    localizer: Arc<Localizer>,
     label: String,
-    #[prop(into)] value: Signal<Option<u8>>,
-    #[prop(into)] unknown: Signal<String>,
+    #[prop(into)] reading: Signal<crate::backend::Progress>,
+    #[prop(optional, into)] then_focus: Option<String>,
 ) -> impl IntoView {
-    let known = Memo::new(move |_| value.get().is_some());
+    let teller = StoredValue::new(Teller::default());
+    let wake = StoredValue::new(Wake::<TimeoutHandle>::default());
+    let told = RwSignal::new(None::<Told>);
+    let bar = NodeRef::<leptos::html::Div>::new();
+    // A cleanup runs before the bar leaves the page, so it still knows
+    // whether the bar holds focus.
+    on_cleanup(move || {
+        wake.try_update_value(Wake::clear);
+        if let Some(id) = then_focus
+            && bar.get_untracked().is_some_and(|bar| holds_focus(&bar))
+        {
+            focus_element(&id);
+        }
+    });
+    // The first reading is told as the bar is built, so it is never without
+    // a value; the effect tells what follows, and asks again of the same.
+    let first = reading.get_untracked();
+    act(
+        teller.try_update_value(|teller| teller.report(first, PageClock.now())),
+        teller,
+        wake,
+        told,
+    );
+    Effect::new(move |_| {
+        let progress = reading.get();
+        act(
+            teller.try_update_value(|teller| teller.report(progress, PageClock.now())),
+            teller,
+            wake,
+            told,
+        );
+    });
+    let percent =
+        Memo::new(move |_| reading.with(|progress| percent(progress.current, progress.total)));
+    let known = Memo::new(move |_| percent.get().is_some());
+    let said = Memo::new(move |_| reading.with(progress_text));
+    let value_localizer = Arc::clone(&localizer);
+    let step_localizer = Arc::clone(&localizer);
     view! {
         <div
+            node_ref=bar
             role="progressbar"
-            aria-label=label.clone()
+            tabindex="0"
+            class="progress"
+            aria-label=label
             aria-valuemin="0"
             aria-valuemax="100"
-            aria-valuenow=move || value.get().map(|value| value.to_string())
-            aria-valuetext=move || value.get().map(|value| format!("{value}%"))
+            aria-valuenow=move || {
+                told.get().and_then(|told| told.measure).map(|measure| measure.percent.to_string())
+            }
+            aria-valuetext=move || {
+                told.get()
+                    .map(|told| value_text(&told, |id, args| text_with(&value_localizer, id, args)))
+            }
         >
+            {move || {
+                said.get()
+                    .above
+                    .map(|id| view! { <span class="progress-step">{text(&step_localizer, id)}</span> })
+            }}
             {move || {
                 known
                     .get()
@@ -586,24 +668,59 @@ pub fn Progress(
                                 // allows (§10.1), not a `style` attribute, which it refuses.
                                 <div
                                     class="progress-fill"
-                                    style:inline-size=move || format!("{}%", value.get().unwrap_or_default())
+                                    style:inline-size=move || format!("{}%", percent.get().unwrap_or_default())
                                 ></div>
                             </div>
                         }
                     })
             }}
+            <span>
+                {move || match percent.get() {
+                    Some(percent) => format!("{percent}%"),
+                    None => text(&localizer, said.get().unknown),
+                }}
+            </span>
         </div>
-        // The percentage is the bar's `aria-valuetext` already, so it is
-        // hidden from screen readers; the text of a bar of unknown size is
-        // what they have instead.
-        <span aria-hidden=move || known.get().then_some("true")>
-            {move || match value.get() {
-                Some(value) => format!("{value}%"),
-                None => unknown.get(),
-            }}
-        </span>
     }
 }
+
+impl Clear for TimeoutHandle {
+    fn clear(self) {
+        TimeoutHandle::clear(&self);
+    }
+}
+
+/// Does what a bar's [`Teller`] answered, `None` once the bar has gone:
+/// tells the value now, clearing the timer that waited to, or waits on one
+/// timer until the hold is over and asks again.
+fn act(
+    next: Option<Next>,
+    teller: StoredValue<Teller>,
+    wake: StoredValue<Wake<TimeoutHandle>>,
+    told: RwSignal<Option<Told>>,
+) {
+    match next {
+        Some(Next::Tell(value)) => {
+            wake.try_update_value(Wake::clear);
+            told.set(Some(value));
+        }
+        Some(Next::WaitUntil(due)) => {
+            let ask = move || {
+                act(
+                    teller.try_update_value(|teller| teller.wake(PageClock.now())),
+                    teller,
+                    wake,
+                    told,
+                );
+            };
+            if let Ok(handle) = set_timeout_with_handle(ask, wait_for(due, PageClock.now())) {
+                wake.try_update_value(|wake| wake.set(handle));
+            }
+        }
+        Some(Next::Keep) | None => {}
+    }
+}
+
 /// A toast: shown as plain text (§4.5 renders toasts through the announcer,
 /// so the element itself is not a second live region), announced politely
 /// once through the announcer by [`show_toast`], and gone after [`TOAST_MS`]

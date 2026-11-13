@@ -49,11 +49,18 @@ pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
 }
 
 /// The name of `operation`'s progress bar: what it measures, a backup's, a
-/// check's, a prune's, so a screen reader that reaches the bar hears which
-/// run it is about (§4.5; §16, decision 83).
+/// check's, a prune's, and which run it is about, named as its row and its
+/// Cancel button are, so a screen reader that reaches one of two running
+/// backups' bars hears which (WCAG 2.4.6; §4.5; §16, decision 83).
 pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
-    let _ = operation;
-    todo!()
+    match plan_of(operation) {
+        Some(plan) => fact(msg::UI_PLAN_PROGRESS, "plan", text(plan)),
+        None => by_kind(
+            operation,
+            msg::UI_OPERATION_PROGRESS_OF,
+            msg::UI_OPERATION_PROGRESS,
+        ),
+    }
 }
 
 /// The facts of what `operation` produced, in the order the Result cell

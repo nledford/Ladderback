@@ -485,16 +485,34 @@ ui-sorted-oldest = Sorted by started, oldest first.
 # What the operations page says when the daemon holds no operations.
 ui-no-operations = No operations yet.
 
-# The label of a running backup's progress bar.
-ui-backup-progress = Backup progress
-
 # Shown beside a progress bar in place of its percentage while the
 # operation has no total to measure against: a backup before it has
 # walked its whole source, or a step that counts without a total.
 ui-progress-working = Working…
 
-# The name of a running operation's progress bar, which says what it
-# measures, so a check's bar is never announced as a backup's.
+# The name of a running backup's progress bar, named as its row is, by its
+# plan, so two running backups' bars are told apart and a check's bar is
+# never announced as a backup's.
+# $plan (text): the plan's ID, as config.toml names it. It is shown as it came.
+ui-plan-progress = Backup progress of { $plan }
+
+# The name of a running maintenance run's progress bar: what it measures and
+# the repository it runs on, by the alias this agent gave the repository when
+# the run started, as its row is named.
+# $kind is the wire text of what runs: forget, prune, check or adopt; any other
+# kind is an operation.
+# $repository (text): the repository's alias. It is shown as it came.
+ui-operation-progress-of =
+    { $kind ->
+        [forget] Forget progress in { $repository }
+        [prune] Prune progress of { $repository }
+        [check] Check progress of { $repository }
+        [adopt] Adoption progress in { $repository }
+       *[other] Operation progress on { $repository }
+    }
+
+# The name of the progress bar of a run the log names no plan or repository
+# for, such as one an earlier version logged: what it measures.
 # $kind is the wire text of what runs: backup, forget, prune, check or adopt;
 # any other kind is an operation.
 ui-operation-progress =
