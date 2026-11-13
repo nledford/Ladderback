@@ -45,20 +45,6 @@ git_release_name = "Ladderback v{{ version }}"
 # `X.Y.Z-rc.N` becomes a GitHub pre-release, not the latest release.
 git_release_type = "auto"
 
-# Crates added since the last tag (development §13.7.6). release-plz reads
-# each package from the tree of its last release's tag, and a crate missing
-# there stops it (`cannot find package "spawn-gate" in workspace`). A pattern
-# no tag matches makes the crate unreleased instead. Remove each entry once a
-# `vX.Y.Z` tag holds the crate: from then on it would look unreleased, and its
-# own feat commits would bump only the patch version.
-[[package]]
-name = "spawn-gate"
-git_tag_name = "unreleased-spawn-gate-v{{ version }}"
-
-[[package]]
-name = "notify-adapter"
-git_tag_name = "unreleased-notify-adapter-v{{ version }}"
-
 [changelog]
 header = """# Changelog
 
