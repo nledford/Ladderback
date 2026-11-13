@@ -392,6 +392,22 @@ pub enum OperationStep {
     Unknown,
 }
 
+/// What a progress bar counts (technical design §4.4; §16, decision 83), on
+/// the wire as its kebab-case name: bytes, which a page shows as sizes, or
+/// things such as files or packs, which it shows as plain numbers. Closed
+/// like [`OperationStep`]: a page that reads a unit it doesn't know has
+/// `Unknown`, which it shows as a plain number. The daemon never sends
+/// `Unknown`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressUnit {
+    #[default]
+    Count,
+    Bytes,
+    #[serde(other)]
+    Unknown,
+}
+
 /// A typed message argument. Identifiers, ports, years and hostnames are
 /// `Text`, so they are never formatted as numbers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1935,16 +1951,19 @@ pub enum UiEvent {
         started_at: String,
     },
     /// A running operation moved forward: in `step`, `current` of `total`,
-    /// when it says. What a page is shown is one progress bar, the one the
-    /// engine began last and still has open (§4.4), so its numbers are that
-    /// step's. `step` is `null` when the engine names no step this build
-    /// knows, and is left out by a daemon older than the field. Progress is
-    /// transient: it is never stored, and a subscriber whose buffer fills
-    /// loses the oldest of these first.
+    /// when it says, counted in `unit`. What a page is shown is one progress
+    /// bar, the one the engine began last and still has open (§4.4), so its
+    /// numbers are that step's. `step` is `null` when the engine names no
+    /// step this build knows, and is left out by a daemon older than the
+    /// field; `unit` is left out by a daemon older than its field, and then
+    /// reads as a count. Progress is transient: it is never stored, and a
+    /// subscriber whose buffer fills loses the oldest of these first.
     OperationProgress {
         operation: String,
         #[serde(default)]
         step: Option<OperationStep>,
+        #[serde(default)]
+        unit: ProgressUnit,
         current: u64,
         total: Option<u64>,
     },
@@ -2197,6 +2216,7 @@ mod ui_event_tests {
         UiEvent::OperationProgress {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
             step: None,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         }
@@ -2286,6 +2306,7 @@ mod ui_event_tests {
                 "type": "operation-progress",
                 "operation": "018f0000-0000-7000-8000-000000000001",
                 "step": null,
+                "unit": "count",
                 "current": 3,
                 "total": 10,
             })
@@ -2293,6 +2314,7 @@ mod ui_event_tests {
         let wire = to_value(&UiEvent::OperationProgress {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
             step: None,
+            unit: ProgressUnit::Count,
             current: 1,
             total: None,
         })
@@ -2320,6 +2342,7 @@ mod ui_event_tests {
             UiEvent::OperationProgress {
                 operation: "018f0000-0000-7000-8000-000000000001".into(),
                 step: None,
+                unit: ProgressUnit::Count,
                 current: 1,
                 total: None,
             },
@@ -2378,6 +2401,7 @@ mod ui_event_tests {
             let event = UiEvent::OperationProgress {
                 operation: "018f0000-0000-7000-8000-000000000001".into(),
                 step: Some(step),
+                unit: ProgressUnit::Count,
                 current: 3,
                 total: Some(10),
             };
@@ -2388,6 +2412,7 @@ mod ui_event_tests {
                     "type": "operation-progress",
                     "operation": "018f0000-0000-7000-8000-000000000001",
                     "step": code,
+                    "unit": "count",
                     "current": 3,
                     "total": 10,
                 })
@@ -2416,6 +2441,7 @@ mod ui_event_tests {
         let read = |step| UiEvent::OperationProgress {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
             step,
+            unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
         };
@@ -2428,6 +2454,50 @@ mod ui_event_tests {
         assert_eq!(
             progress_with(Some(Value::from("backing-up"))),
             read(Some(OperationStep::BackingUp))
+        );
+    }
+
+    /// A bar of bytes says so, so a page can show its amounts as sizes. A
+    /// page reads the progress of a daemon older than the unit as a count,
+    /// and a unit newer than itself as one it doesn't know: the progress
+    /// still counts.
+    #[test]
+    fn a_progress_event_says_what_it_counts_and_reads_without_a_unit_it_knows() {
+        let wire = |unit: Option<&str>| {
+            let mut wire = serde_json::json!({
+                "type": "operation-progress",
+                "operation": "018f0000-0000-7000-8000-000000000001",
+                "step": "backing-up",
+                "current": 3,
+                "total": 10,
+            });
+            if let (Some(unit), Some(fields)) = (unit, wire.as_object_mut()) {
+                fields.insert("unit".to_owned(), Value::from(unit));
+            }
+            wire
+        };
+        let read = |unit| UiEvent::OperationProgress {
+            operation: "018f0000-0000-7000-8000-000000000001".into(),
+            step: Some(OperationStep::BackingUp),
+            unit,
+            current: 3,
+            total: Some(10),
+        };
+        assert_eq!(
+            to_value(read(ProgressUnit::Bytes)).unwrap(),
+            wire(Some("bytes"))
+        );
+        assert_eq!(
+            to_value(read(ProgressUnit::Count)).unwrap(),
+            wire(Some("count"))
+        );
+        assert_eq!(
+            from_value::<UiEvent>(wire(None)).unwrap(),
+            read(ProgressUnit::Count)
+        );
+        assert_eq!(
+            from_value::<UiEvent>(wire(Some("furlongs"))).unwrap(),
+            read(ProgressUnit::Unknown)
         );
     }
 

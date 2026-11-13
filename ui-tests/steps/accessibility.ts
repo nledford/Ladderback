@@ -87,6 +87,15 @@ Then("focus stays on the {word} {string}", async function (this: BrowserWorld, r
   assert.ok(stays, `focus left the ${role} "${name}": it is ${await whereFocusIs(this.page)}`);
 });
 
+// Focus a control handed on as it left the page (WCAG 2.4.3): the header of
+// its row, which takes focus from a script and is no stop in the tab order.
+Then("focus is on the row header {string}", async function (this: BrowserWorld, name: string) {
+  const header = journey(this.page).byRole("rowheader", { name: namePattern(name) });
+  assert.equal(await header.count(), 1, `the row header "${name}" is not on the page once`);
+  const focused = await header.evaluate((el) => el === document.activeElement);
+  assert.ok(focused, `focus is not on the row header "${name}": it is ${await whereFocusIs(this.page)}`);
+});
+
 Then("focus is inside the dialog {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
   const dialog = keys.byRole("dialog", { name });

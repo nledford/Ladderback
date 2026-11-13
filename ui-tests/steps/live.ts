@@ -185,6 +185,12 @@ Given("the daemon reports a running backup of {string}", function (this: Browser
   this.scriptedDaemon = daemon;
 });
 
+Given("the daemon reports a running check of {string}", function (this: BrowserWorld, repository: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addRunningCheck(repository, "2026-11-09T10:00:01Z");
+  this.scriptedDaemon = daemon;
+});
+
 Given("the daemon reports running backups of {string} and {string}", function (this: BrowserWorld, first: string, second: string) {
   const daemon = new ScriptedDaemon();
   daemon.addBackup(first, "running", { queuedAt: "2026-11-09T10:00:00Z", startedAt: "2026-11-09T10:00:01Z" });
@@ -236,6 +242,7 @@ When("the daemon reports {int} steps of progress of the backup of {string}", asy
 const STEP_CODES: Record<string, string> = {
   "reading the index": "reading-index",
   "backing up": "backing-up",
+  "checking trees": "checking-trees",
 };
 
 function stepCode(step: string): string {
@@ -257,6 +264,30 @@ When(
     await scripted(this).progressesInStep(plan, stepCode(step), Number(current), null);
   },
 );
+
+const GIB = 1024 ** 3;
+
+When(
+  "the daemon reports that the backup of {string} is backing up, {int} GiB of {int} GiB done",
+  async function (this: BrowserWorld, plan: string, current: number, total: number) {
+    await scripted(this).progressesInStep(plan, "backing-up", current * GIB, total * GIB, "bytes");
+  },
+);
+
+When(
+  "the daemon reports that the check of {string} is checking trees, {int} of {int} done",
+  async function (this: BrowserWorld, repository: string, current: number, total: number) {
+    await scripted(this).checkProgressesInStep(repository, stepCode("checking trees"), current, total);
+  },
+);
+
+// The page's clock, which a Given installed, moves on: its timers that fall
+// due meanwhile run, and what it reads as the time has moved on with them.
+// Nothing else changes: the daemon tells the page nothing meanwhile.
+When("the page's clock moves on {int} seconds", async function (this: BrowserWorld, seconds: number) {
+  assert.ok(this.fakeClock, "the page's clock can't be moved on: no Given installed it");
+  await this.page.clock.fastForward(seconds * 1000);
+});
 
 When(
   "the daemon reports {int} bytes processed of the backup of {string} and not yet its total",
@@ -361,10 +392,12 @@ When("I reload the page", async function (this: BrowserWorld) {
   await this.page.getByRole("heading", { level: 1 }).waitFor();
 });
 
-// A row is named by its plan; what it shows is its life so far, which a
-// backup changes as it runs, so the step waits for the row to say it.
+// A row is named by its plan, or a maintenance run by what ran and its
+// repository, whose alias the page isolates (§4.5); what it shows is its
+// life so far, which a run changes as it goes, so the step waits for the
+// row to say it.
 Then("the table {string} has a row {string} that shows {string}", async function (this: BrowserWorld, name: string, row: string, status: string) {
-  const rows = table(this, name).getByRole("row", { name: new RegExp(escape(row)) });
+  const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escape).join(ISOLATION)) });
   await until(
     async () => {
       const found = await rows.first().textContent().catch(() => null);

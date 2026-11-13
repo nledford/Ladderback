@@ -11,6 +11,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
+use crate::backend::Progress as Reading;
 use crate::components::{
     Checkbox, Confirmation, FormField, ModalDialog, PauseUpdates, Progress, ReviewDialog,
     SortableTable, StatusBadge, Toast, show_toast,
@@ -62,7 +63,13 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let form_error = RwSignal::<Option<String>>::new(None);
     let form_value = RwSignal::new(String::new());
     let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
-    let progress = RwSignal::new(40u8);
+    const GIB: u64 = 1 << 30;
+    let progress = RwSignal::new(Reading {
+        step: Some(api::OperationStep::BackingUp),
+        unit: api::ProgressUnit::Bytes,
+        current: 4 * GIB,
+        total: Some(10 * GIB),
+    });
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
     // The review demos: whether each is open, and what confirming the first
@@ -235,28 +242,29 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
             <Progress
+                localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
-                value=Signal::derive(move || Some(progress.get()))
-                unknown=t(msg::UI_PROGRESS_WORKING)
+                reading=progress
             />
             <p>
                 <button type="button" on:click=move |_| {
-                    if progress.get_untracked() < 100 {
-                        progress.set((progress.get_untracked() + 40).min(100));
-                    }
+                    progress.update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
                 }>
                     {t(msg::UI_GALLERY_ADVANCE_PROGRESS)}
                 </button>
             </p>
             <Progress
+                localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
-                value=Signal::stored(None)
-                unknown=t(msg::UI_PROGRESS_WORKING)
+                reading=Signal::stored(Reading::default())
             />
             <Progress
+                localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
-                value=Signal::stored(None)
-                unknown=t(msg::UI_STEP_READING_INDEX)
+                reading=Signal::stored(Reading {
+                    step: Some(api::OperationStep::ReadingIndex),
+                    ..Reading::default()
+                })
             />
         </section>
         <section>

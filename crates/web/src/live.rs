@@ -19,7 +19,7 @@ const POLITE_ID: &str = "live-polite";
 const ASSERTIVE_ID: &str = "live-assertive";
 
 /// The browser's monotonic clock.
-struct PageClock;
+pub(crate) struct PageClock;
 
 impl Clock for PageClock {
     fn now(&self) -> Duration {

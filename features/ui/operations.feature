@@ -44,10 +44,10 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total
     Then the row "demo-home" of the table "Operations" shows "Working…" in its "Status" column
     And the row "demo-home" of the table "Operations" shows no percentage in its "Status" column
-    And the progress bar "Backup progress" shows no percentage
+    And the progress bar "Backup progress of demo-home" shows no percentage
     And the page has no accessibility violations
     When the daemon reports 4 steps of progress of the backup of "demo-home"
-    Then the progress bar "Backup progress" shows 100 percent
+    Then the progress bar "Backup progress of demo-home" shows 100 percent
     And the row "demo-home" of the table "Operations" doesn't show "Working…" in its "Status" column
 
   # A backup reads the repository's index before it backs up, and its row
@@ -60,15 +60,15 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the table "Operations" has a row "demo-home" that shows "Running"
     And the daemon reports that the backup of "demo-home" is reading the index, 3 of 10 done
     Then the row "demo-home" of the table "Operations" shows "Reading the index…" in its "Status" column
-    And the progress bar "Backup progress" shows 30 percent
+    And the progress bar "Backup progress of demo-home" shows 30 percent
     When the daemon reports that the backup of "demo-home" is backing up, 8 done of a total not known yet
     Then the row "demo-home" of the table "Operations" shows "Backing up…" in its "Status" column
     And the row "demo-home" of the table "Operations" doesn't show "Reading the index…" in its "Status" column
     And the row "demo-home" of the table "Operations" shows no percentage in its "Status" column
-    And the progress bar "Backup progress" shows no percentage
+    And the progress bar "Backup progress of demo-home" shows no percentage
     And the page has no accessibility violations
     When the daemon reports that the backup of "demo-home" is backing up, 4 of 4 done
-    Then the progress bar "Backup progress" shows 100 percent
+    Then the progress bar "Backup progress of demo-home" shows 100 percent
     And the row "demo-home" of the table "Operations" shows "Backing up…" in its "Status" column
 
   Scenario: A backup that ends while its row is open shows what it backed up
@@ -186,7 +186,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the page doesn't scroll sideways
     And nothing in the table "Operations" runs outside its cell
     When the daemon reports 4 steps of progress of the backup of "demo-home"
-    Then the progress bar "Backup progress" shows 100 percent
+    Then the progress bar "Backup progress of demo-home" shows 100 percent
     And the columns of the table "Operations" keep the widths noted
     And the page doesn't scroll sideways
     And nothing in the table "Operations" runs outside its cell
@@ -228,7 +228,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And nothing in the table "Operations" runs outside its cell
     And no text is clipped
     When the daemon reports 4 steps of progress of the backup of "demo-home"
-    Then the progress bar "Backup progress" shows 100 percent
+    Then the progress bar "Backup progress of demo-home" shows 100 percent
     And the page doesn't scroll sideways
     And nothing in the table "Operations" runs outside its cell
     And no text is clipped

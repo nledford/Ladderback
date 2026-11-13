@@ -48,6 +48,21 @@ pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
     }
 }
 
+/// The name of `operation`'s progress bar: what it measures, a backup's, a
+/// check's, a prune's, and which run it is about, named as its row and its
+/// Cancel button are, so a screen reader that reaches one of two running
+/// backups' bars hears which (WCAG 2.4.6; §4.5; §16, decision 83).
+pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
+    match plan_of(operation) {
+        Some(plan) => fact(msg::UI_PLAN_PROGRESS, "plan", text(plan)),
+        None => by_kind(
+            operation,
+            msg::UI_OPERATION_PROGRESS_OF,
+            msg::UI_OPERATION_PROGRESS,
+        ),
+    }
+}
+
 /// The facts of what `operation` produced, in the order the Result cell
 /// lists them; none for a run that has not succeeded. A fact the log did not
 /// keep, such as the bytes a backup an earlier version ran went through, is
@@ -294,6 +309,33 @@ mod tests {
             panic!("a check is named in words");
         };
         assert_eq!(english(&check), "Check of demo");
+    }
+
+    /// A bar is named for what it measures and which run it is about, as its
+    /// row is: a check's bar is never called a backup's, and two running
+    /// backups' bars are told apart by their plans (WCAG 2.4.6).
+    #[test]
+    fn a_progress_bar_is_named_for_what_it_measures_and_its_run() {
+        for (kind, english_name) in [
+            ("backup", "Backup progress of home"),
+            ("check", "Check progress of demo"),
+            ("prune", "Prune progress of demo"),
+            ("forget", "Forget progress in demo"),
+            ("adopt", "Adoption progress in demo"),
+            ("restore", "Operation progress on demo"),
+        ] {
+            let label = progress_label(&summary(kind, "home", Some("demo"), None));
+            assert_eq!(english(&label), english_name, "{kind}");
+        }
+        // A run the log names no plan or repository for is named by what ran.
+        for (kind, english_name) in [
+            ("backup", "Backup progress"),
+            ("check", "Check progress"),
+            ("restore", "Operation progress"),
+        ] {
+            let label = progress_label(&summary(kind, "", None, None));
+            assert_eq!(english(&label), english_name, "{kind}");
+        }
     }
 
     #[test]

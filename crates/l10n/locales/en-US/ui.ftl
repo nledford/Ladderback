@@ -485,13 +485,72 @@ ui-sorted-oldest = Sorted by started, oldest first.
 # What the operations page says when the daemon holds no operations.
 ui-no-operations = No operations yet.
 
-# The label of a running backup's progress bar.
-ui-backup-progress = Backup progress
-
 # Shown beside a progress bar in place of its percentage while the
 # operation has no total to measure against: a backup before it has
 # walked its whole source, or a step that counts without a total.
 ui-progress-working = Working…
+
+# The name of a running backup's progress bar, named as its row is, by its
+# plan, so two running backups' bars are told apart and a check's bar is
+# never announced as a backup's.
+# $plan (text): the plan's ID, as config.toml names it. It is shown as it came.
+ui-plan-progress = Backup progress of { $plan }
+
+# The name of a running maintenance run's progress bar: what it measures and
+# the repository it runs on, by the alias this agent gave the repository when
+# the run started, as its row is named.
+# $kind is the wire text of what runs: forget, prune, check or adopt; any other
+# kind is an operation.
+# $repository (text): the repository's alias. It is shown as it came.
+ui-operation-progress-of =
+    { $kind ->
+        [forget] Forget progress in { $repository }
+        [prune] Prune progress of { $repository }
+        [check] Check progress of { $repository }
+        [adopt] Adoption progress in { $repository }
+       *[other] Operation progress on { $repository }
+    }
+
+# The name of the progress bar of a run the log names no plan or repository
+# for, such as one an earlier version logged: what it measures.
+# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
+# any other kind is an operation.
+ui-operation-progress =
+    { $kind ->
+        [backup] Backup progress
+        [forget] Forget progress
+        [prune] Prune progress
+        [check] Check progress
+        [adopt] Adoption progress
+       *[other] Operation progress
+    }
+
+# What a screen reader reads as the value of a progress bar that shows a
+# percentage (§4.5): the step, how far, how much of how much, and the time
+# left once it can be told. It changes at most every 30 seconds.
+# $step (text): the step's own message, such as "Backing up…", or none when the operation names no step.
+# $percent (number): how far, as a whole percent.
+# $done (number or size): how much is done; a size such as 3.1 GiB when the bar counts bytes, a plain number when it counts things.
+# $total (number or size): the whole, in the same unit as $done.
+# $left (text): how the time left is told: none (not known yet), soon (under a minute), minutes or hours.
+# $minutes (number): the whole minutes left, for minutes.
+# $hours (number): the whole hours left, for hours.
+ui-progress-value =
+    { $step ->
+        [none] { NUMBER($percent) }%, { $done } of { $total }
+       *[other] { $step } { NUMBER($percent) }%, { $done } of { $total }
+    }{ $left ->
+        [soon] , less than a minute left
+        [minutes] , about { $minutes ->
+            [one] { $minutes } minute
+           *[other] { $minutes } minutes
+        } left
+        [hours] , about { $hours ->
+            [one] { $hours } hour
+           *[other] { $hours } hours
+        } left
+       *[none] {""}
+    }
 
 ## The step a running operation is in (§4.4; decision 82), beside its
 ## progress bar in place of the percentage, or above a bar that shows one.
