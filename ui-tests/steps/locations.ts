@@ -137,6 +137,16 @@ Given("the plan {string} ran and used the location {string}", async function (th
   assert.ok(run.status.startsWith("succeeded"), `the backup of ${plan} ended as ${run.status}`);
 });
 
+// The rule is written into the last location's table, the end of the file,
+// as a person adds one; the page reads the configuration as it is listed.
+Given("the location {string} is eligible only on a wired network", async function (this: BrowserWorld, name: string) {
+  const { scratch, places } = locations(this);
+  assert.equal(places.at(-1)?.[0], name, `the location ${name} is the last one, whose table ends the file`);
+  const configFile = path.join(scratch, "config", "config.toml");
+  const written = await readFile(configFile, "utf8");
+  await writeFile(configFile, [written.trimEnd(), 'when = [ { network = "wired" } ]', ""].join("\n"));
+});
+
 When("I open the Repositories page", async function (this: BrowserWorld) {
   await this.open("/repositories");
 });
@@ -158,6 +168,19 @@ Then(
     assert.ok(one?.includes(placeOf(this, first)), `the first location is ${first}: ${one}`);
     assert.ok(one?.includes("tried first"), `the first location says it is tried first: ${one}`);
     assert.ok(two?.includes(placeOf(this, second)), `the second location is ${second}: ${two}`);
+  },
+);
+
+Then(
+  "the location {string} of the repository {string} says it may be tried on a wired network",
+  async function (this: BrowserWorld, name: string, alias: string) {
+    const position = locations(this).places.findIndex(([known]) => known === name);
+    assert.ok(position >= 0, `no location "${name}"`);
+    const items = locationList(this, alias).getByRole("listitem");
+    await until(async () => {
+      if ((await items.count()) <= position) return false;
+      return (await shown(items.nth(position).innerText())).includes("May be tried on a wired network");
+    }, `the location ${name} says it may be tried on a wired network`);
   },
 );
 

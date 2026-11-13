@@ -19,8 +19,7 @@ use domain::execution::locations::{
     LocationOutcome, LocationTried, LocationsRecord, recorded_address,
 };
 use domain::planning::{
-    ExposedCredentials, LOCATION_PROBE_SECONDS, Location, MAX_RECORDED_ADDRESS_BYTES,
-    RuleVerdict,
+    ExposedCredentials, LOCATION_PROBE_SECONDS, Location, MAX_RECORDED_ADDRESS_BYTES, RuleVerdict,
 };
 use domain::secrets::{SecretValue, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
@@ -252,11 +251,8 @@ impl ChooseLocation {
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
-        for ((settings, rule), position) in entry
-            .location_settings()
-            .into_iter()
-            .zip(rules)
-            .zip(1u8..)
+        for ((settings, rule), position) in
+            entry.location_settings().into_iter().zip(rules).zip(1u8..)
         {
             let address = recorded_address(
                 &Location::of(&settings).masked_address(),
@@ -463,8 +459,7 @@ fn failure(record: &LocationsRecord) -> FailureReason {
             LocationOutcome::RuleNotMet | LocationOutcome::RuleUnknown
         )
     };
-    if !record.locations.is_empty() && record.locations.iter().all(|tried| by_rule(tried.outcome))
-    {
+    if !record.locations.is_empty() && record.locations.iter().all(|tried| by_rule(tried.outcome)) {
         return FailureReason::NoLocationRuleHolds;
     }
     let answered: Vec<LocationOutcome> = record

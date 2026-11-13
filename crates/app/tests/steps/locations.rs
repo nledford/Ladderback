@@ -26,8 +26,9 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, Hooks, Link, Location, LocationRule, LocationWarning, Locations,
-    Maintenance, NetworkKind, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
+    AgentConfig, AgentSettings, Hooks, Interval, Link, Location, LocationRule, LocationWarning,
+    Locations, Maintenance, NetworkKind, Plan, RepositoryConfig, RepositorySettings, RetryPolicy,
+    RuleNote, Schedule, Source, SourceFilter,
 };
 use domain::secrets::SecretRef;
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Uuid};
@@ -80,6 +81,11 @@ pub struct LocationsWorld {
     link: Arc<FakeNetworkLink>,
     /// What a person's Test of the locations found.
     tested: Option<LocationsRecord>,
+    /// Whether the plan "home" is scheduled, and if so whether it retries
+    /// a failed run; `None` for a plan that runs only when asked.
+    plan_retries: Option<bool>,
+    /// Whether this machine can't tell a wired link from other links.
+    cant_tell_wired: bool,
 }
 
 impl std::fmt::Debug for LocationsWorld {
@@ -1064,6 +1070,70 @@ fn warning_names_neither(agent: &mut Agent) {
     for hidden in ["lan.example.lan", "canary-pass", "s3.example.lan"] {
         assert!(!shown.contains(hidden), "{shown}");
     }
+}
+
+#[given(expr = "the plan {string} is scheduled and doesn't retry a failed run")]
+fn scheduled_without_retry(agent: &mut Agent, plan: String) {
+    assert_eq!(plan, PLAN);
+    agent.locations.plan_retries = Some(false);
+}
+
+#[given(expr = "the plan {string} is scheduled and retries up to {int} times")]
+fn scheduled_with_retry(agent: &mut Agent, plan: String, attempts: u32) {
+    assert_eq!(plan, PLAN);
+    assert!(attempts > 0);
+    agent.locations.plan_retries = Some(true);
+}
+
+#[given("the machine can't tell a wired network from other links")]
+fn cant_tell_wired(agent: &mut Agent) {
+    agent.locations.cant_tell_wired = true;
+}
+
+/// What the Repositories page notes about the rules of the locations of
+/// "nas", with the plan "home" as the scenario sets it.
+fn rule_notes(agent: &Agent) -> Vec<RuleNote> {
+    let world = &agent.locations;
+    let mut plan = Plan::new(plan_id(PLAN), alias(NAS), Vec::new());
+    if let Some(retries) = world.plan_retries {
+        plan.schedule = Some(Schedule::new(Interval::parse("1d").expect("an interval")));
+        plan.retry = retries
+            .then(|| RetryPolicy::new(3, SignedDuration::from_mins(10)).expect("a retry policy"));
+    }
+    world.entries[NAS].rule_notes(&[&plan], !world.cant_tell_wired)
+}
+
+#[then(expr = "the repository {string} notes that every location has a rule")]
+fn notes_every_ruled(agent: &mut Agent, _name: String) {
+    let notes = rule_notes(agent);
+    assert!(notes.contains(&RuleNote::EveryLocationRuled), "{notes:?}");
+}
+
+#[then(
+    expr = "the repository {string} notes that its last location has a rule and the plan {string} doesn't retry"
+)]
+fn notes_last_ruled(agent: &mut Agent, _name: String, plan: String) {
+    let notes = rule_notes(agent);
+    let note = RuleNote::LastRuledWithoutRetry {
+        plan: plan_id(&plan),
+    };
+    assert!(notes.contains(&note), "{notes:?}");
+}
+
+#[then(
+    expr = "the repository {string} notes that the location {int}'s rule asks for a wired network, which this machine can't tell"
+)]
+fn notes_wired_unknown(agent: &mut Agent, _name: String, position: u8) {
+    let notes = rule_notes(agent);
+    assert!(
+        notes.contains(&RuleNote::WiredUnknown { position }),
+        "{notes:?}"
+    );
+}
+
+#[then(expr = "the repository {string} carries no note about its locations' rules")]
+fn carries_no_note(agent: &mut Agent, _name: String) {
+    assert_eq!(rule_notes(agent), Vec::new());
 }
 
 #[then(expr = "the repository {string} carries no warning about its locations")]

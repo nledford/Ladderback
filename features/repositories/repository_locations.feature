@@ -268,6 +268,37 @@ Feature: A repository reached at several locations
       Then the daemon's log warns that the location 1 sends its credentials over plain HTTP
       And the operation has no warnings
 
+  Rule: The Repositories page notes what the locations' rules mean for a plan's runs
+
+    Scenario: A repository whose every location has a rule is noted
+      Given both locations are eligible only on a wired network
+      When the repositories are listed
+      Then the repository "nas" notes that every location has a rule
+
+    Scenario: A last location with a rule is noted for a scheduled plan that doesn't retry
+      Given the location "public" is eligible only on a wired network
+      And the plan "home" is scheduled and doesn't retry a failed run
+      When the repositories are listed
+      Then the repository "nas" notes that its last location has a rule and the plan "home" doesn't retry
+
+    Scenario: A plan that retries a failed run isn't noted
+      Given the location "public" is eligible only on a wired network
+      And the plan "home" is scheduled and retries up to 3 times
+      When the repositories are listed
+      Then the repository "nas" carries no note about its locations' rules
+
+    Scenario: A wired rule is noted where the machine can't tell a wired network from other links
+      Given the location "lan" is eligible only on a wired network
+      And the machine can't tell a wired network from other links
+      When the repositories are listed
+      Then the repository "nas" notes that the location 1's rule asks for a wired network, which this machine can't tell
+
+    @ui
+    Scenario: The Repositories page says when a location may be tried
+      Given the location "public" is eligible only on a wired network
+      When I open the Repositories page
+      Then the location "public" of the repository "nas" says it may be tried on a wired network
+
   Rule: What the person sees names a location by its position, never by a secret
 
     @e2e

@@ -29,7 +29,7 @@ pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};
 pub use location::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
-    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, check_location_count,
+    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, RuleNote, check_location_count,
 };
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
