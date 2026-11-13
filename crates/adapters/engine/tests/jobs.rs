@@ -3,7 +3,7 @@
 
 mod support;
 
-use std::fs::{self, File};
+use std::fs::{self, File, FileTimes};
 use std::time::{Duration, SystemTime};
 
 use app::ports::{
@@ -553,12 +553,7 @@ async fn only_old_temporary_files_are_removed_before_a_job() {
     }
     let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
     for path in [&old_tmp, &old_config_tmp, &old_other] {
-        File::options()
-            .write(true)
-            .open(path)
-            .unwrap()
-            .set_modified(two_days_ago)
-            .unwrap();
+        fs::set_times(path, FileTimes::new().set_modified(two_days_ago)).unwrap();
     }
     let events = run_to_end(
         &engine(),

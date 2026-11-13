@@ -328,7 +328,7 @@ fn entries(dir: &Path, tidying: &mut CacheTidying) -> Vec<fs::DirEntry> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, File};
+    use std::fs::{self, File, FileTimes};
     use std::time::Duration;
 
     use super::*;
@@ -375,12 +375,7 @@ mod tests {
             .join("snapshots")
             .join(format!("{}-tmp-", name.repeat(32)));
         file(&path, bytes);
-        File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(now - age)
-            .unwrap();
+        fs::set_times(&path, FileTimes::new().set_modified(now - age)).unwrap();
         path
     }
 
@@ -606,12 +601,7 @@ mod tests {
         let older = unfinished(&dir, "a2", 200, now, 30 * DAY);
         let recent = unfinished(&dir, "a3", 100, now, DAY - Duration::from_secs(60));
         let ahead = unfinished(&dir, "a4", 100, now, Duration::ZERO);
-        File::options()
-            .write(true)
-            .open(&ahead)
-            .unwrap()
-            .set_modified(now + DAY)
-            .unwrap();
+        fs::set_times(&ahead, FileTimes::new().set_modified(now + DAY)).unwrap();
 
         let tidying = tidy_cache(root, &recorded(&[&repository]), now);
 
@@ -660,12 +650,11 @@ mod tests {
         // Not a name rustic gives an unfinished file: `<64 hex digits>-tmp-`.
         let not_rustics = slot(root, &repository, 0).join("x-tmp-");
         file(&not_rustics, 10);
-        File::options()
-            .write(true)
-            .open(&not_rustics)
-            .unwrap()
-            .set_modified(SystemTime::now() - 2 * DAY)
-            .unwrap();
+        fs::set_times(
+            &not_rustics,
+            FileTimes::new().set_modified(SystemTime::now() - 2 * DAY),
+        )
+        .unwrap();
 
         let tidying = tidy_cache(root, &recorded(&[&repository]), SystemTime::now());
 
@@ -698,12 +687,7 @@ mod tests {
         // Named and dated as an unfinished file tidying would remove.
         let outside_unfinished = outside.join(format!("{}-tmp-", "ab".repeat(32)));
         file(&outside_unfinished, 10);
-        File::options()
-            .write(true)
-            .open(&outside_unfinished)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        fs::set_times(&outside_unfinished, FileTimes::new().set_modified(old)).unwrap();
         let before = files(&outside);
         let root = scratch.path().join("cache");
         fs::create_dir(&root).unwrap();

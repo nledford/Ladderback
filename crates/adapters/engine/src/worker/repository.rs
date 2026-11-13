@@ -320,7 +320,7 @@ fn remove_leftovers(ctx: &Context, half: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, File};
+    use std::fs::{self, File, FileTimes};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
@@ -400,12 +400,11 @@ mod tests {
             .join(format!("{}-tmp-1", "ab".repeat(32)));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"x").unwrap();
-        File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600))
-            .unwrap();
+        fs::set_times(
+            &path,
+            FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600)),
+        )
+        .unwrap();
         path
     }
 

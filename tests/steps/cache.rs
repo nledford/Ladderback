@@ -5,7 +5,7 @@
 //! removes from that folder when it starts.
 
 use std::collections::BTreeMap;
-use std::fs::{File, TryLockError};
+use std::fs::{self, File, FileTimes, TryLockError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -361,12 +361,11 @@ fn unfinished_file(agent: &mut Agent, slot: u32, hours: u64) {
         ));
     let bytes = 300 + hours;
     write(&path, usize::try_from(bytes).expect("a small size"));
-    File::options()
-        .write(true)
-        .open(&path)
-        .expect("the file opens")
-        .set_modified(SystemTime::now() - Duration::from_secs(hours * 60 * 60))
-        .expect("the file's time is set");
+    fs::set_times(
+        &path,
+        FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(hours * 60 * 60)),
+    )
+    .expect("the file's time is set");
     agent.cache.unfinished.insert((slot, hours), (path, bytes));
 }
 
