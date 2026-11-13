@@ -78,6 +78,14 @@ pub enum ErrorCode {
     /// No repository is at the location: the engine found an empty folder
     /// on this machine there, so nothing was opened or written.
     RepositoryNotFound,
+    /// A repository reached at several locations had none that could be
+    /// used (decision 80): each was silent, refused, held no repository or
+    /// another one, or a secret of it was unavailable. The operation names
+    /// each location and why, by position.
+    NoLocationUsable,
+    /// The repository's password opened nothing at any location tried
+    /// (decision 80).
+    PasswordNotAccepted,
     /// A saved repository's Create was refused because its row doesn't offer
     /// it: no job found its location empty since nothing reached it, so
     /// nothing says the location is reachable and holds no repository
@@ -279,6 +287,21 @@ pub enum ErrorCode {
 #[serde(rename_all = "kebab-case")]
 pub enum WarningCode {
     SourceUnreadable,
+    /// A location of a repository reached at several was skipped where it
+    /// shouldn't have been (decision 80). The argument `position` is the
+    /// location's, from 1, and `outcome` why: `other-repository`,
+    /// `secret-unavailable`, `silent`, `refused`, `not-a-repository` or
+    /// `password-not-accepted`. Never an address or a network's name.
+    LocationSkipped,
+    /// A location of a repository sends its credentials where whoever
+    /// answers at its address can read them (decision 80, §10.6). The
+    /// arguments are `position`, the location's, from 1, and `cause`:
+    /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
+    /// `plain-ftp`. Never the address or a credential.
+    LocationPlainHttpCredentials,
+    /// An export wrote the repository's first location only: rustic has no
+    /// fallback. The argument `count` is how many locations it left out.
+    ProfileLocationsNotExported,
     /// An import left out a setting of the profile that Ladderback has no
     /// place for. The argument `key` is its path in the profile.
     ProfileKeyIgnored,
@@ -592,7 +615,10 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::RepositoryNotFound | Self::CreateNotOffered => &[],
+            Self::RepositoryNotFound
+            | Self::CreateNotOffered
+            | Self::NoLocationUsable
+            | Self::PasswordNotAccepted => &[],
             Self::RepositoryAliasTaken | Self::RepositoryAlreadyConfigured => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -864,6 +890,35 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::LocationSkipped => &[
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "outcome",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::LocationPlainHttpCredentials => &[
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "cause",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::ProfileLocationsNotExported => &[ArgSpec {
+                name: "count",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
             Self::MaintenancePartial => &[
                 ArgSpec {
                     name: "what",

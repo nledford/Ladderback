@@ -8,8 +8,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use super::{InvalidValue, RepositoryConfig, RepositorySettings};
-use crate::secrets::SecretRef;
+use super::{InvalidValue, RepositoryConfig, RepositorySettings, ValueKind, masked_options};
+use crate::secrets::{
+    REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
+    location_secret_written,
+};
 
 /// The most locations a repository has, the first included.
 pub const MAX_LOCATIONS: usize = 4;
@@ -37,22 +40,103 @@ pub struct Location {
 impl Location {
     /// The location `settings` describe: everything but the password.
     pub fn of(settings: &RepositorySettings) -> Self {
-        let _ = settings;
-        todo!()
+        Self {
+            repository: settings.repository.clone(),
+            repo_hot: settings.repo_hot.clone(),
+            options: settings.options.clone(),
+            options_hot: settings.options_hot.clone(),
+            options_cold: settings.options_cold.clone(),
+        }
     }
 
     /// The settings that open the repository at this location, with the
     /// repository's `password`.
     pub fn with_password(&self, password: SecretRef) -> RepositorySettings {
-        let _ = password;
-        todo!()
+        RepositorySettings {
+            repository: self.repository.clone(),
+            repo_hot: self.repo_hot.clone(),
+            password,
+            options: self.options.clone(),
+            options_hot: self.options_hot.clone(),
+            options_cold: self.options_cold.clone(),
+        }
+    }
+
+    /// Whether any option set holds a credential: an option whose name says
+    /// it is one, written or a reference.
+    fn carries_credential_option(&self) -> bool {
+        [&self.options, &self.options_hot, &self.options_cold]
+            .into_iter()
+            .flatten()
+            .any(|(name, value)| is_secret_option(name) && !value.is_empty())
+    }
+
+    /// Whether `repository` or `repo-hot` carries a credential in its text: a
+    /// user and password in its URL (written or a reference), or an rclone
+    /// connection string's.
+    fn carries_credential_in_address(&self) -> bool {
+        std::iter::once(self.repository.as_str())
+            .chain(self.repo_hot.as_deref())
+            .any(|address| has_userinfo(address) || location_secret_written(address))
+    }
+
+    fn carries_credential(&self) -> bool {
+        self.carries_credential_in_address() || self.carries_credential_option()
+    }
+
+    /// The value of the option `name` in any set, compared without case.
+    fn option(&self, name: &str) -> Option<&str> {
+        [&self.options, &self.options_hot, &self.options_cold]
+            .into_iter()
+            .flatten()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// Whether the URL in `address` has a userinfo (`user:password@`): what
+/// follows the first `://` up to the first `/`, `?` or `#` holds an `@`.
+fn has_userinfo(address: &str) -> bool {
+    address.split_once("://").is_some_and(|(_, rest)| {
+        rest.split(['/', '?', '#'])
+            .next()
+            .is_some_and(|authority| authority.contains('@'))
+    })
+}
+
+/// Whether `text` starts with `prefix`, compared without ASCII case.
+fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+impl Location {
+    /// The address as written, with the credentials written in it masked:
+    /// what an operation keeps of a location, never a secret.
+    pub fn masked_address(&self) -> String {
+        let none = SecretValue::new("");
+        Redactor::for_repository(RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &none,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        })
+        .redact(&self.repository)
     }
 }
 
 impl fmt::Debug for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!()
+        f.debug_struct("Location")
+            .field("repository", &self.masked_address())
+            .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))
+            .field("options", &masked_options(&self.options))
+            .field("options_hot", &masked_options(&self.options_hot))
+            .field("options_cold", &masked_options(&self.options_cold))
+            .finish()
     }
 }
 
@@ -84,14 +168,57 @@ pub enum ExposedCredentials {
 impl ExposedCredentials {
     /// The cause's code, as the warning carries it.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::PlainHttp => "plain-http",
+            Self::UncheckedCertificate => "unchecked-certificate",
+            Self::PlainEndpoint => "plain-endpoint",
+            Self::PlainFtp => "plain-ftp",
+        }
     }
 
     /// The cause of `settings`, a location as written or as resolved, when
     /// whoever answers at its address can read its credentials.
     pub fn of(settings: &RepositorySettings) -> Option<Self> {
-        let _ = settings;
-        todo!()
+        Self::of_location(&Location::of(settings))
+    }
+
+    /// The cause of `location`, as written or as resolved.
+    pub fn of_location(location: &Location) -> Option<Self> {
+        let address = location.repository.as_str();
+        if starts_with_ignore_case(address, "rest:http://") {
+            return location.carries_credential().then_some(Self::PlainHttp);
+        }
+        if starts_with_ignore_case(address, "rest:https://") {
+            let insecure = location
+                .option("http-insecure-tls")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("true"));
+            return insecure.then_some(Self::UncheckedCertificate);
+        }
+        if let Some(service) = address.get("opendal:".len()..)
+            && starts_with_ignore_case(address, "opendal:")
+        {
+            let scheme = service
+                .split_once(':')
+                .map_or(service, |(scheme, _)| scheme);
+            if scheme.eq_ignore_ascii_case("ftp") {
+                return location.carries_credential().then_some(Self::PlainFtp);
+            }
+            let plain = ["endpoint", "url"].into_iter().any(|name| {
+                location
+                    .option(name)
+                    .is_some_and(|value| starts_with_ignore_case(value.trim(), "http://"))
+            });
+            return (plain && location.carries_credential()).then_some(Self::PlainEndpoint);
+        }
+        if starts_with_ignore_case(address, "rclone:") {
+            // rclone quotes a value that holds a `:`, such as a URL.
+            let plain = address
+                .to_ascii_lowercase()
+                .replace(['"', '\''], "")
+                .contains("url=http://");
+            return (plain && location.carries_credential()).then_some(Self::PlainEndpoint);
+        }
+        None
     }
 }
 
@@ -107,32 +234,194 @@ pub struct LocationWarning {
 impl RepositoryConfig {
     /// How many locations the entry has: 1 and the further ones.
     pub fn location_count(&self) -> usize {
-        todo!()
+        self.locations.further.len().saturating_add(1)
     }
 
     /// Whether the entry has more than one location: only then is a job's
     /// location chosen, by a probe of each.
     pub fn has_several_locations(&self) -> bool {
-        todo!()
+        !self.locations.further.is_empty()
     }
 
     /// The settings that open the repository at each location, in order,
     /// each with the repository's password.
     pub fn location_settings(&self) -> Vec<RepositorySettings> {
-        todo!()
+        std::iter::once(self.settings.clone())
+            .chain(
+                self.locations
+                    .further
+                    .iter()
+                    .map(|location| location.with_password(self.settings.password.clone())),
+            )
+            .collect()
     }
 
     /// The entry's locations whose credentials can be read by whoever
     /// answers at their address, as written: none for an entry with one
     /// location, which is unchanged in every way.
     pub fn location_warnings(&self) -> Vec<LocationWarning> {
-        todo!()
+        std::iter::once(Location::of(&self.settings))
+            .chain(self.locations.further.iter().cloned())
+            .zip(1u8..)
+            .filter_map(|(location, position)| {
+                ExposedCredentials::of_location(&location)
+                    .map(|cause| LocationWarning { position, cause })
+            })
+            .collect()
     }
 }
 
 /// Refuses a set of further locations an entry can't hold: more than
 /// [`MAX_LOCATIONS`] in all.
 pub fn check_location_count(further: usize) -> Result<(), InvalidValue> {
-    let _ = further;
-    todo!()
+    if further.saturating_add(1) > MAX_LOCATIONS {
+        return Err(InvalidValue::new(ValueKind::Location, ""));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn location(address: &str, options: &[(&str, &str)]) -> Location {
+        Location {
+            repository: address.to_owned(),
+            options: options
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+            ..Location::default()
+        }
+    }
+
+    #[test]
+    fn a_location_and_its_password_make_the_settings_it_came_from() {
+        let settings = location("rest:https://nas/r", &[("http-cacert", "/ca.pem")])
+            .with_password(SecretRef::Env("PW".to_owned()));
+        assert_eq!(
+            Location::of(&settings),
+            location("rest:https://nas/r", &[("http-cacert", "/ca.pem")])
+        );
+        assert_eq!(settings.password, SecretRef::Env("PW".to_owned()));
+    }
+
+    #[test]
+    fn a_location_debug_form_masks_its_credentials() {
+        let shown = format!(
+            "{:?}",
+            location("rest:http://demo:CANARY@nas/r", &[("password", "CANARY")])
+        );
+        assert!(!shown.contains("CANARY"), "{shown}");
+        assert!(shown.contains("password"), "{shown}");
+    }
+
+    #[test]
+    fn plain_http_with_credentials_is_exposed_and_without_them_is_not() {
+        let of = |address, options: &[(&str, &str)]| {
+            ExposedCredentials::of_location(&location(address, options))
+        };
+        assert_eq!(
+            of("rest:http://demo:pw@nas/r", &[]),
+            Some(ExposedCredentials::PlainHttp)
+        );
+        assert_eq!(
+            of("rest:http://demo:${PW}@nas/r", &[]),
+            Some(ExposedCredentials::PlainHttp)
+        );
+        assert_eq!(
+            of("rest:HTTP://nas/r", &[("password", "${PW}")]),
+            Some(ExposedCredentials::PlainHttp)
+        );
+        assert_eq!(of("rest:http://nas/r", &[]), None);
+        assert_eq!(of("rest:http://nas/r", &[("timeout", "10s")]), None);
+        assert_eq!(of("rest:https://demo:pw@nas/r", &[]), None);
+        assert_eq!(of("/srv/nas", &[("password", "pw")]), None);
+    }
+
+    #[test]
+    fn an_unchecked_certificate_is_exposed_only_when_insecure_tls_is_true() {
+        let of = |value| {
+            ExposedCredentials::of_location(&location(
+                "rest:https://nas/r",
+                &[("http-insecure-tls", value)],
+            ))
+        };
+        assert_eq!(of("true"), Some(ExposedCredentials::UncheckedCertificate));
+        assert_eq!(of("false"), None);
+    }
+
+    #[test]
+    fn opendal_endpoints_and_ftp_are_exposed_with_a_credential() {
+        let of = |address, options: &[(&str, &str)]| {
+            ExposedCredentials::of_location(&location(address, options))
+        };
+        let s3 = [("endpoint", "http://s3.lan"), ("secret_access_key", "${K}")];
+        assert_eq!(
+            of("opendal:s3", &s3),
+            Some(ExposedCredentials::PlainEndpoint)
+        );
+        assert_eq!(of("opendal:s3", &s3[..1]), None);
+        assert_eq!(
+            of(
+                "opendal:s3",
+                &[("endpoint", "https://s3.lan"), ("secret_access_key", "k")]
+            ),
+            None
+        );
+        assert_eq!(
+            of("opendal:ftp", &[("password", "pw")]),
+            Some(ExposedCredentials::PlainFtp)
+        );
+        assert_eq!(of("opendal:ftp", &[]), None);
+        assert_eq!(
+            of(
+                r#"rclone::webdav,url="http://dav.lan",user=me,pass=pw:r"#,
+                &[]
+            ),
+            Some(ExposedCredentials::PlainEndpoint)
+        );
+    }
+
+    #[test]
+    fn an_entry_counts_its_locations_and_warns_by_position() {
+        let mut entry = RepositoryConfig {
+            settings: location("/srv/one", &[]).with_password(SecretRef::Env("PW".to_owned())),
+            locations: Locations::default(),
+            id: None,
+            maintenance: super::super::Maintenance::None,
+            group_by: super::super::GroupBy::default(),
+            hooks: super::super::Hooks::default(),
+        };
+        assert_eq!(entry.location_count(), 1);
+        assert!(!entry.has_several_locations());
+        assert_eq!(entry.location_warnings(), Vec::new());
+        entry
+            .locations
+            .further
+            .push(location("rest:http://nas/r", &[("password", "${PW2}")]));
+        assert_eq!(entry.location_count(), 2);
+        assert!(entry.has_several_locations());
+        let settings = entry.location_settings();
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[1].repository, "rest:http://nas/r");
+        assert_eq!(settings[1].password, SecretRef::Env("PW".to_owned()));
+        assert!(settings[0].options.is_empty(), "no option is inherited");
+        assert_eq!(
+            entry.location_warnings(),
+            vec![LocationWarning {
+                position: 2,
+                cause: ExposedCredentials::PlainHttp
+            }]
+        );
+    }
+
+    #[test]
+    fn at_most_four_locations_are_held() {
+        assert_eq!(check_location_count(3), Ok(()));
+        assert_eq!(
+            check_location_count(4).map_err(|error| error.kind),
+            Err(ValueKind::Location)
+        );
+    }
 }

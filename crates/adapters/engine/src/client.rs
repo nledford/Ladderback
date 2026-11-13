@@ -1178,6 +1178,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 WarningCode::CheckWarning => WarningKind::CheckWarning,
                 WarningCode::CheckError => WarningKind::CheckError,
                 WarningCode::MaintenanceOtherHosts => WarningKind::OtherHosts,
+                // The daemon's choice of location says it, never a worker.
+                WarningCode::LocationSkipped => WarningKind::LocationSkipped,
                 // The profile codes belong to the import and export, which
                 // run in the CLI; a worker that sent one is reported as the
                 // problem it claims, in its own words.
@@ -1194,6 +1196,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileRetentionEmpty
                 | WarningCode::ProfileSettingKept
                 | WarningCode::ProfileKeyringCommandMissing
+                | WarningCode::ProfileLocationsNotExported
+                | WarningCode::LocationPlainHttpCredentials
                 // The daemon's notifier says it, never a worker.
                 | WarningCode::NotificationUndelivered
                 | WarningCode::Unknown => WarningKind::Other,
@@ -1316,6 +1320,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::EngineExitTimedOut
                 | ErrorCode::RepositoryTimedOut
                 | ErrorCode::DaemonStopped
+                | ErrorCode::NoLocationUsable
+                | ErrorCode::PasswordNotAccepted
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired
@@ -1552,7 +1558,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::CheckWarning => WarningCode::CheckWarning,
                         WarningKind::CheckError => WarningCode::CheckError,
                         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
-                        WarningKind::LocationSkipped => todo!(),
+                        WarningKind::LocationSkipped => WarningCode::LocationSkipped,
                         WarningKind::Other => WarningCode::Unknown,
                     },
                     item: w.item,

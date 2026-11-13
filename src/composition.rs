@@ -861,7 +861,9 @@ impl Publish {
             // operation is running, and its end before the run's ending hooks
             // and final write, so a page told of either could read a history
             // that doesn't have it yet. The run announces both.
-            E::Started { .. } | E::Succeeded(_) | E::Failed(_) => None,
+            // The choice of location is the run's record, which the
+            // operation's row shows once the run writes it.
+            E::Started { .. } | E::Succeeded(_) | E::Failed(_) | E::Located(_) => None,
         }
     }
 }
@@ -1456,7 +1458,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::CheckWarning => WarningCode::CheckWarning,
         WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
-        WarningKind::LocationSkipped => todo!(),
+        WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -2497,6 +2499,8 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
+        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
     }
 }
 

@@ -2,7 +2,7 @@
 //! (technical design §10.2). Nothing here keeps a resolved value past the
 //! returned [`ResolvedRepository`], and nothing prints one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use domain::RepositoryAlias;
@@ -113,14 +113,46 @@ impl ResolveRepository {
     ) -> Result<ResolvedRepository, ResolveError> {
         refuse_references_in_arguments(settings)?;
         refuse_too_many_credentials(settings)?;
-        let mut run = Run {
-            resolver: self.resolver.as_ref(),
-            values: BTreeMap::new(),
-            secrets: Vec::new(),
-            warnings: Vec::new(),
-            masked: MaskedSecrets::default(),
-        };
+        let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(&settings.password).await?;
+        Self::resolve_rest(run, settings, password)
+            .await
+            .map(|(resolved, _)| resolved)
+    }
+
+    /// Resolves one location of a repository reached at several, when it is
+    /// about to be tried (decision 80): `settings` is the location with the
+    /// repository's password, which `password` already holds, so it isn't
+    /// read again. A reference the job's earlier locations read is not read
+    /// again either (`read` keeps them, §10.2); the access lists only the
+    /// secrets this location uses, so a job carries no other location's.
+    pub async fn resolve_location(
+        &self,
+        settings: &RepositorySettings,
+        password: &SecretValue,
+        read: &mut JobReferences,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        refuse_references_in_arguments(settings)?;
+        refuse_too_many_credentials(settings)?;
+        let mut run = Run::new(self.resolver.as_ref(), read.values.clone());
+        run.masked
+            .secret(password)
+            .map_err(|too_much| ResolveError {
+                field: Field::Password,
+                cause: too_much_to_mask(too_much),
+            })?;
+        let (resolved, values) = Self::resolve_rest(run, settings, password.clone()).await?;
+        read.values = values;
+        Ok(resolved)
+    }
+
+    /// The rest of `settings`, past the password, resolved by `run`, with
+    /// every reference `run` has read by the end.
+    async fn resolve_rest(
+        mut run: Run<'_>,
+        settings: &RepositorySettings,
+        password: SecretValue,
+    ) -> Result<(ResolvedRepository, BTreeMap<Reference, SecretValue>), ResolveError> {
         let repository = run
             .location(Field::Repository, &settings.repository)
             .await?;
@@ -135,7 +167,7 @@ impl ResolveRepository {
         let options_cold = run
             .expand_all(&settings.options_cold, Field::OptionCold)
             .await?;
-        Ok(ResolvedRepository {
+        let resolved = ResolvedRepository {
             access: RepositoryAccess {
                 repository,
                 repo_hot,
@@ -148,7 +180,8 @@ impl ResolveRepository {
                 entry: None,
             },
             warnings: run.warnings,
-        })
+        };
+        Ok((resolved, run.values))
     }
 
     /// Resolves the settings of the configuration's entry `entry`, saved
@@ -162,13 +195,53 @@ impl ResolveRepository {
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
     ) -> Result<ResolvedRepository, ResolveError> {
-        let mut resolved = self.resolve(&entry.settings).await?;
+        let mut resolved = if entry.has_several_locations() {
+            self.resolve_password(&entry.settings.password).await?
+        } else {
+            self.resolve(&entry.settings).await?
+        };
         resolved.access.id = entry.id.clone();
         resolved.access.entry = Some(SavedEntry {
             alias: alias.clone(),
             entry: entry.clone(),
         });
         Ok(resolved)
+    }
+}
+
+/// The references one job's locations have read, each once (§10.2), so a
+/// probe and the job that follows it see one value. Dropped with the job.
+#[derive(Default)]
+pub struct JobReferences {
+    values: BTreeMap<Reference, SecretValue>,
+}
+
+impl ResolveRepository {
+    /// The repository's password alone, in an access that names no
+    /// location: a repository reached at several has its location chosen
+    /// when the job starts, and each location's references are read only
+    /// then ([`Self::resolve_location`]), so nothing opens a location the
+    /// choice didn't make.
+    async fn resolve_password(
+        &self,
+        password: &SecretRef,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
+        let password = run.password(password).await?;
+        Ok(ResolvedRepository {
+            access: RepositoryAccess {
+                repository: String::new(),
+                repo_hot: None,
+                password,
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+                secrets: Vec::new(),
+                id: None,
+                entry: None,
+            },
+            warnings: run.warnings,
+        })
     }
 }
 
@@ -285,13 +358,27 @@ fn too_much_to_mask(_: TooMuchToMask) -> Cause {
 /// mask, counted.
 struct Run<'a> {
     resolver: &'a dyn SecretResolver,
+    /// Every reference read, by this run or the job's earlier ones.
     values: BTreeMap<Reference, SecretValue>,
+    /// The references this run uses, each counted and listed once.
+    used: BTreeSet<Reference>,
     secrets: Vec<SecretValue>,
     warnings: Vec<SecretWarning>,
     masked: MaskedSecrets,
 }
 
-impl Run<'_> {
+impl<'a> Run<'a> {
+    fn new(resolver: &'a dyn SecretResolver, values: BTreeMap<Reference, SecretValue>) -> Self {
+        Self {
+            resolver,
+            values,
+            used: BTreeSet::new(),
+            secrets: Vec::new(),
+            warnings: Vec::new(),
+            masked: MaskedSecrets::default(),
+        }
+    }
+
     async fn password(&mut self, password: &SecretRef) -> Result<SecretValue, ResolveError> {
         let fail = |cause| ResolveError {
             field: Field::Password,
@@ -374,22 +461,25 @@ impl Run<'_> {
 
     /// What `reference` resolves to, read once, and counted when first read.
     async fn value(&mut self, reference: &Reference) -> Result<SecretValue, Cause> {
-        if let Some(value) = self.values.get(reference) {
-            return Ok(value.clone());
+        let value = match self.values.get(reference) {
+            Some(value) => value.clone(),
+            None => {
+                let resolved = self
+                    .resolver
+                    .resolve(&reference.secret_ref())
+                    .await
+                    .map_err(Cause::Unresolved)?;
+                self.warn(resolved.warnings);
+                self.values
+                    .insert(reference.clone(), resolved.value.clone());
+                resolved.value
+            }
+        };
+        if self.used.insert(reference.clone()) {
+            self.masked.secret(&value).map_err(too_much_to_mask)?;
+            self.secrets.push(value.clone());
         }
-        let resolved = self
-            .resolver
-            .resolve(&reference.secret_ref())
-            .await
-            .map_err(Cause::Unresolved)?;
-        self.warn(resolved.warnings);
-        self.masked
-            .secret(&resolved.value)
-            .map_err(too_much_to_mask)?;
-        self.secrets.push(resolved.value.clone());
-        self.values
-            .insert(reference.clone(), resolved.value.clone());
-        Ok(resolved.value)
+        Ok(value)
     }
 
     fn warn(&mut self, warnings: Vec<SecretWarning>) {

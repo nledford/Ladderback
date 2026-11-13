@@ -309,7 +309,10 @@ async fn identified(
             EngineEvent::Succeeded(EngineResult::Repository { id }) => return Ok(id),
             EngineEvent::Failed(reason) => return Err(reason),
             EngineEvent::Succeeded(_) => break,
-            EngineEvent::Started { .. } | EngineEvent::Progress(_) | EngineEvent::Warning(_) => {}
+            EngineEvent::Started { .. }
+            | EngineEvent::Progress(_)
+            | EngineEvent::Warning(_)
+            | EngineEvent::Located(_) => {}
         }
     }
     Err(FailureReason::EngineExited { exit_code: None })

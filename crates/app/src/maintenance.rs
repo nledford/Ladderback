@@ -374,8 +374,36 @@ impl RunMaintenance {
     /// location `locations` chooses, never the first by default (decision
     /// 80).
     pub fn with_locations(self, locations: Arc<crate::locations::ChooseLocation>) -> Self {
-        let _ = locations;
-        todo!()
+        Self {
+            locations: Some(locations),
+            ..self
+        }
+    }
+
+    /// The access retention opens in-process: the location the choice
+    /// makes now, for a repository reached at several, which a listing
+    /// before it doesn't decide; the access itself for one location. With no
+    /// choice to ask, a repository reached at several isn't opened at all.
+    async fn in_process(
+        &self,
+        op: OperationId,
+        access: &RepositoryAccess,
+    ) -> Result<RepositoryAccess, MaintenanceError> {
+        let several = access
+            .entry
+            .as_ref()
+            .is_some_and(|saved| saved.entry.has_several_locations());
+        if !several {
+            return Ok(access.clone());
+        }
+        let Some(locations) = &self.locations else {
+            return Err(MaintenanceError::Failed(FailureReason::NoLocationUsable));
+        };
+        locations
+            .locate(op, access.clone())
+            .await
+            .map(|located| located.access)
+            .map_err(|(reason, _)| MaintenanceError::Failed(reason))
     }
 
     /// Announces how each run ends on `events` (§4.4): once, after the last
@@ -812,6 +840,7 @@ impl RunMaintenance {
         let plans = plans_of(config, alias);
         let partition = self.partitioned(op, access.clone(), &plans).await?;
         let mut removals = Vec::new();
+        let mut opened: Option<RepositoryAccess> = None;
         for plan in &plans {
             let Some(group) = partition
                 .managed
@@ -830,13 +859,18 @@ impl RunMaintenance {
                     plan: plan.plan.clone(),
                 });
             }
+            let at = match opened.take() {
+                Some(at) => at,
+                None => self.in_process(op, access).await?,
+            };
             let ids = within_read_timeout(
                 self.clock.as_ref(),
                 self.retention
-                    .removes(access, &plan.policy, &group.snapshots)
+                    .removes(&at, &plan.policy, &group.snapshots)
                     .map(|answer| answer.map_err(|error| retention_failed(error, &plan.plan))),
             )
             .await?;
+            opened = Some(at);
             removals.push((plan.plan.clone(), ids));
         }
         let forget = ForgetPreview::new(&partition, removals);
@@ -1117,6 +1151,13 @@ impl RunMaintenance {
                             let _ = operation.record_warning(warning);
                         }
                         EngineEvent::Succeeded(reported) => return Played::Reported(reported),
+                        // A run of several jobs keeps the first job's choice:
+                        // the operation says once where it went.
+                        EngineEvent::Located(record) => {
+                            if operation.locations().is_none() {
+                                let _ = operation.record_locations(record, |_| false);
+                            }
+                        }
                         EngineEvent::Failed(reason) => {
                             note_partial(operation, done, total);
                             let _ = operation.fail(reason, self.clock.now());

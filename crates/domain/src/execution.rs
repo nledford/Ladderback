@@ -120,6 +120,14 @@ pub enum FailureReason {
     /// failed (§9). What it did before it stopped is unknown, so it is never
     /// recorded as succeeded.
     DaemonStopped,
+    /// The repository is reached at several locations and none could be
+    /// used (decision 80): each was silent, refused, held no repository or
+    /// another one, or a secret of it was unavailable. The operation's
+    /// locations say why, by position.
+    NoLocationUsable,
+    /// The repository's password opened nothing at any location tried
+    /// (decision 80): a wrong password is the likelier cause.
+    PasswordNotAccepted,
 }
 
 impl FailureReason {
@@ -141,6 +149,8 @@ impl FailureReason {
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
             Self::DaemonStopped => "daemon-stopped",
+            Self::NoLocationUsable => "no-location-usable",
+            Self::PasswordNotAccepted => "password-not-accepted",
         }
     }
 }
@@ -362,7 +372,7 @@ impl Operation {
     /// Which location the run used and why each earlier one was skipped,
     /// for a repository reached at several.
     pub fn locations(&self) -> Option<&locations::LocationsRecord> {
-        todo!()
+        self.locations.as_ref()
     }
 
     /// Records the run's choice of location, and the warnings it gives
@@ -372,8 +382,12 @@ impl Operation {
         record: locations::LocationsRecord,
         rule_held: impl Fn(u8) -> bool,
     ) -> Result<(), LifecycleError> {
-        let _ = (record, rule_held);
-        todo!()
+        self.require(Transition::RecordWarning, |s| !s.is_finished())?;
+        for warning in record.warnings(rule_held) {
+            self.keep(warning);
+        }
+        self.locations = Some(record);
+        Ok(())
     }
 
     pub fn id(&self) -> OperationId {
@@ -985,6 +999,36 @@ mod tests {
         op.succeed(t(20)).unwrap();
         assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
         assert_eq!(op.warnings(), &[unreadable("/a"), unreadable("/b")]);
+    }
+
+    #[test]
+    fn a_choice_of_location_is_recorded_with_its_warnings_until_the_operation_ends() {
+        use locations::{LocationOutcome, LocationTried, LocationsRecord};
+        let record = LocationsRecord {
+            locations: vec![
+                LocationTried {
+                    position: 1,
+                    address: "/srv/a".to_owned(),
+                    outcome: LocationOutcome::OtherRepository,
+                    source: None,
+                },
+                LocationTried {
+                    position: 2,
+                    address: "/srv/b".to_owned(),
+                    outcome: LocationOutcome::Used,
+                    source: None,
+                },
+            ],
+        };
+        let mut op = queued();
+        assert_eq!(op.locations(), None);
+        op.record_locations(record.clone(), |_| false).unwrap();
+        assert_eq!(op.locations(), Some(&record));
+        op.start(t(10)).unwrap();
+        op.succeed(t(20)).unwrap();
+        assert_eq!(op.status(), &OperationStatus::SucceededWithWarnings);
+        assert_eq!(op.warnings().len(), 1);
+        assert!(op.record_locations(record, |_| false).is_err());
     }
 
     #[test]

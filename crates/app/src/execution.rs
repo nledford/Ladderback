@@ -398,6 +398,8 @@ impl RunOperation {
                 succeeded
             }
             EngineEvent::Failed(reason) => run.operation.fail(reason, at),
+            // Part 1 has no rules, so no location's rule held (decision 80).
+            EngineEvent::Located(record) => run.operation.record_locations(record, |_| false),
         };
         if let Err(error) = applied {
             let transition = error.transition;

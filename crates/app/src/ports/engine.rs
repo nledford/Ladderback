@@ -430,6 +430,10 @@ pub enum EngineEvent {
     Warning(Warning),
     Succeeded(EngineResult),
     Failed(FailureReason),
+    /// Which location of a repository reached at several the job opens, and
+    /// why each earlier one was skipped (decision 80): the choice made when
+    /// the job started, before any of the job's own events.
+    Located(domain::execution::locations::LocationsRecord),
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names

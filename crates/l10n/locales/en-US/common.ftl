@@ -294,6 +294,12 @@ error-repository-exists = { -brand-name } did not initialise a repository at { $
 # No repository is at the location: it is a folder on this machine holding nothing of a repository, so nothing was opened or written.
 error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.
 
+# A repository reached at several locations had none that could be used: each was silent, refused, held no repository or another one, or a secret of it was unavailable. The operation's detail lists each location and why.
+error-no-location-usable = No location of this repository could be used, so nothing was read or written. The operation lists each location and why it was skipped; check that one of them can be reached, then try again.
+
+# The repository's password opened nothing at any of its locations that answered.
+error-password-not-accepted = The repository's password was not accepted at any of its locations, so nothing was read or written. Check the repository's password, then try again.
+
 # A saved repository's Create was refused because its row doesn't offer it: no backup found the location empty, or one reached the repository there once, so nothing says the location can be reached and holds no repository. Nothing was run.
 error-create-not-offered = This repository wasn't created: { -brand-name } creates one only where a backup found the location empty. Check that the drive or location can be reached, then run a backup.
 
@@ -464,6 +470,36 @@ error-profile-export-url-password = { -brand-name } did not export the plan, bec
 # $tag (text): the tag.
 # The comma is typed as it is: keep it a string literal.
 error-profile-export-tag-comma = { -brand-name } did not export the plan, because its tag { $tag } holds a comma ({ "," }), which rustic reads as two tags. Rename the tag without the comma, then export again.
+
+# A location of a repository reached at several was skipped where it shouldn't have been.
+# $position (text): the location's place in the list, from 1.
+# $outcome (text): why, as a code: other-repository, secret-unavailable, silent, refused, not-a-repository or password-not-accepted.
+warning-location-skipped = { $outcome ->
+    [other-repository] Location { $position } holds another repository, so it was not used. Check its address.
+    [secret-unavailable] Location { $position } was not tried, because a secret it needs could not be read.
+    [silent] Location { $position } did not answer, although its rule held.
+    [refused] Location { $position } refused its credentials, although its rule held.
+    [not-a-repository] Location { $position } holds no repository, although its rule held.
+   *[other] Location { $position } did not accept the repository's password, although its rule held.
+  }
+
+# A location of a repository sends its credentials where whoever answers at its address can read them, so an impostor on the network could take them.
+# $position (text): the location's place in the list, from 1.
+# $cause (text): why: plain-http, unchecked-certificate, plain-endpoint or plain-ftp.
+# `http-cacert` is an option of the configuration, typed as it is: keep it a string literal.
+warning-location-plain-http-credentials = { $cause ->
+    [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Trust the server's own certificate with { "http-cacert" } instead.
+    [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
+    [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
+   *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
+  }
+
+# An export wrote the repository's first location only, because a rustic profile has no fallback.
+# $count (count): how many further locations it left out.
+warning-profile-locations-not-exported = { $count ->
+    [one] The profile points at the repository's first location only: { $count } further location was left out, because rustic has no fallback.
+   *[other] The profile points at the repository's first location only: { $count } further locations were left out, because rustic has no fallback.
+  }
 
 # The import left out a setting of the profile.
 # $key (text): the setting, as its path in the profile, such as copy or backup.group-by.
