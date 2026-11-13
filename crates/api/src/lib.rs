@@ -305,6 +305,18 @@ pub enum WarningCode {
     /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
     /// `plain-ftp`. Never the address or a credential.
     LocationPlainHttpCredentials,
+    /// Every location of a repository has a rule (decision 80): a scheduled
+    /// run is skipped on a network where none holds, and any other run fails
+    /// there. No arguments.
+    LocationEveryRuled,
+    /// A repository's last location has a rule and the plan `plan`, which
+    /// has a schedule, doesn't retry a failed run (decision 80): a run that
+    /// finds no location usable fails until the next one.
+    LocationLastRuledNoRetry,
+    /// The rule of the location at `position`, from 1, asks for a wired
+    /// network, which this machine can't tell from other links (decision
+    /// 80): that alternative never holds here.
+    LocationRuleWiredUnknown,
     /// An export wrote the repository's first location only: rustic has no
     /// fallback. The argument `count` is how many locations it left out.
     ProfileLocationsNotExported,
@@ -909,6 +921,17 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::LocationEveryRuled => &[],
+            Self::LocationLastRuledNoRetry => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::LocationRuleWiredUnknown => &[ArgSpec {
+                name: "position",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::LocationPlainHttpCredentials => &[
                 ArgSpec {
                     name: "position",
@@ -2791,6 +2814,20 @@ pub struct LocationDto {
     /// Its options, set by set, each by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<LocationOptionDto>,
+    /// Its rule's alternatives, in the order written, of which any one
+    /// holding lets it be tried. Left out for a location with no rule,
+    /// which is tried on every network.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when: Vec<LocationAlternativeDto>,
+}
+
+/// One alternative of a location's rule (decision 80).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationAlternativeDto {
+    /// The kind of network, as the configuration writes it: `wired` or
+    /// `wifi`.
+    pub network: String,
 }
 
 /// One option of a location: its name, and its value only when the value

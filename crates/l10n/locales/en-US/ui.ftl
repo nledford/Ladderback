@@ -1201,8 +1201,20 @@ ui-location-tested = { $outcome ->
     [secret-expansion-too-long] Not tried: one of its settings is too long once its references are resolved.
     [secret-in-process-arguments] Not tried: a setting passed to a program holds a reference, which would show its secret.
     [location-too-many-credentials] Not tried: its rclone connection string holds more credentials than a job can hide.
+    [rule-not-met] Not tried: its rule doesn't hold on the network this machine is on.
+    [rule-unknown] Not tried: its rule couldn't be checked on this machine.
    *[other] Could not be used.
 }
+
+# One alternative of a location's rule, under the location in a repository's list of locations. The location may be tried when any one of its alternatives holds.
+# $network (text): the kind of network the alternative asks for, as the configuration file writes it: wired or wifi. Not shown.
+ui-location-rule = { $network ->
+    [wired] May be tried on a wired network.
+   *[wifi] May be tried on any Wi-Fi network.
+}
+
+# Under a location's rule, after its alternatives: where the location isn't tried. A VPN that carries all traffic makes the machine's network link the VPN's.
+ui-location-rule-elsewhere = Skipped on any other network, and behind a VPN that carries all of this machine's traffic.
 
 # Shown right after ui-location-tested, when the daemon named where a secret was looked for or which setting can't be used. Never a value.
 # $outcome (text): what the Test found, as in ui-location-tested. Not shown.

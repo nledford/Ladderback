@@ -10,7 +10,7 @@ use std::fmt;
 
 use super::repository::Place;
 use super::{
-    InvalidValue, LocationRule, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+    InvalidValue, LocationRule, NetworkKind, Plan, RepositoryConfig, RepositorySettings, ValueKind,
     masked_options,
 };
 use crate::PlanId;
@@ -371,8 +371,28 @@ impl RepositoryConfig {
     /// link from other links: none for an entry whose locations have no
     /// rule.
     pub fn rule_notes(&self, plans: &[&Plan], tells_wired: bool) -> Vec<RuleNote> {
-        let _ = (plans, tells_wired);
-        todo!("the notes about an entry's locations' rules")
+        let rules = self.location_rules();
+        let mut notes = Vec::new();
+        if rules.iter().all(Option::is_some) {
+            notes.push(RuleNote::EveryLocationRuled);
+        }
+        if rules.last().is_some_and(Option::is_some) {
+            notes.extend(
+                plans
+                    .iter()
+                    .filter(|plan| plan.schedule.is_some() && plan.retry.is_none())
+                    .map(|plan| RuleNote::LastRuledWithoutRetry {
+                        plan: plan.id.clone(),
+                    }),
+            );
+        }
+        if !tells_wired {
+            notes.extend(rules.iter().zip(1u8..).filter_map(|(rule, position)| {
+                rule.filter(|rule| rule.alternatives().contains(&NetworkKind::Wired))
+                    .map(|_| RuleNote::WiredUnknown { position })
+            }));
+        }
+        notes
     }
 }
 
@@ -387,7 +407,6 @@ pub fn check_location_count(further: usize) -> Result<(), InvalidValue> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::NetworkKind;
     use super::*;
 
     fn location(address: &str, options: &[(&str, &str)]) -> Location {

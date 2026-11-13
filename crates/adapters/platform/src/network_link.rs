@@ -291,6 +291,13 @@ fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Link, Plat
     }
 }
 
+/// Whether this machine's reader tells a wired link from other links: not
+/// on macOS, until a run on Ethernet has shown how a Mac names its wired
+/// ports (decision 80), so a rule's `wired` never holds there.
+pub fn tells_wired() -> bool {
+    !cfg!(target_os = "macos")
+}
+
 /// This machine's network link: `route` and `networksetup` on macOS, the
 /// kernel's elsewhere.
 pub fn system_link() -> Arc<dyn NetworkLink> {

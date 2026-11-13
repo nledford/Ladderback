@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 
 use api::{
-    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationOptionDto, LocationTriedDto,
-    LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto, RepositoryIdDto, RepositoryInitDto,
-    RepositorySettingsDto, TestRepositoryDto, WarningDto,
+    ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationAlternativeDto, LocationOptionDto,
+    LocationTriedDto, LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto, RepositoryIdDto,
+    RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 
@@ -404,6 +404,29 @@ pub(crate) fn location_option(
         ),
         None => (msg::UI_LOCATION_OPTION_WRITTEN, named.to_vec()),
     }
+}
+
+/// What a location's rule reads as, under the location: each alternative,
+/// any one of which lets it be tried, then where it is skipped. Nothing for
+/// a location with no rule, which is tried on every network.
+pub(crate) fn location_rule(
+    when: &[LocationAlternativeDto],
+) -> Vec<(MessageId, Vec<(&'static str, MsgArg)>)> {
+    if when.is_empty() {
+        return Vec::new();
+    }
+    when.iter()
+        .map(|alternative| {
+            (
+                msg::UI_LOCATION_RULE,
+                vec![("network", text(&alternative.network))],
+            )
+        })
+        .chain(std::iter::once((
+            msg::UI_LOCATION_RULE_ELSEWHERE,
+            Vec::new(),
+        )))
+        .collect()
 }
 
 /// What a row's Test found at one location: its outcome, then, when the
@@ -1207,6 +1230,26 @@ mod tests {
             english_of((msg::UI_REPOSITORIES_TEST, vec![]))
         );
         assert_eq!(english_of(locations_label("nas")), "Locations of nas");
+    }
+
+    #[test]
+    fn a_locations_rule_reads_as_each_alternative_then_where_it_is_skipped() {
+        let alternative = |network: &str| LocationAlternativeDto {
+            network: network.to_owned(),
+        };
+        assert_eq!(location_rule(&[]), Vec::new());
+        let said: Vec<String> = location_rule(&[alternative("wired"), alternative("wifi")])
+            .into_iter()
+            .map(english_of)
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "May be tried on a wired network.",
+                "May be tried on any Wi-Fi network.",
+                "Skipped on any other network, and behind a VPN that carries all of this machine's traffic.",
+            ]
+        );
     }
 
     #[test]

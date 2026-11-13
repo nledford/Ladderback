@@ -1198,6 +1198,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileKeyringCommandMissing
                 | WarningCode::ProfileLocationsNotExported
                 | WarningCode::LocationPlainHttpCredentials
+                | WarningCode::LocationEveryRuled
+                | WarningCode::LocationLastRuledNoRetry
+                | WarningCode::LocationRuleWiredUnknown
                 // The daemon's notifier says it, never a worker.
                 | WarningCode::NotificationUndelivered
                 | WarningCode::Unknown => WarningKind::Other,

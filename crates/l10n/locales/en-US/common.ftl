@@ -502,6 +502,19 @@ warning-location-plain-http-credentials = { $cause ->
    *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a server's own certificate.
   }
 
+# Every location of a repository has a rule about the network the machine is on, so on a network where no rule holds, nothing can be tried.
+warning-location-every-ruled = Every location of this repository has a rule, so a scheduled run is skipped on a network where none holds, and any other run fails there. Leave one location without a rule to have it tried on every network.
+
+# A repository's last location has a rule about the network the machine is on, and a scheduled plan backing up to it doesn't retry a failed run.
+# $plan (text): the plan's ID, as the configuration file writes it. It is shown as it came.
+# `retry` is a key of the configuration file, typed as it is: keep it a string literal.
+warning-location-last-ruled-no-retry = The plan { $plan } doesn't retry a failed run, and this repository's last location has a rule: when no location can be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
+
+# A location's rule asks for a wired network, and this machine can't yet tell a wired network from other links, so that part of the rule never holds here.
+# $position (text): the location's place in the list, from 1.
+# `wifi` is a value of the configuration file, typed as it is: keep it a string literal.
+warning-location-rule-wired-unknown = The rule of location { $position } asks for a wired network, which Ladderback can't yet tell apart from other links on this machine, so that part of the rule never holds here. A rule of { "wifi" } works here.
+
 # An export wrote the repository's first location only, because a rustic profile has no fallback.
 # $count (count): how many further locations it left out.
 warning-profile-locations-not-exported = { $count ->

@@ -48,7 +48,8 @@ use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    Location, Maintenance, NotRecorded, RepositoryConfig, RepositoryField, RepositorySettings,
+    Location, LocationRule, Maintenance, NotRecorded, Plan, RepositoryConfig, RepositoryField,
+    RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -1911,7 +1912,18 @@ impl Catalog for ConfigCatalog {
                 .repositories()
                 .iter()
                 .map(|(alias, repository)| {
-                    listed_repository(alias, repository, offered.contains(alias))
+                    let plans: Vec<&Plan> = config
+                        .plans()
+                        .iter()
+                        .filter(|plan| &plan.repository == alias)
+                        .collect();
+                    listed_repository(
+                        alias,
+                        repository,
+                        &plans,
+                        platform::network_link::tells_wired(),
+                        offered.contains(alias),
+                    )
                 })
                 .collect(),
         })
@@ -2712,12 +2724,17 @@ fn config_unusable<R>(
 }
 
 /// A configured entry as the repositories list shows it: its row, and for
-/// an entry reached at several locations, each location in order and a
-/// warning for each that sends its credentials where an impostor could read
-/// them (decision 80), by position and cause, never the address.
+/// an entry reached at several locations, each location in order with its
+/// rule; a warning for each location that sends its credentials where an
+/// impostor could read them, by position and cause, never the address; and
+/// the notes about what the locations' rules mean for `plans`, the plans
+/// that back up to it, on a machine that can or can't tell a wired link
+/// from other links (decision 80).
 fn listed_repository(
     alias: &RepositoryAlias,
     repository: &RepositoryConfig,
+    plans: &[&Plan],
+    tells_wired: bool,
     create_offered: bool,
 ) -> api::RepositoryDto {
     let mut row = repository_row(
@@ -2737,8 +2754,36 @@ fn listed_repository(
                 .into(),
             }
         }));
+    row.warnings.extend(
+        repository
+            .rule_notes(plans, tells_wired)
+            .into_iter()
+            .map(|note| {
+                let (code, args) = match note {
+                    RuleNote::EveryLocationRuled => {
+                        (api::WarningCode::LocationEveryRuled, Vec::new())
+                    }
+                    RuleNote::LastRuledWithoutRetry { plan } => (
+                        api::WarningCode::LocationLastRuledNoRetry,
+                        vec![("plan".to_owned(), text(plan.as_str()))],
+                    ),
+                    RuleNote::WiredUnknown { position } => (
+                        api::WarningCode::LocationRuleWiredUnknown,
+                        vec![("position".to_owned(), text(position))],
+                    ),
+                };
+                api::WarningDto {
+                    code,
+                    args: args.into_iter().collect(),
+                }
+            }),
+    );
     if repository.has_several_locations() {
-        row.locations = std::iter::once(Location::of(&repository.settings))
+        let first = Location {
+            when: repository.locations.first_when.clone(),
+            ..Location::of(&repository.settings)
+        };
+        row.locations = std::iter::once(first)
             .chain(repository.locations.further.iter().cloned())
             .zip(1u8..)
             .map(|(location, position)| listed_location(&location, position))
@@ -2771,6 +2816,14 @@ fn listed_location(location: &Location, position: u8) -> api::LocationDto {
         repository: location.masked_address(),
         repo_hot: location.masked_repo_hot(),
         options,
+        when: location
+            .when
+            .iter()
+            .flat_map(LocationRule::alternatives)
+            .map(|kind| api::LocationAlternativeDto {
+                network: kind.as_str().to_owned(),
+            })
+            .collect(),
     }
 }
 
@@ -3350,7 +3403,7 @@ mod tests {
     fn a_listed_repository_lists_its_locations_in_order_with_references_and_never_a_written_secret()
     {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, false);
         let option = |set: &str, name: &str, reference: Option<&str>| api::LocationOptionDto {
             set: set.to_owned(),
             name: name.to_owned(),
@@ -3364,12 +3417,14 @@ mod tests {
                     repository: "rest:http://lan:***@lan.example.lan/r".to_owned(),
                     repo_hot: None,
                     options: vec![option("options", "application_key", Some("${LAN_KEY}"))],
+                    when: Vec::new(),
                 },
                 api::LocationDto {
                     position: 2,
                     repository: "/srv/public".to_owned(),
                     repo_hot: None,
                     options: vec![option("options-cold", "secret_access_key", None)],
+                    when: Vec::new(),
                 },
             ]
         );
@@ -3380,7 +3435,7 @@ mod tests {
     #[test]
     fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, false);
         let warning = api::WarningDto {
             code: WarningCode::LocationPlainHttpCredentials,
             args: [
@@ -3393,11 +3448,76 @@ mod tests {
     }
 
     #[test]
+    fn a_listed_repository_shows_each_locations_rule_and_notes_what_the_rules_mean() {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let mut entry = two_locations();
+        let wired = LocationRule::new(vec![domain::planning::NetworkKind::Wired]).expect("a rule");
+        entry.locations.first_when = Some(wired.clone());
+        entry.locations.further[0].when = Some(
+            LocationRule::new(vec![
+                domain::planning::NetworkKind::WiFi,
+                domain::planning::NetworkKind::Wired,
+            ])
+            .expect("a rule"),
+        );
+        let mut plan = Plan::new(
+            PlanId::parse("home").expect("a plan ID"),
+            alias.clone(),
+            Vec::new(),
+        );
+        plan.schedule = Some(domain::planning::Schedule::new(
+            domain::planning::Interval::parse("1d").expect("an interval"),
+        ));
+        let row = listed_repository(&alias, &entry, &[&plan], false, false);
+        let when: Vec<Vec<&str>> = row
+            .locations
+            .iter()
+            .map(|location| {
+                location
+                    .when
+                    .iter()
+                    .map(|kind| kind.network.as_str())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(when, vec![vec!["wired"], vec!["wifi", "wired"]]);
+        let note = |code, args: &[(&str, &str)]| api::WarningDto {
+            code,
+            args: args
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), MsgArg::Text((*value).to_owned())))
+                .collect(),
+        };
+        for expected in [
+            note(WarningCode::LocationEveryRuled, &[]),
+            note(WarningCode::LocationLastRuledNoRetry, &[("plan", "home")]),
+            note(WarningCode::LocationRuleWiredUnknown, &[("position", "1")]),
+            note(WarningCode::LocationRuleWiredUnknown, &[("position", "2")]),
+        ] {
+            assert!(
+                row.warnings.contains(&expected),
+                "{expected:?} in {:?}",
+                row.warnings
+            );
+        }
+        assert!(
+            listed_repository(&alias, &entry, &[], true, false)
+                .warnings
+                .iter()
+                .all(|warning| !matches!(
+                    warning.code,
+                    WarningCode::LocationLastRuledNoRetry | WarningCode::LocationRuleWiredUnknown
+                )),
+            "no plan and a machine that tells wired: neither note"
+        );
+    }
+
+    #[test]
     fn a_listed_repository_of_one_location_lists_no_locations() {
         let alias = RepositoryAlias::parse("demo").expect("an alias");
         let mut entry = two_locations();
         entry.locations = Default::default();
-        let row = listed_repository(&alias, &entry, false);
+        let row = listed_repository(&alias, &entry, &[], true, false);
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");

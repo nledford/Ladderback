@@ -27,9 +27,10 @@ use crate::operations::{self, Name};
 use crate::pause::{self, Ends, Pausable};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
-    create_saved_path, error_of, field_of, location_heading, location_option, location_tested,
-    locations_label, locations_tested, password_source, problems_of, repository_notes,
-    rereads_list, row_refusal, test_locations_label, test_locations_path, tested_announcement,
+    create_saved_path, error_of, field_of, location_heading, location_option, location_rule,
+    location_tested, locations_label, locations_tested, password_source, problems_of,
+    repository_notes, rereads_list, row_refusal, test_locations_label, test_locations_path,
+    tested_announcement,
 };
 use crate::sign_in::SignInOff;
 use crate::visit::Visit;
@@ -1468,6 +1469,10 @@ fn locations_list(
                     text_with(localizer, id, &args)
                 })
                 .collect();
+            let rule: Vec<String> = location_rule(&location.when)
+                .into_iter()
+                .map(|(id, args)| text_with(localizer, id, &args))
+                .collect();
             let position = location.position;
             let localizer = Arc::clone(localizer);
             let found = move || {
@@ -1491,6 +1496,7 @@ fn locations_list(
                     <div>{location.repository}</div>
                     {hot.map(|hot| view! { <div>{hot}</div> })}
                     {options.into_iter().map(|option| view! { <div class="text-muted">{option}</div> }).collect_view()}
+                    {rule.into_iter().map(|said| view! { <div>{said}</div> }).collect_view()}
                     {move || found().map(|found| view! { <div>{found}</div> })}
                 </li>
             }
