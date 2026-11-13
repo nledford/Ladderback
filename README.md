@@ -100,6 +100,82 @@ On macOS, grant the installed `ladderback` Full Disk Access by hand, in System S
 
 Sign-in is off until you set an admin password with `ladderback set-password`, which turns it on the next time Ladderback starts (for the service, run `ladderback install-service` again). With sign-in off, anyone with an account on the machine can use Ladderback, so set a password on a machine others use. `ladderback serve --listen` takes an address beyond loopback only with sign-in on and at least one `--allowed-host`, the name the browser reaches Ladderback by; it serves plain HTTP, so put a reverse proxy with TLS in front of it. [Technical design §10.1](docs/design/security.md#101-web-ui) has the details.
 
+#### A first plan
+
+A plan says what to back up, into which repository, when, and how long to keep its snapshots. A plan backs up to a repository by its name, so make one in this order:
+
+1. **Connect a repository** on the Repositories page (the link at the top of every page): fill in its location and password, test it, give it a name such as `nas`, and connect it, or create a new one there. To have this machine forget old snapshots by your plans' keep policies, turn on "Maintain this repository from this agent", unless another machine already maintains it.
+2. **Add a plan to `config.toml`**, in Ladderback's config folder: `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS (`$XDG_CONFIG_HOME/ladderback` on Linux when that is set, and `$LADDERBACK_CONFIG_DIR` on either when that is set). The Repositories page wrote the repository there; add a `[[plans]]` table after it. Ladderback reads the file again by itself, with no restart, and its start page lists the plan with its next run.
+
+This is a whole `config.toml` with one plan, which backs up a home folder every hour and leaves out caches and game libraries; on macOS, change `/home/demo` to `/Users/demo` in `iglobs` too:
+
+```toml
+schema = 1
+
+# The repository, as the Repositories page wrote it, with its password moved
+# out of this file (see below). Yours may have more lines, such as its
+# repository-id.
+[repositories.nas]
+repository = "rest:https://nas.example:8000/demo-laptop"
+password-keyring = "ladderback/nas"
+
+[[plans]]
+id = "home"                        # the plan's name: lower-case letters, digits and hyphens
+repository = "nas"                 # the name the repository was connected under
+sources = ["/home/demo"]           # absolute paths; on macOS, /Users/demo
+schedule = { cron = "0 * * * *" }  # on the hour, in this machine's time zone; or every = "6h"
+# Skip every folder that holds one of these files, as many caches mark theirs.
+exclude-if-present = ["CACHEDIR.TAG", ".nobackup"]
+# rustic's globs, matched without regard to case; a leading "!" leaves out what matches.
+iglobs = [
+  "!/home/demo/.cache",
+  "!/home/demo/.local/share/Steam",                # Steam's games
+  "!/home/demo/.var/app/com.valvesoftware.Steam",  # Steam from Flathub
+  "!/home/demo/Games",                             # Lutris, Heroic and the like
+  "!node_modules",
+  "!target",
+]
+
+# The keep policy: a snapshot an hour for a day, one a day for a week, one a
+# week for a month, and one a month for a year.
+[plans.retention]
+keep-within-hourly = "1 day"
+keep-within-daily = "7 days"
+keep-within-weekly = "1 month"
+keep-within-monthly = "1 year"
+```
+
+A run the machine slept through runs when it wakes. Ladderback doesn't forget on a schedule yet: the keep policy takes effect when you press "Forget snapshots" on the Snapshots page, on a repository this machine maintains. Every key a plan takes, among them tags, a time zone, retries and hooks, is in [technical design §6.1](docs/design/scheduling-and-config.md#61-source-of-truth); the filter and `keep-*` keys are rustic's own.
+
+#### Moving a repository's password out of `config.toml`
+
+The Repositories page saves the password you type into `config.toml`, and the page and the log warn that it is there. To move it, keep it in one of these places, then replace the repository's `password = "…"` line with the line that names it; a repository has exactly one:
+
+- **The system keyring**, on a desktop or laptop. Store the password under the service `ladderback` and the repository's name; each command asks for it, so it stays out of your shell's history:
+
+  ```sh
+  # macOS: the login keychain
+  security add-generic-password -s ladderback -a nas -w
+  # Linux: the Secret Service, such as GNOME Keyring
+  secret-tool store --label="Ladderback: nas" service ladderback username nas
+  ```
+
+  Then write `password-keyring = "ladderback/nas"`, the service and the name.
+- **A password file** that only you can read. Ladderback reads its first line, and warns when others can read it:
+
+  ```sh
+  touch ~/.config/ladderback/nas.password && chmod 600 ~/.config/ladderback/nas.password
+  ```
+
+  Write the password on its first line with an editor, then write `password-file = "/home/demo/.config/ladderback/nas.password"`: the path is absolute, since nothing expands `~`. On macOS, keep the file in the config folder there, and quote the path, since it holds a space:
+
+  ```sh
+  touch "$HOME/Library/Application Support/ladderback/nas.password" && chmod 600 "$HOME/Library/Application Support/ladderback/nas.password"
+  ```
+- **An environment variable**: `password-env = "NAS_PASSWORD"`. The service doesn't get your shell's variables, so this suits `ladderback serve` started by hand, or a container.
+
+The copies of earlier versions of `config.toml` in the `history` folder beside it may still hold the password: delete those that do. [Technical design §10.2](docs/design/security.md#102-repository-secrets) has every source, a password command among them.
+
 ## Roadmap
 
 The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) and schedules and errors (M2, released as [0.2.0](https://github.com/nledford/Ladderback/releases/tag/v0.2.0)) are in place: backups run on their schedules, with no restore in Ladderback yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. M2 is the first release worth using on your own machines; M3 adds browsing and restoring snapshots.
