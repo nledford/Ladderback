@@ -7,9 +7,12 @@
 //! The stand-ins keep, in the scenario's scratch folder, a list of every call
 //! (`install/state/calls`, one line each, the command's name and its
 //! arguments) and the answers a scenario chose: the version each tool
-//! reports, the system `uname` names, the glibc `getconf` reports. Tools a
-//! stand-in installs (`cargo install`, rustup's installer) are copied from
-//! `install/state/templates` into `~/.cargo/bin`, as the real ones would be.
+//! reports, the system `uname` names, the glibc `getconf` reports, the
+//! toolchains rustup has (`install/state/toolchains`). Each cargo call also
+//! records the Rust it builds with, chosen as rustup and cargo choose it
+//! (`install/state/builds`). Tools a stand-in installs (`cargo install`,
+//! rustup's installer) are copied from `install/state/templates` into
+//! `~/.cargo/bin`, as the real ones would be.
 //! `git` is the real one behind a stand-in that logs its calls, and the home
 //! folder's git configuration sends the script's clone of Ladderback's URL to
 //! `upstream`, a local repository with releases of the scenario's choosing.
@@ -34,6 +37,12 @@ const URL: &str = "https://github.com/nledford/Ladderback.git";
 
 /// The version of wasm-bindgen the `just` stand-in says the checkout pins.
 const WASM_BINDGEN: &str = "0.2.105";
+
+/// The Rust each release pins in its `rust-toolchain.toml`.
+const PINNED: &str = "1.100.0";
+
+/// The system the stand-in rustup's toolchains are for.
+const HOST: &str = "x86_64-unknown-linux-gnu";
 
 #[derive(Debug, Default)]
 pub(super) struct InstallScriptE2e {
@@ -84,7 +93,28 @@ printf '#!/bin/sh\necho "ladderback %s"\n' "$version" > "$root/bin/ladderback"
 /// `cargo +stable install --locked <tool>…` installs the tools' stand-ins;
 /// `cargo install --locked --path .`, as `just install` runs it, installs
 /// Ladderback's; the wasm-bindgen build is only recorded.
-const CARGO: &str = r#"if [ "$1" = +stable ] && [ "$2" = install ] && [ "$3" = --locked ]; then
+///
+/// Each call first records the Rust it builds with: the toolchain rustup
+/// chooses for it (`+<name>`, then RUSTUP_TOOLCHAIN, then the channel of the
+/// nearest `rust-toolchain.toml` from the working folder up, then rustup's
+/// default), unless RUSTC or CARGO_BUILD_RUSTC names a compiler for cargo to
+/// run instead, RUSTC first.
+const CARGO: &str = r#"rust=default
+dir=$PWD
+while :; do
+  if [ -f "$dir/rust-toolchain.toml" ]; then
+    rust=$(/usr/bin/sed -n 's/^channel = "\(.*\)"$/\1/p' "$dir/rust-toolchain.toml")
+    break
+  fi
+  [ -n "$dir" ] || break
+  dir=${dir%/*}
+done
+[ -z "$RUSTUP_TOOLCHAIN" ] || rust=$RUSTUP_TOOLCHAIN
+case "$1" in +*) rust=${1#+} ;; esac
+[ -z "$CARGO_BUILD_RUSTC" ] || rust=$CARGO_BUILD_RUSTC
+[ -z "$RUSTC" ] || rust=$RUSTC
+printf '%s %s\n' "$rust" "$*" >> "$state/builds"
+if [ "$1" = +stable ] && [ "$2" = install ] && [ "$3" = --locked ]; then
   shift 3
   /bin/mkdir -p "$HOME/.cargo/bin"
   for tool in "$@"; do
@@ -100,6 +130,69 @@ if [ "$1 $2 $3 $4" = "install --locked --path ." ]; then
 fi
 echo "the cargo stand-in doesn't know this call" >&2
 exit 64
+"#;
+
+/// rustup, with the toolchains it has: a file each in
+/// `install/state/toolchains`, named as `rustup toolchain list` names the
+/// toolchain, that lists its components as `rustup component list
+/// --installed` does. `toolchain install` adds the toolchain, or the
+/// components and targets it lacks.
+const RUSTUP: &str = r#"host='@HOST@'
+toolchains="$state/toolchains"
+case "$1" in
+  --version) echo 'rustup 1.28.2 (stand-in)' ;;
+  toolchain)
+    case "$2" in
+      list)
+        # As the real one does, it marks the default toolchain: the first.
+        mark=' (default)'
+        for file in "$toolchains"/*; do
+          [ -f "$file" ] || continue
+          printf '%s%s\n' "${file##*/}" "$mark"
+          mark=''
+        done
+        [ -z "$mark" ] || echo 'no installed toolchains'
+        ;;
+      install)
+        file="$toolchains/$3-$host"
+        shift 3
+        /bin/mkdir -p "$toolchains"
+        printf 'cargo-%s\nrustc-%s\nrust-std-%s\n' "$host" "$host" "$host" >> "$file"
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --no-self-update) ;;
+            --component | --target)
+              kind=$1
+              old=$IFS
+              IFS=,
+              for item in $2; do
+                if [ "$kind" = --component ]; then
+                  printf '%s-%s\n' "$item" "$host"
+                else
+                  printf 'rust-std-%s\n' "$item"
+                fi
+              done >> "$file"
+              IFS=$old
+              shift
+              ;;
+            *) echo "the rustup stand-in doesn't know $1" >&2; exit 64 ;;
+          esac
+          shift
+        done
+        ;;
+      *) exit 64 ;;
+    esac
+    ;;
+  component)
+    [ "$2 $3 $4" = "list --installed --toolchain" ] || exit 64
+    if [ ! -f "$toolchains/$5-$host" ]; then
+      echo "error: toolchain '$5' is not installed" >&2
+      exit 1
+    fi
+    /bin/cat "$toolchains/$5-$host"
+    ;;
+  *) exit 64 ;;
+esac
 "#;
 
 /// `just install` rewrites the web UI's stylesheet, as the UI's build does
@@ -176,7 +269,7 @@ const TOOLS: &[(&str, &str)] = &[
     ("cc", "exit 0\n"),
     ("node", NODE),
     ("npm", "echo 10.9.0\n"),
-    ("rustup", "echo 'rustup 1.28.2 (stand-in)'\n"),
+    ("rustup", RUSTUP),
     ("cargo", CARGO),
     ("rustc", RUSTC),
     ("just", JUST),
@@ -216,6 +309,24 @@ fn source(agent: &Agent) -> PathBuf {
     home(agent).join(".local/share/ladderback/source")
 }
 
+/// The stand-in rustup's file for the Rust the release pins.
+fn pinned_rust(agent: &Agent) -> PathBuf {
+    state(agent).join(format!("toolchains/{PINNED}-{HOST}"))
+}
+
+/// What `rustup component list --installed` lists for the Rust the release
+/// pins, with the components and targets its `rust-toolchain.toml` names,
+/// leaving out the line `without` names, if any.
+fn pinned_rust_components(without: Option<&str>) -> String {
+    ["cargo", "clippy", "rust-std", "rustc", "rustfmt"]
+        .map(|component| format!("{component}-{HOST}"))
+        .into_iter()
+        .chain(["rust-std-wasm32-unknown-unknown".to_owned()])
+        .filter(|line| Some(line.as_str()) != without)
+        .map(|line| line + "\n")
+        .collect()
+}
+
 /// `{home}` in a step's text stands for the scenario's home folder.
 fn expand(agent: &Agent, text: &str) -> String {
     text.replace("{home}", &home(agent).display().to_string())
@@ -243,7 +354,11 @@ fn write_runnable(path: &Path, text: &str) {
 
 fn stand_in(agent: &Agent, body: &str) -> String {
     let prelude = PRELUDE.replace("@STATE@", &state(agent).display().to_string());
-    format!("{prelude}{}", body.replace("@WASM_BINDGEN@", WASM_BINDGEN))
+    format!(
+        "{prelude}{}",
+        body.replace("@WASM_BINDGEN@", WASM_BINDGEN)
+            .replace("@HOST@", HOST)
+    )
 }
 
 fn set(agent: &Agent, name: &str, value: &str) {
@@ -315,10 +430,28 @@ async fn release(agent: &Agent, tag: &str) {
     let version = tag.trim_start_matches('v');
     fs::write(
         dir.join("Cargo.toml"),
-        format!("[workspace.package]\nversion = \"{version}\"\nrust-version = \"1.100.0\"\n"),
+        format!("[workspace.package]\nversion = \"{version}\"\nrust-version = \"{PINNED}\"\n"),
     )
     .expect("the release's Cargo.toml");
-    git(agent, &dir, &["add", "Cargo.toml", "Justfile", "crates"]).await;
+    fs::write(
+        dir.join("rust-toolchain.toml"),
+        format!(
+            "[toolchain]\nchannel = \"{PINNED}\"\ncomponents = [\"rustfmt\", \"clippy\"]\ntargets = [\"wasm32-unknown-unknown\"]\n"
+        ),
+    )
+    .expect("the release's rust-toolchain.toml");
+    git(
+        agent,
+        &dir,
+        &[
+            "add",
+            "Cargo.toml",
+            "rust-toolchain.toml",
+            "Justfile",
+            "crates",
+        ],
+    )
+    .await;
     git(agent, &dir, &["commit", "--quiet", "-m", tag]).await;
     git(agent, &dir, &["tag", tag]).await;
 }
@@ -343,6 +476,14 @@ async fn has_released(agent: &mut Agent, first: String, second: String, third: S
 #[given(expr = "Ladderback has since released {string}")]
 async fn has_since_released(agent: &mut Agent, tag: String) {
     release(agent, &tag).await;
+}
+
+#[given(expr = "Ladderback has since released {string}, which pins no Rust")]
+async fn has_since_released_unpinned(agent: &mut Agent, tag: String) {
+    let dir = upstream(agent);
+    git(agent, &dir, &["rm", "--quiet", "rust-toolchain.toml"]).await;
+    git(agent, &dir, &["commit", "--quiet", "-m", &tag]).await;
+    git(agent, &dir, &["tag", &tag]).await;
 }
 
 #[given("Ladderback's only releases are release candidates")]
@@ -386,6 +527,9 @@ fn every_tool_installed(agent: &mut Agent) {
     set(agent, "uname-s", "Linux");
     set(agent, "uname-m", "x86_64");
     set(agent, "glibc", "2.39");
+    fs::create_dir_all(state(agent).join("toolchains")).expect("rustup's toolchains");
+    fs::write(pinned_rust(agent), pinned_rust_components(None))
+        .expect("rustup has the Rust the release pins");
 }
 
 #[given(
@@ -456,6 +600,28 @@ fn no_rust(agent: &mut Agent) {
     for tool in ["rustup", "cargo", "rustc"] {
         remove_tool(agent, tool);
     }
+    fs::remove_dir_all(state(agent).join("toolchains")).expect("rustup's toolchains");
+}
+
+#[given("rustup doesn't have the Rust the release pins")]
+fn no_pinned_rust(agent: &mut Agent) {
+    fs::remove_file(pinned_rust(agent)).expect("rustup had the Rust the release pins");
+}
+
+#[given(regex = r"^rustup has the Rust the release pins without (the WebAssembly target|Clippy)$")]
+fn pinned_rust_without(agent: &mut Agent, part: String) {
+    let line = if part == "Clippy" {
+        format!("clippy-{HOST}")
+    } else {
+        "rust-std-wasm32-unknown-unknown".to_owned()
+    };
+    fs::write(pinned_rust(agent), pinned_rust_components(Some(&line)))
+        .expect("rustup has the Rust the release pins");
+}
+
+#[given(expr = "the owner's environment sets {word} to {string}")]
+fn environment_sets(agent: &mut Agent, name: String, value: String) {
+    agent.install.env.push((name, value));
 }
 
 #[given(expr = "Rust {string} is installed without rustup")]
@@ -701,6 +867,7 @@ fn nothing_done(agent: &mut Agent) {
             changes_git
                 || name == "cargo"
                 || name == "curl"
+                || call.starts_with("rustup toolchain install")
                 || name.starts_with("rustup-init")
                 || call.starts_with("just install")
         })
@@ -816,4 +983,91 @@ fn folder_unchanged(agent: &mut Agent, folder: String, name: String) {
 fn change_kept(agent: &mut Agent) {
     let (file, text) = agent.install.changed.as_ref().expect("a change");
     assert_eq!(&fs::read_to_string(file).expect("the changed file"), text);
+}
+
+/// The Rust the last cargo call whose arguments start with `call` built
+/// with, as the cargo stand-in recorded it.
+fn built_with(agent: &Agent, call: &str) -> String {
+    let builds = fs::read_to_string(state(agent).join("builds")).unwrap_or_default();
+    builds
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let (rust, args) = line.split_once(' ')?;
+            args.starts_with(call).then(|| rust.to_owned())
+        })
+        .unwrap_or_else(|| panic!("no cargo call {call:?}: {builds}"))
+}
+
+#[then(expr = "the release was built with the Rust it pins, {string}")]
+fn release_built_with_pin(agent: &mut Agent, rust: String) {
+    assert_eq!(built_with(agent, "install --locked --path ."), rust);
+}
+
+#[then(expr = "wasm-bindgen was built with the Rust the release pins, {string}")]
+fn wasm_bindgen_built_with_pin(agent: &mut Agent, rust: String) {
+    assert_eq!(built_with(agent, "install --locked wasm-bindgen-cli"), rust);
+}
+
+/// Where in `calls` rustup was told to install the Rust the release pins.
+fn pinned_rust_installs(calls: &[String]) -> Vec<usize> {
+    calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| {
+            call.split(' ')
+                .take(4)
+                .eq(["rustup", "toolchain", "install", PINNED])
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+#[then(
+    "the Rust the release pins was installed, with the components and targets it lists, before the release"
+)]
+fn pinned_rust_installed(agent: &mut Agent) {
+    let calls = calls_since_run(agent);
+    let installed = pinned_rust_installs(&calls).first().copied();
+    let built = calls
+        .iter()
+        .position(|call| call.starts_with("just install"));
+    assert!(
+        matches!((installed, built), (Some(i), Some(b)) if i < b),
+        "{calls:?}"
+    );
+    let has = fs::read_to_string(pinned_rust(agent)).expect("rustup has the Rust the release pins");
+    let wants = pinned_rust_components(None);
+    let missing: Vec<&str> = wants
+        .lines()
+        .filter(|want| !has.lines().any(|line| line == *want))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the Rust the release pins lacks {missing:?}"
+    );
+}
+
+#[then("the Rust the release pins was installed by the first run only")]
+fn pinned_rust_installed_once(agent: &mut Agent) {
+    let calls = calls(agent);
+    let installs = pinned_rust_installs(&calls);
+    assert!(
+        matches!(installs.as_slice(), [first] if *first < agent.install.calls_before),
+        "{calls:?}"
+    );
+}
+
+#[then(expr = "the release was built with {string}, the Rust the owner's environment names")]
+fn release_built_with_environment(agent: &mut Agent, rust: String) {
+    assert_eq!(built_with(agent, "install --locked --path ."), rust);
+}
+
+#[then(expr = "standard output doesn't say {string}")]
+fn stdout_doesnt_say(agent: &mut Agent, text: String) {
+    let stdout = &ran(agent).stdout;
+    assert!(
+        !stdout.contains(&text),
+        "standard output says {text:?}: {stdout}"
+    );
 }

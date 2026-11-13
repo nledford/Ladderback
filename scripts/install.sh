@@ -416,9 +416,90 @@ check_rust_without_rustup() {
     fi
 }
 
+# With rustup, the release builds with the Rust its rust-toolchain.toml pins
+# (decision 78), whatever the environment names instead: RUSTUP_TOOLCHAIN
+# outranks the file, and RUSTC or CARGO_BUILD_RUSTC has cargo run another
+# compiler. They are unset for the rest of this run, which is a process of
+# its own: the shell it was started from keeps them. The pinned Rust, with
+# the components and targets the file lists, is installed here when rustup
+# lacks it, not left to rustup's automatic install, which rustup has
+# deprecated (rust-lang/rustup#4836). The version is passed by name, as
+# `rustup toolchain install` reads the file itself only from rustup 1.28 on,
+# and `--no-self-update` keeps it from updating rustup itself.
+use_pinned_rust() {
+    local line channel='' components='' targets='' list
+    local channel_pattern='^channel *= *"([^"]+)"'
+    local list_pattern='^(components|targets) *= *\[(.*)\]'
+    if [ -f "$dir/rust-toolchain.toml" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ $line =~ $channel_pattern ]]; then
+                channel=${BASH_REMATCH[1]}
+            elif [[ $line =~ $list_pattern ]]; then
+                # ["rustfmt", "clippy"] becomes rustfmt,clippy.
+                list=${BASH_REMATCH[2]//\"/}
+                list=${list// /}
+                list=${list%,}
+                if [ "${BASH_REMATCH[1]}" = components ]; then
+                    components=$list
+                else
+                    targets=$list
+                fi
+            fi
+        done <"$dir/rust-toolchain.toml"
+    fi
+    if [ -z "$channel" ]; then
+        die "$release's rust-toolchain.toml names no Rust version to build it with. Build it by hand: $README_URL"
+    fi
+
+    local name value
+    for name in RUSTUP_TOOLCHAIN RUSTC CARGO_BUILD_RUSTC; do
+        value=${!name:-}
+        if [ -n "$value" ]; then
+            say "Ignoring $name=$value: Ladderback $release builds with the Rust it pins, $channel."
+        fi
+        unset "$name"
+    done
+
+    if ! has_rust "$channel" "$components" "$targets"; then
+        say "Installing Rust $channel, which Ladderback $release builds with"
+        local install=("$channel" --no-self-update)
+        if [ -n "$components" ]; then install+=(--component "$components"); fi
+        if [ -n "$targets" ]; then install+=(--target "$targets"); fi
+        rustup toolchain install "${install[@]}"
+    fi
+}
+
+# Whether rustup has Rust $1 with components $2 and targets $3, each a
+# comma-separated list. It asks rustup only what is installed, so it neither
+# downloads nor installs anything.
+has_rust() {
+    local installed item items=()
+    installed=$'\n'$(rustup toolchain list 2>/dev/null)
+    case $installed in
+        *$'\n'"$1"-*) ;;
+        *) return 1 ;;
+    esac
+    installed=$'\n'$(rustup component list --installed --toolchain "$1" 2>/dev/null)$'\n' || return 1
+    IFS=, read -r -a items <<<"$2"
+    for item in ${items[@]+"${items[@]}"}; do
+        case $installed in
+            *$'\n'"$item"-*) ;;
+            *) return 1 ;;
+        esac
+    done
+    IFS=, read -r -a items <<<"$3"
+    for item in ${items[@]+"${items[@]}"}; do
+        case $installed in
+            *$'\n'"rust-std-$item"$'\n'*) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
 # On 64-bit ARM Linux with a glibc older than 2.38, the wasm-bindgen trunk
-# downloads doesn't run; the version the checkout pins is built instead, and
-# trunk finds it on the PATH (README, "Installation").
+# downloads doesn't run; the version the checkout pins is built instead, in
+# the checkout so that it is built with the Rust the checkout pins, and trunk
+# finds it on the PATH (README, "Installation").
 build_wasm_bindgen_if_needed() {
     local machine glibc
     machine=$(uname -m)
@@ -433,7 +514,7 @@ build_wasm_bindgen_if_needed() {
     local version
     version=$(cd "$dir" && just _wasm-bindgen-version)
     say "Building wasm-bindgen $version: the one trunk downloads doesn't run with glibc $glibc"
-    cargo install --locked wasm-bindgen-cli --version "$version"
+    (cd "$dir" && cargo install --locked wasm-bindgen-cli --version "$version")
 }
 
 # The web UI's build regenerates its stylesheet, `crates/web/tw-out.css`,
@@ -567,7 +648,9 @@ main() {
 
     install_missing_tools
     checkout_newest_release
-    if [ "$rustup" = 0 ]; then
+    if [ "$rustup" = 1 ]; then
+        use_pinned_rust
+    else
         check_rust_without_rustup
     fi
     build_wasm_bindgen_if_needed
