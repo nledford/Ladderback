@@ -143,9 +143,11 @@ proc-macro2 = "1.0.107"
 # the default `fork` and `timeout` features run each case in a child process,
 # which no property here needs, and pull in `rusty-fork` and `tempfile`.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
-# The notifications adapter's HTTP client (technical design §8.2, §11): no
-# defaults, rustls for TLS. Already in the tree through `rustic_backend`, with
-# these features and more, so it adds no package.
+# The notifications adapter's HTTP client (technical design §8.2, §11), and
+# the type of the errors of rustic's REST backend, which `engine` reads the
+# server's status from: no defaults, rustls for TLS. Already in the tree
+# through `rustic_backend`, with these features and more, so it adds no
+# package.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased

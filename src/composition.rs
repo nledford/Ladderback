@@ -2689,6 +2689,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => RepositoriesError::NotFound,
+        F::CredentialsRefused => unavailable(ErrorCode::CredentialsRefused, Vec::new(), None),
         F::SecretsTooLargeToMask { field, limit } => {
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
@@ -8360,6 +8361,10 @@ mod repository_service_tests {
             (
                 F::RepositoryReplaced,
                 unavailable(ErrorCode::RepositoryReplaced, vec![], None),
+            ),
+            (
+                F::CredentialsRefused,
+                unavailable(ErrorCode::CredentialsRefused, vec![], None),
             ),
             (
                 F::RepositoryExists,

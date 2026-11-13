@@ -1697,6 +1697,7 @@ dependencies = [
  "jiff",
  "log",
  "nix 0.31.3",
+ "reqwest",
  "rustic_backend",
  "rustic_core",
  "serde",

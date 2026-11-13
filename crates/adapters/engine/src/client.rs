@@ -1296,6 +1296,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // with `RepositoryExists`, the code says it all.
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
+                // A server refused the credentials (decision 85): nothing was
+                // read or written, and the code says it all.
+                ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes

@@ -55,6 +55,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ConfigSchemaNewer => msg::ERROR_CONFIG_SCHEMA_NEWER,
     RepositoryExists => msg::ERROR_REPOSITORY_EXISTS,
     RepositoryNotFound => msg::ERROR_REPOSITORY_NOT_FOUND,
+    CredentialsRefused => msg::ERROR_CREDENTIALS_REFUSED,
     CreateNotOffered => msg::ERROR_CREATE_NOT_OFFERED,
     RepositoryTimedOut => msg::ERROR_REPOSITORY_TIMED_OUT,
     RepositoryAliasTaken => msg::ERROR_REPOSITORY_ALIAS_TAKEN,

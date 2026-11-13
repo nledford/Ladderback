@@ -78,6 +78,9 @@ pub enum ErrorCode {
     /// No repository is at the location: the engine found an empty folder
     /// on this machine there, so nothing was opened or written.
     RepositoryNotFound,
+    /// The server the repository is on answered and refused the credentials
+    /// it was sent (HTTP 401 or 403), so nothing was opened or written.
+    CredentialsRefused,
     /// A repository reached at several locations had none that could be
     /// used (decision 80): each was silent, refused, held no repository or
     /// another one, or a secret of it was unavailable. The operation names
@@ -637,6 +640,7 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::RepositoryNotFound
+            | Self::CredentialsRefused
             | Self::CreateNotOffered
             | Self::NoLocationUsable
             | Self::NoLocationRuleHolds
@@ -1613,6 +1617,7 @@ mod tests {
             ErrorCode::EngineExitTimedOut,
             ErrorCode::RepositoryTimedOut,
             ErrorCode::RepositoryReplaced,
+            ErrorCode::CredentialsRefused,
             ErrorCode::DaemonStopped,
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,

@@ -475,6 +475,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
+        F::CredentialsRefused => unavailable(ErrorCode::CredentialsRefused, Vec::new(), None),
         F::SecretsTooLargeToMask { field, limit } => {
             MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
         }
@@ -1108,6 +1109,10 @@ mod tests {
             (
                 FailureReason::RepositoryNotFound,
                 MaintenanceRefusal::RepositoryNotFound,
+            ),
+            (
+                FailureReason::CredentialsRefused,
+                unavailable_with(ErrorCode::CredentialsRefused, Vec::new(), None),
             ),
             (
                 FailureReason::SecretsTooLargeToMask {

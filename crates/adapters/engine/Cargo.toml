@@ -17,6 +17,9 @@ bytes.workspace = true
 futures.workspace = true
 jiff.workspace = true
 log.workspace = true
+# The status a REST server answered with, in rustic's errors: a refusal of
+# the credentials is told from a missing repository by it (#478).
+reqwest.workspace = true
 rustic_backend.workspace = true
 rustic_core.workspace = true
 serde.workspace = true
