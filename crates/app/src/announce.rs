@@ -9,6 +9,7 @@
 
 use api::{ErrorCode, ErrorDto, MsgArg, UiEvent};
 use domain::RepositoryId;
+use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, Operation, OperationStatus};
 
 use crate::ports::EventBus;
@@ -135,7 +136,20 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),
+        F::SecretRefused { .. } => todo!(),
     }
+}
+
+/// A run's refusal as a request to start it is answered and as a page shows
+/// it: the code, the arguments its message takes, by name, in the order the
+/// code declares them, and what a platform or a command said, as `detail`.
+/// Every text was masked of the repository's secrets before it was kept
+/// (I4).
+pub fn refused(
+    _field: &str,
+    _refusal: &SettingRefusal,
+) -> (ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>) {
+    todo!()
 }
 
 #[cfg(test)]
@@ -371,7 +385,23 @@ mod tests {
                 vec![MsgArg::Bytes(262_144)],
             ),
         ];
-        for (reason, code, args) in cases {
+        // A refused run is told as its refusal is, what was said last.
+        let refused = refusals()
+            .into_iter()
+            .map(|(refusal, code, _, args, detail)| {
+                (
+                    F::SecretRefused {
+                        field: "options.token".to_owned(),
+                        refusal,
+                    },
+                    code,
+                    args.into_iter()
+                        .map(|(_, arg)| arg)
+                        .chain(detail.map(MsgArg::Text))
+                        .collect(),
+                )
+            });
+        for (reason, code, args) in cases.into_iter().chain(refused) {
             let mut operation = running();
             operation
                 .fail(reason.clone(), t(60))
@@ -500,7 +530,20 @@ mod tests {
                 ),
             ),
         ];
-        for (reason, shown) in cases {
+        // A refused run is shown as its refusal is, the arguments by the
+        // names its alert gives them and what was said as the detail.
+        let refused = refusals()
+            .into_iter()
+            .map(|(refusal, code, _, args, detail)| {
+                (
+                    F::SecretRefused {
+                        field: "options.token".to_owned(),
+                        refusal,
+                    },
+                    ErrorDto::new(code, args, detail),
+                )
+            });
+        for (reason, shown) in cases.into_iter().chain(refused) {
             assert_eq!(failure(&reason), shown, "{reason:?}");
             // An event tells it by position; read back, it is the same.
             assert_eq!(
@@ -509,5 +552,208 @@ mod tests {
                 "{reason:?}"
             );
         }
+    }
+
+    /// A refusal of a setting, its codes, its arguments and what was said.
+    type Refusal = (
+        SettingRefusal,
+        ErrorCode,
+        &'static str,
+        Vec<(&'static str, MsgArg)>,
+        Option<String>,
+    );
+
+    /// Every refusal of a setting, with the code a request to start its run
+    /// is refused with, the code the log keeps it under, and its arguments
+    /// by name, in the order the code declares them.
+    fn refusals() -> Vec<Refusal> {
+        use SettingRefusal as R;
+        let text = |text: &str| MsgArg::Text(text.to_owned());
+        let field = || ("field", text("options.token"));
+        let source = || ("source", text("ladderback/demo"));
+        let said = || Some("the platform said no".to_owned());
+        vec![
+            (
+                R::SecretMissing {
+                    source: "ladderback/demo".to_owned(),
+                },
+                ErrorCode::SecretMissing,
+                "secret-missing",
+                vec![field(), source()],
+                None,
+            ),
+            (
+                R::SecretUnreadable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said(),
+                },
+                ErrorCode::SecretUnreadable,
+                "secret-unreadable",
+                vec![field(), source()],
+                said(),
+            ),
+            (
+                R::SecretKeyringUnavailable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said(),
+                },
+                ErrorCode::SecretKeyringUnavailable,
+                "secret-keyring-unavailable",
+                vec![field(), source()],
+                said(),
+            ),
+            (
+                R::SecretNotText {
+                    source: "ladderback/demo".to_owned(),
+                },
+                ErrorCode::SecretNotText,
+                "secret-not-text",
+                vec![field(), source()],
+                None,
+            ),
+            (
+                R::SecretTooLarge {
+                    source: "ladderback/demo".to_owned(),
+                    limit: 65_536,
+                },
+                ErrorCode::SecretTooLarge,
+                "secret-too-large",
+                vec![field(), source(), ("limit", MsgArg::Bytes(65_536))],
+                None,
+            ),
+            (
+                R::SecretCommandFailed {
+                    source: "ladderback/demo".to_owned(),
+                    detail: None,
+                },
+                ErrorCode::SecretCommandFailed,
+                "secret-command-failed",
+                vec![field(), source()],
+                None,
+            ),
+            (
+                R::SecretCommandTimedOut {
+                    source: "ladderback/demo".to_owned(),
+                    seconds: 30,
+                },
+                ErrorCode::SecretCommandTimedOut,
+                "secret-command-timed-out",
+                vec![field(), source(), ("seconds", MsgArg::Count(30))],
+                None,
+            ),
+            (
+                R::SecretCommandOutputOpen {
+                    source: "ladderback/demo".to_owned(),
+                },
+                ErrorCode::SecretCommandOutputOpen,
+                "secret-command-output-open",
+                vec![field(), source()],
+                None,
+            ),
+            (
+                R::SecretInProcessArguments,
+                ErrorCode::SecretInProcessArguments,
+                "secret-in-process-arguments",
+                vec![field()],
+                None,
+            ),
+            (
+                R::SecretExpansionTooLong { limit: 65_536 },
+                ErrorCode::SecretExpansionTooLong,
+                "secret-expansion-too-long",
+                vec![field(), ("limit", MsgArg::Bytes(65_536))],
+                None,
+            ),
+            (
+                R::LocationTooManyCredentials,
+                ErrorCode::LocationTooManyCredentials,
+                "location-too-many-credentials",
+                vec![field()],
+                None,
+            ),
+            (
+                R::RepositoryPathRelative,
+                ErrorCode::RepositoryPathRelative,
+                "repository-path-relative",
+                vec![field()],
+                None,
+            ),
+            (
+                R::TemplateInvalid { at: Some(7) },
+                ErrorCode::TemplateInvalid,
+                "template-invalid",
+                vec![field(), ("at", text("7"))],
+                None,
+            ),
+            (
+                R::TemplateInvalid { at: None },
+                ErrorCode::TemplateInvalid,
+                "template-invalid",
+                vec![field()],
+                None,
+            ),
+        ]
+    }
+
+    /// A refused run's failure is the refusal a request to start it is
+    /// answered with: the same code, the same arguments, the same detail,
+    /// and the log keeps it under that code (no code of its own).
+    #[test]
+    fn each_refusal_is_answered_and_kept_under_the_code_a_request_is_refused_with() {
+        for (refusal, code, kept, args, detail) in refusals() {
+            assert_eq!(
+                refused("options.token", &refusal),
+                (code, args, detail),
+                "{refusal:?}"
+            );
+            assert_eq!(refusal.code(), kept, "{refusal:?}");
+            let reason = FailureReason::SecretRefused {
+                field: "options.token".to_owned(),
+                refusal: refusal.clone(),
+            };
+            assert_eq!(reason.code(), kept, "{refusal:?}");
+        }
+    }
+
+    /// A refused run's end is announced with the refusal's code, its
+    /// arguments in the order the code declares them, and what was said
+    /// last; a page shows the arguments by name and what was said as the
+    /// detail.
+    #[test]
+    fn a_refused_runs_failure_is_announced_with_the_refusals_code_and_arguments() {
+        let text = |text: &str| MsgArg::Text(text.to_owned());
+        let mut operation = running();
+        operation
+            .fail(
+                FailureReason::SecretRefused {
+                    field: "password".to_owned(),
+                    refusal: SettingRefusal::SecretCommandFailed {
+                        source: "pass".to_owned(),
+                        detail: Some("pass: no such entry".to_owned()),
+                    },
+                },
+                t(60),
+            )
+            .expect("a running operation ends");
+        let OperationStatus::Failed { reason } = operation.status() else {
+            panic!("the operation failed: {operation:?}");
+        };
+        assert_eq!(
+            failure(reason),
+            ErrorDto::new(
+                ErrorCode::SecretCommandFailed,
+                [("field", text("password")), ("source", text("pass"))],
+                Some("pass: no such entry".to_owned()),
+            )
+        );
+        assert_eq!(
+            end_of(&operation),
+            Some(UiEvent::OperationFailed {
+                operation: ID.to_owned(),
+                code: ErrorCode::SecretCommandFailed,
+                args: vec![text("password"), text("pass"), text("pass: no such entry")],
+                finished_at: t(60).to_string(),
+            })
+        );
     }
 }

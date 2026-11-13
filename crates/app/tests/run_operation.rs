@@ -1552,3 +1552,88 @@ async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothi
     drop(running);
     assert!(has_turn(&mut next));
 }
+
+/// An engine no run may ask: it counts each time it is.
+#[derive(Default)]
+struct NeverAsked(AtomicUsize);
+
+#[async_trait]
+impl Engine for NeverAsked {
+    async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(EngineError::Unavailable {
+            detail: "a refused run asked the engine".to_owned(),
+        })
+    }
+}
+
+/// A backup the schedule started whose start was refused is written to the
+/// log once, failed with the refusal and never started, and its end is
+/// announced as any failed operation's (§4.4, §5). The engine is never
+/// asked.
+#[tokio::test]
+async fn a_refused_run_is_written_once_as_failed_and_announced() {
+    use api::{ErrorCode, MsgArg, UiEvent};
+    use app::event_bus::BroadcastEventBus;
+    use app::ports::EventBus;
+    use domain::execution::refusal::SettingRefusal;
+
+    let store = Arc::new(Journal::default());
+    let engine = Arc::new(NeverAsked::default());
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let reason = FailureReason::SecretRefused {
+        field: "password".to_owned(),
+        refusal: SettingRefusal::SecretMissing {
+            source: "ladderback/demo".to_owned(),
+        },
+    };
+    let target = Target {
+        plan: Some(domain::PlanId::parse("home").unwrap()),
+        repository: None,
+    };
+    let finished = RunOperation::new(
+        engine.clone(),
+        Arc::new(FakeClock::new(t(9))),
+        store.clone(),
+    )
+    .with_events(bus)
+    .refused(id(), Trigger::Schedule, target.clone(), reason.clone())
+    .await;
+
+    let failed = OperationStatus::Failed { reason };
+    assert_eq!(finished.operation.status(), &failed);
+    assert_eq!(finished.operation.trigger(), Trigger::Schedule);
+    assert_eq!(finished.operation.target(), &target);
+    assert_eq!(finished.operation.started_at(), None);
+    assert_eq!(finished.operation.finished_at(), Some(t(9)));
+    assert!(finished.result.is_none());
+    assert!(finished.recording_errors.is_empty());
+    assert_eq!(
+        store.writes(),
+        std::slice::from_ref(&failed),
+        "one write, of the end"
+    );
+    assert_eq!(
+        store
+            .get(id())
+            .await
+            .unwrap()
+            .map(|found| found.record.status),
+        Some(failed)
+    );
+    assert_eq!(engine.0.load(Ordering::SeqCst), 0, "the engine was asked");
+    let heard = page.next().now_or_never().flatten();
+    assert_eq!(
+        heard,
+        Some(UiEvent::OperationFailed {
+            operation: "00000000-0000-0000-0000-000000000001".to_owned(),
+            code: ErrorCode::SecretMissing,
+            args: vec![
+                MsgArg::Text("password".to_owned()),
+                MsgArg::Text("ladderback/demo".to_owned()),
+            ],
+            finished_at: t(9).to_string(),
+        })
+    );
+}

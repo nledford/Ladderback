@@ -2,20 +2,30 @@
 //! process, killed and started again on the same folders, and a second one
 //! started on folders the first holds. What the daemon says on the wire after
 //! its start is read once, with no waiting: recovery has finished before it
-//! says it listens.
+//! says it listens. A run the scheduler starts once the daemon is back (the
+//! missed run of `features/execution/refused_run.feature`) is waited for.
+
+use std::time::{Duration, Instant};
 
 use api::MsgArg;
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
-use domain::{OperationId, PlanId, RepositoryId, Timestamp, Uuid};
+use domain::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp, Uuid};
 use l10n::{Localizer, msg};
+use platform::SystemClock;
 use store::SqliteStore;
 
-use app::ports::{OperationStore, Start};
+use app::ports::{Clock, OperationStore, PlannedRun, ScheduleStore, Start};
 
 use super::events_steps::{self, Events};
 use super::operations_steps::{exchange_at, history_page, shows_status, start_backup};
 use super::{Agent, blocking};
+
+/// How long the history may take to list a run the schedule refused. The
+/// runner stops a scenario at 120 s and leaves its daemon running, so a step
+/// that waits as long fails as a stopped run; the refused run is written
+/// within a second of the start, so half that is ample.
+const REFUSED_RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// When the seeded prune was queued, in seconds since the Unix epoch.
 const SEEDED_QUEUED_AT: i64 = 1_700_000_000;
@@ -175,5 +185,87 @@ fn the_second_is_refused(agent: &mut Agent) {
         log.contains(said.text()),
         "the refusal says {:?}:\n{log}",
         said.text()
+    );
+}
+
+/// The schedule kept `plan`'s next run, as the daemon keeps it while it is
+/// off, for an hour before now: the next start finds it missed.
+#[given(expr = "the schedule, while the daemon was down, kept the plan {string} due an hour ago")]
+async fn a_run_kept_due(agent: &mut Agent, plan: String) {
+    let run = PlannedRun {
+        plan: PlanId::try_from(plan).expect("a plan ID"),
+        at: SystemClock.now() - SignedDuration::from_hours(1),
+    };
+    let path = Events::data_dir(agent).join("ladderback.db");
+    let store = SqliteStore::open(&path)
+        .await
+        .expect("the operation log opens while the daemon is down");
+    store.plan_run(&run).await.expect("the planned run is kept");
+    // Closed, so the file is quiet when the daemon opens it.
+    store.close().await;
+}
+
+#[then(
+    expr = "the history comes to list one backup of the plan {string}, failed with the code {string} and never started"
+)]
+async fn history_lists_one_failed_backup(agent: &mut Agent, plan: String, code: String) {
+    let started = Instant::now();
+    let backup = loop {
+        let page = history_page(agent, "limit=50").await;
+        let backups: Vec<serde_json::Value> = page
+            .get("operations")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|op| {
+                op.get("kind").and_then(serde_json::Value::as_str) == Some("backup")
+                    && op.get("plan").and_then(serde_json::Value::as_str) == Some(plan.as_str())
+            })
+            .cloned()
+            .collect();
+        if let [backup] = backups.as_slice() {
+            // Settle, then look once more: a second row written just after
+            // the first would otherwise go unseen.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let again = history_page(agent, "limit=50").await;
+            let count = again
+                .get("operations")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|op| {
+                    op.get("kind").and_then(serde_json::Value::as_str) == Some("backup")
+                        && op.get("plan").and_then(serde_json::Value::as_str) == Some(plan.as_str())
+                })
+                .count();
+            assert_eq!(
+                count, 1,
+                "the history lists more than one backup of {plan}: {again}"
+            );
+            break backup.clone();
+        }
+        assert!(
+            backups.is_empty(),
+            "the history lists more than one backup of {plan}: {page}"
+        );
+        assert!(
+            started.elapsed() < REFUSED_RUN_TIMEOUT,
+            "no backup of {plan} came within {} s: {page}",
+            REFUSED_RUN_TIMEOUT.as_secs()
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    // Kept once, failed: never queued first and then failed.
+    let text = |key: &str| backup.get(key).and_then(serde_json::Value::as_str);
+    assert_eq!(text("status"), Some("failed"), "the backup: {backup}");
+    assert_eq!(
+        text("failure-code"),
+        Some(code.as_str()),
+        "the backup: {backup}"
+    );
+    assert_eq!(
+        backup.get("started-at"),
+        Some(&serde_json::Value::Null),
+        "the backup never started: {backup}"
     );
 }

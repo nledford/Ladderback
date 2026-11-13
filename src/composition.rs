@@ -2697,6 +2697,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+        F::SecretRefused { .. } => todo!(),
     }
 }
 
@@ -5988,14 +5989,14 @@ mod tests {
     /// An operation log that refuses every save, in the words a database
     /// uses for what it refuses, and counts them. Starts and reads go to the
     /// log behind it.
-    struct RefusingSaves {
-        inner: Arc<dyn OperationStore>,
-        refused: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) struct RefusingSaves {
+        pub(super) inner: Arc<dyn OperationStore>,
+        pub(super) refused: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     /// What a refused save says for itself: none of it may reach the daemon's
     /// log.
-    const REFUSAL: &str = "canary: the disk of /srv/secret-folder is full";
+    pub(super) const REFUSAL: &str = "canary: the disk of /srv/secret-folder is full";
 
     #[async_trait]
     impl OperationStore for RefusingSaves {
@@ -9671,6 +9672,328 @@ mod repository_service_tests {
             .unwrap_or_else(|| panic!("no warning names the plan and the variable: {said:?}"));
         assert!(line.contains("(SecretMissing)"), "{line}");
         assert!(line.contains("password"), "{line}");
+    }
+
+    /// A scheduled run whose repository's password can't be read doesn't
+    /// start, and nobody is there to hear a refusal: it ends as one failed
+    /// operation that says why, never started, the engine never asked (§5).
+    /// The schedule hears it failed, so it is retried as any failed backup
+    /// the schedule started (decision 76), and its place in the queue is
+    /// given up. The log names the plan, the operation, the code, the setting
+    /// and where the secret was looked for, as a refusal by hand does (#483).
+    #[tokio::test]
+    async fn a_scheduled_run_refused_for_a_secret_ends_as_one_failed_operation_that_says_why() {
+        capture();
+        const UNSET: &str = "LADDERBACK_TEST_REFUSED_RUN_PASSWORD_UNSET";
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, heard, scripted, plan) =
+            refused_password_runner(UNSET, store.clone(), Arc::new(BroadcastEventBus::new())).await;
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+
+        assert_eq!(jobs(&scripted), 0, "the engine was asked");
+        let history = store
+            .list(&app::ports::HistoryQuery::default())
+            .await
+            .expect("the log reads");
+        let [record] = history.operations.as_slice() else {
+            panic!("one operation is recorded: {history:?}");
+        };
+        assert_eq!(
+            record.status,
+            OperationStatus::Failed {
+                reason: FailureReason::SecretRefused {
+                    field: "password".to_owned(),
+                    refusal: domain::execution::refusal::SettingRefusal::SecretMissing {
+                        source: UNSET.to_owned(),
+                    },
+                },
+            }
+        );
+        assert_eq!(record.kind, OperationKind::Backup);
+        assert_eq!(record.trigger, Trigger::Schedule);
+        assert_eq!(record.target.plan.as_ref(), Some(&plan));
+        assert_eq!(record.started_at, None, "a refused run never started");
+
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the run ended");
+        assert_eq!(
+            end,
+            Some(app::retry::RunEnd {
+                operation: record.id,
+                plan: plan.clone(),
+                trigger: Trigger::Schedule,
+                outcome: app::retry::RunOutcome::Failed,
+            })
+        );
+
+        let mut next = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        assert!(
+            futures::FutureExt::now_or_never(next.turn()).is_some(),
+            "the refused run gave up its place"
+        );
+
+        let operation = record.id.as_uuid().hyphenated().to_string();
+        let said = captured_log::lines();
+        let line = said
+            .iter()
+            .find(|(level, line)| *level == log::Level::Warn && line.contains(&operation))
+            .map(|(_, line)| line)
+            .unwrap_or_else(|| panic!("no warning names the operation: {said:?}"));
+        assert!(line.contains("run of plan home didn't start"), "{line}");
+        assert!(line.contains("SecretMissing"), "{line}");
+        // Where the secret was looked for is a name, never a secret (#483).
+        assert!(
+            line.contains(&format!("its password, from {UNSET}")),
+            "{line}"
+        );
+    }
+
+    /// A runner for the plan `home` on the repository `demo`, whose password
+    /// is the environment variable `unset`, which nothing sets.
+    async fn refused_password_runner(
+        unset: &str,
+        store: Arc<dyn OperationStore>,
+        events: Arc<BroadcastEventBus>,
+    ) -> (
+        PlanRunner,
+        app::retry::RunEnds,
+        Arc<Scripted>,
+        domain::PlanId,
+    ) {
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo-repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Env(unset.to_owned()),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        refused_runner(settings, store, events).await
+    }
+
+    /// A scheduled run whose password command fails with the other secrets
+    /// of the repository in its stderr keeps the command's words in its
+    /// history row's failure masked as the refusal of a run by hand masks
+    /// them, and no secret reaches the row (I4).
+    #[tokio::test]
+    async fn a_refused_runs_history_row_says_what_the_command_said_masked_as_its_refusal() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let referenced = scratch.path().join("token");
+        std::fs::write(&referenced, "canary-from-a-file\n").expect("the file is written");
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo-repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Command(
+                domain::secrets::CommandLine::parse(
+                    "sh -c 'echo canary-inline canary-from-a-file >&2; exit 3'",
+                )
+                .expect("a command"),
+            ),
+            options: [
+                ("secret_access_key".to_owned(), "canary-inline".to_owned()),
+                (
+                    "application_key".to_owned(),
+                    format!("${{file:{}}}", referenced.display()),
+                ),
+            ]
+            .into(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, _heard, _, plan) =
+            refused_runner(settings, store, Arc::new(BroadcastEventBus::new())).await;
+
+        let by_hand = Operations::start_backup(&runner, plan.as_str().to_owned())
+            .await
+            .expect_err("a run by hand is refused");
+        let StartError::SecretRefused(alert) = by_hand else {
+            panic!("a secret refusal, not {by_hand:?}");
+        };
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+
+        let page = Operations::history(&runner, None, None, None)
+            .await
+            .expect("the history reads");
+        let [row] = page.operations.as_slice() else {
+            panic!("one operation is recorded: {page:?}");
+        };
+        let failure = row.failure.as_ref().expect("the row says why it failed");
+        assert_eq!(failure.code, ErrorCode::SecretCommandFailed);
+        let detail = failure
+            .detail
+            .as_deref()
+            .expect("the command's words are kept");
+        assert_eq!(Some(detail), alert.detail.as_deref());
+        assert!(detail.contains(domain::secrets::REDACTED), "{detail}");
+        let wire = serde_json::to_string(row).expect("the row serializes");
+        assert!(!wire.contains("canary-inline"), "{wire}");
+        assert!(!wire.contains("canary-from-a-file"), "{wire}");
+    }
+
+    /// A runner for the plan `home` on the repository `demo` of `settings`.
+    async fn refused_runner(
+        settings: domain::planning::RepositorySettings,
+        store: Arc<dyn OperationStore>,
+        events: Arc<BroadcastEventBus>,
+    ) -> (
+        PlanRunner,
+        app::retry::RunEnds,
+        Arc<Scripted>,
+        domain::PlanId,
+    ) {
+        let plan = domain::PlanId::parse("home").expect("a plan ID");
+        let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+        let config = domain::planning::AgentConfig::new(
+            domain::planning::AgentSettings::default(),
+            Default::default(),
+            std::collections::BTreeMap::from([(
+                alias.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings,
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            )]),
+            vec![domain::planning::Plan::new(
+                plan.clone(),
+                alias,
+                vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+            )],
+        )
+        .expect("a valid configuration");
+        let config_store = Arc::new(InMemoryConfigStore::new());
+        app::ports::ConfigStore::save(&*config_store, &config)
+            .await
+            .expect("the config saves");
+        let scripted = engine();
+        let (ends, heard) = app::retry::run_ends();
+        let runner = PlanRunner {
+            config: config_store,
+            resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+            agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+            engine: scripted.clone(),
+            locations: None,
+            retention: Arc::new(engine::RusticRetention),
+            store,
+            registry: Arc::new(CancelRegistry::new()),
+            hooks: Arc::new(ProcessHookRunner::new()),
+            events,
+            queue: Arc::new(RunQueue::new()),
+            ends,
+        };
+        (runner, heard, scripted, plan)
+    }
+
+    /// A retry the schedule started that is refused for its secret ends as a
+    /// failed retry: the schedule hears it with its own trigger, so the
+    /// retry's count goes on rather than starting over (decision 76).
+    #[tokio::test]
+    async fn a_refused_retry_is_heard_as_a_failed_retry() {
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, heard, _, plan) = refused_password_runner(
+            "LADDERBACK_TEST_REFUSED_RETRY_PASSWORD_UNSET",
+            store.clone(),
+            Arc::new(BroadcastEventBus::new()),
+        )
+        .await;
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Retry, place).await;
+
+        let history = store
+            .list(&app::ports::HistoryQuery::default())
+            .await
+            .expect("the log reads");
+        let [record] = history.operations.as_slice() else {
+            panic!("one operation is recorded: {history:?}");
+        };
+        assert_eq!(record.trigger, Trigger::Retry);
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the retry ended");
+        assert_eq!(
+            end,
+            Some(app::retry::RunEnd {
+                operation: record.id,
+                plan,
+                trigger: Trigger::Retry,
+                outcome: app::retry::RunOutcome::Failed,
+            })
+        );
+    }
+
+    /// A refused run whose write the operation log refuses still ends: the
+    /// schedule hears it failed and a page is told, and the daemon's log says
+    /// the write failed by its code, never in the store's own words (I4).
+    #[tokio::test]
+    async fn a_refused_run_the_log_cannot_keep_still_ends_and_is_announced() {
+        capture();
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let store = Arc::new(super::tests::RefusingSaves {
+            inner: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            refused: refused.clone(),
+        });
+        let events = Arc::new(BroadcastEventBus::new());
+        let mut page = events.subscribe().await;
+        let (runner, heard, scripted, plan) = refused_password_runner(
+            "LADDERBACK_TEST_REFUSED_UNKEPT_PASSWORD_UNSET",
+            store,
+            events,
+        )
+        .await;
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+
+        assert_eq!(jobs(&scripted), 0, "the engine was asked");
+        assert_eq!(refused.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the run ended")
+            .expect("an end");
+        assert_eq!(end.outcome, app::retry::RunOutcome::Failed);
+        let told = futures::FutureExt::now_or_never(page.next()).flatten();
+        assert!(
+            matches!(
+                told,
+                Some(UiEvent::OperationFailed {
+                    code: ErrorCode::SecretMissing,
+                    ..
+                })
+            ),
+            "{told:?}"
+        );
+        let operation = end.operation.as_uuid().hyphenated().to_string();
+        let said = captured_log::lines();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains(&operation)
+                && line.contains("a write to the operation log failed")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .all(|(_, line)| !line.contains(super::tests::REFUSAL)),
+            "{said:?}"
+        );
     }
 
     /// A listing the engine refused, told by its code alone.

@@ -486,6 +486,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+        F::SecretRefused { .. } => todo!(),
     }
 }
 

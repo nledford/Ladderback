@@ -6,11 +6,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use domain::RepositoryAlias;
+use domain::execution::FailureReason;
+use domain::execution::refusal::SettingRefusal;
 use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
-    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Reference,
-    SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError, TooMuchToMask,
-    has_reference, too_many_rclone_credentials,
+    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Redactor,
+    Reference, SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError,
+    TooMuchToMask, has_reference, too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
@@ -103,6 +105,25 @@ impl std::fmt::Display for ResolveError {
 }
 
 impl std::error::Error for ResolveError {}
+
+impl ResolveError {
+    /// Why a run of the repository is refused, by its code: `Err` with the
+    /// cap when the repository's secrets come to more than a job masks
+    /// ([`Cause::TooMuchToMask`]), whose code is a job's too. Where a secret
+    /// was looked for, and what a platform or a command said, are masked
+    /// through `redactor` first (I4), and a text masked to nothing is left
+    /// out: it says nothing.
+    pub fn refusal(&self, _redactor: &Redactor) -> Result<SettingRefusal, usize> {
+        todo!()
+    }
+
+    /// The failure a run the schedule started records when its start is
+    /// refused for this error (§5): its [`refusal`](Self::refusal), at
+    /// [`field`](Self::field).
+    pub fn failure(&self, _redactor: &Redactor) -> FailureReason {
+        todo!()
+    }
+}
 
 /// Resolves a repository's settings: the password from its source, and every
 /// `${…}` reference in the repository string and the options from the
@@ -503,5 +524,304 @@ impl<'a> Run<'a> {
                 self.warnings.push(warning);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use domain::secrets::{Problem, SecretError, SecretValue, SourceName};
+
+    use super::*;
+
+    const CANARY: &str = "CANARY-refused-run-secret";
+    /// The start of [`CANARY`], as a line cut at its cap may end.
+    const CANARY_START: &str = "CANARY-ref";
+
+    fn unresolved(field: Field, source: SourceName, problem: Problem) -> ResolveError {
+        ResolveError {
+            field,
+            cause: Cause::Unresolved(SecretError { source, problem }),
+        }
+    }
+
+    fn env(name: &str) -> SourceName {
+        SourceName::Env {
+            name: name.to_owned(),
+        }
+    }
+
+    fn keyring(entry: &str) -> SourceName {
+        SourceName::Keyring {
+            entry: entry.to_owned(),
+        }
+    }
+
+    fn file(path: &str) -> SourceName {
+        SourceName::File {
+            path: path.to_owned(),
+        }
+    }
+
+    fn command(program: &str) -> SourceName {
+        SourceName::Command {
+            program: program.to_owned(),
+        }
+    }
+
+    fn nothing_to_mask() -> Redactor {
+        Redactor::new([])
+    }
+
+    /// A secret that couldn't be read is refused by what was wrong, naming
+    /// where it was looked for; only a command is run for a time, so a
+    /// keyring or a file that doesn't answer is a source that can't be read.
+    #[test]
+    fn each_secret_that_cant_be_read_is_refused_by_what_was_wrong() {
+        use SettingRefusal as R;
+        let said = |text: &str| Some(text.to_owned());
+        let cases = [
+            (
+                env("DEMO_PASSWORD"),
+                Problem::Missing,
+                R::SecretMissing {
+                    source: "DEMO_PASSWORD".to_owned(),
+                },
+            ),
+            (
+                file("/srv/demo/password"),
+                Problem::Unreachable {
+                    detail: "permission denied".to_owned(),
+                },
+                R::SecretUnreadable {
+                    source: "/srv/demo/password".to_owned(),
+                    detail: said("permission denied"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "no Secret Service runs".to_owned(),
+                },
+                R::SecretKeyringUnavailable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("no Secret Service runs"),
+                },
+            ),
+            (
+                file("/srv/demo/password"),
+                Problem::NotUnicode,
+                R::SecretNotText {
+                    source: "/srv/demo/password".to_owned(),
+                },
+            ),
+            (
+                file("/srv/demo/password"),
+                Problem::TooLarge { limit: 65_536 },
+                R::SecretTooLarge {
+                    source: "/srv/demo/password".to_owned(),
+                    limit: 65_536,
+                },
+            ),
+            (
+                command("pass"),
+                Problem::CommandFailed {
+                    status: Some(1),
+                    detail: "pass: no such entry".to_owned(),
+                },
+                R::SecretCommandFailed {
+                    source: "pass".to_owned(),
+                    detail: said("pass: no such entry"),
+                },
+            ),
+            (
+                command("pass"),
+                Problem::TimedOut { seconds: 30 },
+                R::SecretCommandTimedOut {
+                    source: "pass".to_owned(),
+                    seconds: 30,
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::TimedOut { seconds: 30 },
+                R::SecretUnreadable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: None,
+                },
+            ),
+            (
+                file("/srv/demo/password"),
+                Problem::TimedOut { seconds: 30 },
+                R::SecretUnreadable {
+                    source: "/srv/demo/password".to_owned(),
+                    detail: None,
+                },
+            ),
+            (
+                command("pass"),
+                Problem::OutputCut,
+                R::SecretCommandOutputOpen {
+                    source: "pass".to_owned(),
+                },
+            ),
+        ];
+        for (source, problem, refusal) in cases {
+            let error = unresolved(Field::Password, source, problem);
+            assert_eq!(error.refusal(&nothing_to_mask()), Ok(refusal), "{error:?}");
+        }
+    }
+
+    /// Where a secret was looked for and what a platform or a command said
+    /// are kept with the repository's secrets masked (I4), a line cut at its
+    /// cap included, whose end may be the start of one; a detail that says
+    /// nothing is left out.
+    #[test]
+    fn a_refusal_keeps_no_secret_of_the_repository() {
+        let secret = SecretValue::new(CANARY);
+        let redactor = Redactor::new([&secret]);
+        let error = unresolved(
+            Field::Password,
+            file(&format!("/srv/{CANARY}/password")),
+            Problem::Unreachable {
+                detail: format!("denied: {CANARY}"),
+            },
+        );
+        let refusal = error.refusal(&redactor);
+        assert!(
+            !format!("{refusal:?}").contains("CANARY"),
+            "the refusal shows a secret: {refusal:?}"
+        );
+        assert_eq!(
+            refusal,
+            Ok(SettingRefusal::SecretUnreadable {
+                source: "/srv/***/password".to_owned(),
+                detail: Some("denied: ***".to_owned()),
+            })
+        );
+
+        let clipped = unresolved(
+            Field::Password,
+            command("pass"),
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: format!("said {}…", CANARY_START),
+            },
+        );
+        let refusal = clipped.refusal(&redactor);
+        assert!(
+            !format!("{refusal:?}").contains(CANARY_START),
+            "the refusal shows the start of a secret: {refusal:?}"
+        );
+
+        let silent = unresolved(
+            Field::Password,
+            command("pass"),
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: String::new(),
+            },
+        );
+        assert_eq!(
+            silent.refusal(&redactor),
+            Ok(SettingRefusal::SecretCommandFailed {
+                source: "pass".to_owned(),
+                detail: None,
+            })
+        );
+    }
+
+    /// A setting refused before any secret is read is refused by its own
+    /// fault, and a template's by where it goes wrong, when it has a place.
+    #[test]
+    fn a_setting_refused_before_any_secret_is_read_is_refused_by_its_fault() {
+        use SettingRefusal as R;
+        let cases = [
+            (
+                Cause::ReferenceInProcessArguments,
+                R::SecretInProcessArguments,
+            ),
+            (
+                Cause::ExpansionTooLong { limit: 65_536 },
+                R::SecretExpansionTooLong { limit: 65_536 },
+            ),
+            (
+                Cause::TooManyCredentials { limit: 16 },
+                R::LocationTooManyCredentials,
+            ),
+            (Cause::RelativePath, R::RepositoryPathRelative),
+            (
+                Cause::Invalid(TemplateError::Unterminated { at: 4 }),
+                R::TemplateInvalid { at: Some(4) },
+            ),
+            (
+                Cause::Invalid(TemplateError::EmptyReference { at: 5 }),
+                R::TemplateInvalid { at: Some(5) },
+            ),
+            (
+                Cause::Invalid(TemplateError::InvalidName { at: 6 }),
+                R::TemplateInvalid { at: Some(6) },
+            ),
+            (
+                Cause::Invalid(TemplateError::EmptyPath { at: 7 }),
+                R::TemplateInvalid { at: Some(7) },
+            ),
+            (
+                Cause::Invalid(TemplateError::RelativePath { at: 8 }),
+                R::TemplateInvalid { at: Some(8) },
+            ),
+            (
+                Cause::Invalid(TemplateError::NestedReference { at: 9 }),
+                R::TemplateInvalid { at: Some(9) },
+            ),
+            (
+                Cause::Invalid(TemplateError::TooLong { limit: 65_536 }),
+                R::TemplateInvalid { at: None },
+            ),
+            (
+                Cause::Invalid(TemplateError::TooManyReferences { limit: 64 }),
+                R::TemplateInvalid { at: None },
+            ),
+        ];
+        for (cause, refusal) in cases {
+            let error = ResolveError {
+                field: Field::Repository,
+                cause,
+            };
+            assert_eq!(error.refusal(&nothing_to_mask()), Ok(refusal), "{error:?}");
+        }
+    }
+
+    /// A refused run's failure names the setting as the configuration
+    /// writes it; secrets that come to more than a job masks are a job's
+    /// refusal, kept under its own code with the setting where they passed
+    /// the cap.
+    #[test]
+    fn a_refused_runs_failure_names_its_setting_as_the_configuration_writes_it() {
+        let missing = unresolved(
+            Field::OptionHot("token".to_owned()),
+            env("DEMO_TOKEN"),
+            Problem::Missing,
+        );
+        assert_eq!(
+            missing.failure(&nothing_to_mask()),
+            FailureReason::SecretRefused {
+                field: "options-hot.token".to_owned(),
+                refusal: SettingRefusal::SecretMissing {
+                    source: "DEMO_TOKEN".to_owned(),
+                },
+            }
+        );
+        let too_much = ResolveError {
+            field: Field::Option("token".to_owned()),
+            cause: Cause::TooMuchToMask { limit: 262_144 },
+        };
+        assert_eq!(too_much.refusal(&nothing_to_mask()), Err(262_144));
+        assert_eq!(
+            too_much.failure(&nothing_to_mask()),
+            FailureReason::SecretsTooLargeToMask {
+                field: Some("options.token".to_owned()),
+                limit: 262_144,
+            }
+        );
     }
 }

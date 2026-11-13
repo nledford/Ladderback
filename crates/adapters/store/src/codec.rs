@@ -204,6 +204,7 @@ pub(crate) fn encode_failure(
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
+        FailureReason::SecretRefused { .. } => todo!(),
     };
     Ok(FailureColumns {
         code,
@@ -327,6 +328,8 @@ fn transition(args: &[(String, MsgArg)]) -> Result<Transition, BadColumn> {
 
 #[cfg(test)]
 mod tests {
+    use domain::execution::refusal::SettingRefusal;
+
     use super::*;
 
     /// Every kind round-trips: what the log writes for an operation is what
@@ -473,5 +476,154 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::DaemonStopped);
+    }
+
+    /// A run the schedule started that was refused for a setting, for each
+    /// refusal, with its texts as awkward as a source and a platform make
+    /// them.
+    fn refused_runs() -> Vec<FailureReason> {
+        use SettingRefusal as R;
+        let source = || "/home/demo/données ☃/\"pass\"\nword".to_owned();
+        let said = || Some("line one\nline \"two\" ✓ 日本語".to_owned());
+        [
+            R::SecretMissing { source: source() },
+            R::SecretUnreadable {
+                source: source(),
+                detail: said(),
+            },
+            R::SecretUnreadable {
+                source: source(),
+                detail: None,
+            },
+            R::SecretKeyringUnavailable {
+                source: "ladderback/demo".to_owned(),
+                detail: said(),
+            },
+            R::SecretKeyringUnavailable {
+                source: "ladderback/demo".to_owned(),
+                detail: None,
+            },
+            R::SecretNotText { source: source() },
+            R::SecretTooLarge {
+                source: source(),
+                limit: 65_536,
+            },
+            R::SecretCommandFailed {
+                source: "pass".to_owned(),
+                detail: said(),
+            },
+            R::SecretCommandFailed {
+                source: "pass".to_owned(),
+                detail: None,
+            },
+            R::SecretCommandTimedOut {
+                source: "pass".to_owned(),
+                seconds: 30,
+            },
+            R::SecretCommandOutputOpen {
+                source: "pass".to_owned(),
+            },
+            R::SecretInProcessArguments,
+            R::SecretExpansionTooLong { limit: 65_536 },
+            R::LocationTooManyCredentials,
+            R::RepositoryPathRelative,
+            R::TemplateInvalid { at: Some(12) },
+            R::TemplateInvalid { at: None },
+        ]
+        .into_iter()
+        .map(|refusal| FailureReason::SecretRefused {
+            field: "options-hot.token".to_owned(),
+            refusal,
+        })
+        .collect()
+    }
+
+    /// Every refusal a run the schedule started records reads back as it
+    /// was written, under the refusal's own code: the setting, where the
+    /// secret was looked for, its number and what was said.
+    #[test]
+    fn every_refused_run_round_trips_under_its_refusals_code() {
+        let mut codes = std::collections::BTreeSet::new();
+        for reason in refused_runs() {
+            let columns = match encode_failure(&reason) {
+                Ok(columns) => columns,
+                Err(error) => panic!("{reason:?} encodes: {error}"),
+            };
+            assert_eq!(columns.code, reason.code(), "{reason:?}");
+            codes.insert(columns.code);
+            let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail)
+            {
+                Ok(reason) => reason,
+                Err(bad) => panic!("{reason:?} decodes: {} {}", bad.column, bad.why),
+            };
+            assert_eq!(back, reason);
+        }
+        assert_eq!(codes.len(), 13, "one code per refusal: {codes:?}");
+    }
+
+    /// A refusal's columns that lack what its code needs, or hold it as the
+    /// wrong kind of argument, are reported, not guessed at.
+    #[test]
+    fn a_refusal_missing_an_argument_or_holding_the_wrong_kind_is_reported() {
+        let args = |args: &[(&str, MsgArg)]| match error_args::encode(args) {
+            Ok(text) => text,
+            Err(error) => panic!("the arguments encode: {error}"),
+        };
+        let text = |text: &str| MsgArg::Text(text.to_owned());
+        let cases = [
+            (
+                "secret-missing",
+                args(&[("field", text("password"))]),
+                "has no source",
+            ),
+            (
+                "secret-missing",
+                args(&[("source", text("DEMO"))]),
+                "has no field",
+            ),
+            (
+                "secret-missing",
+                args(&[("field", text("password")), ("source", MsgArg::Count(1))]),
+                "source is not text",
+            ),
+            (
+                "secret-too-large",
+                args(&[("field", text("password")), ("source", text("DEMO"))]),
+                "has no limit",
+            ),
+            (
+                "secret-expansion-too-long",
+                args(&[("field", text("repository")), ("limit", MsgArg::Count(9))]),
+                "limit is not a number of bytes",
+            ),
+            (
+                "secret-command-timed-out",
+                args(&[
+                    ("field", text("password")),
+                    ("source", text("pass")),
+                    ("seconds", MsgArg::Bytes(30)),
+                ]),
+                "seconds is not a count",
+            ),
+            (
+                "template-invalid",
+                args(&[("field", text("repository")), ("at", text("twelve"))]),
+                "at \"twelve\" is not a place",
+            ),
+            (
+                "template-invalid",
+                args(&[("field", text("repository")), ("at", MsgArg::Count(12))]),
+                "at is not text",
+            ),
+        ];
+        for (code, args, why) in cases {
+            match decode_failure(Some(code), Some(&args), None) {
+                Ok(reason) => panic!("{code} {args} decodes as {reason:?}"),
+                Err(bad) => {
+                    assert_eq!(bad.column, "error_args", "{code} {args}");
+                    assert_eq!(bad.why, why, "{code} {args}");
+                }
+            }
+        }
     }
 }

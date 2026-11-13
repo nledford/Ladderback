@@ -1,6 +1,7 @@
 mod recovery;
 mod serialization;
 
+use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
     Target, Transition, Trigger, Warning, WarningKind,
@@ -379,6 +380,19 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
             limit: 262_144,
         },
         FailureReason::DaemonStopped,
+        // A run the schedule started that was refused for a setting: its
+        // source and what was said, as awkward as either gets.
+        FailureReason::SecretRefused {
+            field: "options-hot.token".to_owned(),
+            refusal: SettingRefusal::SecretCommandFailed {
+                source: "/home/demo/données ☃/pass".to_owned(),
+                detail: Some(awkward.to_owned()),
+            },
+        },
+        FailureReason::SecretRefused {
+            field: "repository".to_owned(),
+            refusal: SettingRefusal::TemplateInvalid { at: Some(12) },
+        },
     ];
 
     let mut ops = vec![

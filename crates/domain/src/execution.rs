@@ -8,6 +8,7 @@ pub mod plan_tags;
 #[cfg(test)]
 mod properties;
 pub mod queue;
+pub mod refusal;
 pub mod retry;
 pub mod wake;
 
@@ -136,6 +137,15 @@ pub enum FailureReason {
     /// The repository's password opened nothing at any location tried
     /// (decision 80): a wrong password is the likelier cause.
     PasswordNotAccepted,
+    /// A run the schedule started was refused before anything ran, because
+    /// the setting `field` of its repository (`password`, `options.<name>`,
+    /// as the configuration writes it) couldn't be resolved (§5, §10.2): the
+    /// refusal a request to start it is answered with. Nothing ran, so no
+    /// hook ran either.
+    SecretRefused {
+        field: String,
+        refusal: refusal::SettingRefusal,
+    },
 }
 
 impl FailureReason {
@@ -161,6 +171,7 @@ impl FailureReason {
             Self::NoLocationUsable => "no-location-usable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
+            Self::SecretRefused { refusal, .. } => refusal.code(),
         }
     }
 }
@@ -363,6 +374,19 @@ impl Operation {
             repository_alias: None,
             locations: None,
         }
+    }
+
+    /// A run refused before anything ran (§5): queued and failed with
+    /// `reason` at `at`, never started.
+    pub fn refused(
+        _id: OperationId,
+        _kind: OperationKind,
+        _trigger: Trigger,
+        _target: Target,
+        _reason: FailureReason,
+        _at: Timestamp,
+    ) -> Self {
+        todo!()
     }
 
     /// The operation, named with the alias of the repository it runs on.
@@ -1248,5 +1272,38 @@ mod tests {
         let mut op = running();
         op.cancel(t(20)).unwrap();
         assert!(op.attach_warning(hook_warning("3")).is_err());
+    }
+
+    /// A run refused before anything ran is queued and failed in the same
+    /// instant, with the refusal as its reason, and never started: no time
+    /// of the run is the start of anything that ran (§5).
+    #[test]
+    fn a_refused_run_is_queued_and_failed_in_one_instant_and_never_started() {
+        let reason = FailureReason::SecretRefused {
+            field: "password".to_owned(),
+            refusal: refusal::SettingRefusal::SecretMissing {
+                source: "ladderback/demo".to_owned(),
+            },
+        };
+        assert_eq!(reason.code(), "secret-missing");
+        let target = Target {
+            plan: Some(PlanId::parse("home").unwrap()),
+            repository: None,
+        };
+        let op = Operation::refused(
+            OperationId::from_uuid(Uuid::from_u128(7)),
+            OperationKind::Backup,
+            Trigger::Schedule,
+            target.clone(),
+            reason.clone(),
+            t(30),
+        );
+        assert_eq!(op.status(), &OperationStatus::Failed { reason });
+        assert_eq!(op.started_at(), None);
+        assert_eq!(op.queued_at(), t(30));
+        assert_eq!(op.finished_at(), Some(t(30)));
+        assert_eq!(op.trigger(), Trigger::Schedule);
+        assert_eq!(op.kind(), OperationKind::Backup);
+        assert_eq!(op.target(), &target);
     }
 }
