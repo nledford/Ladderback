@@ -1114,7 +1114,18 @@ impl PlanRunner {
     }
 }
 
-/// Why a plan's run didn't start, for the daemon's log: a code, never the
+/// Logs that plan `plan`'s run, started by `trigger`, didn't start.
+fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
+    log::warn!(
+        "the {trigger:?} run of plan {} didn't start: {}",
+        plan.as_str(),
+        start_refused(error)
+    );
+}
+
+/// Why a plan's run didn't start, for the daemon's log: a code, and for a
+/// secret the setting and where it was looked for (an entry, a file, a
+/// variable or a program, masked as the refusal shows them), never the
 /// words of a secret's refusal, which may quote what was read (I4).
 fn start_refused(error: &StartError) -> String {
     match error {
@@ -1123,8 +1134,19 @@ fn start_refused(error: &StartError) -> String {
             format!("the configuration can't be read or used ({code:?})")
         }
         StartError::SecretRefused(refusal) => {
+            let named = |key: &str| {
+                refusal.args.iter().find_map(|(name, arg)| match arg {
+                    MsgArg::Text(text) if *name == key => Some(text.as_str()),
+                    _ => None,
+                })
+            };
+            let place = match (named("field"), named("source")) {
+                (Some(field), Some(source)) => format!(": its {field}, from {source}"),
+                (Some(field), None) => format!(": its {field}"),
+                _ => String::new(),
+            };
             format!(
-                "a secret of its repository was refused ({:?})",
+                "a secret of its repository was refused ({:?}){place}",
                 refusal.code
             )
         }
@@ -1135,11 +1157,7 @@ fn start_refused(error: &StartError) -> String {
 impl PlanRuns for PlanRunner {
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
         if let Err(error) = self.start_plan(plan, trigger, Some(place)).await {
-            log::warn!(
-                "the {trigger:?} run of plan {} didn't start: {}",
-                plan.as_str(),
-                start_refused(&error)
-            );
+            log_not_started(plan, trigger, &error);
         }
     }
 
@@ -1282,7 +1300,12 @@ impl PlanRuns for PlanRunner {
 impl Operations for PlanRunner {
     async fn start_backup(&self, plan: String) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
-        let operation = self.start_plan(&id, Trigger::Manual, None).await?;
+        // Refused by hand as on a schedule, the run leaves a line in the log
+        // too, not only the answer the page shows for a moment (#483).
+        let operation = self
+            .start_plan(&id, Trigger::Manual, None)
+            .await
+            .inspect_err(|error| log_not_started(&id, Trigger::Manual, error))?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
 
