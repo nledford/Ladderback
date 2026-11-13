@@ -96,6 +96,11 @@ impl KernelLink {
             ..self
         }
     }
+
+    /// How long a read may take before its answer is given up.
+    pub fn with_timeout(self, timeout: Duration) -> Self {
+        Self { timeout, ..self }
+    }
 }
 
 #[async_trait]

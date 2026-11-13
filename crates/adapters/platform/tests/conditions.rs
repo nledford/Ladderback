@@ -1059,6 +1059,55 @@ async fn a_machine_off_wi_fi_needs_no_networkmanager_to_have_no_network() {
     );
 }
 
+/// A name read given up names what it was waiting on: NetworkManager when
+/// the bus doesn't answer, not the routing table the read began at, and the
+/// routing table when that is what stalls.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_name_read_given_up_names_what_stalled() {
+    let harness = KernelLinkHarness::new();
+    // A bus that takes the connection and never answers it.
+    let socket = harness.scratch.path().join("silent-bus");
+    let silent = std::os::unix::net::UnixListener::bind(&socket).expect("a socket");
+    let bus = format!("unix:path={}", socket.display());
+    let answer = harness
+        .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
+        .with_bus(bus.clone())
+        .with_timeout(SHORT)
+        .network_name()
+        .await;
+    // Before the asserts: closing the socket ends the call given up, which
+    // the runtime waits for when the test ends.
+    drop(silent);
+    assert_eq!(
+        answer,
+        Err(PlatformError::TimedOut {
+            from: format!("NetworkManager on {bus}")
+        })
+    );
+
+    let machine = harness.machines.load(Ordering::Relaxed);
+    let link = harness
+        .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
+        .with_bus(bus)
+        .with_timeout(SHORT);
+    let route = harness
+        .scratch
+        .path()
+        .join(machine.to_string())
+        .join("route");
+    std::fs::remove_file(&route).expect("the routes written");
+    fifo(&route);
+    let answer = link.network_name().await;
+    release(&route, &answer);
+    assert_eq!(
+        answer,
+        Err(PlatformError::TimedOut {
+            from: route.display().to_string()
+        })
+    );
+}
+
 /// NetworkManager on a bus of its own: a `dbus-daemon` with a configuration
 /// of the test's, and a thread that answers `Properties.Get` for the devices
 /// the test adds, as NetworkManager's D-Bus API does.
