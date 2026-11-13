@@ -4,6 +4,7 @@
 
 use async_trait::async_trait;
 use domain::execution::conditions::PowerSource;
+use domain::planning::Link;
 
 /// What powers the machine.
 #[async_trait]
@@ -19,6 +20,18 @@ pub trait Network: Send + Sync {
     /// Whether the machine has a working connection to a network other than
     /// itself. An error is a state the platform couldn't report.
     async fn is_online(&self) -> Result<bool, PlatformError>;
+}
+
+/// The network link the machine reaches others by (decision 80): the
+/// interface its default route leaves by, which a location's rule is
+/// evaluated against. The same fact the metered-connection condition will
+/// need, so one port serves both.
+#[async_trait]
+pub trait NetworkLink: Send + Sync {
+    /// The link's kind, or [`Link::NoRoute`] when there is no default
+    /// route. An error is a link the platform couldn't report, never a
+    /// guess. No network's name is ever in the answer or its error.
+    async fn link(&self) -> Result<Link, PlatformError>;
 }
 
 /// Why the platform couldn't report what was asked. `from` names where the

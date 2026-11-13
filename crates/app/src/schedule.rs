@@ -34,8 +34,8 @@ use futures::future::{Either, select};
 
 use crate::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, EventBus, Network, PendingRetry, PlannedRun, PlatformError,
-    PowerSupply, Random, ScheduleStore, StoreError,
+    Clock, ConfigError, ConfigStore, EventBus, Network, NetworkLink, PendingRetry, PlannedRun,
+    PlatformError, PowerSupply, Random, ScheduleStore, StoreError,
 };
 use crate::queue::{Place, RunQueue};
 use crate::recovery::QueuedEnd;
@@ -111,6 +111,9 @@ pub struct Scheduler {
     pub config: Arc<dyn ConfigStore>,
     pub power: Arc<dyn PowerSupply>,
     pub network: Arc<dyn Network>,
+    /// The machine's network link, which the rules of a plan's locations
+    /// are evaluated against, read once for the plans due together.
+    pub link: Arc<dyn NetworkLink>,
     pub runs: Arc<dyn PlanRuns>,
     /// The agent's one queue of backups, which the routes share.
     pub queue: Arc<RunQueue>,
@@ -765,6 +768,7 @@ mod tests {
             config: Arc::new(InMemoryConfigStore::new()),
             power: Arc::new(FakePower::new()),
             network: Arc::new(FakeNetwork::new()),
+            link: Arc::new(crate::fakes::FakeNetworkLink::new()),
             runs,
             queue: Arc::new(RunQueue::new()),
             zone: TimeZone::UTC,

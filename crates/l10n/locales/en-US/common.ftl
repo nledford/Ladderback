@@ -297,6 +297,9 @@ error-repository-not-found = There is no repository at this location. First chec
 # A repository reached at several locations had none that could be used: each was silent, refused, held no repository or another one, or a secret of it was unavailable. The operation's detail lists each location and why.
 error-no-location-usable = No location of this repository could be used, so nothing was read or written. The operation lists each location and why it was skipped; check that one of them can be reached, then try again.
 
+# Every location of the repository has a rule for the network it may be tried on, and none held when the job started: the machine was on another kind of network, or couldn't tell which it was on. The operation's detail lists each location and why.
+error-no-location-rule-holds = No location of this repository may be tried on the network this machine is on, so nothing was read or written. The operation lists each location's rule and why it didn't hold; connect to a network one of them allows, or run again later.
+
 # The repository's password opened nothing at any of its locations that answered.
 error-password-not-accepted = The repository's password was not accepted at any of its locations, so nothing was read or written. Check the repository's password, then try again.
 

@@ -27,8 +27,8 @@ use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
     EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
-    OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random, RunningJob,
-    ScheduleStore, SnapshotSummary,
+    NetworkLink, OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random,
+    RunningJob, ScheduleStore, SnapshotSummary,
 };
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
@@ -148,10 +148,12 @@ pub(crate) struct Daemon {
 }
 
 /// What the conditions before a scheduled run ask the machine (§5): what
-/// powers it and whether it is online.
+/// powers it, whether it is online, and the network link the rules of a
+/// repository's locations are evaluated against (decision 80).
 pub(crate) struct RunConditions {
     pub(crate) power: Arc<dyn PowerSupply>,
     pub(crate) network: Arc<dyn Network>,
+    pub(crate) link: Arc<dyn NetworkLink>,
 }
 
 impl RunConditions {
@@ -160,6 +162,7 @@ impl RunConditions {
         Self {
             power: platform::power::system_power(),
             network: platform::network::system_network(),
+            link: platform::network_link::system_link(),
         }
     }
 }
@@ -195,6 +198,7 @@ impl Background {
             config: self.config,
             power: self.conditions.power,
             network: self.conditions.network,
+            link: self.conditions.link,
             runs,
             queue,
             zone: domain::TimeZone::system(),
@@ -435,6 +439,7 @@ async fn state_over(
             Arc::new(log_recording),
         )),
         Arc::new(SystemClock),
+        Arc::clone(&conditions.link),
         resolve.as_ref().clone(),
         Arc::new(log_location),
     ));
@@ -458,6 +463,7 @@ async fn state_over(
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
         Arc::clone(&engine),
+        Arc::clone(&conditions.link),
         resolve.as_ref().clone(),
         Arc::clone(&config),
         Arc::clone(&store),
@@ -2045,6 +2051,8 @@ fn snapshot_dto(snapshot: &SnapshotSummary) -> Result<api::SnapshotDto, api::Inv
 struct RepositoryService {
     clock: Arc<dyn Clock>,
     engine: Arc<dyn Engine>,
+    /// The network link a Test evaluates the locations' rules against.
+    link: Arc<dyn NetworkLink>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
     /// The operation log, which says whether a saved repository's row
@@ -2059,6 +2067,7 @@ impl RepositoryService {
     fn new(
         clock: Arc<dyn Clock>,
         engine: Arc<dyn Engine>,
+        link: Arc<dyn NetworkLink>,
         resolve: ResolveRepository,
         config: Arc<dyn ConfigStore>,
         operations: Arc<dyn OperationStore>,
@@ -2067,6 +2076,7 @@ impl RepositoryService {
         Self {
             clock,
             engine,
+            link,
             resolve,
             config,
             operations,
@@ -2234,6 +2244,7 @@ impl Repositories for RepositoryService {
         let tested = ChooseLocation::new(
             Arc::clone(&self.engine),
             Arc::clone(&self.clock),
+            Arc::clone(&self.link),
             self.resolve.clone(),
             Arc::new(log_location),
         )
@@ -2629,6 +2640,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
+        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
     }
 }
@@ -3315,6 +3327,7 @@ mod tests {
             .insert("application_key".to_owned(), "${LAN_KEY}".to_owned());
         RepositoryConfig {
             locations: domain::planning::Locations {
+                first_when: None,
                 further: vec![Location {
                     repository: "/srv/public".to_owned(),
                     options_cold: [(
@@ -3421,9 +3434,11 @@ mod tests {
         .expect("a summary")
         .with_locations(locations_tried(&record));
         assert_eq!(
-            summary
-                .used_location()
-                .map(|(used, count)| (used.position, used.address.as_str(), count)),
+            summary.used_location().map(|(used, count)| (
+                used.position,
+                used.address.as_str(),
+                count
+            )),
             Some((2, "/srv/public", 2))
         );
         let wire = serde_json::to_value(&summary).expect("a summary is JSON");
@@ -6959,6 +6974,7 @@ mod repository_service_tests {
         RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config,
             Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -7123,6 +7139,7 @@ mod repository_service_tests {
         let answer = RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -7209,6 +7226,7 @@ mod repository_service_tests {
             let service = RepositoryService::new(
                 clock(),
                 engine.clone(),
+                Arc::new(app::fakes::FakeNetworkLink::new()),
                 ResolveRepository::new(Arc::new(secrets)),
                 config.clone(),
                 Arc::new(app::fakes::InMemoryOperationStore::new()),
@@ -7471,6 +7489,7 @@ mod repository_service_tests {
         let service = RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
             Arc::new(NoLog),
@@ -7568,6 +7587,7 @@ mod repository_service_tests {
         RepositoryService::new(
             clock(),
             engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(secrets)),
             config.clone(),
             Arc::new(app::fakes::InMemoryOperationStore::new()),

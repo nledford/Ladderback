@@ -83,6 +83,9 @@ pub enum ErrorCode {
     /// another one, or a secret of it was unavailable. The operation names
     /// each location and why, by position.
     NoLocationUsable,
+    /// No location's rule held when the job started (decision 80). The
+    /// operation names each location and why, by position.
+    NoLocationRuleHolds,
     /// The repository's password opened nothing at any location tried
     /// (decision 80).
     PasswordNotAccepted,
@@ -621,6 +624,7 @@ impl ErrorCode {
             Self::RepositoryNotFound
             | Self::CreateNotOffered
             | Self::NoLocationUsable
+            | Self::NoLocationRuleHolds
             | Self::PasswordNotAccepted => &[],
             Self::RepositoryAliasTaken | Self::RepositoryAlreadyConfigured => &[ArgSpec {
                 name: "alias",

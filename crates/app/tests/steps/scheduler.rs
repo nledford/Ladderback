@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use api::UiEvent;
 use app::fakes::{
-    FakeClock, FakeNetwork, FakePower, InMemoryConfigStore, InMemoryScheduleStore, SeededRandom,
+    FakeClock, FakeNetwork, FakeNetworkLink, FakePower, InMemoryConfigStore, InMemoryScheduleStore,
+    SeededRandom,
 };
 use app::ports::{Clock, ConfigStore, EventBus, PendingRetry, PlannedRun, ScheduleStore};
 use app::queue::{Place, RunQueue};
@@ -25,8 +26,9 @@ use domain::execution::queue::Overlapping;
 use domain::execution::retry::{NoRetry, RetryScheduled};
 use domain::execution::{Operation, Trigger};
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, CronExpression, Hooks, Overlap, Plan,
-    RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, ScheduleZone, Source,
+    AgentConfig, AgentSettings, Concurrency, CronExpression, Hooks, LocationRule, NetworkKind,
+    Overlap, Plan, RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, ScheduleZone,
+    Source,
 };
 use domain::secrets::{FileRead, SecretRef};
 use domain::{
@@ -337,6 +339,9 @@ pub struct SchedulerWorld {
     schedules: Arc<InMemoryScheduleStore>,
     power: Arc<FakePower>,
     network: Arc<FakeNetwork>,
+    /// The machine's network link, which the steps about the network the
+    /// machine is on set for this world and the locations' alike.
+    link: Arc<FakeNetworkLink>,
     runs: Arc<RecordingRuns>,
     /// The queue the scheduler's runs and a person's take their turns in.
     queue: Arc<RunQueue>,
@@ -345,6 +350,8 @@ pub struct SchedulerWorld {
     /// The agent's concurrency limit.
     concurrency: Concurrency,
     plans: Vec<Plan>,
+    /// The rule of the repository's one location, if any.
+    rule: Option<LocationRule>,
     /// The scheduler's loop, once the agent serves.
     serving: Option<BoxFuture<'static, ()>>,
     /// When the machine last woke.
@@ -366,7 +373,9 @@ impl Default for SchedulerWorld {
             schedules: Arc::new(InMemoryScheduleStore::new()),
             power: Arc::new(FakePower::new()),
             network: Arc::new(FakeNetwork::new()),
+            link: Arc::new(FakeNetworkLink::new()),
             plans: Vec::new(),
+            rule: None,
             serving: None,
             events: Arc::default(),
             woke_at: None,
@@ -376,6 +385,11 @@ impl Default for SchedulerWorld {
 }
 
 impl SchedulerWorld {
+    /// The machine's network link.
+    pub(super) fn link(&self) -> &FakeNetworkLink {
+        &self.link
+    }
+
     fn plan(&mut self, name: &str) -> &mut Plan {
         let id = plan_id(name);
         self.plans
@@ -393,7 +407,7 @@ impl SchedulerWorld {
 
     /// Saves the plans as the configuration the scheduler reads.
     async fn save(&self) {
-        let config = config_of(self.concurrency, self.plans.clone());
+        let config = config_of(self.concurrency, self.rule.clone(), self.plans.clone());
         self.config.save(&config).await.expect("the config saves");
     }
 
@@ -408,6 +422,7 @@ impl SchedulerWorld {
                 config: self.config.clone(),
                 power: self.power.clone(),
                 network: self.network.clone(),
+                link: self.link.clone(),
                 runs: self.runs.clone(),
                 queue: self.queue.clone(),
                 zone: self.zone.clone(),
@@ -506,14 +521,20 @@ fn demo_repository() -> RepositoryConfig {
 
 /// A valid configuration holding `plans`, each on the demo repository, for
 /// an agent that runs at most `concurrency` backups at once.
-fn config_of(concurrency: Concurrency, plans: Vec<Plan>) -> AgentConfig {
+fn config_of(
+    concurrency: Concurrency,
+    rule: Option<LocationRule>,
+    plans: Vec<Plan>,
+) -> AgentConfig {
+    let mut repository = demo_repository();
+    repository.locations.first_when = rule;
     AgentConfig::new(
         AgentSettings {
             concurrency,
             ..AgentSettings::default()
         },
         Hooks::default(),
-        BTreeMap::from([(alias(), demo_repository())]),
+        BTreeMap::from([(alias(), repository)]),
         plans,
     )
     .expect("the scenario's configuration is valid")
@@ -993,4 +1014,30 @@ async fn no_pending_retry(agent: &mut Agent, name: String) {
         pending.iter().all(|retry| retry.plan != plan),
         "{pending:?}"
     );
+}
+
+#[given("the repository's one location is eligible only on a wired network")]
+async fn location_eligible_wired(agent: &mut Agent) {
+    agent.scheduler.rule = Some(LocationRule::new(vec![NetworkKind::Wired]).expect("a rule"));
+    agent.scheduler.save().await;
+}
+
+#[then(
+    expr = "the agent said the run of the plan {string} was skipped because no location's rule holds"
+)]
+fn said_skipped_no_rule(agent: &mut Agent, name: String) {
+    let skipped = ScheduleReport::Skipped {
+        plan: plan_id(&name),
+        unmet: UnmetCondition::NoLocationRuleHolds,
+    };
+    assert!(
+        agent.scheduler.runs.reports().contains(&skipped),
+        "the agent said {:?}",
+        agent.scheduler.runs.reports()
+    );
+}
+
+#[then("the network link was read once")]
+fn link_read_once(agent: &mut Agent) {
+    assert_eq!(agent.scheduler.link.asked(), 1);
 }

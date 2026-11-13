@@ -1,5 +1,6 @@
 //! The checks a scheduled run goes through before it starts (technical
-//! design §5): the plan's AC power condition, the wait for the network that
+//! design §5): the plan's AC power condition, the rules of its repository's
+//! locations (decision 80), the wait for the network that
 //! a catch-up run after a wake makes, and the watch that notices a wake. The
 //! scheduler that runs them is #274's; the network wait is bounded here,
 //! whatever the platform does, so it can't hold a run back for good.
@@ -7,12 +8,12 @@
 use std::sync::Arc;
 
 use domain::SignedDuration;
-use domain::execution::conditions::{UnmetCondition, power_condition};
+use domain::execution::conditions::{UnmetCondition, location_condition, power_condition};
 use domain::execution::wake::{ClockSample, WAKE_CHECK_EVERY, Wake, WakeDetector};
-use domain::planning::Schedule;
+use domain::planning::{Link, LocationRule, Schedule};
 use futures::future::{Either, select};
 
-use crate::ports::{Clock, Network, PlatformError, PowerSupply};
+use crate::ports::{Clock, Network, NetworkLink, PlatformError, PowerSupply};
 
 /// The longest a catch-up run after a wake waits for the network.
 pub const NETWORK_WAIT: SignedDuration = SignedDuration::from_mins(2);
@@ -52,6 +53,41 @@ pub async fn check_power(schedule: &Schedule, power: &dyn PowerSupply) -> PowerC
         },
         Err(error) => PowerCheck::Unknown(error),
     }
+}
+
+/// The machine's network link, read at most once: the scheduler makes one
+/// for the plans due together, so their rules all see one network.
+pub struct LinkReading {
+    link: Arc<dyn NetworkLink>,
+    read: Option<Option<Link>>,
+}
+
+impl LinkReading {
+    /// A reading of `link` not taken yet.
+    pub fn new(link: Arc<dyn NetworkLink>) -> Self {
+        Self { link, read: None }
+    }
+
+    /// The link, read the first time it is asked for; `None` when the
+    /// platform couldn't report it.
+    pub async fn link(&mut self) -> Option<Link> {
+        todo!("{:?}", self.read)
+    }
+}
+
+/// Checks the rules of the locations of a plan's repository, `rules` in
+/// order (decision 80): the run is skipped only when every location has a
+/// rule and each is known not to hold. The link is read only when every
+/// location has a rule, so a repository with a location that has none never
+/// asks the platform.
+pub async fn check_location_rules(
+    rules: &[Option<LocationRule>],
+    reading: &mut LinkReading,
+) -> Result<(), UnmetCondition> {
+    todo!(
+        "{rules:?} {:?}",
+        location_condition(rules, reading.read.flatten())
+    )
 }
 
 /// How the wait for the network ended. Whatever the end, the run goes ahead:
@@ -140,8 +176,47 @@ mod tests {
     use domain::Timestamp;
     use futures::FutureExt;
 
+    use domain::planning::NetworkKind;
+
     use super::*;
-    use crate::fakes::FakeClock;
+    use crate::fakes::{FakeClock, FakeNetworkLink};
+
+    fn wired() -> Option<LocationRule> {
+        Some(LocationRule::new(vec![NetworkKind::Wired]).unwrap())
+    }
+
+    #[test]
+    fn a_repository_with_a_location_that_has_no_rule_never_reads_the_link() {
+        let link = Arc::new(FakeNetworkLink::new());
+        let mut reading = LinkReading::new(link.clone());
+        let checked = check_location_rules(&[wired(), None], &mut reading).now_or_never();
+        assert_eq!(checked, Some(Ok(())));
+        assert_eq!(link.asked(), 0);
+    }
+
+    #[test]
+    fn one_reading_serves_every_check_that_takes_it() {
+        let link = Arc::new(FakeNetworkLink::new());
+        link.set(Ok(Link::WiFi));
+        let mut reading = LinkReading::new(link.clone());
+        for _ in 0..3 {
+            let checked = check_location_rules(&[wired()], &mut reading).now_or_never();
+            assert_eq!(checked, Some(Err(UnmetCondition::NoLocationRuleHolds)));
+        }
+        assert_eq!(link.asked(), 1);
+    }
+
+    #[test]
+    fn a_link_the_platform_cannot_report_never_skips_a_run() {
+        let link = Arc::new(FakeNetworkLink::new());
+        link.set(Err(PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }));
+        let mut reading = LinkReading::new(link);
+        let checked = check_location_rules(&[wired()], &mut reading).now_or_never();
+        assert_eq!(checked, Some(Ok(())));
+    }
 
     /// How the wait for `network` ends, and at what monotonic time: time
     /// moves on a second at a time, for at most ten minutes of moves, so a

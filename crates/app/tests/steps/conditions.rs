@@ -6,7 +6,10 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use app::conditions::{NetworkWait, PowerCheck, WakeWatch, check_power, wait_for_network};
+use app::conditions::{
+    LinkReading, NetworkWait, PowerCheck, WakeWatch, check_location_rules, check_power,
+    wait_for_network,
+};
 use app::fakes::{FakeClock, FakeNetwork, FakePower};
 use app::ports::{Clock, PlatformError};
 use cucumber::{given, then, when};
@@ -30,6 +33,9 @@ pub struct ConditionsWorld {
     network: Arc<FakeNetwork>,
     schedule: Option<Schedule>,
     power_check: Option<PowerCheck>,
+    /// What the rules of the plan's locations said, when its repository
+    /// has the locations of `features/repositories/repository_locations.feature`.
+    rules_check: Option<Result<(), UnmetCondition>>,
     watch: Option<WakeWatch>,
     /// The wake the watch noticed, and how long after waking it did.
     noticed: Option<(Wake, SignedDuration)>,
@@ -49,6 +55,7 @@ impl Default for ConditionsWorld {
             network: Arc::new(FakeNetwork::new()),
             schedule: None,
             power_check: None,
+            rules_check: None,
             watch: None,
             noticed: None,
             network_up_after: None,
@@ -102,8 +109,12 @@ fn power_unknown(agent: &mut Agent) {
 #[when(expr = "the plan {string} is due")]
 async fn due(agent: &mut Agent, _plan: String) {
     let world = &mut agent.conditions;
-    let schedule = world.schedule.as_ref().expect("a plan");
-    world.power_check = Some(check_power(schedule, world.power.as_ref()).await);
+    let schedule = world.schedule.clone().unwrap_or_else(|| schedule(false));
+    world.power_check = Some(check_power(&schedule, world.power.as_ref()).await);
+    if let Some(rules) = agent.locations.plan_rules() {
+        let mut reading = LinkReading::new(agent.locations.link());
+        agent.conditions.rules_check = Some(check_location_rules(&rules, &mut reading).await);
+    }
 }
 
 fn power_check(agent: &Agent) -> &PowerCheck {
@@ -121,11 +132,26 @@ fn skipped_on_battery(agent: &mut Agent, _plan: String) {
     assert!(!check.lets_run());
 }
 
+#[then(expr = "the run of the plan {string} is skipped because no location's rule holds")]
+fn skipped_no_rule_holds(agent: &mut Agent, _plan: String) {
+    assert_eq!(
+        agent.conditions.rules_check,
+        Some(Err(UnmetCondition::NoLocationRuleHolds))
+    );
+}
+
+/// The plan's run starts: its conditions are met, and the rules of its
+/// locations, when it has any, don't skip it. A plan of the locations'
+/// scenarios then runs its backup.
 #[then(expr = "the plan {string} runs")]
-fn runs(agent: &mut Agent, _plan: String) {
+async fn runs(agent: &mut Agent, _plan: String) {
     let check = power_check(agent);
     assert_eq!(check, &PowerCheck::Met);
     assert!(check.lets_run());
+    if let Some(rules) = agent.conditions.rules_check {
+        assert_eq!(rules, Ok(()));
+        super::locations_steps::run_scheduled(agent).await;
+    }
 }
 
 #[then(expr = "the plan {string} runs, though the machine couldn't tell what powers it")]

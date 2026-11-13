@@ -618,6 +618,70 @@ async fn the_fake_network_meets_the_network_contract() {
     contract::network::run(&FakeNetworkHarness).await;
 }
 
+/// The fake network link, told what to say.
+struct FakeNetworkLinkHarness;
+
+impl FakeNetworkLinkHarness {
+    fn saying(
+        answer: Result<domain::planning::Link, app::ports::PlatformError>,
+    ) -> Arc<dyn app::ports::NetworkLink> {
+        let link = Arc::new(app::fakes::FakeNetworkLink::new());
+        link.set(answer);
+        link
+    }
+}
+
+impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
+    fn wired(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::Wired))
+    }
+
+    fn wired_reads_as(&self) -> domain::planning::Link {
+        domain::planning::Link::Wired
+    }
+
+    fn wifi(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::WiFi))
+    }
+
+    fn tunnel(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::Other))
+    }
+
+    fn no_route(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::NoRoute))
+    }
+
+    fn unrecognized(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Err(app::ports::PlatformError::Unrecognized {
+            from: "fake".to_owned(),
+            detail: "maybe".to_owned(),
+        }))
+    }
+
+    fn unreadable(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Err(app::ports::PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn the_fake_network_link_meets_the_network_link_contract() {
+    contract::network_link::run(&FakeNetworkLinkHarness).await;
+}
+
+#[tokio::test]
+async fn the_fake_network_link_counts_each_reading() {
+    let link = app::fakes::FakeNetworkLink::new();
+    assert_eq!(
+        app::ports::NetworkLink::link(&link).await,
+        Ok(domain::planning::Link::Wired)
+    );
+    assert_eq!(link.asked(), 1);
+}
+
 #[tokio::test]
 async fn the_fake_network_is_online_until_told_otherwise() {
     use app::ports::Network;

@@ -611,7 +611,10 @@ mod tests {
         assert_eq!(result(&failed), [used]);
 
         // A run whose choice used none names none.
-        failed.locations = vec![tried(1, "/srv/lan", "silent"), tried(2, "/srv/public", "silent")];
+        failed.locations = vec![
+            tried(1, "/srv/lan", "silent"),
+            tried(2, "/srv/public", "silent"),
+        ];
         assert_eq!(result(&failed), []);
     }
 

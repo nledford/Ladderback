@@ -22,8 +22,8 @@ use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::ports::{
-    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, ProbeAnswer,
-    RepositoryAccess, RunningJob, SavedEntry,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, NetworkLink,
+    ProbeAnswer, RepositoryAccess, RunningJob, SavedEntry,
 };
 use crate::repositories::RepositoryError;
 use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository};
@@ -68,6 +68,7 @@ pub struct Located {
 pub struct ChooseLocation {
     inner: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
+    link: Arc<dyn NetworkLink>,
     resolve: ResolveRepository,
     report: Arc<dyn Fn(LocationReport) + Send + Sync>,
     bound: SignedDuration,
@@ -79,17 +80,20 @@ type Probing = Arc<Mutex<Phase>>;
 impl ChooseLocation {
     /// Probes through `inner`, each probe bounded by
     /// [`LOCATION_PROBE_SECONDS`](domain::planning::LOCATION_PROBE_SECONDS)
-    /// on `clock`, resolves each location's references with `resolve` when
+    /// on `clock`, evaluates the locations' rules against `link`, read once
+    /// per choice, resolves each location's references with `resolve` when
     /// it is about to be probed, and tells `report` what the log says.
     pub fn new(
         inner: Arc<dyn Engine>,
         clock: Arc<dyn Clock>,
+        link: Arc<dyn NetworkLink>,
         resolve: ResolveRepository,
         report: Arc<dyn Fn(LocationReport) + Send + Sync>,
     ) -> Self {
         Self {
             inner,
             clock,
+            link,
             resolve,
             report,
             bound: SignedDuration::from_secs(LOCATION_PROBE_SECONDS),
@@ -211,6 +215,9 @@ impl ChooseLocation {
         phase: &Probing,
     ) -> Result<(LocationsRecord, Option<RepositoryAccess>), FailureReason> {
         let SavedEntry { alias, entry } = saved;
+        if entry.location_rules().iter().any(Option::is_some) {
+            todo!("the rules of decision 80, against {:p}", self.link)
+        }
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
@@ -236,6 +243,7 @@ impl ChooseLocation {
                     Ok(resolved) => {
                         let location = resolved.access;
                         if let Some(cause) = ExposedCredentials::of_location(&Location {
+                            when: None,
                             repository: location.repository.clone(),
                             repo_hot: location.repo_hot.clone(),
                             options: location.options.clone(),
@@ -555,7 +563,7 @@ mod tests {
     use domain::{Timestamp, Uuid};
 
     use super::*;
-    use crate::fakes::{FakeClock, FakeSecrets};
+    use crate::fakes::{FakeClock, FakeNetworkLink, FakeSecrets};
 
     const ID: &str = "4c6f636174696f6e73206f6620746865207265706f7369746f72792066697273";
 
@@ -608,7 +616,9 @@ mod tests {
         let entry = RepositoryConfig {
             settings: first,
             locations: Locations {
+                first_when: None,
                 further: vec![Location {
+                    when: None,
                     repository: "/srv/public".to_owned(),
                     repo_hot: None,
                     options: BTreeMap::new(),
@@ -631,6 +641,7 @@ mod tests {
         let choose = ChooseLocation::new(
             Arc::new(Holds(Arc::clone(&probed))),
             Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
             resolve,
             Arc::new(|_| {}),
         );
@@ -731,6 +742,7 @@ mod tests {
             entry: RepositoryConfig {
                 settings: first("/srv/lan", &[]),
                 locations: Locations {
+                    first_when: None,
                     further: further
                         .iter()
                         .map(|repository| Location {
@@ -749,6 +761,7 @@ mod tests {
         let tested = ChooseLocation::new(
             Arc::new(Holds(Arc::clone(&probed))),
             Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
             ResolveRepository::new(Arc::new(fake)),
             Arc::new(|_| {}),
         )

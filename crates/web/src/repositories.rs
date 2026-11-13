@@ -393,7 +393,9 @@ pub(crate) fn location_heading(position: u8) -> (MessageId, Vec<(&'static str, M
 /// What one option of a location reads as: by its name and set, with the
 /// references its value is made of, or saying the value is not shown. A
 /// value written in the configuration may be the secret itself (I4).
-pub(crate) fn location_option(option: &LocationOptionDto) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+pub(crate) fn location_option(
+    option: &LocationOptionDto,
+) -> (MessageId, Vec<(&'static str, MsgArg)>) {
     let named = [("name", text(&option.name)), ("set", text(&option.set))];
     match &option.reference {
         Some(reference) => (
@@ -407,7 +409,9 @@ pub(crate) fn location_option(option: &LocationOptionDto) -> (MessageId, Vec<(&'
 /// What a row's Test found at one location: its outcome, then, when the
 /// daemon named one, where a secret was looked for or the setting that
 /// can't be used, never a value.
-pub(crate) fn location_tested(tried: &LocationTriedDto) -> Vec<(MessageId, Vec<(&'static str, MsgArg)>)> {
+pub(crate) fn location_tested(
+    tried: &LocationTriedDto,
+) -> Vec<(MessageId, Vec<(&'static str, MsgArg)>)> {
     let outcome = ("outcome", text(&tried.outcome));
     let mut said = vec![(msg::UI_LOCATION_TESTED, vec![outcome.clone()])];
     if let Some(source) = &tried.source {
@@ -435,7 +439,10 @@ pub(crate) fn tested_announcement(
     tested: &[LocationTriedDto],
 ) -> (MessageId, Vec<(&'static str, MsgArg)>) {
     let count = |n: usize| MsgArg::Count(u64::try_from(n).unwrap_or(u64::MAX));
-    let answering = tested.iter().filter(|tried| tried.outcome == "used").count();
+    let answering = tested
+        .iter()
+        .filter(|tried| tried.outcome == "used")
+        .count();
     (
         msg::UI_REPOSITORY_LOCATIONS_TESTED,
         vec![
@@ -1177,10 +1184,7 @@ mod tests {
 
     #[test]
     fn a_rows_test_posts_to_the_route_that_probes_each_location() {
-        assert_eq!(
-            test_locations_path("nas"),
-            "/api/v1/repositories/nas/test"
-        );
+        assert_eq!(test_locations_path("nas"), "/api/v1/repositories/nas/test");
     }
 
     /// The row's Test and its list name the row, so each is told apart by
@@ -1217,7 +1221,10 @@ mod tests {
         assert_eq!(english_of(location_heading(1)), "Location 1, tried first");
         assert_eq!(
             location_heading(2),
-            (msg::UI_LOCATION_POSITION, vec![("position", MsgArg::Count(2))])
+            (
+                msg::UI_LOCATION_POSITION,
+                vec![("position", MsgArg::Count(2))]
+            )
         );
         assert_eq!(english_of(location_heading(2)), "Location 2");
     }
@@ -1296,7 +1303,10 @@ mod tests {
             "location-too-many-credentials",
         ] {
             let [said] = english(outcome).try_into().expect("one sentence");
-            assert!(seen.insert(said.clone()), "{outcome} reads as another: {said}");
+            assert!(
+                seen.insert(said.clone()),
+                "{outcome} reads as another: {said}"
+            );
         }
         let [unknown] = english("a-later-outcome").try_into().expect("one sentence");
         assert_eq!(unknown, "Could not be used.");
@@ -1367,7 +1377,10 @@ mod tests {
             "Tested nas: 1 of its 2 locations answers and holds the repository."
         );
         assert_eq!(
-            english_of(tested_announcement("nas", &[tried(1, "used", None), tried(2, "used", None)])),
+            english_of(tested_announcement(
+                "nas",
+                &[tried(1, "used", None), tried(2, "used", None)]
+            )),
             "Tested nas: 2 of its 2 locations answer and hold the repository."
         );
     }

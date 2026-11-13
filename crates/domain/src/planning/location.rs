@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use super::repository::Place;
-use super::{InvalidValue, RepositoryConfig, RepositorySettings, ValueKind, masked_options};
+use super::{
+    InvalidValue, LocationRule, RepositoryConfig, RepositorySettings, ValueKind, masked_options,
+};
 use crate::secrets::{
     REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
     location_secret_written,
@@ -36,6 +38,8 @@ pub struct Location {
     pub options: BTreeMap<String, String>,
     pub options_hot: BTreeMap<String, String>,
     pub options_cold: BTreeMap<String, String>,
+    /// When the location may be tried; `None` is always.
+    pub when: Option<LocationRule>,
 }
 
 impl Location {
@@ -47,6 +51,7 @@ impl Location {
             options: settings.options.clone(),
             options_hot: settings.options_hot.clone(),
             options_cold: settings.options_cold.clone(),
+            when: None,
         }
     }
 
@@ -146,6 +151,7 @@ impl fmt::Debug for Location {
             .field("options", &masked_options(&self.options))
             .field("options_hot", &masked_options(&self.options_hot))
             .field("options_cold", &masked_options(&self.options_cold))
+            .field("when", &self.when)
             .finish()
     }
 }
@@ -154,6 +160,8 @@ impl fmt::Debug for Location {
 /// for a repository reached at one location, which is unchanged in every way.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Locations {
+    /// The first location's rule: its `when` is in the repository's table.
+    pub first_when: Option<LocationRule>,
     pub further: Vec<Location>,
 }
 
@@ -263,6 +271,34 @@ impl RepositoryConfig {
                     .iter()
                     .map(|location| location.with_password(self.settings.password.clone())),
             )
+            .collect()
+    }
+
+    /// Each location's rule, in order, the first included; `None` for a
+    /// location with no rule.
+    pub fn location_rules(&self) -> Vec<Option<&LocationRule>> {
+        std::iter::once(self.locations.first_when.as_ref())
+            .chain(
+                self.locations
+                    .further
+                    .iter()
+                    .map(|location| location.when.as_ref()),
+            )
+            .collect()
+    }
+
+    /// Whether a job's location is chosen before it opens the repository:
+    /// when there are several, or when one has a rule.
+    pub fn chooses_location(&self) -> bool {
+        self.has_several_locations() || self.location_rules().iter().any(Option::is_some)
+    }
+
+    /// The positions, from 1, of the locations that have a rule.
+    pub fn ruled_positions(&self) -> Vec<u8> {
+        self.location_rules()
+            .into_iter()
+            .zip(1u8..)
+            .filter_map(|(rule, position)| rule.map(|_| position))
             .collect()
     }
 
@@ -459,6 +495,7 @@ mod tests {
         RepositoryConfig {
             settings: location(first, &[]).with_password(SecretRef::Env("PW".to_owned())),
             locations: Locations {
+                first_when: None,
                 further: further
                     .iter()
                     .map(|address| location(address, &[]))

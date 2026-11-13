@@ -79,6 +79,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::OnFailure => "on-failure",
             ValueKind::HookCommand => "hook-command",
             ValueKind::Location => "location",
+            ValueKind::LocationRule => "location rule",
             ValueKind::OptionValue => "option-value",
             ValueKind::Options => "options",
             ValueKind::HookProgram => "hook-program",

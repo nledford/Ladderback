@@ -402,6 +402,7 @@ fn further_locations(
             options: options.unwrap_or_default(),
             options_hot: options_hot.unwrap_or_default(),
             options_cold: options_cold.unwrap_or_default(),
+            when: None,
         };
         // The password is the repository's, and was checked at its key.
         relative_path(
@@ -411,7 +412,10 @@ fn further_locations(
         )?;
         further.push(location);
     }
-    Ok(Locations { further })
+    Ok(Locations {
+        first_when: None,
+        further,
+    })
 }
 
 /// What a relative path a repository's settings name is refused as.

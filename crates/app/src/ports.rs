@@ -42,7 +42,7 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Recovered, Start, StoreError, maintained_repository,
 };
-pub use platform::{Network, PlatformError, PowerSupply};
+pub use platform::{Network, NetworkLink, PlatformError, PowerSupply};
 pub use profiles::{
     ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
     ProfileReader, ProfileWriter, RenderedProfile,

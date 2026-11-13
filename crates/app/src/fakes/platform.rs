@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use domain::execution::conditions::PowerSource;
+use domain::planning::Link;
 
-use crate::ports::{Network, PlatformError, PowerSupply};
+use crate::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 
 /// One scripted answer, and how often it was asked for.
 struct Scripted<T> {
@@ -98,5 +99,37 @@ impl Default for FakeNetwork {
 impl Network for FakeNetwork {
     async fn is_online(&self) -> Result<bool, PlatformError> {
         self.0.ask()
+    }
+}
+
+/// A network link that reports what it was set to: wired at first.
+pub struct FakeNetworkLink(Scripted<Link>);
+
+impl FakeNetworkLink {
+    pub fn new() -> Self {
+        Self(Scripted::new(Link::Wired))
+    }
+
+    /// What every later [`link`](NetworkLink::link) call answers.
+    pub fn set(&self, answer: Result<Link, PlatformError>) {
+        self.0.set(answer);
+    }
+
+    /// How many times the link was read.
+    pub fn asked(&self) -> usize {
+        self.0.asked()
+    }
+}
+
+impl Default for FakeNetworkLink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl NetworkLink for FakeNetworkLink {
+    async fn link(&self) -> Result<Link, PlatformError> {
+        todo!("{}", self.0.asked())
     }
 }

@@ -125,6 +125,10 @@ pub enum FailureReason {
     /// another one, or a secret of it was unavailable. The operation's
     /// locations say why, by position.
     NoLocationUsable,
+    /// No location's rule held when the job started (decision 80): each
+    /// rule wasn't met on the machine's network link, or couldn't be
+    /// evaluated. The operation's locations say which, by position.
+    NoLocationRuleHolds,
     /// The repository's password opened nothing at any location tried
     /// (decision 80): a wrong password is the likelier cause.
     PasswordNotAccepted,
@@ -150,6 +154,7 @@ impl FailureReason {
             Self::RepositoryNotFound => "repository-not-found",
             Self::DaemonStopped => "daemon-stopped",
             Self::NoLocationUsable => "no-location-usable",
+            Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
         }
     }

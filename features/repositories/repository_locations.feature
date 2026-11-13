@@ -7,9 +7,11 @@ Feature: A repository reached at several locations
   be used is skipped without a warning, since its address may be someone
   else's on this network; a location that holds another repository, or whose
   secret can't be read, is a warning. Each location keeps its own options and
-  credentials, and a job carries only the location it uses (I4). The operation
-  records which location it used and why each earlier one was skipped, by
-  position and outcome, never by a network's name (decision 80).
+  credentials, and a job carries only the location it uses (I4). A location
+  may carry a rule about the network link the machine is on: it is tried
+  only when its rule holds, and a rule that can't be evaluated doesn't hold.
+  The operation records which location it used and why each earlier one was
+  skipped, by position and outcome, never by a network's name (decision 80).
 
   Background:
     Given a repository "nas" that records its repository ID, with the locations "lan" and "public", in that order
@@ -64,6 +66,103 @@ Feature: A repository reached at several locations
       Then the operation used the location "public"
       And the operation warns that the location "lan" couldn't be tried because a secret was unavailable
       And the warning names the source and never a value
+
+  Rule: A location is tried only when its rule holds
+
+    Scenario: A location whose rule doesn't hold is skipped
+      Given the location "lan" is eligible only on a wired network
+      And the machine is on Wi-Fi
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation says the location "lan" was skipped because its rule didn't hold
+      And the location "lan" was never probed
+      And the operation has no warnings
+
+    Scenario: A location whose rule holds is probed and used
+      Given the location "lan" is eligible only on a wired network
+      And the machine is on a wired network
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+    Scenario: A location whose rule held and that doesn't answer is a warning
+      Given the location "lan" is eligible only on a wired network
+      And the machine is on a wired network
+      And the location "lan" doesn't answer
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation ends as succeeded with warnings
+      And the operation warns that the location "lan" was skipped though its rule held
+
+    Scenario: A rule that can't be evaluated doesn't hold
+      Given the location "lan" is eligible only on a wired network
+      And the machine can't tell what kind of network it is on
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation says the location "lan" was skipped because its rule couldn't be evaluated
+
+    Scenario: A rule holds when any of its alternatives does
+      Given the location "lan" is eligible on a wired network or on any Wi-Fi network
+      And the machine is on Wi-Fi
+      When the plan "home" runs
+      Then the location "lan" is probed
+
+    Scenario: A person's Test says a location's rule didn't hold, without probing it
+      Given the location "lan" is eligible only on a wired network
+      And the machine is on Wi-Fi
+      When a person tests the locations of the repository "nas"
+      Then the test says the location "lan" was skipped because its rule didn't hold
+      And the location "lan" was never probed
+      And the test says the location "public" answered
+
+  Rule: A run whose locations' rules all fail to hold is skipped or fails
+
+    Scenario: A scheduled run is skipped when every location has a rule and none is known to hold
+      Given both locations are eligible only on a wired network
+      And the machine is on Wi-Fi
+      When the plan "home" is due
+      Then the run of the plan "home" is skipped because no location's rule holds
+      And no operation is recorded
+
+    Scenario: A scheduled run still starts when a rule can't be evaluated, and fails where it is seen
+      Given the plan "home" retries up to 3 times
+      And both locations are eligible only on a wired network
+      And the machine can't tell what kind of network it is on
+      When the plan "home" is due
+      Then the plan "home" runs
+      And the operation ends as failed with the reason "no location's rule holds"
+      And a retry of the plan "home" is scheduled
+
+    Scenario: A run that waited in the queue while the network changed fails when it starts
+      Given both locations are eligible only on a wired network
+      And a run of the plan "home" is queued while the machine is on a wired network
+      When the machine moves to Wi-Fi before the run starts
+      Then the operation ends as failed with the reason "no location's rule holds"
+
+    Scenario: A manual run fails when no location's rule holds
+      Given both locations are eligible only on a wired network
+      And the machine is on Wi-Fi
+      When a person runs the plan "home" now
+      Then the operation ends as failed with the reason "no location's rule holds"
+      And the operation names each location and why its rule didn't hold
+
+    Scenario: A rule on a repository of one location is honoured
+      Given a repository "solo" with one location that is eligible only on a wired network
+      And the machine is on Wi-Fi
+      When a person runs a backup of "solo" now
+      Then the operation ends as failed with the reason "no location's rule holds"
+      And no location was probed
+
+    Scenario: A repository of one location whose rule holds is opened without a probe
+      Given a repository "solo" with one location that is eligible only on a wired network
+      And the machine is on a wired network
+      When a person runs a backup of "solo" now
+      Then the operation ends as succeeded
+      And no location was probed
+      And the repository was opened at the location "solo" only
 
   Rule: A run that finds no usable location fails, and only a scheduled one is retried
 

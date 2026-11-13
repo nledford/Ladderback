@@ -2,18 +2,21 @@
 //! repository "nas" reached at the locations "lan" and "public", a scripted
 //! engine that answers each location's probe as the scenario says, and the
 //! choice of location in front of it, with the fake clock that jumps to each
-//! probe's bound.
+//! probe's bound, and the machine's network link the locations' rules are
+//! evaluated against.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use app::conditions::{LinkReading, check_location_rules};
 use app::execution::RunOperation;
-use app::fakes::{FakeRetention, FakeSecrets, InMemoryConfigStore};
+use app::fakes::{FakeNetworkLink, FakeRetention, FakeSecrets, InMemoryConfigStore};
 use app::locations::{ChooseLocation, LocationReport};
 use app::maintenance::{MaintenanceKind, RunMaintenance};
 use app::ports::{
     BackupJob, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
-    NormalizeSources, ProbeAnswer, RepositoryAccess, RunningJob, SourcesError,
+    NormalizeSources, PlatformError, ProbeAnswer, RepositoryAccess, RunningJob, SavedEntry,
+    SourcesError,
 };
 use app::secrets::ResolveRepository;
 use async_trait::async_trait;
@@ -23,8 +26,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, Hooks, Location, LocationWarning, Locations, Maintenance, Plan,
-    RepositoryConfig, RepositorySettings, Source, SourceFilter,
+    AgentConfig, AgentSettings, Hooks, Link, Location, LocationRule, LocationWarning, Locations,
+    Maintenance, NetworkKind, Plan, RepositoryConfig, RepositorySettings, Source, SourceFilter,
 };
 use domain::secrets::SecretRef;
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Uuid};
@@ -72,6 +75,11 @@ pub struct LocationsWorld {
     /// comes from a variable.
     pending_credentials: Option<String>,
     retention: Arc<Mutex<Vec<RepositoryAccess>>>,
+    /// The machine's network link, which the locations' rules are
+    /// evaluated against.
+    link: Arc<FakeNetworkLink>,
+    /// What a person's Test of the locations found.
+    tested: Option<LocationsRecord>,
 }
 
 impl std::fmt::Debug for LocationsWorld {
@@ -154,6 +162,7 @@ impl LocationsWorld {
         let entry = self.nas();
         if entry.settings.repository == address {
             let mut first = Location {
+                when: entry.locations.first_when.clone(),
                 repository: entry.settings.repository.clone(),
                 repo_hot: entry.settings.repo_hot.clone(),
                 options: entry.settings.options.clone(),
@@ -166,6 +175,7 @@ impl LocationsWorld {
             entry.settings.options = first.options;
             entry.settings.options_hot = first.options_hot;
             entry.settings.options_cold = first.options_cold;
+            entry.locations.first_when = first.when;
             return;
         }
         let location = entry
@@ -197,6 +207,7 @@ impl LocationsWorld {
                 jobs: Arc::clone(&self.jobs),
             }),
             agent_clock,
+            self.link.clone(),
             ResolveRepository::new(self.secrets.clone()),
             Arc::new(move |report| {
                 reports
@@ -259,6 +270,35 @@ impl LocationsWorld {
             .locations()
             .expect("the operation records its locations")
     }
+
+    /// The rules of the locations of "nas", in order, when the scenario has
+    /// it: the plan "home" backs up to it.
+    pub(super) fn plan_rules(&self) -> Option<Vec<Option<LocationRule>>> {
+        self.entries.get(NAS).map(|entry| {
+            entry
+                .location_rules()
+                .into_iter()
+                .map(Option::<&LocationRule>::cloned)
+                .collect()
+        })
+    }
+
+    /// The machine's network link.
+    pub(super) fn link(&self) -> Arc<FakeNetworkLink> {
+        self.link.clone()
+    }
+}
+
+/// A rule of `kinds`, in order.
+fn rule(kinds: &[NetworkKind]) -> LocationRule {
+    LocationRule::new(kinds.to_vec()).expect("a rule")
+}
+
+/// Sets what the machine's network link reads as, for the locations' rules
+/// and the scheduler's alike.
+fn machine_on(agent: &mut Agent, answer: Result<Link, PlatformError>) {
+    agent.locations.link.set(answer.clone());
+    agent.scheduler.link().set(answer);
 }
 
 /// An engine that answers each location's probe as the scenario says, and
@@ -428,10 +468,10 @@ async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
 /// The outcome a scenario's words name.
 fn outcome(reason: &str) -> LocationOutcome {
     match reason {
-        "didn't answer" => LocationOutcome::Silent,
-        "refused its credentials" => LocationOutcome::Refused,
-        "held no repository" => LocationOutcome::NotARepository,
-        "didn't accept the repository's password" => LocationOutcome::PasswordNotAccepted,
+        "it didn't answer" => LocationOutcome::Silent,
+        "it refused its credentials" => LocationOutcome::Refused,
+        "it held no repository" => LocationOutcome::NotARepository,
+        "it didn't accept the repository's password" => LocationOutcome::PasswordNotAccepted,
         "its rule didn't hold" => LocationOutcome::RuleNotMet,
         "its rule couldn't be evaluated" => LocationOutcome::RuleUnknown,
         other => panic!("no outcome is called {other:?}"),
@@ -460,6 +500,7 @@ fn repository_with_locations(agent: &mut Agent, name: String, first: String, sec
         RepositoryConfig {
             settings: settings(&address_of(&first)),
             locations: Locations {
+                first_when: None,
                 further: vec![Location {
                     repository: address_of(&second),
                     ..Location::default()
@@ -641,6 +682,11 @@ async fn person_runs_plan(agent: &mut Agent, plan: String) {
     run_backup(agent, NAS, Trigger::Manual).await;
 }
 
+#[when(expr = "a person runs a backup of {string} now")]
+async fn person_runs_backup(agent: &mut Agent, repository: String) {
+    run_backup(agent, &repository, Trigger::Manual).await;
+}
+
 #[when(expr = "a backup of {string} runs")]
 async fn backup_runs(agent: &mut Agent, repository: String) {
     run_backup(agent, &repository, Trigger::Schedule).await;
@@ -729,7 +775,7 @@ fn shows_not_tried(agent: &mut Agent, name: String) {
     assert_eq!(tried.outcome, LocationOutcome::NotTried);
 }
 
-#[then(regex = r#"^the operation says the location "([^"]+)" was skipped because it (.+)$"#)]
+#[then(regex = r#"^the operation says the location "([^"]+)" was skipped because (.+)$"#)]
 fn says_skipped(agent: &mut Agent, name: String, reason: String) {
     let world = &agent.locations;
     let tried = world
@@ -927,8 +973,7 @@ fn canary_nowhere(agent: &mut Agent) {
 
 #[then("no location was probed")]
 fn none_probed(agent: &mut Agent) {
-    assert!(agent.locations.probes().is_empty());
-    assert!(!agent.locations.opens().is_empty(), "the job ran");
+    assert_eq!(agent.locations.probes(), Vec::new());
 }
 
 #[then("the operation records no location")]
@@ -1011,4 +1056,168 @@ fn log_warns_plain_http(agent: &mut Agent, position: u8) {
     );
     let shown = format!("{reports:?}");
     assert!(!shown.contains("canary-pass"), "{shown}");
+}
+
+#[given(expr = "the location {string} is eligible only on a wired network")]
+fn eligible_wired(agent: &mut Agent, name: String) {
+    agent.locations.change_location(&name, |location| {
+        location.when = Some(rule(&[NetworkKind::Wired]))
+    });
+}
+
+#[given("both locations are eligible only on a wired network")]
+fn both_eligible_wired(agent: &mut Agent) {
+    for name in ["lan", "public"] {
+        agent.locations.change_location(name, |location| {
+            location.when = Some(rule(&[NetworkKind::Wired]))
+        });
+    }
+}
+
+#[given(expr = "the location {string} is eligible on a wired network or on any Wi-Fi network")]
+fn eligible_wired_or_wifi(agent: &mut Agent, name: String) {
+    agent.locations.change_location(&name, |location| {
+        location.when = Some(rule(&[NetworkKind::Wired, NetworkKind::WiFi]));
+    });
+}
+
+#[given(expr = "a repository {string} with one location that is eligible only on a wired network")]
+fn one_location_eligible_wired(agent: &mut Agent, name: String) {
+    repository_with_one_location(agent, name.clone());
+    let entry = agent
+        .locations
+        .entries
+        .get_mut(&name)
+        .expect("the repository");
+    entry.locations.first_when = Some(rule(&[NetworkKind::Wired]));
+}
+
+#[given("the machine is on Wi-Fi")]
+fn on_wifi(agent: &mut Agent) {
+    machine_on(agent, Ok(Link::WiFi));
+}
+
+#[given("the machine is on a wired network")]
+fn on_wired(agent: &mut Agent) {
+    machine_on(agent, Ok(Link::Wired));
+}
+
+#[given("the machine can't tell what kind of network it is on")]
+fn link_unknown(agent: &mut Agent) {
+    machine_on(
+        agent,
+        Err(PlatformError::Unreadable {
+            from: "the demo machine".to_owned(),
+            detail: "nothing to read".to_owned(),
+        }),
+    );
+}
+
+#[given(expr = "a run of the plan {string} is queued while the machine is on a wired network")]
+async fn queued_on_wired(agent: &mut Agent, plan: String) {
+    assert_eq!(plan, PLAN);
+    machine_on(agent, Ok(Link::Wired));
+    let rules = agent.locations.plan_rules().expect("the repository nas");
+    let mut reading = LinkReading::new(agent.locations.link());
+    assert_eq!(check_location_rules(&rules, &mut reading).await, Ok(()));
+}
+
+#[when("the machine moves to Wi-Fi before the run starts")]
+async fn moves_to_wifi(agent: &mut Agent) {
+    machine_on(agent, Ok(Link::WiFi));
+    run_backup(agent, NAS, Trigger::Schedule).await;
+}
+
+/// Runs the backup of the plan "home" the scheduler started.
+pub(super) async fn run_scheduled(agent: &mut Agent) {
+    run_backup(agent, NAS, Trigger::Schedule).await;
+}
+
+#[when(expr = "a person tests the locations of the repository {string}")]
+async fn person_tests(agent: &mut Agent, repository: String) {
+    let world = &agent.locations;
+    let saved = SavedEntry {
+        alias: alias(&repository),
+        entry: world.entries[&repository].clone(),
+    };
+    let tested = world
+        .engine(agent.clock.clone())
+        .test_each(OperationId::from_uuid(Uuid::from_u128(0x0600)), &saved)
+        .await
+        .expect("the test runs");
+    agent.locations.tested = Some(tested);
+}
+
+fn tested_outcome(agent: &Agent, name: &str) -> LocationOutcome {
+    let world = &agent.locations;
+    world
+        .tested
+        .as_ref()
+        .expect("a person tested the locations")
+        .at(world.position(name))
+        .expect("the location")
+        .outcome
+}
+
+#[then(regex = r#"^the test says the location "([^"]+)" was skipped because (.+)$"#)]
+fn test_says_skipped(agent: &mut Agent, name: String, reason: String) {
+    assert_eq!(tested_outcome(agent, &name), outcome(&reason));
+}
+
+#[then(expr = "the test says the location {string} answered")]
+fn test_says_answered(agent: &mut Agent, name: String) {
+    assert_eq!(tested_outcome(agent, &name), LocationOutcome::Used);
+}
+
+#[then(expr = "the location {string} was never probed")]
+fn never_probed(agent: &mut Agent, name: String) {
+    let address = &agent.locations.addresses[&name];
+    let probes = agent.locations.probes();
+    assert!(
+        probes.iter().all(|probe| &probe.repository != address),
+        "{name} was probed: {probes:?}"
+    );
+}
+
+#[then(expr = "the location {string} is probed")]
+fn is_probed(agent: &mut Agent, name: String) {
+    let address = &agent.locations.addresses[&name];
+    assert!(
+        agent
+            .locations
+            .probes()
+            .iter()
+            .any(|probe| &probe.repository == address),
+        "{name} was never probed"
+    );
+}
+
+#[then(expr = "the operation warns that the location {string} was skipped though its rule held")]
+fn warns_skipped_though_held(agent: &mut Agent, name: String) {
+    let warning = skipped_warning(agent, &name);
+    assert_eq!(warning.detail, LocationOutcome::Silent.code());
+}
+
+#[then("the operation names each location and why its rule didn't hold")]
+fn names_each_rule(agent: &mut Agent) {
+    let outcomes: Vec<(u8, LocationOutcome)> = agent
+        .locations
+        .record()
+        .locations
+        .iter()
+        .map(|tried| (tried.position, tried.outcome))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (1, LocationOutcome::RuleNotMet),
+            (2, LocationOutcome::RuleNotMet)
+        ]
+    );
+}
+
+#[then("no operation is recorded")]
+fn no_operation(agent: &mut Agent) {
+    assert_eq!(agent.locations.operations.len(), 0);
+    assert!(agent.locations.jobs().is_empty());
 }

@@ -205,6 +205,7 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
+        FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
     };
     Ok(FailureColumns {
@@ -259,6 +260,7 @@ pub(crate) fn decode_failure(
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "no-location-usable" => Ok(FailureReason::NoLocationUsable),
+        "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "hook-failed" => Ok(FailureReason::HookFailed {
             exit_code: exit_code(&args)?,

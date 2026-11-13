@@ -1327,6 +1327,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::RepositoryTimedOut
                 | ErrorCode::DaemonStopped
                 | ErrorCode::NoLocationUsable
+                | ErrorCode::NoLocationRuleHolds
                 | ErrorCode::PasswordNotAccepted
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed

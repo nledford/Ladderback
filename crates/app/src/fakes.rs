@@ -26,7 +26,7 @@ pub use event_bus::InMemoryEventBus;
 pub use hooks::{FakeHookRunner, HookCall, Scripted};
 pub use notifier::RecordingNotifier;
 pub use operation_store::InMemoryOperationStore;
-pub use platform::{FakeNetwork, FakePower};
+pub use platform::{FakeNetwork, FakeNetworkLink, FakePower};
 pub use profiles::{FakeProfileReader, FakeProfileWriter};
 pub use random::SeededRandom;
 pub use retention::FakeRetention;

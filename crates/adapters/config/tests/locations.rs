@@ -9,7 +9,10 @@ use std::path::Path;
 use app::ports::{ConfigStore, Problem};
 use config_adapter::render;
 use domain::RepositoryAlias;
-use domain::planning::{AgentConfig, AgentSettings, Concurrency, ValueKind, Violation};
+use domain::planning::{
+    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_RULE_ALTERNATIVES, NetworkKind,
+    ValueKind, Violation,
+};
 use support::*;
 
 const ID: &str = "4c6f636174696f6e73206f6620746865207265706f7369746f72792066697273";
@@ -179,4 +182,71 @@ async fn a_save_keeps_what_a_location_table_says_as_written() {
         "{saved}"
     );
     assert_eq!(store.load().await.expect("loaded again"), changed);
+}
+
+#[test]
+fn each_locations_rule_is_read_in_order_and_written_back() {
+    let text = nas(&format!(
+        "when = [ {{ network = \"wired\" }} ]\n{}when = [ {{ network = \"wifi\" }}, {{ network = \"wired\" }} ]\n{}",
+        location("rest:https://backup.example.net/r"),
+        location("/srv/usb"),
+    ));
+    let config = parsed(&text).expect("read").config;
+    let entry = &config.repositories()[&RepositoryAlias::parse("nas").expect("an alias")];
+    let kinds = |rule: Option<&LocationRule>| rule.map(|rule| rule.alternatives().to_vec());
+    assert_eq!(
+        kinds(entry.locations.first_when.as_ref()),
+        Some(vec![NetworkKind::Wired])
+    );
+    assert_eq!(
+        kinds(entry.locations.further[0].when.as_ref()),
+        Some(vec![NetworkKind::WiFi, NetworkKind::Wired])
+    );
+    assert_eq!(kinds(entry.locations.further[1].when.as_ref()), None);
+    let written = render(Path::new(FILE), &config).expect("written");
+    assert_eq!(parsed(&written).expect("read back").config, config);
+}
+
+#[test]
+fn a_rule_on_a_repository_of_one_location_needs_no_recorded_id() {
+    let text = "schema = 1\n\n[repositories.solo]\nrepository = \"/srv/solo\"\npassword-env = \"PW\"\nwhen = [ { network = \"wifi\" } ]\n";
+    let config = parsed(text).expect("read").config;
+    let entry = &config.repositories()[&RepositoryAlias::parse("solo").expect("an alias")];
+    assert!(entry.locations.first_when.is_some());
+    assert!(entry.locations.further.is_empty());
+}
+
+#[test]
+fn a_rule_that_is_empty_too_long_or_of_an_unknown_network_is_refused_at_its_key() {
+    let nine = vec!["{ network = \"wifi\" }"; MAX_RULE_ALTERNATIVES + 1].join(", ");
+    for (extra, key) in [
+        ("when = []\n".to_owned(), "repositories.nas.when"),
+        (format!("when = [ {nine} ]\n"), "repositories.nas.when"),
+        (
+            "when = [ { network = \"ethernet\" } ]\n".to_owned(),
+            "repositories.nas.when[0].network",
+        ),
+        (
+            format!(
+                "{}when = [ {{ network = \"Wired\" }} ]\n",
+                location("/srv/public")
+            ),
+            "repositories.nas.locations[0].when[0].network",
+        ),
+    ] {
+        let error = invalid(parsed(&nas(&extra)));
+        assert_eq!(
+            (error.key.as_deref(), error.problem),
+            (Some(key), Problem::Value(ValueKind::LocationRule)),
+            "{extra}"
+        );
+    }
+    // An alternative takes `network` and, from part 3, its lists: nothing
+    // else.
+    let error = invalid(parsed(&nas(
+        "when = [ { network = \"wifi\", ssid = \"Office\" } ]\n",
+    )));
+    assert_eq!(error.problem, Problem::UnknownKey);
+    let error = invalid(parsed(&nas("when = [ { } ]\n")));
+    assert_eq!(error.problem, Problem::MissingKey);
 }

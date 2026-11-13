@@ -11,10 +11,13 @@ use std::time::{Duration, Instant};
 
 use app::contract;
 use app::contract::network::NetworkHarness;
+use app::contract::network_link::NetworkLinkHarness;
 use app::contract::power::PowerHarness;
-use app::ports::{Network, PlatformError, PowerSupply};
+use app::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 use domain::execution::conditions::PowerSource;
+use domain::planning::Link;
 use platform::network::{ScutilNetwork, SysfsNetwork};
+use platform::network_link::{KernelLink, RouteLink};
 use platform::power::{PmsetPower, SysfsPower};
 
 /// A short bound for the stand-ins that hang, so the test doesn't.
@@ -746,4 +749,319 @@ async fn the_system_sources_are_this_platforms() {
 async fn the_system_network_is_this_platforms() {
     let network = platform::network::system_network().is_online().await;
     assert!(network.is_ok(), "{network:?}");
+}
+
+/// The kernel's routing tables and `/sys/class/net`, made up, one machine
+/// per call: each interface a folder under `devices/`, linked from `net/` as
+/// the kernel links it, a virtual one under `devices/virtual/net/`.
+struct KernelLinkHarness {
+    scratch: tempfile::TempDir,
+    machines: AtomicUsize,
+}
+
+/// One made-up interface: its name, whether it is virtual, its attributes,
+/// and the folders in it (`phy80211`, `wireless`).
+type Interface<'a> = (&'a str, bool, &'a [(&'a str, &'a str)], &'a [&'a str]);
+
+const ROUTE_HEADER: &str =
+    "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT";
+
+/// An IPv4 default route out of `interface` at `metric`, with a route to its
+/// own subnet beside it.
+fn default_route(interface: &str, metric: u32) -> String {
+    format!(
+        "{ROUTE_HEADER}\n{interface}\t0001A8C0\t00000000\t0001\t0\t0\t{metric}\t00FFFFFF\t0\t0\t0\n\
+         {interface}\t00000000\t0101A8C0\t0003\t0\t0\t{metric}\t00000000\t0\t0\t0\n"
+    )
+}
+
+/// IPv6's unreachable default, which every Linux machine lists, out of `lo`.
+const IPV6_UNREACHABLE: &str = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo\n";
+
+const ETH0: Interface<'static> = ("eth0", false, &[("type", "1")], &[]);
+const WLAN0: Interface<'static> = ("wlp2s0", false, &[("type", "1")], &["phy80211"]);
+const TUN0: Interface<'static> = ("tun0", true, &[("type", "65534")], &[]);
+const BRIDGE: Interface<'static> = ("br0", true, &[("type", "1")], &["bridge"]);
+
+impl KernelLinkHarness {
+    fn new() -> Self {
+        Self {
+            scratch: tempfile::tempdir().expect("a scratch folder"),
+            machines: AtomicUsize::new(0),
+        }
+    }
+
+    fn machine(
+        &self,
+        route: &str,
+        ipv6_route: Option<&str>,
+        interfaces: &[Interface<'_>],
+    ) -> Arc<dyn NetworkLink> {
+        let number = self.machines.fetch_add(1, Ordering::Relaxed);
+        let root = self.scratch.path().join(number.to_string());
+        let net = root.join("net");
+        std::fs::create_dir_all(&net).expect("a class folder");
+        for (name, is_virtual, attributes, folders) in interfaces {
+            let device = if *is_virtual {
+                root.join("devices/virtual/net").join(name)
+            } else {
+                root.join("devices/pci0000:00/0000:00:1f.6/net").join(name)
+            };
+            std::fs::create_dir_all(&device).expect("an interface");
+            for (attribute, value) in *attributes {
+                std::fs::write(device.join(attribute), format!("{value}\n")).expect("an attribute");
+            }
+            for folder in *folders {
+                std::fs::create_dir(device.join(folder)).expect("a folder");
+            }
+            let relative = device.strip_prefix(&root).expect("under the machine");
+            std::os::unix::fs::symlink(Path::new("..").join(relative), net.join(name))
+                .expect("a link");
+        }
+        std::fs::write(root.join("route"), route).expect("the IPv4 routes");
+        if let Some(text) = ipv6_route {
+            std::fs::write(root.join("ipv6_route"), text).expect("the IPv6 routes");
+        }
+        Arc::new(KernelLink::at(
+            root.join("route"),
+            root.join("ipv6_route"),
+            net,
+        ))
+    }
+}
+
+impl NetworkLinkHarness for KernelLinkHarness {
+    fn wired(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &default_route("eth0", 100),
+            Some(IPV6_UNREACHABLE),
+            &[ETH0, WLAN0],
+        )
+    }
+
+    fn wired_reads_as(&self) -> Link {
+        Link::Wired
+    }
+
+    fn wifi(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &default_route("wlp2s0", 600),
+            Some(IPV6_UNREACHABLE),
+            &[ETH0, WLAN0],
+        )
+    }
+
+    fn tunnel(&self) -> Arc<dyn NetworkLink> {
+        self.machine(&default_route("tun0", 50), None, &[ETH0, TUN0])
+    }
+
+    fn no_route(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &format!("{ROUTE_HEADER}\n"),
+            Some(IPV6_UNREACHABLE),
+            &[ETH0],
+        )
+    }
+
+    fn unrecognized(&self) -> Arc<dyn NetworkLink> {
+        self.machine(&format!("{ROUTE_HEADER}\neth0\tdefault\n"), None, &[ETH0])
+    }
+
+    fn unreadable(&self) -> Arc<dyn NetworkLink> {
+        let root = self.scratch.path().join("unreadable");
+        std::fs::create_dir_all(root.join("route")).expect("a folder where the routes should be");
+        Arc::new(KernelLink::at(
+            root.join("route"),
+            root.join("ipv6_route"),
+            root.join("net"),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn the_kernels_routes_and_interfaces_meet_the_network_link_contract() {
+    contract::network_link::run(&KernelLinkHarness::new()).await;
+}
+
+#[tokio::test]
+async fn the_kernel_with_no_default_route_says_no_route() {
+    let harness = KernelLinkHarness::new();
+    assert_eq!(harness.no_route().link().await, Ok(Link::NoRoute));
+    // A machine with IPv6 switched off has no IPv6 table at all.
+    let link = harness.machine(&format!("{ROUTE_HEADER}\n"), None, &[ETH0]);
+    assert_eq!(link.link().await, Ok(Link::NoRoute));
+}
+
+#[tokio::test]
+async fn the_default_route_of_lowest_metric_in_either_family_is_the_link() {
+    let harness = KernelLinkHarness::new();
+    let ipv6_wired = format!(
+        "00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000064 00000001 00000000 00000003     eth0\n{IPV6_UNREACHABLE}"
+    );
+    let link = harness.machine(
+        &default_route("wlp2s0", 600),
+        Some(&ipv6_wired),
+        &[ETH0, WLAN0],
+    );
+    assert_eq!(link.link().await, Ok(Link::Wired));
+    let link = harness.machine(
+        &default_route("wlp2s0", 20),
+        Some(&ipv6_wired),
+        &[ETH0, WLAN0],
+    );
+    assert_eq!(link.link().await, Ok(Link::WiFi));
+}
+
+#[tokio::test]
+async fn a_default_route_that_is_down_is_no_route() {
+    let harness = KernelLinkHarness::new();
+    let down =
+        format!("{ROUTE_HEADER}\neth0\t00000000\t0101A8C0\t0002\t0\t0\t100\t00000000\t0\t0\t0\n");
+    assert_eq!(
+        harness.machine(&down, None, &[ETH0]).link().await,
+        Ok(Link::NoRoute)
+    );
+}
+
+#[tokio::test]
+async fn a_virtual_ethernet_interface_is_not_wired() {
+    let harness = KernelLinkHarness::new();
+    let link = harness.machine(&default_route("br0", 100), None, &[ETH0, BRIDGE]);
+    assert_eq!(link.link().await, Ok(Link::Other));
+}
+
+#[tokio::test]
+async fn a_wireless_extensions_interface_is_wi_fi() {
+    let harness = KernelLinkHarness::new();
+    let old = ("wlan0", false, &[("type", "1")][..], &["wireless"][..]);
+    let link = harness.machine(&default_route("wlan0", 100), None, &[old]);
+    assert_eq!(link.link().await, Ok(Link::WiFi));
+}
+
+#[tokio::test]
+async fn an_interface_name_that_leaves_the_folder_is_unrecognized() {
+    let harness = KernelLinkHarness::new();
+    for name in ["..", "../eth0", "eth0/..", ""] {
+        let route = format!(
+            "{ROUTE_HEADER}\n{name}\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+        );
+        let answer = harness.machine(&route, None, &[ETH0]).link().await;
+        assert!(
+            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+            "{name:?}: {answer:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_default_route_out_of_an_interface_not_listed_is_unrecognized() {
+    let harness = KernelLinkHarness::new();
+    let answer = harness
+        .machine(&default_route("eth9", 100), None, &[ETH0])
+        .link()
+        .await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unrecognized { .. })),
+        "{answer:?}"
+    );
+}
+
+/// `route -n get default` on a Mac whose default route leaves by `interface`.
+fn route_output(interface: &str) -> String {
+    format!(
+        "   route to: default\ndestination: default\n       mask: default\n    gateway: 192.168.1.1\n  interface: {interface}\n      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>\n"
+    )
+}
+
+/// `networksetup -listallhardwareports` as the Mac this was written on
+/// prints it, its addresses made up.
+const HARDWARE_PORTS: &str = "\nHardware Port: Ethernet Adapter (en4)\nDevice: en4\nEthernet Address: 02:00:00:00:00:04\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 02:00:00:00:00:05\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 02:00:00:00:00:00\n\nVLAN Configurations\n===================\n";
+
+struct RouteLinkHarness;
+
+impl RouteLinkHarness {
+    fn link(route: &str, ports: &str) -> Arc<dyn NetworkLink> {
+        Arc::new(RouteLink::running(
+            ("/bin/sh", &printing(route)[..]),
+            ("/bin/sh", &printing(ports)[..]),
+        ))
+    }
+}
+
+impl NetworkLinkHarness for RouteLinkHarness {
+    fn wired(&self) -> Arc<dyn NetworkLink> {
+        Self::link(&route_output("en4"), HARDWARE_PORTS)
+    }
+
+    fn wired_reads_as(&self) -> Link {
+        // No Mac on Ethernet has been seen yet (decision 80): a port that
+        // isn't Wi-Fi is only that.
+        Link::NotWiFi
+    }
+
+    fn wifi(&self) -> Arc<dyn NetworkLink> {
+        Self::link(&route_output("en0"), HARDWARE_PORTS)
+    }
+
+    fn tunnel(&self) -> Arc<dyn NetworkLink> {
+        Self::link(&route_output("utun3"), HARDWARE_PORTS)
+    }
+
+    fn no_route(&self) -> Arc<dyn NetworkLink> {
+        Arc::new(RouteLink::running(
+            (
+                "/bin/sh",
+                &[
+                    "-c".to_owned(),
+                    "echo 'route: writing to routing socket: not in table' >&2; exit 1".to_owned(),
+                ][..],
+            ),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+        ))
+    }
+
+    fn unrecognized(&self) -> Arc<dyn NetworkLink> {
+        Self::link(
+            "   route to: default\ndestination: default\n",
+            HARDWARE_PORTS,
+        )
+    }
+
+    fn unreadable(&self) -> Arc<dyn NetworkLink> {
+        Arc::new(RouteLink::running(
+            ("/nonexistent/ladderback-demo/route", &["-n".to_owned()][..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn route_and_networksetup_meet_the_network_link_contract() {
+    contract::network_link::run(&RouteLinkHarness).await;
+}
+
+#[tokio::test]
+async fn a_thunderbolt_bridge_is_not_wi_fi() {
+    let link = RouteLinkHarness::link(&route_output("bridge0"), HARDWARE_PORTS);
+    assert_eq!(link.link().await, Ok(Link::NotWiFi));
+}
+
+#[tokio::test]
+async fn networksetup_listing_no_port_is_unrecognized() {
+    let answer = RouteLinkHarness::link(&route_output("en0"), "VLAN Configurations\n")
+        .link()
+        .await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unrecognized { .. })),
+        "{answer:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_system_link_is_this_platforms() {
+    let link = platform::network_link::system_link().link().await;
+    assert!(
+        matches!(link, Ok(_) | Err(PlatformError::Unreadable { .. })),
+        "{link:?}"
+    );
 }

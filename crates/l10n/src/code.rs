@@ -102,6 +102,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     MaintenanceSelectionChanged => msg::ERROR_MAINTENANCE_SELECTION_CHANGED,
     RepositoryReadTimedOut => msg::ERROR_REPOSITORY_READ_TIMED_OUT,
     NoLocationUsable => msg::ERROR_NO_LOCATION_USABLE,
+    NoLocationRuleHolds => msg::ERROR_NO_LOCATION_RULE_HOLDS,
     PasswordNotAccepted => msg::ERROR_PASSWORD_NOT_ACCEPTED,
     Unknown => msg::ERROR_UNKNOWN,
 });
