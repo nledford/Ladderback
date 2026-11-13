@@ -1949,7 +1949,6 @@ impl Catalog for ConfigCatalog {
                         alias,
                         repository,
                         &plans,
-                        platform::network_link::tells_wired(),
                         reads_names,
                         offered.contains(alias),
                     )
@@ -2757,13 +2756,11 @@ fn config_unusable<R>(
 /// rule; a warning for each location that sends its credentials where an
 /// impostor could read them, by position and cause, never the address; and
 /// the notes about what the locations' rules mean for `plans`, the plans
-/// that back up to it, on a machine that can or can't tell a wired link
-/// from other links (decision 80).
+/// that back up to it (decision 80).
 fn listed_repository(
     alias: &RepositoryAlias,
     repository: &RepositoryConfig,
     plans: &[&Plan],
-    tells_wired: bool,
     reads_names: bool,
     create_offered: bool,
 ) -> api::RepositoryDto {
@@ -2786,7 +2783,7 @@ fn listed_repository(
         }));
     row.warnings.extend(
         repository
-            .rule_notes(plans, tells_wired, reads_names)
+            .rule_notes(plans, reads_names)
             .into_iter()
             .map(|note| {
                 let (code, args) = match note {
@@ -2796,10 +2793,6 @@ fn listed_repository(
                     RuleNote::LastRuledWithoutRetry { plan } => (
                         api::WarningCode::LocationLastRuledNoRetry,
                         vec![("plan".to_owned(), text(plan.as_str()))],
-                    ),
-                    RuleNote::WiredUnknown { position } => (
-                        api::WarningCode::LocationRuleWiredUnknown,
-                        vec![("position".to_owned(), text(position))],
                     ),
                     RuleNote::NameUnreadable { position } => (
                         api::WarningCode::LocationRuleNameUnreadable,
@@ -3453,7 +3446,7 @@ mod tests {
     fn a_listed_repository_lists_its_locations_in_order_with_references_and_never_a_written_secret()
     {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, false);
         let option = |set: &str, name: &str, reference: Option<&str>| api::LocationOptionDto {
             set: set.to_owned(),
             name: name.to_owned(),
@@ -3485,7 +3478,7 @@ mod tests {
     #[test]
     fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
         let alias = RepositoryAlias::parse("nas").expect("an alias");
-        let row = listed_repository(&alias, &two_locations(), &[], true, true, false);
+        let row = listed_repository(&alias, &two_locations(), &[], true, false);
         let warning = api::WarningDto {
             code: WarningCode::LocationPlainHttpCredentials,
             args: [
@@ -3519,7 +3512,7 @@ mod tests {
         plan.schedule = Some(domain::planning::Schedule::new(
             domain::planning::Interval::parse("1d").expect("an interval"),
         ));
-        let row = listed_repository(&alias, &entry, &[&plan], false, true, false);
+        let row = listed_repository(&alias, &entry, &[&plan], true, false);
         let when: Vec<Vec<&str>> = row
             .locations
             .iter()
@@ -3542,8 +3535,6 @@ mod tests {
         for expected in [
             note(WarningCode::LocationEveryRuled, &[]),
             note(WarningCode::LocationLastRuledNoRetry, &[("plan", "home")]),
-            note(WarningCode::LocationRuleWiredUnknown, &[("position", "1")]),
-            note(WarningCode::LocationRuleWiredUnknown, &[("position", "2")]),
         ] {
             assert!(
                 row.warnings.contains(&expected),
@@ -3552,14 +3543,11 @@ mod tests {
             );
         }
         assert!(
-            listed_repository(&alias, &entry, &[], true, true, false)
+            listed_repository(&alias, &entry, &[], true, false)
                 .warnings
                 .iter()
-                .all(|warning| !matches!(
-                    warning.code,
-                    WarningCode::LocationLastRuledNoRetry | WarningCode::LocationRuleWiredUnknown
-                )),
-            "no plan and a machine that tells wired: neither note"
+                .all(|warning| warning.code != WarningCode::LocationLastRuledNoRetry),
+            "no plan: no note about retries"
         );
     }
 
@@ -3582,7 +3570,7 @@ mod tests {
         let mut entry = two_locations();
         entry.locations.first_when = Some(wifi(Some(NameFilter::Only(names(&["Office", "Lab"])))));
         entry.locations.further[0].when = Some(wifi(Some(NameFilter::Except(names(&["Guest"])))));
-        let row = listed_repository(&alias, &entry, &[], true, false, false);
+        let row = listed_repository(&alias, &entry, &[], false, false);
         let when: Vec<(Vec<String>, Vec<String>)> = row
             .locations
             .iter()
@@ -3613,7 +3601,7 @@ mod tests {
             ]
         );
         assert!(
-            listed_repository(&alias, &entry, &[], true, true, false)
+            listed_repository(&alias, &entry, &[], true, false)
                 .warnings
                 .iter()
                 .all(|warning| warning.code != WarningCode::LocationRuleNameUnreadable),
@@ -3632,7 +3620,7 @@ mod tests {
         let alias = RepositoryAlias::parse("demo").expect("an alias");
         let mut entry = two_locations();
         entry.locations = Default::default();
-        let row = listed_repository(&alias, &entry, &[], true, true, false);
+        let row = listed_repository(&alias, &entry, &[], true, false);
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");

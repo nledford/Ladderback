@@ -189,7 +189,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `Identity` | The agent's Ed25519 key: public key and signing | Key file in the data dir | Fixed test key |
 | `PowerSupply` | AC power or battery (§16, decision 63) | `/sys/class/power_supply` on Linux, `pmset -g batt` on macOS | Scripted fake |
 | `Network` | Whether the machine is online (§16, decision 63) | `/sys/class/net` on Linux, `scutil --nwi` on macOS | Scripted fake |
-| `NetworkLink` | The network link (§3.1): wired, Wi-Fi with its name when it can be read, or other, or why the platform can't say (§16, decision 80) | `/proc/net/route`, `/sys/class/net` and NetworkManager's D-Bus API on Linux; `route`, `networksetup` and `system_profiler` run as decision 63 runs its commands, on macOS | Scripted fake |
+| `NetworkLink` | The network link (§3.1): wired, Wi-Fi with its name when it can be read, or other, or why the platform can't say (§16, decision 80) | `/proc/net/route`, `/sys/class/net` and NetworkManager's D-Bus API on Linux; `route`, `networksetup`, `ifconfig` and `system_profiler` run as decision 63 runs its commands, on macOS | Scripted fake |
 | `ServiceManager` | Install, start, stop and remove the agent's user service (§12, decision 64) | systemd user unit through `systemctl --user` on Linux, launchd agent through `launchctl` on macOS | In-memory fake |
 | `EventPublisher` | Deliver domain events to in-process subscribers (UI, outbox, notifications) | Broadcast channel | Recording fake |
 | `Notifier` | Deliver a rendered notification | reqwest, lettre | Recording fake |

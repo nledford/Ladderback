@@ -887,10 +887,6 @@ impl NetworkLinkHarness for KernelLinkHarness {
         )
     }
 
-    fn wired_reads_as(&self) -> Link {
-        Link::Wired
-    }
-
     fn wifi(&self) -> Arc<dyn NetworkLink> {
         self.machine(
             &default_route("wlp2s0", 600),
@@ -1409,9 +1405,26 @@ fn route_output(interface: &str) -> String {
     )
 }
 
-/// `networksetup -listallhardwareports` as the Mac this was written on
-/// prints it, its addresses made up.
-const HARDWARE_PORTS: &str = "\nHardware Port: Ethernet Adapter (en4)\nDevice: en4\nEthernet Address: 02:00:00:00:00:04\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 02:00:00:00:00:05\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 02:00:00:00:00:00\n\nVLAN Configurations\n===================\n";
+/// `networksetup -listallhardwareports` as a Mac on Ethernet printed it
+/// (#452), cut to some of its ports, its addresses made up: `en10` is a USB
+/// 2.5 GbE adapter, `en4` an Ethernet adapter with no cable, `en1` a
+/// Thunderbolt port.
+const HARDWARE_PORTS: &str = "\nHardware Port: Ethernet Adapter (en4)\nDevice: en4\nEthernet Address: 02:00:00:00:00:04\n\nHardware Port: USB 10/100/1G/2.5G LAN\nDevice: en10\nEthernet Address: 02:00:00:00:00:0a\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 02:00:00:00:00:05\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 02:00:00:00:00:00\n\nHardware Port: Thunderbolt 1\nDevice: en1\nEthernet Address: 02:00:00:00:00:01\n\nVLAN Configurations\n===================\n";
+
+/// A stand-in for `ifconfig <interface>`, which `sh` is given as `$1`: the
+/// `media:` and `status:` lines the same Mac printed for its ports, and the
+/// error `ifconfig` gives for an interface that doesn't exist.
+fn ifconfig() -> [String; 3] {
+    let script = r#"case "$1" in
+en10) printf '\tmedia: autoselect (2500Base-T <full-duplex>)\n\tstatus: active\n' ;;
+en4) printf '\tmedia: none\n\tstatus: inactive\n' ;;
+en1) printf '\tmedia: autoselect <full-duplex>\n\tstatus: inactive\n' ;;
+bridge0) printf '\tmedia: <unknown type>\n\tstatus: inactive\n' ;;
+en0) printf '\tmedia: autoselect\n\tstatus: active\n' ;;
+*) echo "ifconfig: interface $1 does not exist" >&2; exit 1 ;;
+esac"#;
+    ["-c".to_owned(), script.to_owned(), "ifconfig".to_owned()]
+}
 
 /// `system_profiler -json SPAirPortDataType` as macOS 27 prints it, cut to
 /// what the reader looks at: the Wi-Fi port `en0`, whose current network is
@@ -1462,6 +1475,7 @@ impl RouteLinkHarness {
         Arc::new(RouteLink::running(
             ("/bin/sh", &printing(route)[..]),
             ("/bin/sh", &printing(ports)[..]),
+            ("/bin/sh", &ifconfig()[..]),
             ("/bin/sh", &printing(profile)[..]),
         ))
     }
@@ -1469,13 +1483,7 @@ impl RouteLinkHarness {
 
 impl NetworkLinkHarness for RouteLinkHarness {
     fn wired(&self) -> Arc<dyn NetworkLink> {
-        Self::link(&route_output("en4"), HARDWARE_PORTS)
-    }
-
-    fn wired_reads_as(&self) -> Link {
-        // No Mac on Ethernet has been seen yet (decision 80): a port that
-        // isn't Wi-Fi is only that.
-        Link::NotWiFi
+        Self::link(&route_output("en10"), HARDWARE_PORTS)
     }
 
     fn wifi(&self) -> Arc<dyn NetworkLink> {
@@ -1496,6 +1504,7 @@ impl NetworkLinkHarness for RouteLinkHarness {
                 ][..],
             ),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
             ("/bin/sh", &printing(&profile(None))[..]),
         ))
     }
@@ -1511,6 +1520,7 @@ impl NetworkLinkHarness for RouteLinkHarness {
         Arc::new(RouteLink::running(
             ("/nonexistent/ladderback-demo/route", &["-n".to_owned()][..]),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
             ("/bin/sh", &printing(&profile(None))[..]),
         ))
     }
@@ -1531,6 +1541,7 @@ impl NetworkLinkHarness for RouteLinkHarness {
         Arc::new(RouteLink::running(
             ("/bin/sh", &printing(&route_output("en0"))[..]),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
             (
                 "/nonexistent/ladderback-demo/system_profiler",
                 &["-json".to_owned()][..],
@@ -1549,10 +1560,41 @@ async fn route_and_networksetup_meet_the_network_link_contract() {
     contract::network_link::run(&RouteLinkHarness).await;
 }
 
+/// A port that isn't Wi-Fi is wired only when its medium is Ethernet, whatever
+/// its name: a bridge, an Ethernet adapter with no link and a Thunderbolt
+/// port are other links.
 #[tokio::test]
-async fn a_thunderbolt_bridge_is_not_wi_fi() {
-    let link = RouteLinkHarness::link(&route_output("bridge0"), HARDWARE_PORTS);
-    assert_eq!(link.link().await, Ok(Link::NotWiFi));
+async fn a_bridge_or_a_port_with_no_ethernet_medium_is_other() {
+    for interface in ["bridge0", "en4", "en1"] {
+        let link = RouteLinkHarness::link(&route_output(interface), HARDWARE_PORTS);
+        assert_eq!(link.link().await, Ok(Link::Other), "{interface}");
+    }
+}
+
+/// `ifconfig` is asked only of a hardware port that isn't Wi-Fi, so an
+/// `ifconfig` that fails leaves Wi-Fi, a tunnel and the network's name
+/// readable, and makes only such a port's link an error.
+#[tokio::test]
+async fn ifconfig_is_asked_only_of_a_port_that_is_not_wi_fi() {
+    let without_ifconfig = |interface: &str| {
+        RouteLink::running(
+            ("/bin/sh", &printing(&route_output(interface))[..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            (
+                "/nonexistent/ladderback-demo/ifconfig",
+                &["-a".to_owned()][..],
+            ),
+            ("/bin/sh", &printing(&profile_on("Office".into()))[..]),
+        )
+    };
+    let answer = without_ifconfig("en10").link().await;
+    assert!(
+        matches!(answer, Err(PlatformError::Unreadable { .. })),
+        "{answer:?}"
+    );
+    assert_eq!(without_ifconfig("en10").network_name().await, Ok(None));
+    assert_eq!(without_ifconfig("en0").link().await, Ok(Link::WiFi));
+    assert_eq!(without_ifconfig("utun3").link().await, Ok(Link::Other));
 }
 
 #[tokio::test]
@@ -1629,6 +1671,7 @@ async fn a_wi_fi_report_is_read_up_to_a_mebibyte() {
         RouteLink::running(
             ("/bin/sh", &printing(&route_output("en0"))[..]),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
             ("/bin/sh", &["-c".to_owned(), script][..]),
         )
     };

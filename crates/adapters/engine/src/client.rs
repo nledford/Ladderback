@@ -1200,7 +1200,6 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::LocationPlainHttpCredentials
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry
-                | WarningCode::LocationRuleWiredUnknown
                 | WarningCode::LocationRuleNameUnreadable
                 // The daemon's notifier says it, never a worker.
                 | WarningCode::NotificationUndelivered

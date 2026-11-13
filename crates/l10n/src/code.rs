@@ -113,7 +113,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     LocationPlainHttpCredentials => msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
     LocationEveryRuled => msg::WARNING_LOCATION_EVERY_RULED,
     LocationLastRuledNoRetry => msg::WARNING_LOCATION_LAST_RULED_NO_RETRY,
-    LocationRuleWiredUnknown => msg::WARNING_LOCATION_RULE_WIRED_UNKNOWN,
     LocationRuleNameUnreadable => msg::WARNING_LOCATION_RULE_NAME_UNREADABLE,
     ProfileLocationsNotExported => msg::WARNING_PROFILE_LOCATIONS_NOT_EXPORTED,
     HookWarning => msg::WARNING_HOOK_WARNING,

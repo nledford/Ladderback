@@ -510,11 +510,6 @@ warning-location-every-ruled = Every location of this repository has a rule, so 
 # `retry` is a key of the configuration file, typed as it is: keep it a string literal.
 warning-location-last-ruled-no-retry = The plan { $plan } doesn't retry a failed run, and this repository's last location has a rule: when no location can be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
 
-# A location's rule asks for a wired network, and this machine can't yet tell a wired network from other links, so that part of the rule never holds here.
-# $position (text): the location's place in the list, from 1.
-# `wifi` is a value of the configuration file, typed as it is: keep it a string literal.
-warning-location-rule-wired-unknown = The rule of location { $position } asks for a wired network, which Ladderback can't yet tell apart from other links on this machine, so that part of the rule never holds here. A rule of { "wifi" } works here.
-
 # A location's rule lists Wi-Fi networks by name, and this machine couldn't read the name of the network it is on, so that part of the rule doesn't hold and the location is skipped there.
 # $position (text): the location's place in the list, from 1.
 # `wired` and `wifi` are values of the configuration file, typed as they are: keep them string literals.

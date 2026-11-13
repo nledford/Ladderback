@@ -646,10 +646,6 @@ impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
         Self::saying(Ok(domain::planning::Link::Wired))
     }
 
-    fn wired_reads_as(&self) -> domain::planning::Link {
-        domain::planning::Link::Wired
-    }
-
     fn wifi(&self) -> Arc<dyn app::ports::NetworkLink> {
         Self::saying(Ok(domain::planning::Link::WiFi))
     }
