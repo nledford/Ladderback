@@ -3,6 +3,7 @@
 //! the scripted engine the forget scenarios use, which records every job it
 //! was given.
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -572,8 +573,9 @@ fn preview_unknown_repository(agent: &mut Agent) {
 #[then("the preview is refused because the engine cannot be reached")]
 fn preview_engine(agent: &mut Agent) {
     let error = refusal(agent);
-    assert!(
-        matches!(error, MaintenanceError::Engine { .. }),
+    assert_matches!(
+        error,
+        MaintenanceError::Engine { .. },
         "an engine failure, not {error:?}"
     );
 }
@@ -596,8 +598,9 @@ fn groups_unknown_repository(agent: &mut Agent) {
 #[then("the groups are refused because the engine cannot be reached")]
 fn groups_engine(agent: &mut Agent) {
     let error = refusal(agent);
-    assert!(
-        matches!(error, MaintenanceError::Engine { .. }),
+    assert_matches!(
+        error,
+        MaintenanceError::Engine { .. },
         "an engine failure, not {error:?}"
     );
 }

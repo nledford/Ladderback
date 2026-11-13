@@ -3,6 +3,8 @@
 
 mod support;
 
+use std::assert_matches;
+
 use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Position, Problem};
 use config_adapter::{MigrationError, Schemas};
 use domain::planning::{
@@ -1395,10 +1397,7 @@ fn an_error_names_the_file_as_it_was_given() {
     let file = std::path::Path::new("demo/config.toml");
     let error = config_adapter::parse(file, "schema = 1\ncolour = 1\n", &Schemas::production())
         .expect_err("unknown key");
-    assert!(
-        matches!(&error, ConfigError::Invalid { file, .. } if file == "demo/config.toml"),
-        "{error:?}"
-    );
+    assert_matches!(&error, ConfigError::Invalid { file, .. } if file == "demo/config.toml");
 }
 
 #[test]

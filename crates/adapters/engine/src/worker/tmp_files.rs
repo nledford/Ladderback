@@ -134,7 +134,7 @@ pub(crate) fn is_id_temporary(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, File};
+    use std::fs::{self, File, FileTimes};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
@@ -145,12 +145,7 @@ mod tests {
     const ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn age(path: &Path, age: Duration, now: SystemTime) {
-        File::options()
-            .write(true)
-            .open(path)
-            .unwrap()
-            .set_modified(now - age)
-            .unwrap();
+        fs::set_times(path, FileTimes::new().set_modified(now - age)).unwrap();
     }
 
     fn touch(path: impl AsRef<Path>) -> PathBuf {
@@ -196,12 +191,11 @@ mod tests {
         let fresh = touch(repo.path().join("config-tmp-"));
         // A clock set back: the file looks like it is from the future.
         let future = touch(repo.path().join(format!("index/{ID}-tmp-")));
-        File::options()
-            .write(true)
-            .open(&future)
-            .unwrap()
-            .set_modified(now + Duration::from_secs(3600))
-            .unwrap();
+        fs::set_times(
+            &future,
+            FileTimes::new().set_modified(now + Duration::from_secs(3600)),
+        )
+        .unwrap();
         let cleanup = remove_stale_files(repo.path(), now);
         assert!(cleanup.removed.is_empty());
         assert!(recent.exists() && fresh.exists() && future.exists());

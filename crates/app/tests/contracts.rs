@@ -341,10 +341,7 @@ impl HooksHarness for FakeHooksHarness {
     }
 
     async fn written(&self) -> Vec<String> {
-        self.written
-            .lock()
-            .map(|lines| lines.clone())
-            .unwrap_or_default()
+        self.written.lock().map_or_default(|lines| lines.clone())
     }
 }
 

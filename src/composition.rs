@@ -952,8 +952,7 @@ impl Publish {
                 args: warning
                     .item
                     .as_ref()
-                    .map(|item| vec![MsgArg::Text(item.clone())])
-                    .unwrap_or_default(),
+                    .map_or_default(|item| vec![MsgArg::Text(item.clone())]),
             }),
             // The engine's start comes before the run's write that says the
             // operation is running, and its end before the run's ending hooks
@@ -1457,8 +1456,7 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .target
             .plan
             .as_ref()
-            .map(|plan| plan.as_str().to_owned())
-            .unwrap_or_default(),
+            .map_or_default(|plan| plan.as_str().to_owned()),
         kind_text(record.kind).to_owned(),
         status_text(&record.status).to_owned(),
         record.queued_at.to_string(),
@@ -1476,13 +1474,7 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .map(|alias| alias.as_str().to_owned()),
     )
     .map(|summary| {
-        summary.with_locations(
-            record
-                .locations
-                .as_ref()
-                .map(locations_tried)
-                .unwrap_or_default(),
-        )
+        summary.with_locations(record.locations.as_ref().map_or_default(locations_tried))
     })
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
@@ -1986,8 +1978,7 @@ impl Catalog for ConfigCatalog {
                 refusal
                     .detail
                     .as_deref()
-                    .map(|detail| format!(" ({detail})"))
-                    .unwrap_or_default()
+                    .map_or_default(|detail| format!(" ({detail})"))
             );
             SnapshotsError::SecretRefused(refusal)
         };
@@ -2849,15 +2840,13 @@ fn listed_location(location: &Location, position: u8) -> api::LocationDto {
             .flat_map(LocationRule::alternatives)
             .map(|alternative| {
                 let names = |filter: Option<&NameFilter>| {
-                    filter
-                        .map(|filter| {
-                            filter
-                                .names()
-                                .iter()
-                                .map(|name| name.as_str().to_owned())
-                                .collect()
-                        })
-                        .unwrap_or_default()
+                    filter.map_or_default(|filter| {
+                        filter
+                            .names()
+                            .iter()
+                            .map(|name| name.as_str().to_owned())
+                            .collect()
+                    })
                 };
                 let filter = alternative.names();
                 api::LocationAlternativeDto {
@@ -3034,6 +3023,8 @@ mod captured_log {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use app::ports::{HookContext, HookOutcome, HookStatus, JobControl, ProgressEvent};
 
@@ -4883,14 +4874,12 @@ mod tests {
         .expect("the config file");
         for alias in ["demo", "other"] {
             let refused = runner.groups(alias.to_owned()).await;
-            assert!(
-                matches!(
-                    refused,
-                    Err(MaintenanceRefusal::Unavailable {
-                        code: ErrorCode::ConfigInvalid,
-                        ..
-                    })
-                ),
+            assert_matches!(
+                refused,
+                Err(MaintenanceRefusal::Unavailable {
+                    code: ErrorCode::ConfigInvalid,
+                    ..
+                }),
                 "the groups of {alias}: {refused:?}"
             );
         }
@@ -5551,10 +5540,7 @@ mod tests {
 
         log.let_it_through();
         let end = next_end(&mut heard).await;
-        assert!(
-            matches!(&end, UiEvent::OperationSucceeded { operation, .. } if *operation == id),
-            "{end:?}"
-        );
+        assert_matches!(&end, UiEvent::OperationSucceeded { operation, .. } if *operation == id);
         assert_eq!(
             history_of(&runner, &id).await.record.status,
             OperationStatus::Succeeded
@@ -5583,10 +5569,7 @@ mod tests {
 
         log.let_it_through();
         let end = next_end(&mut heard).await;
-        assert!(
-            matches!(&end, UiEvent::OperationSucceeded { operation, .. } if *operation == id),
-            "{end:?}"
-        );
+        assert_matches!(&end, UiEvent::OperationSucceeded { operation, .. } if *operation == id);
         assert_eq!(
             history_of(&runner, &id).await.record.status,
             OperationStatus::Succeeded
@@ -5638,9 +5621,9 @@ mod tests {
         let start = tokio::time::timeout(std::time::Duration::from_secs(10), heard.next())
             .await
             .expect("the page hears the start once the log has it");
-        assert!(
-            matches!(&start, Some(UiEvent::OperationStarted { operation, .. }) if *operation == id),
-            "{start:?}"
+        assert_matches!(
+            &start,
+            Some(UiEvent::OperationStarted { operation, .. }) if *operation == id
         );
         assert_ne!(
             history_of(&runner, &id).await.record.status,
@@ -5679,8 +5662,9 @@ mod tests {
             .iter()
             .filter(|news| matches!(news, UiEvent::OperationStarted { .. }))
             .collect();
-        assert!(
-            matches!(starts.as_slice(), [UiEvent::OperationStarted { operation, .. }] if *operation == id),
+        assert_matches!(
+            starts.as_slice(),
+            [UiEvent::OperationStarted { operation, .. }] if *operation == id,
             "the page hears one start, the run's: {news:?}"
         );
     }
@@ -5895,14 +5879,12 @@ mod tests {
             running.events.collect::<Vec<_>>().await;
             let news = heard_now(&mut heard);
             if operation {
-                assert!(
-                    matches!(
-                        news.as_slice(),
-                        [
-                            UiEvent::OperationProgress { .. },
-                            UiEvent::OperationWarning { .. }
-                        ]
-                    ),
+                assert_matches!(
+                    news.as_slice(),
+                    [
+                        UiEvent::OperationProgress { .. },
+                        UiEvent::OperationWarning { .. }
+                    ],
                     "{said}: {news:?}"
                 );
             } else {
@@ -6502,8 +6484,9 @@ mod tests {
             .expect("the check starts");
 
         let ends = ends_heard_when_done(&runner, &mut heard).await;
-        assert!(
-            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+        assert_matches!(
+            ends.as_slice(),
+            [UiEvent::OperationSucceeded { operation, .. }] if *operation == id,
             "the page hears one end, the run's: {ends:?}"
         );
         assert_said_once_that_it_ended(&id, "Succeeded");
@@ -6523,8 +6506,9 @@ mod tests {
             .expect("the plan starts");
 
         let ends = ends_heard_when_done(&runner, &mut heard).await;
-        assert!(
-            matches!(ends.as_slice(), [UiEvent::OperationSucceeded { operation, .. }] if *operation == id),
+        assert_matches!(
+            ends.as_slice(),
+            [UiEvent::OperationSucceeded { operation, .. }] if *operation == id,
             "the page hears one end, the run's: {ends:?}"
         );
         assert_said_once_that_it_ended(&id, "Succeeded");
@@ -7050,6 +7034,8 @@ mod tests {
 
 #[cfg(test)]
 mod repository_service_tests {
+    use std::assert_matches;
+
     use super::captured_log::{self, capture};
     use std::collections::BTreeMap;
     use std::sync::{Mutex, PoisonError};
@@ -7355,10 +7341,10 @@ mod repository_service_tests {
             })
             .await;
         assert_eq!(answer, Ok(api::RepositoryIdDto { id: "a".repeat(64) }));
-        assert!(matches!(
+        assert_matches!(
             engine.seen.lock().unwrap_or_else(PoisonError::into_inner)[0],
             Job::Identify(_)
-        ));
+        );
         assert!(saved(&*config).await.repositories().is_empty());
     }
 
@@ -7591,10 +7577,10 @@ mod repository_service_tests {
                 saved: false
             })
         );
-        assert!(matches!(
+        assert_matches!(
             engine.seen.lock().unwrap_or_else(PoisonError::into_inner)[0],
             Job::Init(_)
-        ));
+        );
         assert!(saved(&*config).await.repositories().is_empty());
 
         let answer = service.init(init(Some("fresh"), settings_dto())).await;
@@ -7714,8 +7700,9 @@ mod repository_service_tests {
         );
         assert_eq!(saved(&*config).await, before);
         let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        assert!(
-            matches!(seen.as_slice(), [_, Job::Identify(_)]),
+        assert_matches!(
+            seen.as_slice(),
+            [_, Job::Identify(_)],
             "only the connection's test and Create's look ran: {seen:?}"
         );
     }

@@ -115,7 +115,7 @@ pub(crate) fn exchange_at(
     } else {
         reader.read_to_end(&mut raw).expect("the response body");
     }
-    (status, String::from_utf8_lossy(&raw).into_owned())
+    (status, String::from_utf8_lossy_owned(raw))
 }
 
 /// One history page, as JSON.

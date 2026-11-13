@@ -147,7 +147,7 @@ fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    if let Some(v6) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+    if let Some(v6) = host.strip_circumfix('[', ']') {
         return v6.parse::<Ipv6Addr>().is_ok_and(|addr| addr.is_loopback());
     }
     host.parse::<Ipv4Addr>()

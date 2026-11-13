@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::{self, FileTimes};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -222,12 +222,11 @@ pub fn write_file(path: impl AsRef<Path>, contents: &[u8]) {
 /// Makes `path` look two days old: old enough to be a leftover of a worker
 /// that was killed.
 pub fn two_days_old(path: &Path) {
-    File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600))
-        .unwrap();
+    fs::set_times(
+        path,
+        FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 3600)),
+    )
+    .unwrap();
 }
 
 /// A worker engine on this crate's own worker binary, with timings short

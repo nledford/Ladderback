@@ -171,7 +171,7 @@ fn serve_with_a_bad_allowed_host(language: &str, name: &str) -> String {
         .expect("ladderback serve ran");
     let _ = std::fs::remove_dir_all(&scratch);
     assert_eq!(output.status.code(), Some(2), "a refused argument exits 2");
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stderr = String::from_utf8_lossy_owned(output.stderr);
     stderr
         .lines()
         .find(|line| line.starts_with("ladderback: "))

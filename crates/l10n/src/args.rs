@@ -145,11 +145,13 @@ impl DurationParts {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
     fn text_within_the_cap_is_kept_as_it_is() {
-        assert!(matches!(clamp_text("/home/demo/docs"), Cow::Borrowed(_)));
+        assert_matches!(clamp_text("/home/demo/docs"), Cow::Borrowed(_));
         let exactly = "a".repeat(MAX_TEXT);
         assert_eq!(clamp_text(&exactly), exactly);
     }
@@ -176,7 +178,7 @@ mod tests {
     fn the_cap_is_sixteen_kibibytes() {
         // Spelled out in bytes, so the test can't follow the constant.
         let at_cap = "a".repeat(16_384);
-        assert!(matches!(clamp_text(&at_cap), Cow::Borrowed(_)));
+        assert_matches!(clamp_text(&at_cap), Cow::Borrowed(_));
         let over = "a".repeat(16_385);
         let clamped = clamp_text(&over);
         assert_eq!(clamped.len(), 16_384);

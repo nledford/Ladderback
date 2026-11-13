@@ -219,23 +219,23 @@ impl Host for NoHost {
     type Instants = Nothing;
 }
 
-/// The host a build writes with where the `browser-intl` feature is on, for
-/// wasm32: the browser's `Intl`, the web UI's. It comes before ICU4X's, which
-/// a test build of `l10n` turns on as well.
-#[cfg(all(feature = "browser-intl", target_arch = "wasm32"))]
-pub(crate) type Active = crate::browser::Browser;
-
-/// The host a build writes with where the `icu` feature is on, and the
-/// browser's is not: ICU4X's, the daemon's.
-#[cfg(all(
-    feature = "icu",
-    not(all(feature = "browser-intl", target_arch = "wasm32"))
-))]
-pub(crate) type Active = crate::icu::Icu;
-
-/// The host a build writes with where neither feature is on: none.
-#[cfg(not(any(feature = "icu", all(feature = "browser-intl", target_arch = "wasm32"))))]
-pub(crate) type Active = NoHost;
+cfg_select! {
+    all(feature = "browser-intl", target_arch = "wasm32") => {
+        /// The host a build writes with where the `browser-intl` feature is
+        /// on, for wasm32: the browser's `Intl`, the web UI's. It comes before
+        /// ICU4X's, which a test build of `l10n` turns on as well.
+        pub(crate) type Active = crate::browser::Browser;
+    }
+    feature = "icu" => {
+        /// The host a build writes with where the `icu` feature is on, and
+        /// the browser's is not: ICU4X's, the daemon's.
+        pub(crate) type Active = crate::icu::Icu;
+    }
+    _ => {
+        /// The host a build writes with where neither feature is on: none.
+        pub(crate) type Active = NoHost;
+    }
+}
 
 /// Whether host `H` writes the instants of `locale` itself, rather than
 /// leaving them to [`plain_instant`], which reads every instant in UTC and

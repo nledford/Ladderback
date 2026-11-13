@@ -4,6 +4,7 @@
 //! The repositories are made and inspected with `rustic_core` itself, never
 //! through Ladderback, so the checks don't trust the code under test.
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -237,8 +238,7 @@ async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
         .repositories
         .cold
         .as_ref()
-        .map(|cold| contents(cold))
-        .unwrap_or_default();
+        .map_or_default(|cold| contents(cold));
     let use_case = app::repositories::InitRepository::new(
         Arc::new(platform::SystemClock),
         agent.engine.clone(),
@@ -316,10 +316,10 @@ async fn opens_with_password(agent: &mut Agent) {
 
 #[then("the initialisation is refused because a repository already exists")]
 fn init_refused(agent: &mut Agent) {
-    assert!(matches!(
+    assert_matches!(
         agent.repositories.init.as_ref().expect("the run"),
         Err(RepositoryError::Exists)
-    ));
+    );
 }
 
 #[then("the repository is unchanged")]
@@ -557,8 +557,7 @@ async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
         .repositories
         .cold
         .as_ref()
-        .map(|cold| contents(cold))
-        .unwrap_or_default();
+        .map_or_default(|cold| contents(cold));
     let mut body = serde_json::json!({"settings": api_settings(agent)});
     if let Some(alias) = alias {
         body["alias"] = serde_json::json!(alias);

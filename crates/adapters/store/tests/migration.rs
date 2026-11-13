@@ -5,6 +5,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::path::Path;
 
@@ -392,10 +393,7 @@ async fn a_log_that_already_has_the_alias_column_is_refused_and_left_at_its_vers
 
     let error = open_error(&scratch.path()).await;
 
-    assert!(
-        matches!(&error, OpenError::Migration { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Migration { detail } if !detail.is_empty());
     let mut raw = scratch.raw().await;
     assert_eq!(
         applied_versions(&mut raw).await,

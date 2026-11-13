@@ -3,6 +3,7 @@
 //! header byte, `Host` included, which an HTTP client library would set for
 //! itself.
 
+use std::assert_matches;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -215,7 +216,7 @@ pub(crate) fn exchange(addr: SocketAddr, request: &Request) -> Response {
     Response {
         status,
         headers,
-        body: String::from_utf8_lossy(&body).into_owned(),
+        body: String::from_utf8_lossy_owned(body),
     }
 }
 
@@ -348,8 +349,9 @@ fn not_refused(agent: &mut Agent) {
     // What the UI's own routes answer: the page, no such file, no such method,
     // or (when this build has no UI) none. Anything else, a 400 from a request
     // the server couldn't read, say, is not a request that was served.
-    assert!(
-        matches!(response.status, 200 | 404 | 405 | 503),
+    assert_matches!(
+        response.status,
+        200 | 404 | 405 | 503,
         "status {} with body {:?}",
         response.status,
         response.body

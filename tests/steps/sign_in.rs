@@ -62,7 +62,7 @@ async fn set_password(agent: &mut Agent, args: &[&str], input: &str) {
     .await;
     agent.sign_in.ran = Some(Ran {
         code: output.status.code(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stderr: String::from_utf8_lossy_owned(output.stderr),
     });
 }
 

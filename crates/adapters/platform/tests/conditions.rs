@@ -4,6 +4,7 @@
 //! would. Both adapters run on every platform this way; the system's own
 //! sources are only asked for an answer, since their state isn't the test's.
 
+use std::assert_matches;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -203,10 +204,10 @@ async fn a_machine_with_no_power_supply_folder_is_on_ac_power() {
 #[tokio::test]
 async fn a_battery_status_this_adapter_does_not_know_is_unrecognized() {
     let odd = ("BAT0", &[("type", "Battery"), ("status", "Resting")][..]);
-    assert!(matches!(
+    assert_matches!(
         sysfs_power(&[odd]).await,
         Err(PlatformError::Unrecognized { .. })
-    ));
+    );
 }
 
 #[tokio::test]
@@ -216,18 +217,12 @@ async fn an_attribute_too_long_or_not_text_is_unrecognized() {
     std::fs::write(long.join("BAT0/status"), "Discharging".repeat(1_000_000))
         .expect("a long attribute");
     let answer = SysfsPower::at(long).source().await;
-    assert!(
-        matches!(&answer, Err(PlatformError::Unrecognized { detail, .. }) if detail.len() < 200),
-        "{answer:?}"
-    );
+    assert_matches!(&answer, Err(PlatformError::Unrecognized { detail, .. }) if detail.len() < 200);
 
     let binary = sysfs.machine(&[("BAT0", &[("type", "Battery")])]);
     std::fs::write(binary.join("BAT0/status"), [0xff, 0xfe, b'\n']).expect("an attribute");
     let answer = SysfsPower::at(binary).source().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 #[tokio::test]
@@ -238,15 +233,9 @@ async fn a_folder_of_too_many_entries_is_unrecognized() {
         std::fs::create_dir(root.join(format!("BAT{n}"))).expect("an entry");
     }
     let answer = SysfsPower::at(&root).source().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     let answer = SysfsNetwork::at(&root).is_online().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 /// Makes `path` a named pipe: opening it for reading waits for a writer, as
@@ -289,10 +278,7 @@ async fn a_read_that_stalls_is_given_up_at_the_bound() {
     // Before the asserts: a test that panicked with the reader stalled
     // would wait for it on unwinding, and never end.
     release(&root.join("AC/type"), &answer);
-    assert!(
-        matches!(answer, Err(PlatformError::TimedOut { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::TimedOut { .. }));
     assert!(took < SHORT * 10, "gave up after {took:?}");
 
     let root = sysfs.machine(&[("eth0", &[])]);
@@ -302,10 +288,7 @@ async fn a_read_that_stalls_is_given_up_at_the_bound() {
         .is_online()
         .await;
     release(&root.join("eth0/flags"), &answer);
-    assert!(
-        matches!(answer, Err(PlatformError::TimedOut { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::TimedOut { .. }));
 }
 
 /// Network interfaces as the kernel lists them. `flags` holds what the
@@ -435,10 +418,7 @@ async fn a_state_or_carrier_the_kernel_does_not_write_is_unrecognized() {
         &[("flags", "0x1003"), ("operstate", "sideways")][..],
     );
     let answer = sysfs_online(&[LOOPBACK, sideways]).await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     let odd_carrier = (
         "tun0",
         &[
@@ -448,29 +428,26 @@ async fn a_state_or_carrier_the_kernel_does_not_write_is_unrecognized() {
         ][..],
     );
     let answer = sysfs_online(&[LOOPBACK, odd_carrier]).await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 #[tokio::test]
 async fn flags_too_large_for_the_kernels_are_unrecognized() {
     let huge = ("eth0", &[("flags", "0x1ffffffff")][..]);
-    assert!(matches!(
+    assert_matches!(
         sysfs_online(&[huge]).await,
         Err(PlatformError::Unrecognized { .. })
-    ));
+    );
 }
 
 #[tokio::test]
 async fn a_machine_with_no_network_folder_is_unreadable() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let network = SysfsNetwork::at(scratch.path().join("net"));
-    assert!(matches!(
+    assert_matches!(
         network.is_online().await,
         Err(PlatformError::Unreadable { .. })
-    ));
+    );
 }
 
 /// A stand-in program: `sh` printing `text` exactly.
@@ -537,8 +514,9 @@ async fn pmset_on_a_ups_is_battery_power() {
 async fn pmset_saying_nothing_of_its_source_is_unrecognized() {
     for text in ["", "Now drawing from 'AC Power", "drawing from 'AC Power'"] {
         let answer = PmsetHarness::power(text).source().await;
-        assert!(
-            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+        assert_matches!(
+            answer,
+            Err(PlatformError::Unrecognized { .. }),
             "{text:?}: {answer:?}"
         );
     }
@@ -628,10 +606,7 @@ async fn scutil_with_no_reachability_is_unrecognized() {
     let answer = ScutilHarness::network("Network information\n")
         .is_online()
         .await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 /// The program sees none of the daemon's environment: here it answers
@@ -650,16 +625,10 @@ async fn a_program_that_hangs_is_stopped_at_the_bound() {
     let started = Instant::now();
     let power = PmsetPower::running("/bin/sh", ["-c", "sleep 30"]).with_timeout(SHORT);
     let answer = power.source().await;
-    assert!(
-        matches!(answer, Err(PlatformError::TimedOut { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::TimedOut { .. }));
     let network = ScutilNetwork::running("/bin/sh", ["-c", "sleep 30"]).with_timeout(SHORT);
     let answer = network.is_online().await;
-    assert!(
-        matches!(answer, Err(PlatformError::TimedOut { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::TimedOut { .. }));
     assert!(started.elapsed() < SHORT * 10);
 }
 
@@ -668,10 +637,7 @@ async fn a_program_that_prints_without_end_is_unrecognized() {
     let started = Instant::now();
     let power = PmsetPower::running("/bin/sh", ["-c", "yes 'Now drawing from'"]);
     let answer = power.source().await;
-    assert!(
-        matches!(&answer, Err(PlatformError::Unrecognized { detail, .. }) if detail.len() < 200),
-        "{answer:?}"
-    );
+    assert_matches!(&answer, Err(PlatformError::Unrecognized { detail, .. }) if detail.len() < 200);
     assert!(
         started.elapsed() < Duration::from_secs(4),
         "given up once the output passed its cap, not at the timeout"
@@ -696,10 +662,7 @@ async fn a_program_that_cannot_start_in_time_is_given_up_at_the_bound() {
     let answer = power.source().await;
     let took = started.elapsed();
     holder.join().expect("the holder lets go");
-    assert!(
-        matches!(answer, Err(PlatformError::TimedOut { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::TimedOut { .. }));
     assert!(took < SHORT * 3, "gave up after {took:?}");
 }
 
@@ -709,13 +672,10 @@ async fn a_program_that_cannot_start_in_time_is_given_up_at_the_bound() {
 async fn what_a_source_said_is_repeated_without_its_control_characters() {
     let power = PmsetPower::running("/bin/sh", printing("Now drawing from '\u{1b}[2JSolar'"));
     let answer = power.source().await;
-    assert!(
-        matches!(
-            &answer,
-            Err(PlatformError::Unrecognized { detail, .. })
-                if !detail.chars().any(char::is_control) && detail.contains("[2JSolar")
-        ),
-        "{answer:?}"
+    assert_matches!(
+        &answer,
+        Err(PlatformError::Unrecognized { detail, .. })
+            if !detail.chars().any(char::is_control) && detail.contains("[2JSolar")
     );
 }
 
@@ -1019,14 +979,12 @@ async fn the_name_is_the_wi_fi_network_the_default_route_leaves_by() {
     device.kind = 1;
     for link in [harness.on_wifi(Some(device)), harness.on_wifi(None)] {
         let answer = link.network_name().await;
-        assert!(
-            matches!(answer, Err(PlatformError::Unrecognized { .. })),
-            "{answer:?}"
-        );
+        assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
     let answer = harness.no_route().network_name().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unreadable { .. })),
+    assert_matches!(
+        answer,
+        Err(PlatformError::Unreadable { .. }),
         "a route gone since the link was read is no answer, not \"no network\": {answer:?}"
     );
 }
@@ -1049,10 +1007,7 @@ async fn a_machine_off_wi_fi_needs_no_networkmanager_to_have_no_network() {
         .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
         .with_bus(bus);
     let answer = wifi.network_name().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unreadable { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unreadable { .. }));
 }
 
 /// A name read given up names what it was waiting on: NetworkManager when
@@ -1378,8 +1333,9 @@ async fn an_interface_name_that_leaves_the_folder_is_unrecognized() {
             "{ROUTE_HEADER}\n{name}\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
         );
         let answer = harness.machine(&route, None, &[ETH0]).link().await;
-        assert!(
-            matches!(answer, Err(PlatformError::Unrecognized { .. })),
+        assert_matches!(
+            answer,
+            Err(PlatformError::Unrecognized { .. }),
             "{name:?}: {answer:?}"
         );
     }
@@ -1392,10 +1348,7 @@ async fn a_default_route_out_of_an_interface_not_listed_is_unrecognized() {
         .machine(&default_route("eth9", 100), None, &[ETH0])
         .link()
         .await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 /// `route -n get default` on a Mac whose default route leaves by `interface`.
@@ -1602,10 +1555,7 @@ async fn networksetup_listing_no_port_is_unrecognized() {
     let answer = RouteLinkHarness::link(&route_output("en0"), "VLAN Configurations\n")
         .link()
         .await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 /// A name macOS leaves out or empties is withheld, never "no network": a
@@ -1621,10 +1571,7 @@ async fn a_name_the_report_leaves_out_or_empties_is_no_answer() {
         no_name,
     ] {
         let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
-        assert!(
-            matches!(answer, Err(PlatformError::Unrecognized { .. })),
-            "{answer:?}"
-        );
+        assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
 }
 
@@ -1649,10 +1596,7 @@ async fn the_name_is_the_wi_fi_port_s_when_the_default_route_leaves_by_it() {
         "{\"SPUSBDataType\": []}".to_owned(),
     ] {
         let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
-        assert!(
-            matches!(answer, Err(PlatformError::Unrecognized { .. })),
-            "{answer:?}"
-        );
+        assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
 }
 
@@ -1680,17 +1624,11 @@ async fn a_wi_fi_report_is_read_up_to_a_mebibyte() {
         Ok(CurrentNetworkName::new(b"Office"))
     );
     let answer = padded(1024 * 1024).network_name().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
-        "{answer:?}"
-    );
+    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 
 #[tokio::test]
 async fn the_system_link_is_this_platforms() {
     let link = platform::network_link::system_link().link().await;
-    assert!(
-        matches!(link, Ok(_) | Err(PlatformError::Unreadable { .. })),
-        "{link:?}"
-    );
+    assert_matches!(link, Ok(_) | Err(PlatformError::Unreadable { .. }));
 }

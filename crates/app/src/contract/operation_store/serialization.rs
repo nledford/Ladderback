@@ -3,6 +3,8 @@
 //! repositories and operation IDs of its own, so none depends on what another
 //! left in the log.
 
+use std::assert_matches;
+
 use domain::OperationId;
 use domain::RepositoryId;
 use domain::execution::OperationKind::{Backup, Check, Fake, Identify, Prune};
@@ -340,8 +342,9 @@ async fn only_a_running_operation_can_be_started(store: &dyn OperationStore) {
         ];
         for (state, op) in ops {
             let decided = store.try_start(&op).await;
-            assert!(
-                matches!(decided, Err(StoreError::Unavailable { .. })),
+            assert_matches!(
+                decided,
+                Err(StoreError::Unavailable { .. }),
                 "a {kind:?} that is {state} can't be started: {decided:?}"
             );
             assert_eq!(read(store, op.id()).await, None, "and none of it is stored");
@@ -352,8 +355,9 @@ async fn only_a_running_operation_can_be_started(store: &dyn OperationStore) {
     let waiting = on(0x2850, Prune, Some(&repository));
     save(store, &waiting, None).await;
     let decided = store.try_start(&waiting).await;
-    assert!(
-        matches!(decided, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        decided,
+        Err(StoreError::Unavailable { .. }),
         "a queued prune can't be started: {decided:?}"
     );
     assert_eq!(read(store, waiting.id()).await, Some(stored(&waiting)));
@@ -390,8 +394,9 @@ async fn save_refuses_a_second_running_maintenance_operation(store: &dyn Operati
     let mut running = started(waiting.clone());
     applied(running.record_warning(unreadable("/home/demo/a")));
     let refused_save = store.save(&running, None).await;
-    assert!(
-        matches!(refused_save, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        refused_save,
+        Err(StoreError::Unavailable { .. }),
         "a second running maintenance operation isn't saved: {refused_save:?}"
     );
     assert_eq!(
@@ -403,8 +408,9 @@ async fn save_refuses_a_second_running_maintenance_operation(store: &dyn Operati
     // Nor is one that was never saved before.
     let newcomer = started(on(0x2902, Prune, Some(&repository)));
     let refused_save = store.save(&newcomer, None).await;
-    assert!(
-        matches!(refused_save, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        refused_save,
+        Err(StoreError::Unavailable { .. }),
         "a first save is refused the same way: {refused_save:?}"
     );
     assert_eq!(read(store, newcomer.id()).await, None);

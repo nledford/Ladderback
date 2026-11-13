@@ -534,6 +534,7 @@ fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod tests {
+    use std::assert_matches;
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
@@ -1084,12 +1085,12 @@ mod tests {
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
             config.clone(),
         );
-        assert!(matches!(
+        assert_matches!(
             use_case
                 .connect(op(), alias(), &settings(), Maintenance::None)
                 .await,
             Err(RepositoryError::Failed(FailureReason::EngineFailed { .. }))
-        ));
+        );
         let saved = config
             .load()
             .await
@@ -1114,12 +1115,12 @@ mod tests {
             .connect(op(), alias(), &settings(), Maintenance::None)
             .await
             .unwrap_or_else(|e| panic!("the first connect: {e:?}"));
-        assert!(matches!(
+        assert_matches!(
             use_case
                 .connect(op(), alias(), &settings(), Maintenance::None)
                 .await,
             Err(RepositoryError::AliasTaken(_))
-        ));
+        );
         let saved = config
             .load()
             .await
@@ -1235,10 +1236,10 @@ mod tests {
             .len();
         let mut elsewhere = settings();
         elsewhere.repository = "/home/demo/scratch/other".to_owned();
-        assert!(matches!(
+        assert_matches!(
             use_case.init(op(), &elsewhere, Some(alias())).await,
             Err(RepositoryError::AliasTaken(_))
-        ));
+        );
         assert_eq!(
             engine
                 .seen

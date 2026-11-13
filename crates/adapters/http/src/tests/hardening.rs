@@ -1,6 +1,7 @@
 //! Body limits and security response headers (technical design §10.1),
 //! checked on the router as a client sees it.
 
+use std::assert_matches;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::{SinkExt, StreamExt, stream};
@@ -233,9 +234,9 @@ async fn a_message_from_the_events_client_is_bounded() {
         .await
         .unwrap();
     let answer = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next()).await;
-    assert!(
-        matches!(answer, Ok(Some(Ok(Message::Pong(ref payload)))) if payload.as_ref() == ping.as_slice()),
-        "{answer:?}"
+    assert_matches!(
+        answer,
+        Ok(Some(Ok(Message::Pong(ref payload)))) if payload.as_ref() == ping.as_slice()
     );
     // Anything larger is nothing the UI says: the daemon ends the connection
     // rather than hold a message of whatever size in memory.

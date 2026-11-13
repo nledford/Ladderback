@@ -5,6 +5,8 @@
 
 mod support;
 
+use std::assert_matches;
+
 use app::ports::{OperationDetail, OperationRecord, OperationStore, Start, StoreError};
 use domain::execution::{FailureReason, OperationKind, OperationStatus};
 use support::*;
@@ -256,10 +258,7 @@ async fn a_failure_part_way_through_leaves_every_row_as_it_was() {
         .expect("the fault is set up");
 
     let outcome = ended(&store).await;
-    assert!(
-        matches!(outcome, Err(StoreError::Unavailable { .. })),
-        "{outcome:?}"
-    );
+    assert_matches!(outcome, Err(StoreError::Unavailable { .. }));
 
     for ((n, before), seen) in numbers.into_iter().zip(rows_before).zip(seen_before) {
         assert_eq!(
@@ -289,8 +288,9 @@ async fn recovery_frees_the_repository_a_running_maintenance_operation_held_acro
             None,
         )
         .await;
-    assert!(
-        matches!(blocked, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        blocked,
+        Err(StoreError::Unavailable { .. }),
         "the unique index holds the repository while the prune runs: {blocked:?}"
     );
 

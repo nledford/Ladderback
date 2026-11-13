@@ -3,6 +3,7 @@
 //! identify, a listing and a forget, and records what it was asked to
 //! remove. The retention evaluation is the `FakeRetention` port.
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -1139,7 +1140,7 @@ fn refused_keeps_nothing(agent: &mut Agent) {
 #[then("the forget is refused while the other operation runs")]
 fn refused_busy(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    assert!(matches!(error, MaintenanceError::Busy { .. }), "{error:?}");
+    assert_matches!(error, MaintenanceError::Busy { .. });
 }
 
 #[given("the repository's entry records no ID")]
@@ -1160,16 +1161,13 @@ fn identified_first(agent: &mut Agent) {
 #[then("the forget is refused, naming the operation running on the repository")]
 fn refused_naming_running(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    assert!(
-        matches!(error, MaintenanceError::Busy { running } if running == operation_id(0xbb)),
-        "{error:?}"
-    );
+    assert_matches!(error, MaintenanceError::Busy { running } if running == operation_id(0xbb));
 }
 
 #[then("the prune is refused while the forget holds the repository")]
 fn prune_refused(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the prune was refused");
-    assert!(matches!(error, MaintenanceError::Busy { .. }), "{error:?}");
+    assert_matches!(error, MaintenanceError::Busy { .. });
 }
 
 #[then("a prune of the repository can start")]
@@ -1206,8 +1204,9 @@ fn no_forget_job(agent: &mut Agent) {
 #[then("the forget is refused because the engine cannot be reached")]
 fn refused_engine(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
-    assert!(
-        matches!(error, MaintenanceError::Engine { .. }),
+    assert_matches!(
+        error,
+        MaintenanceError::Engine { .. },
         "an engine failure, not {error:?}"
     );
 }

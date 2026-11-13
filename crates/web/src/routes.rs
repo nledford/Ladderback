@@ -383,7 +383,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         {move || {
             let buttons = plans
                 .get()
-                .map(|plans| {
+                .map_or_default(|plans| {
                     plans
                         .into_iter()
                         .map(|plan| {
@@ -446,8 +446,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             }
                         })
                         .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+                });
             (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
         }}
         {move || {
@@ -597,21 +596,13 @@ fn row_view(
             page.with(|state| {
                 state
                     .row(&id)
-                    .map(|row| row.summary.status.clone())
-                    .unwrap_or_default()
+                    .map_or_default(|row| row.summary.status.clone())
             })
         }
     });
     let started = Memo::new({
         let id = id.clone();
-        move |_| {
-            page.with(|state| {
-                state
-                    .row(&id)
-                    .map(|row| key(row).to_owned())
-                    .unwrap_or_default()
-            })
-        }
+        move |_| page.with(|state| state.row(&id).map_or_default(|row| key(row).to_owned()))
     });
     // The run's latest report: none until it has reported, so a row that has
     // not begun has no bar.
@@ -625,8 +616,7 @@ fn row_view(
             page.with(|state| {
                 state
                     .row(&id)
-                    .map(|row| operations::result(&row.summary))
-                    .unwrap_or_default()
+                    .map_or_default(|row| operations::result(&row.summary))
             })
         }
     });
@@ -1697,7 +1687,7 @@ pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
 fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
     let page = if path == "/" {
         msg::UI_START_TITLE
-    } else if gallery && path.strip_suffix('/').unwrap_or(path) == "/_gallery" {
+    } else if gallery && path.trim_suffix('/') == "/_gallery" {
         msg::UI_GALLERY_TITLE
     } else if path == "/operations" {
         msg::UI_OPERATIONS_TITLE

@@ -69,7 +69,7 @@ pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
 /// the run. A fact the log did not keep, such as the bytes a backup an
 /// earlier version ran went through, is left out, never shown as zero.
 pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
-    let mut facts = operation.result.as_ref().map(produced).unwrap_or_default();
+    let mut facts = operation.result.as_ref().map_or_default(produced);
     if let Some((used, count)) = operation.used_location() {
         facts.push(Words {
             id: msg::UI_RESULT_USED_LOCATION,

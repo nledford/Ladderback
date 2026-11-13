@@ -4,6 +4,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -314,10 +315,7 @@ async fn a_write_that_never_gets_the_lock_gives_up_with_unavailable_and_the_stor
     )
     .await;
 
-    assert!(
-        matches!(&outcome, Err(StoreError::Unavailable { detail }) if !detail.is_empty()),
-        "{outcome:?}"
-    );
+    assert_matches!(&outcome, Err(StoreError::Unavailable { detail }) if !detail.is_empty());
     assert!(started_waiting.elapsed() < Duration::from_secs(20));
 
     sqlx::query("ROLLBACK")

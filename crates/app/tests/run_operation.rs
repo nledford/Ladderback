@@ -3,6 +3,7 @@
 //! operation log. The well-behaved paths are specified in
 //! `features/execution/*.feature`.
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -575,7 +576,7 @@ async fn a_stream_that_ends_without_a_result_fails_the_operation() {
 #[tokio::test]
 async fn an_empty_stream_fails_the_queued_operation() {
     let op = run(vec![]).await;
-    assert!(matches!(op.status(), OperationStatus::Failed { .. }));
+    assert_matches!(op.status(), OperationStatus::Failed { .. });
     assert_eq!(op.started_at(), None);
 }
 
@@ -1302,11 +1303,9 @@ async fn a_stalled_write_does_not_delay_a_cancel() {
     let ended = finished(running).await;
     assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
     assert_eq!(ended.operation.finished_at(), Some(t(0)));
-    assert!(
-        matches!(
-            ended.recording_errors.as_slice(),
-            [StoreError::Unavailable { .. }]
-        ),
+    assert_matches!(
+        ended.recording_errors.as_slice(),
+        [StoreError::Unavailable { .. }],
         "{:?}",
         ended.recording_errors
     );

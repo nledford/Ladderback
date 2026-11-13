@@ -19,6 +19,7 @@
 //! The prompt's terminal is a file the scenario writes, or none at all:
 //! `LADDERBACK_INSTALL_TTY` names it, so no real terminal is ever asked.
 
+use std::assert_matches;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -818,8 +819,8 @@ async fn run_script(agent: &mut Agent, args: &[&str]) {
     agent.interop.ran = Some(Ran {
         success: output.status.success(),
         code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout: String::from_utf8_lossy_owned(output.stdout),
+        stderr: String::from_utf8_lossy_owned(output.stderr),
     });
 }
 
@@ -965,10 +966,7 @@ fn wasm_bindgen_built(agent: &mut Agent) {
     let installed = calls
         .iter()
         .position(|call| call.starts_with("just install"));
-    assert!(
-        matches!((built, installed), (Some(b), Some(i)) if b < i),
-        "{calls:?}"
-    );
+    assert_matches!((built, installed), (Some(b), Some(i)) if b < i, "{calls:?}");
 }
 
 #[then("wasm-bindgen was not built")]
@@ -1086,10 +1084,7 @@ fn pinned_rust_installed(agent: &mut Agent) {
     let built = calls
         .iter()
         .position(|call| call.starts_with("just install"));
-    assert!(
-        matches!((installed, built), (Some(i), Some(b)) if i < b),
-        "{calls:?}"
-    );
+    assert_matches!((installed, built), (Some(i), Some(b)) if i < b, "{calls:?}");
     let has = fs::read_to_string(pinned_rust(agent)).expect("rustup has the Rust the release pins");
     let wants = pinned_rust_components(None);
     let missing: Vec<&str> = wants
@@ -1106,8 +1101,9 @@ fn pinned_rust_installed(agent: &mut Agent) {
 fn pinned_rust_installed_once(agent: &mut Agent) {
     let calls = calls(agent);
     let installs = pinned_rust_installs(&calls);
-    assert!(
-        matches!(installs.as_slice(), [first] if *first < agent.install.calls_before),
+    assert_matches!(
+        installs.as_slice(),
+        [first] if *first < agent.install.calls_before,
         "{calls:?}"
     );
 }

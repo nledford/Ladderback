@@ -103,7 +103,7 @@ pub(crate) fn config(reader: &Reader<'_, '_>, file: FileTable) -> Read<AgentConf
     let agent = agent(reader, &root.key("agent"), file.agent.unwrap_or_default())?;
     let hooks = hooks(reader, &root.key("hooks"), file.hooks.unwrap_or_default())?;
     let mut repositories = BTreeMap::new();
-    for (name, table) in file.repositories.map(|named| named.0).unwrap_or_default() {
+    for (name, table) in file.repositories.map_or_default(|named| named.0) {
         let path = root.key("repositories").key(&name);
         let alias = RepositoryAlias::parse(&name).map_err(|invalid| {
             reader.error(&path, Spot::Key, Problem::Id(invalid.kind), String::new())

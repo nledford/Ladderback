@@ -266,6 +266,8 @@ pub(crate) fn errors_first<L: std::fmt::Debug, F>(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use domain::Timestamp;
     use jiff::tz::TimeZone;
     use rustic_core::repofile::{SnapshotId as RusticSnapshotId, SnapshotSummary, StringList};
@@ -395,10 +397,10 @@ mod tests {
 
     #[test]
     fn a_snapshot_without_a_summary_is_an_error_not_a_guess() {
-        assert!(matches!(
+        assert_matches!(
             backup_result(repository(), &snapshot()),
             Err(JobError::Failed { .. })
-        ));
+        );
     }
 
     #[test]
@@ -419,8 +421,9 @@ mod tests {
             SignedDuration::ZERO,
             SignedDuration::from_hours(-1),
         ] {
-            assert!(
-                matches!(prune_options(short), Err(JobError::Failed { .. })),
+            assert_matches!(
+                prune_options(short),
+                Err(JobError::Failed { .. }),
                 "{short:?}"
             );
         }
@@ -450,10 +453,10 @@ mod tests {
 
     #[test]
     fn an_extra_tag_with_the_reserved_prefix_is_refused() {
-        assert!(matches!(
+        assert_matches!(
             snapshot_tags(&plan_tags(), &["ladderback-plan:other".to_owned()]),
             Err(JobError::Failed { .. })
-        ));
+        );
     }
 
     #[test]
@@ -564,14 +567,12 @@ mod tests {
     #[test]
     fn a_host_the_daemon_would_refuse_is_an_invalid_spec() {
         for host in [String::new(), "a".repeat(256), "demo\nlaptop".to_owned()] {
-            assert!(
-                matches!(
-                    snapshot_host(Some(&host)),
-                    Err(JobError::Failed {
-                        code: ErrorCode::InvalidJobSpec,
-                        ..
-                    })
-                ),
+            assert_matches!(
+                snapshot_host(Some(&host)),
+                Err(JobError::Failed {
+                    code: ErrorCode::InvalidJobSpec,
+                    ..
+                }),
                 "{host:?}"
             );
         }

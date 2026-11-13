@@ -2,6 +2,7 @@
 //! acceptance runner: hooks are scripted on a `FakeHookRunner`, and the
 //! operation runs with them attached.
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use cucumber::{given, then};
@@ -187,12 +188,12 @@ fn failed_by_hook(agent: &mut Agent, code: i32) {
 
 #[then("the operation ends as failed because a hook timed out")]
 fn failed_by_timeout(agent: &mut Agent) {
-    assert!(matches!(
+    assert_matches!(
         agent.operation().status(),
         OperationStatus::Failed {
             reason: FailureReason::HookFailed { exit_code: None }
         }
-    ));
+    );
 }
 
 #[then(expr = "the operation carries a hook warning from the {word} phase with detail {string}")]

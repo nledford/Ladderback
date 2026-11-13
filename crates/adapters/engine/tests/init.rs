@@ -6,6 +6,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::fs;
 
 use app::ports::{EngineEvent, EngineResult, Job};
@@ -68,10 +69,10 @@ async fn initialising_where_a_repository_already_exists_is_refused_and_changes_n
     off_runtime(|| location.init());
     let before = contents(&scratch.repo_dir());
     let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
-    assert!(matches!(
+    assert_matches!(
         failed(&events),
         domain::execution::FailureReason::RepositoryExists
-    ));
+    );
     assert_eq!(contents(&scratch.repo_dir()), before, "nothing was written");
 }
 
@@ -84,10 +85,10 @@ async fn initialising_where_the_hot_half_holds_a_repository_is_refused_and_chang
     off_runtime(|| Location::local(&scratch.hot_dir()).init());
     let before = contents(&scratch.hot_dir());
     let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
-    assert!(matches!(
+    assert_matches!(
         failed(&events),
         domain::execution::FailureReason::RepositoryExists
-    ));
+    );
     assert_eq!(contents(&scratch.hot_dir()), before, "nothing was written");
 }
 
@@ -162,11 +163,9 @@ async fn a_backup_where_the_repository_folder_is_not_there_makes_none_and_create
         for attempt in 1..=2 {
             let job = backup_job(&location, &scratch.source(), "home", HOUR);
             let events = run_to_end(&engine(), job).await;
-            assert!(
-                matches!(
-                    failed(&events),
-                    domain::execution::FailureReason::EngineFailed { .. }
-                ),
+            assert_matches!(
+                failed(&events),
+                domain::execution::FailureReason::EngineFailed { .. },
                 "backup {attempt} at {missing:?}: {events:?}"
             );
             assert!(

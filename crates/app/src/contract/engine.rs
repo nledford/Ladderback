@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::time::Duration;
 
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -44,8 +45,9 @@ async fn start(engine: &dyn Engine, job: FakeJob) -> Result<RunningJob, EngineEr
 /// so it is checked for presence only.
 async fn events(engine: &dyn Engine, job: FakeJob) -> Result<Vec<EngineEvent>, EngineError> {
     let events: Vec<EngineEvent> = start(engine, job).await?.events.collect().await;
-    assert!(
-        matches!(events.first(), Some(EngineEvent::Started { .. })),
+    assert_matches!(
+        events.first(),
+        Some(EngineEvent::Started { .. }),
         "a job starts with Started: {events:?}"
     );
     Ok(events.into_iter().skip(1).collect())

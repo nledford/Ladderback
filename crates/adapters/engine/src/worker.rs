@@ -440,6 +440,7 @@ fn exit_on_signal(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Mutex;
     use std::sync::mpsc;
 
@@ -523,18 +524,17 @@ mod tests {
         let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
         assert_eq!(exit.code(), 1);
         let events = capture.parsed();
-        assert!(
-            matches!(
-                events.first(),
-                Some(WorkerEvent::Log {
-                    level: Level::Debug,
-                    ..
-                })
-            ),
+        assert_matches!(
+            events.first(),
+            Some(WorkerEvent::Log {
+                level: Level::Debug,
+                ..
+            }),
             "the stream doesn't start with the log line: {events:?}"
         );
-        assert!(
-            matches!(events.last(), Some(WorkerEvent::Failed { .. })),
+        assert_matches!(
+            events.last(),
+            Some(WorkerEvent::Failed { .. }),
             "{events:?}"
         );
     }
@@ -688,8 +688,9 @@ mod tests {
             terminated.try_recv().is_err(),
             "the worker was ended after its work was done"
         );
-        assert!(
-            matches!(capture.parsed().as_slice(), [WorkerEvent::Started { .. }]),
+        assert_matches!(
+            capture.parsed().as_slice(),
+            [WorkerEvent::Started { .. }],
             "{:?}",
             capture.parsed()
         );

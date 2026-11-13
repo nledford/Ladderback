@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -136,14 +137,12 @@ async fn a_file_that_is_not_a_profile_is_refused(harness: &dyn ProfilesHarness) 
     };
     let file = harness.broken_profile();
     let read = harness.reader().read(&file, &demo).await;
-    assert!(
-        matches!(
-            &read,
-            Err(ProfileError::Invalid {
-                problem: ProfileProblem::Syntax,
-                ..
-            })
-        ),
+    assert_matches!(
+        &read,
+        Err(ProfileError::Invalid {
+            problem: ProfileProblem::Syntax,
+            ..
+        }),
         "a file that is not TOML is invalid: {read:?}"
     );
     if let Err(ProfileError::Invalid { file: named, .. }) = read {
@@ -157,8 +156,9 @@ async fn a_file_that_is_not_there_is_unreadable(harness: &dyn ProfilesHarness) {
     };
     let file = harness.missing_profile();
     let read = harness.reader().read(&file, &demo).await;
-    assert!(
-        matches!(&read, Err(ProfileError::Unreadable { .. })),
+    assert_matches!(
+        &read,
+        Err(ProfileError::Unreadable { .. }),
         "a missing file is unreadable: {read:?}"
     );
     if let Err(ProfileError::Unreadable { file: named }) = read {

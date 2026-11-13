@@ -96,6 +96,7 @@ fn record_this_process(file: &mut File) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::fs;
     use std::path::PathBuf;
 
@@ -111,7 +112,7 @@ mod tests {
         let _first = DataDirLock::acquire(dir.path()).unwrap();
         let second =
             DataDirLock::acquire(dir.path()).expect_err("a second lock on a held data dir");
-        assert!(matches!(second, LockError::InUse { .. }), "{second:?}");
+        assert_matches!(second, LockError::InUse { .. });
     }
 
     #[test]
@@ -184,7 +185,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
         let error = DataDirLock::acquire(&missing).expect_err("no data dir");
-        assert!(matches!(error, LockError::Unavailable { .. }), "{error:?}");
+        assert_matches!(error, LockError::Unavailable { .. });
         assert!(!missing.exists(), "locking doesn't make the data dir");
     }
 

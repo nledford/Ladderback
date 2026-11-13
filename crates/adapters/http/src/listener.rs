@@ -319,7 +319,7 @@ mod tests {
             .unwrap()
             .unwrap();
             assert!(child.status.success());
-            String::from_utf8_lossy(&child.stdout).into_owned()
+            String::from_utf8_lossy_owned(child.stdout)
         }
 
         /// Polls `future` once: whether it is still pending.

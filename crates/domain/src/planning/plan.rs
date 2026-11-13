@@ -154,6 +154,8 @@ impl Plan {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use crate::planning::MAX_DURATION;
 
@@ -216,14 +218,12 @@ mod tests {
             MAX_DURATION,
             MAX_DURATION + SignedDuration::from_secs(1),
         ] {
-            assert!(
-                matches!(
-                    RetryPolicy::new(3, backoff),
-                    Err(InvalidValue {
-                        kind: ValueKind::Duration,
-                        ..
-                    })
-                ),
+            assert_matches!(
+                RetryPolicy::new(3, backoff),
+                Err(InvalidValue {
+                    kind: ValueKind::Duration,
+                    ..
+                }),
                 "{backoff:?}"
             );
         }

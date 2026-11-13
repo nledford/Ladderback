@@ -163,7 +163,7 @@ pub(super) fn rclone_credentials(location: &str) -> Vec<SecretValue> {
 /// follow the backend's name all the same, so the second `:` goes too.
 fn rclone_remote(location: &str) -> Option<&str> {
     let rest = location.strip_prefix(RCLONE)?;
-    Some(rest.strip_prefix(':').unwrap_or(rest))
+    Some(rest.trim_prefix(':'))
 }
 
 /// How many levels deep an rclone location is read for credentials, and for

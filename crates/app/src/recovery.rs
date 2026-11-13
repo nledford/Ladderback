@@ -122,6 +122,7 @@ fn ended_why(target: &Target, config: &AgentConfig) -> Option<QueuedEnd> {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod tests {
+    use std::assert_matches;
     use std::sync::{Arc, Mutex, PoisonError};
 
     use async_trait::async_trait;
@@ -197,11 +198,9 @@ mod tests {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        assert!(
-            matches!(
-                reports.as_slice(),
-                [ScheduleReport::Store(StoreError::Corrupt { .. })]
-            ),
+        assert_matches!(
+            reports.as_slice(),
+            [ScheduleReport::Store(StoreError::Corrupt { .. })],
             "{reports:?}"
         );
         assert!(
