@@ -482,8 +482,42 @@ fn cases() -> Vec<Case> {
             "warning_count",
             good().with("warning_count", 2.5_f64),
         ),
+        // The locations of a run's choice (decision 80).
+        broken(
+            "a used location with no locations recorded",
+            "location_no",
+            good().with("location_no", 1_i64),
+        ),
+        broken(
+            "a used location that isn't the one the record says was used",
+            "location_no",
+            good()
+                .with("location_no", 1_i64)
+                .with("locations_json", LOCATIONS_USED_SECOND),
+        ),
+        broken(
+            "a record of locations that used one, with no used location",
+            "location_no",
+            good().with("locations_json", LOCATIONS_USED_SECOND),
+        ),
+        broken(
+            "a location whose outcome is no outcome",
+            "locations_json",
+            good().with(
+                "locations_json",
+                r#"[{"position":1,"address":"/srv/a","outcome":"teleported"}]"#,
+            ),
+        ),
+        broken(
+            "locations that aren't a list",
+            "locations_json",
+            good().with("locations_json", "{}"),
+        ),
     ]
 }
+
+/// A choice that skipped the first location and used the second.
+const LOCATIONS_USED_SECOND: &str = r#"[{"position":1,"address":"/srv/a","outcome":"silent"},{"position":2,"address":"/srv/b","outcome":"used"}]"#;
 
 /// The report of a corrupt row, or a failed test.
 fn corrupt<T: std::fmt::Debug>(outcome: Result<T, StoreError>, what: &str) -> String {
@@ -514,6 +548,7 @@ fn expected_good_record() -> OperationRecord {
             ..backup_summary()
         })),
         repository_alias: None,
+        locations: None,
     }
 }
 

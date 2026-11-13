@@ -134,6 +134,7 @@ fn demoted(n: u128, kind: OperationKind) -> OperationRecord {
         warning_count: 0,
         result: None,
         repository_alias: None,
+        locations: None,
     }
 }
 
@@ -226,7 +227,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (4, true),
             (5, true),
             (6, true),
-            (7, true)
+            (7, true),
+            (8, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -284,7 +286,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (4, true),
             (5, true),
             (6, true),
-            (7, true)
+            (7, true),
+            (8, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -340,7 +343,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (4, true),
             (5, true),
             (6, true),
-            (7, true)
+            (7, true),
+            (8, true)
         ]
     );
     let check = store
@@ -350,6 +354,10 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
         .expect("the check is in the log");
     assert_eq!(check.record.kind, OperationKind::Check);
     assert_eq!(check.record.repository_alias, None);
+    assert_eq!(
+        check.record.locations, None,
+        "an earlier row records no location"
+    );
     let backup = store
         .get(id(0x61))
         .await
@@ -364,6 +372,7 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
         }))
     );
     assert_eq!(backup.record.repository_alias, None);
+    assert_eq!(backup.record.locations, None);
 }
 
 /// A log that already has a `repo_alias` column, which no build of Ladderback
@@ -425,7 +434,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (4, true),
             (5, true),
             (6, true),
-            (7, true)
+            (7, true),
+            (8, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(

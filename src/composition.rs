@@ -2867,6 +2867,7 @@ mod tests {
             warning_count: 0,
             result,
             repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
+            locations: None,
         }
     }
 

@@ -13,6 +13,7 @@
 
 mod codec;
 mod error_args;
+mod locations;
 mod report;
 mod row;
 mod sql;
@@ -30,6 +31,7 @@ use app::ports::{
     PlannedRun, Recovered, ScheduleStore, Start, StoreError, maintained_repository,
 };
 use async_trait::async_trait;
+use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
@@ -179,6 +181,7 @@ struct Encoded<'a> {
     failure: Option<codec::FailureColumns<'a>>,
     summary: Option<String>,
     snapshot: Option<&'a str>,
+    locations: Option<String>,
 }
 
 impl<'a> Encoded<'a> {
@@ -197,11 +200,17 @@ impl<'a> Encoded<'a> {
             Some(EngineResult::Backup(backup)) => Some(backup.snapshot.as_str()),
             _ => None,
         };
+        let locations = operation
+            .locations()
+            .map(locations::encode)
+            .transpose()
+            .map_err(encoding)?;
         Ok(Self {
             id: operation.id().as_uuid().to_string(),
             failure,
             summary,
             snapshot,
+            locations,
         })
     }
 }
@@ -238,6 +247,13 @@ async fn write(
         .bind(encoded.failure.as_ref().and_then(|failure| failure.detail))
         .bind(i64::try_from(operation.warning_count()).unwrap_or(i64::MAX))
         .bind(operation.repository_alias().map(RepositoryAlias::as_str))
+        .bind(
+            operation
+                .locations()
+                .and_then(LocationsRecord::used)
+                .map(i64::from),
+        )
+        .bind(encoded.locations.as_deref())
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;

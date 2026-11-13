@@ -31,6 +31,7 @@ pub async fn run(store: &dyn OperationStore) {
     every_kind_and_trigger_reads_back(store, &fx).await;
     every_result_reads_back(store, &fx).await;
     a_maintenance_operation_keeps_the_alias_it_ran_under(store, &fx).await;
+    an_operation_keeps_the_locations_its_choice_saw(store, &fx).await;
     warnings_read_back_whole_and_in_order(store).await;
     a_later_save_replaces_the_warnings_too(store).await;
     one_operations_warnings_are_not_anothers(store).await;
@@ -580,6 +581,60 @@ async fn a_maintenance_operation_keeps_the_alias_it_ran_under(
     save(store, &backup, None).await;
     let found = read(store, id(0xb9)).await.map(|found| found.record);
     assert_eq!(found.map(|record| record.repository_alias), Some(None));
+}
+
+/// The choice of a repository reached at several locations is kept with the
+/// operation: every location, in order, with its masked address, its outcome
+/// and the source of a skip, whatever the outcome (decision 80). Each choice
+/// has at most the four locations an entry may have.
+async fn an_operation_keeps_the_locations_its_choice_saw(
+    store: &dyn OperationStore,
+    fx: &Fixtures,
+) {
+    use domain::execution::locations::{LocationOutcome::*, LocationTried, LocationsRecord};
+    let choices = [
+        [Silent, Refused, Used, NotTried],
+        [RuleNotMet, RuleUnknown, NotARepository, OtherRepository],
+        [
+            PasswordNotAccepted,
+            SecretUnavailable,
+            TemplateInvalid,
+            PathRelative,
+        ],
+        [
+            ExpansionTooLong,
+            ReferenceInProcessArguments,
+            TooManyCredentials,
+            Used,
+        ],
+    ];
+    for (n, outcomes) in (0xbb..).zip(choices) {
+        let record = LocationsRecord {
+            locations: (1u8..)
+                .zip(outcomes)
+                .map(|(position, outcome)| LocationTried {
+                    position,
+                    address: format!("rest:https://user:***@host-{position}.example.lan/é"),
+                    outcome,
+                    source: (outcome == SecretUnavailable).then(|| "env LAN_KEY".to_owned()),
+                })
+                .collect(),
+        };
+        let mut op = started(queued(n, Some(&fx.home)));
+        let recorded = op.record_locations(record.clone(), |_| false);
+        assert!(
+            recorded.is_ok(),
+            "a running operation records its choice: {recorded:?}"
+        );
+        save(store, &op, None).await;
+        let found = read(store, id(n)).await.map(|found| found.record);
+        assert_eq!(
+            found.as_ref().and_then(|record| record.locations.as_ref()),
+            Some(&record),
+            "the log keeps every location the choice saw"
+        );
+        assert_eq!(found, Some(OperationRecord::of(&op, None)));
+    }
 }
 
 async fn warnings_read_back_whole_and_in_order(store: &dyn OperationStore) {
