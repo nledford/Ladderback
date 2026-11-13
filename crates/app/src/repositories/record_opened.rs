@@ -1035,6 +1035,16 @@ mod tests {
         async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
             let kind = job.kind();
             let identify = matches!(job, Job::Identify(_));
+            // The worker exists from the start of the job, so a start that
+            // is dropped while it is held drops its worker too.
+            let (halt, halted) = futures::channel::oneshot::channel::<()>();
+            self.live.fetch_add(1, Ordering::SeqCst);
+            let control = Box::new(Halts {
+                kind,
+                halt: Some(halt),
+                stopped: Arc::clone(&self.stopped),
+                live: Arc::clone(&self.live),
+            });
             self.seen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -1064,7 +1074,6 @@ mod tests {
                     false,
                 ),
             };
-            let (halt, halted) = futures::channel::oneshot::channel::<()>();
             let played = futures::stream::iter(events);
             let events = if hangs {
                 played
@@ -1073,16 +1082,7 @@ mod tests {
             } else {
                 played.boxed()
             };
-            self.live.fetch_add(1, Ordering::SeqCst);
-            Ok(RunningJob {
-                events,
-                control: Box::new(Halts {
-                    kind,
-                    halt: Some(halt),
-                    stopped: Arc::clone(&self.stopped),
-                    live: Arc::clone(&self.live),
-                }),
-            })
+            Ok(RunningJob { events, control })
         }
     }
 
@@ -1330,6 +1330,7 @@ mod tests {
             keeps.seen(),
             [Job::Identify(access.clone()), backup(&identified)]
         );
+        assert_eq!(keeps.live(), 1, "the job's worker is starting");
         stop_within_bound(&mut control).await;
         let _ = go.send(());
         assert_eq!(rest(events).await, [], "nothing of the job is passed on");
@@ -1405,6 +1406,7 @@ mod tests {
         })
         .await
         .expect("the job is being started");
+        assert_eq!(keeps.live(), 1, "the job's worker is starting");
         cancel.send(()).expect("the run waits for a cancel");
         let finished = tokio::time::timeout(BOUND, running)
             .await
