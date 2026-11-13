@@ -178,7 +178,7 @@ pub(crate) fn encode_failure(
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
         FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
-        FailureReason::CredentialsRefused => todo!(),
+        FailureReason::CredentialsRefused => ("credentials-refused", Vec::new(), None),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -253,6 +253,7 @@ pub(crate) fn decode_failure(
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
         "repository-not-found" => Ok(FailureReason::RepositoryNotFound),
+        "credentials-refused" => Ok(FailureReason::CredentialsRefused),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),

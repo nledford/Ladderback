@@ -294,6 +294,9 @@ error-repository-exists = { -brand-name } did not initialise a repository at { $
 # No repository is at the location: it is a folder on this machine holding nothing of a repository, so nothing was opened or written.
 error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.
 
+# The server the repository is on answered and refused the credentials it was sent (HTTP 401 or 403), so nothing was read or written. Not a missing repository: the server never said what it holds.
+error-credentials-refused = The server refused the credentials { -brand-name } sent for this repository, so nothing was read or written. Check the user name and password in the repository's location or its options, and that the server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+
 # A repository reached at several locations had none that could be used: each was silent, refused, held no repository or another one, or a secret of it was unavailable. The operation's detail lists each location and why.
 error-no-location-usable = No location of this repository could be used, so nothing was read or written. The operation lists each location and why it was skipped; check that one of them can be reached, then try again.
 

@@ -118,7 +118,7 @@ pub fn failure(reason: &FailureReason) -> (ErrorCode, Vec<MsgArg>) {
         F::RepositoryExists => (ErrorCode::RepositoryExists, Vec::new()),
         F::RepositoryReplaced => (ErrorCode::RepositoryReplaced, Vec::new()),
         F::RepositoryNotFound => (ErrorCode::RepositoryNotFound, Vec::new()),
-        F::CredentialsRefused => todo!(),
+        F::CredentialsRefused => (ErrorCode::CredentialsRefused, Vec::new()),
         F::SecretsTooLargeToMask { field, limit } => (
             ErrorCode::SecretsTooLargeToMask,
             std::iter::once(MsgArg::Bytes(u64::try_from(*limit).unwrap_or(u64::MAX)))

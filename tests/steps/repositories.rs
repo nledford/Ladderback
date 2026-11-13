@@ -21,7 +21,7 @@ use domain::{OperationId, RepositoryAlias, RepositoryId, Uuid};
 use platform::SystemClock;
 use secrets::SystemSecrets;
 
-use super::rest_server_steps::{WRONG_SERVER_PASSWORD, location};
+use super::rest_server_steps::{SERVER_PASSWORD, WRONG_SERVER_PASSWORD, location};
 use super::{Agent, blocking};
 
 /// Not a real secret: the scratch repositories' password.
@@ -508,6 +508,11 @@ fn api_other_empty_location(agent: &mut Agent) {
 #[given("a REST server that refuses the credentials the client sends it")]
 async fn api_refusing_rest_server(agent: &mut Agent) {
     agent.repositories.rest = Some(location(WRONG_SERVER_PASSWORD).await);
+}
+
+#[given("a REST server that takes the credentials the client sends it and holds no repository")]
+async fn api_empty_rest_server(agent: &mut Agent) {
+    agent.repositories.rest = Some(location(SERVER_PASSWORD).await);
 }
 
 #[given(expr = "the client has connected it as {string}")]

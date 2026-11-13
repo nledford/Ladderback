@@ -1,14 +1,18 @@
 //! Opening a repository for a job.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use api::ErrorCode;
 use domain::RepositoryId;
-use rustic_backend::util::location_to_type_and_path;
-use rustic_backend::{BackendOptions, SupportedBackend};
-use rustic_core::{Credentials, OpenStatus, Repository, RepositoryOptions};
+use reqwest::StatusCode;
+use rustic_backend::util::{BackendLocation, location_to_type_and_path};
+use rustic_backend::{BackendOptions, RestBackend, SupportedBackend};
+use rustic_core::{
+    Credentials, FileType, OpenStatus, ReadBackend, Repository, RepositoryOptions, RusticError,
+};
 
 use super::Context;
 use super::cancel::refusing_snapshots_once_cancelled;
@@ -60,11 +64,12 @@ pub(crate) fn new_repository(
 ///
 /// A half on OpenDAL's `fs` whose root folder isn't there fails the job
 /// before its backend is set up, which would make that folder (decision 53).
-/// When the repository doesn't open, and only then, its folders are looked
-/// at: when each half is a folder on this machine holding nothing of a
-/// repository, the job fails with `repository-not-found`, and otherwise
-/// with the error opening gave, as it always did. A repository that opens
-/// costs no extra look.
+/// When the repository doesn't open, and only then, a REST server's refusal
+/// of the credentials fails the job with `credentials-refused` (#478), and
+/// its folders are looked at: when each half is a folder on this machine
+/// holding nothing of a repository, the job fails with
+/// `repository-not-found`, and otherwise with the error opening gave, as it
+/// always did. A repository that opens costs no extra look.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
@@ -78,13 +83,23 @@ pub(crate) fn open(
     let credentials = Credentials::password(spec.password.expose());
     let repository = match new_repository(ctx, spec)?.open(&credentials) {
         Ok(repository) => repository,
-        Err(_) if no_repository_there(spec) => {
-            return Err(JobError::Failed {
-                code: ErrorCode::RepositoryNotFound,
-                detail: "no repository config file is at the location".to_owned(),
-            });
+        Err(error) => {
+            if let Some(status) = refusal(spec, &error) {
+                return Err(JobError::Failed {
+                    code: ErrorCode::CredentialsRefused,
+                    detail: format!(
+                        "the server answered {status}: it refused the credentials sent for the repository"
+                    ),
+                });
+            }
+            if no_repository_there(spec) {
+                return Err(JobError::Failed {
+                    code: ErrorCode::RepositoryNotFound,
+                    detail: "no repository config file is at the location".to_owned(),
+                });
+            }
+            return Err(error.into());
         }
-        Err(error) => return Err(error.into()),
     };
     if let Some(expected) = &spec.id {
         let found = repository_id(&repository)?;
@@ -154,7 +169,7 @@ const WRONG_PASSWORD: &str = "C002";
 /// Whether the backend answered and refused the credentials: an HTTP 401 or
 /// 403 from a REST or OpenDAL server, or OpenDAL's permission error, found
 /// anywhere in the error's chain.
-fn refused(error: &rustic_core::RusticError) -> bool {
+fn refused(error: &RusticError) -> bool {
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(error) = cause {
         let text = error.to_string();
@@ -167,6 +182,60 @@ fn refused(error: &rustic_core::RusticError) -> bool {
         cause = error.source();
     }
     false
+}
+
+/// The refusal a REST server the repository is on gave its credentials
+/// (HTTP 401 or 403), if one did, as the failed opening's `error` tells it.
+/// rustic's REST backend reads the config with a `HEAD` and takes any status
+/// but success for "no config file", dropping the status (`rest.rs`). So
+/// when the error holds no answer of a server, and only then, each half on
+/// a REST server lists its keys, a `GET` whose status rustic keeps, once,
+/// without retrying. No other half is set up again: an rclone half starts a
+/// process, and one on OpenDAL's `fs` makes its root folder.
+fn refusal(spec: &RepositorySpec, error: &RusticError) -> Option<StatusCode> {
+    match answer(error) {
+        Some(status) => status.filter(refuses),
+        None => rest_halves(spec).find_map(|(location, options)| {
+            let listed =
+                RestBackend::new(location, options).and_then(|backend| backend.list(FileType::Key));
+            answer(listed.err()?.as_ref()).flatten().filter(refuses)
+        }),
+    }
+}
+
+/// What `error`'s chain says of an HTTP request: `None` when it holds no
+/// HTTP client's error, and otherwise the status the server answered with,
+/// if it answered at all.
+fn answer(error: &(dyn std::error::Error + 'static)) -> Option<Option<StatusCode>> {
+    std::iter::successors(Some(error), |error| error.source())
+        .find_map(|error| error.downcast_ref::<reqwest::Error>())
+        .map(reqwest::Error::status)
+}
+
+/// Whether `status` is a server's refusal of the credentials.
+fn refuses(status: &StatusCode) -> bool {
+    matches!(*status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+}
+
+/// Each half of the repository on a REST server, the cold one first: its
+/// location, and its options as rustic gives them to it (`options_cold` or
+/// `options_hot` over `options`), with retries off.
+fn rest_halves(
+    spec: &RepositorySpec,
+) -> impl Iterator<Item = (BackendLocation, BTreeMap<String, String>)> + '_ {
+    let cold = (spec.repository.as_str(), &spec.options_cold);
+    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
+    std::iter::once(cold)
+        .chain(hot)
+        .filter_map(|(location, half_options)| {
+            let Ok((SupportedBackend::Rest, location)) = location_to_type_and_path(location) else {
+                return None;
+            };
+            let mut options = spec.options.clone();
+            options.extend(half_options.clone());
+            options.insert("retry".to_owned(), "off".to_owned());
+            Some((location, options))
+        })
 }
 
 /// Where a half of the repository is, as far as telling "no repository"
@@ -712,6 +781,19 @@ mod tests {
             ..spec_at(&cold.to_string_lossy())
         };
         assert_eq!(failed_code(&spec), api::ErrorCode::CredentialsRefused);
+    }
+
+    /// A REST server that takes the credentials and holds no repository
+    /// answers `404 Not Found`, which is no refusal: the job fails as it
+    /// always did, never as `repository-not-found`, since a server's missing
+    /// repository can't be told from one out of reach (decision 53).
+    #[test]
+    fn a_rest_server_that_holds_no_repository_fails_the_job_as_before() {
+        let empty = format!("rest:http://{}/", server_answering("404 Not Found"));
+        assert_eq!(
+            failed_code(&spec_at(&empty)),
+            api::ErrorCode::OperationFailed
+        );
     }
 
     // The probe of a location (decision 80).

@@ -39,6 +39,14 @@ Feature: Repositories over HTTP
     And no answer shows "canary-wrong-secret"
     And the daemon lists no repositories
 
+  Scenario: Testing at a server that holds no repository is refused with the engine's words
+    Given a REST server that takes the credentials the client sends it and holds no repository
+    When the client tests the repository
+    Then the refusal has status 422 and the typed code "operation-failed"
+    And the refusal carries the engine's detail
+    And no answer shows "canary-not-a-secret"
+    And the daemon lists no repositories
+
   Scenario: Connecting a repository adds it to the list, without its password
     Given an initialised repository
     When the client connects it as "demo"

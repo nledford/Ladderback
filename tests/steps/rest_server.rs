@@ -1,6 +1,6 @@
 //! A REST server on loopback for the `@e2e` scenarios about what a server
 //! says of the credentials it is sent (#478). It takes only the user
-//! [`USER`] with the password `canary-not-a-secret`, refusing any other
+//! [`USER`] with the password [`SERVER_PASSWORD`], refusing any other
 //! request with `401 Unauthorized`, and it holds no repository: every
 //! request it takes is answered `404 Not Found`. That is all of rustic's
 //! REST server these scenarios need, so the runner needs no `rustic-server`.
@@ -13,11 +13,14 @@ use tokio::net::{TcpListener, TcpStream};
 /// The one user the server takes.
 pub(crate) const USER: &str = "demo";
 
+/// Not a real secret: the one password the server takes.
+pub(crate) const SERVER_PASSWORD: &str = "canary-not-a-secret";
+
 /// Not a real secret: a password the server refuses.
 pub(crate) const WRONG_SERVER_PASSWORD: &str = "canary-wrong-secret";
 
-/// The `Authorization` header of the one user and password the server
-/// takes: HTTP Basic, the two base64-encoded as `demo:canary-not-a-secret`.
+/// The `Authorization` header of [`USER`] and [`SERVER_PASSWORD`]: HTTP
+/// Basic, the two base64-encoded as `demo:canary-not-a-secret`.
 const ACCEPTED: &str = "Basic ZGVtbzpjYW5hcnktbm90LWEtc2VjcmV0";
 
 /// The most of one request's head the server reads.

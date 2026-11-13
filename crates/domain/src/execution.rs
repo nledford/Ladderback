@@ -156,7 +156,7 @@ impl FailureReason {
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
-            Self::CredentialsRefused => todo!(),
+            Self::CredentialsRefused => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
             Self::NoLocationUsable => "no-location-usable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
