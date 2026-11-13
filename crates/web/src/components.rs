@@ -457,12 +457,12 @@ pub(crate) fn ErrorSummary(
                         let SummaryItem { field, sentence } = item;
                         let shown = sentence_view(sentence);
                         match field {
-                            // The router takes a click on any same-origin
-                            // link and would only scroll, so the link moves
-                            // focus itself and stops the click.
                             Some(field) => {
                                 view! {
                                     <li>
+                                        // The router takes a click on any same-origin
+                                        // link and would only scroll, so the link moves
+                                        // focus itself and stops the click.
                                         <a
                                             href=format!("#{field}")
                                             on:click=move |event| {

@@ -394,15 +394,17 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             let base = start_base.clone();
                             let visit = start_visit.clone();
                             let error_localizer = Arc::clone(&localizer_for_errors);
-                            // Named with its plan, as a row's Cancel is: a
-                            // reader tabbing through the plans hears which
-                            // one each button runs (2.4.6, 4.1.2).
                             let label = text_with(
                                 &start_localizer,
                                 msg::UI_START_PLAN,
                                 &[("plan", MsgArg::Text(plan.id.clone()))],
                             );
                             view! {
+                                // Named with its plan, as a row's Cancel is: a
+                                // reader tabbing through the plans hears which
+                                // one each button runs (2.4.6, 4.1.2). When a
+                                // start gets no answer at all, the page's phase
+                                // says that its own way.
                                 <button
                                     type="button"
                                     on:click=move |_| {
@@ -434,8 +436,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                         detail.as_deref(),
                                                     )));
                                                 }
-                                                // No answer at all: the page's
-                                                // phase says that its own way.
                                                 None => {}
                                             }
                                         });
@@ -449,10 +449,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 });
             (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
         }}
+        // Per render: the sort button's and rows' closures own what they
+        // say and show. A render is a change of what the page shows, never
+        // an update to a row.
         {move || {
-            // Per render: the sort button's and rows' closures own what they
-            // say and show. A render is a change of what the page shows, never
-            // an update to a row.
             let newest = sorted_newest.clone();
             let oldest = sorted_oldest.clone();
             let rows_localizer = table_localizer.clone();
@@ -477,15 +477,14 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             _ => "descending",
                                         }
                                     >
+                                        // Its sort button's first press is the newest
+                                        // first: the history is already the daemon's
+                                        // newest first, so the sort's own orders follow.
                                         <span class="sort-header">
                                             {started_column.clone()}
                                             <button
                                                 type="button"
                                                 on:click=move |_| {
-                                                    // The first press is the newest
-                                                    // first: the history is already
-                                                    // the daemon's newest first, so
-                                                    // the sort's own orders follow.
                                                     let next = match sort.get_untracked() {
                                                         SortOrder::History
                                                         | SortOrder::OldestFirst => SortOrder::NewestFirst,
@@ -682,9 +681,6 @@ fn row_view(
                     can_cancel
                         .get()
                         .then(|| {
-                            // A run that ends takes its Cancel button away;
-                            // a button that held focus hands it to the row's
-                            // header, which names the run (#438).
                             let button = NodeRef::<leptos::html::Button>::new();
                             hand_focus_when_gone(button, cancel_header.clone());
                             let url = url.clone();
@@ -693,6 +689,9 @@ fn row_view(
                             let still_waiting = still_waiting.clone();
                             let error_localizer = Arc::clone(&error_localizer);
                             view! {
+                                // A run that ends takes its Cancel button away;
+                                // a button that held focus hands it to the row's
+                                // header, which names the run (#438).
                                 <button
                                     node_ref=button
                                     type="button"

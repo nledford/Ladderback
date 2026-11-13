@@ -201,12 +201,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 error=form_error
             />
             <p>
+                // A second check of a corrected field clears the
+                // error, rewiring the input's description; only the
+                // error's arrival is announced.
                 <button
                     type="button"
                     on:click=move |_| {
-                        // A second check of a corrected field clears the
-                        // error, rewiring the input's description; only the
-                        // error's arrival is announced.
                         if form_error.get_untracked().is_some() {
                             form_error.set(None);
                         } else {
@@ -347,11 +347,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
             />
             <p>
+                // A run that finishes by itself: said at once, or
+                // counted while the demo is paused.
                 <button
                     type="button"
                     on:click=move |_| {
-                        // A run that finishes by itself: said at once, or
-                        // counted while the demo is paused.
                         if demo_paused.get_untracked() {
                             demo_ends.update_value(|ends| ends.count("succeeded"));
                             demo_waiting.update(|waiting| *waiting = waiting.saturating_add(1));

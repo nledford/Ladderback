@@ -258,13 +258,13 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
     });
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
     view! {
+        // On `cancel`, Escape keeps the session too; the warning closes once
+        // the daemon has counted the use.
         <dialog
             node_ref=dialog
             aria-labelledby="idle-warning-title"
             aria-describedby="idle-warning-body"
             on:cancel=move |event: web_sys::Event| {
-                // Escape keeps the session too; the warning closes once the
-                // daemon has counted the use.
                 event.prevent_default();
                 keep();
             }
