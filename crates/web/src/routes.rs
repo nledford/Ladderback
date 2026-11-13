@@ -622,6 +622,7 @@ fn row_view(
     let has_progress = Memo::new(move |_| percent.get().is_some());
     let result_localizer = Arc::clone(&localizer);
     let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
+    let working = text(&localizer, msg::UI_PROGRESS_WORKING);
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
     let url = format!("{}/api/v1/operations/{id}/cancel", connection.base);
     let operation = id;
@@ -640,7 +641,8 @@ fn row_view(
                             view! {
                                 <Progress
                                     label=progress_label.clone()
-                                    value=Signal::derive(move || percent.get().flatten().unwrap_or_default())
+                                    value=Signal::derive(move || percent.get().flatten())
+                                    unknown=working.clone()
                                 />
                             }
                         })
@@ -773,7 +775,8 @@ fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
 /// progress, so a row that has not begun has no bar, and then the bar's
 /// whole percent, `None` while the run doesn't know its total yet.
 fn progress_percent(row: &OperationRow) -> Option<Option<u8>> {
-    todo!("{row:?}")
+    row.progress
+        .map(|progress| percent(progress.current, progress.total))
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this
@@ -817,9 +820,15 @@ fn cancellable(status: &str) -> bool {
 }
 
 /// A run's progress as a whole percent of its total. A total of nothing or
-/// zero cannot be a share, so there is none rather than a wrong one.
+/// zero cannot be a share, so there is none rather than a wrong one. A count
+/// past its total is all of it: both come from a worker's report, so the
+/// count is held to the total first, and the product is taken in `u128`,
+/// where a `u64` times 100 can't overflow.
 fn percent(current: u64, total: Option<u64>) -> Option<u8> {
-    todo!("{current} {total:?}")
+    total.filter(|total| *total > 0).map(|total| {
+        let share = u128::from(current.min(total)) * 100 / u128::from(total);
+        u8::try_from(share).unwrap_or(100)
+    })
 }
 
 /// Whether the change from `previous` to `status` is a run's end arriving:

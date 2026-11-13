@@ -234,7 +234,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
-            <Progress label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS) value=progress />
+            <Progress
+                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
+                value=Signal::derive(move || Some(progress.get()))
+                unknown=t(msg::UI_PROGRESS_WORKING)
+            />
             <p>
                 <button type="button" on:click=move |_| {
                     if progress.get_untracked() < 100 {
@@ -244,6 +248,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_ADVANCE_PROGRESS)}
                 </button>
             </p>
+            <Progress
+                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
+                value=Signal::stored(None)
+                unknown=t(msg::UI_PROGRESS_WORKING)
+            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
