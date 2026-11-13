@@ -364,6 +364,13 @@ export class ScriptedDaemon {
     await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, current: bytes, total: null });
   }
 
+  /** The backup of `plan` reports `current` of `total` (`null`: not known
+   *  yet) in the step whose code is `step`, as the daemon does for the bar
+   *  the engine began last. */
+  async progressesInStep(plan: string, step: string, current: number, total: number | null): Promise<void> {
+    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, step, current, total });
+  }
+
   /** The backup of `plan` succeeds: its log has the end and what the backup
    *  went through, `files` files, before the page is told, as the daemon's
    *  own run tells of an end only after its last write to the log. A backup

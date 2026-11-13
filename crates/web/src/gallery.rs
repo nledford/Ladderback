@@ -253,6 +253,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 value=Signal::stored(None)
                 unknown=t(msg::UI_PROGRESS_WORKING)
             />
+            <Progress
+                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
+                value=Signal::stored(None)
+                unknown=t(msg::UI_STEP_READING_INDEX)
+            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>

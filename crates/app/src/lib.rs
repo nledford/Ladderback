@@ -25,6 +25,7 @@ pub mod log_write;
 pub mod maintenance;
 pub mod notifications;
 pub mod ports;
+pub mod progress;
 pub mod queue;
 pub mod recovery;
 pub mod repositories;

@@ -9,6 +9,29 @@
 # The product's name. A message that says it uses this term.
 -brand-name = Ladderback
 
+## Words of the glossary (technical design §3.1). A message that says one
+## uses its term, so a translation says it one way everywhere. A term that
+## has more than one form takes `form`: "one" for one of it, "other" for
+## more than one, as the sentence means, not as a count.
+
+# The repository's index: the list of what each pack holds.
+-index = index
+
+# A rustic snapshot.
+-snapshot = { $form ->
+   *[one] snapshot
+    [other] snapshots
+}
+
+# A pack: a file of the repository's data.
+-pack = { $form ->
+   *[one] pack
+    [other] packs
+}
+
+# A rustic repository.
+-repository = repository
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 

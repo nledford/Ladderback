@@ -620,9 +620,28 @@ fn row_view(
     });
     let can_cancel = Memo::new(move |_| status.with(|status| cancellable(status)));
     let has_progress = Memo::new(move |_| percent.get().is_some());
+    let said = Memo::new({
+        let id = id.clone();
+        move |_| {
+            page.with(|state| {
+                state.row(&id).map_or(
+                    ProgressText {
+                        above: None,
+                        unknown: msg::UI_PROGRESS_WORKING,
+                    },
+                    progress_text,
+                )
+            })
+        }
+    });
     let result_localizer = Arc::clone(&localizer);
     let progress_label = text(&localizer, msg::UI_BACKUP_PROGRESS);
-    let working = text(&localizer, msg::UI_PROGRESS_WORKING);
+    let step_localizer = Arc::clone(&localizer);
+    let above = Signal::derive({
+        let localizer = Arc::clone(&localizer);
+        move || said.get().above.map(|id| text(&localizer, id))
+    });
+    let unknown = Signal::derive(move || text(&step_localizer, said.get().unknown));
     let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
     let url = format!("{}/api/v1/operations/{id}/cancel", connection.base);
     let operation = id;
@@ -639,10 +658,11 @@ fn row_view(
                         .get()
                         .then(|| {
                             view! {
+                                {move || above.get().map(|step| view! { <span class="progress-step">{step}</span> })}
                                 <Progress
                                     label=progress_label.clone()
                                     value=Signal::derive(move || percent.get().flatten())
-                                    unknown=working.clone()
+                                    unknown=unknown
                                 />
                             }
                         })
@@ -777,6 +797,53 @@ fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
 fn progress_percent(row: &OperationRow) -> Option<Option<u8>> {
     row.progress
         .map(|progress| percent(progress.current, progress.total))
+}
+
+/// What a row's Status cell says of its run's progress besides the bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProgressText {
+    /// The step's message above the bar, while the bar shows a percentage.
+    above: Option<MessageId>,
+    /// What stands beside the bar while it shows no percentage: the step's
+    /// message, or that the run is working when it names none this build
+    /// knows.
+    unknown: MessageId,
+}
+
+/// What `row` says of the step its run is in (§4.4; §16, decision 82).
+fn progress_text(row: &OperationRow) -> ProgressText {
+    let step = row
+        .progress
+        .and_then(|progress| progress.step)
+        .and_then(step_message);
+    let with_percent = matches!(progress_percent(row), Some(Some(_)));
+    ProgressText {
+        above: step.filter(|_| with_percent),
+        unknown: step.unwrap_or(msg::UI_PROGRESS_WORKING),
+    }
+}
+
+/// The message of `step`; `None` for one this build doesn't know.
+fn step_message(step: api::OperationStep) -> Option<MessageId> {
+    use api::OperationStep as S;
+    Some(match step {
+        S::ReadingIndex => msg::UI_STEP_READING_INDEX,
+        S::GettingSnapshots => msg::UI_STEP_GETTING_SNAPSHOTS,
+        S::BackingUp => msg::UI_STEP_BACKING_UP,
+        S::ListingPacks => msg::UI_STEP_LISTING_PACKS,
+        S::CheckingCache => msg::UI_STEP_CHECKING_CACHE,
+        S::CheckingHotRepository => msg::UI_STEP_CHECKING_HOT_REPOSITORY,
+        S::CheckingTrees => msg::UI_STEP_CHECKING_TREES,
+        S::ReadingPackData => msg::UI_STEP_READING_PACK_DATA,
+        S::FindingUsedData => msg::UI_STEP_FINDING_USED_DATA,
+        S::MarkingUnusedPacks => msg::UI_STEP_MARKING_UNUSED_PACKS,
+        S::Repacking => msg::UI_STEP_REPACKING,
+        S::RebuildingIndex => msg::UI_STEP_REBUILDING_INDEX,
+        S::DeletingUnusedData => msg::UI_STEP_DELETING_UNUSED_DATA,
+        S::DeletingSnapshots => msg::UI_STEP_DELETING_SNAPSHOTS,
+        S::SavingSnapshots => msg::UI_STEP_SAVING_SNAPSHOTS,
+        S::Unknown => return None,
+    })
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this
@@ -1849,11 +1916,13 @@ mod tests {
             "a run that has reported nothing has no bar"
         );
         running.progress = Some(crate::backend::Progress {
+            step: None,
             current: 3,
             total: Some(4),
         });
         assert_eq!(progress_percent(&running), Some(Some(75)));
         running.progress = Some(crate::backend::Progress {
+            step: None,
             current: 9,
             total: None,
         });
@@ -1862,6 +1931,78 @@ mod tests {
             Some(None),
             "a run of unknown size has a bar with no value, never one at 0%"
         );
+    }
+
+    /// A run says the step it is in: beside its bar while the bar shows no
+    /// percentage, and above it while it shows one, so the percentage is
+    /// read as that step's. A step it doesn't know, or none, is working.
+    #[test]
+    fn a_row_says_its_step_beside_a_bar_with_no_percentage_and_above_one_with_one() {
+        use api::OperationStep as S;
+        let mut running = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z");
+        let mut at = |step, total| {
+            running.progress = Some(crate::backend::Progress {
+                step,
+                current: 3,
+                total,
+            });
+            progress_text(&running)
+        };
+        assert_eq!(
+            at(Some(S::BackingUp), None),
+            ProgressText {
+                above: None,
+                unknown: msg::UI_STEP_BACKING_UP
+            }
+        );
+        assert_eq!(
+            at(Some(S::ReadingIndex), Some(10)),
+            ProgressText {
+                above: Some(msg::UI_STEP_READING_INDEX),
+                unknown: msg::UI_STEP_READING_INDEX
+            }
+        );
+        for step in [None, Some(S::Unknown)] {
+            for total in [None, Some(10)] {
+                assert_eq!(
+                    at(step, total),
+                    ProgressText {
+                        above: None,
+                        unknown: msg::UI_PROGRESS_WORKING
+                    },
+                    "{step:?} of {total:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn each_step_has_a_message_of_its_own() {
+        use api::OperationStep as S;
+        let messages = [
+            (S::ReadingIndex, msg::UI_STEP_READING_INDEX),
+            (S::GettingSnapshots, msg::UI_STEP_GETTING_SNAPSHOTS),
+            (S::BackingUp, msg::UI_STEP_BACKING_UP),
+            (S::ListingPacks, msg::UI_STEP_LISTING_PACKS),
+            (S::CheckingCache, msg::UI_STEP_CHECKING_CACHE),
+            (
+                S::CheckingHotRepository,
+                msg::UI_STEP_CHECKING_HOT_REPOSITORY,
+            ),
+            (S::CheckingTrees, msg::UI_STEP_CHECKING_TREES),
+            (S::ReadingPackData, msg::UI_STEP_READING_PACK_DATA),
+            (S::FindingUsedData, msg::UI_STEP_FINDING_USED_DATA),
+            (S::MarkingUnusedPacks, msg::UI_STEP_MARKING_UNUSED_PACKS),
+            (S::Repacking, msg::UI_STEP_REPACKING),
+            (S::RebuildingIndex, msg::UI_STEP_REBUILDING_INDEX),
+            (S::DeletingUnusedData, msg::UI_STEP_DELETING_UNUSED_DATA),
+            (S::DeletingSnapshots, msg::UI_STEP_DELETING_SNAPSHOTS),
+            (S::SavingSnapshots, msg::UI_STEP_SAVING_SNAPSHOTS),
+        ];
+        for (step, message) in messages {
+            assert_eq!(step_message(step), Some(message), "{step:?}");
+        }
+        assert_eq!(step_message(S::Unknown), None);
     }
 
     #[test]

@@ -6,7 +6,9 @@ mod support;
 use std::fs::{self, File};
 use std::time::{Duration, SystemTime};
 
-use app::ports::{Engine, EngineEvent, EngineResult, ForgetJob, Job, RunningJob};
+use app::ports::{
+    Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent, RunningJob,
+};
 use domain::SignedDuration;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -702,4 +704,105 @@ async fn every_job_that_opens_a_repository_names_its_id_when_it_starts() {
             );
         }
     }
+}
+
+/// The steps a run's progress names, in the order it names them, each once
+/// where it repeats.
+fn steps_of(events: &[EngineEvent]) -> Vec<OperationStep> {
+    let mut steps: Vec<OperationStep> = Vec::new();
+    for event in events {
+        if let EngineEvent::Progress(
+            ProgressEvent::Begin {
+                step: Some(step), ..
+            }
+            | ProgressEvent::Title {
+                step: Some(step), ..
+            },
+        ) = event
+            && steps.last() != Some(step)
+        {
+            steps.push(*step);
+        }
+    }
+    steps
+}
+
+/// Whether `expected` comes in `steps` in its order, with others between.
+fn named_in_order(steps: &[OperationStep], expected: &[OperationStep]) -> bool {
+    let mut rest = steps.iter();
+    expected.iter().all(|want| rest.any(|step| step == want))
+}
+
+/// The pinned rustic's texts name the steps a person sees (decision 82): a
+/// first backup reads the index, looks for its parent among the snapshots,
+/// then backs up. A rustic that renamed one would show it as working.
+#[tokio::test]
+async fn a_backup_names_its_steps_from_reading_the_index_to_backing_up() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    let events = run_to_end(
+        &engine(),
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    backed_up(&events);
+    assert_eq!(
+        steps_of(&events),
+        [
+            OperationStep::ReadingIndex,
+            OperationStep::GettingSnapshots,
+            OperationStep::BackingUp
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_check_and_a_prune_name_their_steps() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    let engine = engine();
+    backed_up(
+        &run_to_end(
+            &engine,
+            backup_job(&location, &scratch.source(), "daily", HOUR),
+        )
+        .await,
+    );
+
+    let checked = run_to_end(&engine, check_job(&location, true)).await;
+    succeeded(&checked);
+    let steps = steps_of(&checked);
+    assert!(
+        named_in_order(
+            &steps,
+            &[
+                OperationStep::GettingSnapshots,
+                OperationStep::ReadingIndex,
+                OperationStep::ListingPacks,
+                OperationStep::CheckingTrees,
+                OperationStep::ReadingPackData,
+            ]
+        ),
+        "{steps:?}"
+    );
+
+    let pruned = run_to_end(&engine, prune_job(&location)).await;
+    succeeded(&pruned);
+    let steps = steps_of(&pruned);
+    assert!(
+        named_in_order(
+            &steps,
+            &[
+                OperationStep::ReadingIndex,
+                OperationStep::GettingSnapshots,
+                OperationStep::FindingUsedData,
+                OperationStep::ListingPacks,
+            ]
+        ),
+        "{steps:?}"
+    );
 }

@@ -34,6 +34,7 @@ use crate::job::{
     ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec, TRUNCATED,
     WorkerEvent, exit_code,
 };
+use crate::step::step_of;
 use domain::planning::{GlobFile, SourceFilter};
 
 /// How long a worker may keep running after it reported its result, for
@@ -1130,6 +1131,8 @@ async fn read_log_line(
 /// of a spec before it has read it. And it cuts a long text after it has
 /// masked it, so a text it marked as cut ([`TRUNCATED`]) is masked as a cut
 /// text: one of those secrets the cut went through leaves nothing behind.
+/// A progress bar's text goes no further than here: the masked text names
+/// the bar's step, when it is one of rustic's that [`step_of`] knows.
 fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
     Some(match event {
         WorkerEvent::Started {
@@ -1148,7 +1151,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                     ProgressKind::Counter => AppProgressKind::Counter,
                     ProgressKind::Bytes => AppProgressKind::Bytes,
                 },
-                prefix: redactor.redact_clipped(&prefix, TRUNCATED),
+                step: step_of(&redactor.redact_clipped(&prefix, TRUNCATED)),
             })
         }
         WorkerEvent::ProgressLength { key, len } => {
@@ -1159,7 +1162,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         }
         WorkerEvent::ProgressTitle { key, title } => EngineEvent::Progress(ProgressEvent::Title {
             key,
-            title: redactor.redact_clipped(&title, TRUNCATED),
+            step: step_of(&redactor.redact_clipped(&title, TRUNCATED)),
         }),
         WorkerEvent::ProgressFinish { key } => EngineEvent::Progress(ProgressEvent::Finish { key }),
         WorkerEvent::Warning {
@@ -1677,6 +1680,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::time::Instant;
 
+    use app::ports::OperationStep;
     use domain::Uuid;
 
     use super::*;
@@ -1875,37 +1879,55 @@ mod tests {
         }
     }
 
+    /// A progress bar's text is rustic's, and what leaves the adapter is the
+    /// step it names, never the text: a text that carries a secret names no
+    /// step, so nothing of it goes on (I4). The masked text is what names
+    /// the step, so one of rustic's own texts a mask changed names none.
     #[test]
-    fn progress_text_hides_the_jobs_secrets() {
-        let redactor = redactor_of(&["hunter2-demo"]);
-        assert_eq!(
-            translate(
+    fn a_progress_text_carrying_a_secret_is_never_forwarded_as_text() {
+        let redactor = redactor_of(&["CANARY-step-secret", "unindexed"]);
+        for (text, step) in [
+            ("reading index...", Some(OperationStep::ReadingIndex)),
+            ("reading index... CANARY-step-secret", None),
+            ("CANARY-step-secret", None),
+            ("removing unindexed packs...", None),
+            (
+                "removing old data packs...",
+                Some(OperationStep::DeletingUnusedData),
+            ),
+        ] {
+            let begun = translate(
                 WorkerEvent::ProgressStart {
                     key: 1,
-                    kind: ProgressKind::Spinner,
-                    prefix: "opening hunter2-demo".to_owned(),
+                    kind: ProgressKind::Bytes,
+                    prefix: text.to_owned(),
                 },
-                &redactor
-            ),
-            Some(EngineEvent::Progress(ProgressEvent::Begin {
-                key: 1,
-                kind: AppProgressKind::Spinner,
-                prefix: "opening ***".to_owned(),
-            }))
-        );
-        assert_eq!(
-            translate(
+                &redactor,
+            );
+            assert_eq!(
+                begun,
+                Some(EngineEvent::Progress(ProgressEvent::Begin {
+                    key: 1,
+                    kind: AppProgressKind::Bytes,
+                    step,
+                })),
+                "{text:?}"
+            );
+            let titled = translate(
                 WorkerEvent::ProgressTitle {
                     key: 1,
-                    title: "still hunter2-demo".to_owned(),
+                    title: text.to_owned(),
                 },
-                &redactor
-            ),
-            Some(EngineEvent::Progress(ProgressEvent::Title {
-                key: 1,
-                title: "still ***".to_owned(),
-            }))
-        );
+                &redactor,
+            );
+            assert_eq!(
+                titled,
+                Some(EngineEvent::Progress(ProgressEvent::Title { key: 1, step })),
+                "{text:?}"
+            );
+            let told = format!("{begun:?} {titled:?}");
+            assert!(!told.contains("CANARY"), "{told}");
+        }
     }
 
     /// A stderr line that was not cut is all the worker said: an end that
@@ -1945,7 +1967,7 @@ mod tests {
             Some(EngineEvent::Progress(ProgressEvent::Begin {
                 key: 1,
                 kind: AppProgressKind::Spinner,
-                prefix: masked.clone(),
+                step: None,
             }))
         );
         assert_eq!(
@@ -1958,7 +1980,7 @@ mod tests {
             ),
             Some(EngineEvent::Progress(ProgressEvent::Title {
                 key: 1,
-                title: masked.clone(),
+                step: None,
             }))
         );
         assert_eq!(

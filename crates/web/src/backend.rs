@@ -13,12 +13,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use api::{OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode};
+use api::{OperationStep, OperationSummaryDto, OperationsPageDto, UiEvent, WarningCode};
 
-/// The live progress of a running operation. Transient: never part of the
-/// stored history, and gone the moment the operation ends.
+/// The live progress of a running operation: the step it is in, when the
+/// daemon names one, and how far that step has come. Transient: never part
+/// of the stored history, and gone the moment the operation ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Progress {
+    pub(crate) step: Option<OperationStep>,
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
 }
@@ -79,11 +81,13 @@ impl OperationsState {
             }
             UiEvent::OperationProgress {
                 operation,
+                step,
                 current,
                 total,
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
                     row.progress = Some(Progress {
+                        step: *step,
                         current: *current,
                         total: *total,
                     });
@@ -471,6 +475,7 @@ mod tests {
         for current in 1..=5 {
             live.apply(&UiEvent::OperationProgress {
                 operation: id(SECOND),
+                step: None,
                 current,
                 total: Some(5),
             });
@@ -590,6 +595,7 @@ mod tests {
         let read = state.clone();
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
+            step: None,
             current: 3,
             total: Some(10),
         });
@@ -607,12 +613,14 @@ mod tests {
             OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
+            step: None,
             current: 3,
             total: Some(10),
         });
         assert_eq!(
             state.rows[0].progress,
             Some(Progress {
+                step: None,
                 current: 3,
                 total: Some(10)
             })
@@ -620,11 +628,48 @@ mod tests {
         assert_eq!(state.rows[0].summary.status, "running");
     }
 
+    /// Each report says the step its numbers are of: a report with no step
+    /// leaves none from the one before it.
+    #[test]
+    fn a_progress_event_brings_the_row_its_step() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step: Some(api::OperationStep::ReadingIndex),
+            current: 3,
+            total: Some(10),
+        });
+        assert_eq!(
+            state.rows[0].progress,
+            Some(Progress {
+                step: Some(api::OperationStep::ReadingIndex),
+                current: 3,
+                total: Some(10)
+            })
+        );
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step: None,
+            current: 1,
+            total: None,
+        });
+        assert_eq!(
+            state.rows[0].progress,
+            Some(Progress {
+                step: None,
+                current: 1,
+                total: None
+            })
+        );
+    }
+
     #[test]
     fn a_succeeded_event_ends_the_row_and_its_progress_with_it() {
         let mut state =
             OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
         state.rows[0].progress = Some(Progress {
+            step: None,
             current: 9,
             total: Some(10),
         });
@@ -654,6 +699,7 @@ mod tests {
             },
             UiEvent::OperationProgress {
                 operation: id(SECOND),
+                step: None,
                 current: 1,
                 total: None,
             },
@@ -729,6 +775,7 @@ mod tests {
         });
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
+            step: None,
             current: 3,
             total: Some(10),
         });
@@ -744,6 +791,7 @@ mod tests {
         assert_eq!(
             row.progress,
             Some(Progress {
+                step: None,
                 current: 3,
                 total: Some(10)
             }),
@@ -847,6 +895,7 @@ mod tests {
         });
         state.apply(&UiEvent::OperationProgress {
             operation: id(SECOND),
+            step: None,
             current: 4,
             total: Some(9),
         });
@@ -869,6 +918,7 @@ mod tests {
         assert_eq!(
             second.progress,
             Some(Progress {
+                step: None,
                 current: 4,
                 total: Some(9)
             })
@@ -928,6 +978,7 @@ mod tests {
         });
         state.apply(&UiEvent::OperationProgress {
             operation: id(FIRST),
+            step: None,
             current: 3,
             total: Some(10),
         });
@@ -949,6 +1000,7 @@ mod tests {
         assert_eq!(
             row.progress,
             Some(Progress {
+                step: None,
                 current: 3,
                 total: Some(10)
             }),
@@ -1142,6 +1194,7 @@ mod tests {
             },
             UiEvent::OperationProgress {
                 operation: operation.clone(),
+                step: None,
                 current: 1,
                 total: Some(3),
             },

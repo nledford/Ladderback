@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Page } from "playwright";
+import { expect } from "playwright/test";
 
 import { journey } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -75,6 +76,37 @@ Then("every visible text but the data of the tables and lists is transformed", a
 Then("the page title is transformed", async function (this: BrowserWorld) {
   const title = await this.page.title();
   assert.match(title, NON_ASCII, `the title "${title}" has no transformed letter`);
+});
+
+// A pseudolocale transforms a progress bar's name too, so on a page with one
+// bar these find it by its role alone.
+Then("the page's one progress bar shows {int} percent", async function (this: BrowserWorld, percent: number) {
+  await expect(this.page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", String(percent));
+});
+
+Then("the page's one progress bar shows no percentage", async function (this: BrowserWorld) {
+  await expect(this.page.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+});
+
+// The cell of a running operation's bar says two things in words, its status
+// and the step it is in (a percentage has no letters), and the catalog wrote
+// both, so the pseudolocale transformed both.
+Then("the cell of the page's one progress bar says its status and its step, both transformed", async function (this: BrowserWorld) {
+  const said = () =>
+    this.page.getByRole("progressbar").evaluate((bar) => {
+      const texts: string[] = [];
+      const cell = bar.closest("td");
+      if (!cell) return texts;
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = (node.textContent ?? "").trim();
+        if (/\p{L}/u.test(text) && node.parentElement?.checkVisibility({ visibilityProperty: true })) texts.push(text);
+      }
+      return texts;
+    });
+  await expect.poll(said).toHaveLength(2);
+  const plain = (await said()).filter((text) => !NON_ASCII.test(text));
+  assert.deepEqual(plain, [], "text in the bar's cell that the pseudolocale did not transform");
 });
 
 Then("the skip link is at the {word} edge of the page", async function (this: BrowserWorld, edge: string) {

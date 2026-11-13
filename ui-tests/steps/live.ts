@@ -232,6 +232,32 @@ When("the daemon reports {int} steps of progress of the backup of {string}", asy
   await scripted(this).progresses(plan, steps);
 });
 
+// A step as a person says it, and its code on the wire (decision 82).
+const STEP_CODES: Record<string, string> = {
+  "reading the index": "reading-index",
+  "backing up": "backing-up",
+};
+
+function stepCode(step: string): string {
+  const code = STEP_CODES[step];
+  assert.ok(code, `no code for the step "${step}"`);
+  return code;
+}
+
+When(
+  /^the daemon reports that the backup of "([^"]*)" is (reading the index|backing up), (\d+) of (\d+) done$/,
+  async function (this: BrowserWorld, plan: string, step: string, current: string, total: string) {
+    await scripted(this).progressesInStep(plan, stepCode(step), Number(current), Number(total));
+  },
+);
+
+When(
+  /^the daemon reports that the backup of "([^"]*)" is (reading the index|backing up), (\d+) done of a total not known yet$/,
+  async function (this: BrowserWorld, plan: string, step: string, current: string) {
+    await scripted(this).progressesInStep(plan, stepCode(step), Number(current), null);
+  },
+);
+
 When(
   "the daemon reports {int} bytes processed of the backup of {string} and not yet its total",
   async function (this: BrowserWorld, bytes: number, plan: string) {
@@ -350,16 +376,25 @@ Then("the table {string} has a row {string} that shows {string}", async function
 });
 
 Then("the table {string} has {int} rows", async function (this: BrowserWorld, name: string, count: number) {
-  const rows = table(this, name).locator("tbody tr");
+  await hasRows(table(this, name), count, `the table ${name}`);
+});
+
+// The same, on a page with one table, whose name a pseudolocale transformed.
+Then("the page's one table has {int} row(s)", async function (this: BrowserWorld, count: number) {
+  await hasRows(this.page.getByRole("table"), count, "the table");
+});
+
+async function hasRows(grid: Locator, count: number, what: string): Promise<void> {
+  const rows = grid.locator("tbody tr");
   await until(
     async () => {
       const found = await rows.count();
       return found === count ? found : null;
     },
     ROW_PATIENCE_MS,
-    `the table ${name} never had ${count} rows`,
+    `${what} never had ${count} rows`,
   );
-});
+}
 
 // The widths of a table's columns, as its column headers are laid out, noted
 // by one step for a later one to compare with.
@@ -467,7 +502,16 @@ Then("the buttons {string} and {string} stand apart", async function (this: Brow
 // page's width nor a clipped box shows. Every box and every line of text in a
 // cell stays inside the cell, within half a pixel of rounding.
 Then("nothing in the table {string} runs outside its cell", async function (this: BrowserWorld, name: string) {
-  const outside = await table(this, name).evaluate(async (element) => {
+  assert.deepEqual(await outsideItsCells(table(this, name)), [], `something in the table ${name} runs outside its cell`);
+});
+
+// The same, on a page with one table, whose name a pseudolocale transformed.
+Then("nothing in the page's one table runs outside its cell", async function (this: BrowserWorld) {
+  assert.deepEqual(await outsideItsCells(this.page.getByRole("table")), [], "something in the table runs outside its cell");
+});
+
+async function outsideItsCells(grid: Locator): Promise<string[]> {
+  return grid.evaluate(async (element) => {
     await document.fonts.ready;
     // Let layout settle after injected styles.
     await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
@@ -496,8 +540,7 @@ Then("nothing in the table {string} runs outside its cell", async function (this
     }
     return found;
   });
-  assert.deepEqual(outside, [], `something in the table ${name} runs outside its cell`);
-});
+}
 
 /** The row of a table that its row header names. A name the catalog wrote
  *  holds its arguments in bidi isolation marks, which a reader never hears. */

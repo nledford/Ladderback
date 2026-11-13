@@ -419,17 +419,21 @@ pub enum EngineEvent {
     Failed(FailureReason),
 }
 
-/// One progress bar's change; `key` tells concurrent bars apart.
+/// One progress bar's change; `key` tells concurrent bars apart. A bar names
+/// the step of the operation it measures, when the engine knows it: the
+/// engine's own text for it stays in the engine adapter (§4.4; §16,
+/// decision 82).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProgressEvent {
     Begin {
         key: u32,
         kind: ProgressKind,
-        prefix: String,
+        step: Option<OperationStep>,
     },
+    /// The bar measures another step, or one the adapter doesn't know.
     Title {
         key: u32,
-        title: String,
+        step: Option<OperationStep>,
     },
     Length {
         key: u32,
@@ -449,6 +453,43 @@ pub enum ProgressKind {
     Spinner,
     Counter,
     Bytes,
+}
+
+/// A step of a running operation (§3.1): what the engine is doing now, as
+/// one of the stages it names. A stage it names in words the engine adapter
+/// doesn't know is no step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationStep {
+    /// Reading the repository's index.
+    ReadingIndex,
+    /// Reading the repository's snapshots.
+    GettingSnapshots,
+    /// Reading the source and writing what is new.
+    BackingUp,
+    /// Listing the packs in the repository.
+    ListingPacks,
+    /// Comparing the agent's cache of the repository with it.
+    CheckingCache,
+    /// Comparing the hot repository with the repository.
+    CheckingHotRepository,
+    /// Checking what each snapshot holds.
+    CheckingTrees,
+    /// Reading every pack's data to check it.
+    ReadingPackData,
+    /// Finding the data the snapshots use.
+    FindingUsedData,
+    /// Marking packs no index lists for deletion.
+    MarkingUnusedPacks,
+    /// Rewriting packs that hold unused data.
+    Repacking,
+    /// Writing the index anew.
+    RebuildingIndex,
+    /// Deleting packs and index files no longer needed.
+    DeletingUnusedData,
+    /// Deleting snapshots.
+    DeletingSnapshots,
+    /// Writing snapshots.
+    SavingSnapshots,
 }
 
 /// What a successful operation produced.

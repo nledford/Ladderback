@@ -111,7 +111,7 @@ fn script(job: &FakeJob) -> Result<VecDeque<Step>, EngineError> {
         Step::Emit(EngineEvent::Progress(ProgressEvent::Begin {
             key,
             kind: ProgressKind::Counter,
-            prefix: "fake".to_owned(),
+            step: None,
         })),
         Step::Emit(EngineEvent::Progress(ProgressEvent::Length {
             key,

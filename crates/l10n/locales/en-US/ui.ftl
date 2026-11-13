@@ -206,6 +206,10 @@ ui-gallery-advance-progress = Advance the demo progress
 # The accessible name of the demo progress bar whose size isn't known.
 ui-gallery-demo-unknown-progress = Demo progress of unknown size
 
+# The accessible name of the demo progress bar whose text names the step a
+# running operation is in.
+ui-gallery-demo-step-progress = Demo progress of a step
+
 # The heading of the gallery's toast demo.
 ui-gallery-toast-heading = Toast
 
@@ -488,6 +492,55 @@ ui-backup-progress = Backup progress
 # operation has no total to measure against: a backup before it has
 # walked its whole source, or a step that counts without a total.
 ui-progress-working = Working…
+
+## The step a running operation is in (§4.4; decision 82), beside its
+## progress bar in place of the percentage, or above a bar that shows one.
+## Each says what the engine is doing now.
+
+# Reading the index, which lists what each pack holds.
+ui-step-reading-index = Reading the { -index }…
+
+# Reading the snapshots of the repository.
+ui-step-getting-snapshots = Reading the { -snapshot(form: "other") }…
+
+# Reading the backup's source and writing what is new.
+ui-step-backing-up = Backing up…
+
+# Listing the packs the repository holds.
+ui-step-listing-packs = Listing the { -pack(form: "other") }…
+
+# Comparing the agent's cache of the repository with the repository.
+ui-step-checking-cache = Checking the cache of the { -repository }…
+
+# Comparing a repository's hot copy with the repository itself.
+ui-step-checking-hot-repository = Checking the hot copy of the { -repository }…
+
+# A check reading what each snapshot holds.
+ui-step-checking-trees = Checking what each { -snapshot } holds…
+
+# A check reading all the data to check it can be read.
+ui-step-reading-pack-data = Reading the data in each { -pack }…
+
+# A prune finding which data the snapshots still use.
+ui-step-finding-used-data = Finding the data the { -snapshot(form: "other") } use…
+
+# A prune marking packs no index lists, to delete them later.
+ui-step-marking-unused-packs = Marking unused { -pack(form: "other") } for deletion…
+
+# A prune moving the data still in use out of packs it will delete.
+ui-step-repacking = Moving the data still in use into new { -pack(form: "other") }…
+
+# A prune writing the index anew.
+ui-step-rebuilding-index = Rebuilding the { -index }…
+
+# A prune deleting packs and index files no longer needed.
+ui-step-deleting-unused-data = Deleting data no longer needed…
+
+# A forget or an adoption deleting snapshots.
+ui-step-deleting-snapshots = Deleting { -snapshot(form: "other") }…
+
+# An adoption writing the snapshots it made.
+ui-step-saving-snapshots = Saving the new { -snapshot(form: "other") }…
 
 # A status label: the operation waits for its turn.
 ui-status-queued = Queued

@@ -55,7 +55,7 @@ fn begin() -> EngineEvent {
     EngineEvent::Progress(ProgressEvent::Begin {
         key: 0,
         kind: ProgressKind::Counter,
-        prefix: "fake".to_owned(),
+        step: None,
     })
 }
 

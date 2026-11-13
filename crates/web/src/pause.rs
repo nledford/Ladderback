@@ -278,6 +278,7 @@ mod tests {
             state.update(|state| {
                 state.apply(&UiEvent::OperationProgress {
                     operation: id(1),
+                    step: None,
                     current,
                     total: Some(3),
                 });

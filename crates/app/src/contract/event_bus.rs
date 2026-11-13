@@ -45,6 +45,7 @@ fn started(operation: &str) -> UiEvent {
 fn progress(operation: &str, current: u64) -> UiEvent {
     UiEvent::OperationProgress {
         operation: operation.into(),
+        step: None,
         current,
         total: Some(current + 1),
     }
