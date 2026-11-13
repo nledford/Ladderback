@@ -73,7 +73,7 @@ impl FileRead {
             Self::FirstLine => first_line(contents),
             Self::Whole => contents
                 .strip_suffix('\n')
-                .map_or(contents, |rest| rest.strip_suffix('\r').unwrap_or(rest)),
+                .map_or(contents, |rest| rest.trim_suffix('\r')),
         }
     }
 }
@@ -83,7 +83,7 @@ impl FileRead {
 /// minus a `\r` before it.
 pub fn first_line(text: &str) -> &str {
     match text.split_once('\n') {
-        Some((line, _)) => line.strip_suffix('\r').unwrap_or(line),
+        Some((line, _)) => line.trim_suffix('\r'),
         None => text,
     }
 }

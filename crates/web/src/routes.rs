@@ -1697,7 +1697,7 @@ pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
 fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
     let page = if path == "/" {
         msg::UI_START_TITLE
-    } else if gallery && path.strip_suffix('/').unwrap_or(path) == "/_gallery" {
+    } else if gallery && path.trim_suffix('/') == "/_gallery" {
         msg::UI_GALLERY_TITLE
     } else if path == "/operations" {
         msg::UI_OPERATIONS_TITLE

@@ -28,11 +28,7 @@ fn every_message_id_is_named_by_some_product_code() {
     let mut problems = Vec::new();
     let sources = product_sources(&root).unwrap_or_else(|error| panic!("{error}"));
     for path in sources {
-        let shown = path
-            .strip_prefix(&root)
-            .unwrap_or(&path)
-            .display()
-            .to_string();
+        let shown = path.trim_prefix(&root).display().to_string();
         let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("{shown}: {error}"));
         match scan(&source) {
             Ok(usage) => {

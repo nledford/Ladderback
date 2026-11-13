@@ -393,7 +393,7 @@ fn declarations(
                 match next {
                     TokenTree::Punct(semicolon) if semicolon.as_char() == ';' => {
                         let name = name.to_string();
-                        let name = name.strip_prefix("r#").unwrap_or(&name).to_owned();
+                        let name = name.trim_prefix("r#").to_owned();
                         found.push(DeclaredModule {
                             test: in_test || test,
                             candidates: candidates(folders, &name, path.as_deref()),
