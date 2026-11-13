@@ -16,7 +16,7 @@ use super::{
 use crate::PlanId;
 use crate::secrets::{
     REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
-    location_secret_written,
+    location_secret_written, url_has_userinfo,
 };
 
 /// The most locations a repository has, the first included.
@@ -85,7 +85,7 @@ impl Location {
     fn carries_credential_in_address(&self) -> bool {
         std::iter::once(self.repository.as_str())
             .chain(self.repo_hot.as_deref())
-            .any(|address| has_userinfo(address) || location_secret_written(address))
+            .any(|address| url_has_userinfo(address) || location_secret_written(address))
     }
 
     fn carries_credential(&self) -> bool {
@@ -100,16 +100,6 @@ impl Location {
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     }
-}
-
-/// Whether the URL in `address` has a userinfo (`user:password@`): what
-/// follows the first `://` up to the first `/`, `?` or `#` holds an `@`.
-fn has_userinfo(address: &str) -> bool {
-    address.split_once("://").is_some_and(|(_, rest)| {
-        rest.split(['/', '?', '#'])
-            .next()
-            .is_some_and(|authority| authority.contains('@'))
-    })
 }
 
 /// Whether `text` starts with `prefix`, compared without ASCII case.
@@ -468,6 +458,50 @@ mod tests {
     }
 
     #[test]
+    fn a_userinfo_a_file_reference_gives_is_exposed_over_plain_http() {
+        let of = |address: &str| ExposedCredentials::of_location(&location(address, &[]));
+        // The reference's path holds `/`, and may hold `?`, `#` or `@`: none
+        // of them ends the authority or the userinfo.
+        for userinfo in [
+            "${file:/home/user/.config/secrets/nas-userinfo}",
+            "${file:/home/user/nas?userinfo#1}",
+            "${file:/home/user/nas@userinfo}",
+            "demo:${file:/home/user/.config/secrets/nas-password}",
+        ] {
+            assert_eq!(
+                of(&format!("rest:http://{userinfo}@nas.example:8000")),
+                Some(ExposedCredentials::PlainHttp),
+                "{userinfo}"
+            );
+            assert_eq!(
+                of(&format!("rest:https://{userinfo}@nas.example:8000")),
+                None,
+                "{userinfo}"
+            );
+        }
+        // An `@` after the authority's end is in the path, a `\` ending it as
+        // `/` does in an `http` URL; an `@` inside a reference ends nothing.
+        for address in [
+            "rest:http://nas.example/a@b",
+            "rest:http://nas.example?a@b",
+            "rest:http://nas.example#a@b",
+            "rest:http://nas.example\\a@b",
+            "rest:http://nas.example:8000/${file:/home/user/a@b}",
+        ] {
+            assert_eq!(of(address), None, "{address}");
+        }
+        // A `${` never closed is no reference, so it is text as written.
+        assert_eq!(
+            of("rest:http://${file:/home/user/nas-userinfo@nas.example:8000"),
+            None
+        );
+        assert_eq!(
+            of("rest:http://demo:${file@nas.example:8000/r"),
+            Some(ExposedCredentials::PlainHttp)
+        );
+    }
+
+    #[test]
     fn an_unchecked_certificate_is_exposed_only_when_insecure_tls_is_true() {
         let of = |value| {
             ExposedCredentials::of_location(&location(
@@ -728,6 +762,32 @@ mod tests {
         assert_eq!(
             hot_as_written.masked_repo_hot().as_deref(),
             Some("/srv/hot")
+        );
+    }
+
+    #[test]
+    fn a_userinfo_a_reference_gives_is_masked_whole() {
+        let masked = |address: &str| location(address, &[]).masked_address();
+        for userinfo in [
+            "${file:/home/user/.config/secrets/nas-userinfo}",
+            "${file:/home/user/nas?userinfo#1}",
+            "${file:/home/user/nas@userinfo}",
+            "${NAS_USERINFO}",
+        ] {
+            assert_eq!(
+                masked(&format!("rest:http://{userinfo}@nas.example:8000")),
+                "rest:http://***@nas.example:8000",
+                "{userinfo}"
+            );
+        }
+        // A password from a reference is masked as a written one is.
+        assert_eq!(
+            masked("rest:http://demo:${file:/home/user/nas-password}@nas.example:8000/r"),
+            "rest:http://demo:***@nas.example:8000/r"
+        );
+        assert_eq!(
+            masked("rest:http://nas.example/a@b"),
+            "rest:http://nas.example/a@b"
         );
     }
 

@@ -15,7 +15,8 @@ mod template;
 
 pub use command::{CommandLine, CommandLineError};
 pub(crate) use inline::MAX_RCLONE_DEPTH;
-use inline::rclone_credentials;
+pub(crate) use inline::url_has_userinfo;
+use inline::{AuthorityEnd, Scheme, Userinfo, WrittenUrl, rclone_credentials};
 pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
@@ -140,16 +141,17 @@ impl MaskedSecrets {
         self.count(secret.expose())
     }
 
-    /// Counts the secrets a location holds: the password of its URL, and
-    /// the credentials of an rclone connection string.
+    /// Counts the secrets a location holds: what of its URL's userinfo a
+    /// redactor masks, and the credentials of an rclone connection string.
     pub fn location(&mut self, location: &str) -> Result<(), TooMuchToMask> {
         location_secrets(location)
             .iter()
             .try_for_each(|secret| self.secret(secret))
     }
 
-    /// Counts the secrets an option holds: the password of a URL in it, and
-    /// its whole value when its name says it holds a credential.
+    /// Counts the secrets an option holds: what of the userinfo of a URL in
+    /// it a redactor masks, and its whole value when its name says it holds
+    /// a credential.
     pub fn option(&mut self, name: &str, value: &str) -> Result<(), TooMuchToMask> {
         option_secrets(name, value)
             .iter()
@@ -199,18 +201,19 @@ impl MaskedSecrets {
 }
 
 /// What a location holds that a redactor masks: the password of a URL in
-/// it, and each credential of an rclone connection string.
+/// it, or its userinfo where a reference gives it ([`url_secrets`]), and
+/// each credential of an rclone connection string.
 fn location_secrets(location: &str) -> Vec<SecretValue> {
-    let mut secrets = url_passwords(location);
+    let mut secrets = url_secrets(location);
     secrets.extend(rclone_credentials(location));
     secrets
 }
 
-/// What an option holds that a redactor masks: the password of a URL in its
-/// value, and the whole value when its name says it holds a credential
-/// ([`is_secret_option`]), even one written inline.
+/// What an option holds that a redactor masks: what of a URL in its value
+/// does ([`url_secrets`]), and the whole value when its name says it holds
+/// a credential ([`is_secret_option`]), even one written inline.
 fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
-    let mut secrets = url_passwords(value);
+    let mut secrets = url_secrets(value);
     if is_secret_option(name) {
         secrets.push(SecretValue::new(value));
     }
@@ -637,22 +640,31 @@ fn go_prints(c: char) -> bool {
 
 /// Every password the userinfo of the URL inside a repository string may
 /// hold, as written and decoded; empty when the string has no URL or the
-/// URL has no password.
-///
-/// The userinfo usually ends at the last `@` before the first `/`, but a raw
-/// `/` in the password ends the authority early, so the last `@` of the
-/// whole string is tried too. Masking part of a path by mistake is the safe
-/// direction.
+/// URL has no password. Each userinfo the URL may hold is tried
+/// ([`userinfos`]), with a `${…}` reference read as one piece and as text.
 pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
-    let Some((_, rest)) = repository.split_once("://") else {
-        return Vec::new();
-    };
-    forms(
-        userinfos(rest)
-            .into_iter()
-            .filter_map(|userinfo| userinfo.split_once(':'))
-            .map(|(_, password)| password),
-    )
+    url_userinfo_parts(repository, |userinfo| userinfo.password)
+}
+
+/// What of the userinfo of the URL in `text` a redactor masks: its password
+/// ([`url_passwords`]), or, where it has no `:` outside a `${…}` reference
+/// and a reference is in it, the whole of it, as the reference may stand for
+/// a user and a password both (`${file:/path}@host`).
+fn url_secrets(text: &str) -> Vec<SecretValue> {
+    url_userinfo_parts(text, |userinfo| {
+        userinfo
+            .password
+            .or_else(|| userinfo.user_reference.then_some(userinfo.written))
+    })
+}
+
+/// What `part` takes of each userinfo ([`userinfos`]) of the URL in `text`,
+/// as written and decoded; empty when `text` has no URL.
+fn url_userinfo_parts<'a>(
+    text: &'a str,
+    part: impl Fn(&Userinfo<'a>) -> Option<&'a str>,
+) -> Vec<SecretValue> {
+    forms(userinfos(text, Scheme::Required).iter().filter_map(part))
 }
 
 /// Whether a repository string is an rclone connection string that carries a
@@ -678,40 +690,39 @@ pub fn rclone_secret(location: &str) -> bool {
 /// (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty when there
 /// is no userinfo.
 pub fn url_credentials(url: &str) -> Vec<SecretValue> {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let userinfos = userinfos(rest);
-    let split: Vec<(&str, &str)> = userinfos
-        .iter()
-        .filter_map(|userinfo| userinfo.split_once(':'))
-        .collect();
+    let userinfos = userinfos(url, Scheme::Optional);
     forms(
-        split
+        userinfos
             .iter()
-            .map(|&(_, password)| password)
+            .filter_map(|userinfo| userinfo.password)
             .chain(
-                split
+                userinfos
                     .iter()
-                    .filter(|(_, password)| password.is_empty())
-                    .map(|&(user, _)| user),
+                    .filter(|userinfo| userinfo.password == Some(""))
+                    .map(|userinfo| userinfo.user),
             )
-            .chain(userinfos.iter().copied()),
+            .chain(userinfos.iter().map(|userinfo| userinfo.written)),
     )
 }
 
-/// The userinfos a URL's authority and path (what follows its scheme) may
-/// hold: the one before the last `@` of the authority, and the one before
-/// the last `@` of the whole of it, for a raw `/` in a password ends the
-/// authority early.
-fn userinfos(rest: &str) -> Vec<&str> {
-    let authority = rest.split('/').next().unwrap_or(rest);
-    [authority, rest]
-        .into_iter()
-        .filter_map(|candidate| candidate.rsplit_once('@'))
-        .map(|(userinfo, _)| userinfo)
-        // A `/` before the `:` puts the `@` in the path, not in a userinfo.
-        .filter(|userinfo| {
-            let user = userinfo.split_once(':').map_or(*userinfo, |(user, _)| user);
-            !user.contains('/')
+/// The userinfos the URL in `text` may hold, in each of its readings
+/// ([`WrittenUrl::readings`]): the one before the last `@` of the authority
+/// as a URL parser ends it, at its first `/`, `\`, `?` or `#`; the one
+/// before the last `@` up to the first `/`, for a raw `?` or `#` in a
+/// password ends the authority early; and the one before the last `@` of
+/// the whole of it, for a raw `/` does too. Masking part of a path by
+/// mistake is the safe direction.
+fn userinfos(text: &str, scheme: Scheme) -> Vec<Userinfo<'_>> {
+    WrittenUrl::readings(text, scheme)
+        .iter()
+        .flat_map(|url| {
+            [
+                AuthorityEnd::Standard,
+                AuthorityEnd::Slash,
+                AuthorityEnd::Text,
+            ]
+            .into_iter()
+            .filter_map(|end| url.userinfo(end))
         })
         .collect()
 }
@@ -1630,6 +1641,73 @@ mod tests {
     #[test]
     fn an_unencoded_at_sign_in_the_password_stays_in_the_password() {
         assert_eq!(passwords("rest:https://demo:p@ss@nas/b"), ["p@ss"]);
+    }
+
+    /// The last `@` of the authority ends its userinfo, and the last `@` of
+    /// the whole URL another (a raw `/` in a password): both are masked.
+    #[test]
+    fn an_at_sign_in_the_path_leaves_the_password_of_the_authority_found() {
+        assert_eq!(
+            passwords("rest:https://demo:s3cr3t@nas/a@b"),
+            ["s3cr3t", "s3cr3t@nas/a"]
+        );
+    }
+
+    /// Read to its first `/` alone, the authority keeps a `?` a parser ends
+    /// it at, and the password before its `@` is masked as well.
+    #[test]
+    fn a_password_with_a_question_mark_is_found_to_the_first_slash() {
+        let found = passwords("rest:https://demo:pw?x@nas.example/a@b");
+        assert!(found.contains(&"pw?x".to_owned()), "{found:?}");
+    }
+
+    /// Without its `://` a repository string holds no URL, so nothing in it
+    /// is a password.
+    #[test]
+    fn a_location_without_a_scheme_separator_has_no_url_password() {
+        assert!(passwords("sftp:demo:pw@nas.example:/r").is_empty());
+        assert!(!url_password_written("sftp:demo:pw@nas.example:/r"));
+    }
+
+    /// A URL parser ends an `http` URL's authority at its first `/`, `\`,
+    /// `?` or `#`, so the password before the `@` there is one, whatever
+    /// `@` follows.
+    #[test]
+    fn the_password_is_found_where_a_url_parser_ends_the_authority() {
+        for repository in [
+            "rest:http://demo:pw-canary@nas.example\\x@y",
+            "rest:http://demo:pw-canary@nas.example:8000?x@y",
+            "rest:http://demo:pw-canary@nas.example:8000#x@y",
+        ] {
+            let found = passwords(repository);
+            assert!(
+                found.contains(&"pw-canary".to_owned()),
+                "{repository}: {found:?}"
+            );
+        }
+    }
+
+    /// A resolved location, or one an export has taken its escapes out of,
+    /// may hold `${…}` as text: a URL parser reads it character by
+    /// character, and so is it read too, beside the reading as a template.
+    #[test]
+    fn a_reference_written_as_text_hides_no_password() {
+        for (repository, password) in [
+            (
+                "rest:http://demo:pw-canary@x${file:/y}@nas.example/r",
+                "pw-canary",
+            ),
+            (
+                "rest:http://x${file:/y:pw-canary}@nas.example/r",
+                "/y:pw-canary}",
+            ),
+        ] {
+            let found = passwords(repository);
+            assert!(
+                found.contains(&password.to_owned()),
+                "{repository}: {found:?}"
+            );
+        }
     }
 
     #[test]

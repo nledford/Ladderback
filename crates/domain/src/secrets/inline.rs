@@ -59,43 +59,163 @@ pub fn rclone_location(location: &str) -> bool {
 /// The prefix of an rclone location.
 const RCLONE: &str = "rclone:";
 
-/// Whether the URL in `text` has a password written as text in its userinfo:
-/// what follows the first `:` of the userinfo, not empty and with no `${…}`
-/// reference in it. A user name alone is not a password.
-///
-/// The URL starts after the first `://`. Its authority ends at the first `/`,
-/// `\`, `?` or `#`, as the WHATWG URL standard reads a URL of a special
-/// scheme, and its userinfo at the last `@` of the authority. A reference is
-/// one opaque piece, so a `/`, `:` or `@` inside `${file:/path}` ends nothing.
-/// Percent-encoding is not undone: `%70` is text in the file all the same.
-/// One pass over the text, with no allocation beyond its pieces and where
-/// they are written.
+/// Whether the URL in `text` has a password written as text in its userinfo
+/// ([`WrittenUrl::userinfo`], to the authority's standard end): what follows
+/// the first `:` of the userinfo, not empty and with no `${…}` reference in
+/// it. A user name alone is not a password. Percent-encoding is not undone:
+/// `%70` is text in the file all the same.
 pub fn url_password_written(text: &str) -> bool {
-    let pieces = written_pieces(text).0;
-    let Some(start) = pieces
-        .windows(3)
-        .position(|three| three == [Piece::Char(':'), Piece::Char('/'), Piece::Char('/')])
-    else {
-        return false;
-    };
-    let rest = pieces.get(start.saturating_add(3)..).unwrap_or_default();
-    let end = rest
-        .iter()
-        .position(|piece| matches!(piece, Piece::Char('/' | '\\' | '?' | '#')))
-        .unwrap_or(rest.len());
-    let authority = rest.get(..end).unwrap_or_default();
-    let Some(at) = authority
-        .iter()
-        .rposition(|piece| *piece == Piece::Char('@'))
-    else {
-        return false;
-    };
-    let userinfo = authority.get(..at).unwrap_or_default();
-    let Some(colon) = userinfo.iter().position(|piece| *piece == Piece::Char(':')) else {
-        return false;
-    };
-    let password = userinfo.get(colon.saturating_add(1)..).unwrap_or_default();
-    !password.is_empty() && !password.contains(&Piece::Reference)
+    WrittenUrl::after_scheme(text)
+        .and_then(|url| url.userinfo(AuthorityEnd::Standard))
+        .is_some_and(|userinfo| {
+            userinfo
+                .password
+                .is_some_and(|password| !password.is_empty())
+                && !userinfo.password_reference
+        })
+}
+
+/// Whether the URL in `text` has a userinfo (`user:password@`, `user@`, or
+/// a `${…}` reference that stands for one), as [`WrittenUrl::userinfo`]
+/// reads it to the authority's standard end.
+pub(crate) fn url_has_userinfo(text: &str) -> bool {
+    WrittenUrl::after_scheme(text).is_some_and(|url| url.userinfo(AuthorityEnd::Standard).is_some())
+}
+
+/// Where [`WrittenUrl::userinfo`] takes a URL's authority to end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AuthorityEnd {
+    /// At the first `/`, `\`, `?` or `#`, as the WHATWG URL standard reads a
+    /// URL of a special scheme: where a URL parser ends it.
+    Standard,
+    /// At the first `/`: a raw `?` or `#` in a password doesn't end it early.
+    Slash,
+    /// At the end of the text: a raw `/` in a password doesn't either.
+    Text,
+}
+
+/// The userinfo of a URL, as written in the text it was read from. It has
+/// no `Debug` form: it holds a password.
+#[derive(Clone, Copy)]
+pub(crate) struct Userinfo<'a> {
+    /// The whole of it, up to the `@` that ends it.
+    pub written: &'a str,
+    /// What precedes its first `:`; the whole of it without one.
+    pub user: &'a str,
+    /// What follows its first `:`; `None` without one.
+    pub password: Option<&'a str>,
+    /// Whether a `${…}` reference is in the user name.
+    pub user_reference: bool,
+    /// Whether a `${…}` reference is in the password.
+    pub password_reference: bool,
+}
+
+/// Whether a URL starts after its scheme's `://`, or may lack its scheme, as
+/// a proxy setting may.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scheme {
+    Required,
+    Optional,
+}
+
+/// A URL read for its userinfo, piece by piece: as a configuration field
+/// writes it, each `${…}` reference one opaque piece ([`written_pieces`]),
+/// so a `/`, `?`, `#`, `:` or `@` inside `${file:/path}` ends nothing; or
+/// character by character, as a URL parser reads a text that holds `${…}`
+/// as text (a resolved location, an environment's value). The one reading
+/// of a URL's authority that the warnings and the redactor share.
+pub(crate) struct WrittenUrl<'a> {
+    text: &'a str,
+    pieces: Vec<Piece>,
+    starts: Vec<usize>,
+    /// The piece the URL's authority starts at.
+    authority: usize,
+}
+
+impl<'a> WrittenUrl<'a> {
+    /// The URL in `text` as a configuration field writes it, which starts
+    /// after the first `://` outside references; `None` without one.
+    pub(crate) fn after_scheme(text: &'a str) -> Option<Self> {
+        Self::starting(text, written_pieces(text), Scheme::Required)
+    }
+
+    /// The URL in `text` read both ways: as a configuration field writes it
+    /// and, where that reading finds a reference, character by character
+    /// too, for the text may hold `${…}` as text. Each starts after the first
+    /// `://` it reads, or, where `scheme` is optional, at the start of `text`
+    /// without one.
+    pub(crate) fn readings(text: &'a str, scheme: Scheme) -> Vec<Self> {
+        let written = written_pieces(text);
+        let referenced = written.0.contains(&Piece::Reference);
+        let mut readings: Vec<Self> = Self::starting(text, written, scheme).into_iter().collect();
+        if referenced {
+            readings.extend(Self::starting(text, char_pieces(text), scheme));
+        }
+        readings
+    }
+
+    /// The URL `pieces` (with where each starts in `text`) hold, from after
+    /// their first `://`.
+    fn starting(
+        text: &'a str,
+        (pieces, starts): (Vec<Piece>, Vec<usize>),
+        scheme: Scheme,
+    ) -> Option<Self> {
+        let authority = match pieces
+            .windows(3)
+            .position(|three| three == [Piece::Char(':'), Piece::Char('/'), Piece::Char('/')])
+        {
+            Some(at) => at.saturating_add(3),
+            None if scheme == Scheme::Optional => 0,
+            None => return None,
+        };
+        Some(Self {
+            text,
+            pieces,
+            starts,
+            authority,
+        })
+    }
+
+    /// The userinfo of the URL: what precedes the last `@` of its authority,
+    /// which ends where `end` says, both outside references. An `@` after a
+    /// `/` and before the first `:` is in a path, not in a userinfo.
+    pub(crate) fn userinfo(&self, end: AuthorityEnd) -> Option<Userinfo<'a>> {
+        let rest = self.pieces.get(self.authority..).unwrap_or_default();
+        let ends = |piece: &Piece| match end {
+            AuthorityEnd::Standard => matches!(piece, Piece::Char('/' | '\\' | '?' | '#')),
+            AuthorityEnd::Slash => *piece == Piece::Char('/'),
+            AuthorityEnd::Text => false,
+        };
+        let authority = rest
+            .get(..rest.iter().position(ends).unwrap_or(rest.len()))
+            .unwrap_or_default();
+        let at = authority
+            .iter()
+            .rposition(|piece| *piece == Piece::Char('@'))?;
+        let userinfo = authority.get(..at).unwrap_or_default();
+        let colon = userinfo.iter().position(|piece| *piece == Piece::Char(':'));
+        let (user, password) = userinfo.split_at(colon.unwrap_or(userinfo.len()));
+        if user.contains(&Piece::Char('/')) {
+            return None;
+        }
+        let byte = |piece: usize| {
+            self.starts
+                .get(self.authority.saturating_add(piece))
+                .copied()
+        };
+        let text = |from: usize, to: usize| self.text.get(byte(from)?..byte(to)?);
+        Some(Userinfo {
+            written: text(0, at)?,
+            user: text(0, user.len())?,
+            password: match colon {
+                Some(colon) => Some(text(colon.saturating_add(1), at)?),
+                None => None,
+            },
+            user_reference: user.contains(&Piece::Reference),
+            password_reference: password.contains(&Piece::Reference),
+        })
+    }
 }
 
 /// Whether an rclone connection string keeps a credential as text: one of
@@ -453,12 +573,7 @@ enum Piece {
 /// `${`: its `$` is written `$$`.
 fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
     let Ok(template) = Template::parse(text) else {
-        let (pieces, mut starts): (Vec<Piece>, Vec<usize>) = text
-            .char_indices()
-            .map(|(at, c)| (Piece::Char(c), at))
-            .unzip();
-        starts.push(text.len());
-        return (pieces, starts);
+        return char_pieces(text);
     };
     let mut pieces = Vec::with_capacity(text.len());
     let mut starts = Vec::with_capacity(text.len().saturating_add(1));
@@ -487,6 +602,17 @@ fn written_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
         }
     }
     starts.push(at);
+    (pieces, starts)
+}
+
+/// `text` as pieces, one for each character, and where in `text` each
+/// starts, then `text.len()`: `text` read with no reference in it.
+fn char_pieces(text: &str) -> (Vec<Piece>, Vec<usize>) {
+    let (pieces, mut starts): (Vec<Piece>, Vec<usize>) = text
+        .char_indices()
+        .map(|(at, c)| (Piece::Char(c), at))
+        .unzip();
+    starts.push(text.len());
     (pieces, starts)
 }
 
