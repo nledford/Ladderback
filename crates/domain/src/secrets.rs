@@ -15,7 +15,8 @@ mod template;
 
 pub use command::{CommandLine, CommandLineError};
 pub(crate) use inline::MAX_RCLONE_DEPTH;
-use inline::rclone_credentials;
+pub(crate) use inline::url_has_userinfo;
+use inline::{AuthorityEnd, Userinfo, WrittenUrl, rclone_credentials};
 pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
@@ -199,18 +200,19 @@ impl MaskedSecrets {
 }
 
 /// What a location holds that a redactor masks: the password of a URL in
-/// it, and each credential of an rclone connection string.
+/// it, or its userinfo where a reference gives it ([`url_secrets`]), and
+/// each credential of an rclone connection string.
 fn location_secrets(location: &str) -> Vec<SecretValue> {
-    let mut secrets = url_passwords(location);
+    let mut secrets = url_secrets(location);
     secrets.extend(rclone_credentials(location));
     secrets
 }
 
-/// What an option holds that a redactor masks: the password of a URL in its
-/// value, and the whole value when its name says it holds a credential
-/// ([`is_secret_option`]), even one written inline.
+/// What an option holds that a redactor masks: what of a URL in its value
+/// does ([`url_secrets`]), and the whole value when its name says it holds
+/// a credential ([`is_secret_option`]), even one written inline.
 fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
-    let mut secrets = url_passwords(value);
+    let mut secrets = url_secrets(value);
     if is_secret_option(name) {
         secrets.push(SecretValue::new(value));
     }
@@ -642,17 +644,33 @@ fn go_prints(c: char) -> bool {
 /// The userinfo usually ends at the last `@` before the first `/`, but a raw
 /// `/` in the password ends the authority early, so the last `@` of the
 /// whole string is tried too. Masking part of a path by mistake is the safe
-/// direction.
+/// direction. A `${…}` reference is one piece ([`WrittenUrl`]): a `/`, `:`
+/// or `@` in it ends nothing.
 pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
-    let Some((_, rest)) = repository.split_once("://") else {
-        return Vec::new();
-    };
-    forms(
-        userinfos(rest)
-            .into_iter()
-            .filter_map(|userinfo| userinfo.split_once(':'))
-            .map(|(_, password)| password),
-    )
+    url_userinfo_parts(repository, |userinfo| userinfo.password)
+}
+
+/// What of the userinfo of the URL in `text` a redactor masks: its password
+/// ([`url_passwords`]), or, where it has no `:` outside a `${…}` reference
+/// and a reference is in it, the whole of it, as the reference may stand for
+/// a user and a password both (`${file:/path}@host`).
+fn url_secrets(text: &str) -> Vec<SecretValue> {
+    url_userinfo_parts(text, |userinfo| {
+        userinfo
+            .password
+            .or_else(|| userinfo.user_reference.then_some(userinfo.written))
+    })
+}
+
+/// What `part` takes of each userinfo ([`userinfos`]) of the URL in `text`,
+/// as written and decoded; empty when `text` has no URL.
+fn url_userinfo_parts<'a>(
+    text: &'a str,
+    part: impl Fn(&Userinfo<'a>) -> Option<&'a str>,
+) -> Vec<SecretValue> {
+    WrittenUrl::after_scheme(text).map_or_else(Vec::new, |url| {
+        forms(userinfos(&url).iter().filter_map(part))
+    })
 }
 
 /// Whether a repository string is an rclone connection string that carries a
@@ -678,41 +696,28 @@ pub fn rclone_secret(location: &str) -> bool {
 /// (`demo:s3cr3t@proxy:3128`), as proxy settings often do. Empty when there
 /// is no userinfo.
 pub fn url_credentials(url: &str) -> Vec<SecretValue> {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let userinfos = userinfos(rest);
-    let split: Vec<(&str, &str)> = userinfos
-        .iter()
-        .filter_map(|userinfo| userinfo.split_once(':'))
-        .collect();
+    let userinfos = userinfos(&WrittenUrl::scheme_optional(url));
     forms(
-        split
+        userinfos
             .iter()
-            .map(|&(_, password)| password)
+            .filter_map(|userinfo| userinfo.password)
             .chain(
-                split
+                userinfos
                     .iter()
-                    .filter(|(_, password)| password.is_empty())
-                    .map(|&(user, _)| user),
+                    .filter(|userinfo| userinfo.password == Some(""))
+                    .map(|userinfo| userinfo.user),
             )
-            .chain(userinfos.iter().copied()),
+            .chain(userinfos.iter().map(|userinfo| userinfo.written)),
     )
 }
 
-/// The userinfos a URL's authority and path (what follows its scheme) may
-/// hold: the one before the last `@` of the authority, and the one before
-/// the last `@` of the whole of it, for a raw `/` in a password ends the
-/// authority early.
-fn userinfos(rest: &str) -> Vec<&str> {
-    let authority = rest.split('/').next().unwrap_or(rest);
-    [authority, rest]
+/// The userinfos a URL's authority and path may hold: the one before the
+/// last `@` of the authority, and the one before the last `@` of the whole
+/// of it, for a raw `/` in a password ends the authority early.
+fn userinfos<'a>(url: &WrittenUrl<'a>) -> Vec<Userinfo<'a>> {
+    [AuthorityEnd::Slash, AuthorityEnd::Text]
         .into_iter()
-        .filter_map(|candidate| candidate.rsplit_once('@'))
-        .map(|(userinfo, _)| userinfo)
-        // A `/` before the `:` puts the `@` in the path, not in a userinfo.
-        .filter(|userinfo| {
-            let user = userinfo.split_once(':').map_or(*userinfo, |(user, _)| user);
-            !user.contains('/')
-        })
+        .filter_map(|end| url.userinfo(end))
         .collect()
 }
 

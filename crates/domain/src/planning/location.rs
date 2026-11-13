@@ -16,7 +16,7 @@ use super::{
 use crate::PlanId;
 use crate::secrets::{
     REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
-    location_secret_written,
+    location_secret_written, url_has_userinfo,
 };
 
 /// The most locations a repository has, the first included.
@@ -85,7 +85,7 @@ impl Location {
     fn carries_credential_in_address(&self) -> bool {
         std::iter::once(self.repository.as_str())
             .chain(self.repo_hot.as_deref())
-            .any(|address| has_userinfo(address) || location_secret_written(address))
+            .any(|address| url_has_userinfo(address) || location_secret_written(address))
     }
 
     fn carries_credential(&self) -> bool {
@@ -100,16 +100,6 @@ impl Location {
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     }
-}
-
-/// Whether the URL in `address` has a userinfo (`user:password@`): what
-/// follows the first `://` up to the first `/`, `?` or `#` holds an `@`.
-fn has_userinfo(address: &str) -> bool {
-    address.split_once("://").is_some_and(|(_, rest)| {
-        rest.split(['/', '?', '#'])
-            .next()
-            .is_some_and(|authority| authority.contains('@'))
-    })
 }
 
 /// Whether `text` starts with `prefix`, compared without ASCII case.
