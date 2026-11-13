@@ -3,8 +3,10 @@ Feature: A repository's cache
   Each worker of a repository whose ID is known keeps rustic's cache in a
   cache slot of its own, a folder under the agent's cache folder named by the
   repository ID and the slot's number. The next operation on that repository
-  reads the index and the snapshots from the cache its slot holds instead of
-  from the repository again. No two running workers share a slot.
+  reads the index, the snapshots and the trees from the cache its slot holds
+  instead of from the repository again. No two running workers share a slot.
+  A job of an entry that records no ID has the agent identify the repository
+  first, which records the ID, so that job has a slot too.
 
   Nothing in the cache is needed, so each time it starts the agent tidies its
   cache folder: it removes the cache of a repository no entry records, the
