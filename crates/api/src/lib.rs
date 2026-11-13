@@ -404,6 +404,7 @@ pub enum ProgressUnit {
     #[default]
     Count,
     Bytes,
+    #[serde(other)]
     Unknown,
 }
 

@@ -32,7 +32,10 @@ impl ProgressShown {
         UiEvent::OperationProgress {
             operation,
             step: self.step.map(wire_step),
-            unit: api::ProgressUnit::Count,
+            unit: match self.kind {
+                ProgressKind::Bytes => api::ProgressUnit::Bytes,
+                ProgressKind::Counter | ProgressKind::Spinner => api::ProgressUnit::Count,
+            },
             current: self.current,
             total: self.total,
         }
