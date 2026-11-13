@@ -4,15 +4,20 @@
 use std::assert_matches;
 use std::sync::Arc;
 
+use app::execution::RunOperation;
 use app::fakes::{FakeSecrets, Script};
+use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use cucumber::{given, then, when};
+use domain::execution::refusal::SettingRefusal;
+use domain::execution::{FailureReason, OperationStatus, Target, Trigger};
 use domain::planning::RepositorySettings;
 use domain::secrets::{
-    CommandLine, FileRead, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem, SecretError,
-    SecretRef, SecretValue, SecretWarning, SourceName, TemplateError,
+    CommandLine, FileRead, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem, Redactor,
+    SecretError, SecretRef, SecretValue, SecretWarning, SourceName, TemplateError,
 };
+use domain::{OperationId, PlanId, Uuid};
 
 use super::Agent;
 
@@ -720,4 +725,57 @@ fn settings_hide(agent: &mut Agent, value: String) {
 fn settings_show(agent: &mut Agent, value: String) {
     let debug = format!("{:?}", agent.secrets.settings);
     assert!(debug.contains(&value), "{debug}");
+}
+
+// A backup the schedule starts, refused before it runs (§5).
+
+#[when(expr = "the schedule starts a backup of the plan {string} on the repository")]
+async fn schedule_starts_a_backup(agent: &mut Agent, plan: String) {
+    let use_case = ResolveRepository::new(agent.secrets.store.clone());
+    let error = match use_case.resolve(&agent.secrets.settings).await {
+        Ok(_) => panic!("the repository's settings resolve, so the run isn't refused"),
+        Err(error) => error,
+    };
+    // No secret of the repository was read, so none is masked.
+    let reason = error.failure(&Redactor::new([]));
+    let run = RunOperation::new(
+        agent.engine.clone(),
+        agent.clock.clone(),
+        agent.store.clone(),
+    );
+    let target = Target {
+        plan: Some(PlanId::try_from(plan).expect("a plan ID")),
+        repository: None,
+    };
+    let id = OperationId::from_uuid(Uuid::from_u128(1));
+    agent.finished = Some(run.refused(id, Trigger::Schedule, target, reason).await);
+}
+
+#[then(
+    expr = "the operation ends as failed because the password's keyring entry {string} is missing"
+)]
+fn failed_for_a_missing_entry(agent: &mut Agent, entry: String) {
+    assert_eq!(
+        agent.operation().status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::SecretRefused {
+                field: "password".to_owned(),
+                refusal: SettingRefusal::SecretMissing { source: entry },
+            }
+        }
+    );
+}
+
+#[then(expr = "the run ends as a failed scheduled run of the plan {string}")]
+fn ends_as_a_failed_scheduled_run(agent: &mut Agent, plan: String) {
+    let operation = agent.operation();
+    assert_eq!(
+        RunEnd::of(operation),
+        Some(RunEnd {
+            operation: operation.id(),
+            plan: PlanId::try_from(plan).expect("a plan ID"),
+            trigger: Trigger::Schedule,
+            outcome: RunOutcome::Failed,
+        })
+    );
 }

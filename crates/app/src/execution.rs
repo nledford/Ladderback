@@ -4,7 +4,9 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use domain::execution::deadline::Deadline;
-use domain::execution::{FailureReason, Operation, OperationStatus, Trigger, Warning, WarningKind};
+use domain::execution::{
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
+};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
@@ -172,6 +174,40 @@ impl RunOperation {
         };
         self.record(&mut run).await;
         Queued { run, job }
+    }
+
+    /// Records a backup the schedule started whose start was refused before
+    /// anything ran (§5): one write, of the operation queued and failed with
+    /// `reason` in the same instant, then the news that it failed, as any
+    /// failed operation's. No hook runs and the engine is never asked.
+    pub async fn refused(
+        &self,
+        id: OperationId,
+        trigger: Trigger,
+        target: Target,
+        reason: FailureReason,
+    ) -> Finished {
+        let operation = Operation::refused(
+            id,
+            OperationKind::Backup,
+            trigger,
+            target,
+            reason,
+            self.clock.now(),
+        );
+        let mut run = Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        };
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: None,
+            recording_errors: run.recording_errors,
+        }
     }
 
     /// Runs the job of an operation [`Self::queue`] recorded, as
