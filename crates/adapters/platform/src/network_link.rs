@@ -306,13 +306,14 @@ fn ipv6_default(from: &Path, table: &str) -> Result<Option<(u32, String)>, Platf
     Ok(best)
 }
 
-/// Asks `route -n get default`, `networksetup -listallhardwareports` and
-/// `system_profiler -json SPAirPortDataType` on macOS, or programs that
-/// answer as they do.
+/// Asks `route -n get default`, `networksetup -listallhardwareports`,
+/// `ifconfig <interface>` and `system_profiler -json SPAirPortDataType` on
+/// macOS, or programs that answer as they do.
 #[derive(Clone, Debug)]
 pub struct RouteLink {
     route: Program,
     ports: Program,
+    media: Program,
     profile: Program,
 }
 
@@ -324,6 +325,7 @@ impl RouteLink {
                 "/usr/sbin/networksetup",
                 ["-listallhardwareports"].as_slice(),
             ),
+            ("/sbin/ifconfig", [].as_slice()),
             (
                 "/usr/sbin/system_profiler",
                 ["-json", "SPAirPortDataType"].as_slice(),
@@ -331,19 +333,23 @@ impl RouteLink {
         )
     }
 
-    /// Runs `route`, then `ports` for the link, or `profile` for the
-    /// network's name, each a program and its arguments, with no
-    /// environment, and reads what they print as `route -n get default`,
-    /// `networksetup -listallhardwareports` and `system_profiler -json
-    /// SPAirPortDataType` print it. `profile` has 15 s and 1 MiB.
+    /// Runs `route`, then `ports` for the link and `media`, with the
+    /// interface after its arguments, for a port that isn't Wi-Fi, or
+    /// `profile` for the network's name, each a program and its arguments,
+    /// with no environment, and reads what they print as `route -n get
+    /// default`, `networksetup -listallhardwareports`, `ifconfig <interface>`
+    /// and `system_profiler -json SPAirPortDataType` print it. `profile` has
+    /// 15 s and 1 MiB.
     pub fn running<A: Into<OsString> + Clone>(
         route: (impl Into<PathBuf>, &[A]),
         ports: (impl Into<PathBuf>, &[A]),
+        media: (impl Into<PathBuf>, &[A]),
         profile: (impl Into<PathBuf>, &[A]),
     ) -> Self {
         Self {
             route: Program::new(route.0, route.1.iter().cloned()),
             ports: Program::new(ports.0, ports.1.iter().cloned()),
+            media: Program::new(media.0, media.1.iter().cloned()),
             profile: Program::new(profile.0, profile.1.iter().cloned())
                 .with_limits(PROFILE_TIMEOUT, MAX_PROFILE_BYTES),
         }
@@ -456,6 +462,11 @@ fn hardware_port(from: &Path, ports: &str, interface: &str) -> Result<Link, Plat
 /// ports (decision 80), so a rule's `wired` never holds there.
 pub fn tells_wired() -> bool {
     !cfg!(target_os = "macos")
+}
+
+/// Whether `ifconfig <interface>` says the interface's medium is Ethernet.
+fn ethernet_medium(_ifconfig: &str) -> bool {
+    todo!()
 }
 
 /// NetworkManager's answer, over D-Bus: its read-only properties only
@@ -592,5 +603,84 @@ pub fn system_link() -> Arc<dyn NetworkLink> {
         Arc::new(RouteLink::system())
     } else {
         Arc::new(KernelLink::system())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ifconfig <interface>` as macOS 27 prints it for a port whose `media:`
+    /// line is `media`, its addresses made up.
+    fn ifconfig(media: &str, status: &str) -> String {
+        format!(
+            "en10: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n\toptions=6464<VLAN_MTU,TSO4,TSO6,CHANNEL_IO,PARTIAL_CSUM,ZEROINVERT_CSUM>\n\tether 02:00:00:00:00:0a\n\tinet 192.0.2.10 netmask 0xffffff00 broadcast 192.0.2.255\n\tnd6 options=201<PERFORMNUD,DAD>\n\tmedia: {media}\n\tstatus: {status}\n"
+        )
+    }
+
+    /// The medium in brackets after `autoselect` is the one negotiated; a
+    /// medium set by hand stands alone, with the active one, `(none)` with no
+    /// link, in brackets after it. Either is Ethernet when it names a
+    /// `…base…` medium, in either case, as every medium a Mac's Ethernet
+    /// port can have does in xnu's `bsd/net/if_media.h`. Whether the port
+    /// is up isn't read: the medium says what kind of port it is, as the
+    /// kernel's type does on Linux, whatever its carrier.
+    #[test]
+    fn a_medium_that_names_a_base_medium_is_ethernet() {
+        for (media, status) in [
+            ("autoselect (2500Base-T <full-duplex>)", "active"),
+            (
+                "autoselect (1000baseT <full-duplex,flow-control>)",
+                "active",
+            ),
+            ("autoselect (10Gbase-T <full-duplex>)", "active"),
+            ("autoselect (100baseTX <full-duplex>)", "active"),
+            ("autoselect (5000BASE-T)", "active"),
+            ("1000baseT <full-duplex>", "active"),
+            ("1000baseT <full-duplex> (none)", "inactive"),
+        ] {
+            assert!(
+                ethernet_medium(&ifconfig(media, status)),
+                "{media}, {status}"
+            );
+        }
+    }
+
+    /// What this Mac's ports that aren't Ethernet print, and what isn't a
+    /// medium at all: no answer says Ethernet but a `…base…` medium.
+    #[test]
+    fn any_other_medium_is_not_ethernet() {
+        for media in [
+            // Wi-Fi, a Thunderbolt port, an Ethernet port with no link, a
+            // port that has none, a bridge.
+            "autoselect",
+            "autoselect <full-duplex>",
+            "autoselect (none)",
+            "none",
+            "<unknown type>",
+            // An 802.11 medium, an Ethernet medium of xnu's that names no
+            // `base`, and text that only looks like one.
+            "autoselect (DS11)",
+            "homePNA",
+            "base",
+            "autoselect (base-T)",
+            "autoselect (2500Bas)",
+            "",
+            "autoselect (",
+            "(",
+        ] {
+            assert!(!ethernet_medium(&ifconfig(media, "active")), "{media:?}");
+        }
+        for text in [
+            "",
+            "en10: flags=8863<UP> mtu 1500\n\tstatus: active\n",
+            "\tsupported media: 1000baseT\n",
+            "status: active (1000baseT)\n",
+            "\tmedia:",
+            "media: autoselect\n\tmedia: 1000baseT\n",
+            "media: ２５００Base-T\n",
+        ] {
+            assert!(!ethernet_medium(text), "{text:?}");
+        }
     }
 }
