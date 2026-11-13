@@ -1048,6 +1048,7 @@ impl RunMaintenance {
         let mut result = None;
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());
+        let ruled = crate::locations::ruled_positions(&job);
         let jobs = split(job);
         let total: usize = jobs.iter().map(names).sum();
         let last = jobs.len().saturating_sub(1);
@@ -1076,6 +1077,7 @@ impl RunMaintenance {
                     cancel.as_mut(),
                     done.as_ref(),
                     total,
+                    &ruled,
                 )
                 .await
             {
@@ -1105,8 +1107,9 @@ impl RunMaintenance {
     /// Plays one engine job's events into the operation until it reports a
     /// result (the operation is left running for the caller to settle) or
     /// the operation ends: failed, or cancelled. `done` is what the jobs
-    /// before this one finished, and `total` how many snapshots the whole
-    /// run names.
+    /// before this one finished, `total` how many snapshots the whole run
+    /// names, and `ruled` the positions of the repository's locations that
+    /// have a rule.
     async fn play(
         &self,
         operation: &mut Operation,
@@ -1114,6 +1117,7 @@ impl RunMaintenance {
         mut cancel: Pin<&mut (impl FusedFuture<Output = ()> + Send)>,
         done: Option<&EngineResult>,
         total: usize,
+        ruled: &[u8],
     ) -> Played {
         let RunningJob {
             events,
@@ -1155,7 +1159,9 @@ impl RunMaintenance {
                         // the operation says once where it went.
                         EngineEvent::Located(record) => {
                             if operation.locations().is_none() {
-                                let _ = operation.record_locations(record, |_| false);
+                                let _ = operation.record_locations(record, |position| {
+                                    ruled.contains(&position)
+                                });
                             }
                         }
                         EngineEvent::Failed(reason) => {

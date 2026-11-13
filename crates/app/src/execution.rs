@@ -238,6 +238,7 @@ impl RunOperation {
     /// Plays the engine's events into the operation until it finishes.
     async fn drive(&self, run: &mut Run, job: Job, cancel: impl Future<Output = ()> + Send) {
         let budget = job.deadline_budget();
+        let ruled = crate::locations::ruled_positions(&job);
         let RunningJob {
             events,
             mut control,
@@ -289,7 +290,7 @@ impl RunOperation {
                         deadline = Some(d);
                         timer = self.clock.sleep_until(d.at()).fuse();
                     }
-                    self.apply(run, event);
+                    self.apply(run, event, &ruled);
                     if run.operation.status().is_finished() {
                         // A result stands even past the deadline: the snapshot
                         // it reports was written already. Dropping the job
@@ -380,7 +381,9 @@ impl RunOperation {
         }
     }
 
-    fn apply(&self, run: &mut Run, event: EngineEvent) {
+    /// Applies `event` to the run's operation; `ruled` are the positions of
+    /// the repository's locations that have a rule.
+    fn apply(&self, run: &mut Run, event: EngineEvent, ruled: &[u8]) {
         let at = self.clock.now();
         let applied = match event {
             // A backup queued before its repository's ID was known names
@@ -398,8 +401,10 @@ impl RunOperation {
                 succeeded
             }
             EngineEvent::Failed(reason) => run.operation.fail(reason, at),
-            // Part 1 has no rules, so no location's rule held (decision 80).
-            EngineEvent::Located(record) => run.operation.record_locations(record, |_| false),
+            // A location the choice probed had no rule or one that held.
+            EngineEvent::Located(record) => run
+                .operation
+                .record_locations(record, |position| ruled.contains(&position)),
         };
         if let Err(error) = applied {
             let transition = error.transition;
@@ -762,6 +767,7 @@ mod tests {
                 index_read_at: t(1),
                 repository: Some(opened.clone()),
             },
+            &[],
         );
         assert_eq!(run.operation.status(), &OperationStatus::Running);
         assert_eq!(run.operation.target().repository, Some(opened));

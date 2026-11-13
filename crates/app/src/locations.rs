@@ -1,11 +1,15 @@
 //! Choosing which location of a repository a job opens (technical design
 //! §6.1, decision 80). Before a job that opens a repository reached at
-//! several locations, every location is probed in order, each by a
-//! short-lived worker of its own with only its own secrets, and the first
-//! that answers with the repository's ID is used: a location that holds
-//! another repository is refused and never used. The job then carries that
-//! location alone, so a location the job didn't use never had its secrets in
-//! the job's process (I4).
+//! several locations, or at one location that has a rule, the locations'
+//! rules are evaluated against the machine's network link, read once for
+//! the choice, and every location whose rule holds (or that has none) is
+//! probed in order, each by a short-lived worker of its own with only its
+//! own secrets; the first that answers with the repository's ID is used: a
+//! location that holds another repository is refused and never used. A
+//! repository of one location is never probed: its rule decides alone, and
+//! the job's own open checks the ID. The job then carries that location
+//! alone, so a location the job didn't use never had its secrets in the
+//! job's process (I4).
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -16,6 +20,7 @@ use domain::execution::locations::{
 };
 use domain::planning::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, MAX_RECORDED_ADDRESS_BYTES,
+    RuleVerdict,
 };
 use domain::secrets::{SecretValue, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
@@ -58,7 +63,8 @@ pub struct Located {
     /// The chosen location's access, with only its own secrets.
     pub access: RepositoryAccess,
     /// Every location as the choice saw it; `None` for a repository of one
-    /// location, which is opened as it always was, with no probe.
+    /// location, which is opened as it always was, with no probe, once its
+    /// rule, if it has one, holds.
     pub record: Option<LocationsRecord>,
 }
 
@@ -106,9 +112,10 @@ impl ChooseLocation {
     }
 
     /// Chooses the location `access` opens, for operation `op`: the access
-    /// itself for a repository of one location, else the first location that
-    /// answers with the entry's repository ID. Fails with the reason the
-    /// operation ends with when none can be used.
+    /// itself for a repository of one location whose rule, if any, holds,
+    /// else the first location whose rule holds that answers with the
+    /// entry's repository ID. Fails with the reason the operation ends with
+    /// when none can be used.
     pub async fn locate(
         &self,
         op: OperationId,
@@ -124,12 +131,30 @@ impl ChooseLocation {
         access: RepositoryAccess,
         phase: &Probing,
     ) -> Result<Located, (FailureReason, Option<LocationsRecord>)> {
-        let Some(saved) = several(&access) else {
+        let Some(saved) = chosen(&access) else {
             return Ok(Located {
                 access,
                 record: None,
             });
         };
+        if !saved.entry.has_several_locations() {
+            // One location with a rule is tried only when its rule holds,
+            // with no probe: there is no other location to choose, and the
+            // job's own open refuses another repository, as it does for a
+            // location with no rule (decision 80, point 2).
+            let holds = match saved.entry.location_rules().first().copied().flatten() {
+                Some(rule) => rule.holds(self.link.link().await.ok()) == RuleVerdict::Holds,
+                None => true,
+            };
+            return if holds {
+                Ok(Located {
+                    access,
+                    record: None,
+                })
+            } else {
+                Err((FailureReason::NoLocationRuleHolds, None))
+            };
+        }
         // The configuration refuses further locations on an entry with no
         // recorded ID (decision 80): without one, nothing says which
         // repository a location must hold.
@@ -199,7 +224,10 @@ impl ChooseLocation {
     }
 
     /// Tries the locations of `saved` in order with the repository's
-    /// `password`: each is resolved and probed, and holds the repository
+    /// `password`. The rules are evaluated first, against the network link
+    /// read once and only when a location has one: a location whose rule
+    /// isn't met, or can't be evaluated, is skipped unresolved and unprobed.
+    /// Each other location is resolved and probed, and holds the repository
     /// when its ID is `expected` (any ID when `None`). With
     /// [`Reach::FirstUsed`] the ones after the first usable one are
     /// `not-tried`. Answers every location's outcome and the first usable
@@ -215,20 +243,33 @@ impl ChooseLocation {
         phase: &Probing,
     ) -> Result<(LocationsRecord, Option<RepositoryAccess>), FailureReason> {
         let SavedEntry { alias, entry } = saved;
-        if entry.location_rules().iter().any(Option::is_some) {
-            todo!("the rules of decision 80, against {:p}", self.link)
-        }
+        let rules = entry.location_rules();
+        let link = if rules.iter().any(Option::is_some) {
+            self.link.link().await.ok()
+        } else {
+            None
+        };
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
-        for (settings, position) in entry.location_settings().into_iter().zip(1u8..) {
+        for ((settings, rule), position) in entry
+            .location_settings()
+            .into_iter()
+            .zip(rules)
+            .zip(1u8..)
+        {
             let address = recorded_address(
                 &Location::of(&settings).masked_address(),
                 MAX_RECORDED_ADDRESS_BYTES,
             );
             let mut source = None;
+            let verdict = rule.map_or(RuleVerdict::Holds, |rule| rule.holds(link));
             let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
                 LocationOutcome::NotTried
+            } else if verdict == RuleVerdict::NotMet {
+                LocationOutcome::RuleNotMet
+            } else if verdict == RuleVerdict::Unknown {
+                LocationOutcome::RuleUnknown
             } else {
                 match self
                     .resolve
@@ -344,13 +385,23 @@ impl ChooseLocation {
     }
 }
 
-/// The entry of `access` when it lists several locations: only then is a
-/// location chosen.
-fn several(access: &RepositoryAccess) -> Option<SavedEntry> {
+/// The entry of `access` when a location is chosen for it: when it lists
+/// several locations, or one that has a rule.
+fn chosen(access: &RepositoryAccess) -> Option<SavedEntry> {
     access
         .entry
         .clone()
-        .filter(|saved| saved.entry.has_several_locations())
+        .filter(|saved| saved.entry.chooses_location())
+}
+
+/// The positions, from 1, of the locations of `job`'s repository that have
+/// a rule: a location the choice probed there had its rule hold, so its skip
+/// is a warning of the operation (decision 80, point 8).
+pub(crate) fn ruled_positions(job: &Job) -> Vec<u8> {
+    job.access()
+        .and_then(|access| access.entry.as_ref())
+        .map(|saved| saved.entry.ruled_positions())
+        .unwrap_or_default()
 }
 
 /// How far a run of the locations goes: a job's choice stops at the first
@@ -401,10 +452,21 @@ fn source_name(source: &SourceName) -> String {
     }
 }
 
-/// Why a choice that used no location fails: a password error when every
+/// Why a choice that used no location fails: no rule held when every
+/// location was skipped by its rule; else a password error when every
 /// location that answered refused the repository's password, the likelier
 /// cause; else no location was usable.
 fn failure(record: &LocationsRecord) -> FailureReason {
+    let by_rule = |outcome: LocationOutcome| {
+        matches!(
+            outcome,
+            LocationOutcome::RuleNotMet | LocationOutcome::RuleUnknown
+        )
+    };
+    if !record.locations.is_empty() && record.locations.iter().all(|tried| by_rule(tried.outcome))
+    {
+        return FailureReason::NoLocationRuleHolds;
+    }
     let answered: Vec<LocationOutcome> = record
         .locations
         .iter()
@@ -484,7 +546,7 @@ impl Engine for ChooseLocation {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
         let Some(access) = job
             .access()
-            .filter(|access| several(access).is_some())
+            .filter(|access| chosen(access).is_some())
             .cloned()
         else {
             return self.inner.run(op, job).await;
