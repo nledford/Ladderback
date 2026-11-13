@@ -55,10 +55,22 @@ pub(crate) fn PageHeading(children: Children) -> impl IntoView {
     }
 }
 
+/// Where the format of a plan in `config.toml` is described: §6.1 of the
+/// technical design, at the tag of the release this build is, so a reader
+/// gets the format their build reads.
+pub(crate) const PLAN_FORMAT_URL: &str = concat!(
+    env!("CARGO_PKG_REPOSITORY"),
+    "/blob/v",
+    env!("CARGO_PKG_VERSION"),
+    "/docs/design/scheduling-and-config.md#61-source-of-truth"
+);
+
 /// The start page, the route `/`: the configured plans, each with when it
-/// runs next on its schedule (§5), and the way to the operations page, where
-/// a backup is started by hand. With sign-in off it says so, and how to turn
-/// it on (security §10.1).
+/// runs next on its schedule (§5), where the format of a plan is described,
+/// and the way to the operations page, where a backup is started by hand.
+/// Without plans it says to connect a repository first, with the way to the
+/// repositories page (#477). With sign-in off it says so, and how to turn it
+/// on (security §10.1).
 #[component]
 pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_START_HEADING);
@@ -73,6 +85,8 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         text(&localizer, msg::UI_COLUMN_NEXT_RUN),
     );
     let operations_link = text(&localizer, msg::UI_START_OPERATIONS_LINK);
+    let repositories_link = text(&localizer, msg::UI_START_REPOSITORIES_LINK);
+    let plan_format_link = text(&localizer, msg::UI_START_PLAN_FORMAT_LINK);
     let phase = RwSignal::new(Phase::Loading);
     // The configured plans; `None` until the read answers.
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
@@ -162,10 +176,22 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                         }
                             .into_any()
                     }
-                    _ => view! { <p>{empty.clone()}</p> }.into_any(),
+                    _ => {
+                        let repositories_link = repositories_link.clone();
+                        view! {
+                            <p>{empty.clone()}</p>
+                            <p>
+                                <A href="/repositories">{repositories_link}</A>
+                            </p>
+                        }
+                            .into_any()
+                    }
                 }
             }
         }}
+        <p>
+            <a href=PLAN_FORMAT_URL>{plan_format_link}</a>
+        </p>
         <p>
             <A href="/operations">{operations_link}</A>
         </p>
