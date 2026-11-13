@@ -130,6 +130,10 @@ impl ProfileWriter for FakeProfileWriter {
         if export.plan.retention.is_empty() {
             notices.push(ProfileNotice::RetentionEmpty);
         }
+        let further = export.repository.location_count().saturating_sub(1);
+        if further > 0 {
+            notices.push(ProfileNotice::LocationsNotExported { further });
+        }
         for (name, value) in &settings.options {
             if !is_plain(value) || is_secret_option(name) || !url_credentials(value).is_empty() {
                 notices.push(ProfileNotice::OptionLeftOut {

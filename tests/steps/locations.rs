@@ -111,11 +111,15 @@ fn write_config(agent: &mut Agent) {
         .map(|(name, _)| name.clone())
         .collect();
     let (first, rest) = names.split_first().expect("a first location");
+    // The password is read from a file, as a profile can name it: an export
+    // refuses a password written in the configuration.
+    let password = agent.scratch().join("password");
+    fs::write(&password, super::backup_steps::PASSWORD).expect("the password file");
     let mut text = format!(
-        "schema = 1\n\n[repositories.{alias}]\n{}repository-id = {}\npassword = {}\nmaintenance = \"local\"\n",
+        "schema = 1\n\n[repositories.{alias}]\n{}repository-id = {}\npassword-file = {}\nmaintenance = \"local\"\n",
         location_table(agent, first),
         quoted(id.as_str()),
-        quoted(super::backup_steps::PASSWORD),
+        quoted(path_text(&password)),
     );
     for name in rest {
         text.push_str(&format!(

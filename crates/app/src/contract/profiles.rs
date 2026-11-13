@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
-    GroupBy, Hooks, KeepCount, Maintenance, Plan, RepositoryConfig, RepositorySettings,
+    GroupBy, Hooks, KeepCount, Location, Maintenance, Plan, RepositoryConfig, RepositorySettings,
     RetentionPolicy, Source,
 };
 use domain::secrets::{FileRead, Part, SecretRef, SecretValue, Template};
@@ -57,6 +57,7 @@ pub async fn run(harness: &dyn ProfilesHarness) {
     a_location_that_is_a_reference_is_refused(harness);
     an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(harness);
     a_plan_that_keeps_everything_is_written_with_a_notice(harness);
+    a_repository_of_several_locations_is_written_at_its_first_with_a_notice(harness);
     a_location_with_a_password_in_its_url_is_refused_and_never_written(harness);
     a_tag_with_a_comma_is_refused(harness);
 }
@@ -323,6 +324,53 @@ fn a_plan_that_keeps_everything_is_written_with_a_notice(harness: &dyn ProfilesH
         profile.notices.contains(&ProfileNotice::RetentionEmpty),
         "rustic's forget will refuse the profile, and the export says so: {:?}",
         profile.notices
+    );
+}
+
+/// rustic has no fallback, so a repository reached at several locations is
+/// written at its first, and the export says how many it left out; a further
+/// location's address never reaches the profile (decision 80). A repository
+/// of one location has no such notice.
+fn a_repository_of_several_locations_is_written_at_its_first_with_a_notice(
+    harness: &dyn ProfilesHarness,
+) {
+    let Some(one) = export("/srv/demo-lan") else {
+        return;
+    };
+    let written = harness.writer().render(&one);
+    assert!(written.is_ok(), "the export is made: {written:?}");
+    let Ok(profile) = written else { return };
+    assert!(
+        !profile
+            .notices
+            .iter()
+            .any(|notice| matches!(notice, ProfileNotice::LocationsNotExported { .. })),
+        "one location leaves nothing out: {:?}",
+        profile.notices
+    );
+
+    let mut several = one;
+    several.repository.locations.further = ["/srv/demo-public", "/srv/demo-third"]
+        .into_iter()
+        .map(|address| Location {
+            repository: address.to_owned(),
+            ..Location::default()
+        })
+        .collect();
+    let written = harness.writer().render(&several);
+    assert!(written.is_ok(), "the export is made: {written:?}");
+    let Ok(profile) = written else { return };
+    assert!(
+        profile
+            .notices
+            .contains(&ProfileNotice::LocationsNotExported { further: 2 }),
+        "the export says it left two locations out: {:?}",
+        profile.notices
+    );
+    assert!(
+        !profile.text.contains("demo-public") && !profile.text.contains("demo-third"),
+        "no further location is written: {}",
+        profile.text
     );
 }
 

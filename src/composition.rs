@@ -1828,6 +1828,13 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::ProfileKeyringCommandMissing,
             vec![("program", text(program))],
         ),
+        ProfileNotice::LocationsNotExported { further } => (
+            WarningCode::ProfileLocationsNotExported,
+            vec![(
+                "count",
+                MsgArg::Count(u64::try_from(further).unwrap_or(u64::MAX)),
+            )],
+        ),
     };
     Notice { code, args }
 }
@@ -6707,6 +6714,14 @@ mod tests {
                     setting: "group-by".into(),
                 },
                 "demo-nas was already configured, so the profile's plans were added to it, and it kept its own group-by",
+            ),
+            (
+                ProfileNotice::LocationsNotExported { further: 1 },
+                "1 further location was left out",
+            ),
+            (
+                ProfileNotice::LocationsNotExported { further: 2 },
+                "2 further locations were left out",
             ),
         ];
         for (notice, expected) in notices {
