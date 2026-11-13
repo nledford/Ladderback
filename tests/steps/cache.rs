@@ -9,7 +9,10 @@ use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use app::ports::OperationStore;
 use cucumber::{given, then};
+use domain::{OperationId, Uuid};
+use store::SqliteStore;
 
 use super::Agent;
 use super::events_steps::{Events, save_daemon_config};
@@ -193,6 +196,59 @@ fn holds_the_cache(agent: &mut Agent, slot: u32) {
         left.keys().collect::<Vec<_>>()
     );
     agent.cache.left = left;
+}
+
+#[given(
+    expr = "the repository already holds {int} snapshots of the plan {string} that another tool made"
+)]
+async fn snapshots_another_tool_made(agent: &mut Agent, count: usize, plan: String) {
+    let tags = super::adopt_steps::plan_tags(agent, &plan);
+    for _ in 0..count {
+        super::adopt_steps::back_up_with_tags(agent, &tags).await;
+    }
+}
+
+/// rustic keeps a repository's tree packs in its cache as `data`: those of
+/// the parent snapshot the backup read, and those it wrote.
+#[then(
+    expr = "the repository's cache slot {int} holds rustic's cache of the index, {int} snapshots and the trees"
+)]
+fn holds_index_snapshots_and_trees(agent: &mut Agent, slot: u32, snapshots: usize) {
+    let dir = slot_dir(agent, slot);
+    let left = files(&dir);
+    assert!(
+        of_kind(&left, "index") >= 1
+            && of_kind(&left, "snapshots") == snapshots
+            && of_kind(&left, "data") >= 1,
+        "the cache slot {} holds not the index, {snapshots} snapshots and the trees: {:?}",
+        dir.display(),
+        left.keys().collect::<Vec<_>>()
+    );
+}
+
+#[then("the operation log names the repository")]
+async fn the_log_names_the_repository(agent: &mut Agent) {
+    let operation = agent.ops.the_operation();
+    let id = OperationId::from_uuid(Uuid::parse_str(&operation).expect("an operation's ID"));
+    let path = Events::data_dir(agent).join("ladderback.db");
+    // The daemon keeps the log in WAL mode, so it can be read beside it.
+    let store = SqliteStore::open(&path)
+        .await
+        .expect("the operation log opens beside the daemon");
+    let detail = store.get(id).await.expect("the log answers");
+    store.close().await;
+    let record = detail.expect("the log holds the backup").record;
+    assert_eq!(
+        record.target.repository.as_ref(),
+        Some(
+            agent
+                .backup
+                .id
+                .as_ref()
+                .expect("the scenario knows the repository's ID")
+        ),
+        "the backup's operation names no repository, or another"
+    );
 }
 
 #[then("the second backup kept what the cache slot held and added its snapshot to it")]

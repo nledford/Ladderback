@@ -245,6 +245,16 @@ impl ForgetWorld {
         self.save().await;
     }
 
+    /// Makes the repository's entry record no repository ID, as an entry
+    /// imported or connected does until a job identifies the repository.
+    pub async fn records_no_id(&mut self) {
+        self.repositories
+            .get_mut(&alias())
+            .expect("the repository was added first")
+            .id = None;
+        self.save().await;
+    }
+
     /// Gives the agent a hostname of its own.
     pub async fn name_agent(&mut self, hostname: &str) {
         self.hostname = Some(Hostname::parse(hostname).expect("a hostname"));
@@ -1128,6 +1138,30 @@ fn refused_keeps_nothing(agent: &mut Agent) {
 fn refused_busy(agent: &mut Agent) {
     let error = agent.forget.refused.take().expect("the forget was refused");
     assert!(matches!(error, MaintenanceError::Busy { .. }), "{error:?}");
+}
+
+#[given("the repository's entry records no ID")]
+async fn entry_records_no_id(agent: &mut Agent) {
+    agent.forget.records_no_id().await;
+}
+
+#[then("the repository was identified first")]
+fn identified_first(agent: &mut Agent) {
+    assert_eq!(
+        agent.forget.jobs().first(),
+        Some(&"identify"),
+        "the engine's jobs: {:?}",
+        agent.forget.jobs()
+    );
+}
+
+#[then("the forget is refused, naming the operation running on the repository")]
+fn refused_naming_running(agent: &mut Agent) {
+    let error = agent.forget.refused.take().expect("the forget was refused");
+    assert!(
+        matches!(error, MaintenanceError::Busy { running } if running == operation_id(0xbb)),
+        "{error:?}"
+    );
 }
 
 #[then("the prune is refused while the forget holds the repository")]

@@ -46,6 +46,11 @@ pub trait JobControl: Send {
     /// Asks the job to stop, waits up to the engine's grace period, then
     /// forces it (for a worker process: SIGTERM, then SIGKILL). Returns once
     /// the job has stopped. Calling it after the job ended does nothing.
+    ///
+    /// A job whose engine is still starting it, as one an identify precedes
+    /// (§16, decision 81), is stopped without waiting for the start: nothing
+    /// more of it is passed on, and the started job is stopped when its
+    /// events are next read, or killed when they are dropped.
     async fn stop(&mut self);
 }
 
@@ -78,6 +83,28 @@ impl From<EngineError> for FailureReason {
             EngineError::SecretsTooLargeToMask { field, limit } => {
                 Self::SecretsTooLargeToMask { field, limit }
             }
+        }
+    }
+}
+
+/// The engine's refusal a job's failure stands for, for a caller that
+/// answers a refusal otherwise than a failure. A job the engine is asked to
+/// start after its run began, as a job that runs after an identify does
+/// (decision 81), can't be refused through [`Engine::run`]'s error: its
+/// refusal ends its events as the reason [`From`] gives, and this gives the
+/// refusal back. Only the reasons nothing but a refusal gives are given
+/// back: `EngineStartTimedOut` is also what a worker that took its job and
+/// then sent nothing fails with, so it stays a failure.
+impl TryFrom<FailureReason> for EngineError {
+    type Error = FailureReason;
+
+    fn try_from(reason: FailureReason) -> Result<Self, FailureReason> {
+        match reason {
+            FailureReason::EngineUnavailable { detail } => Ok(Self::Unavailable { detail }),
+            FailureReason::SecretsTooLargeToMask { field, limit } => {
+                Ok(Self::SecretsTooLargeToMask { field, limit })
+            }
+            reason => Err(reason),
         }
     }
 }
@@ -160,6 +187,19 @@ impl Job {
             Self::Rewrite(job) => Some(&job.repository),
             Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
             Self::Check(job) => Some(&job.repository),
+        }
+    }
+
+    /// [`Self::access`], to name the ID an identify found.
+    pub(crate) fn access_mut(&mut self) -> Option<&mut RepositoryAccess> {
+        match self {
+            Self::Fake(_) => None,
+            Self::Identify(access) | Self::Init(access) | Self::Ls(access) => Some(access),
+            Self::Backup(job) => Some(&mut job.repository),
+            Self::Forget(job) => Some(&mut job.repository),
+            Self::Rewrite(job) => Some(&mut job.repository),
+            Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
+            Self::Check(job) => Some(&mut job.repository),
         }
     }
 
@@ -584,6 +624,42 @@ mod tests {
             ),
         ] {
             assert_eq!(FailureReason::from(error), reason);
+        }
+    }
+
+    #[test]
+    fn a_failure_only_a_refusal_gives_is_read_back_as_the_refusal_and_any_other_stays_one() {
+        for error in [
+            EngineError::Unavailable {
+                detail: "no such program".to_owned(),
+            },
+            EngineError::SecretsTooLargeToMask {
+                field: Some("HTTPS_PROXY".to_owned()),
+                limit: 262_144,
+            },
+            EngineError::SecretsTooLargeToMask {
+                field: None,
+                limit: 262_144,
+            },
+        ] {
+            assert_eq!(
+                EngineError::try_from(FailureReason::from(error.clone())),
+                Ok(error)
+            );
+        }
+        for reason in [
+            // A worker that took its job and then sent nothing fails so too.
+            FailureReason::EngineStartTimedOut,
+            FailureReason::JobRejected {
+                detail: "no such job".to_owned(),
+            },
+            FailureReason::EngineFailed {
+                detail: "the password is wrong".to_owned(),
+            },
+            FailureReason::EngineExited { exit_code: None },
+            FailureReason::RepositoryNotFound,
+        ] {
+            assert_eq!(EngineError::try_from(reason.clone()), Err(reason));
         }
     }
 

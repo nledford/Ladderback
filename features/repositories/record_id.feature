@@ -8,9 +8,16 @@ Feature: Recording a saved repository's ID
   to create one in its place. A record that can't be made changes nothing
   about the job, and the next job that opens the repository tries again.
 
+  A job that doesn't know its repository's ID would run without a cache,
+  which is kept by that ID, and its operation would name no repository. So
+  a job of an entry that records no ID first has the agent identify the
+  repository, which records the ID, and then runs with it. A repository that
+  can't be identified can't be opened by the job either: the job ends as the
+  identify did, and never runs without the ID.
+
   Rule: The first job that opens a saved repository records its ID in the entry
 
-    Scenario Outline: A <job> of a repository whose entry records no ID records the ID it opened
+    Scenario Outline: A <job> of a repository whose entry records no ID records the ID of the repository its identify opened
       Given the agent has the repository "demo" configured with its settings
       When a <job> of the repository "demo" opens it
       Then the agent has the repository "demo" configured with the repository's ID
@@ -58,3 +65,20 @@ Feature: Recording a saved repository's ID
       And the latest operation of the plan "demo-home" failed because no repository is there
       When the agent decides which saved repositories to offer to create
       Then the repository "demo" is not offered to be created
+
+  Rule: A job of an entry that records no ID runs with the ID an identify found first
+
+    Scenario: A backup of a repository whose entry records no ID runs with the ID, and the operation log names the repository
+      Given the agent has the repository "demo" configured with its settings
+      When a backup of the repository "demo" runs
+      Then the repository was identified first, and the backup ran with the repository's ID
+      And the agent has the repository "demo" configured with the repository's ID
+      And the operation log names the repository the engine opened
+
+    Scenario: A backup whose repository can't be identified ends as the identify did, and never runs
+      Given the agent has the repository "demo" configured with its settings
+      And a location whose folder is not there
+      When a backup of the repository "demo" runs
+      Then the backup ended as failed because the repository folder is not there
+      And the repository was identified, and nothing else ran
+      And the agent has the repository "demo" configured with no repository ID

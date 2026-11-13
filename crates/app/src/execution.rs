@@ -383,7 +383,11 @@ impl RunOperation {
     fn apply(&self, run: &mut Run, event: EngineEvent) {
         let at = self.clock.now();
         let applied = match event {
-            EngineEvent::Started { .. } => run.operation.start(at),
+            // A backup queued before its repository's ID was known names
+            // the repository from its start on (§9).
+            EngineEvent::Started { repository, .. } => {
+                run.operation.start_on(at, repository.as_ref())
+            }
             EngineEvent::Progress(_) => run.operation.report_progress(),
             EngineEvent::Warning(warning) => run.operation.record_warning(warning),
             EngineEvent::Succeeded(result) => {
@@ -608,7 +612,7 @@ mod tests {
 
     use super::{HookPhase, HookSetup, Run, RunOperation, ending_list, ending_phase, snapshot_of};
     use crate::fakes::{FakeClock, InMemoryOperationStore, SimulatedEngine};
-    use crate::ports::{BackupSummary, EngineResult};
+    use crate::ports::{BackupSummary, EngineEvent, EngineResult};
 
     fn t(seconds: i64) -> Timestamp {
         Timestamp::from_second(1_800_000_000 + seconds).expect("the demo time is valid")
@@ -740,6 +744,25 @@ mod tests {
                 "the {word}-hooks of the three levels, in order"
             );
         }
+    }
+
+    /// A backup queued from an entry that recorded no repository ID names
+    /// none until its engine starts; from its start the log names the
+    /// repository the engine opened (§9).
+    #[test]
+    fn a_run_queued_before_its_repository_was_known_names_the_one_its_engine_opened() {
+        let opened = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let use_case = use_case();
+        let mut run = run_of(operation(OperationKind::Backup));
+        use_case.apply(
+            &mut run,
+            EngineEvent::Started {
+                index_read_at: t(1),
+                repository: Some(opened.clone()),
+            },
+        );
+        assert_eq!(run.operation.status(), &OperationStatus::Running);
+        assert_eq!(run.operation.target().repository, Some(opened));
     }
 
     #[test]

@@ -3,8 +3,10 @@ Feature: A repository's cache
   Each worker of a repository whose ID is known keeps rustic's cache in a
   cache slot of its own, a folder under the agent's cache folder named by the
   repository ID and the slot's number. The next operation on that repository
-  reads the index and the snapshots from the cache its slot holds instead of
-  from the repository again. No two running workers share a slot.
+  reads the index, the snapshots and the trees from the cache its slot holds
+  instead of from the repository again. No two running workers share a slot.
+  A job of an entry that records no ID has the agent identify the repository
+  first, which records the ID, so that job has a slot too.
 
   Nothing in the cache is needed, so each time it starts the agent tidies its
   cache folder: it removes the cache of a repository no entry records, the
@@ -35,6 +37,17 @@ Feature: A repository's cache
     And the repository's cache slot 0 is free once the backup has ended
     When the daemon has finished 1 backup of the plan "home"
     Then the second backup kept what the cache slot held and added its snapshot to it
+
+  # The repository holds the snapshots of a plan imported from a rustic
+  # profile, and its entry records no ID yet, as after an import or a
+  # connection. Without a cache the backup would read every tree of its
+  # parent snapshot from the repository, one request each.
+  Scenario: A backup of a repository whose entry records no ID still uses a cache
+    Given the repository already holds 3 snapshots of the plan "home" that another tool made
+    And the configuration no longer records the repository's ID
+    When the daemon has finished 1 backup of the plan "home"
+    Then the repository's cache slot 0 holds rustic's cache of the index, 4 snapshots and the trees
+    And the operation log names the repository
 
   Scenario: Starting again removes the cache of a repository no entry records
     Given the repository's cache slot 0 holds a cache
