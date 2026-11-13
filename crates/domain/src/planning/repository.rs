@@ -141,13 +141,43 @@ impl RepositorySettings {
     /// so the sets that reach it keep theirs: `options` reach both halves,
     /// `options-hot` the `repo-hot` one and `options-cold` the other.
     pub fn same_location(&self, other: &Self) -> bool {
-        let cold = is_drive(&self.repository);
-        let hot = self.repo_hot.as_deref().is_some_and(is_drive);
+        self.place().is(&other.place())
+    }
+
+    /// Where these settings point, borrowed.
+    pub(super) fn place(&self) -> Place<'_> {
+        Place {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+        }
+    }
+}
+
+/// Where a location points, borrowed from the settings or the further
+/// location that writes it: what [`RepositorySettings::same_location`]
+/// compares.
+pub(super) struct Place<'a> {
+    pub repository: &'a str,
+    pub repo_hot: Option<&'a str>,
+    pub options: &'a BTreeMap<String, String>,
+    pub options_hot: &'a BTreeMap<String, String>,
+    pub options_cold: &'a BTreeMap<String, String>,
+}
+
+impl Place<'_> {
+    /// Whether `other` is the same place, as
+    /// [`RepositorySettings::same_location`] says.
+    pub(super) fn is(&self, other: &Place<'_>) -> bool {
+        let cold = is_drive(self.repository);
+        let hot = self.repo_hot.is_some_and(is_drive);
         self.repository == other.repository
             && self.repo_hot == other.repo_hot
-            && same_places(&self.options, &other.options, cold || hot)
-            && same_places(&self.options_hot, &other.options_hot, hot)
-            && same_places(&self.options_cold, &other.options_cold, cold)
+            && same_places(self.options, other.options, cold || hot)
+            && same_places(self.options_hot, other.options_hot, hot)
+            && same_places(self.options_cold, other.options_cold, cold)
     }
 }
 
@@ -357,10 +387,21 @@ impl RepositoryConfig {
     /// to hold another repository, and one repository may be reached at two
     /// locations. Otherwise one location is one repository (§7.3), and a
     /// location is the whole of it: [`RepositorySettings::same_location`].
+    /// Any location of the entry counts (decision 80).
     pub fn is(&self, settings: &RepositorySettings, id: Option<&RepositoryId>) -> bool {
         match (self.id.as_ref(), id) {
             (Some(own), Some(id)) => own == id,
-            _ => self.settings.same_location(settings),
+            _ => self.has_location(&settings.place()),
+        }
+    }
+
+    /// Whether `other` is the same repository as this entry, as
+    /// [`is`](Self::is) says, with every location of `other` compared with
+    /// every location of this one when either entry records no ID.
+    pub fn is_entry(&self, other: &RepositoryConfig) -> bool {
+        match (self.id.as_ref(), other.id.as_ref()) {
+            (Some(own), Some(id)) => own == id,
+            _ => other.places().any(|place| self.has_location(&place)),
         }
     }
 }

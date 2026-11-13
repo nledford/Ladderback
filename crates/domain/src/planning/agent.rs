@@ -163,7 +163,7 @@ impl AgentConfig {
             let same = repositories
                 .iter()
                 .skip(n.saturating_add(1))
-                .find(|(_, other)| other.is(&entry.settings, entry.id.as_ref()));
+                .find(|(_, other)| other.is_entry(entry));
             if let Some((second, _)) = same {
                 return Err(Violation::SameRepository {
                     first: first.clone(),
@@ -291,7 +291,6 @@ impl AgentConfig {
                 if entry.id.as_ref() == Some(id)
                     && read.id.is_none()
                     && RepositoryConfig {
-                        locations: Default::default(),
                         id: None,
                         ..entry.clone()
                     } == *read =>

@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use super::repository::Place;
 use super::{InvalidValue, RepositoryConfig, RepositorySettings, ValueKind, masked_options};
 use crate::secrets::{
     REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
@@ -256,6 +257,35 @@ impl RepositoryConfig {
             .collect()
     }
 
+    /// Where each location points, in order, the first included.
+    pub(super) fn places(&self) -> impl Iterator<Item = Place<'_>> {
+        std::iter::once(self.settings.place()).chain(self.locations.further.iter().map(
+            |location| Place {
+                repository: &location.repository,
+                repo_hot: location.repo_hot.as_deref(),
+                options: &location.options,
+                options_hot: &location.options_hot,
+                options_cold: &location.options_cold,
+            },
+        ))
+    }
+
+    /// Whether any location of the entry is at `place`.
+    pub(super) fn has_location(&self, place: &Place<'_>) -> bool {
+        self.places().any(|own| own.is(place))
+    }
+
+    /// The first further location, by its index among the further ones,
+    /// that is at the same location as an earlier location of the entry:
+    /// two locations of one entry may not be one (decision 80, point 8).
+    pub fn repeated_location(&self) -> Option<usize> {
+        self.places()
+            .enumerate()
+            .skip(1)
+            .find(|(n, place)| self.places().take(*n).any(|earlier| earlier.is(place)))
+            .map(|(n, _)| n.saturating_sub(1))
+    }
+
     /// The entry's locations whose credentials can be read by whoever
     /// answers at their address, as written: none for an entry with one
     /// location, which is unchanged in every way.
@@ -414,6 +444,63 @@ mod tests {
                 cause: ExposedCredentials::PlainHttp
             }]
         );
+    }
+
+    fn entry(first: &str, further: &[&str], id: Option<&str>) -> RepositoryConfig {
+        RepositoryConfig {
+            settings: location(first, &[]).with_password(SecretRef::Env("PW".to_owned())),
+            locations: Locations {
+                further: further
+                    .iter()
+                    .map(|address| location(address, &[]))
+                    .collect(),
+            },
+            id: id.map(|hex| crate::RepositoryId::parse(&hex.repeat(32)).unwrap()),
+            maintenance: super::super::Maintenance::None,
+            group_by: super::super::GroupBy::default(),
+            hooks: super::super::Hooks::default(),
+        }
+    }
+
+    #[test]
+    fn a_further_location_at_an_earlier_ones_place_is_named_by_its_index() {
+        assert_eq!(
+            entry("/srv/a", &["/srv/b", "/srv/c"], None).repeated_location(),
+            None
+        );
+        assert_eq!(
+            entry("/srv/a", &["/srv/a"], None).repeated_location(),
+            Some(0)
+        );
+        assert_eq!(
+            entry("/srv/a", &["/srv/b", "/srv/c", "/srv/b"], None).repeated_location(),
+            Some(2)
+        );
+        // Credentials don't make a place: the same address with another
+        // password is the same location.
+        let mut moved = entry("rest:https://nas/r", &[], None);
+        moved
+            .locations
+            .further
+            .push(location("rest:https://nas/r", &[("password", "${PW2}")]));
+        assert_eq!(moved.repeated_location(), Some(0));
+    }
+
+    #[test]
+    fn two_entries_with_no_known_id_are_one_repository_at_any_shared_location() {
+        let laptop = entry("/srv/lan", &["/srv/public"], None);
+        assert!(laptop.is_entry(&entry("/srv/public", &[], None)));
+        assert!(entry("/srv/other", &["/srv/lan"], None).is_entry(&laptop));
+        assert!(!laptop.is_entry(&entry("/srv/other", &["/srv/elsewhere"], None)));
+        assert!(laptop.is(
+            &location("/srv/public", &[]).with_password(SecretRef::Env("PW".to_owned())),
+            None
+        ));
+        // When both know their ID, the ID decides alone.
+        let known = entry("/srv/lan", &["/srv/public"], Some("aa"));
+        assert!(!known.is_entry(&entry("/srv/public", &[], Some("bb"))));
+        assert!(known.is_entry(&entry("/srv/elsewhere", &[], Some("aa"))));
+        assert!(known.is_entry(&entry("/srv/public", &[], None)));
     }
 
     #[test]
