@@ -319,29 +319,33 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
     use async_trait::async_trait;
     use domain::execution::deadline::KeepDelete;
     use domain::execution::plan_tags::PlanTags;
-    use domain::execution::{FailureReason, OperationKind};
+    use domain::execution::{FailureReason, OperationKind, OperationStatus, Trigger};
     use domain::planning::{
-        AgentConfig, Maintenance, NotRecorded, RepositoryConfig, RepositorySettings,
+        AgentConfig, Concurrency, Maintenance, NotRecorded, RepositoryConfig, RepositorySettings,
     };
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{
         AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp,
         Uuid,
     };
-    use futures::StreamExt;
+    use futures::stream::BoxStream;
+    use futures::{FutureExt, StreamExt};
 
     use super::{ConfigWrites, RecordOpened, Recording};
-    use crate::fakes::InMemoryConfigStore;
+    use crate::execution::RunOperation;
+    use crate::fakes::{FakeClock, InMemoryConfigStore, InMemoryOperationStore};
     use crate::ports::{
         BackupJob, CheckJob, ConfigError, ConfigStore, Engine, EngineError, EngineEvent,
         EngineResult, ForgetJob, Job, JobControl, NotInPlace, PruneJob, RecordError,
         RepositoryAccess, RewriteJob, RunningJob, SavedEntry,
     };
+    use crate::queue::RunQueue;
 
     struct Stop;
 
@@ -909,11 +913,13 @@ mod tests {
     }
 
     /// A job's control that ends its job's stream when stopped, and notes
-    /// which kind of job it stopped.
+    /// which kind of job it stopped. While it lives, so does its job's
+    /// worker: dropping it kills the worker, as dropping a real job does.
     struct Halts {
         kind: OperationKind,
         halt: Option<futures::channel::oneshot::Sender<()>>,
         stopped: Arc<Mutex<Vec<OperationKind>>>,
+        live: Arc<AtomicUsize>,
     }
 
     #[async_trait]
@@ -929,14 +935,23 @@ mod tests {
         }
     }
 
+    impl Drop for Halts {
+        fn drop(&mut self) {
+            self.live.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     /// An engine that keeps the jobs it is given. An identify finds what
     /// `finds` says; every other job opens [`opened`] and succeeds, or, when
-    /// `job_hangs`, runs until it is stopped.
+    /// `job_hangs`, runs until it is stopped. A job other than an identify
+    /// is started only once the test lets it go, after [`Keeps::hold_start`].
     struct Keeps {
         finds: Finds,
         job_hangs: bool,
+        held: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
         seen: Mutex<Vec<Job>>,
         stopped: Arc<Mutex<Vec<OperationKind>>>,
+        live: Arc<AtomicUsize>,
     }
 
     impl Keeps {
@@ -953,6 +968,19 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone()
         }
+
+        /// How many of the jobs it started still have a worker.
+        fn live(&self) -> usize {
+            self.live.load(Ordering::SeqCst)
+        }
+
+        /// Holds the start of the next job other than an identify until the
+        /// returned sender sends, or is dropped.
+        fn hold_start(&self) -> futures::channel::oneshot::Sender<()> {
+            let (go, held) = futures::channel::oneshot::channel();
+            *self.held.lock().unwrap_or_else(PoisonError::into_inner) = Some(held);
+            go
+        }
     }
 
     #[async_trait]
@@ -964,6 +992,16 @@ mod tests {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(job);
+            if !identify {
+                let held = self
+                    .held
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                if let Some(held) = held {
+                    let _ = held.await;
+                }
+            }
             let (events, hangs) = match (identify, &self.finds) {
                 (true, Finds::Refused(error)) => return Err(error.clone()),
                 (true, Finds::Repository) => (vec![started(Some(opened())), succeeded()], false),
@@ -988,12 +1026,14 @@ mod tests {
             } else {
                 played.boxed()
             };
+            self.live.fetch_add(1, Ordering::SeqCst);
             Ok(RunningJob {
                 events,
                 control: Box::new(Halts {
                     kind,
                     halt: Some(halt),
                     stopped: Arc::clone(&self.stopped),
+                    live: Arc::clone(&self.live),
                 }),
             })
         }
@@ -1007,8 +1047,10 @@ mod tests {
         let keeps = Arc::new(Keeps {
             finds,
             job_hangs,
+            held: Mutex::new(None),
             seen: Mutex::new(Vec::new()),
             stopped: Arc::new(Mutex::new(Vec::new())),
+            live: Arc::new(AtomicUsize::new(0)),
         });
         let reports = Arc::new(Mutex::new(Vec::new()));
         let heard = Arc::clone(&reports);
@@ -1133,8 +1175,30 @@ mod tests {
         assert_eq!(keeps.seen(), [Job::Identify(access)]);
     }
 
+    /// The bound every stop, every stream's end and every run's end is held
+    /// to here: one that waits on something nothing will do fails its test
+    /// rather than hanging it.
+    const BOUND: std::time::Duration = std::time::Duration::from_secs(5);
+
+    /// Stops a job, failing when the stop doesn't return within [`BOUND`].
+    async fn stop_within_bound(control: &mut Box<dyn JobControl>) {
+        tokio::time::timeout(BOUND, control.stop())
+            .await
+            .expect("the stop returns");
+    }
+
+    /// What a stopped job's stream still reports, failing when it doesn't
+    /// end within [`BOUND`].
+    async fn rest(events: BoxStream<'static, EngineEvent>) -> Vec<EngineEvent> {
+        tokio::time::timeout(BOUND, events.collect())
+            .await
+            .expect("the stream ends once the job is stopped")
+    }
+
+    /// A stop before anything read the job's events, its identify running:
+    /// the identify is stopped, and the job never starts.
     #[tokio::test]
-    async fn stopping_a_job_while_it_identifies_stops_the_identify_and_starts_nothing() {
+    async fn stopping_a_job_before_its_events_are_read_stops_the_identify_and_starts_nothing() {
         let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
         let access = access_of(&store, "demo").await;
         let (engine, keeps, _) = keeping(&store, Finds::Hangs, false);
@@ -1145,16 +1209,89 @@ mod tests {
             .run(op(), backup(&access))
             .await
             .expect("the engine takes the job");
-        control.stop().await;
-        let events: Vec<EngineEvent> =
-            tokio::time::timeout(std::time::Duration::from_secs(5), events.collect())
-                .await
-                .expect("the stream ends once the job is stopped");
-        assert_eq!(events, []);
+        stop_within_bound(&mut control).await;
+        assert_eq!(rest(events).await, []);
+        drop(control);
         assert_eq!(keeps.seen(), [Job::Identify(access)]);
         assert_eq!(keeps.stopped(), [OperationKind::Identify]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
     }
 
+    /// A stop while the job's stream waits for its identify.
+    #[tokio::test]
+    async fn stopping_a_job_while_it_identifies_stops_the_identify_and_starts_nothing() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Hangs, false);
+        let RunningJob {
+            mut events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        assert_eq!(events.next().now_or_never(), None, "the identify runs");
+        stop_within_bound(&mut control).await;
+        assert_eq!(rest(events).await, []);
+        drop(control);
+        assert_eq!(keeps.seen(), [Job::Identify(access)]);
+        assert_eq!(keeps.stopped(), [OperationKind::Identify]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
+    }
+
+    /// A stop once the identify has found the ID, before the job's stream
+    /// has read it and so before the job is started: the job never starts.
+    #[tokio::test]
+    async fn stopping_a_job_whose_identify_found_the_id_starts_nothing() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
+        let RunningJob {
+            events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        stop_within_bound(&mut control).await;
+        assert_eq!(rest(events).await, []);
+        drop(control);
+        assert_eq!(keeps.seen(), [Job::Identify(access)]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
+    }
+
+    /// A stop while the engine is starting the job, after its identify: the
+    /// stop doesn't wait for the start, and the job it started is stopped
+    /// before anything it reports is passed on.
+    #[tokio::test]
+    async fn stopping_a_job_while_it_starts_returns_at_once_and_stops_the_job_it_started() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let mut identified = access.clone();
+        identified.id = Some(opened());
+        let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
+        let go = keeps.hold_start();
+        let RunningJob {
+            mut events,
+            mut control,
+        } = engine
+            .run(op(), backup(&access))
+            .await
+            .expect("the engine takes the job");
+        assert_eq!(events.next().now_or_never(), None, "the job is starting");
+        assert_eq!(
+            keeps.seen(),
+            [Job::Identify(access.clone()), backup(&identified)]
+        );
+        stop_within_bound(&mut control).await;
+        let _ = go.send(());
+        assert_eq!(rest(events).await, [], "nothing of the job is passed on");
+        drop(control);
+        assert_eq!(keeps.stopped(), [OperationKind::Backup]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
+    }
+
+    /// A stop once the job runs, after its identify.
     #[tokio::test]
     async fn stopping_a_job_after_its_identify_stops_the_job() {
         let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
@@ -1170,16 +1307,66 @@ mod tests {
             .await
             .expect("the engine takes the job");
         assert_eq!(events.next().await, Some(started(Some(opened()))));
-        control.stop().await;
-        let rest: Vec<EngineEvent> =
-            tokio::time::timeout(std::time::Duration::from_secs(5), events.collect())
-                .await
-                .expect("the stream ends once the job is stopped");
-        assert_eq!(rest, []);
+        stop_within_bound(&mut control).await;
+        assert_eq!(rest(events).await, []);
+        drop(control);
         assert_eq!(
             keeps.seen(),
             [Job::Identify(access.clone()), backup(&identified)]
         );
         assert_eq!(keeps.stopped(), [OperationKind::Backup]);
+        assert_eq!(keeps.live(), 0, "no worker is left running");
+    }
+
+    /// A cancel that comes while the engine is starting a backup's job,
+    /// after its identify, ends the operation cancelled at once and gives
+    /// its place in the queue to the next run, with no worker left running:
+    /// a shutdown, which cancels the runs and waits for them, ends too.
+    #[tokio::test]
+    async fn cancelling_a_backup_while_its_job_starts_ends_it_and_frees_its_place() {
+        let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
+        let access = access_of(&store, "demo").await;
+        let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
+        let _held = keeps.hold_start();
+        let queue = RunQueue::new();
+        let place = queue.push(
+            &PlanId::parse("demo-home").expect("a plan ID"),
+            Concurrency::default(),
+        );
+        let mut next = queue.push(
+            &PlanId::parse("demo-work").expect("a plan ID"),
+            Concurrency::default(),
+        );
+        let use_case = RunOperation::new(
+            Arc::new(engine),
+            Arc::new(FakeClock::new(
+                Timestamp::from_second(1_800_000_000).expect("a time"),
+            )),
+            Arc::new(InMemoryOperationStore::new()),
+        );
+        let queued = use_case.queue(op(), Trigger::Manual, backup(&access)).await;
+        let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+        let running = tokio::spawn(async move {
+            use_case
+                .run_in_turn(queued, place, cancelled.map(|_| ()))
+                .await
+        });
+        tokio::time::timeout(BOUND, async {
+            while keeps.seen().len() < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the job is being started");
+        cancel.send(()).expect("the run waits for a cancel");
+        let finished = tokio::time::timeout(BOUND, running)
+            .await
+            .expect("the run ends once cancelled")
+            .expect("the run ends without a panic");
+        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        tokio::time::timeout(BOUND, next.turn())
+            .await
+            .expect("the next run's turn comes");
+        assert_eq!(keeps.live(), 0, "no worker is left running");
     }
 }
