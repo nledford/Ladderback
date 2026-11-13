@@ -49,6 +49,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [10.3 Agent ↔ hub](security.md#103-agent--hub)
   - [10.4 Restores](security.md#104-restores)
   - [10.5 MCP server](security.md#105-mcp-server)
+  - [10.6 Repository locations](security.md#106-repository-locations)
 - [11. Notifications](operations.md#11-notifications)
 - [12. Packaging and deployment](operations.md#12-packaging-and-deployment)
   - [12.1 Versioning and releases](operations.md#121-versioning-and-releases)

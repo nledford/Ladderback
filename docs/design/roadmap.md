@@ -11,9 +11,9 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | **M3** | Browse, restore and automation | Snapshot tree browser (accessible tree pattern, §4.5); restore to a new folder by default, in-place from the local UI, step-up confirmation (§10.4); download via `ls` + `dump` (tar/zip); repo stats page; scoped API tokens (§10.1); the data-dir lock for `mcp --headless` (§9; `serve` took it in M1b); MCP server in connect, headless and scratch modes with the read, run and preview tools (§4.6); on macOS, `just install` signing with a self-signed certificate, and the Full Disk Access tests (decision 71) | 2–3 wks |
 | **M4a** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 3–4 wks |
 | **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub); MCP connect mode against a hub, with an `agent` argument (§4.6) | 3–4 wks |
-| **M5** | Polish | Conditions (AC power / metered), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
+| **M5** | Polish | Conditions (AC power / metered), location rules by network link and Wi-Fi name (decision 80), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
 
-M2 ends with its release, `0.2.0`: after the tag, it runs on real machines before M3 starts, and what that run turns up is fixed or filed first. On macOS that run uses an ad-hoc-signed build from source, with Full Disk Access granted by hand (decision 71).
+M2 ends with its release, `0.2.0`: after the tag, it runs on real machines before M3 starts, and what that run turns up is fixed or filed first. On macOS that run uses an ad-hoc-signed build from source, with Full Disk Access granted by hand (decision 71). That run found that a repository has one location, so a laptop that reaches its server by a LAN address at home and a public one away takes the slow route at home (#424): the first of the three pull requests of decision 80 (ordered locations, a bounded probe, the same-repository check) is that fix and lands before M3 starts; the other two, the rules by network link and by Wi-Fi name, share the platform readers of M5's conditions and belong there.
 
 | Milestone | Feature files |
 |---|---|
@@ -23,7 +23,8 @@ M2 ends with its release, `0.2.0`: after the tag, it runs on real machines befor
 | M3 | `restore/restore.feature`, `restore/download.feature`, `automation/mcp.feature` |
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |
 | M4b | `maintenance/ownership.feature`, `maintenance/prune_guard.feature`, `restore/hub_restore.feature` |
-| M5 | `execution/conditions.feature`, `operations/db_rebuild.feature` |
+| 0.2.x follow-up | `repositories/repository_locations.feature` (decision 80, slice 1, with the `@e2e` and `@ui` scenarios) |
+| M5 | `execution/conditions.feature`, `operations/db_rebuild.feature`, the rule scenarios of `repositories/repository_locations.feature` (decision 80, slices 2 and 3) |
 
 A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **10–14 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **18–24 weeks**, roughly **4½–6 months part-time**. These ranges include writing scenarios and tests first and building the accessible component set in M1b; M0 is longer than in v0.2 because the test tooling, including the browser toolchain, is built there.
 
@@ -139,6 +140,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
 | [78](decisions/78-the-rust-toolchain-is-pinned.md) | The Rust toolchain is pinned, and the MSRV is the pin |
 | [79](decisions/79-a-from-source-install-script.md) | A from-source install script |
+| [80](decisions/80-repository-locations.md) | A repository reached at several locations |
 
 ## 17. Open questions
 
