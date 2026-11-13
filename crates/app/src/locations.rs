@@ -1,17 +1,22 @@
 //! Choosing which location of a repository a job opens (technical design
-//! §6.1, decision 80). Before a job that opens a repository reached at
-//! several locations, or at one location that has a rule, the locations'
+//! §6.1, decisions 80 and NN). Before a job that opens a repository reached
+//! at several locations, or at one location that has a rule, the locations'
 //! rules are evaluated against the machine's network link, read once for
 //! the choice, and every location whose rule holds (or that has none) is
-//! probed in order, each by a short-lived worker of its own with only its
-//! own secrets; the first that answers with the repository's ID is used: a
-//! location that holds another repository is refused and never used. A
-//! repository of one location is never probed: its rule decides alone, and
-//! the job's own open checks the ID. The job then carries that location
-//! alone, so a location the job didn't use never had its secrets in the
-//! job's process (I4).
+//! probed, each by a short-lived worker of its own with only its own
+//! secrets: at once, beside the others, when it makes the server prove who
+//! it is before it is sent a credential, or sends none; else only in its
+//! turn, once every earlier location has failed. The first in order that
+//! answers with the repository's ID is used, however soon a later one
+//! answered, and every probe still running then is stopped: a location
+//! that holds another repository is refused and never used. A repository
+//! of one location is never probed: its rule decides alone, and the job's
+//! own open checks the ID. The job then carries that location alone, so a
+//! location the job didn't use never had its secrets in the job's process
+//! (I4).
 
 use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use domain::execution::FailureReason;
@@ -23,6 +28,8 @@ use domain::planning::{
 };
 use domain::secrets::{SecretValue, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
+use futures::channel::oneshot;
+use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::conditions::LinkReading;
@@ -31,7 +38,7 @@ use crate::ports::{
     ProbeAnswer, RepositoryAccess, RunningJob, SavedEntry,
 };
 use crate::repositories::RepositoryError;
-use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository};
+use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository, ResolvedRepository};
 
 /// What the choice tells the daemon's log. Nothing here is a secret or a
 /// network's name: a location is named by its position, from 1.
@@ -79,7 +86,8 @@ pub struct ChooseLocation {
     report: Arc<dyn Fn(LocationReport) + Send + Sync>,
 }
 
-/// The probe that runs now, so a stop of the job stops it too.
+/// The probes that run now, or the job after them, so a stop of the job
+/// stops them too.
 type Probing = Arc<Mutex<Phase>>;
 
 impl ChooseLocation {
@@ -114,7 +122,7 @@ impl ChooseLocation {
         op: OperationId,
         access: RepositoryAccess,
     ) -> Result<Located, (FailureReason, Option<LocationsRecord>)> {
-        let phase = Arc::new(Mutex::new(Phase::Idle));
+        let phase = Arc::new(Mutex::new(Phase::Probing(Vec::new())));
         self.choose(op, access, &phase).await
     }
 
@@ -208,7 +216,7 @@ impl ChooseLocation {
             .map_err(RepositoryError::Resolve)?
             .access
             .password;
-        let phase = Arc::new(Mutex::new(Phase::Idle));
+        let phase = Arc::new(Mutex::new(Phase::Probing(Vec::new())));
         let (record, _) = self
             .try_each(
                 op,
@@ -228,12 +236,16 @@ impl ChooseLocation {
     /// read once and only when a location has one, and its Wi-Fi network's
     /// name read once and only when a rule lists names: a location whose rule
     /// isn't met, or can't be evaluated, is skipped unresolved and unprobed.
-    /// Each other location is resolved and probed, and holds the repository
-    /// when its ID is `expected` (any ID when `None`). With
+    /// Every location whose rule holds and that checks the server first, as
+    /// written and as resolved, is then resolved and probed at once, beside
+    /// the others (decision NN); each other location is resolved and probed
+    /// in its turn, once every earlier one has its outcome. A location holds
+    /// the repository when its ID is `expected` (any ID when `None`). With
     /// [`Reach::FirstUsed`] the ones after the first usable one are
-    /// `not-tried`. Answers every location's outcome and the first usable
-    /// one's access, or the reason the whole choice fails (secrets past
-    /// what the daemon masks).
+    /// `not-tried`, and every probe still running then is stopped; no probe
+    /// runs on once this returns. Answers every location's outcome and the
+    /// first usable one's access, or the reason the whole choice fails
+    /// (secrets past what the daemon masks, met in a location's turn).
     async fn try_each(
         &self,
         op: OperationId,
@@ -253,87 +265,147 @@ impl ChooseLocation {
                 None => RuleVerdict::Holds,
             });
         }
+        let early = entry.early_probes(&verdicts);
+        let settings = entry.location_settings();
         let mut read = JobReferences::default();
-        let mut tried = Vec::with_capacity(entry.location_count());
-        let mut chosen = None;
-        for ((settings, verdict), position) in entry
-            .location_settings()
-            .into_iter()
-            .zip(verdicts)
-            .zip(1u8..)
+        let mut probes = EarlyProbes::new(settings.len());
+        // A location probed early is resolved now, in order, beside the
+        // probes already started; what its resolution says is kept for its
+        // turn, so it skips or fails the choice only if its turn comes.
+        let mut resolved: Vec<Option<Result<ResolvedRepository, ResolveError>>> =
+            settings.iter().map(|_| None).collect();
+        for (((index, location), early), position) in
+            settings.iter().enumerate().zip(early).zip(1u8..)
         {
-            let address = recorded_address(
-                &Location::of(&settings).masked_address(),
-                MAX_RECORDED_ADDRESS_BYTES,
-            );
-            let mut source = None;
-            let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
-                LocationOutcome::NotTried
-            } else if verdict == RuleVerdict::NotMet {
-                LocationOutcome::RuleNotMet
-            } else if verdict == RuleVerdict::Unknown {
-                LocationOutcome::RuleUnknown
-            } else {
-                match self
-                    .resolve
-                    .resolve_location(&settings, password, &mut read)
-                    .await
-                {
-                    Err(error) => {
-                        let (outcome, named) = unusable(error)?;
-                        source = Some(named);
-                        outcome
-                    }
-                    Ok(resolved) => {
-                        let location = resolved.access;
-                        if let Some(cause) = ExposedCredentials::of_location(&Location {
-                            when: None,
-                            repository: location.repository.clone(),
-                            repo_hot: location.repo_hot.clone(),
-                            options: location.options.clone(),
-                            options_hot: location.options_hot.clone(),
-                            options_cold: location.options_cold.clone(),
-                        }) {
-                            (self.report)(LocationReport::ExposedCredentials {
-                                alias: alias.clone(),
-                                position,
-                                cause,
-                            });
-                        }
-                        let outcome = self.probe(op, location.clone(), expected, phase).await;
-                        if outcome == LocationOutcome::OtherRepository {
-                            (self.report)(LocationReport::OtherRepository {
-                                alias: alias.clone(),
-                                position,
-                            });
-                        }
-                        if outcome == LocationOutcome::Used && chosen.is_none() {
-                            chosen = Some(location);
-                        }
-                        outcome
-                    }
-                }
-            };
-            tried.push(LocationTried {
-                position,
-                address,
-                outcome,
-                source,
-            });
+            if !early {
+                continue;
+            }
+            let resolution = probes
+                .alongside(self.resolve.resolve_location(location, password, &mut read))
+                .await;
+            if let Ok(resolution) = &resolution
+                && location_of(&resolution.access).checks_server_first()
+            {
+                let (wanted, unwanted) = oneshot::channel();
+                let probe = self.probe(
+                    op,
+                    position,
+                    resolution.access.clone(),
+                    expected,
+                    phase,
+                    unwanted,
+                );
+                probes.start(index, probe.boxed(), wanted);
+            }
+            if let Some(slot) = resolved.get_mut(index) {
+                *slot = Some(resolution);
+            }
         }
-        Ok((LocationsRecord { locations: tried }, chosen))
+        let walked = async {
+            let mut tried = Vec::with_capacity(settings.len());
+            let mut chosen = None;
+            for (((index, location), verdict), position) in
+                settings.iter().enumerate().zip(verdicts).zip(1u8..)
+            {
+                let address = recorded_address(
+                    &Location::of(location).masked_address(),
+                    MAX_RECORDED_ADDRESS_BYTES,
+                );
+                let mut source = None;
+                let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
+                    LocationOutcome::NotTried
+                } else if verdict == RuleVerdict::NotMet {
+                    LocationOutcome::RuleNotMet
+                } else if verdict == RuleVerdict::Unknown {
+                    LocationOutcome::RuleUnknown
+                } else {
+                    let resolution = match resolved.get_mut(index).and_then(Option::take) {
+                        Some(resolution) => resolution,
+                        None => {
+                            probes
+                                .alongside(
+                                    self.resolve.resolve_location(location, password, &mut read),
+                                )
+                                .await
+                        }
+                    };
+                    match resolution {
+                        Err(error) => {
+                            let (outcome, named) = unusable(error)?;
+                            source = Some(named);
+                            outcome
+                        }
+                        Ok(resolution) => {
+                            let location = resolution.access;
+                            if let Some(cause) =
+                                ExposedCredentials::of_location(&location_of(&location))
+                            {
+                                (self.report)(LocationReport::ExposedCredentials {
+                                    alias: alias.clone(),
+                                    position,
+                                    cause,
+                                });
+                            }
+                            let outcome = match probes.outcome(index).await {
+                                Some(outcome) => outcome,
+                                None => {
+                                    // Kept until the probe ends: it is wanted all along.
+                                    let (_wanted, unwanted) = oneshot::channel();
+                                    probes
+                                        .alongside(self.probe(
+                                            op,
+                                            position,
+                                            location.clone(),
+                                            expected,
+                                            phase,
+                                            unwanted,
+                                        ))
+                                        .await
+                                }
+                            };
+                            if outcome == LocationOutcome::OtherRepository {
+                                (self.report)(LocationReport::OtherRepository {
+                                    alias: alias.clone(),
+                                    position,
+                                });
+                            }
+                            if outcome == LocationOutcome::Used && chosen.is_none() {
+                                chosen = Some(location);
+                                if reach == Reach::FirstUsed {
+                                    probes.stop().await;
+                                }
+                            }
+                            outcome
+                        }
+                    }
+                };
+                tried.push(LocationTried {
+                    position,
+                    address,
+                    outcome,
+                    source,
+                });
+            }
+            Ok((LocationsRecord { locations: tried }, chosen))
+        }
+        .await;
+        probes.stop().await;
+        walked
     }
 
-    /// Probes one location, resolved: a worker of its own that opens it with
-    /// no cache (it names no repository), bounded by
-    /// [`LOCATION_PROBE_SECONDS`] on the clock, and stopped when the bound
-    /// runs out or the job is stopped.
+    /// Probes one location, resolved, at `position`: a worker of its own
+    /// that opens it with no cache (it names no repository), bounded by
+    /// [`LOCATION_PROBE_SECONDS`] on the clock from its start, and stopped
+    /// when the bound runs out, when the job is stopped, or when `wanted`'s
+    /// sender is dropped because its answer is no longer needed.
     async fn probe(
         &self,
         op: OperationId,
+        position: u8,
         mut location: RepositoryAccess,
         expected: Option<&RepositoryId>,
         phase: &Probing,
+        mut wanted: oneshot::Receiver<()>,
     ) -> LocationOutcome {
         location.id = None;
         location.entry = None;
@@ -343,11 +415,14 @@ impl ChooseLocation {
         };
         let unwanted = {
             let mut current = phase.lock().unwrap_or_else(PoisonError::into_inner);
-            if matches!(*current, Phase::Stopped) {
-                Some(control)
-            } else {
-                *current = Phase::Probing(control);
-                None
+            match &mut *current {
+                // Nothing is sent on `wanted`: it is still wanted while its
+                // sender lives.
+                Phase::Probing(running) if matches!(wanted.try_recv(), Ok(None)) => {
+                    running.push((position, control));
+                    None
+                }
+                Phase::Probing(_) | Phase::Running(_) | Phase::Stopped => Some(control),
             }
         };
         if let Some(mut control) = unwanted {
@@ -360,25 +435,32 @@ impl ChooseLocation {
                 .sleep(SignedDuration::from_secs(LOCATION_PROBE_SECONDS))
                 .fuse()
         );
+        // A `Receiver` counts as terminated once its sender is dropped, and
+        // `select!` skips a terminated branch: wait for it inside a future of
+        // its own, which ends then.
+        let mut unwanted = std::pin::pin!(
+            async move {
+                let _ = wanted.await;
+            }
+            .fuse()
+        );
         let found = select_biased! {
             found = answer => found,
             () = bound => None,
+            () = unwanted => None,
         };
-        let left = std::mem::replace(
-            &mut *phase.lock().unwrap_or_else(PoisonError::into_inner),
-            Phase::Idle,
-        );
-        match left {
-            Phase::Probing(mut control) => {
-                if found.is_none() {
-                    control.stop().await;
-                }
-            }
-            // Only a stop or the probe itself changes the phase while it runs.
-            other @ (Phase::Stopped | Phase::Running(_)) => {
-                *phase.lock().unwrap_or_else(PoisonError::into_inner) = other;
-            }
-            Phase::Idle => {}
+        // A stop of the job took every probe's control already.
+        let left = match &mut *phase.lock().unwrap_or_else(PoisonError::into_inner) {
+            Phase::Probing(running) => running
+                .iter()
+                .position(|(at, _)| *at == position)
+                .map(|index| running.swap_remove(index).1),
+            Phase::Running(_) | Phase::Stopped => None,
+        };
+        if let Some(mut control) = left
+            && found.is_none()
+        {
+            control.stop().await;
         }
         match found {
             Some(ProbeAnswer::Holds(id)) if expected.is_none_or(|expected| id == *expected) => {
@@ -390,6 +472,112 @@ impl ChooseLocation {
             Some(ProbeAnswer::PasswordNotAccepted) => LocationOutcome::PasswordNotAccepted,
             None => LocationOutcome::Silent,
         }
+    }
+}
+
+/// The location a resolved access opens, to see what it sends where.
+fn location_of(access: &RepositoryAccess) -> Location {
+    Location {
+        when: None,
+        repository: access.repository.clone(),
+        repo_hot: access.repo_hot.clone(),
+        options: access.options.clone(),
+        options_hot: access.options_hot.clone(),
+        options_cold: access.options_cold.clone(),
+    }
+}
+
+/// A probe started before its location's turn (decision NN): running, with
+/// the sender whose drop says its answer is no longer wanted, or ended.
+enum Early<'a> {
+    Running {
+        probe: BoxFuture<'a, LocationOutcome>,
+        wanted: Option<oneshot::Sender<()>>,
+    },
+    Ended(LocationOutcome),
+}
+
+/// A choice's early probes, by location index, each polled whatever the
+/// choice waits on, so they run beside it and beside each other.
+struct EarlyProbes<'a>(Vec<Option<Early<'a>>>);
+
+impl<'a> EarlyProbes<'a> {
+    fn new(count: usize) -> Self {
+        Self((0..count).map(|_| None).collect())
+    }
+
+    /// Starts `probe` as the early probe of the location at `index`.
+    fn start(
+        &mut self,
+        index: usize,
+        probe: BoxFuture<'a, LocationOutcome>,
+        wanted: oneshot::Sender<()>,
+    ) {
+        if let Some(slot) = self.0.get_mut(index) {
+            *slot = Some(Early::Running {
+                probe,
+                wanted: Some(wanted),
+            });
+        }
+    }
+
+    /// Polls every probe still running, keeping the outcome of each that
+    /// ends.
+    fn poll_running(&mut self, cx: &mut Context<'_>) {
+        for slot in &mut self.0 {
+            if let Some(Early::Running { probe, .. }) = slot
+                && let Poll::Ready(outcome) = probe.poll_unpin(cx)
+            {
+                *slot = Some(Early::Ended(outcome));
+            }
+        }
+    }
+
+    /// Runs `work` to its end while the early probes run on.
+    async fn alongside<T>(&mut self, work: impl Future<Output = T>) -> T {
+        let mut work = std::pin::pin!(work);
+        futures::future::poll_fn(|cx| {
+            self.poll_running(cx);
+            work.as_mut().poll(cx)
+        })
+        .await
+    }
+
+    /// The outcome of the early probe of the location at `index` once it
+    /// ends, or `None` when none was started.
+    async fn outcome(&mut self, index: usize) -> Option<LocationOutcome> {
+        futures::future::poll_fn(|cx| {
+            self.poll_running(cx);
+            match self.0.get(index) {
+                Some(Some(Early::Ended(outcome))) => Poll::Ready(Some(*outcome)),
+                Some(Some(Early::Running { .. })) => Poll::Pending,
+                Some(None) | None => Poll::Ready(None),
+            }
+        })
+        .await
+    }
+
+    /// Stops every probe still running and waits until each has ended, its
+    /// worker stopped.
+    async fn stop(&mut self) {
+        for slot in &mut self.0 {
+            if let Some(Early::Running { wanted, .. }) = slot {
+                wanted.take();
+            }
+        }
+        futures::future::poll_fn(|cx| {
+            self.poll_running(cx);
+            if self
+                .0
+                .iter()
+                .any(|slot| matches!(slot, Some(Early::Running { .. })))
+            {
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
     }
 }
 
@@ -521,18 +709,19 @@ async fn answered(
     None
 }
 
-/// What a choice is doing, so a stop reaches the probe that runs and
+/// What a choice is doing, so a stop reaches every probe that runs and
 /// nothing starts after it.
 enum Phase {
-    Idle,
-    Probing(Box<dyn JobControl>),
+    /// The probes that run now, by their location's position: none before
+    /// the first starts and after the last ends.
+    Probing(Vec<(u8, Box<dyn JobControl>)>),
     /// The job that follows the choice runs.
     Running(Box<dyn JobControl>),
     Stopped,
 }
 
-/// Stops a located job: the probe while one runs, the job once it does, and
-/// nothing is started after.
+/// Stops a located job: every probe while they run, the job once it does,
+/// and nothing is started after.
 struct Handover(Probing);
 
 #[async_trait]
@@ -542,8 +731,14 @@ impl JobControl for Handover {
             &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
             Phase::Stopped,
         );
-        if let Phase::Probing(mut control) | Phase::Running(mut control) = going {
-            control.stop().await;
+        match going {
+            Phase::Probing(running) => {
+                for (_, mut control) in running {
+                    control.stop().await;
+                }
+            }
+            Phase::Running(mut control) => control.stop().await,
+            Phase::Stopped => {}
         }
     }
 }
@@ -558,7 +753,7 @@ impl Engine for ChooseLocation {
         else {
             return self.inner.run(op, job).await;
         };
-        let phase: Probing = Arc::new(Mutex::new(Phase::Idle));
+        let phase: Probing = Arc::new(Mutex::new(Phase::Probing(Vec::new())));
         let handed = Arc::clone(&phase);
         let this = self.clone();
         let mut job = job;
