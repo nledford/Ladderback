@@ -24,7 +24,7 @@ M2 ends with its release, `0.2.0`: after the tag, it runs on real machines befor
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |
 | M4b | `maintenance/ownership.feature`, `maintenance/prune_guard.feature`, `restore/hub_restore.feature` |
 | 0.2.x follow-up | `repositories/repository_locations.feature` (decision 80, slice 1, with the `@e2e` and `@ui` scenarios) |
-| M5 | `execution/conditions.feature`, `operations/db_rebuild.feature`, the rule scenarios of `repositories/repository_locations.feature` (decision 80, slices 2 and 3) |
+| M5 | `execution/conditions.feature`, `operations/db_rebuild.feature`, the rule scenarios of `repositories/repository_locations.feature` and the scheduler's location skip in `execution/` (decision 80, slices 2 and 3) |
 
 A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **10–14 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **18–24 weeks**, roughly **4½–6 months part-time**. These ranges include writing scenarios and tests first and building the accessible component set in M1b; M0 is longer than in v0.2 because the test tooling, including the browser toolchain, is built there.
 
