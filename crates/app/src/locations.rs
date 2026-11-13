@@ -1048,6 +1048,228 @@ mod tests {
         );
     }
 
+    /// The addresses `sites` was asked to probe, in the order asked.
+    fn probed(sites: &Sites) -> Vec<String> {
+        sites
+            .jobs()
+            .into_iter()
+            .filter_map(|job| match job {
+                Job::Probe(access) => Some(access.repository),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every location that checks the server first is probed from the start
+    /// of the choice, so a later one runs while an earlier one is waited for
+    /// (decision NN); the earlier one still decides, at its own bound.
+    #[tokio::test]
+    async fn a_later_location_that_checks_the_server_first_is_probed_while_an_earlier_one_is_waited_for()
+     {
+        let sites = Sites::silent_at("/srv/lan");
+        let (choose, access, clock) = choosing(&sites).await;
+        let mut located = choose.locate(op(), access).boxed();
+        assert!(futures::poll!(&mut located).is_pending());
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/lan".to_owned(), "/srv/public".to_owned()],
+            "both locations are probed at once"
+        );
+        clock.advance(SignedDuration::from_secs(LOCATION_PROBE_SECONDS));
+        let futures::task::Poll::Ready(located) = futures::poll!(&mut located) else {
+            panic!("the choice still waits at the first location's bound");
+        };
+        let record = located
+            .ok()
+            .and_then(|located| located.record)
+            .expect("a location used");
+        let outcomes: Vec<LocationOutcome> =
+            record.locations.iter().map(|tried| tried.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![LocationOutcome::Silent, LocationOutcome::Used]
+        );
+        assert_eq!(sites.running(), 0);
+        assert_eq!(probed(&sites).len(), 2, "no location is probed twice");
+    }
+
+    /// A probe started early that is still running when an earlier location
+    /// is used is stopped before the choice ends, and its location is
+    /// recorded as not tried (decision NN).
+    #[tokio::test]
+    async fn a_probe_still_running_when_an_earlier_location_is_used_is_stopped() {
+        let sites = Sites::silent_at("/srv/public");
+        let (choose, access, _clock) = choosing(&sites).await;
+        let located = choose
+            .locate(op(), access)
+            .now_or_never()
+            .expect("the first location answers at once, so the choice ends");
+        let record = located
+            .ok()
+            .and_then(|located| located.record)
+            .expect("a location used");
+        let outcomes: Vec<LocationOutcome> =
+            record.locations.iter().map(|tried| tried.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![LocationOutcome::Used, LocationOutcome::NotTried]
+        );
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/lan".to_owned(), "/srv/public".to_owned()],
+            "the second location was probed early"
+        );
+        assert_eq!(sites.running(), 0, "its probe was stopped");
+    }
+
+    /// A job cancelled while its choice waits on several probes at once
+    /// stops every one of them.
+    #[tokio::test]
+    async fn a_job_cancelled_while_several_probes_run_stops_every_one() {
+        let sites = Sites {
+            silent: vec!["/srv/lan".to_owned(), "/srv/public".to_owned()],
+            ..Sites::default()
+        };
+        let (choose, access, _clock) = choosing(&sites).await;
+        let RunningJob {
+            mut events,
+            mut control,
+        } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        assert!(futures::poll!(events.next()).is_pending());
+        assert_eq!(sites.running(), 2, "both probes run");
+        control.stop().await;
+        assert_eq!(sites.running(), 0, "the cancel stops both");
+        assert!(
+            matches!(events.next().now_or_never(), Some(None)),
+            "the job ends at once, with nothing to say"
+        );
+        assert!(
+            sites.jobs().iter().all(|job| matches!(job, Job::Probe(_))),
+            "no job opens the repository after a cancel"
+        );
+    }
+
+    /// A choice that fails in a location's turn, here on secrets past what
+    /// the daemon masks, stops every probe still running before it returns:
+    /// a later location's early probe doesn't outlive it. The first location
+    /// is skipped at once, its reference unresolved, so the third's probe
+    /// still runs when the second's turn fails.
+    #[tokio::test]
+    async fn a_choice_that_fails_in_a_locations_turn_stops_every_early_probe() {
+        let sites = Sites::silent_at("/srv/far");
+        let secrets = FakeSecrets::default();
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        let mut options = BTreeMap::new();
+        for n in 1..=5 {
+            secrets.set_env(&format!("DEMO_LARGE_{n}"), &n.to_string().repeat(60_000));
+            options.insert(format!("demo-{n}"), format!("${{DEMO_LARGE_{n}}}"));
+        }
+        let resolve = ResolveRepository::new(Arc::new(secrets));
+        let mut access = nas(&resolve, first("${DEMO_LAN}", &[])).await;
+        let saved = access.entry.as_mut().expect("the entry");
+        saved.entry.locations.further = vec![
+            Location {
+                repository: "rest:http://backup.example.net/r".to_owned(),
+                options,
+                ..Location::default()
+            },
+            Location {
+                repository: "/srv/far".to_owned(),
+                ..Location::default()
+            },
+        ];
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let choose = ChooseLocation::new(
+            Arc::new(sites.clone()),
+            Arc::<FakeClock>::clone(&clock),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let located = choose
+            .locate(op(), access)
+            .now_or_never()
+            .expect("the second location's turn comes at once and fails the choice");
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/far".to_owned()],
+            "the local path was probed early, and nothing in its turn"
+        );
+        assert!(
+            matches!(
+                located,
+                Err((FailureReason::SecretsTooLargeToMask { .. }, _))
+            ),
+            "the second location's secrets fail the choice"
+        );
+        assert_eq!(sites.running(), 0, "the third location's probe is stopped");
+    }
+
+    /// A location that checks the server first as written but not as its
+    /// references resolve, here an `https` location whose certificate check
+    /// a reference turns off, waits for its turn; a later local path is
+    /// still probed at once.
+    #[tokio::test]
+    async fn a_location_whose_resolved_settings_send_credentials_unchecked_waits_for_its_turn() {
+        let sites = Sites::silent_at("/srv/lan");
+        let secrets = FakeSecrets::default();
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        secrets.set_env("UNCHECKED", "true");
+        let resolve = ResolveRepository::new(Arc::new(secrets));
+        let mut access = nas(&resolve, first("/srv/lan", &[])).await;
+        let saved = access.entry.as_mut().expect("the entry");
+        saved.entry.locations.further = vec![
+            Location {
+                repository: "rest:https://demo:pw@backup.example.net/r".to_owned(),
+                options: BTreeMap::from([(
+                    "http-insecure-tls".to_owned(),
+                    "${UNCHECKED}".to_owned(),
+                )]),
+                ..Location::default()
+            },
+            Location {
+                repository: "/srv/far".to_owned(),
+                ..Location::default()
+            },
+        ];
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let choose = ChooseLocation::new(
+            Arc::new(sites.clone()),
+            Arc::<FakeClock>::clone(&clock),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let mut located = choose.locate(op(), access).boxed();
+        assert!(futures::poll!(&mut located).is_pending());
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/lan".to_owned(), "/srv/far".to_owned()],
+            "the unchecked location isn't probed before its turn"
+        );
+        clock.advance(SignedDuration::from_secs(LOCATION_PROBE_SECONDS));
+        let futures::task::Poll::Ready(located) = futures::poll!(&mut located) else {
+            panic!("the choice still waits");
+        };
+        assert_eq!(
+            probed(&sites),
+            vec![
+                "/srv/lan".to_owned(),
+                "/srv/far".to_owned(),
+                "rest:https://demo:pw@backup.example.net/r".to_owned()
+            ],
+            "it is probed in its turn"
+        );
+        let used = located
+            .ok()
+            .and_then(|located| located.record)
+            .and_then(|record| record.used());
+        assert_eq!(used, Some(2));
+    }
+
     /// The job that follows the choice opens the location chosen, alone,
     /// and carries the entry it was made from, as every job made from one
     /// does (§6.1, decision 57).
