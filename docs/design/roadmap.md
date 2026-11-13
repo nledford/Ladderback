@@ -147,6 +147,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [84](decisions/84-view-blocks-are-formatted-by-leptosfmt.md) | Formatting the inside of `view!` blocks |
 | [85](decisions/85-a-server-s-refusal-of-the-credentials.md) | How a REST server's refusal of the credentials is told |
 | [86](decisions/86-trying-a-repositorys-locations-at-the-same-time.md) | Trying a repository's locations at the same time |
+| [87](decisions/87-listening-on-the-network-with-sign-in-off.md) | Listening on the network with sign-in off |
 
 ## 17. Open questions
 

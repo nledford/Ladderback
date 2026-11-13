@@ -82,7 +82,8 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Template | A rule's own text for its messages, with placeholders for the event's facts (`{plan}`, `{code}`, …) and nothing else, so it can't hold a secret (I4). Without one, the message is the catalog's text in the agent's locale |
 | Step-up confirmation | Re-entering the password (or typing the snapshot ID when auth is off) before a restore or download |
 | Admin password | The one password that signs in to an agent's web UI and API. Set with `ladderback set-password`, at the terminal or from standard input; only its argon2id hash is kept (§10.1) |
-| Sign-in | Asking for the admin password before the web UI and API answer. **On** while an admin password is set, which the daemon decides when it starts; **off** otherwise, and then the agent listens on loopback only (§10.1) |
+| Sign-in | Asking for the admin password before the web UI and API answer. **On** while an admin password is set, which the daemon decides when it starts; **off** otherwise, and then anyone who can reach the agent can use it: anyone on this machine on loopback, anyone who reaches the address on the network, where the agent and every page warn so (§10.1) |
+| Exposure | Who can reach an agent at the address it listens on: this machine, on a loopback address, or **the network**, on any other, which needs an `--allowed-host` (§10.1) |
 | Session | What a sign-in starts: a cookie and the CSRF token its changed requests carry. It ends at sign-out, 12 hours after its last **use**, 30 days after it started, or when the admin password is set anew |
 | Background read | A request the web UI sends on its own, not because a person did something: a refresh after an event, opening the events stream. It never uses a session, so a page left open doesn't keep one alive (§10.1) |
 
