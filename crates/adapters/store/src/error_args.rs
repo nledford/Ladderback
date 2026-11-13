@@ -139,6 +139,8 @@ pub(crate) fn decode(text: &str) -> Result<Vec<(String, MsgArg)>, ArgsError> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use api::IanaZone;
 
     use super::*;
@@ -355,8 +357,9 @@ mod tests {
         ];
         for text in refused {
             let outcome = decode(text);
-            assert!(
-                matches!(outcome, Err(ArgsError::NotPairs(_))),
+            assert_matches!(
+                outcome,
+                Err(ArgsError::NotPairs(_)),
                 "{text:?}: {outcome:?}"
             );
         }
@@ -373,8 +376,9 @@ mod tests {
         ];
         for text in refused {
             let outcome = decode(text);
-            assert!(
-                matches!(outcome, Err(ArgsError::NotPairs(_))),
+            assert_matches!(
+                outcome,
+                Err(ArgsError::NotPairs(_)),
                 "{text:?}: {outcome:?}"
             );
         }
@@ -402,8 +406,9 @@ mod tests {
         ];
         for text in refused {
             let outcome = decode(text);
-            assert!(
-                matches!(outcome, Err(ArgsError::NotPairs(_))),
+            assert_matches!(
+                outcome,
+                Err(ArgsError::NotPairs(_)),
                 "{text:?}: {outcome:?}"
             );
         }
@@ -428,8 +433,9 @@ mod tests {
                 r#"[["when",{{"type":"timestamp","value":{{"utc_ms":5,"zone":{json}}}}}]]"#
             );
             let outcome = decode(&text);
-            assert!(
-                matches!(&outcome, Err(ArgsError::BadZone { name: found }) if *found == name),
+            assert_matches!(
+                &outcome,
+                Err(ArgsError::BadZone { name: found }) if *found == name,
                 "{name:?}: {outcome:?}"
             );
         }

@@ -5,6 +5,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -302,10 +303,7 @@ async fn a_start_that_fails_halfway_stores_nothing_and_holds_nothing() {
 
     let outcome = store.try_start(&prune).await;
 
-    assert!(
-        matches!(outcome, Err(StoreError::Unavailable { .. })),
-        "{outcome:?}"
-    );
+    assert_matches!(outcome, Err(StoreError::Unavailable { .. }));
     assert_eq!(rows_of(&mut raw, "operations", "id", 0x7200).await, 0);
     assert_eq!(rows_of(&mut raw, "op_warnings", "op_id", 0x7200).await, 0);
 
@@ -386,9 +384,9 @@ async fn a_holder_that_cannot_be_read_fails_the_start_instead_of_letting_it_thro
         .try_start(&started(queued_on_repository(0x7400, OperationKind::Prune)))
         .await;
 
-    assert!(
-        matches!(&outcome, Err(StoreError::Corrupt { detail }) if detail.contains("not-an-operation-id")),
-        "{outcome:?}"
+    assert_matches!(
+        &outcome,
+        Err(StoreError::Corrupt { detail }) if detail.contains("not-an-operation-id")
     );
     assert_eq!(rows_of(&mut raw, "operations", "id", 0x7400).await, 0);
 }

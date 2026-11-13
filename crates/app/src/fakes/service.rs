@@ -108,6 +108,7 @@ impl ServiceManager for FakeServiceManager {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::path::{Path, PathBuf};
 
     use domain::service::ServicePath;
@@ -128,20 +129,17 @@ mod tests {
         let manager = fake();
         manager.refuse("Failed to connect to bus");
         let error = manager.install(&program()).await.unwrap_err();
-        assert!(matches!(
+        assert_matches!(
             error.problem,
             ServiceProblem::ManagerRefused { ref said, .. } if said == "Failed to connect to bus"
-        ));
+        );
         assert!(!manager.runs());
     }
 
     #[tokio::test]
     async fn removing_no_service_asks_the_manager_nothing() {
         let manager = fake();
-        assert!(matches!(
-            manager.remove().await,
-            Ok(Removed::NotInstalled { .. })
-        ));
+        assert_matches!(manager.remove().await, Ok(Removed::NotInstalled { .. }));
         assert_eq!(manager.asked(), 0);
     }
 

@@ -3,6 +3,7 @@
 //! move a second at a time, polling the check under test after each move, so
 //! a check that waits too long, or for ever, shows as a failed bound.
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -312,10 +313,7 @@ fn ahead_once_up(agent: &mut Agent, seconds: i64) {
         .network_up_after
         .expect("the network comes up");
     let (ended, after) = waited(agent);
-    assert!(
-        matches!(ended, NetworkWait::Online { waited } if waited == after),
-        "{ended:?}"
-    );
+    assert_matches!(ended, NetworkWait::Online { waited } if waited == after);
     assert!(*after >= up_after, "went ahead {after} after the wake");
     assert!(
         *after <= up_after + SignedDuration::from_secs(seconds),

@@ -6,6 +6,7 @@
 //! repository "nas" unless the scenario moved it), and read the log back
 //! through its port, and what the queue ran again and said off a recording.
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use app::fakes::InMemoryOperationStore;
@@ -618,11 +619,9 @@ fn first_start_ended(agent: &mut Agent, count: u64) {
 
 #[then("the daemon's start reports that the log could not be written")]
 fn start_reports_unwritable(agent: &mut Agent) {
-    assert!(
-        matches!(
-            agent.recovery.last_start(),
-            Err(StoreError::Unavailable { .. })
-        ),
+    assert_matches!(
+        agent.recovery.last_start(),
+        Err(StoreError::Unavailable { .. }),
         "the start reported {:?}",
         agent.recovery.last_start()
     );

@@ -2,6 +2,8 @@
 //! through the operation log's port, on the in-memory log the world's `store`
 //! holds, and read the history back through its use cases.
 
+use std::assert_matches;
+
 use app::history::{GetOperation, ListOperations};
 use app::ports::{OperationDetail, OperationRecord, OperationStore, Start};
 use cucumber::{given, then, when};
@@ -227,8 +229,9 @@ fn start_is_allowed(agent: &mut Agent) {
 #[then("the start is refused")]
 fn start_is_refused(agent: &mut Agent) {
     let (op, decided) = agent.maintenance.last_attempt();
-    assert!(
-        matches!(decided, Start::Refused { .. }),
+    assert_matches!(
+        decided,
+        Start::Refused { .. },
         "the {:?} wasn't refused: {decided:?}",
         op.kind()
     );

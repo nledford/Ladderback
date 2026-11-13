@@ -219,6 +219,7 @@ impl ConfigStore for FileConfigStore {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -307,15 +308,12 @@ mod tests {
             &opened(),
             || {},
         );
-        assert!(
-            matches!(
-                recorded,
-                Err(RecordError::Store(ConfigError::Invalid {
-                    problem: Problem::NotUtf8,
-                    ..
-                }))
-            ),
-            "{recorded:?}"
+        assert_matches!(
+            recorded,
+            Err(RecordError::Store(ConfigError::Invalid {
+                problem: Problem::NotUtf8,
+                ..
+            }))
         );
         assert_eq!(std::fs::read(&path).expect("the file"), bytes);
         assert_eq!(files_in(scratch.path()), 1, "nothing kept in a history");

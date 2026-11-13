@@ -1860,6 +1860,7 @@ mod read_timeout_tests {
 mod record_tests {
     #![allow(clippy::expect_used, reason = "test code")]
 
+    use std::assert_matches;
     use std::sync::Arc;
 
     use async_trait::async_trait;
@@ -1949,8 +1950,9 @@ mod record_tests {
         )
         .await
         .expect("the write is given up on");
-        assert!(
-            matches!(errors.as_slice(), [StoreError::Unavailable { .. }]),
+        assert_matches!(
+            errors.as_slice(),
+            [StoreError::Unavailable { .. }],
             "{errors:?}"
         );
     }

@@ -874,6 +874,8 @@ pub(crate) fn unreachable_after(answered: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use api::{
         ForgetPlanDto, LeftAloneDto, OperationResultDto, OperationWarningDto, PlanGroupDto,
@@ -1911,7 +1913,7 @@ mod tests {
     fn the_wait_gives_up_when_the_daemon_stays_silent() {
         let mut watch = Watch::new(Kind::Forget);
         for _ in 0..6 {
-            assert!(matches!(watch.after(None), Next::Again(_)));
+            assert_matches!(watch.after(None), Next::Again(_));
         }
         assert_eq!(watch.after(None), Next::GaveUp);
     }
@@ -1922,10 +1924,7 @@ mod tests {
         for _ in 0..6 {
             watch.after(None);
         }
-        assert!(matches!(
-            watch.after(Some(&read("running"))),
-            Next::Again(_)
-        ));
+        assert_matches!(watch.after(Some(&read("running"))), Next::Again(_));
         assert_eq!(
             watch.after(None),
             Next::Again(Duration::from_secs(1)),

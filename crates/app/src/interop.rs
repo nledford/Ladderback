@@ -291,6 +291,7 @@ impl ExportProfile {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "test code")]
 mod tests {
+    use std::assert_matches;
     use std::collections::BTreeMap;
 
     use domain::RepositoryId;
@@ -521,13 +522,13 @@ mod tests {
         let mut stray = plan("home", None);
         stray.repository = alias("elsewhere");
         let refused = import(&config, profile(vec![stray], Hooks::default())).await;
-        assert!(matches!(
+        assert_matches!(
             refused,
             Err(ImportError::Config(ConfigError::Invalid {
                 problem: Problem::Violation(Violation::UnknownRepository { .. }),
                 ..
             }))
-        ));
+        );
         assert!(saved(&config).await.repositories().is_empty());
     }
 

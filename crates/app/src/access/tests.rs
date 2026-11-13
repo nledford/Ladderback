@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::net::{IpAddr, Ipv4Addr};
 
 use async_trait::async_trait;
@@ -171,9 +172,9 @@ fn a_password_that_cannot_be_checked_starts_no_session() {
         .now_or_never()
         .unwrap()
         .unwrap_err();
-    assert!(
-        matches!(&refused, SignInRefused::Unavailable(text) if text.contains("Permission denied")),
-        "{refused:?}"
+    assert_matches!(
+        &refused,
+        SignInRefused::Unavailable(text) if text.contains("Permission denied")
     );
 }
 

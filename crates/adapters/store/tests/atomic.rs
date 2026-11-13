@@ -3,6 +3,8 @@
 
 mod support;
 
+use std::assert_matches;
+
 use app::ports::{OperationStore, StoreError};
 use support::*;
 
@@ -37,10 +39,7 @@ async fn a_save_that_fails_halfway_leaves_the_old_state_exactly_as_it_was() {
         .expect("the fault is set up");
     let outcome = store.save(&newer, Some(&backup_result())).await;
 
-    assert!(
-        matches!(outcome, Err(StoreError::Unavailable { .. })),
-        "{outcome:?}"
-    );
+    assert_matches!(outcome, Err(StoreError::Unavailable { .. }));
     assert_eq!(
         store.get(id(0x10)).await.expect("reading works"),
         seen_before
@@ -74,10 +73,7 @@ async fn a_first_save_that_fails_leaves_no_trace() {
 
     let outcome = store.save(&op, None).await;
 
-    assert!(
-        matches!(outcome, Err(StoreError::Unavailable { .. })),
-        "{outcome:?}"
-    );
+    assert_matches!(outcome, Err(StoreError::Unavailable { .. }));
     assert_eq!(rows_of(&mut raw, "operations", "id", 0x20).await, 0);
     assert_eq!(rows_of(&mut raw, "op_warnings", "op_id", 0x20).await, 0);
     assert_eq!(store.get(id(0x20)).await, Ok(None));
@@ -99,8 +95,9 @@ async fn the_store_is_as_usable_as_before_once_a_save_has_failed() {
     // More failures than the store has connections, so each is seen again.
     for attempt in 0..8 {
         let outcome = store.save(&op, None).await;
-        assert!(
-            matches!(outcome, Err(StoreError::Unavailable { .. })),
+        assert_matches!(
+            outcome,
+            Err(StoreError::Unavailable { .. }),
             "attempt {attempt}: {outcome:?}"
         );
     }

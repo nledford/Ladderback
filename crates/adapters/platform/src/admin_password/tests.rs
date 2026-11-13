@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use super::*;
 
 fn password(text: &str) -> Password {
@@ -101,14 +103,14 @@ async fn a_hash_file_others_can_read_is_refused_never_sign_in_off() {
         std::fs::Permissions::from_mode(0o640),
     )
     .unwrap();
-    assert!(matches!(
+    assert_matches!(
         kept.is_set(),
         Err(AdminPasswordError::Unreadable(text)) if text.contains("other users")
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         kept.verify(&password("demo-admin-pass")).await,
         Err(AdminPasswordError::Unreadable(_))
-    ));
+    );
 }
 
 #[tokio::test]
@@ -121,8 +123,9 @@ async fn a_file_that_is_not_an_argon2id_hash_is_refused_never_sign_in_off() {
         "",
     ] {
         write_hash(&data.path().join(FILE), text.trim_end()).unwrap();
-        assert!(
-            matches!(kept.is_set(), Err(AdminPasswordError::Unreadable(_))),
+        assert_matches!(
+            kept.is_set(),
+            Err(AdminPasswordError::Unreadable(_)),
             "{text:?}"
         );
     }
@@ -133,8 +136,8 @@ async fn a_file_larger_than_a_hash_is_refused_unread() {
     let data = tempfile::tempdir().unwrap();
     let kept = FileAdminPassword::in_data_dir(data.path());
     write_hash(&data.path().join(FILE), &"x".repeat(1000)).unwrap();
-    assert!(matches!(
+    assert_matches!(
         kept.is_set(),
         Err(AdminPasswordError::Unreadable(text)) if text.contains("larger")
-    ));
+    );
 }

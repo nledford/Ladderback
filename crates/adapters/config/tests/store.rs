@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -138,10 +139,10 @@ async fn a_config_path_that_cannot_be_read_is_unavailable() {
     let scratch = Scratch::new();
     std::fs::create_dir(&scratch.path).expect("a folder in the file's place");
     let loaded = scratch.store().load().await;
-    assert!(
-        matches!(&loaded, Err(ConfigError::Unavailable { file, detail })
-            if *file == scratch.name() && !detail.is_empty()),
-        "{loaded:?}"
+    assert_matches!(
+        &loaded,
+        Err(ConfigError::Unavailable { file, detail })
+            if *file == scratch.name() && !detail.is_empty()
     );
 }
 
@@ -153,10 +154,10 @@ async fn a_config_path_below_a_file_is_unavailable_not_an_empty_configuration() 
     let path = blocker.join("config.toml");
     let store = config_adapter::FileConfigStore::new(path.clone(), scratch.clock.clone());
     let loaded = store.load().await;
-    assert!(
-        matches!(&loaded, Err(ConfigError::Unavailable { file, .. })
-            if *file == path.display().to_string()),
-        "{loaded:?}"
+    assert_matches!(
+        &loaded,
+        Err(ConfigError::Unavailable { file, .. })
+            if *file == path.display().to_string()
     );
 }
 
@@ -263,10 +264,7 @@ async fn an_older_file_is_not_replaced_when_its_old_version_cannot_be_kept() {
     // A file where the history folder goes.
     std::fs::write(scratch.history_dir(), "not a folder").expect("a file");
     let loaded = scratch.store_with(version_2()).load().await;
-    assert!(
-        matches!(&loaded, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name()),
-        "{loaded:?}"
-    );
+    assert_matches!(&loaded, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name());
     assert_eq!(scratch.read(), OLD_FILE, "the only copy is still the file");
 }
 
@@ -445,10 +443,7 @@ async fn a_save_is_refused_when_the_old_file_cannot_be_kept() {
     std::fs::write(scratch.history_dir(), "not a folder").expect("a file");
 
     let saved = store.save(&with_concurrency(3)).await;
-    assert!(
-        matches!(&saved, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name()),
-        "{saved:?}"
-    );
+    assert_matches!(&saved, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name());
     assert_eq!(scratch.read_bytes(), before, "the file is as it was");
 }
 
@@ -737,10 +732,7 @@ async fn a_save_through_a_link_that_loops_changes_nothing() {
 
     let saved = scratch.store().save(&with_concurrency(2)).await;
 
-    assert!(
-        matches!(&saved, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name()),
-        "{saved:?}"
-    );
+    assert_matches!(&saved, Err(ConfigError::Unavailable { file, .. }) if *file == scratch.name());
     assert!(scratch.history().is_empty());
     for link in [&scratch.path, &other] {
         assert!(

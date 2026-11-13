@@ -6,6 +6,7 @@
 //! fail, not hang the run: each call that waits on a limit, a stop or a pipe
 //! has a bound of its own (`within`), a few times what the call takes.
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -956,10 +957,10 @@ fn a_fifo_is_not_read_and_does_not_block() {
     let result = received
         .recv_timeout(Duration::from_secs(5))
         .expect("opening a FIFO blocked");
-    assert!(
-        matches!(&result, Err(SecretError { problem: Problem::Unreachable { .. }, source })
-            if *source == SourceName::File { path }),
-        "{result:?}"
+    assert_matches!(
+        &result,
+        Err(SecretError { problem: Problem::Unreachable { .. }, source })
+            if *source == SourceName::File { path }
     );
 }
 
@@ -971,15 +972,12 @@ async fn a_device_is_not_read_to_its_end() {
     )
     .await
     .expect("read a device");
-    assert!(
-        matches!(
-            result,
-            Err(SecretError {
-                problem: Problem::Unreachable { .. },
-                ..
-            })
-        ),
-        "{result:?}"
+    assert_matches!(
+        result,
+        Err(SecretError {
+            problem: Problem::Unreachable { .. },
+            ..
+        })
     );
 }
 
@@ -1009,12 +1007,9 @@ async fn a_file_that_may_not_be_read_is_unreachable() {
     if result.is_ok() {
         testkit::skip!("running as root, which reads any file");
     }
-    assert!(
-        matches!(
-            &result,
-            Err(SecretError { problem: Problem::Unreachable { detail }, .. }) if !detail.is_empty()
-        ),
-        "{result:?}"
+    assert_matches!(
+        &result,
+        Err(SecretError { problem: Problem::Unreachable { detail }, .. }) if !detail.is_empty()
     );
 }
 
@@ -1416,17 +1411,14 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
 
     // Whatever the machine has, an absent entry is an answer, never a panic.
     let before = secrets.resolve(&secret).await;
-    assert!(
-        matches!(
-            &before,
-            Err(SecretError {
-                problem: Problem::Missing
-                    | Problem::Unreachable { .. }
-                    | Problem::KeyringUnavailable { .. },
-                ..
-            })
-        ),
-        "{before:?}"
+    assert_matches!(
+        &before,
+        Err(SecretError {
+            problem: Problem::Missing
+                | Problem::Unreachable { .. }
+                | Problem::KeyringUnavailable { .. },
+            ..
+        })
     );
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1436,13 +1428,13 @@ async fn the_os_keyring_keeps_and_gives_back_a_secret() {
         let read = secrets.resolve(&secret).await;
         entry.delete_credential().unwrap();
         assert_eq!(read, gives("hunter2"));
-        assert!(matches!(
+        assert_matches!(
             secrets.resolve(&secret).await,
             Err(SecretError {
                 problem: Problem::Missing,
                 ..
             })
-        ));
+        );
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     testkit::skip!("this platform has no OS keyring");

@@ -1,6 +1,7 @@
 //! Steps for `features/secrets/*.feature`: they drive `ResolveRepository`
 //! over a `FakeSecrets` store held by the world's `secrets` field.
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use app::fakes::{FakeSecrets, Script};
@@ -545,11 +546,9 @@ fn problem_not_text(agent: &mut Agent) {
 
 #[then("the problem is that it can't be reached")]
 fn problem_unreachable(agent: &mut Agent) {
-    assert!(
-        matches!(
-            agent.secrets.unresolved().problem,
-            Problem::Unreachable { .. }
-        ),
+    assert_matches!(
+        agent.secrets.unresolved().problem,
+        Problem::Unreachable { .. },
         "{:?}",
         agent.secrets.unresolved()
     );
@@ -557,11 +556,9 @@ fn problem_unreachable(agent: &mut Agent) {
 
 #[then("the problem is that there is no keyring service to ask")]
 fn problem_no_keyring_service(agent: &mut Agent) {
-    assert!(
-        matches!(
-            agent.secrets.unresolved().problem,
-            Problem::KeyringUnavailable { .. }
-        ),
+    assert_matches!(
+        agent.secrets.unresolved().problem,
+        Problem::KeyringUnavailable { .. },
         "{:?}",
         agent.secrets.unresolved()
     );
@@ -606,11 +603,9 @@ fn problem_output_cut(agent: &mut Agent) {
 
 #[then("the problem is that the command took too long")]
 fn problem_timed_out(agent: &mut Agent) {
-    assert!(
-        matches!(
-            agent.secrets.unresolved().problem,
-            Problem::TimedOut { seconds } if seconds > 0
-        ),
+    assert_matches!(
+        agent.secrets.unresolved().problem,
+        Problem::TimedOut { seconds } if seconds > 0,
         "{:?}",
         agent.secrets.unresolved()
     );

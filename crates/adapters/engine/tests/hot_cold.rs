@@ -5,6 +5,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -80,10 +81,7 @@ async fn a_repository_is_identified_through_both_halves_and_is_gone_without_the_
     // The hot half is part of the repository: rustic reads its config first.
     fs::remove_dir_all(scratch.hot_dir()).unwrap();
     let events = run_to_end(&engine, Job::Identify(location.access(PASSWORD))).await;
-    assert!(
-        matches!(events.last(), Some(EngineEvent::Failed(_))),
-        "{events:?}"
-    );
+    assert_matches!(events.last(), Some(EngineEvent::Failed(_)), "{events:?}");
 }
 
 /// Whether a check ran to its end and found nothing wrong.

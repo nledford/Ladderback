@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -90,10 +91,7 @@ async fn a_database_from_a_newer_version_is_refused_and_left_untouched() {
          VALUES (9999, 'from the future', 1, X'00', 0)",
     )
     .await;
-    assert!(
-        matches!(error, OpenError::NewerSchema { version: 9999 }),
-        "{error:?}"
-    );
+    assert_matches!(error, OpenError::NewerSchema { version: 9999 });
 }
 
 #[tokio::test]
@@ -102,10 +100,7 @@ async fn a_migration_edited_since_it_was_applied_is_refused() {
         "UPDATE _sqlx_migrations SET checksum = X'0102' WHERE version = 1",
     )
     .await;
-    assert!(
-        matches!(&error, OpenError::Migration { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Migration { detail } if !detail.is_empty());
 }
 
 #[tokio::test]
@@ -113,10 +108,7 @@ async fn a_migration_left_half_applied_is_refused() {
     let error =
         refusal_of_a_damaged_database("UPDATE _sqlx_migrations SET success = 0 WHERE version = 1")
             .await;
-    assert!(
-        matches!(&error, OpenError::Migration { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Migration { detail } if !detail.is_empty());
 }
 
 #[tokio::test]
@@ -127,10 +119,7 @@ async fn a_file_that_is_not_a_database_is_refused_and_left_as_it_was() {
 
     let error = open_error(&scratch.path()).await;
 
-    assert!(
-        matches!(&error, OpenError::Database { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Database { detail } if !detail.is_empty());
     assert_eq!(
         fs::read_to_string(scratch.path()).expect("the file is still readable"),
         notes
@@ -144,10 +133,7 @@ async fn a_directory_that_does_not_exist_is_refused_and_not_created() {
 
     let error = open_error(&missing.join("ladderback.db")).await;
 
-    assert!(
-        matches!(&error, OpenError::Database { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Database { detail } if !detail.is_empty());
     assert!(
         !missing.exists(),
         "the data directory is not the store's to create"
@@ -158,7 +144,7 @@ async fn a_directory_that_does_not_exist_is_refused_and_not_created() {
 async fn a_directory_in_place_of_the_file_is_refused() {
     let scratch = Scratch::new();
     let error = open_error(scratch.dir()).await;
-    assert!(matches!(error, OpenError::Database { .. }), "{error:?}");
+    assert_matches!(error, OpenError::Database { .. });
 }
 
 /// Puts a directory's permissions back, even when the test fails.
@@ -189,10 +175,7 @@ async fn a_directory_that_cannot_be_written_is_refused() {
 
     let error = open_error(&locked.join("ladderback.db")).await;
 
-    assert!(
-        matches!(&error, OpenError::Database { detail } if !detail.is_empty()),
-        "{error:?}"
-    );
+    assert_matches!(&error, OpenError::Database { detail } if !detail.is_empty());
 }
 
 #[cfg(unix)]
@@ -232,26 +215,14 @@ async fn a_closed_store_answers_every_call_with_unavailable() {
     store.close().await;
 
     let saved = store.save(&op, None).await;
-    assert!(
-        matches!(saved, Err(StoreError::Unavailable { .. })),
-        "{saved:?}"
-    );
+    assert_matches!(saved, Err(StoreError::Unavailable { .. }));
     let prune = started(queued_on_repository(0x11, OperationKind::Prune));
     let begun = store.try_start(&prune).await;
-    assert!(
-        matches!(begun, Err(StoreError::Unavailable { .. })),
-        "{begun:?}"
-    );
+    assert_matches!(begun, Err(StoreError::Unavailable { .. }));
     let found = store.get(id(0x10)).await;
-    assert!(
-        matches!(found, Err(StoreError::Unavailable { .. })),
-        "{found:?}"
-    );
+    assert_matches!(found, Err(StoreError::Unavailable { .. }));
     let listed = store.list(&HistoryQuery::default()).await;
-    assert!(
-        matches!(listed, Err(StoreError::Unavailable { .. })),
-        "{listed:?}"
-    );
+    assert_matches!(listed, Err(StoreError::Unavailable { .. }));
     // Closing again is harmless.
     within(30, "closing twice", store.close()).await;
 
@@ -371,12 +342,14 @@ async fn closing_waits_for(write: Write, scratch: &Scratch, store: Arc<SqliteSto
     let (found, listed) = within(30, "the reads", reading)
         .await
         .expect("the task ends");
-    assert!(
-        matches!(found, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        found,
+        Err(StoreError::Unavailable { .. }),
         "a read made while close waited: {found:?}"
     );
-    assert!(
-        matches!(listed, Err(StoreError::Unavailable { .. })),
+    assert_matches!(
+        listed,
+        Err(StoreError::Unavailable { .. }),
         "a list made while close waited: {listed:?}"
     );
 }
@@ -407,8 +380,8 @@ async fn with_idle_connections(scratch: &Scratch) -> SqliteStore {
     let hand_back = HandBack::new();
     let reading = hand_back.hold(async { tokio::join!(store.get(id(0x01)), store.get(id(0x02))) });
     let (first, second) = within(30, "reading", reading).await;
-    assert!(matches!(first, Ok(None)), "{first:?}");
-    assert!(matches!(second, Ok(None)), "{second:?}");
+    assert_matches!(first, Ok(None));
+    assert_matches!(second, Ok(None));
     within(
         30,
         "handing the reads' connections back",

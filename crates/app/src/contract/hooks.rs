@@ -2,6 +2,8 @@
 //! run against the in-memory fake and the real process-spawning adapter.
 //! A check fails on the first violation, as the other suites do.
 
+use std::assert_matches;
+
 use domain::planning::HookEntry;
 use domain::{OperationId, PlanId, RepositoryAlias, SnapshotId, Uuid};
 
@@ -215,8 +217,9 @@ async fn a_hook_past_its_timeout_is_stopped(harness: &dyn HooksHarness, demo: &D
 async fn a_hook_that_cannot_be_started_is_not_started(harness: &dyn HooksHarness, demo: &Demo) {
     let hook = harness.hook_missing();
     let outcome = run_hook(harness, demo, &hook).await;
-    assert!(
-        matches!(outcome.status, HookStatus::NotStarted { ref detail } if !detail.is_empty()),
+    assert_matches!(
+        outcome.status,
+        HookStatus::NotStarted { ref detail } if !detail.is_empty(),
         "a missing program is NotStarted with a detail: {:?}",
         outcome.status
     );

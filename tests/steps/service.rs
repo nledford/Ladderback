@@ -5,6 +5,7 @@
 //! Which manager the program asks is this platform's: systemd's user manager
 //! on Linux, launchd on macOS.
 
+use std::assert_matches;
 use std::path::PathBuf;
 
 use cucumber::{given, then};
@@ -174,10 +175,7 @@ fn stopped_then_started(agent: &mut Agent) {
     let position = |word: &str| since.iter().position(|call| call.contains(word));
     if cfg!(target_os = "macos") {
         let (out, back) = (position(" bootout "), position(" bootstrap "));
-        assert!(
-            matches!((out, back), (Some(out), Some(back)) if out < back),
-            "{since:?}"
-        );
+        assert_matches!((out, back), (Some(out), Some(back)) if out < back, "{since:?}");
     } else {
         // A restart stops a running unit before it starts it.
         assert!(

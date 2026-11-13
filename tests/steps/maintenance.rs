@@ -10,6 +10,7 @@
 //! view. The daemon reads its configuration on every request, so a step may
 //! rewrite it between requests.
 
+use std::assert_matches;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -594,11 +595,9 @@ fn check_preview_reads_structure_only(agent: &mut Agent) {
 async fn check_ended_with_warnings(agent: &mut Agent, warnings: u64) {
     let detail = operation_detail(agent, &started(agent)).await;
     assert_eq!(detail.operation.status, "succeeded-with-warnings");
-    assert!(
-        matches!(
-            detail.operation.result,
-            Some(OperationResultDto::Check { errors: 0, warnings: counted, .. }) if counted == warnings
-        ),
+    assert_matches!(
+        detail.operation.result,
+        Some(OperationResultDto::Check { errors: 0, warnings: counted, .. }) if counted == warnings,
         "the check's result: {:?}",
         detail.operation.result
     );

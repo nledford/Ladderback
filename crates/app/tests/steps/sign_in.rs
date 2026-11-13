@@ -2,6 +2,7 @@
 //! the sign-in use case over an in-memory admin password, seeded randomness
 //! and the world's fake clock.
 
+use std::assert_matches;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -94,11 +95,7 @@ async fn set_password(agent: &mut Agent, password: String) {
 #[given(regex = r"^the admin has signed in(?: again)? from (\S+)$")]
 async fn signed_in(agent: &mut Agent, from: String) {
     sign_in(agent, "demo-admin-pass", &from).await;
-    assert!(
-        matches!(agent.sign_in.last, Some(Ok(_))),
-        "{:?}",
-        agent.sign_in.last
-    );
+    assert_matches!(agent.sign_in.last, Some(Ok(_)), "{:?}", agent.sign_in.last);
 }
 
 #[when(expr = "the admin signs in with {string} from {word}")]
@@ -186,11 +183,7 @@ fn time_passes(agent: &mut Agent, count: i64, unit: String) {
 
 #[then("the admin is signed in")]
 fn is_signed_in(agent: &mut Agent) {
-    assert!(
-        matches!(agent.sign_in.last, Some(Ok(_))),
-        "{:?}",
-        agent.sign_in.last
-    );
+    assert_matches!(agent.sign_in.last, Some(Ok(_)), "{:?}", agent.sign_in.last);
 }
 
 #[then("the sign-in is refused as a wrong password")]

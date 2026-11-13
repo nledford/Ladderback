@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::sync::Arc;
 
 use crate::ports::{Network, PlatformError};
@@ -34,13 +35,15 @@ pub async fn run(harness: &dyn NetworkHarness) {
         "a machine that can reach only itself is offline"
     );
     let answer = harness.unrecognized().is_online().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unrecognized { .. })),
+    assert_matches!(
+        answer,
+        Err(PlatformError::Unrecognized { .. }),
         "a source this adapter doesn't understand is no answer, not a guess: {answer:?}"
     );
     let answer = harness.unreadable().is_online().await;
-    assert!(
-        matches!(answer, Err(PlatformError::Unreadable { .. })),
+    assert_matches!(
+        answer,
+        Err(PlatformError::Unreadable { .. }),
         "a source that can't be read is no answer, not a guess: {answer:?}"
     );
 }

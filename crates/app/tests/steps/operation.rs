@@ -3,6 +3,7 @@
 //! a `job`, the `finished` run and the `operation` it left, the operation
 //! `store` the run wrote, and the methods used below.
 
+use std::assert_matches;
 use std::time::Duration;
 
 use app::history::GetOperation;
@@ -117,13 +118,11 @@ fn failed_reported(agent: &mut Agent, detail: String) {
 
 #[then("the operation ends as failed because the engine could not start")]
 fn failed_to_start(agent: &mut Agent) {
-    assert!(
-        matches!(
-            agent.operation().status(),
-            OperationStatus::Failed {
-                reason: FailureReason::EngineUnavailable { .. }
-            }
-        ),
+    assert_matches!(
+        agent.operation().status(),
+        OperationStatus::Failed {
+            reason: FailureReason::EngineUnavailable { .. }
+        },
         "{:?}",
         agent.operation().status()
     );

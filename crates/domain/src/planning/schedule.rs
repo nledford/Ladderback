@@ -352,6 +352,8 @@ impl Schedule {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use jiff::tz::TimeZoneDatabase;
 
     use super::*;
@@ -485,13 +487,13 @@ mod tests {
             assert_eq!(schedule.jitter(), Some(fine));
         }
         for refused in [-second, MAX_DURATION + second] {
-            assert!(matches!(
+            assert_matches!(
                 Schedule::new(cron("@daily")).with_jitter(refused),
                 Err(InvalidValue {
                     kind: ValueKind::Duration,
                     ..
                 })
-            ));
+            );
         }
     }
 

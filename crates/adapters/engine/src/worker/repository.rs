@@ -320,6 +320,7 @@ fn remove_leftovers(ctx: &Context, half: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::fs::{self, File, FileTimes};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
@@ -558,7 +559,7 @@ mod tests {
         let lookalike = leftover(&folder);
         let (ctx, capture) = context(None);
         let opened = open(&ctx, &spec_at(&folder.to_string_lossy()));
-        assert!(matches!(opened, Err(JobError::Failed { .. })));
+        assert_matches!(opened, Err(JobError::Failed { .. }));
         assert!(lookalike.exists(), "somebody's file was removed");
         assert_eq!(logged(&capture), []);
     }
@@ -569,7 +570,7 @@ mod tests {
         let (ctx, _capture) = context(None);
         let missing = root.path().join("nowhere");
         let opened = open(&ctx, &spec_at(&missing.to_string_lossy()));
-        assert!(matches!(opened, Err(JobError::Failed { .. })));
+        assert_matches!(opened, Err(JobError::Failed { .. }));
         assert!(!missing.exists(), "opening made a repository folder");
     }
 
@@ -784,7 +785,7 @@ mod tests {
             options: [("root".to_owned(), missing.to_string_lossy().into_owned())].into(),
             ..spec_at("opendal:fs")
         };
-        assert!(matches!(probed(&spec), Err(JobError::Failed { .. })));
+        assert_matches!(probed(&spec), Err(JobError::Failed { .. }));
     }
 
     /// A server that can't be reached gives no answer at all: the job fails
@@ -959,7 +960,7 @@ mod tests {
     fn a_backend_rustic_cannot_set_up_is_a_failure_before_anything_is_opened() {
         let (ctx, _capture) = context(None);
         let opened = new_repository(&ctx, &spec_at("nosuchbackend:somewhere"));
-        assert!(matches!(opened, Err(JobError::Failed { .. })));
+        assert_matches!(opened, Err(JobError::Failed { .. }));
     }
 
     #[test]

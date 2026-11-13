@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::fs::{self, File, FileTimes};
 use std::time::{Duration, SystemTime};
 
@@ -100,12 +101,12 @@ async fn a_backup_writes_a_snapshot_with_the_plan_tags_extra_tags_and_label() {
     assert!(tags.contains(&"extra".to_owned()), "{tags:?}");
     assert_eq!(snapshot.label, "home");
     // Started came before the backup's own progress.
-    assert!(matches!(
+    assert_matches!(
         events
             .iter()
             .find(|e| !matches!(e, EngineEvent::Progress(_))),
         Some(EngineEvent::Started { .. })
-    ));
+    );
 }
 
 #[tokio::test]
@@ -227,11 +228,9 @@ async fn a_budget_of_zero_fails_before_anything_is_written() {
         .skip_while(|e| !matches!(e, EngineEvent::Started { .. }))
         .skip(1)
         .collect();
-    assert!(
-        matches!(
-            after_started.as_slice(),
-            [EngineEvent::Failed(FailureReason::DeadlinePassed)]
-        ),
+    assert_matches!(
+        after_started.as_slice(),
+        [EngineEvent::Failed(FailureReason::DeadlinePassed)],
         "{events:?}"
     );
     assert!(location.snapshots().is_empty(), "a snapshot was written");
@@ -582,10 +581,7 @@ async fn a_mistyped_repository_path_loses_no_files() {
         app::ports::Job::Identify(Location::local(&folder).access(PASSWORD)),
     )
     .await;
-    assert!(
-        matches!(events.last(), Some(EngineEvent::Failed(_))),
-        "{events:?}"
-    );
+    assert_matches!(events.last(), Some(EngineEvent::Failed(_)), "{events:?}");
     assert!(
         lookalike.exists(),
         "a file in a folder that is no repository was deleted"
@@ -609,10 +605,7 @@ async fn a_repository_that_cannot_be_opened_loses_no_files() {
         app::ports::Job::Identify(location.access("not the password")),
     )
     .await;
-    assert!(
-        matches!(events.last(), Some(EngineEvent::Failed(_))),
-        "{events:?}"
-    );
+    assert_matches!(events.last(), Some(EngineEvent::Failed(_)), "{events:?}");
     assert!(
         leftover.exists(),
         "a job that failed to open still cleaned up"

@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::sync::Arc;
 
 use domain::execution::conditions::PowerSource;
@@ -58,19 +59,18 @@ async fn a_battery_that_is_not_running_down_is_not_on_battery(harness: &dyn Powe
 
 async fn a_source_that_says_something_unknown_is_an_error(harness: &dyn PowerHarness) {
     let answer = harness.unrecognized().source().await;
-    assert!(
-        matches!(
-            answer,
-            Err(crate::ports::PlatformError::Unrecognized { .. })
-        ),
+    assert_matches!(
+        answer,
+        Err(crate::ports::PlatformError::Unrecognized { .. }),
         "a source this adapter doesn't understand is no answer, not a guess: {answer:?}"
     );
 }
 
 async fn a_source_that_cannot_be_read_is_an_error(harness: &dyn PowerHarness) {
     let answer = harness.unreadable().source().await;
-    assert!(
-        matches!(answer, Err(crate::ports::PlatformError::Unreadable { .. })),
+    assert_matches!(
+        answer,
+        Err(crate::ports::PlatformError::Unreadable { .. }),
         "a source that can't be read is no answer, not a guess: {answer:?}"
     );
 }

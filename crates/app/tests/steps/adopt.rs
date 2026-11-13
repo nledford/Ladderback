@@ -3,6 +3,7 @@
 //! use, which answers an identify, a listing and a rewrite, and records
 //! what it was asked to rewrite.
 
+use std::assert_matches;
 use std::time::Duration;
 
 use cucumber::{given, then, when};
@@ -244,7 +245,7 @@ fn no_rewrite_job(agent: &mut Agent) {
 #[then(expr = "the forget is refused while the adoption holds the repository")]
 fn forget_refused(agent: &mut Agent) {
     let error = agent.forget.take_refused().expect("the forget was refused");
-    assert!(matches!(error, MaintenanceError::Busy { .. }), "{error:?}");
+    assert_matches!(error, MaintenanceError::Busy { .. });
 }
 
 #[then(expr = "the log holds no operation of this adoption")]

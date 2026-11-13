@@ -3,6 +3,7 @@
 //! them with an engine scripted to identify or fail, and the in-memory config
 //! store stands in for the configuration file.
 
+use std::assert_matches;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1081,8 +1082,9 @@ fn identified_then_backed_up(agent: &mut super::Agent) {
 #[then("the repository was identified, and nothing else ran")]
 fn identified_alone(agent: &mut super::Agent) {
     let seen = ran(agent);
-    assert!(
-        matches!(seen.as_slice(), [Job::Identify(_)]),
+    assert_matches!(
+        seen.as_slice(),
+        [Job::Identify(_)],
         "the engine ran {seen:?}"
     );
 }

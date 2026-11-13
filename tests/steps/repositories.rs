@@ -4,6 +4,7 @@
 //! The repositories are made and inspected with `rustic_core` itself, never
 //! through Ladderback, so the checks don't trust the code under test.
 
+use std::assert_matches;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -315,10 +316,10 @@ async fn opens_with_password(agent: &mut Agent) {
 
 #[then("the initialisation is refused because a repository already exists")]
 fn init_refused(agent: &mut Agent) {
-    assert!(matches!(
+    assert_matches!(
         agent.repositories.init.as_ref().expect("the run"),
         Err(RepositoryError::Exists)
-    ));
+    );
 }
 
 #[then("the repository is unchanged")]

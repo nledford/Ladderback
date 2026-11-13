@@ -1700,6 +1700,7 @@ impl Drop for CacheSlot {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::collections::BTreeMap;
     use std::time::Instant;
 
@@ -2189,10 +2190,7 @@ mod tests {
             mut events,
             control,
         } = run(&engine).await;
-        assert!(matches!(
-            events.next().await,
-            Some(EngineEvent::Succeeded(_))
-        ));
+        assert_matches!(events.next().await, Some(EngineEvent::Succeeded(_)));
         drop((events, control));
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(scratch.exists(), "the worker was killed after its result");
@@ -2540,14 +2538,12 @@ mod tests {
         let events = tokio::time::timeout(Duration::from_secs(4), events.collect::<Vec<_>>())
             .await
             .expect("the events ended while another process held the pipe");
-        assert!(
-            matches!(
-                events.as_slice(),
-                [
-                    EngineEvent::Warning(_),
-                    EngineEvent::Failed(FailureReason::EngineExited { exit_code: Some(3) })
-                ]
-            ),
+        assert_matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Warning(_),
+                EngineEvent::Failed(FailureReason::EngineExited { exit_code: Some(3) })
+            ],
             "{events:?}"
         );
         let child = pid_from(&pid_file).await;
@@ -2648,10 +2644,7 @@ mod tests {
         );
         let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
         let events = run(&engine).await.events.collect::<Vec<_>>().await;
-        assert!(
-            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
-            "{events:?}"
-        );
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)], "{events:?}");
         assert!(
             logged_soon(log::Level::Warn, |text| text == "stderr marker 1")
                 .await
@@ -2723,7 +2716,7 @@ mod tests {
             .events
             .collect::<Vec<_>>()
             .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let line = logged_soon(log::Level::Warn, |text| text.starts_with("redaction one:"))
             .await
             .expect("the worker's stderr never reached the log");
@@ -2752,7 +2745,7 @@ mod tests {
             .events
             .collect::<Vec<_>>()
             .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let line = logged_soon(log::Level::Warn, |text| {
             text.starts_with("2026/11/12 10:00:00 CRITICAL")
         })
@@ -3030,7 +3023,7 @@ mod tests {
             &[line_of(&log_line), result_line()],
         )
         .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let line = logged_soon(log::Level::Info, |text| text.starts_with("log one:"))
             .await
             .expect("the worker's log line never reached the log");
@@ -3072,7 +3065,7 @@ mod tests {
             .events
             .collect::<Vec<_>>()
             .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
         let env = read("env.txt");
         assert!(env.contains("HOME=/home/demo"), "HOME is missing: {env}");
@@ -3138,7 +3131,7 @@ mod tests {
             .events
             .collect::<Vec<_>>()
             .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let spec: JobSpec =
             serde_json::from_slice(&std::fs::read(dir.path().join("spec.json")).unwrap()).unwrap();
         let JobKind::Identify(repository) = spec.job else {
@@ -3169,7 +3162,7 @@ mod tests {
             .events
             .collect::<Vec<_>>()
             .await;
-        assert!(matches!(events.as_slice(), [EngineEvent::Succeeded(_)]));
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
         let line = logged_soon(log::Level::Warn, |text| text.starts_with("redaction two:"))
             .await
             .expect("the worker's stderr never reached the log");
@@ -3204,11 +3197,9 @@ mod tests {
         let events = tokio::time::timeout(Duration::from_secs(4), events.collect::<Vec<_>>())
             .await
             .expect("the flood on stderr stalled the events");
-        assert!(
-            matches!(
-                events.as_slice(),
-                [EngineEvent::Warning(_), EngineEvent::Succeeded(_)]
-            ),
+        assert_matches!(
+            events.as_slice(),
+            [EngineEvent::Warning(_), EngineEvent::Succeeded(_)],
             "{events:?}"
         );
         tokio::time::timeout(Duration::from_secs(5), control.stop())
@@ -3285,8 +3276,9 @@ mod tests {
             .await
             .err()
             .expect("a spec past the cap is refused");
-        assert!(
-            matches!(&error, EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string())),
+        assert_matches!(
+            &error,
+            EngineError::Unavailable { detail } if detail.contains(&MAX_MESSAGE_BYTES.to_string()),
             "the error should name the cap: {error:?}"
         );
     }
@@ -3332,8 +3324,9 @@ mod tests {
         };
         let rest = MAX_MASKED_BYTES - password.len();
         let at_the_cap = start(of(rest), vec![("NO_PROXY", "demo:p")]).await;
-        assert!(
-            matches!(&at_the_cap, EngineError::Unavailable { .. }),
+        assert_matches!(
+            &at_the_cap,
+            EngineError::Unavailable { .. },
             "a worker should have been started: {at_the_cap:?}"
         );
         let past = start(
@@ -3618,8 +3611,9 @@ mod tests {
                 .await
                 .err()
                 .expect("a job naming too many snapshots is refused");
-            assert!(
-                matches!(&error, EngineError::Unavailable { detail } if detail.contains(&app::ports::MAX_JOB_IDS.to_string())),
+            assert_matches!(
+                &error,
+                EngineError::Unavailable { detail } if detail.contains(&app::ports::MAX_JOB_IDS.to_string()),
                 "the error should name the limit: {error:?}"
             );
         }
@@ -3646,12 +3640,10 @@ mod tests {
              head -c {detail_len} /dev/zero | tr '\\0' x; echo '{tail}'; echo '{result}'"
         );
         let events = events_from(&script).await;
-        assert!(
-            matches!(
-                events.as_slice(),
-                [EngineEvent::Started { .. }, EngineEvent::Warning(warning), EngineEvent::Succeeded(_)]
-                    if warning.detail.len() == detail_len
-            ),
+        assert_matches!(
+            events.as_slice(),
+            [EngineEvent::Started { .. }, EngineEvent::Warning(warning), EngineEvent::Succeeded(_)]
+                if warning.detail.len() == detail_len,
             "unexpected events: {} events",
             events.len()
         );
@@ -3760,10 +3752,7 @@ mod tests {
             WorkerEngine::new("sh", ["-c", "exit 0"]).with_start_timeout(Duration::from_secs(30));
         let answer = run_within(Duration::from_secs(10), &engine, job_larger_than_a_pipe()).await;
         let error = answer.err();
-        assert!(
-            matches!(error, Some(EngineError::Unavailable { .. })),
-            "{error:?}"
-        );
+        assert_matches!(error, Some(EngineError::Unavailable { .. }));
     }
 
     /// What the worker started is killed with it, as at every other end of a
@@ -3845,10 +3834,7 @@ mod tests {
         .await
         .expect("the job after the timed out one was refused");
         let events = collected_within(Duration::from_secs(10), events).await;
-        assert!(
-            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
-            "{events:?}"
-        );
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)], "{events:?}");
         let spec: JobSpec = serde_json::from_slice(&std::fs::read(&spec_file).unwrap()).unwrap();
         assert_eq!(
             spec.cache_dir,
@@ -4057,11 +4043,9 @@ mod tests {
             result_line()
         );
         let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
-        assert!(
-            matches!(
-                events.as_slice(),
-                [EngineEvent::Started { .. }, EngineEvent::Succeeded(_)]
-            ),
+        assert_matches!(
+            events.as_slice(),
+            [EngineEvent::Started { .. }, EngineEvent::Succeeded(_)],
             "{events:?}"
         );
     }
@@ -4079,10 +4063,7 @@ mod tests {
             result_line()
         );
         let events = events_under_a_start_timeout(Duration::from_secs(1), &script).await;
-        assert!(
-            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
-            "{events:?}"
-        );
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)], "{events:?}");
     }
 
     /// The timeout bounds the wait for the first line, not the worker: one
@@ -4092,10 +4073,7 @@ mod tests {
     async fn a_worker_that_answers_within_the_start_timeout_is_not_timed_out() {
         let script = format!("cat >/dev/null; sleep 0.3; echo '{}'", result_line());
         let events = events_under_a_start_timeout(Duration::from_secs(5), &script).await;
-        assert!(
-            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
-            "{events:?}"
-        );
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)], "{events:?}");
     }
 
     /// A timeout too long to be a time never passes, and doesn't panic
@@ -4113,10 +4091,7 @@ mod tests {
             .await
             .expect("`run` must not fail");
         let events = collected_within(Duration::from_secs(10), events).await;
-        assert!(
-            matches!(events.as_slice(), [EngineEvent::Succeeded(_)]),
-            "{events:?}"
-        );
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)], "{events:?}");
     }
 
     /// A worker that closes its output produces no more events, and the

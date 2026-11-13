@@ -2,6 +2,8 @@
 //! rustic records them — absolute, dots removed, symlinks resolved, sorted
 //! and deduplicated — which is what adoption's matching compares (§7.3).
 
+use std::assert_matches;
+
 use app::ports::NormalizeSources;
 use domain::planning::Source;
 use engine::RusticSources;
@@ -67,8 +69,5 @@ async fn a_source_that_cannot_be_read_is_an_error_not_a_panic() {
         .normalized(&[Source::parse(&missing).expect("a source")])
         .await
         .expect_err("nothing is at the path");
-    assert!(
-        matches!(error, app::ports::SourcesError::Unreadable { .. }),
-        "{error:?}"
-    );
+    assert_matches!(error, app::ports::SourcesError::Unreadable { .. });
 }

@@ -2,6 +2,8 @@
 //! real hook processes, as demo scripts in the scratch dir, run by the real
 //! `ProcessHookRunner` around the operation.
 
+use std::assert_matches;
+
 use app::ports::{HookRunner, HookSetup};
 use cucumber::{given, then};
 use domain::execution::{FailureReason, OperationStatus};
@@ -81,12 +83,12 @@ fn writes_env(agent: &mut Agent) {
 
 #[then("the operation ends as failed because a hook timed out")]
 fn failed_by_timeout(agent: &mut Agent) {
-    assert!(matches!(
+    assert_matches!(
         agent.operation().status(),
         OperationStatus::Failed {
             reason: FailureReason::HookFailed { exit_code: None }
         }
-    ));
+    );
 }
 
 /// The variables a hook may be given on top of its `LADDERBACK_*` context:

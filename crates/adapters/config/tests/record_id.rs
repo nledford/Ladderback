@@ -4,6 +4,8 @@
 
 mod support;
 
+use std::assert_matches;
+
 use app::ports::{ConfigStore, NotInPlace, RecordError};
 use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
@@ -250,9 +252,6 @@ async fn a_file_that_is_not_a_configuration_is_not_written() {
         .store()
         .record_id(&alias("usb"), &read, &opened())
         .await;
-    assert!(
-        matches!(recorded, Err(RecordError::Store(_))),
-        "{recorded:?}"
-    );
+    assert_matches!(recorded, Err(RecordError::Store(_)));
     assert_eq!(scratch.read(), broken);
 }

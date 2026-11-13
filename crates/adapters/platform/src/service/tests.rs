@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
@@ -328,10 +329,10 @@ async fn launchd_boots_the_old_agent_out_before_it_boots_the_new_one_in() {
 async fn removing_no_service_asks_the_manager_nothing() {
     for which in [Which::Systemd, Which::Launchd] {
         let faked = Faked::new(which);
-        assert!(matches!(
+        assert_matches!(
             faked.service.remove().await,
             Ok(Removed::NotInstalled { .. })
-        ));
+        );
         assert_eq!(faked.fakes.commands(), Vec::<String>::new(), "{which:?}");
     }
 }
@@ -370,8 +371,9 @@ async fn a_refused_removal_keeps_the_file() {
         faked.service.install(&faked.program("bin")).await.unwrap();
         faked.fakes.refuse(words);
         let error = faked.service.remove().await.unwrap_err();
-        assert!(
-            matches!(error.problem, ServiceProblem::ManagerRefused { .. }),
+        assert_matches!(
+            error.problem,
+            ServiceProblem::ManagerRefused { .. },
             "{which:?}"
         );
         assert!(faked.service.file().exists(), "{which:?}");
@@ -386,8 +388,9 @@ async fn an_agent_launchd_does_not_know_is_removed_without_a_bootout() {
         let faked = Faked::new(Which::Launchd);
         faked.service.install(&faked.program("bin")).await.unwrap();
         faked.fakes.refuse_ending("Could not find service", code);
-        assert!(
-            matches!(faked.service.remove().await, Ok(Removed::Removed { .. })),
+        assert_matches!(
+            faked.service.remove().await,
+            Ok(Removed::Removed { .. }),
             "{code}"
         );
         assert!(!faked.service.file().exists(), "{code}");
@@ -413,12 +416,10 @@ async fn a_manager_that_is_not_on_the_path_is_named() {
         .install(&faked.program("bin"))
         .await
         .unwrap_err();
-    assert!(
-        matches!(
-            &error.problem,
-            ServiceProblem::ManagerMissing { command, detail }
-                if command == "systemctl --user daemon-reload" && !detail.is_empty()
-        ),
+    assert_matches!(
+        &error.problem,
+        ServiceProblem::ManagerMissing { command, detail }
+            if command == "systemctl --user daemon-reload" && !detail.is_empty(),
         "{error:?}"
     );
 }
@@ -476,8 +477,9 @@ async fn a_file_that_can_not_be_written_is_named_with_the_systems_words() {
         .install(&faked.program("bin"))
         .await
         .unwrap_err();
-    assert!(
-        matches!(&error.problem, ServiceProblem::File { detail } if !detail.is_empty()),
+    assert_matches!(
+        &error.problem,
+        ServiceProblem::File { detail } if !detail.is_empty(),
         "{error:?}"
     );
     assert_eq!(faked.fakes.commands(), Vec::<String>::new());
@@ -595,10 +597,7 @@ async fn a_write_that_fails_leaves_no_temporary_file() {
     flags("uchg", &file);
     let installed = faked.service.install(&faked.program("other")).await;
     flags("nouchg", &file);
-    assert!(matches!(
-        installed.unwrap_err().problem,
-        ServiceProblem::File { .. }
-    ));
+    assert_matches!(installed.unwrap_err().problem, ServiceProblem::File { .. });
     let left: Vec<_> = std::fs::read_dir(file.parent().unwrap())
         .unwrap()
         .map(|entry| entry.unwrap().file_name())

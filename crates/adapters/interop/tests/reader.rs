@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::assert_matches;
+
 use app::ports::{ProfileError, ProfileNotice, ProfileProblem, ProfileReader};
 use common::{
     ENTRY, REPOSITORY, Scratch, commands, ids, ignored, line_of, nas, plan, read_err, read_ok,
@@ -1194,10 +1196,7 @@ password-file = \"/srv/demo-password\"
 ",
     )
     .await;
-    assert!(matches!(
-        profile.repository.settings.password,
-        SecretRef::File { .. }
-    ));
+    assert_matches!(profile.repository.settings.password, SecretRef::File { .. });
     assert!(
         profile
             .notices
@@ -1234,10 +1233,7 @@ async fn a_key_is_noted_and_the_password_source_stays_and_a_key_alone_is_refused
     ] {
         assert!(profile.notices.contains(&ignored(key)), "{key}");
     }
-    assert!(matches!(
-        profile.repository.settings.password,
-        SecretRef::File { .. }
-    ));
+    assert_matches!(profile.repository.settings.password, SecretRef::File { .. });
     assert!(!format!("{profile:?}").contains("CANARY"));
 
     let (key, _) = unsupported(
@@ -1461,10 +1457,7 @@ async fn rustics_password_file_and_command_variables_fill_the_gap_too() {
         )
         .await
         .expect("a profile");
-    assert!(matches!(
-        profile.repository.settings.password,
-        SecretRef::Command(_)
-    ));
+    assert_matches!(profile.repository.settings.password, SecretRef::Command(_));
 
     let error = scratch
         .read_with(
@@ -1483,10 +1476,7 @@ async fn a_password_source_the_profile_names_beats_rustics_variable() {
         .read_with(&[("RUSTIC_PASSWORD", "CANARY")], &profile_text(""))
         .await
         .expect("a profile");
-    assert!(matches!(
-        profile.repository.settings.password,
-        SecretRef::File { .. }
-    ));
+    assert_matches!(profile.repository.settings.password, SecretRef::File { .. });
 }
 
 #[tokio::test]
@@ -1837,11 +1827,9 @@ async fn the_filter_an_export_makes_is_not_a_narrowing() {
         // A narrower filter is refused; so is a filter-tags that is not
         // a list of texts (a wrong type).
         let error = read_err(&text).await;
-        assert!(
-            matches!(
-                error,
-                ProfileError::Unsupported { .. } | ProfileError::Invalid { .. }
-            ),
+        assert_matches!(
+            error,
+            ProfileError::Unsupported { .. } | ProfileError::Invalid { .. },
             "{filter}: {error:?}"
         );
     }

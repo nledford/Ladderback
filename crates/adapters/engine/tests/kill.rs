@@ -17,6 +17,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::path::Path;
 use std::time::Duration;
 
@@ -236,11 +237,9 @@ async fn killed_prunes(location: Location, source: &Path, label: &str) {
         assert!(killed, "{context}: the prune ended before its first event");
         assert_checks_clean(&engine, &location, &context).await;
         let again = run_to_end(&engine, prune_job(&location)).await;
-        assert!(
-            matches!(
-                again.last(),
-                Some(EngineEvent::Succeeded(EngineResult::Prune(_)))
-            ),
+        assert_matches!(
+            again.last(),
+            Some(EngineEvent::Succeeded(EngineResult::Prune(_))),
             "{context}: {again:?}"
         );
         // The repository still takes a backup, and is still sound after it.
