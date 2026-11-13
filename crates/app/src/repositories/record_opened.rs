@@ -1257,6 +1257,17 @@ mod tests {
             .expect("the stream ends once the job is stopped")
     }
 
+    /// Hands a job whose start the test holds to `engine`, failing when the
+    /// engine doesn't take it within [`BOUND`]: the engine starts the job
+    /// behind the stream it returns, after the identify, so it takes the job
+    /// before the start is let go.
+    async fn taken_while_held(engine: &RecordOpened, job: Job) -> RunningJob {
+        tokio::time::timeout(BOUND, engine.run(op(), job))
+            .await
+            .expect("the engine takes the job before its start is let go")
+            .expect("the engine takes the job")
+    }
+
     /// A stop before anything read the job's events, its identify running:
     /// the identify is stopped, and the job never starts.
     #[tokio::test]
@@ -1336,10 +1347,7 @@ mod tests {
         let RunningJob {
             mut events,
             mut control,
-        } = engine
-            .run(op(), backup(&access))
-            .await
-            .expect("the engine takes the job");
+        } = taken_while_held(&engine, backup(&access)).await;
         assert_eq!(events.next().now_or_never(), None, "the job is starting");
         assert_eq!(
             keeps.seen(),
@@ -1366,10 +1374,7 @@ mod tests {
         let RunningJob {
             mut events,
             mut control,
-        } = engine
-            .run(op(), backup(&access))
-            .await
-            .expect("the engine takes the job");
+        } = taken_while_held(&engine, backup(&access)).await;
         assert_eq!(events.next().now_or_never(), None, "the job is starting");
         stop_within_bound(&mut control).await;
         let _ = go.send(Err(EngineError::Unavailable {
