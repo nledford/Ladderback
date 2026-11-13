@@ -7,8 +7,8 @@
 //! `type` is an error.
 
 use app::ports::{
-    BackupSummary, CheckSummary, EngineResult, ForgetSummary, PrunePlanSummary, PruneSummary,
-    RewriteSummary, SnapshotSummary,
+    BackupSummary, CheckSummary, EngineResult, ForgetSummary, ProbeAnswer, PrunePlanSummary,
+    PruneSummary, RewriteSummary, SnapshotSummary,
 };
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,21 @@ pub(crate) enum Summary {
     Snapshots {
         snapshots: Vec<Snapshot>,
     },
+    /// A read's result: a probe of a location is never logged as an
+    /// operation (decision 80), so no row holds this variant either.
+    Probed {
+        answer: Probed,
+    },
+}
+
+/// What a probe found, as the summary keeps it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "found", rename_all = "snake_case")]
+pub(crate) enum Probed {
+    Holds { id: RepositoryId },
+    Refused,
+    NotARepository,
+    PasswordNotAccepted,
 }
 
 /// One snapshot of a listing, as the summary keeps it: spelled out here
@@ -97,7 +112,14 @@ impl From<&EngineResult> for Summary {
                 steps_completed: *steps_completed,
             },
             EngineResult::Repository { id } => Self::Repository { id: id.clone() },
-            EngineResult::Probed(_) => todo!(),
+            EngineResult::Probed(answer) => Self::Probed {
+                answer: match answer {
+                    ProbeAnswer::Holds(id) => Probed::Holds { id: id.clone() },
+                    ProbeAnswer::Refused => Probed::Refused,
+                    ProbeAnswer::NotARepository => Probed::NotARepository,
+                    ProbeAnswer::PasswordNotAccepted => Probed::PasswordNotAccepted,
+                },
+            },
             EngineResult::Backup(summary) => Self::Backup {
                 repository: summary.repository.clone(),
                 snapshot: summary.snapshot.clone(),
@@ -231,6 +253,12 @@ impl From<Summary> for EngineResult {
                 errors,
                 warnings,
             }),
+            Summary::Probed { answer } => Self::Probed(match answer {
+                Probed::Holds { id } => ProbeAnswer::Holds(id),
+                Probed::Refused => ProbeAnswer::Refused,
+                Probed::NotARepository => ProbeAnswer::NotARepository,
+                Probed::PasswordNotAccepted => ProbeAnswer::PasswordNotAccepted,
+            }),
             Summary::Snapshots { snapshots } => Self::Snapshots(
                 snapshots
                     .into_iter()
@@ -286,6 +314,20 @@ mod tests {
     fn a_listing_keeps_each_snapshots_offset() {
         for seconds in [-6 * 3600, 19 * 60 + 32] {
             let result = listing(domain::Offset::from_seconds(seconds).expect("an offset"));
+            assert_eq!(round_trip(&result), result);
+        }
+    }
+
+    /// Every answer of a probe reads back as it was written.
+    #[test]
+    fn a_probes_answer_reads_back() {
+        for answer in [
+            ProbeAnswer::Holds(RepositoryId::parse(&"cd".repeat(32)).expect("an ID")),
+            ProbeAnswer::Refused,
+            ProbeAnswer::NotARepository,
+            ProbeAnswer::PasswordNotAccepted,
+        ] {
+            let result = EngineResult::Probed(answer);
             assert_eq!(round_trip(&result), result);
         }
     }

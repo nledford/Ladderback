@@ -91,6 +91,11 @@ pub struct JobSpec {
 pub enum JobKind {
     Fake(FakeJobSpec),
     Identify(RepositorySpec),
+    /// Tries one location of a repository reached at several (decision 80):
+    /// opens it with no cache and writes nothing, not even the removal of a
+    /// killed worker's leftovers, and says what is there. A read, never an
+    /// operation.
+    Probe(RepositorySpec),
     /// Initialises a repository where nothing is yet, with default key
     /// options. It refuses when one already exists there.
     Init(RepositorySpec),
@@ -380,6 +385,23 @@ pub enum OpResult {
     Snapshots {
         count: u64,
     },
+    /// What a [`JobKind::Probe`] found at a location that answered.
+    Probed(ProbeResult),
+}
+
+/// What a probe found at a location that answered. A location that didn't
+/// answer, refused the connection or has no route fails the probe instead.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "found", rename_all = "snake_case")]
+pub enum ProbeResult {
+    /// A repository the password opens, with this ID.
+    Holds { id: RepositoryId },
+    /// The location refused the credentials.
+    Refused,
+    /// No repository's `config` is there.
+    NotARepository,
+    /// A repository is there, and the password opens nothing in it.
+    PasswordNotAccepted,
 }
 
 /// One snapshot of a listing, as the worker reports it.

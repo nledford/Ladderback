@@ -13,7 +13,7 @@ use std::time::Duration;
 use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
-    ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProgressEvent,
+    ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProbeAnswer, ProgressEvent,
     ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary, RepositoryAccess, RewriteJob,
     RewriteSummary, RunningJob, SnapshotSummary,
 };
@@ -31,8 +31,8 @@ use crate::environment;
 use crate::job::{
     BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
     JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
-    ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec, TRUNCATED,
-    WorkerEvent, exit_code,
+    ProbeResult, ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec,
+    TRUNCATED, WorkerEvent, exit_code,
 };
 use crate::step::step_of;
 use domain::planning::{GlobFile, SourceFilter};
@@ -1227,6 +1227,12 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
         WorkerEvent::Result(result) => EngineEvent::Succeeded(match result {
             OpResult::Fake { steps_completed } => EngineResult::Fake { steps_completed },
             OpResult::Repository { id } => EngineResult::Repository { id },
+            OpResult::Probed(found) => EngineResult::Probed(match found {
+                ProbeResult::Holds { id } => ProbeAnswer::Holds(id),
+                ProbeResult::Refused => ProbeAnswer::Refused,
+                ProbeResult::NotARepository => ProbeAnswer::NotARepository,
+                ProbeResult::PasswordNotAccepted => ProbeAnswer::PasswordNotAccepted,
+            }),
             OpResult::Backup(r) => EngineResult::Backup(BackupSummary {
                 repository: r.repository,
                 snapshot: r.snapshot,
@@ -1371,7 +1377,9 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
     match job {
         Job::Fake(_) => None,
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
-        Job::Probe(_) => todo!(),
+        // A probe names no repository, so it takes no cache slot: it opens
+        // with no cache (decision 80).
+        Job::Probe(_) => None,
         Job::Backup(job) => job.repository.id.as_ref(),
         Job::Forget(job) => job.repository.id.as_ref(),
         Job::Rewrite(job) => job.repository.id.as_ref(),
@@ -1425,8 +1433,9 @@ fn without_cache(job: &Job, cache_root: bool, slot: bool) -> Option<NoCache> {
 fn access_of(job: &Job) -> Option<&RepositoryAccess> {
     match job {
         Job::Fake(_) => None,
-        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => Some(access),
-        Job::Probe(_) => todo!(),
+        Job::Identify(access) | Job::Probe(access) | Job::Init(access) | Job::Ls(access) => {
+            Some(access)
+        }
         Job::Backup(job) => Some(&job.repository),
         Job::Forget(job) => Some(&job.repository),
         Job::Rewrite(job) => Some(&job.repository),
@@ -1534,7 +1543,6 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         });
     }
     Ok(match job {
-        Job::Probe(_) => todo!(),
         Job::Fake(FakeJob {
             steps,
             step_delay,
@@ -1580,6 +1588,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
             deadline_budget,
         }),
         Job::Identify(access) => JobKind::Identify(repository_spec(access)),
+        Job::Probe(access) => JobKind::Probe(repository_spec(access)),
         Job::Init(access) => JobKind::Init(repository_spec(access)),
         Job::Ls(access) => JobKind::Ls(repository_spec(access)),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
@@ -3842,6 +3851,31 @@ mod tests {
             Some(cache_dir(&cache_root, &id, 0)),
             "the slot of the worker that timed out stayed taken"
         );
+    }
+
+    /// A probe opens with no cache (decision 80): it takes no slot, even for
+    /// an access that names the repository, and its worker gets the access
+    /// it probes.
+    #[test]
+    fn a_probe_takes_no_cache_slot_and_carries_its_location() {
+        let access = RepositoryAccess {
+            repository: "/srv/lan".to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo"),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: Some(RepositoryId::parse(&"ab".repeat(32)).unwrap()),
+            entry: None,
+        };
+        let probe = Job::Probe(access.clone());
+        assert_eq!(repository_id(&probe), None);
+        assert_eq!(access_of(&probe), Some(&access));
+        let Ok(JobKind::Probe(spec)) = job_kind(probe) else {
+            panic!("a probe is a probe job");
+        };
+        assert_eq!(spec.repository, "/srv/lan");
     }
 
     // The first-line deadline: a worker that took its job and then says

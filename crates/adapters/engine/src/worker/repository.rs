@@ -15,7 +15,7 @@ use super::cancel::refusing_snapshots_once_cancelled;
 use super::convert::JobError;
 use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
-use crate::job::{Level, RepositorySpec};
+use crate::job::{Level, ProbeResult, RepositorySpec};
 
 /// Builds the repository handle, both halves of it when it has a hot one:
 /// the backends, the cache this worker may use, and the progress reporting
@@ -106,6 +106,67 @@ pub(crate) fn open(
         remove_leftovers(ctx, half)?;
     }
     Ok(repository)
+}
+
+/// Tries one location (decision 80): builds its backend with its own
+/// settings, reads the repository's `config` through it, opens the
+/// repository with the password and reads its ID. It writes nothing: unlike
+/// [`open`], it removes no leftovers, since nothing has yet said the location
+/// holds the repository the entry means. A location that doesn't answer
+/// fails the probe with what rustic said; the daemon then calls it silent.
+pub(crate) fn probe(ctx: &Context, spec: &RepositorySpec) -> Result<ProbeResult, JobError> {
+    if let Some(root) = missing_fs_root(spec) {
+        return Err(JobError::failed(format!(
+            "the repository's root folder {} is not there",
+            root.display()
+        )));
+    }
+    let repository = new_repository(ctx, spec)?;
+    match repository.config_id() {
+        Ok(Some(_)) => {}
+        // rustic's REST backend reads `config` with a `HEAD` and takes any
+        // failure for "not there", a refusal of the credentials included: a
+        // listing, which fails on a refusal, tells the two apart.
+        Ok(None) => {
+            return Ok(match repository.infos_files() {
+                Err(error) if refused(&error) => ProbeResult::Refused,
+                Ok(_) | Err(_) => ProbeResult::NotARepository,
+            });
+        }
+        Err(error) if refused(&error) => return Ok(ProbeResult::Refused),
+        Err(error) => return Err(error.into()),
+    }
+    let credentials = Credentials::password(spec.password.expose());
+    match repository.open(&credentials) {
+        Ok(repository) => Ok(ProbeResult::Holds {
+            id: repository_id(&repository)?,
+        }),
+        // rustic's code for "no key opens with this password".
+        Err(error) if error.is_code(WRONG_PASSWORD) => Ok(ProbeResult::PasswordNotAccepted),
+        Err(error) if refused(&error) => Ok(ProbeResult::Refused),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// rustic_core's error code for a password that opens no key (`keyfile.rs`).
+const WRONG_PASSWORD: &str = "C002";
+
+/// Whether the backend answered and refused the credentials: an HTTP 401 or
+/// 403 from a REST or OpenDAL server, or OpenDAL's permission error, found
+/// anywhere in the error's chain.
+fn refused(error: &rustic_core::RusticError) -> bool {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(error) = cause {
+        let text = error.to_string();
+        if ["401 Unauthorized", "403 Forbidden", "PermissionDenied"]
+            .iter()
+            .any(|sign| text.contains(sign))
+        {
+            return true;
+        }
+        cause = error.source();
+    }
+    false
 }
 
 /// Where a half of the repository is, as far as telling "no repository"
@@ -632,6 +693,77 @@ mod tests {
             failed_code(&spec_at(&refusing_rest_server())),
             api::ErrorCode::OperationFailed
         );
+    }
+
+    // The probe of a location (decision 80).
+
+    fn probed(spec: &RepositorySpec) -> Result<ProbeResult, JobError> {
+        let (ctx, _capture) = context(None);
+        probe(&ctx, spec)
+    }
+
+    #[test]
+    fn a_probe_of_a_repository_answers_with_its_id_and_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let lookalike = leftover(&repository);
+        let Ok(ProbeResult::Holds { id }) = probed(&spec_at(&repository.to_string_lossy())) else {
+            panic!("the repository must answer");
+        };
+        let (ctx, _capture) = context(None);
+        let opened = open(&ctx, &spec_at(&repository.to_string_lossy())).unwrap();
+        assert_eq!(id, repository_id(&opened).unwrap());
+        // `open` removed it just now; the probe before it had left it.
+        assert!(!lookalike.exists());
+        let again = leftover(&repository);
+        probed(&spec_at(&repository.to_string_lossy())).unwrap();
+        assert!(again.exists(), "the probe removed a file");
+    }
+
+    #[test]
+    fn a_probe_with_a_password_that_opens_nothing_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let spec = RepositorySpec {
+            password: SecretValue::new("hunter2-not-the-password"),
+            ..spec_at(&repository.to_string_lossy())
+        };
+        assert_eq!(probed(&spec).ok(), Some(ProbeResult::PasswordNotAccepted));
+    }
+
+    #[test]
+    fn a_probe_of_an_empty_folder_finds_no_repository() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            probed(&spec_at(&root.path().to_string_lossy())).ok(),
+            Some(ProbeResult::NotARepository)
+        );
+    }
+
+    #[test]
+    fn a_probe_of_a_rest_server_that_refuses_the_credentials_says_so() {
+        assert_eq!(
+            probed(&spec_at(&refusing_rest_server())).ok(),
+            Some(ProbeResult::Refused)
+        );
+        let forbidding = format!("rest:http://{}/", server_answering("403 Forbidden"));
+        assert_eq!(
+            probed(&spec_at(&forbidding)).ok(),
+            Some(ProbeResult::Refused)
+        );
+    }
+
+    #[test]
+    fn a_probe_of_a_location_that_is_not_there_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("gone").join("repo");
+        let spec = RepositorySpec {
+            options: [("root".to_owned(), missing.to_string_lossy().into_owned())].into(),
+            ..spec_at("opendal:fs")
+        };
+        assert!(matches!(probed(&spec), Err(JobError::Failed { .. })));
     }
 
     /// A server that can't be reached gives no answer at all: the job fails
