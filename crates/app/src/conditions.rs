@@ -71,7 +71,12 @@ impl LinkReading {
     /// The link, read the first time it is asked for; `None` when the
     /// platform couldn't report it.
     pub async fn link(&mut self) -> Option<Link> {
-        todo!("{:?}", self.read)
+        if let Some(read) = self.read {
+            return read;
+        }
+        let read = self.link.link().await.ok();
+        self.read = Some(read);
+        read
     }
 }
 
@@ -84,10 +89,10 @@ pub async fn check_location_rules(
     rules: &[Option<LocationRule>],
     reading: &mut LinkReading,
 ) -> Result<(), UnmetCondition> {
-    todo!(
-        "{rules:?} {:?}",
-        location_condition(rules, reading.read.flatten())
-    )
+    if rules.is_empty() || rules.iter().any(Option::is_none) {
+        return Ok(());
+    }
+    location_condition(rules, reading.link().await)
 }
 
 /// How the wait for the network ended. Whatever the end, the run goes ahead:

@@ -130,6 +130,6 @@ impl Default for FakeNetworkLink {
 #[async_trait]
 impl NetworkLink for FakeNetworkLink {
     async fn link(&self) -> Result<Link, PlatformError> {
-        todo!("{}", self.0.asked())
+        self.0.ask()
     }
 }
