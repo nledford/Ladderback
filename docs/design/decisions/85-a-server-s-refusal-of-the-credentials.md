@@ -1,0 +1,26 @@
+# Decision 85: How a REST server's refusal of the credentials is told
+
+**A job that doesn't open its repository because a REST server answered 401 or 403 fails with a code of its own, `credentials-refused`, which the engine adapter reads from the HTTP status: the one in rustic's error, or, when rustic dropped it, the one a listing of the keys of each REST half gets; a Test answers it 503; nothing else changes** (recorded 2026-11-13, §3.1, §4.1, §4.4; #478). A wrong user name or password in a `rest:` location, or a password file with a trailing newline, was reported as rustic's "No repository config file found", which sent people looking for a missing repository: rustic's REST backend reads the config with a `HEAD` and takes any status but success for "no config file" (`rest.rs` L234-249 at the pinned revision), so the server's refusal never reached the error.
+
+Decided:
+
+1. **The code.** `FailureReason::CredentialsRefused`, on the wire `credentials-refused`, with no arguments: the server answered and refused the credentials it was sent, so nothing was read or written. Like `repository-not-found`, it keeps no detail: the code says it all, and the worker's own line naming the status (`the server answered 401 Unauthorized: …`) goes no further than the adapter. Its message (`error-credentials-refused`) says to check the user name and password in the location or its options, that the server gives that user the repository, and that a credential read from a file holds nothing else.
+2. **Where it is told.** In the engine adapter's `open` (`crates/adapters/engine/src/worker/repository.rs`), when the repository doesn't open, and only then, before decision 53's look at the folders:
+   - when rustic's error holds an HTTP client error anywhere in its chain, its status decides: 401 or 403 is a refusal, any other status or none (no connection, a timeout) is not, and nothing more is asked;
+   - when it holds none, as after the config's `HEAD`, each half on a REST server, the cold one first, lists its keys once: a `GET` that rustic fails with the server's status, built with the half's own options as rustic merges them (`options-cold` or `options-hot` over `options`) and with retries off, so a server that answers 5xx is asked once more, not through a second backoff. A half on any other backend is never set up again: an rclone half starts a process, and an OpenDAL `fs` half makes its root folder.
+   A repository that opens costs no extra request. The status is read as `reqwest::StatusCode`, the type of rustic's REST errors, not from its English.
+3. **What isn't a refusal.** A REST server that takes the credentials and holds no repository answers 404, which stays `operation-failed` with rustic's words, as decision 53 decided: a server's missing repository can't be told from one out of reach. A wrong repository password stays `operation-failed` too.
+4. **The answers.** The Repositories API's Test and connect refuse `credentials-refused` with 503, as the other refusals of a repository that is there but can't be used now (`repository-replaced`, `repository-timed-out`); so do the maintenance routes and the snapshot listing. A backup, check, prune or forget fails with it in the operation log, and the announcement says it.
+5. **The probe.** Decision 80's probe tells a refusal by the same status: an HTTP client error's 401 or 403. An error with no HTTP client error in it is still read for OpenDAL's words (`PermissionDenied`, or a server's own page naming 401 or 403), since `opendal` is no dependency of the engine crate. A location's `refused` and a repository's `no-location-usable` are unchanged.
+
+Accepted:
+
+- **One more request when a REST repository doesn't open for another reason** (a wrong password, a missing repository, a server error at the config): the listing of its keys. It is the error path only, one request, and no retry; on a server that refuses the credentials it is a second refused login, so a lockout that counts them (fail2ban and the like) comes twice as soon.
+- **Initialising on a refusing server is not covered.** `init` doesn't open a repository; its failure keeps rustic's words (`operation-failed`), which name the server's status there, since rustic's writes keep it.
+- **A rustic upgrade that keeps the status out of its errors** turns a refusal back into `operation-failed`; the engine's tests against a refusing server (401 and 403, a cold and a hot half) fail then, rather than the code going quiet.
+
+Rejected:
+
+- **Matching rustic's text** ("No repository config file found"): it says the same of a missing repository, so it can't tell the two apart.
+- **Setting up every half again to list it**: an rclone half starts a process and an OpenDAL `fs` half makes its root folder, which decision 53 keeps from happening.
+- **422, as `operation-failed`**: the request was well formed and the repository may be there; the server only refused who asked, as with `password-not-accepted` and `repository-replaced`.

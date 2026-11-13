@@ -145,6 +145,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [82](decisions/82-the-step-a-running-operation-is-in.md) | How a page learns which step a running operation is in |
 | [83](decisions/83-a-progress-bar-a-screen-reader-can-reach.md) | A progress bar a screen reader can reach, and that never chatters |
 | [84](decisions/84-view-blocks-are-formatted-by-leptosfmt.md) | Formatting the inside of `view!` blocks |
+| [85](decisions/85-a-server-s-refusal-of-the-credentials.md) | How a REST server's refusal of the credentials is told |
 
 ## 17. Open questions
 
