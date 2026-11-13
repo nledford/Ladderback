@@ -7,6 +7,10 @@ ui-skip-link = Skip to content
 # The product's name, in the header of every page.
 ui-brand = { -brand-name }
 
+# The running version, at the right of the header wherever it shows the
+# navigation. $version is the release's number, such as 0.3.0.
+ui-version = Version { $version }
+
 # The start page's title, as the browser's tab and history show it.
 ui-start-title = { -brand-name }
 
