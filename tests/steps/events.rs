@@ -396,7 +396,7 @@ fn post(agent: &Agent, path: &str, body: &str) -> (u16, String) {
         .expect("the request is sent");
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).expect("a response");
-    let text = String::from_utf8_lossy(&raw).into_owned();
+    let text = String::from_utf8_lossy_owned(raw);
     let status = text
         .split_once(' ')
         .and_then(|(_, rest)| rest.split_whitespace().next())

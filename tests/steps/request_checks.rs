@@ -215,7 +215,7 @@ pub(crate) fn exchange(addr: SocketAddr, request: &Request) -> Response {
     Response {
         status,
         headers,
-        body: String::from_utf8_lossy(&body).into_owned(),
+        body: String::from_utf8_lossy_owned(body),
     }
 }
 

@@ -173,8 +173,8 @@ pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     agent.interop.ran = Some(Ran {
         success: output.status.success(),
         code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout: String::from_utf8_lossy_owned(output.stdout),
+        stderr: String::from_utf8_lossy_owned(output.stderr),
     });
 }
 
