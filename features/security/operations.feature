@@ -59,6 +59,16 @@ Feature: The operation lifecycle
     When a history page is asked for with the cursor "not-an-operation"
     Then the refusal is typed "invalid-cursor"
 
+  # The engine says why the backup failed in its own words, which it masks of
+  # every secret of the job first (I4); the history carries them with the
+  # failure's code, so a page can say why without the daemon's log (#474).
+  Scenario: A backup that fails says why in the history, without its password
+    Given the plan's repository password in the configuration is "canary-not-a-secret", which isn't the repository's
+    When the daemon starts a backup of the plan "home"
+    Then the history page shows the operation failed
+    And the history page gives the operation's failure as "operation-failed", in the engine's own words
+    And neither the history page nor the operation's detail shows "canary-not-a-secret"
+
   Scenario: Starting a backup whose password command fails is refused with that secret's problem
     Given the plan's repository reads its password from a command that prints "CANARY-start-password" and then fails saying "no such entry"
     When the client starts a backup of the plan "home"

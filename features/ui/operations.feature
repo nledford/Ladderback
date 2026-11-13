@@ -33,6 +33,20 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the row "home" of the table "Operations" lists "3 files" in its "Result" column
     And the page has no accessibility violations
 
+  # A failed run's Result says why it failed, in the page's language, with
+  # the engine's own words marked as English (WCAG 3.1.2), and never the
+  # password (I4, #474).
+  Scenario: A failed backup's row says why it failed
+    Given a demo plan "home" with a tiny scratch repository
+    And the configuration has the password "canary-not-a-secret" for the repository "demo", which isn't its own
+    And a backup of the plan "home" has failed
+    When I open the address "/operations"
+    Then the row "home" of the table "Operations" shows "Failed" in its "Status" column
+    And the row "home" of the table "Operations" lists "The operation failed:" in its "Result" column
+    And the row "home" of the table "Operations" gives the engine's own words in English in its "Result" column
+    And the row "home" of the table "Operations" doesn't show "canary-not-a-secret" in its "Result" column
+    And the page has no accessibility violations
+
   # A backup learns its size only once rustic has walked the whole source,
   # which on a big folder takes minutes; until then the row says the backup
   # is working and shows no percentage, never 0 percent (#422). Once the

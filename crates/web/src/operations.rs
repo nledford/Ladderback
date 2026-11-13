@@ -5,9 +5,10 @@
 //! the host; `routes.rs` renders it.
 
 use api::{MsgArg, OperationResultDto, OperationSummaryDto};
-use l10n::{MessageId, msg};
+use l10n::{Localizer, MessageId, msg};
 
 use crate::announcer::Politeness;
+use crate::repositories::Sentence;
 use crate::wording::Words;
 
 /// How many hex digits of a snapshot's ID name it, as rustic shows one.
@@ -84,6 +85,24 @@ pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
         });
     }
     facts
+}
+
+/// Why `operation` failed, as its Result cell says it before any fact: its
+/// failure in the catalog's words, with the engine's own marked as English;
+/// none for a run that didn't fail.
+pub(crate) fn failure(localizer: &Localizer, operation: &OperationSummaryDto) -> Option<Sentence> {
+    let failure = operation.failure.as_ref()?;
+    let args: Vec<(String, MsgArg)> = failure
+        .args
+        .iter()
+        .map(|(name, arg)| (name.clone(), arg.clone()))
+        .collect();
+    Some(crate::routes::refused_sentence(
+        localizer,
+        failure.code,
+        &args,
+        failure.detail.as_deref(),
+    ))
 }
 
 /// What a run that succeeded produced, then how long it took.
@@ -264,6 +283,7 @@ mod tests {
             finished_at: result.is_some().then(|| "2026-11-09T10:01:06Z".to_owned()),
             warning_codes: Vec::new(),
             failure_code: None,
+            failure: None,
             result,
             repository: repository.map(str::to_owned),
             locations: Vec::new(),
@@ -618,15 +638,58 @@ mod tests {
         assert_eq!(result(&failed), []);
     }
 
-    /// A failed run's row says nothing in its Result: why it failed is the
-    /// operation's detail, never the table's.
+    /// A failed run's row lists no facts in its Result: it says only why
+    /// the run failed, which [`failure`] gives.
     #[test]
     fn a_failed_run_shows_no_result_and_no_failure() {
         let mut failed = summary("check", "", Some("demo"), None);
         "failed".clone_into(&mut failed.status);
         failed.finished_at = Some("2026-11-09T10:01:06Z".to_owned());
-        failed.failure_code = Some(api::ErrorCode::EngineUnavailable);
+        failed.failure = Some(api::ErrorDto::new(
+            api::ErrorCode::EngineUnavailable,
+            [],
+            None,
+        ));
         assert_eq!(result(&failed), []);
+    }
+
+    /// A failed run's Result says why first: its failure in the catalog's
+    /// words, with the engine's own marked as English (WCAG 3.1.2). A run
+    /// that didn't fail says no failure.
+    #[test]
+    fn a_failed_runs_row_says_why_in_the_catalogs_words_with_the_engines_marked() {
+        let localizer = Localizer::new(&[]);
+        let mut failed = summary("backup", "home", None, None);
+        "failed".clone_into(&mut failed.status);
+        failed.failure = Some(api::ErrorDto::new(
+            api::ErrorCode::OperationFailed,
+            [],
+            Some("no key opens the repository".to_owned()),
+        ));
+        let said = failure(&localizer, &failed).expect("a failed run says why");
+        assert_eq!(
+            said.detail.as_ref().map(|(words, _)| words.as_str()),
+            Some("no key opens the repository")
+        );
+        assert_eq!(
+            said.plain().replace(['\u{2068}', '\u{2069}'], ""),
+            "The operation failed: no key opens the repository"
+        );
+        failed.failure = Some(api::ErrorDto::new(
+            api::ErrorCode::EngineExited,
+            [("exit_code", MsgArg::Text("3".to_owned()))],
+            None,
+        ));
+        let said = failure(&localizer, &failed).expect("a failed run says why");
+        assert!(
+            said.plain()
+                .replace(['\u{2068}', '\u{2069}'], "")
+                .contains("with exit status 3 "),
+            "its arguments: {}",
+            said.plain()
+        );
+        let running = summary("backup", "home", None, None);
+        assert_eq!(failure(&localizer, &running), None);
     }
 
     #[test]

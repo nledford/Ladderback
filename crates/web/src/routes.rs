@@ -678,6 +678,17 @@ fn row_view(
             })
         }
     });
+    let failure = Memo::new({
+        let id = id.clone();
+        let localizer = Arc::clone(&localizer);
+        move |_| {
+            page.with(|state| {
+                state
+                    .row(&id)
+                    .and_then(|row| operations::failure(&localizer, &row.summary))
+            })
+        }
+    });
     let badge = Memo::new({
         let localizer = Arc::clone(&localizer);
         move |_| status.with(|status| badge_of(&localizer, status))
@@ -724,9 +735,12 @@ fn row_view(
             }>{move || instant(&localizer, &started.get(), zone.as_ref())}</td>
             <td>
                 {move || {
+                    let reason = failure.get();
                     let facts = result.get();
-                    (!facts.is_empty())
+                    (reason.is_some() || !facts.is_empty())
                         .then(|| {
+                            let reason = reason
+                                .map(|sentence| view! { <li>{sentence_view(sentence)}</li> });
                             let items = facts
                                 .iter()
                                 .map(|fact| {
@@ -735,7 +749,7 @@ fn row_view(
                                     }
                                 })
                                 .collect_view();
-                            view! { <ul>{items}</ul> }
+                            view! { <ul>{reason}{items}</ul> }
                         })
                 }}
             </td>
