@@ -1,17 +1,20 @@
 @repositories
 Feature: A repository reached at several locations
   A repository may list its locations in order. Before a job opens it the
-  agent tries each in turn and uses the first that answers and holds the same
-  repository, by the ID its entry records: a location that holds another
-  repository is refused and never used. A location with no rule that can't
-  be used is skipped without a warning, since its address may be someone
-  else's on this network; a location that holds another repository, or whose
-  secret can't be read, is a warning. Each location keeps its own options and
-  credentials, and a job carries only the location it uses (I4). A location
-  may carry a rule about the network link the machine is on: it is tried
-  only when its rule holds, and a rule that can't be evaluated doesn't hold.
-  The operation records which location it used and why each earlier one was
-  skipped, by position and outcome, never by a network's name (decision 80).
+  agent tries them and uses the first in order that answers and holds the
+  same repository, by the ID its entry records: a location that holds another
+  repository is refused and never used. Locations that make the server prove
+  who it is before they send a credential, or send none, are tried at the
+  same time; any other location is tried only in its turn. A location with no
+  rule that can't be used is skipped without a warning, since its address may
+  be someone else's on this network; a location that holds another repository,
+  or whose secret can't be read, is a warning. Each location keeps its own
+  options and credentials, and a job carries only the location it uses (I4).
+  A location may carry a rule about the network link the machine is on: it is
+  tried only when its rule holds, and a rule that can't be evaluated doesn't
+  hold. The operation records which location it used and why each earlier one
+  was skipped, by position and outcome, never by a network's name (decisions
+  80 and 86).
 
   Background:
     Given a repository "nas" that records its repository ID, with the locations "lan" and "public", in that order
@@ -24,7 +27,7 @@ Feature: A repository reached at several locations
       When the plan "home" runs
       Then the operation ends as succeeded
       And the operation used the location "lan"
-      And the location "public" was never tried
+      And the location "public" was never opened
       And the operation shows the location "public" as not tried
 
     Scenario: The next location is used when the first doesn't answer
@@ -66,6 +69,46 @@ Feature: A repository reached at several locations
       Then the operation used the location "public"
       And the operation warns that the location "lan" couldn't be tried because a secret was unavailable
       And the warning names the source and never a value
+
+  Rule: Locations that check the server before sending credentials are tried at the same time, and the order still decides
+
+    Scenario: A slower first location that answers is used before a faster second one
+      Given the location "lan" answers after 3 seconds
+      And the location "public" answers after 1 second
+      When the plan "home" runs
+      Then the operation used the location "lan"
+      And the location "public" was tried from the start, at the same time as "lan"
+      And the run waited 3 seconds for its location
+      And the operation shows the location "public" as not tried
+
+    Scenario: A location tried at the same time is stopped once an earlier one answers
+      Given the location "lan" answers after 1 second
+      And the location "public" doesn't answer within 8 seconds
+      When the plan "home" runs
+      Then the operation used the location "lan"
+      And the location "public" was tried from the start, at the same time as "lan"
+      And the run waited 1 second for its location
+      And the operation shows the location "public" as not tried
+      And no probe of a location still runs
+
+    Scenario: A location that doesn't answer adds no wait to the next one's
+      Given the location "lan" doesn't answer within 8 seconds
+      And the location "public" answers after 2 seconds
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation says the location "lan" was skipped because it didn't answer
+      And the run waited 8 seconds for its location
+
+    Scenario: A plain-HTTP location with credentials is never tried before its turn
+      Given the location "lan" doesn't answer within 8 seconds
+      And the location "public" is "rest:http://backup.example.net/nas" with a user and a password in it
+      And the location "public" answers
+      And the repository "nas" has a third location "office", over HTTPS, that answers
+      When the plan "home" runs
+      Then the location "office" was tried from the start, at the same time as "lan"
+      And the location "public" was first tried 8 seconds after the run began, once "lan" had failed
+      And the operation used the location "public"
+      And the operation shows the location "office" as not tried
 
   Rule: A location is tried only when its rule holds
 

@@ -10,7 +10,7 @@ use std::fmt;
 
 use super::repository::Place;
 use super::{
-    InvalidValue, LocationRule, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+    InvalidValue, LocationRule, Plan, RepositoryConfig, RepositorySettings, RuleVerdict, ValueKind,
     masked_options,
 };
 use crate::PlanId;
@@ -133,6 +133,51 @@ impl Location {
         })
         .redact(text)
     }
+}
+
+impl Location {
+    /// Whether every address of this location makes whoever answers prove
+    /// who it is before it is sent a credential, or sends none (decision
+    /// 86): an absolute local path, or `rest:https://` whose certificate is
+    /// checked. Only such a location is probed before its turn.
+    pub fn checks_server_first(&self) -> bool {
+        let accepts_any_certificate = self.accepts_any_certificate();
+        std::iter::once(self.repository.as_str())
+            .chain(self.repo_hot.as_deref())
+            .all(|address| {
+                address_checks_server_first(address)
+                    && !(accepts_any_certificate
+                        && starts_with_ignore_case(address, "rest:https://"))
+            })
+    }
+
+    /// Whether any option set turns the certificate check off: the cold
+    /// backend reads `options` and `options-cold`, the hot one `options` and
+    /// `options-hot`, so one set saying `true` is enough.
+    fn accepts_any_certificate(&self) -> bool {
+        [&self.options, &self.options_hot, &self.options_cold]
+            .into_iter()
+            .flatten()
+            .any(|(key, value)| {
+                key.eq_ignore_ascii_case("http-insecure-tls")
+                    && value.trim().eq_ignore_ascii_case("true")
+            })
+    }
+}
+
+/// Whether one address of a location makes the server prove who it is
+/// before it is sent a credential, or sends none: `local:` and an absolute
+/// path, an absolute path no `:` gives a scheme (rustic reads the text
+/// before the first `:` as one), or `rest:` and an `https://` URL. Anything
+/// else, a reference that may hold any scheme included, doesn't.
+fn address_checks_server_first(address: &str) -> bool {
+    if let Some(path) = address.strip_prefix("local:") {
+        return path.starts_with('/');
+    }
+    if let Some(url) = address.strip_prefix("rest:") {
+        return starts_with_ignore_case(url, "https://");
+    }
+    address.starts_with('/') && !address.contains(':')
 }
 
 impl fmt::Debug for Location {
@@ -323,6 +368,27 @@ impl RepositoryConfig {
             .into_iter()
             .zip(1u8..)
             .filter_map(|(rule, position)| rule.map(|_| position))
+            .collect()
+    }
+
+    /// Which of the entry's locations, in order, the first included, a
+    /// choice probes at its start rather than in its turn (decision 86),
+    /// given each location's rule's verdict, in the same order: those whose
+    /// rule holds (a location with none holds) and that check the server
+    /// first. A location with no verdict doesn't hold.
+    pub fn early_probes(&self, verdicts: &[RuleVerdict]) -> Vec<bool> {
+        let first = Location::of(&self.settings);
+        std::iter::once(&first)
+            .chain(&self.locations.further)
+            .zip(
+                verdicts
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat(RuleVerdict::Unknown)),
+            )
+            .map(|(location, verdict)| {
+                verdict == RuleVerdict::Holds && location.checks_server_first()
+            })
             .collect()
     }
 
@@ -924,5 +990,138 @@ mod tests {
         assert_eq!(several.ruled_positions(), Vec::<u8>::new());
         several.locations.further[0].when = ruled(&[NetworkKind::Wired]);
         assert_eq!(several.ruled_positions(), vec![2]);
+    }
+
+    #[test]
+    fn a_local_path_or_a_checked_https_location_checks_the_server_first() {
+        let checks =
+            |address, options: &[(&str, &str)]| location(address, options).checks_server_first();
+        assert!(checks("/srv/lan", &[]));
+        assert!(checks("local:/srv/lan", &[]));
+        assert!(checks("rest:https://nas.example.lan/r", &[]));
+        assert!(checks("rest:HTTPS://nas.example.lan/r", &[]));
+        assert!(checks("rest:https://demo:pw@nas.example.lan/r", &[]));
+        assert!(checks(
+            "rest:https://nas.example.lan/r",
+            &[("http-cacert", "/etc/ladderback/lan-ca.pem")]
+        ));
+        assert!(checks(
+            "rest:https://nas.example.lan/r",
+            &[("http-insecure-tls", "false")]
+        ));
+    }
+
+    #[test]
+    fn a_location_that_could_send_a_credential_to_an_impostor_doesnt_check_the_server_first() {
+        let checks =
+            |address, options: &[(&str, &str)]| location(address, options).checks_server_first();
+        // Plain HTTP, with credentials or without: in its turn only.
+        assert!(!checks("rest:http://demo:pw@nas.example.lan/r", &[]));
+        assert!(!checks("rest:http://nas.example.lan/r", &[]));
+        assert!(!checks(
+            "rest:http://nas.example.lan/r",
+            &[("password", "${PW}")]
+        ));
+        // Any certificate accepted: an impostor reads the credentials.
+        assert!(!checks(
+            "rest:https://demo:pw@nas.example.lan/r",
+            &[("http-insecure-tls", "true")]
+        ));
+        assert!(!checks(
+            "rest:https://nas.example.lan/r",
+            &[("http-insecure-tls", " TRUE ")]
+        ));
+        // Backends whose check depends on settings Ladderback doesn't see.
+        assert!(!checks(
+            "opendal:s3",
+            &[("endpoint", "https://s3.example.net")]
+        ));
+        assert!(!checks(
+            "opendal:sftp",
+            &[("endpoint", "ssh://nas.example.lan")]
+        ));
+        assert!(!checks(
+            r#"rclone::webdav,url="https://dav.example.lan":r"#,
+            &[]
+        ));
+        // Not known as written: a reference may hold any scheme.
+        assert!(!checks("${LAN_URL}", &[]));
+        // Relative, or a scheme rustic refuses.
+        assert!(!checks("srv/lan", &[]));
+        assert!(!checks("local:srv/lan", &[]));
+        assert!(!checks("/srv/lan:r", &[]));
+        assert!(!checks("REST:https://nas.example.lan/r", &[]));
+        assert!(!checks("rest:https:nas.example.lan/r", &[]));
+        assert!(!checks("", &[]));
+    }
+
+    #[test]
+    fn a_location_whose_hot_half_doesnt_check_the_server_first_doesnt_either() {
+        let mut split = location("rest:https://nas.example.lan/cold", &[]);
+        split.repo_hot = Some("/srv/hot".to_owned());
+        assert!(split.checks_server_first());
+        split.repo_hot = Some("rest:http://demo:pw@nas.example.lan/hot".to_owned());
+        assert!(!split.checks_server_first());
+        split.repo_hot = Some("rest:http://nas.example.lan/hot".to_owned());
+        assert!(!split.checks_server_first());
+        // A hot half over HTTPS that accepts any certificate, whichever set
+        // says so: the hot backend reads `options` and `options-hot`.
+        let mut cold_local = location("/srv/cold", &[]);
+        cold_local.repo_hot = Some("rest:https://demo:pw@nas.example.lan/hot".to_owned());
+        assert!(cold_local.checks_server_first());
+        let insecure = || [("http-insecure-tls".to_owned(), "true".to_owned())].into();
+        let mut in_options = cold_local.clone();
+        in_options.options = insecure();
+        assert!(!in_options.checks_server_first());
+        // The option means nothing to a local path.
+        in_options.repo_hot = Some("/srv/hot".to_owned());
+        assert!(in_options.checks_server_first());
+        let mut in_options_hot = cold_local.clone();
+        in_options_hot.options_hot = insecure();
+        assert!(!in_options_hot.checks_server_first());
+        // A set that turns the check off wins over one that leaves it on.
+        in_options_hot.options = [("http-insecure-tls".to_owned(), "false".to_owned())].into();
+        assert!(!in_options_hot.checks_server_first());
+        let mut cold_https = location(
+            "rest:https://demo:pw@nas.example.lan/cold",
+            &[("http-insecure-tls", "false")],
+        );
+        cold_https.options_cold = insecure();
+        assert!(!cold_https.checks_server_first());
+    }
+
+    #[test]
+    fn only_a_location_whose_rule_holds_and_that_checks_the_server_first_is_probed_early() {
+        use RuleVerdict::{Holds, NotMet, Unknown};
+        let mut several = entry(
+            "rest:https://lan.example.lan/r",
+            &[
+                "rest:http://demo:pw@backup.example.net/r",
+                "/srv/far",
+                "rest:https://backup.example.net/r",
+            ],
+            Some("aa"),
+        );
+        assert_eq!(
+            several.early_probes(&[Holds, Holds, Holds, Holds]),
+            vec![true, false, true, true]
+        );
+        assert_eq!(
+            several.early_probes(&[NotMet, Holds, Unknown, Holds]),
+            vec![false, false, false, true]
+        );
+        // A missing verdict doesn't hold.
+        assert_eq!(
+            several.early_probes(&[Holds, Holds]),
+            vec![true, false, false, false]
+        );
+        several
+            .settings
+            .options
+            .insert("http-insecure-tls".to_owned(), "true".to_owned());
+        assert_eq!(
+            several.early_probes(&[Holds, Holds, Holds, Holds]),
+            vec![false, false, true, true]
+        );
     }
 }

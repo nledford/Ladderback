@@ -6,15 +6,16 @@
 //! evaluated against.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::conditions::{LinkReading, check_location_rules};
 use app::execution::RunOperation;
-use app::fakes::{FakeNetworkLink, FakeRetention, FakeSecrets, InMemoryConfigStore};
+use app::fakes::{FakeClock, FakeNetworkLink, FakeRetention, FakeSecrets, InMemoryConfigStore};
 use app::locations::{ChooseLocation, LocationReport};
 use app::maintenance::{MaintenanceKind, RunMaintenance};
 use app::ports::{
-    BackupJob, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
+    BackupJob, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
     NormalizeSources, PlatformError, ProbeAnswer, RepositoryAccess, RunningJob, SavedEntry,
     SourcesError,
 };
@@ -65,6 +66,15 @@ pub struct LocationsWorld {
     addresses: BTreeMap<String, String>,
     /// By address: what a probe there finds. An address with none answers.
     answers: Arc<Mutex<BTreeMap<String, Answer>>>,
+    /// By address: how long a probe there takes to answer. An address with
+    /// none answers at once.
+    delays: Arc<Mutex<BTreeMap<String, SignedDuration>>>,
+    /// Every job's address, the time on the run's monotonic clock it was
+    /// given to the engine at, and whether it was a probe, in order.
+    contacts: Arc<Mutex<Vec<(String, SignedDuration, bool)>>>,
+    /// How many probe workers run: started, and neither answered nor
+    /// stopped.
+    live: Arc<AtomicUsize>,
     secrets: Arc<FakeSecrets>,
     /// Every job the engine was given, probes included, in order.
     jobs: Arc<Mutex<Vec<Job>>>,
@@ -203,19 +213,30 @@ impl LocationsWorld {
         self.change_location(name, move |location| location.repository = moved);
         let old = self.addresses.insert(name.to_owned(), address.clone());
         let mut answers = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(answer) = old.and_then(|old| answers.remove(&old)) {
-            answers.insert(address, answer);
+        let mut delays = self.delays.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(old) = old {
+            if let Some(answer) = answers.remove(&old) {
+                answers.insert(address.clone(), answer);
+            }
+            if let Some(delay) = delays.remove(&old) {
+                delays.insert(address, delay);
+            }
         }
     }
 
-    fn engine(&self, agent_clock: Arc<app::fakes::FakeClock>) -> Arc<ChooseLocation> {
+    /// The choice of location in front of the scripted engine, on `clock`.
+    fn engine(&self, clock: Arc<FakeClock>) -> Arc<ChooseLocation> {
         let reports = Arc::clone(&self.reports);
         Arc::new(ChooseLocation::new(
             Arc::new(Sites {
                 answers: Arc::clone(&self.answers),
+                delays: Arc::clone(&self.delays),
                 jobs: Arc::clone(&self.jobs),
+                contacts: Arc::clone(&self.contacts),
+                live: Arc::clone(&self.live),
+                clock: Arc::clone(&clock),
             }),
-            agent_clock,
+            clock,
             self.link.clone(),
             ResolveRepository::new(self.secrets.clone()),
             Arc::new(move |report| {
@@ -330,13 +351,17 @@ fn machine_named(agent: &mut Agent, answer: Result<Option<CurrentNetworkName>, P
     agent.scheduler.link().set_name(answer);
 }
 
-/// An engine that answers each location's probe as the scenario says, and
-/// opens whatever else it is given at once, but refuses, as the engine does
-/// (§7.3), a job whose access names a repository ID its location doesn't
-/// hold.
+/// An engine that answers each location's probe as the scenario says, after
+/// its delay on the run's clock, and opens whatever else it is given at
+/// once, but refuses, as the engine does (§7.3), a job whose access names a
+/// repository ID its location doesn't hold.
 struct Sites {
     answers: Arc<Mutex<BTreeMap<String, Answer>>>,
+    delays: Arc<Mutex<BTreeMap<String, SignedDuration>>>,
     jobs: Arc<Mutex<Vec<Job>>>,
+    contacts: Arc<Mutex<Vec<(String, SignedDuration, bool)>>>,
+    live: Arc<AtomicUsize>,
+    clock: Arc<FakeClock>,
 }
 
 struct Stop;
@@ -346,6 +371,36 @@ impl JobControl for Stop {
     async fn stop(&mut self) {}
 }
 
+/// A probe's worker that runs until it answers or is stopped, whichever
+/// comes first.
+struct Probing {
+    live: Arc<AtomicUsize>,
+    ended: Arc<AtomicBool>,
+}
+
+impl Probing {
+    fn start(live: &Arc<AtomicUsize>) -> Self {
+        live.fetch_add(1, Ordering::SeqCst);
+        Self {
+            live: Arc::clone(live),
+            ended: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn end(live: &AtomicUsize, ended: &AtomicBool) {
+        if !ended.swap(true, Ordering::SeqCst) {
+            live.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait]
+impl JobControl for Probing {
+    async fn stop(&mut self) {
+        Self::end(&self.live, &self.ended);
+    }
+}
+
 #[async_trait]
 impl Engine for Sites {
     async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
@@ -353,6 +408,16 @@ impl Engine for Sites {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(job.clone());
+        if let Some(access) = job.access() {
+            self.contacts
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((
+                    access.repository.clone(),
+                    self.clock.monotonic(),
+                    matches!(job, Job::Probe(_)),
+                ));
+        }
         let at = domain::Timestamp::from_second(1_800_000_000).expect("a time");
         let access = job.access().cloned();
         if !matches!(job, Job::Probe(_))
@@ -388,7 +453,7 @@ impl Engine for Sites {
                     Answer::Silent => {
                         return Ok(RunningJob {
                             events: futures::stream::pending().boxed(),
-                            control: Box::new(Stop),
+                            control: Box::new(Probing::start(&self.live)),
                         });
                     }
                     Answer::Holds => ProbeAnswer::Holds(repository_id(REPOSITORY_ID)),
@@ -397,13 +462,35 @@ impl Engine for Sites {
                     Answer::NotARepository => ProbeAnswer::NotARepository,
                     Answer::PasswordNotAccepted => ProbeAnswer::PasswordNotAccepted,
                 };
-                vec![
+                let answered = vec![
                     EngineEvent::Started {
                         index_read_at: at,
                         repository: None,
                     },
                     EngineEvent::Succeeded(EngineResult::Probed(found)),
-                ]
+                ];
+                let delay = self
+                    .delays
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&access.repository)
+                    .copied();
+                if let Some(delay) = delay {
+                    let worker = Probing::start(&self.live);
+                    let (live, ended) = (Arc::clone(&worker.live), Arc::clone(&worker.ended));
+                    let clock = Arc::clone(&self.clock);
+                    return Ok(RunningJob {
+                        events: futures::stream::once(async move {
+                            clock.sleep(delay).await;
+                            Probing::end(&live, &ended);
+                            futures::stream::iter(answered)
+                        })
+                        .flatten()
+                        .boxed(),
+                        control: Box::new(worker),
+                    });
+                }
+                answered
             }
             // One snapshot of the plan, so a forget's preview applies the
             // plan's retention, which opens the repository in-process.
@@ -497,22 +584,61 @@ async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
         filter: SourceFilter::default(),
         deadline_budget: SignedDuration::from_hours(1),
     });
-    let engine = world.engine(agent.clock.clone());
+    // The run's own clock moves only when everything in the run waits on
+    // it, to the next deadline, so probes that run at once take the time of
+    // the slowest, not the sum.
+    let clock = Arc::new(FakeClock::new(agent.clock.now()));
+    let engine = world.engine(Arc::clone(&clock));
     let n = u128::try_from(world.operations.len()).expect("a count");
-    let finished = RunOperation::new(engine, agent.clock.clone(), agent.store.clone())
-        .run(
+    let finished = until_done(
+        &clock,
+        RunOperation::new(engine, clock.clone(), agent.store.clone()).run(
             OperationId::from_uuid(Uuid::from_u128(0x0400 + n)),
             trigger,
             job,
             futures::future::pending(),
-        )
-        .await;
+        ),
+    );
+    agent.clock.advance(clock.monotonic());
     agent.locations.operations.push(finished.operation.clone());
     agent
         .locations
         .results
         .push(format!("{:?}", finished.result));
     agent.finished = Some(finished);
+}
+
+/// Whether a run was woken since it was last polled.
+struct Woken(AtomicBool);
+
+impl futures::task::ArcWake for Woken {
+    fn wake_by_ref(woken: &Arc<Self>) {
+        woken.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Polls `run` to its end, moving `clock` on to its next sleeper's deadline
+/// only when nothing in the run can go on without it: a discrete-event
+/// clock, which neither skips a deadline nor lets one sleeper's wait add to
+/// another's.
+fn until_done<F: Future>(clock: &FakeClock, run: F) -> F::Output {
+    let woken = Arc::new(Woken(AtomicBool::new(false)));
+    let waker = futures::task::waker(Arc::clone(&woken));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut run = std::pin::pin!(run);
+    loop {
+        woken.0.store(false, Ordering::SeqCst);
+        if let std::task::Poll::Ready(output) = run.as_mut().poll(&mut cx) {
+            return output;
+        }
+        if woken.0.load(Ordering::SeqCst) {
+            continue;
+        }
+        let next = clock
+            .until_next_sleeper()
+            .expect("a run that can't go on waits on the clock");
+        clock.advance(next);
+    }
 }
 
 /// The outcome a scenario's words name.
@@ -582,6 +708,33 @@ fn location_silent_to_bound(agent: &mut Agent, name: String) {
 #[given(expr = "the location {string} doesn't answer")]
 fn location_silent(agent: &mut Agent, name: String) {
     agent.locations.answers(&name, Answer::Silent);
+}
+
+#[given(expr = "the location {string} answers after {int} second(s)")]
+fn location_answers_after(agent: &mut Agent, name: String, seconds: i64) {
+    let world = &agent.locations;
+    world.answers(&name, Answer::Holds);
+    world
+        .delays
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(
+            world.addresses[&name].clone(),
+            SignedDuration::from_secs(seconds),
+        );
+}
+
+#[given(expr = "the repository {string} has a third location {string}, over HTTPS, that answers")]
+fn third_location(agent: &mut Agent, repository: String, name: String) {
+    assert_eq!(repository, NAS);
+    let address = "rest:https://office.example.lan/nas".to_owned();
+    let world = &mut agent.locations;
+    world.addresses.insert(name.clone(), address.clone());
+    world.nas().locations.further.push(Location {
+        repository: address,
+        ..Location::default()
+    });
+    world.answers(&name, Answer::Holds);
 }
 
 #[given(expr = "the location {string} answers with a repository whose ID isn't the repository's")]
@@ -814,17 +967,6 @@ fn used_location(agent: &mut Agent, name: String) {
     }
 }
 
-#[then(expr = "the location {string} was never tried")]
-fn never_tried(agent: &mut Agent, name: String) {
-    let world = &agent.locations;
-    let address = &world.addresses[&name];
-    for job in world.jobs() {
-        if let Some(access) = job.access() {
-            assert_ne!(&access.repository, address, "{name} was tried: {job:?}");
-        }
-    }
-}
-
 #[then(expr = "the operation shows the location {string} as not tried")]
 fn shows_not_tried(agent: &mut Agent, name: String) {
     let world = &agent.locations;
@@ -1008,6 +1150,72 @@ fn never_opened(agent: &mut Agent, name: String) {
     for access in agent.locations.opens() {
         assert_ne!(&access.repository, address);
     }
+}
+
+impl LocationsWorld {
+    /// When, on the run's monotonic clock, each probe of the location
+    /// `name` was started, in order.
+    fn probed_at(&self, name: &str) -> Vec<SignedDuration> {
+        let address = &self.addresses[name];
+        self.contacts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(at, _, probe)| *probe && at == address)
+            .map(|(_, when, _)| *when)
+            .collect()
+    }
+}
+
+#[then(expr = "the location {string} was tried from the start, at the same time as {string}")]
+fn tried_from_the_start(agent: &mut Agent, name: String, earlier: String) {
+    let world = &agent.locations;
+    assert_eq!(
+        world.probed_at(&earlier),
+        vec![SignedDuration::ZERO],
+        "{earlier} was probed once, at the start"
+    );
+    assert_eq!(
+        world.probed_at(&name),
+        vec![SignedDuration::ZERO],
+        "{name} was probed once, at the start"
+    );
+}
+
+#[then(expr = "the run waited {int} second(s) for its location")]
+fn waited_for_location(agent: &mut Agent, seconds: i64) {
+    let opened: Vec<SignedDuration> = agent
+        .locations
+        .contacts
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|(_, _, probe)| !probe)
+        .map(|(_, when, _)| *when)
+        .collect();
+    assert_eq!(opened, vec![SignedDuration::from_secs(seconds)]);
+}
+
+#[then("no probe of a location still runs")]
+fn no_probe_runs(agent: &mut Agent) {
+    assert_eq!(agent.locations.live.load(Ordering::SeqCst), 0);
+}
+
+#[then(
+    expr = "the location {string} was first tried {int} seconds after the run began, once {string} had failed"
+)]
+fn first_tried_after(agent: &mut Agent, name: String, seconds: i64, earlier: String) {
+    let world = &agent.locations;
+    assert_eq!(
+        world.probed_at(&name),
+        vec![SignedDuration::from_secs(seconds)]
+    );
+    let failed = world
+        .record()
+        .at(world.position(&earlier))
+        .expect("the earlier location")
+        .outcome;
+    assert_eq!(failed, LocationOutcome::Silent);
 }
 
 #[then(expr = "the job's worker was given no secret of the location {string}")]

@@ -13,7 +13,8 @@ use super::{Warning, WarningKind};
 pub enum LocationOutcome {
     /// The run used it.
     Used,
-    /// A location after the one used: the choice never reached it.
+    /// A location after the one used: the choice never reached its turn,
+    /// though an early probe of it may have run (decision 86).
     NotTried,
     /// Its rule doesn't hold on the network the machine is on.
     RuleNotMet,
