@@ -299,6 +299,21 @@ Feature: Install Ladderback with one command
       Then the command exits with status 0
       And the release was installed
 
+    Scenario: A release that tracks the web UI's stylesheet gets it back after the build
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the source folder has no changes
+      And the web UI's stylesheet in the source folder is the release's
+
+    Scenario: A release that leaves the web UI's stylesheet to its build keeps the one it built
+      Given the owner has run the install script, and its build rewrote the web UI's stylesheet
+      And Ladderback has since released "v0.2.1", which leaves the web UI's stylesheet to its build
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the source folder holds the release "v0.2.1"
+      And the source folder has no changes
+      And the web UI's stylesheet in the source folder is the one its build wrote
+
   Rule: On 64-bit ARM Linux with a glibc older than 2.38 it builds wasm-bindgen first
 
     Scenario: An older glibc on 64-bit ARM builds wasm-bindgen before the release

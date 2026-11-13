@@ -44,6 +44,9 @@ const PINNED: &str = "1.100.0";
 /// The system the stand-in rustup's toolchains are for.
 const HOST: &str = "x86_64-unknown-linux-gnu";
 
+/// The web UI's stylesheet as a release that tracks it holds it.
+const RELEASED_STYLESHEET: &str = "/* built */\n";
+
 #[derive(Debug, Default)]
 pub(super) struct InstallScriptE2e {
     /// Variables the scenario adds to the script's environment.
@@ -196,9 +199,9 @@ esac
 "#;
 
 /// `just install` rewrites the web UI's stylesheet, as the UI's build does
-/// (Trunk's `pre_build` hook regenerates `crates/web/tw-out.css`, which the
-/// repository tracks), then installs Ladderback with cargo, unless the
-/// scenario made the build fail.
+/// (Trunk's `pre_build` hook regenerates `crates/web/tw-out.css`, which
+/// releases up to v0.2.0 track), then installs Ladderback with cargo, unless
+/// the scenario made the build fail.
 const JUST: &str = r#"case "$1" in
   --version) printf 'just %s\n' "$(/bin/cat "$state/just-version")" ;;
   _wasm-bindgen-version) echo '@WASM_BINDGEN@' ;;
@@ -421,11 +424,12 @@ async fn git(agent: &Agent, dir: &Path, args: &[&str]) -> String {
 }
 
 /// A release: a commit whose `Cargo.toml` holds the tag's version, with the
-/// web UI's stylesheet, tagged.
+/// web UI's stylesheet tracked, as releases up to v0.2.0 have it, tagged.
 async fn release(agent: &Agent, tag: &str) {
     let dir = upstream(agent);
     fs::create_dir_all(dir.join("crates/web")).expect("the web UI's folder");
-    fs::write(dir.join("crates/web/tw-out.css"), "/* built */\n").expect("the web UI's stylesheet");
+    fs::write(dir.join("crates/web/tw-out.css"), RELEASED_STYLESHEET)
+        .expect("the web UI's stylesheet");
     fs::write(dir.join("Justfile"), "install *args:\n").expect("the release's Justfile");
     let version = tag.trim_start_matches('v');
     fs::write(
@@ -482,6 +486,28 @@ async fn has_since_released(agent: &mut Agent, tag: String) {
 async fn has_since_released_unpinned(agent: &mut Agent, tag: String) {
     let dir = upstream(agent);
     git(agent, &dir, &["rm", "--quiet", "rust-toolchain.toml"]).await;
+    git(agent, &dir, &["commit", "--quiet", "-m", &tag]).await;
+    git(agent, &dir, &["tag", &tag]).await;
+}
+
+/// A release that no longer tracks the web UI's stylesheet and ignores it,
+/// as releases after v0.2.0 do (#381). The web UI's folder keeps its other
+/// files, so the checkout leaves the folder there for the build.
+#[given(
+    expr = "Ladderback has since released {string}, which leaves the web UI's stylesheet to its build"
+)]
+async fn has_since_released_untracked_stylesheet(agent: &mut Agent, tag: String) {
+    let dir = upstream(agent);
+    fs::write(dir.join(".gitignore"), "/crates/web/tw-out.css\n")
+        .expect("the release's .gitignore");
+    fs::write(dir.join("crates/web/index.html"), "<!doctype html>\n").expect("the web UI's page");
+    git(
+        agent,
+        &dir,
+        &["rm", "--cached", "--quiet", "crates/web/tw-out.css"],
+    )
+    .await;
+    git(agent, &dir, &["add", ".gitignore", "crates/web/index.html"]).await;
     git(agent, &dir, &["commit", "--quiet", "-m", &tag]).await;
     git(agent, &dir, &["tag", &tag]).await;
 }
@@ -983,6 +1009,34 @@ fn folder_unchanged(agent: &mut Agent, folder: String, name: String) {
 fn change_kept(agent: &mut Agent) {
     let (file, text) = agent.install.changed.as_ref().expect("a change");
     assert_eq!(&fs::read_to_string(file).expect("the changed file"), text);
+}
+
+/// Nothing git sees has changed: no tracked file, and no file it doesn't
+/// ignore.
+#[then("the source folder has no changes")]
+async fn source_clean(agent: &mut Agent) {
+    let changes = git(agent, &source(agent), &["status", "--porcelain"]).await;
+    assert!(
+        changes.is_empty(),
+        "the source folder has changes: {changes}"
+    );
+}
+
+fn stylesheet(agent: &Agent) -> String {
+    fs::read_to_string(source(agent).join("crates/web/tw-out.css"))
+        .expect("the web UI's stylesheet")
+}
+
+#[then("the web UI's stylesheet in the source folder is the release's")]
+fn stylesheet_is_release(agent: &mut Agent) {
+    assert_eq!(stylesheet(agent), RELEASED_STYLESHEET);
+}
+
+/// The build stand-in appends its line to the stylesheet; the release's
+/// checkout removed the one the earlier release tracked.
+#[then("the web UI's stylesheet in the source folder is the one its build wrote")]
+fn stylesheet_is_built(agent: &mut Agent) {
+    assert_eq!(stylesheet(agent), "/* rebuilt */\n");
 }
 
 /// The Rust the last cargo call whose arguments start with `call` built

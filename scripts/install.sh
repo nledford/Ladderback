@@ -517,9 +517,10 @@ build_wasm_bindgen_if_needed() {
     (cd "$dir" && cargo install --locked wasm-bindgen-cli --version "$version")
 }
 
-# The web UI's build regenerates its stylesheet, `crates/web/tw-out.css`,
-# which the repository tracks: it is put back, so the next run doesn't refuse
-# the source folder as changed.
+# The web UI's build regenerates its stylesheet, `crates/web/tw-out.css`.
+# Releases up to v0.2.0 track it, so there it is put back, and the next run
+# doesn't refuse the source folder as changed. Later releases ignore it
+# (#381), and the one the build wrote stays.
 restore_stylesheet() {
     local css=crates/web/tw-out.css
     if git -C "$dir" ls-files --error-unmatch -- "$css" >/dev/null 2>&1; then
