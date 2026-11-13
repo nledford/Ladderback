@@ -226,7 +226,7 @@ fn a_rule_on_a_repository_of_one_location_needs_no_recorded_id() {
 
 #[test]
 fn a_rule_that_is_empty_too_long_or_of_an_unknown_network_is_refused_at_its_key() {
-    let nine = vec!["{ network = \"wifi\" }"; MAX_RULE_ALTERNATIVES + 1].join(", ");
+    let nine = ["{ network = \"wifi\" }"; MAX_RULE_ALTERNATIVES + 1].join(", ");
     for (extra, key) in [
         ("when = []\n".to_owned(), "repositories.nas.when"),
         (format!("when = [ {nine} ]\n"), "repositories.nas.when"),

@@ -199,6 +199,10 @@ impl ChooseLocation {
     /// as it is about to be probed, as for a job. An entry of one location
     /// is probed too, and while it records no repository ID, whatever
     /// repository it holds counts as its own. Nothing is recorded.
+    #[allow(
+        clippy::result_large_err,
+        reason = "a typed code for the caller to match, as `InitRepository`'s; none of its variants is large on its own"
+    )]
     pub async fn test_each(
         &self,
         op: OperationId,
