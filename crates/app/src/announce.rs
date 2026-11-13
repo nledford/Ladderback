@@ -93,8 +93,49 @@ pub(crate) async fn announce_end(events: Option<&dyn EventBus>, operation: &Oper
 /// message takes, by name, and the engine's own words as the detail, which
 /// the engine masked of every secret of the job (I4).
 pub fn failure(reason: &FailureReason) -> ErrorDto {
-    let _ = (reason, ErrorCode::Unknown, MsgArg::Count(0));
-    todo!()
+    use FailureReason as F;
+    let said = |detail: &str| Some(detail.to_owned());
+    match reason {
+        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
+            ErrorDto::new(ErrorCode::EngineUnavailable, [], said(detail))
+        }
+        F::EngineFailed { detail } => ErrorDto::new(ErrorCode::OperationFailed, [], said(detail)),
+        F::HookFailed { .. } => ErrorDto::new(ErrorCode::OperationFailed, [], None),
+        F::EngineExited { exit_code } => ErrorDto::new(
+            ErrorCode::EngineExited,
+            exit_code.map(|code| ("exit_code", MsgArg::Text(code.to_string()))),
+            None,
+        ),
+        F::ProtocolViolated { transition } => ErrorDto::new(
+            ErrorCode::ProtocolViolated,
+            [("transition", MsgArg::Text(format!("{transition:?}")))],
+            None,
+        ),
+        F::DeadlinePassed => ErrorDto::new(ErrorCode::DeadlinePassed, [], None),
+        F::EngineStartTimedOut => ErrorDto::new(ErrorCode::EngineStartTimedOut, [], None),
+        F::EngineExitTimedOut => ErrorDto::new(ErrorCode::EngineExitTimedOut, [], None),
+        F::RepositoryExists => ErrorDto::new(ErrorCode::RepositoryExists, [], None),
+        F::RepositoryReplaced => ErrorDto::new(ErrorCode::RepositoryReplaced, [], None),
+        F::RepositoryNotFound => ErrorDto::new(ErrorCode::RepositoryNotFound, [], None),
+        F::CredentialsRefused => ErrorDto::new(ErrorCode::CredentialsRefused, [], None),
+        F::SecretsTooLargeToMask { field, limit } => ErrorDto::new(
+            ErrorCode::SecretsTooLargeToMask,
+            std::iter::once((
+                "limit",
+                MsgArg::Bytes(u64::try_from(*limit).unwrap_or(u64::MAX)),
+            ))
+            .chain(
+                field
+                    .as_deref()
+                    .map(|field| ("field", MsgArg::Text(field.to_owned()))),
+            ),
+            None,
+        ),
+        F::DaemonStopped => ErrorDto::new(ErrorCode::DaemonStopped, [], None),
+        F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
+        F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
+        F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),
+    }
 }
 
 #[cfg(test)]

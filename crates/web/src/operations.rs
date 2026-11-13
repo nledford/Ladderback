@@ -91,8 +91,18 @@ pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
 /// failure in the catalog's words, with the engine's own marked as English;
 /// none for a run that didn't fail.
 pub(crate) fn failure(localizer: &Localizer, operation: &OperationSummaryDto) -> Option<Sentence> {
-    let _ = (localizer, operation);
-    todo!()
+    let failure = operation.failure.as_ref()?;
+    let args: Vec<(String, MsgArg)> = failure
+        .args
+        .iter()
+        .map(|(name, arg)| (name.clone(), arg.clone()))
+        .collect();
+    Some(crate::routes::refused_sentence(
+        localizer,
+        failure.code,
+        &args,
+        failure.detail.as_deref(),
+    ))
 }
 
 /// What a run that succeeded produced, then how long it took.

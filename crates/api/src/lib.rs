@@ -1108,7 +1108,12 @@ impl ErrorDto {
     /// order [`ErrorCode::args`] declares them, up to the first it lacks,
     /// then its detail as one more text, when it has one.
     pub fn positional(&self) -> Vec<MsgArg> {
-        todo!()
+        self.code
+            .args()
+            .iter()
+            .map_while(|spec| self.args.get(spec.name).cloned())
+            .chain(self.detail.clone().map(MsgArg::Text))
+            .collect()
     }
 
     /// The error an `operation-failed` event of `code` tells with `args`, as
@@ -1116,8 +1121,22 @@ impl ErrorDto {
     /// declares them, in order, and the first text after those as the
     /// detail.
     pub fn from_positional(code: ErrorCode, args: &[MsgArg]) -> Self {
-        let _ = (code, args);
-        todo!()
+        let mut rest = args.iter();
+        let named = code
+            .args()
+            .iter()
+            .zip(rest.by_ref())
+            .map(|(spec, arg)| (spec.name.to_owned(), arg.clone()))
+            .collect();
+        let detail = rest.find_map(|arg| match arg {
+            MsgArg::Text(text) => Some(text.clone()),
+            _ => None,
+        });
+        Self {
+            code,
+            args: named,
+            detail,
+        }
     }
 }
 
