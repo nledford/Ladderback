@@ -121,6 +121,32 @@ pub(crate) fn attribute(entry: &Path, name: &str) -> Result<Option<String>, Plat
     Ok(Some(text.trim().to_owned()))
 }
 
+/// The most bytes read of one table of the kernel's (`/proc/net/route`):
+/// a few lines per route.
+const MAX_TABLE_BYTES: u64 = 64 * 1024;
+
+/// A table of the kernel's, whole; `None` when there is no such file.
+pub(crate) fn table(path: &Path) -> Result<Option<String>, PlatformError> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unreadable(path, error)),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_TABLE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| unreadable(path, error))?;
+    if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_TABLE_BYTES) {
+        return Err(unrecognized(
+            path,
+            &format!("longer than {MAX_TABLE_BYTES} bytes"),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| unrecognized(path, "not UTF-8"))
+}
+
 /// A program the adapter runs, with fixed arguments.
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
