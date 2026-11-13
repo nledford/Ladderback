@@ -188,6 +188,11 @@ fn no_keyring_service(agent: &mut Agent) {
     agent.secrets.store.remove_keyring_service();
 }
 
+#[given("the keyring is locked")]
+fn keyring_locked(agent: &mut Agent) {
+    agent.secrets.store.lock_keyring();
+}
+
 #[given(expr = "the command {string} prints {string}")]
 fn command_prints(agent: &mut Agent, command: String, stdout: String) {
     let stdout = text(&stdout).into_bytes();

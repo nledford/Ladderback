@@ -1240,9 +1240,16 @@ fn the_os_keyring_is_used_only_when_it_is_asked_for() {
 fn an_os_keyring_error_says_why_and_holds_no_secret() {
     use crate::keyring_store::{OsStore, failure};
     for store in [OsStore::Keychain, OsStore::SecretService] {
-        assert_eq!(failure(keyring::Error::NoEntry, store), Failure::NoEntry);
         assert_eq!(
-            failure(keyring::Error::BadEncoding(b"hunter2\xff".to_vec()), store),
+            failure(keyring::Error::NoEntry, store, || None),
+            Failure::NoEntry
+        );
+        assert_eq!(
+            failure(
+                keyring::Error::BadEncoding(b"hunter2\xff".to_vec()),
+                store,
+                never_asked
+            ),
             Failure::NotUnicode
         );
     }
@@ -1250,8 +1257,41 @@ fn an_os_keyring_error_says_why_and_holds_no_secret() {
     let said = refused().to_string();
     assert!(said.contains("the keychain is locked"), "{said}");
     assert_eq!(
-        failure(refused(), OsStore::Keychain),
+        failure(refused(), OsStore::Keychain, never_asked),
         Failure::Unreachable(said)
+    );
+}
+
+/// The probe of whether a keyring is locked, for an error that must not ask:
+/// only a missing entry is worth the question.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn never_asked() -> Option<String> {
+    panic!("the store was asked whether its keyring is locked")
+}
+
+/// A Secret Service that finds no entry is asked whether its keyring is
+/// locked: oo7 finds no items in a locked collection, whether the entry is in
+/// it or not (#483). Locked, the entry is refused as no keyring service to
+/// ask, in the service's words; unlocked, or when the service can't say, it
+/// is missing. The keychain, which says when it is locked, is never asked.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_no_keyring_service() {
+    use crate::keyring_store::{OsStore, failure};
+    let said = "Secret Service: object locked";
+    assert_eq!(
+        failure(keyring::Error::NoEntry, OsStore::SecretService, || Some(
+            said.to_owned()
+        )),
+        Failure::NoService(said.to_owned())
+    );
+    assert_eq!(
+        failure(keyring::Error::NoEntry, OsStore::SecretService, || None),
+        Failure::NoEntry
+    );
+    assert_eq!(
+        failure(keyring::Error::NoEntry, OsStore::Keychain, never_asked),
+        Failure::NoEntry
     );
 }
 
@@ -1292,7 +1332,7 @@ fn a_secret_service_that_cannot_be_asked_is_no_keyring_service() {
     for error in cases {
         let said = error.to_string();
         assert_eq!(
-            failure(error, OsStore::SecretService),
+            failure(error, OsStore::SecretService, never_asked),
             Failure::NoService(said)
         );
     }
@@ -1331,7 +1371,7 @@ fn a_secret_service_that_answers_and_fails_is_unreadable() {
         let error = keyring::Error::PlatformFailure(Box::new(error));
         let said = error.to_string();
         assert_eq!(
-            failure(error, OsStore::SecretService),
+            failure(error, OsStore::SecretService, never_asked),
             Failure::Unreachable(said)
         );
     }
@@ -1357,7 +1397,7 @@ fn a_secret_service_that_refuses_an_entry_is_unreachable() {
     for error in cases {
         let said = error().to_string();
         assert_eq!(
-            failure(error(), OsStore::SecretService),
+            failure(error(), OsStore::SecretService, never_asked),
             Failure::Unreachable(said)
         );
     }
@@ -1395,6 +1435,10 @@ fn a_bus_error_names_a_missing_bus_or_service() {
         assert!(!bus_or_service_missing(answered), "{answered}");
     }
 }
+
+// The Secret Service's own answers, from a stand-in on a private bus.
+#[cfg(target_os = "linux")]
+mod secret_service;
 
 /// The real store of the session. It needs one (an unlocked keychain, a
 /// Secret Service), so it runs only when `LADDERBACK_TEST_OS_KEYRING=1`, and

@@ -51,6 +51,8 @@ struct State {
     keyring: BTreeMap<String, String>,
     /// No keyring service to ask: every keyring read fails.
     no_keyring_service: bool,
+    /// The keyring is locked: every keyring read fails, entry or not.
+    keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
     /// Link path to what it leads to.
     links: BTreeMap<String, String>,
@@ -119,6 +121,13 @@ impl FakeSecrets {
     /// Secret Service: every keyring entry fails as `KeyringUnavailable`.
     pub fn remove_keyring_service(&self) {
         self.lock().no_keyring_service = true;
+    }
+
+    /// A keyring that is locked, as a Secret Service whose collection
+    /// nobody unlocked: every keyring entry, there or not, fails as
+    /// `KeyringUnavailable`, never as missing.
+    pub fn lock_keyring(&self) {
+        self.lock().keyring_locked = true;
     }
 
     /// What running `command` does. A command with no script can't be started.
@@ -237,11 +246,18 @@ impl SecretResolver for FakeSecrets {
                 let source = SourceName::Keyring {
                     entry: entry.to_string(),
                 };
-                if state.no_keyring_service {
+                let unavailable = if state.no_keyring_service {
+                    Some("no session bus")
+                } else if state.keyring_locked {
+                    Some("the keyring is locked")
+                } else {
+                    None
+                };
+                if let Some(detail) = unavailable {
                     return Err(SecretError {
                         source,
                         problem: Problem::KeyringUnavailable {
-                            detail: "no session bus".to_owned(),
+                            detail: detail.to_owned(),
                         },
                     });
                 }

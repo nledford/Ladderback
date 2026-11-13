@@ -63,13 +63,41 @@ impl KeyringStore for Os {
     fn get(&self, service: &str, name: &str) -> Result<String, Failure> {
         keyring::Entry::new(service, name)
             .and_then(|entry| entry.get_password())
-            .map_err(|error| failure(error, THIS_STORE))
+            .map_err(|error| {
+                failure(error, THIS_STORE, || {
+                    cfg_select! {
+                        target_os = "linux" => { default_collection_locked() }
+                        // The keychain says when it is locked: never asked.
+                        _ => { None }
+                    }
+                })
+            })
     }
 }
 
-/// Why the OS store `store` gave no secret.
+/// What the Secret Service says when the collection under the alias
+/// `default`, where `keyring` keeps and looks for an entry, is locked: the
+/// words `keyring` gives a locked collection. `None` when it is unlocked or
+/// can't be asked, so a missing entry is never guessed to be locked.
+#[cfg(target_os = "linux")]
+fn default_collection_locked() -> Option<String> {
+    use dbus_secret_service::{EncryptionType, Error, SecretService};
+    let service = SecretService::connect(EncryptionType::Plain).ok()?;
+    let locked = service
+        .get_default_collection()
+        .and_then(|collection| collection.is_locked())
+        .ok()?;
+    locked.then(|| keyring::Error::NoStorageAccess(Box::new(Error::Locked)).to_string())
+}
+
+/// Why the OS store `store` gave no secret. `locked` asks the store whether
+/// its keyring is locked, and gives what it said when it is.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) fn failure(error: keyring::Error, store: OsStore) -> Failure {
+pub(crate) fn failure(
+    error: keyring::Error,
+    store: OsStore,
+    locked: impl FnOnce() -> Option<String>,
+) -> Failure {
     // `keyring` reports a Secret Service it can't reach as `PlatformFailure`
     // and a locked or missing collection as `NoStorageAccess`, but its
     // `PlatformFailure` also carries a failed decryption or an answer it
@@ -90,7 +118,13 @@ pub(crate) fn failure(error: keyring::Error, store: OsStore) -> Failure {
             _ => false,
         };
     match error {
-        keyring::Error::NoEntry => Failure::NoEntry,
+        // oo7 finds no items in a locked collection, so `keyring` says there
+        // is no entry where the entry may well be (#483): the service, asked
+        // whether its collection is locked, tells the two apart.
+        keyring::Error::NoEntry => match store {
+            OsStore::SecretService => locked().map_or(Failure::NoEntry, Failure::NoService),
+            OsStore::Keychain => Failure::NoEntry,
+        },
         // The error holds the bytes: a secret. Drop them.
         keyring::Error::BadEncoding(_) => Failure::NotUnicode,
         error if no_service => Failure::NoService(error.to_string()),

@@ -1114,7 +1114,18 @@ impl PlanRunner {
     }
 }
 
-/// Why a plan's run didn't start, for the daemon's log: a code, never the
+/// Logs that plan `plan`'s run, started by `trigger`, didn't start.
+fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
+    log::warn!(
+        "the {trigger:?} run of plan {} didn't start: {}",
+        plan.as_str(),
+        start_refused(error)
+    );
+}
+
+/// Why a plan's run didn't start, for the daemon's log: a code, and for a
+/// secret the setting and where it was looked for (an entry, a file, a
+/// variable or a program, masked as the refusal shows them), never the
 /// words of a secret's refusal, which may quote what was read (I4).
 fn start_refused(error: &StartError) -> String {
     match error {
@@ -1123,8 +1134,19 @@ fn start_refused(error: &StartError) -> String {
             format!("the configuration can't be read or used ({code:?})")
         }
         StartError::SecretRefused(refusal) => {
+            let named = |key: &str| {
+                refusal.args.iter().find_map(|(name, arg)| match arg {
+                    MsgArg::Text(text) if *name == key => Some(text.as_str()),
+                    _ => None,
+                })
+            };
+            let place = match (named("field"), named("source")) {
+                (Some(field), Some(source)) => format!(": its {field}, from {source}"),
+                (Some(field), None) => format!(": its {field}"),
+                _ => String::new(),
+            };
             format!(
-                "a secret of its repository was refused ({:?})",
+                "a secret of its repository was refused ({:?}){place}",
                 refusal.code
             )
         }
@@ -1135,11 +1157,7 @@ fn start_refused(error: &StartError) -> String {
 impl PlanRuns for PlanRunner {
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
         if let Err(error) = self.start_plan(plan, trigger, Some(place)).await {
-            log::warn!(
-                "the {trigger:?} run of plan {} didn't start: {}",
-                plan.as_str(),
-                start_refused(&error)
-            );
+            log_not_started(plan, trigger, &error);
         }
     }
 
@@ -1282,7 +1300,12 @@ impl PlanRuns for PlanRunner {
 impl Operations for PlanRunner {
     async fn start_backup(&self, plan: String) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
-        let operation = self.start_plan(&id, Trigger::Manual, None).await?;
+        // Refused by hand as on a schedule, the run leaves a line in the log
+        // too, not only the answer the page shows for a moment (#483).
+        let operation = self
+            .start_plan(&id, Trigger::Manual, None)
+            .await
+            .inspect_err(|error| log_not_started(&id, Trigger::Manual, error))?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
 
@@ -9509,6 +9532,88 @@ mod repository_service_tests {
                 );
             }
         }
+    }
+
+    /// A backup started by hand whose repository's secret can't be read is
+    /// refused, and the daemon's log says so, as it does for a scheduled run
+    /// (#483): the plan, the refusal's code, the setting and where the
+    /// secret was looked for, a name and never a secret (I4). The engine is
+    /// never asked.
+    #[tokio::test]
+    async fn a_backup_started_by_hand_and_refused_for_its_secret_says_why_in_the_log() {
+        capture();
+        let variable = "LADDERBACK_TEST_PASSWORD_NEVER_SET";
+        let alias = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+        let config = domain::planning::AgentConfig::new(
+            domain::planning::AgentSettings::default(),
+            Default::default(),
+            std::collections::BTreeMap::from([(
+                alias.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings: RepositorySettings {
+                        repository: "s3:s3.example.net/demo".to_owned(),
+                        repo_hot: None,
+                        password: SecretRef::Env(variable.to_owned()),
+                        options: Default::default(),
+                        options_hot: Default::default(),
+                        options_cold: Default::default(),
+                    },
+                    maintenance: domain::planning::Maintenance::None,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            )]),
+            vec![domain::planning::Plan::new(
+                domain::PlanId::parse("home").expect("a plan ID"),
+                alias,
+                vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+            )],
+        )
+        .expect("a valid configuration");
+        let config_store = Arc::new(InMemoryConfigStore::new());
+        app::ports::ConfigStore::save(&*config_store, &config)
+            .await
+            .expect("the config saves");
+        let scripted = engine();
+        let runner = PlanRunner {
+            config: config_store,
+            resolve: Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default()))),
+            agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+            engine: scripted.clone(),
+            locations: None,
+            retention: Arc::new(engine::RusticRetention),
+            store: Arc::new(app::fakes::InMemoryOperationStore::new()),
+            registry: Arc::new(CancelRegistry::new()),
+            hooks: Arc::new(ProcessHookRunner::new()),
+            events: Arc::new(BroadcastEventBus::new()),
+            queue: Arc::new(RunQueue::new()),
+            ends: app::retry::run_ends().0,
+        };
+
+        let refused = runner.start_backup("home".to_owned()).await;
+
+        assert_matches!(
+            &refused,
+            Err(StartError::SecretRefused(SecretRefusal {
+                code: ErrorCode::SecretMissing,
+                ..
+            }))
+        );
+        assert_eq!(jobs(&scripted), 0);
+        let said = captured_log::lines();
+        let line = said
+            .iter()
+            .find(|(level, line)| {
+                *level == log::Level::Warn
+                    && line.contains("the Manual run of plan home didn't start")
+                    && line.contains(variable)
+            })
+            .map(|(_, line)| line)
+            .unwrap_or_else(|| panic!("no warning names the plan and the variable: {said:?}"));
+        assert!(line.contains("(SecretMissing)"), "{line}");
+        assert!(line.contains("password"), "{line}");
     }
 
     /// A listing the engine refused, told by its code alone.
