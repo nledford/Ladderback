@@ -92,8 +92,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let resumed_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
-        <p><A href="/">{start_link}</A></p>
-        <p><A href="/_missing">{missing_link}</A></p>
+        <p>
+            <A href="/">{start_link}</A>
+        </p>
+        <p>
+            <A href="/_missing">{missing_link}</A>
+        </p>
         <section>
             <h2>{announcer_heading}</h2>
             <p>
@@ -201,12 +205,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 error=form_error
             />
             <p>
+                // A second check of a corrected field clears the
+                // error, rewiring the input's description; only the
+                // error's arrival is announced.
                 <button
                     type="button"
                     on:click=move |_| {
-                        // A second check of a corrected field clears the
-                        // error, rewiring the input's description; only the
-                        // error's arrival is announced.
                         if form_error.get_untracked().is_some() {
                             form_error.set(None);
                         } else {
@@ -228,7 +232,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 description=t(msg::UI_GALLERY_DEMO_NOTIFICATION_HINT)
                 checked=RwSignal::new(false)
             />
-            <Checkbox id="gallery-log" label=t(msg::UI_GALLERY_DEMO_LOG) checked=RwSignal::new(true) />
+            <Checkbox
+                id="gallery-log"
+                label=t(msg::UI_GALLERY_DEMO_LOG)
+                checked=RwSignal::new(true)
+            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>
@@ -247,9 +255,13 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 reading=progress
             />
             <p>
-                <button type="button" on:click=move |_| {
-                    progress.update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
-                }>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        progress
+                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
+                    }
+                >
                     {t(msg::UI_GALLERY_ADVANCE_PROGRESS)}
                 </button>
             </p>
@@ -271,10 +283,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
             <Toast text=toast />
             <p>
-                <button
-                    type="button"
-                    on:click=move |_| show_toast(toast, settings_saved.clone())
-                >
+                <button type="button" on:click=move |_| show_toast(toast, settings_saved.clone())>
                     {t(msg::UI_GALLERY_SAVE_SETTINGS)}
                 </button>
             </p>
@@ -347,11 +356,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
             />
             <p>
+                // A run that finishes by itself: said at once, or
+                // counted while the demo is paused.
                 <button
                     type="button"
                     on:click=move |_| {
-                        // A run that finishes by itself: said at once, or
-                        // counted while the demo is paused.
                         if demo_paused.get_untracked() {
                             demo_ends.update_value(|ends| ends.count("succeeded"));
                             demo_waiting.update(|waiting| *waiting = waiting.saturating_add(1));

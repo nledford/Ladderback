@@ -133,8 +133,7 @@ fn SignInForm(
                 kind="password"
                 autocomplete="current-password"
             />
-            {(place == Place::Dialog)
-                .then(|| view! { <p role="alert">{move || alert.get()}</p> })}
+            {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}
             <p class="actions">
                 <button type="submit" aria-disabled=move || busy.get().then_some("true")>
                     {text(&localizer, msg::UI_SIGN_IN_SUBMIT)}
@@ -258,13 +257,13 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
     });
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
     view! {
+        // On `cancel`, Escape keeps the session too; the warning closes once
+        // the daemon has counted the use.
         <dialog
             node_ref=dialog
             aria-labelledby="idle-warning-title"
             aria-describedby="idle-warning-body"
             on:cancel=move |event: web_sys::Event| {
-                // Escape keeps the session too; the warning closes once the
-                // daemon has counted the use.
                 event.prevent_default();
                 keep();
             }

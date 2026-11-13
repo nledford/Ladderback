@@ -144,6 +144,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [81](decisions/81-identify-a-repository-before-its-first-job.md) | A job of an entry that records no repository ID runs after an identify |
 | [82](decisions/82-the-step-a-running-operation-is-in.md) | How a page learns which step a running operation is in |
 | [83](decisions/83-a-progress-bar-a-screen-reader-can-reach.md) | A progress bar a screen reader can reach, and that never chatters |
+| [84](decisions/84-view-blocks-are-formatted-by-leptosfmt.md) | Formatting the inside of `view!` blocks |
 
 ## 17. Open questions
 

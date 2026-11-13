@@ -146,6 +146,17 @@ jobs:
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,cargo-nextest
+      # leptosfmt at the version the Justfile pins, for `just fmt-check`.
+      # install-action lists no leptosfmt (manifests/ at that SHA), so it
+      # falls back to cargo-binstall at that version, which takes the
+      # release's prebuilt binary, as for wasm-bindgen in red-first.yml.
+      - id: leptosfmt
+        if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        run: echo "version=$(just --evaluate leptosfmt_version)" >> "$GITHUB_OUTPUT"
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: leptosfmt@${{ steps.leptosfmt.outputs.version }}
       # The rustic CLI the profile golden tests compare against (§6.2): the
       # official release, checked against the SHA-256 the script pins.
       - if: needs.changes.outputs.docs-only != 'true'

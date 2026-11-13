@@ -48,7 +48,11 @@ pub(crate) fn PageHeading(children: Children) -> impl IntoView {
             page::focus_on_arrival(&heading);
         }
     });
-    view! { <h1 node_ref=heading tabindex="-1">{children()}</h1> }
+    view! {
+        <h1 node_ref=heading tabindex="-1">
+            {children()}
+        </h1>
+    }
 }
 
 /// The start page, the route `/`: the configured plans, each with when it
@@ -108,49 +112,63 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = Arc::clone(&localizer);
     view! {
         <PageHeading>
-            {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+            {move || {
+                if phase.get() == Phase::Unreachable {
+                    unreachable_heading.clone()
+                } else {
+                    heading.clone()
+                }
+            }}
         </PageHeading>
         <SignInOff localizer=notice />
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => match (refused.get(), plans.get()) {
-                (Some(sentence), _) => {
-                    view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
-                }
-                (None, Some(plans)) if !plans.is_empty() => {
-                    view! {
-                        <table class="plans">
-                            <caption class="text-muted">{caption.clone()}</caption>
-                            <thead>
-                                <tr>
-                                    <th scope="col">{plan_column.clone()}</th>
-                                    <th scope="col">{next_run_column.clone()}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {plans
-                                    .into_iter()
-                                    .map(|plan| {
-                                        let (shown, title) = next_run_cell(&localizer, &plan, viewer.as_ref());
-                                        view! {
-                                            <tr>
-                                                <th scope="row">{plan.id}</th>
-                                                <td title=title>{shown}</td>
-                                            </tr>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </tbody>
-                        </table>
+            Phase::Ready => {
+                match (refused.get(), plans.get()) {
+                    (Some(sentence), _) => {
+                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
                     }
-                        .into_any()
+                    (None, Some(plans)) if !plans.is_empty() => {
+                        view! {
+                            <table class="plans">
+                                <caption class="text-muted">{caption.clone()}</caption>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">{plan_column.clone()}</th>
+                                        <th scope="col">{next_run_column.clone()}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {plans
+                                        .into_iter()
+                                        .map(|plan| {
+                                            let (shown, title) = next_run_cell(
+                                                &localizer,
+                                                &plan,
+                                                viewer.as_ref(),
+                                            );
+                                            view! {
+                                                <tr>
+                                                    <th scope="row">{plan.id}</th>
+                                                    <td title=title>{shown}</td>
+                                                </tr>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </tbody>
+                            </table>
+                        }
+                            .into_any()
+                    }
+                    _ => view! { <p>{empty.clone()}</p> }.into_any(),
                 }
-                _ => view! { <p>{empty.clone()}</p> }.into_any(),
-            },
+            }
         }}
-        <p><A href="/operations">{operations_link}</A></p>
+        <p>
+            <A href="/operations">{operations_link}</A>
+        </p>
     }
 }
 
@@ -355,7 +373,13 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let start_ops = ops;
     view! {
         <PageHeading>
-            {move || if page.phase() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+            {move || {
+                if page.phase() == Phase::Unreachable {
+                    unreachable_heading.clone()
+                } else {
+                    heading.clone()
+                }
+            }}
         </PageHeading>
         <p>{body}</p>
         <PauseUpdates
@@ -370,7 +394,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             on_pause=on_pause
             on_resume=on_resume
         />
-        {move || error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })}
+        {move || {
+            error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+        }}
         {move || {
             plans_refused
                 .get()
@@ -394,19 +420,23 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             let base = start_base.clone();
                             let visit = start_visit.clone();
                             let error_localizer = Arc::clone(&localizer_for_errors);
-                            // Named with its plan, as a row's Cancel is: a
-                            // reader tabbing through the plans hears which
-                            // one each button runs (2.4.6, 4.1.2).
                             let label = text_with(
                                 &start_localizer,
                                 msg::UI_START_PLAN,
                                 &[("plan", MsgArg::Text(plan.id.clone()))],
                             );
                             view! {
+                                // Named with its plan, as a row's Cancel is: a
+                                // reader tabbing through the plans hears which
+                                // one each button runs (2.4.6, 4.1.2). When a
+                                // start gets no answer at all, the page's phase
+                                // says that its own way.
                                 <button
                                     type="button"
                                     on:click=move |_| {
-                                        let request = StartBackup { plan: plan.id.clone() };
+                                        let request = StartBackup {
+                                            plan: plan.id.clone(),
+                                        };
                                         let url = url.clone();
                                         let base = base.clone();
                                         let started = started.clone();
@@ -418,8 +448,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             match ws::post(&url, &request).await {
                                                 Some(Posted::Done(answer)) => {
                                                     reply(Politeness::Polite, &started);
-                                                    if let Some(operation) =
-                                                        ws::started_operation(&answer)
+                                                    if let Some(operation) = ws::started_operation(&answer)
                                                         && visit.during(ws::settle(&base, ops, &operation)).await
                                                             == Some(false)
                                                     {
@@ -427,15 +456,18 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
-                                                    error.set(Some(refused_sentence(
-                                                        &error_localizer,
-                                                        code,
-                                                        &args,
-                                                        detail.as_deref(),
-                                                    )));
+                                                    error
+                                                        .set(
+                                                            Some(
+                                                                refused_sentence(
+                                                                    &error_localizer,
+                                                                    code,
+                                                                    &args,
+                                                                    detail.as_deref(),
+                                                                ),
+                                                            ),
+                                                        );
                                                 }
-                                                // No answer at all: the page's
-                                                // phase says that its own way.
                                                 None => {}
                                             }
                                         });
@@ -449,10 +481,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 });
             (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
         }}
+        // Per render: the sort button's and rows' closures own what they
+        // say and show. A render is a change of what the page shows, never
+        // an update to a row.
         {move || {
-            // Per render: the sort button's and rows' closures own what they
-            // say and show. A render is a change of what the page shows, never
-            // an update to a row.
             let newest = sorted_newest.clone();
             let oldest = sorted_oldest.clone();
             let rows_localizer = table_localizer.clone();
@@ -477,18 +509,18 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             _ => "descending",
                                         }
                                     >
+                                        // Its sort button's first press is the newest
+                                        // first: the history is already the daemon's
+                                        // newest first, so the sort's own orders follow.
                                         <span class="sort-header">
                                             {started_column.clone()}
                                             <button
                                                 type="button"
                                                 on:click=move |_| {
-                                                    // The first press is the newest
-                                                    // first: the history is already
-                                                    // the daemon's newest first, so
-                                                    // the sort's own orders follow.
                                                     let next = match sort.get_untracked() {
-                                                        SortOrder::History
-                                                        | SortOrder::OldestFirst => SortOrder::NewestFirst,
+                                                        SortOrder::History | SortOrder::OldestFirst => {
+                                                            SortOrder::NewestFirst
+                                                        }
                                                         SortOrder::NewestFirst => SortOrder::OldestFirst,
                                                     };
                                                     sort.set(next);
@@ -528,7 +560,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                             </tbody>
                         </table>
                     }
-                    .into_any()
+                        .into_any()
                 }
             }
         }}
@@ -636,7 +668,9 @@ fn row_view(
     let cancel_header = header.clone();
     view! {
         <tr>
-            <th scope="row" id=header.clone() tabindex="-1">{name}</th>
+            <th scope="row" id=header.clone() tabindex="-1">
+                {name}
+            </th>
             <td>
                 <StatusBadge
                     state=Signal::derive(move || badge.with(|badge| badge.0))
@@ -651,15 +685,17 @@ fn row_view(
                                     localizer=Arc::clone(&bar_localizer)
                                     label=progress_label.clone()
                                     then_focus=header.clone()
-                                    reading=Signal::derive(move || reading.get().unwrap_or_default())
+                                    reading=Signal::derive(move || {
+                                        reading.get().unwrap_or_default()
+                                    })
                                 />
                             }
                         })
                 }}
             </td>
-            <td title=move || started.get()>
-                {move || instant(&localizer, &started.get(), zone.as_ref())}
-            </td>
+            <td title=move || {
+                started.get()
+            }>{move || instant(&localizer, &started.get(), zone.as_ref())}</td>
             <td>
                 {move || {
                     let facts = result.get();
@@ -682,9 +718,6 @@ fn row_view(
                     can_cancel
                         .get()
                         .then(|| {
-                            // A run that ends takes its Cancel button away;
-                            // a button that held focus hands it to the row's
-                            // header, which names the run (#438).
                             let button = NodeRef::<leptos::html::Button>::new();
                             hand_focus_when_gone(button, cancel_header.clone());
                             let url = url.clone();
@@ -693,6 +726,9 @@ fn row_view(
                             let still_waiting = still_waiting.clone();
                             let error_localizer = Arc::clone(&error_localizer);
                             view! {
+                                // A run that ends takes its Cancel button away;
+                                // a button that held focus hands it to the row's
+                                // header, which names the run (#438).
                                 <button
                                     node_ref=button
                                     type="button"
@@ -703,9 +739,10 @@ fn row_view(
                                         let operation = operation.clone();
                                         let url = url.clone();
                                         let ops = page.live();
-                                        cancelled.update_value(|cancelled| {
-                                            cancelled.insert(operation.clone());
-                                        });
+                                        cancelled
+                                            .update_value(|cancelled| {
+                                                cancelled.insert(operation.clone());
+                                            });
                                         spawn_local(async move {
                                             match ws::post(&url, &Empty {}).await {
                                                 Some(Posted::Done(_)) => {
@@ -716,20 +753,27 @@ fn row_view(
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
-                                                    cancelled.update_value(|cancelled| {
-                                                        cancelled.remove(&operation);
-                                                    });
-                                                    error.set(Some(refused_sentence(
-                                                        &error_localizer,
-                                                        code,
-                                                        &args,
-                                                        detail.as_deref(),
-                                                    )));
+                                                    cancelled
+                                                        .update_value(|cancelled| {
+                                                            cancelled.remove(&operation);
+                                                        });
+                                                    error
+                                                        .set(
+                                                            Some(
+                                                                refused_sentence(
+                                                                    &error_localizer,
+                                                                    code,
+                                                                    &args,
+                                                                    detail.as_deref(),
+                                                                ),
+                                                            ),
+                                                        );
                                                 }
                                                 None => {
-                                                    cancelled.update_value(|cancelled| {
-                                                        cancelled.remove(&operation);
-                                                    });
+                                                    cancelled
+                                                        .update_value(|cancelled| {
+                                                            cancelled.remove(&operation);
+                                                        });
                                                 }
                                             }
                                         });
@@ -1241,42 +1285,50 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let field_text = |id| text(&localizer, id);
     view! {
         <PageHeading>
-            {move || if phase.get() == Phase::Unreachable { unreachable_heading.clone() } else { heading.clone() }}
+            {move || {
+                if phase.get() == Phase::Unreachable {
+                    unreachable_heading.clone()
+                } else {
+                    heading.clone()
+                }
+            }}
         </PageHeading>
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => match (refused.get(), rows.get()) {
-                (Some(sentence), _) => {
-                    view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
-                }
-                (None, Some(rows)) if !rows.is_empty() => {
-                    let localizer = Arc::clone(&list_localizer);
-                    let base = base.get_value();
-                    view! {
-                        <table class="repositories">
-                            <caption class="text-muted">{caption.clone()}</caption>
-                            <thead>
-                                <tr>
-                                    <th scope="col">{name_column.clone()}</th>
-                                    <th scope="col">{location_column.clone()}</th>
-                                    <th scope="col">{password_column.clone()}</th>
-                                    <th scope="col">{actions_column.clone()}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows
-                                    .into_iter()
-                                    .map(|row| repository_row(&localizer, &base, creates, row))
-                                    .collect_view()}
-                            </tbody>
-                        </table>
+            Phase::Ready => {
+                match (refused.get(), rows.get()) {
+                    (Some(sentence), _) => {
+                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
                     }
-                        .into_any()
+                    (None, Some(rows)) if !rows.is_empty() => {
+                        let localizer = Arc::clone(&list_localizer);
+                        let base = base.get_value();
+                        view! {
+                            <table class="repositories">
+                                <caption class="text-muted">{caption.clone()}</caption>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">{name_column.clone()}</th>
+                                        <th scope="col">{location_column.clone()}</th>
+                                        <th scope="col">{password_column.clone()}</th>
+                                        <th scope="col">{actions_column.clone()}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rows
+                                        .into_iter()
+                                        .map(|row| repository_row(&localizer, &base, creates, row))
+                                        .collect_view()}
+                                </tbody>
+                            </table>
+                        }
+                            .into_any()
+                    }
+                    _ => view! { <p>{empty.clone()}</p> }.into_any(),
                 }
-                _ => view! { <p>{empty.clone()}</p> }.into_any(),
-            },
+            }
         }}
         {move || {
             creates
@@ -1420,7 +1472,10 @@ fn repository_row(
             <td class="path">{place}</td>
             <td class="path">
                 <div>{password}</div>
-                {notes.into_iter().map(|note| view! { <div class="text-muted">{note}</div> }).collect_view()}
+                {notes
+                    .into_iter()
+                    .map(|note| view! { <div class="text-muted">{note}</div> })
+                    .collect_view()}
             </td>
             <td>{test} {create}</td>
         </tr>
@@ -1481,7 +1536,10 @@ fn locations_list(
                     <div>{heading}</div>
                     <div>{location.repository}</div>
                     {hot.map(|hot| view! { <div>{hot}</div> })}
-                    {options.into_iter().map(|option| view! { <div class="text-muted">{option}</div> }).collect_view()}
+                    {options
+                        .into_iter()
+                        .map(|option| view! { <div class="text-muted">{option}</div> })
+                        .collect_view()}
                     {rule.into_iter().map(|said| view! { <div>{said}</div> }).collect_view()}
                     {move || found().map(|found| view! { <div>{found}</div> })}
                 </li>
@@ -1652,7 +1710,9 @@ fn CreatedNote(confirmation: String, id_sentence: String) -> impl IntoView {
         }
     });
     view! {
-        <p tabindex="-1" node_ref=note>{confirmation}</p>
+        <p tabindex="-1" node_ref=note>
+            {confirmation}
+        </p>
         <p>{id_sentence}</p>
     }
 }
@@ -1670,7 +1730,9 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>{text(&localizer, msg::UI_NOT_FOUND_BODY)}</p>
-        <p><A href="/">{text(&localizer, msg::UI_NOT_FOUND_LINK)}</A></p>
+        <p>
+            <A href="/">{text(&localizer, msg::UI_NOT_FOUND_LINK)}</A>
+        </p>
     }
 }
 

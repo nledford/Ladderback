@@ -20,6 +20,11 @@ mutants_packages := "--package domain --package app --package api --package l10n
 # artifacts change together.
 release_flags := "--no-default-features"
 
+# The leptosfmt release `fmt` and `fmt-check` expect (technical design §13.13).
+# Another release formats differently, so `setup` installs this one, CI too
+# (`just --evaluate leptosfmt_version`), and `fmt-check` refuses another.
+leptosfmt_version := "0.1.33"
+
 # List available workflows.
 [group('help')]
 default:
@@ -36,21 +41,36 @@ setup:
     rustup target add wasm32-unknown-unknown
     cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
+    cargo binstall --no-confirm --version '{{ leptosfmt_version }}' leptosfmt
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
     scripts/install-dist.sh
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium
 
-# Format Rust code.
+# Format Rust code: leptosfmt formats the `view!` blocks, which rustfmt leaves
+# alone, then rustfmt the rest. leptosfmt goes first because rustfmt settles
+# the code around a view it has laid out, never the other way round. The
+# comment check runs before either writes: leptosfmt drops a comment inside a
+# view's Rust code (§13.13).
 [group('quality')]
-fmt:
+fmt: _leptosfmt-pinned
+    node scripts/leptosfmt-comments.ts leptosfmt.toml crates/web
+    leptosfmt --quiet --config-file leptosfmt.toml crates/web
     cargo fmt --all
 
-# Check formatting without changing files.
+# Check formatting without changing files: rustfmt, leptosfmt, and no comment
+# that a leptosfmt run would drop.
 [group('quality')]
-fmt-check:
+fmt-check: _leptosfmt-pinned
     cargo fmt --all --check
+    node scripts/leptosfmt-comments.ts leptosfmt.toml crates/web
+    leptosfmt --quiet --check --config-file leptosfmt.toml crates/web
+
+# Fails unless the installed leptosfmt is the pinned release.
+[private]
+_leptosfmt-pinned:
+    @[ "$(leptosfmt --version)" = 'leptosfmt {{ leptosfmt_version }}' ] || { echo "needs leptosfmt {{ leptosfmt_version }}, found $(leptosfmt --version 2>&1 || true); run just setup" >&2; exit 1; }
 
 # Clippy on the host crates: the part of `lint` that can differ by OS
 # (`cfg(target_os)` code), and so the only part CI runs on macOS too.

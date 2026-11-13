@@ -385,40 +385,36 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             {move || if unreachable.get() { unreachable_heading.clone() } else { heading.clone() }}
         </PageHeading>
         <p>{body}</p>
+        {move || { unreachable.get().then(|| view! { <p>{unreachable_body.clone()}</p> }) }}
         {move || {
-            unreachable
-                .get()
-                .then(|| view! { <p>{unreachable_body.clone()}</p> })
-        }}
-        {move || {
-            refused
-                .get()
-                .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            refused.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
         }}
         {move || match repositories.get() {
             None => view! { <p>{loading.clone()}</p> }.into_any(),
-            Some(aliases) => aliases
-                .into_iter()
-                .map(|(alias, maintained)| {
-                    let label = text_with(
-                        &picker,
-                        msg::UI_SNAPSHOTS_OF,
-                        &[("alias", MsgArg::Text(alias.clone()))],
-                    );
-                    view! {
-                        <button
-                            type="button"
-                            on:click=move |_| {
-                                chosen.set(Some((alias.clone(), maintained)));
-                                picks.update(|picks| *picks = picks.wrapping_add(1));
-                            }
-                        >
-                            {label}
-                        </button>
-                    }
-                })
-                .collect_view()
-                .into_any(),
+            Some(aliases) => {
+                aliases
+                    .into_iter()
+                    .map(|(alias, maintained)| {
+                        let label = text_with(
+                            &picker,
+                            msg::UI_SNAPSHOTS_OF,
+                            &[("alias", MsgArg::Text(alias.clone()))],
+                        );
+                        view! {
+                            <button
+                                type="button"
+                                on:click=move |_| {
+                                    chosen.set(Some((alias.clone(), maintained)));
+                                    picks.update(|picks| *picks = picks.wrapping_add(1));
+                                }
+                            >
+                                {label}
+                            </button>
+                        }
+                    })
+                    .collect_view()
+                    .into_any()
+            }
         }}
         {move || {
             shown_alias
@@ -547,7 +543,9 @@ fn Repository(
                 refused
                     .get()
                     .map(|refused| {
-                        view! { <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p> }
+                        view! {
+                            <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p>
+                        }
                     })
             }}
             {move || {
@@ -565,9 +563,7 @@ fn Repository(
                     })
             }}
             {move || {
-                ended
-                    .get()
-                    .map(|told| view! { <p>{page.words(&wording::told(told))}</p> })
+                ended.get().map(|told| view! { <p>{page.words(&wording::told(told))}</p> })
             }}
             {move || {
                 let findings = findings.get();
@@ -778,7 +774,13 @@ fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> i
         let items = group
             .paths
             .iter()
-            .map(|path| view! { <li><bdi>{path.clone()}</bdi></li> })
+            .map(|path| {
+                view! {
+                    <li>
+                        <bdi>{path.clone()}</bdi>
+                    </li>
+                }
+            })
             .collect_view();
         view! {
             <p>{page.plain(msg::UI_UNMANAGED_PATHS)}</p>

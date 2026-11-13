@@ -68,9 +68,14 @@ pub fn ModalDialog(
         >
             <h3>{label.clone()}</h3>
             {body}
-            <button type="button" on:click=move |_| if let Some(dialog) = dialog.get() {
-                dialog.close();
-            }>
+            <button
+                type="button"
+                on:click=move |_| {
+                    if let Some(dialog) = dialog.get() {
+                        dialog.close();
+                    }
+                }
+            >
                 {close_label}
             </button>
         </dialog>
@@ -225,8 +230,10 @@ pub fn ReviewDialog(
             <button
                 type="button"
                 aria-disabled=move || busy.get().then_some("true")
-                on:click=move |_| if !busy.get_untracked() {
-                    action.run(());
+                on:click=move |_| {
+                    if !busy.get_untracked() {
+                        action.run(());
+                    }
                 }
             >
                 {label}
@@ -238,8 +245,10 @@ pub fn ReviewDialog(
             node_ref=dialog
             aria-labelledby=title_id.clone()
             aria-describedby=described_by
-            on:cancel=move |ev: web_sys::Event| if busy.get_untracked() {
-                ev.prevent_default();
+            on:cancel=move |ev: web_sys::Event| {
+                if busy.get_untracked() {
+                    ev.prevent_default();
+                }
             }
             on:close=move |_| {
                 modal_gone(counted);
@@ -258,10 +267,10 @@ pub fn ReviewDialog(
                     type="button"
                     node_ref=dismiss
                     aria-disabled=move || busy.get().then_some("true")
-                    on:click=move |_| if !busy.get_untracked()
-                        && let Some(dialog) = dialog.get()
-                    {
-                        dialog.close();
+                    on:click=move |_| {
+                        if !busy.get_untracked() && let Some(dialog) = dialog.get() {
+                            dialog.close();
+                        }
                     }
                 >
                     {dismiss_label}
@@ -300,9 +309,7 @@ pub fn SortableTable(
                 <tr>
                     <th
                         scope="col"
-                        aria-sort=move || {
-                            if sorted.get() { "ascending" } else { "descending" }
-                        }
+                        aria-sort=move || { if sorted.get() { "ascending" } else { "descending" } }
                     >
                         <span class="sort-header">
                             {column.clone()}
@@ -324,7 +331,13 @@ pub fn SortableTable(
                     shown
                         .get()
                         .into_iter()
-                        .map(|row| view! { <tr><td>{row}</td></tr> })
+                        .map(|row| {
+                            view! {
+                                <tr>
+                                    <td>{row}</td>
+                                </tr>
+                            }
+                        })
                         .collect::<Vec<_>>()
                 }}
             </tbody>
@@ -380,7 +393,13 @@ pub fn FormField(
             {move || {
                 error
                     .get()
-                    .map(|text| view! { <p id=error_in_error.clone() class="form-error">{text}</p> })
+                    .map(|text| {
+                        view! {
+                            <p id=error_in_error.clone() class="form-error">
+                                {text}
+                            </p>
+                        }
+                    })
             }}
         </div>
     }
@@ -449,7 +468,9 @@ pub(crate) fn ErrorSummary(
     });
     view! {
         <div class="error-summary">
-            <h2 tabindex="-1" node_ref=heading_ref>{heading}</h2>
+            <h2 tabindex="-1" node_ref=heading_ref>
+                {heading}
+            </h2>
             <ul>
                 {items
                     .into_iter()
@@ -457,12 +478,12 @@ pub(crate) fn ErrorSummary(
                         let SummaryItem { field, sentence } = item;
                         let shown = sentence_view(sentence);
                         match field {
-                            // The router takes a click on any same-origin
-                            // link and would only scroll, so the link moves
-                            // focus itself and stops the click.
                             Some(field) => {
                                 view! {
                                     <li>
+                                        // The router takes a click on any same-origin
+                                        // link and would only scroll, so the link moves
+                                        // focus itself and stops the click.
                                         <a
                                             href=format!("#{field}")
                                             on:click=move |event| {
@@ -674,7 +695,9 @@ pub fn Progress(
             {move || {
                 said.get()
                     .above
-                    .map(|id| view! { <span class="progress-step">{text(&step_localizer, id)}</span> })
+                    .map(|id| {
+                        view! { <span class="progress-step">{text(&step_localizer, id)}</span> }
+                    })
             }}
             {move || {
                 known
@@ -686,7 +709,9 @@ pub fn Progress(
                                 // allows (§10.1), not a `style` attribute, which it refuses.
                                 <div
                                     class="progress-fill"
-                                    style:inline-size=move || format!("{}%", percent.get().unwrap_or_default())
+                                    style:inline-size=move || {
+                                        format!("{}%", percent.get().unwrap_or_default())
+                                    }
                                 ></div>
                             </div>
                         }
@@ -745,11 +770,7 @@ fn act(
 /// without any announcement of its going.
 #[component]
 pub fn Toast(text: RwSignal<Option<String>>) -> impl IntoView {
-    view! {
-        {move || {
-            text.get().map(|message| view! { <p class="toast">{message}</p> })
-        }}
-    }
+    view! { {move || { text.get().map(|message| view! { <p class="toast">{message}</p> }) }} }
 }
 
 /// Shows `message` as a toast for the lifetime [`crate::toast::arrival`]
@@ -816,7 +837,13 @@ pub(crate) fn PauseUpdates(
             {move || {
                 paused
                     .get()
-                    .then(|| view! { <p id=banner_id class="pause-banner">{move || banner.get()}</p> })
+                    .then(|| {
+                        view! {
+                            <p id=banner_id class="pause-banner">
+                                {move || banner.get()}
+                            </p>
+                        }
+                    })
             }}
         </div>
     }
