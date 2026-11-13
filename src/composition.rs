@@ -46,14 +46,14 @@ use domain::RepositoryAlias;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
+use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
     Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan, RepositoryConfig,
     RepositoryField, RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
-    SecretValue, SourceName, Template, TemplateError,
+    SecretValue, Template,
 };
 use domain::{AgentId, OperationId, PlanId, RepositoryId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
@@ -1002,11 +1002,13 @@ impl PlanRunner {
         &self,
         config: &domain::planning::AgentConfig,
         id: &PlanId,
-    ) -> Result<(Job, HookSetup), StartError> {
-        let plan = config.plan(id).ok_or(StartError::UnknownPlan)?;
+    ) -> Result<(Job, HookSetup), Unbuilt> {
+        let plan = config
+            .plan(id)
+            .ok_or(Unbuilt::Refused(StartError::UnknownPlan))?;
         let repository = config
             .repository(&plan.repository)
-            .ok_or(StartError::UnknownPlan)?;
+            .ok_or(Unbuilt::Refused(StartError::UnknownPlan))?;
         // The engine opens only the repository the configuration recorded,
         // when it recorded one (§7.3), and the job carries the entry it was
         // made from, so the ID it opens is recorded in an entry that records
@@ -1020,9 +1022,16 @@ impl PlanRunner {
         {
             Ok(resolved) => resolved,
             Err(error) => {
-                return Err(StartError::SecretRefused(
-                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
-                ));
+                let redactor =
+                    refusal_redactor(&error, &repository.settings, &SystemSecrets::default()).await;
+                return Err(Unbuilt::Secret(Box::new(SecretUnbuilt {
+                    refusal: refusal_with(&error, &redactor),
+                    failure: error.failure(&redactor),
+                    target: Target {
+                        plan: Some(plan.id.clone()),
+                        repository: repository.id.clone(),
+                    },
+                })));
             }
         };
         let job = Job::Backup(BackupJob {
@@ -1077,13 +1086,11 @@ impl PlanRunner {
         id: &PlanId,
         trigger: Trigger,
         place: Option<Place>,
-    ) -> Result<OperationId, StartError> {
+    ) -> Result<OperationId, Unbuilt> {
         let config = self.config.load().await.map_err(|error| {
-            config_unusable(error, |code, args, detail| StartError::Unavailable {
-                code,
-                args,
-                detail,
-            })
+            Unbuilt::Refused(config_unusable(error, |code, args, detail| {
+                StartError::Unavailable { code, args, detail }
+            }))
         })?;
         let (job, setup) = self.backup_of(&config, id).await?;
         let place = place.unwrap_or_else(|| self.queue.push(id, config.agent().concurrency));
@@ -1111,6 +1118,33 @@ impl PlanRunner {
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
         Ok(operation)
+    }
+}
+
+/// Why a plan's backup couldn't be built, so its run doesn't start.
+enum Unbuilt {
+    /// Refused as a request to start it is, and nothing is recorded.
+    Refused(StartError),
+    /// A setting of the plan's repository couldn't be resolved.
+    Secret(Box<SecretUnbuilt>),
+}
+
+/// A plan's backup unbuilt for a setting of its repository: `refusal` is
+/// what a request to start it is answered with, and `failure` and `target`
+/// what a run the schedule started records (§5).
+struct SecretUnbuilt {
+    refusal: SecretRefusal,
+    failure: FailureReason,
+    target: Target,
+}
+
+impl Unbuilt {
+    /// The refusal of a request to start the run.
+    fn into_start_error(self) -> StartError {
+        match self {
+            Self::Refused(error) => error,
+            Self::Secret(secret) => StartError::SecretRefused(secret.refusal),
+        }
     }
 }
 
@@ -1156,8 +1190,39 @@ fn start_refused(error: &StartError) -> String {
 #[async_trait]
 impl PlanRuns for PlanRunner {
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
-        if let Err(error) = self.start_plan(plan, trigger, Some(place)).await {
-            log_not_started(plan, trigger, &error);
+        match self.start_plan(plan, trigger, Some(place)).await {
+            Ok(_) => {}
+            // Refused for a secret of its repository, it ends failed with the
+            // refusal, so the history and the page say why the schedule's
+            // backups stopped (§5), and it is retried as any failed backup the
+            // schedule started (decision 76). Its place is given up already.
+            Err(Unbuilt::Secret(secret)) => {
+                let SecretUnbuilt {
+                    refusal,
+                    failure,
+                    target,
+                } = *secret;
+                let operation = OperationId::from_uuid(Uuid::now_v7());
+                // As a refusal by hand is logged (#483), never the refusal's
+                // words, which only the history shows, masked (I4).
+                log::warn!(
+                    "the {trigger:?} run of plan {} didn't start, and ends as failed operation {}: {}",
+                    plan.as_str(),
+                    operation.as_uuid().hyphenated(),
+                    start_refused(&StartError::SecretRefused(refusal))
+                );
+                let finished = RunOperation::new(
+                    Arc::clone(&self.engine),
+                    Arc::new(SystemClock),
+                    Arc::clone(&self.store),
+                )
+                .with_events(Arc::clone(&self.events))
+                .refused(operation, trigger, target, failure)
+                .await;
+                log_recording_errors(&finished);
+                say_how_it_ended(&self.ends, &finished);
+            }
+            Err(Unbuilt::Refused(error)) => log_not_started(plan, trigger, &error),
         }
     }
 
@@ -1169,24 +1234,24 @@ impl PlanRuns for PlanRunner {
                     .backup_of(&config, &plan)
                     .await
                     .map(|(job, setup)| (job, setup, plan, config.agent().concurrency)),
-                Err(error) => Err(config_unusable(error, |code, args, detail| {
-                    StartError::Unavailable { code, args, detail }
-                })),
+                Err(error) => Err(Unbuilt::Refused(config_unusable(
+                    error,
+                    |code, args, detail| StartError::Unavailable { code, args, detail },
+                ))),
             },
-            None => Err(StartError::UnknownPlan),
+            None => Err(Unbuilt::Refused(StartError::UnknownPlan)),
         };
-        let built =
-            built
-                .map_err(|error| start_refused(&error))
-                .and_then(|(job, setup, plan, limit)| {
-                    // The plan may have moved to another repository since the
-                    // queue's own read: it isn't run there under a record of the old.
-                    if operation.target().is_on(job.target().repository.as_ref()) {
-                        Ok((job, setup, plan, limit))
-                    } else {
-                        Err("its plan now backs up to another repository".to_owned())
-                    }
-                });
+        let built = built
+            .map_err(|error| start_refused(&error.into_start_error()))
+            .and_then(|(job, setup, plan, limit)| {
+                // The plan may have moved to another repository since the
+                // queue's own read: it isn't run there under a record of the old.
+                if operation.target().is_on(job.target().repository.as_ref()) {
+                    Ok((job, setup, plan, limit))
+                } else {
+                    Err("its plan now backs up to another repository".to_owned())
+                }
+            });
         match built {
             Ok((job, setup, plan, limit)) => {
                 // Oldest first, as the queue hands them on: each waits for
@@ -1305,6 +1370,7 @@ impl Operations for PlanRunner {
         let operation = self
             .start_plan(&id, Trigger::Manual, None)
             .await
+            .map_err(Unbuilt::into_start_error)
             .inspect_err(|error| log_not_started(&id, Trigger::Manual, error))?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
@@ -1447,11 +1513,18 @@ fn say_how_it_ended(ends: &app::retry::RunEndSender, finished: &Finished) {
 /// refused write is named by the code of its failure and never by the
 /// failure's own words, which nobody has checked for a value (I4).
 fn log_ended(finished: &Finished) {
-    let operation = finished.operation.id().as_uuid().hyphenated();
     log::info!(
-        "operation {operation} ended: {:?}",
+        "operation {} ended: {:?}",
+        finished.operation.id().as_uuid().hyphenated(),
         finished.operation.status()
     );
+    log_recording_errors(finished);
+}
+
+/// Says in the log each write of `finished` the operation log refused, as
+/// [`log_ended`] does.
+fn log_recording_errors(finished: &Finished) {
+    let operation = finished.operation.id().as_uuid().hyphenated();
     for refused in &finished.recording_errors {
         log::warn!(
             "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
@@ -2457,129 +2530,47 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
     }
 }
 
-/// A secret that couldn't be resolved, as the typed refusal of its cause.
-/// What a platform or a command said is masked of every secret of the
-/// repository first (I4), read again through `resolver`. A refusal that
-/// shows nothing a source said reads nothing: a location with too many
-/// credentials, or a reference that would reach a process's arguments, is
-/// refused before any secret is read (§10.2).
+/// A secret that couldn't be resolved, as the typed refusal of its cause
+/// ([`ResolveError::refusal`]). What a platform or a command said is masked
+/// of every secret of the repository first (I4), read again through
+/// `resolver`. A refusal that shows nothing a source said reads nothing: a
+/// location with too many credentials, or a reference that would reach a
+/// process's arguments, is refused before any secret is read (§10.2).
 async fn secret_refusal(
     error: &ResolveError,
     settings: &RepositorySettings,
     resolver: &dyn SecretResolver,
 ) -> SecretRefusal {
-    use domain::secrets::Problem;
-    let field = || ("field", MsgArg::Text(error.field.name()));
-    let refusal = |code, args: Vec<(&'static str, MsgArg)>, detail: Option<String>| SecretRefusal {
-        code,
-        args,
-        detail: detail.filter(|detail| !detail.is_empty()),
-    };
-    let bytes = |limit: usize| MsgArg::Bytes(u64::try_from(limit).unwrap_or(u64::MAX));
-    match &error.cause {
-        Cause::Unresolved(secret) => {
-            let redactor = failure_redactor(settings, resolver).await;
-            let source = (
-                "source",
-                MsgArg::Text(redactor.redact(&source_text(&secret.source))),
-            );
-            let named = vec![field(), source.clone()];
-            match &secret.problem {
-                Problem::Missing => refusal(ErrorCode::SecretMissing, named, None),
-                Problem::Unreachable { detail } => refusal(
-                    ErrorCode::SecretUnreadable,
-                    named,
-                    Some(masked_detail(&redactor, detail)),
-                ),
-                // The platform's words about the service, never about a
-                // secret it gave: none was read. Masked all the same.
-                Problem::KeyringUnavailable { detail } => refusal(
-                    ErrorCode::SecretKeyringUnavailable,
-                    named,
-                    Some(masked_detail(&redactor, detail)),
-                ),
-                Problem::NotUnicode => refusal(ErrorCode::SecretNotText, named, None),
-                Problem::TooLarge { limit } => refusal(
-                    ErrorCode::SecretTooLarge,
-                    vec![field(), source, ("limit", bytes(*limit))],
-                    None,
-                ),
-                Problem::CommandFailed { detail, .. } => refusal(
-                    ErrorCode::SecretCommandFailed,
-                    named,
-                    Some(masked_detail(&redactor, detail)),
-                ),
-                // Only a command is run for a time; a file or a keyring that
-                // doesn't answer is a source that can't be read.
-                Problem::TimedOut { seconds } => match secret.source {
-                    SourceName::Command { .. } => refusal(
-                        ErrorCode::SecretCommandTimedOut,
-                        vec![field(), source, ("seconds", MsgArg::Count(*seconds))],
-                        None,
-                    ),
-                    SourceName::Keyring { .. }
-                    | SourceName::File { .. }
-                    | SourceName::Env { .. } => refusal(ErrorCode::SecretUnreadable, named, None),
-                },
-                // A command that succeeded while something it started kept
-                // its output open before its secret's line ended gave no
-                // secret, and nothing it printed is shown. Not a failure of
-                // the command, which exited as it should.
-                Problem::OutputCut => refusal(ErrorCode::SecretCommandOutputOpen, named, None),
-            }
+    refusal_with(error, &refusal_redactor(error, settings, resolver).await)
+}
+
+/// [`secret_refusal`], with what `redactor` masks.
+fn refusal_with(error: &ResolveError, redactor: &Redactor) -> SecretRefusal {
+    match error.refusal(redactor) {
+        Ok(refusal) => {
+            let (code, args, detail) = app::announce::refused(&error.field.name(), &refusal);
+            SecretRefusal { code, args, detail }
         }
-        Cause::ReferenceInProcessArguments => {
-            refusal(ErrorCode::SecretInProcessArguments, vec![field()], None)
-        }
-        Cause::ExpansionTooLong { limit } => refusal(
-            ErrorCode::SecretExpansionTooLong,
-            vec![field(), ("limit", bytes(*limit))],
-            None,
-        ),
-        Cause::TooMuchToMask { limit } => too_much_to_mask(Some(error.field.name()), *limit),
-        Cause::TooManyCredentials { .. } => {
-            refusal(ErrorCode::LocationTooManyCredentials, vec![field()], None)
-        }
-        Cause::RelativePath => refusal(ErrorCode::RepositoryPathRelative, vec![field()], None),
-        Cause::Invalid(template) => {
-            let mut args = vec![field()];
-            if let Some(at) = template_error_place(template) {
-                args.push(("at", MsgArg::Text(at.to_string())));
-            }
-            refusal(ErrorCode::TemplateInvalid, args, None)
-        }
+        Err(limit) => too_much_to_mask(Some(error.field.name()), limit),
     }
 }
 
-/// What a command or a platform said, with the secrets of the repository
-/// masked. A line that was cut at its cap (it ends in `…`) may end in the
-/// start of a secret that whoever cut it didn't know, which is masked as a
-/// whole one is ([`Redactor::redact_clipped`]).
-fn masked_detail(redactor: &Redactor, detail: &str) -> String {
-    redactor.redact_clipped(detail, "…")
-}
-
-/// Where in a setting a template goes wrong, when the fault has a place.
-fn template_error_place(error: &TemplateError) -> Option<usize> {
-    match error {
-        TemplateError::TooLong { .. } | TemplateError::TooManyReferences { .. } => None,
-        TemplateError::Unterminated { at }
-        | TemplateError::EmptyReference { at }
-        | TemplateError::InvalidName { at }
-        | TemplateError::EmptyPath { at }
-        | TemplateError::RelativePath { at }
-        | TemplateError::NestedReference { at } => Some(*at),
-    }
-}
-
-/// What names a source in a refusal: the variable, the path, the keyring
-/// entry or the program, never what it gave.
-fn source_text(source: &SourceName) -> String {
-    match source {
-        SourceName::Command { program } => program.clone(),
-        SourceName::Keyring { entry } => entry.clone(),
-        SourceName::File { path } => path.clone(),
-        SourceName::Env { name } => name.clone(),
+/// What masks the texts of `error`'s refusal: only a secret that couldn't be
+/// read has any, where it was looked for and what was said, so only then are
+/// the repository's secrets read again ([`failure_redactor`]).
+async fn refusal_redactor(
+    error: &ResolveError,
+    settings: &RepositorySettings,
+    resolver: &dyn SecretResolver,
+) -> Redactor {
+    match error.cause {
+        Cause::Unresolved(_) => failure_redactor(settings, resolver).await,
+        Cause::Invalid(_)
+        | Cause::ExpansionTooLong { .. }
+        | Cause::ReferenceInProcessArguments
+        | Cause::TooManyCredentials { .. }
+        | Cause::TooMuchToMask { .. }
+        | Cause::RelativePath => Redactor::new([]),
     }
 }
 
@@ -2697,7 +2688,12 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
-        F::SecretRefused { .. } => todo!(),
+        // Only a run the schedule started records a refusal (§5): a
+        // repository job is refused before it runs, as `secret_refusal` says.
+        F::SecretRefused { field, refusal } => {
+            let (code, args, detail) = app::announce::refused(&field, &refusal);
+            RepositoriesError::SecretRefused(SecretRefusal { code, args, detail })
+        }
     }
 }
 

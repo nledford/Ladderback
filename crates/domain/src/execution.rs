@@ -138,8 +138,9 @@ pub enum FailureReason {
     /// (decision 80): a wrong password is the likelier cause.
     PasswordNotAccepted,
     /// A run the schedule started was refused before anything ran, because
-    /// the setting `field` of its repository (`password`, `options.<name>`,
-    /// as the configuration writes it) couldn't be resolved (§5, §10.2): the
+    /// the setting `field` of its repository (`password`, `repository`,
+    /// `repo-hot`, `options.<name>`, `options-hot.<name>`,
+    /// `options-cold.<name>`, as the configuration writes it) couldn't be resolved (§5, §10.2): the
     /// refusal a request to start it is answered with. Nothing ran, so no
     /// hook ran either.
     SecretRefused {
@@ -379,14 +380,16 @@ impl Operation {
     /// A run refused before anything ran (§5): queued and failed with
     /// `reason` at `at`, never started.
     pub fn refused(
-        _id: OperationId,
-        _kind: OperationKind,
-        _trigger: Trigger,
-        _target: Target,
-        _reason: FailureReason,
-        _at: Timestamp,
+        id: OperationId,
+        kind: OperationKind,
+        trigger: Trigger,
+        target: Target,
+        reason: FailureReason,
+        at: Timestamp,
     ) -> Self {
-        todo!()
+        let mut operation = Self::queue(id, kind, trigger, target, at);
+        operation.finish(OperationStatus::Failed { reason }, at);
+        operation
     }
 
     /// The operation, named with the alias of the repository it runs on.

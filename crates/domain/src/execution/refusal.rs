@@ -62,6 +62,20 @@ impl SettingRefusal {
     /// The refusal's code, as a request to start the run is refused with it
     /// and as the operation log keeps it (§9).
     pub fn code(&self) -> &'static str {
-        todo!()
+        match self {
+            Self::SecretMissing { .. } => "secret-missing",
+            Self::SecretUnreadable { .. } => "secret-unreadable",
+            Self::SecretKeyringUnavailable { .. } => "secret-keyring-unavailable",
+            Self::SecretNotText { .. } => "secret-not-text",
+            Self::SecretTooLarge { .. } => "secret-too-large",
+            Self::SecretCommandFailed { .. } => "secret-command-failed",
+            Self::SecretCommandTimedOut { .. } => "secret-command-timed-out",
+            Self::SecretCommandOutputOpen { .. } => "secret-command-output-open",
+            Self::SecretInProcessArguments => "secret-in-process-arguments",
+            Self::SecretExpansionTooLong { .. } => "secret-expansion-too-long",
+            Self::LocationTooManyCredentials => "location-too-many-credentials",
+            Self::RepositoryPathRelative => "repository-path-relative",
+            Self::TemplateInvalid { .. } => "template-invalid",
+        }
     }
 }

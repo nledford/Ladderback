@@ -486,7 +486,12 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
-        F::SecretRefused { .. } => todo!(),
+        // Only a backup the schedule started records a refusal (§5); a read
+        // is refused before it runs, as `secret_refused` says.
+        F::SecretRefused { field, refusal } => {
+            let (code, args, detail) = app::announce::refused(&field, &refusal);
+            MaintenanceRefusal::SecretRefused(http_adapter::SecretRefusal { code, args, detail })
+        }
     }
 }
 

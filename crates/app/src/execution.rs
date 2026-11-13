@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use domain::execution::deadline::Deadline;
 use domain::execution::{
-    FailureReason, Operation, OperationStatus, Target, Trigger, Warning, WarningKind,
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, SnapshotId};
@@ -182,12 +182,32 @@ impl RunOperation {
     /// failed operation's. No hook runs and the engine is never asked.
     pub async fn refused(
         &self,
-        _id: OperationId,
-        _trigger: Trigger,
-        _target: Target,
-        _reason: FailureReason,
+        id: OperationId,
+        trigger: Trigger,
+        target: Target,
+        reason: FailureReason,
     ) -> Finished {
-        todo!()
+        let operation = Operation::refused(
+            id,
+            OperationKind::Backup,
+            trigger,
+            target,
+            reason,
+            self.clock.now(),
+        );
+        let mut run = Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        };
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: None,
+            recording_errors: run.recording_errors,
+        }
     }
 
     /// Runs the job of an operation [`Self::queue`] recorded, as

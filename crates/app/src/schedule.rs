@@ -54,8 +54,12 @@ use crate::retry::{RunEnd, RunEnds, RunOutcome};
 pub trait PlanRuns: Send + Sync {
     /// Starts a backup of `plan`, started by `trigger`, as a new operation,
     /// and returns once the operation log has it queued. It runs once
-    /// `place`'s turn comes, and holds the place until it ends. A run that
-    /// can't start (a secret that can't be resolved) is the
+    /// `place`'s turn comes, and holds the place until it ends. A run
+    /// refused for a setting of its repository that can't be resolved (a
+    /// secret missing or unreadable, §10.2) drops its place and is recorded
+    /// as a failed backup that never started, with the refusal as its reason
+    /// (§5), whose end the scheduler hears as any failed run's. Any other
+    /// run that can't start (the configuration can't be read) is the
     /// implementation's to say in the daemon's log, and drops its place.
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place);
 

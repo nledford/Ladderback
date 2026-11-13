@@ -7,6 +7,7 @@
 //! reported, not guessed at.
 
 use api::MsgArg;
+use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, OperationKind, OperationStatus, Transition, Trigger, WarningKind,
 };
@@ -204,13 +205,62 @@ pub(crate) fn encode_failure(
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
-        FailureReason::SecretRefused { .. } => todo!(),
+        FailureReason::SecretRefused { field, refusal } => (
+            refusal.code(),
+            std::iter::once(("field", MsgArg::Text(field.clone())))
+                .chain(refusal_args(refusal))
+                .collect(),
+            refusal_detail(refusal),
+        ),
     };
     Ok(FailureColumns {
         code,
         args: error_args::encode(&args)?,
         detail,
     })
+}
+
+/// What a refusal keeps beside its `field`: where the secret was looked
+/// for, and its number, by name.
+fn refusal_args(refusal: &SettingRefusal) -> Vec<(&'static str, MsgArg)> {
+    use SettingRefusal as R;
+    let source = |source: &str| ("source", MsgArg::Text(source.to_owned()));
+    match refusal {
+        R::SecretMissing { source: from }
+        | R::SecretUnreadable { source: from, .. }
+        | R::SecretKeyringUnavailable { source: from, .. }
+        | R::SecretNotText { source: from }
+        | R::SecretCommandFailed { source: from, .. }
+        | R::SecretCommandOutputOpen { source: from } => vec![source(from)],
+        R::SecretTooLarge {
+            source: from,
+            limit,
+        } => vec![source(from), ("limit", MsgArg::Bytes(*limit))],
+        R::SecretCommandTimedOut {
+            source: from,
+            seconds,
+        } => vec![source(from), ("seconds", MsgArg::Count(*seconds))],
+        R::SecretExpansionTooLong { limit } => vec![("limit", MsgArg::Bytes(*limit))],
+        R::TemplateInvalid { at } => at
+            .map(|at| ("at", MsgArg::Text(at.to_string())))
+            .into_iter()
+            .collect(),
+        R::SecretInProcessArguments | R::LocationTooManyCredentials | R::RepositoryPathRelative => {
+            Vec::new()
+        }
+    }
+}
+
+/// What a platform or a command said of a refused secret, masked before it
+/// was kept.
+fn refusal_detail(refusal: &SettingRefusal) -> Option<&str> {
+    use SettingRefusal as R;
+    match refusal {
+        R::SecretUnreadable { detail, .. }
+        | R::SecretKeyringUnavailable { detail, .. }
+        | R::SecretCommandFailed { detail, .. } => detail.as_deref(),
+        _ => None,
+    }
 }
 
 /// A column of a failed operation that can't be read, and why.
@@ -235,6 +285,7 @@ pub(crate) fn decode_failure(
     let code = code.ok_or_else(|| bad("error_code", "is NULL on a failed operation"))?;
     let args = args.ok_or_else(|| bad("error_args", "is NULL on a failed operation"))?;
     let args = error_args::decode(args).map_err(|error| bad("error_args", error.to_string()))?;
+    let said = detail;
     let detail = || {
         detail
             .map(str::to_owned)
@@ -268,10 +319,101 @@ pub(crate) fn decode_failure(
             field: field(&args)?,
             limit: limit(&args)?,
         }),
-        other => Err(bad(
-            "error_code",
-            format!("{} is not an error code of this version", shown(other)),
+        other => match refused(other, &args, said)? {
+            Some(refusal) => Ok(FailureReason::SecretRefused {
+                field: text(&args, "field")?,
+                refusal,
+            }),
+            None => Err(bad(
+                "error_code",
+                format!("{} is not an error code of this version", shown(other)),
+            )),
+        },
+    }
+}
+
+/// The refusal `code` names, read from its arguments and detail, or `None`
+/// when the code is no refusal's.
+fn refused(
+    code: &str,
+    args: &[(String, MsgArg)],
+    detail: Option<&str>,
+) -> Result<Option<SettingRefusal>, BadColumn> {
+    use SettingRefusal as R;
+    let source = || text(args, "source");
+    let said = detail.map(str::to_owned);
+    Ok(Some(match code {
+        "secret-missing" => R::SecretMissing { source: source()? },
+        "secret-unreadable" => R::SecretUnreadable {
+            source: source()?,
+            detail: said,
+        },
+        "secret-keyring-unavailable" => R::SecretKeyringUnavailable {
+            source: source()?,
+            detail: said,
+        },
+        "secret-not-text" => R::SecretNotText { source: source()? },
+        "secret-too-large" => R::SecretTooLarge {
+            source: source()?,
+            limit: bytes(args, "limit")?,
+        },
+        "secret-command-failed" => R::SecretCommandFailed {
+            source: source()?,
+            detail: said,
+        },
+        "secret-command-timed-out" => R::SecretCommandTimedOut {
+            source: source()?,
+            seconds: count(args, "seconds")?,
+        },
+        "secret-command-output-open" => R::SecretCommandOutputOpen { source: source()? },
+        "secret-in-process-arguments" => R::SecretInProcessArguments,
+        "secret-expansion-too-long" => R::SecretExpansionTooLong {
+            limit: bytes(args, "limit")?,
+        },
+        "location-too-many-credentials" => R::LocationTooManyCredentials,
+        "repository-path-relative" => R::RepositoryPathRelative,
+        "template-invalid" => {
+            R::TemplateInvalid {
+                at: match argument(args, "at") {
+                    None => None,
+                    Some(MsgArg::Text(at)) => Some(at.parse().map_err(|_| {
+                        bad("error_args", format!("at {} is not a place", shown(at)))
+                    })?),
+                    Some(_) => return Err(bad("error_args", "at is not text")),
+                },
+            }
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// The text argument `name`, which the failure must have.
+fn text(args: &[(String, MsgArg)], name: &str) -> Result<String, BadColumn> {
+    match argument(args, name) {
+        None => Err(bad("error_args", format!("has no {name}"))),
+        Some(MsgArg::Text(text)) => Ok(text.clone()),
+        Some(_) => Err(bad("error_args", format!("{name} is not text"))),
+    }
+}
+
+/// The number of bytes `name`, which the failure must have.
+fn bytes(args: &[(String, MsgArg)], name: &str) -> Result<u64, BadColumn> {
+    match argument(args, name) {
+        None => Err(bad("error_args", format!("has no {name}"))),
+        Some(MsgArg::Bytes(bytes)) => Ok(*bytes),
+        Some(_) => Err(bad(
+            "error_args",
+            format!("{name} is not a number of bytes"),
         )),
+    }
+}
+
+/// The count `name`, which the failure must have.
+fn count(args: &[(String, MsgArg)], name: &str) -> Result<u64, BadColumn> {
+    match argument(args, name) {
+        None => Err(bad("error_args", format!("has no {name}"))),
+        Some(MsgArg::Count(count)) => Ok(*count),
+        Some(_) => Err(bad("error_args", format!("{name} is not a count"))),
     }
 }
 
@@ -328,8 +470,6 @@ fn transition(args: &[(String, MsgArg)]) -> Result<Transition, BadColumn> {
 
 #[cfg(test)]
 mod tests {
-    use domain::execution::refusal::SettingRefusal;
-
     use super::*;
 
     /// Every kind round-trips: what the log writes for an operation is what

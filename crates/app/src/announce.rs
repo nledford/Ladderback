@@ -92,7 +92,9 @@ pub(crate) async fn announce_end(events: Option<&dyn EventBus>, operation: &Oper
 
 /// Why an operation failed, as a page shows it: the code, the arguments its
 /// message takes, by name, and the engine's own words as the detail, which
-/// the engine masked of every secret of the job (I4).
+/// the engine masked of every secret of the job (I4). A run refused for a
+/// setting is shown as its refusal is ([`refused`]), with what a platform or
+/// a command said as the detail, masked of the repository's secrets.
 pub fn failure(reason: &FailureReason) -> ErrorDto {
     use FailureReason as F;
     let said = |detail: &str| Some(detail.to_owned());
@@ -136,7 +138,10 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),
-        F::SecretRefused { .. } => todo!(),
+        F::SecretRefused { field, refusal } => {
+            let (code, args, detail) = refused(field, refusal);
+            ErrorDto::new(code, args, detail)
+        }
     }
 }
 
@@ -146,10 +151,60 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
 /// Every text was masked of the repository's secrets before it was kept
 /// (I4).
 pub fn refused(
-    _field: &str,
-    _refusal: &SettingRefusal,
+    field: &str,
+    refusal: &SettingRefusal,
 ) -> (ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>) {
-    todo!()
+    use SettingRefusal as R;
+    let text = |text: &str| MsgArg::Text(text.to_owned());
+    let at = ("field", text(field));
+    let from = |source: &str| vec![at.clone(), ("source", text(source))];
+    let with = |mut args: Vec<(&'static str, MsgArg)>, arg| {
+        args.push(arg);
+        args
+    };
+    match refusal {
+        R::SecretMissing { source } => (ErrorCode::SecretMissing, from(source), None),
+        R::SecretUnreadable { source, detail } => {
+            (ErrorCode::SecretUnreadable, from(source), detail.clone())
+        }
+        R::SecretKeyringUnavailable { source, detail } => (
+            ErrorCode::SecretKeyringUnavailable,
+            from(source),
+            detail.clone(),
+        ),
+        R::SecretNotText { source } => (ErrorCode::SecretNotText, from(source), None),
+        R::SecretTooLarge { source, limit } => (
+            ErrorCode::SecretTooLarge,
+            with(from(source), ("limit", MsgArg::Bytes(*limit))),
+            None,
+        ),
+        R::SecretCommandFailed { source, detail } => {
+            (ErrorCode::SecretCommandFailed, from(source), detail.clone())
+        }
+        R::SecretCommandTimedOut { source, seconds } => (
+            ErrorCode::SecretCommandTimedOut,
+            with(from(source), ("seconds", MsgArg::Count(*seconds))),
+            None,
+        ),
+        R::SecretCommandOutputOpen { source } => {
+            (ErrorCode::SecretCommandOutputOpen, from(source), None)
+        }
+        R::SecretInProcessArguments => (ErrorCode::SecretInProcessArguments, vec![at], None),
+        R::SecretExpansionTooLong { limit } => (
+            ErrorCode::SecretExpansionTooLong,
+            vec![at, ("limit", MsgArg::Bytes(*limit))],
+            None,
+        ),
+        R::LocationTooManyCredentials => (ErrorCode::LocationTooManyCredentials, vec![at], None),
+        R::RepositoryPathRelative => (ErrorCode::RepositoryPathRelative, vec![at], None),
+        R::TemplateInvalid { at: place } => (
+            ErrorCode::TemplateInvalid,
+            std::iter::once(at)
+                .chain(place.map(|place| ("at", MsgArg::Text(place.to_string()))))
+                .collect(),
+            None,
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -10,9 +10,9 @@ use domain::execution::FailureReason;
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
-    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Redactor,
-    Reference, SecretError, SecretRef, SecretValue, SecretWarning, Template, TemplateError,
-    TooMuchToMask, has_reference, too_many_rclone_credentials,
+    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Problem,
+    Redactor, Reference, SecretError, SecretRef, SecretValue, SecretWarning, SourceName, Template,
+    TemplateError, TooMuchToMask, has_reference, too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
@@ -113,15 +113,111 @@ impl ResolveError {
     /// was looked for, and what a platform or a command said, are masked
     /// through `redactor` first (I4), and a text masked to nothing is left
     /// out: it says nothing.
-    pub fn refusal(&self, _redactor: &Redactor) -> Result<SettingRefusal, usize> {
-        todo!()
+    pub fn refusal(&self, redactor: &Redactor) -> Result<SettingRefusal, usize> {
+        let bytes = |limit: usize| u64::try_from(limit).unwrap_or(u64::MAX);
+        let refusal = match &self.cause {
+            Cause::Unresolved(secret) => {
+                let source = redactor.redact(&source_text(&secret.source));
+                // A line cut at its cap (it ends in `…`) may end in the start
+                // of a secret whoever cut it didn't know, which is masked as
+                // a whole one is.
+                let said = |detail: &str| {
+                    Some(redactor.redact_clipped(detail, "…")).filter(|said| !said.is_empty())
+                };
+                match &secret.problem {
+                    Problem::Missing => SettingRefusal::SecretMissing { source },
+                    Problem::Unreachable { detail } => SettingRefusal::SecretUnreadable {
+                        source,
+                        detail: said(detail),
+                    },
+                    // The platform's words about the service, never about a
+                    // secret it gave: none was read. Masked all the same.
+                    Problem::KeyringUnavailable { detail } => {
+                        SettingRefusal::SecretKeyringUnavailable {
+                            source,
+                            detail: said(detail),
+                        }
+                    }
+                    Problem::NotUnicode => SettingRefusal::SecretNotText { source },
+                    Problem::TooLarge { limit } => SettingRefusal::SecretTooLarge {
+                        source,
+                        limit: bytes(*limit),
+                    },
+                    Problem::CommandFailed { detail, .. } => SettingRefusal::SecretCommandFailed {
+                        source,
+                        detail: said(detail),
+                    },
+                    // Only a command is run for a time; a file or a keyring
+                    // that doesn't answer is a source that can't be read.
+                    Problem::TimedOut { seconds } => match secret.source {
+                        SourceName::Command { .. } => SettingRefusal::SecretCommandTimedOut {
+                            source,
+                            seconds: *seconds,
+                        },
+                        SourceName::Keyring { .. }
+                        | SourceName::File { .. }
+                        | SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
+                            source,
+                            detail: None,
+                        },
+                    },
+                    // A command that succeeded while something it started
+                    // kept its output open before its secret's line ended
+                    // gave no secret, and nothing it printed is shown. Not a
+                    // failure of the command, which exited as it should.
+                    Problem::OutputCut => SettingRefusal::SecretCommandOutputOpen { source },
+                }
+            }
+            Cause::ReferenceInProcessArguments => SettingRefusal::SecretInProcessArguments,
+            Cause::ExpansionTooLong { limit } => SettingRefusal::SecretExpansionTooLong {
+                limit: bytes(*limit),
+            },
+            Cause::TooMuchToMask { limit } => return Err(*limit),
+            Cause::TooManyCredentials { .. } => SettingRefusal::LocationTooManyCredentials,
+            Cause::RelativePath => SettingRefusal::RepositoryPathRelative,
+            Cause::Invalid(template) => SettingRefusal::TemplateInvalid {
+                at: template_error_place(template).map(bytes),
+            },
+        };
+        Ok(refusal)
     }
 
     /// The failure a run the schedule started records when its start is
     /// refused for this error (§5): its [`refusal`](Self::refusal), at
     /// [`field`](Self::field).
-    pub fn failure(&self, _redactor: &Redactor) -> FailureReason {
-        todo!()
+    pub fn failure(&self, redactor: &Redactor) -> FailureReason {
+        let field = self.field.name();
+        match self.refusal(redactor) {
+            Ok(refusal) => FailureReason::SecretRefused { field, refusal },
+            Err(limit) => FailureReason::SecretsTooLargeToMask {
+                field: Some(field),
+                limit,
+            },
+        }
+    }
+}
+
+/// What names a source in a refusal: the variable, the path, the keyring
+/// entry or the program, never what it gave.
+fn source_text(source: &SourceName) -> String {
+    match source {
+        SourceName::Command { program } => program.clone(),
+        SourceName::Keyring { entry } => entry.clone(),
+        SourceName::File { path } => path.clone(),
+        SourceName::Env { name } => name.clone(),
+    }
+}
+
+/// Where in a setting a template goes wrong, when the fault has a place.
+fn template_error_place(error: &TemplateError) -> Option<usize> {
+    match error {
+        TemplateError::TooLong { .. } | TemplateError::TooManyReferences { .. } => None,
+        TemplateError::Unterminated { at }
+        | TemplateError::EmptyReference { at }
+        | TemplateError::InvalidName { at }
+        | TemplateError::EmptyPath { at }
+        | TemplateError::RelativePath { at }
+        | TemplateError::NestedReference { at } => Some(*at),
     }
 }
 
