@@ -121,6 +121,13 @@ impl FakeSecrets {
         self.lock().no_keyring_service = true;
     }
 
+    /// A keyring that is locked, as a Secret Service whose collection
+    /// nobody unlocked: every keyring entry, there or not, fails as
+    /// `KeyringUnavailable`, never as missing.
+    pub fn lock_keyring(&self) {
+        todo!()
+    }
+
     /// What running `command` does. A command with no script can't be started.
     pub fn script(&self, command: &CommandLine, script: Script) {
         self.lock().commands.insert(

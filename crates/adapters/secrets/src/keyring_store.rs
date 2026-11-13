@@ -63,13 +63,19 @@ impl KeyringStore for Os {
     fn get(&self, service: &str, name: &str) -> Result<String, Failure> {
         keyring::Entry::new(service, name)
             .and_then(|entry| entry.get_password())
-            .map_err(|error| failure(error, THIS_STORE))
+            .map_err(|error| failure(error, THIS_STORE, || None))
     }
 }
 
-/// Why the OS store `store` gave no secret.
+/// Why the OS store `store` gave no secret. `locked` asks the store whether
+/// its keyring is locked, and gives what it said when it is.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) fn failure(error: keyring::Error, store: OsStore) -> Failure {
+pub(crate) fn failure(
+    error: keyring::Error,
+    store: OsStore,
+    locked: impl FnOnce() -> Option<String>,
+) -> Failure {
+    let _ = locked;
     // `keyring` reports a Secret Service it can't reach as `PlatformFailure`
     // and a locked or missing collection as `NoStorageAccess`, but its
     // `PlatformFailure` also carries a failed decryption or an answer it
