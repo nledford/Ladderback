@@ -1,5 +1,5 @@
 //! Choosing which location of a repository a job opens (technical design
-//! §6.1, decisions 80 and NN). Before a job that opens a repository reached
+//! §6.1, decisions 80 and 86). Before a job that opens a repository reached
 //! at several locations, or at one location that has a rule, the locations'
 //! rules are evaluated against the machine's network link, read once for
 //! the choice, and every location whose rule holds (or that has none) is
@@ -238,7 +238,7 @@ impl ChooseLocation {
     /// isn't met, or can't be evaluated, is skipped unresolved and unprobed.
     /// Every location whose rule holds and that checks the server first, as
     /// written and as resolved, is then resolved and probed at once, beside
-    /// the others (decision NN); each other location is resolved and probed
+    /// the others (decision 86); each other location is resolved and probed
     /// in its turn, once every earlier one has its outcome. A location holds
     /// the repository when its ID is `expected` (any ID when `None`). With
     /// [`Reach::FirstUsed`] the ones after the first usable one are
@@ -487,7 +487,7 @@ fn location_of(access: &RepositoryAccess) -> Location {
     }
 }
 
-/// A probe started before its location's turn (decision NN): running, with
+/// A probe started before its location's turn (decision 86): running, with
 /// the sender whose drop says its answer is no longer wanted, or ended.
 enum Early<'a> {
     Running {
@@ -1257,7 +1257,7 @@ mod tests {
 
     /// Every location that checks the server first is probed from the start
     /// of the choice, so a later one runs while an earlier one is waited for
-    /// (decision NN); the earlier one still decides, at its own bound.
+    /// (decision 86); the earlier one still decides, at its own bound.
     #[tokio::test]
     async fn a_later_location_that_checks_the_server_first_is_probed_while_an_earlier_one_is_waited_for()
      {
@@ -1290,7 +1290,7 @@ mod tests {
 
     /// A probe started early that is still running when an earlier location
     /// is used is stopped before the choice ends, and its location is
-    /// recorded as not tried (decision NN).
+    /// recorded as not tried (decision 86).
     #[tokio::test]
     async fn a_probe_still_running_when_an_earlier_location_is_used_is_stopped() {
         let sites = Sites::silent_at("/srv/public");

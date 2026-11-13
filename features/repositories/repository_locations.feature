@@ -14,7 +14,7 @@ Feature: A repository reached at several locations
   tried only when its rule holds, and a rule that can't be evaluated doesn't
   hold. The operation records which location it used and why each earlier one
   was skipped, by position and outcome, never by a network's name (decisions
-  80 and NN).
+  80 and 86).
 
   Background:
     Given a repository "nas" that records its repository ID, with the locations "lan" and "public", in that order

@@ -138,7 +138,7 @@ impl Location {
 impl Location {
     /// Whether every address of this location makes whoever answers prove
     /// who it is before it is sent a credential, or sends none (decision
-    /// NN): an absolute local path, or `rest:https://` whose certificate is
+    /// 86): an absolute local path, or `rest:https://` whose certificate is
     /// checked. Only such a location is probed before its turn.
     pub fn checks_server_first(&self) -> bool {
         let accepts_any_certificate = self.accepts_any_certificate();
@@ -372,7 +372,7 @@ impl RepositoryConfig {
     }
 
     /// Which of the entry's locations, in order, the first included, a
-    /// choice probes at its start rather than in its turn (decision NN),
+    /// choice probes at its start rather than in its turn (decision 86),
     /// given each location's rule's verdict, in the same order: those whose
     /// rule holds (a location with none holds) and that check the server
     /// first. A location with no verdict doesn't hold.
