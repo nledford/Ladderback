@@ -38,7 +38,11 @@ pub enum NetworkKind {
 impl NetworkKind {
     /// The kind `text` names, as `config.toml` writes it.
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        todo!("{text}")
+        match text {
+            "wired" => Ok(Self::Wired),
+            "wifi" => Ok(Self::WiFi),
+            _ => Err(InvalidValue::new(ValueKind::LocationRule, text)),
+        }
     }
 
     /// The kind as `config.toml` writes it.
@@ -51,7 +55,15 @@ impl NetworkKind {
 
     /// What this alternative says of `link`.
     fn verdict(self, link: Link) -> RuleVerdict {
-        todo!("{self:?} {link:?}")
+        match (self, link) {
+            (Self::Wired, Link::Wired) | (Self::WiFi, Link::WiFi) => RuleVerdict::Holds,
+            // Nothing says where the next route leaves by.
+            (_, Link::NoRoute) => RuleVerdict::Unknown,
+            // Not Wi-Fi may still be wired: the platform can't tell.
+            (Self::Wired, Link::NotWiFi) => RuleVerdict::Unknown,
+            (Self::Wired, Link::WiFi | Link::Other)
+            | (Self::WiFi, Link::Wired | Link::Other | Link::NotWiFi) => RuleVerdict::NotMet,
+        }
     }
 }
 
@@ -78,7 +90,13 @@ impl LocationRule {
     /// A rule of `alternatives`: at least one, at most
     /// [`MAX_RULE_ALTERNATIVES`].
     pub fn new(alternatives: Vec<NetworkKind>) -> Result<Self, InvalidValue> {
-        todo!("{alternatives:?}")
+        if alternatives.is_empty() || alternatives.len() > MAX_RULE_ALTERNATIVES {
+            return Err(InvalidValue::new(
+                ValueKind::LocationRule,
+                alternatives.len().to_string(),
+            ));
+        }
+        Ok(Self { alternatives })
     }
 
     /// The alternatives, in the order written.
@@ -90,7 +108,18 @@ impl LocationRule {
     /// read: it holds when any alternative does, else it is unknown when any
     /// alternative can't be evaluated, else it isn't met.
     pub fn holds(&self, link: Option<Link>) -> RuleVerdict {
-        todo!("{link:?}")
+        let Some(link) = link else {
+            return RuleVerdict::Unknown;
+        };
+        let mut verdict = RuleVerdict::NotMet;
+        for alternative in &self.alternatives {
+            match alternative.verdict(link) {
+                RuleVerdict::Holds => return RuleVerdict::Holds,
+                RuleVerdict::Unknown => verdict = RuleVerdict::Unknown,
+                RuleVerdict::NotMet => {}
+            }
+        }
+        verdict
     }
 }
 

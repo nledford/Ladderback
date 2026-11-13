@@ -46,7 +46,15 @@ pub fn location_condition(
     rules: &[Option<LocationRule>],
     link: Option<Link>,
 ) -> Result<(), UnmetCondition> {
-    todo!("{rules:?} {link:?} {:?}", RuleVerdict::NotMet)
+    let known_not_to_hold = |rule: &Option<LocationRule>| {
+        rule.as_ref()
+            .is_some_and(|rule| rule.holds(link) == RuleVerdict::NotMet)
+    };
+    if !rules.is_empty() && rules.iter().all(known_not_to_hold) {
+        Err(UnmetCondition::NoLocationRuleHolds)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
