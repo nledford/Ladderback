@@ -166,22 +166,24 @@ pub(crate) fn probe(ctx: &Context, spec: &RepositorySpec) -> Result<ProbeResult,
 /// rustic_core's error code for a password that opens no key (`keyfile.rs`).
 const WRONG_PASSWORD: &str = "C002";
 
-/// Whether the backend answered and refused the credentials: an HTTP 401 or
-/// 403 from a REST or OpenDAL server, or OpenDAL's permission error, found
-/// anywhere in the error's chain.
+/// Whether the backend answered and refused the credentials: a REST
+/// server's HTTP 401 or 403, told by the status its client kept; or, when
+/// the chain holds no REST client's error, an OpenDAL server's refusal,
+/// told by its error text (`PermissionDenied`, or a 401/403 status line
+/// OpenDAL quotes), since OpenDAL's types aren't the engine's to name.
 fn refused(error: &RusticError) -> bool {
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(error) = cause {
+    if let Some(status) = answer(error) {
+        return status.as_ref().is_some_and(refuses);
+    }
+    std::iter::successors(Some(error as &(dyn std::error::Error + 'static)), |error| {
+        error.source()
+    })
+    .any(|error| {
         let text = error.to_string();
-        if ["401 Unauthorized", "403 Forbidden", "PermissionDenied"]
+        ["401 Unauthorized", "403 Forbidden", "PermissionDenied"]
             .iter()
             .any(|sign| text.contains(sign))
-        {
-            return true;
-        }
-        cause = error.source();
-    }
-    false
+    })
 }
 
 /// The refusal a REST server the repository is on gave its credentials
@@ -856,11 +858,11 @@ mod tests {
         );
     }
 
-    /// The refusal is told by rustic's own error text at the revision the
-    /// workspace pins (`refused`): these two and the REST ones above fail
-    /// when an upgrade changes that text, rather than the probe calling a
-    /// refusal something else. OpenDAL's `fs` service says `PermissionDenied`
-    /// of a folder nobody may read.
+    /// A REST refusal is told by the status rustic's client keeps; an
+    /// OpenDAL one by OpenDAL's error text at the revision the workspace
+    /// pins (`refused`): these two fail when an upgrade changes that text,
+    /// rather than the probe calling a refusal something else. OpenDAL's
+    /// `fs` service says `PermissionDenied` of a folder nobody may read.
     #[test]
     fn a_probe_of_an_opendal_folder_nobody_may_read_is_refused() {
         let root = tempfile::tempdir().unwrap();
