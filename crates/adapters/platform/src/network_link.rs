@@ -46,12 +46,12 @@ enum Bus {
     At(String),
 }
 
-impl Bus {
-    /// Where an error says the name was read from.
-    fn from(&self) -> String {
+/// Where an error says the name was read from.
+impl std::fmt::Display for Bus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::System => "NetworkManager on the system bus".to_owned(),
-            Self::At(address) => format!("NetworkManager on {address}"),
+            Self::System => formatter.write_str("NetworkManager on the system bus"),
+            Self::At(address) => write!(formatter, "NetworkManager on {address}"),
         }
     }
 }
@@ -107,12 +107,26 @@ impl KernelLink {
 impl NetworkLink for KernelLink {
     async fn link(&self) -> Result<Link, PlatformError> {
         let reader = self.clone();
-        source::blocking(&self.route, self.timeout, move || reader.read()).await
+        source::blocking(self.route.display(), self.timeout, move || reader.read()).await
     }
 
+    /// The kernel's tables, then NetworkManager, under one bound; a read
+    /// given up names the one it was waiting on.
     async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        let given_up_at = tokio::time::Instant::now() + self.timeout;
         let reader = self.clone();
-        source::blocking(&self.route, self.timeout, move || reader.read_name()).await
+        let wifi = source::blocking(self.route.display(), self.timeout, move || {
+            reader.wifi_interface()
+        });
+        let Some(interface) = wifi.await? else {
+            return Ok(None);
+        };
+        let bus = self.bus.clone();
+        let left = given_up_at.saturating_duration_since(tokio::time::Instant::now());
+        source::blocking(&self.bus, left, move || {
+            network_manager::current_network(&bus, &interface)
+        })
+        .await
     }
 }
 
@@ -126,14 +140,14 @@ impl KernelLink {
         }
     }
 
-    /// The name of the Wi-Fi network the default route's interface has
-    /// joined; `None` when that interface isn't Wi-Fi. The kernel says what
-    /// the interface is, and NetworkManager is asked only for a Wi-Fi one, so
-    /// a wired machine without NetworkManager has no network, as on macOS.
-    /// No default route is an error, not "no network": the link was read as
-    /// Wi-Fi a moment ago, and a rule's `except` must not hold on a route
-    /// that has just gone.
-    fn read_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+    /// The default route's interface when it is a Wi-Fi one, whose network's
+    /// name NetworkManager is asked for; `None` when it isn't Wi-Fi. The
+    /// kernel says what the interface is, and NetworkManager is asked only
+    /// for a Wi-Fi one, so a wired machine without NetworkManager has no
+    /// network, as on macOS. No default route is an error, not "no network":
+    /// the link was read as Wi-Fi a moment ago, and a rule's `except` must
+    /// not hold on a route that has just gone.
+    fn wifi_interface(&self) -> Result<Option<String>, PlatformError> {
         let Some(interface) = self.default_interface()? else {
             return Err(PlatformError::Unreadable {
                 from: self.route.display().to_string(),
@@ -143,7 +157,7 @@ impl KernelLink {
         if self.kind(&interface)? != Link::WiFi {
             return Ok(None);
         }
-        network_manager::current_network(&self.bus, &interface)
+        Ok(Some(interface))
     }
 
     /// The interface the default route of lowest metric leaves by, of either
@@ -481,7 +495,7 @@ mod network_manager {
         bus: &Bus,
         interface: &str,
     ) -> Result<Option<CurrentNetworkName>, PlatformError> {
-        let from = bus.from();
+        let from = bus.to_string();
         let failed = |error: dbus::Error| PlatformError::Unreadable {
             from: from.clone(),
             detail: crate::source::detail(error.name().unwrap_or("a D-Bus error with no name")),
@@ -565,7 +579,7 @@ mod network_manager {
         _interface: &str,
     ) -> Result<Option<CurrentNetworkName>, PlatformError> {
         Err(PlatformError::Unreadable {
-            from: bus.from(),
+            from: bus.to_string(),
             detail: "NetworkManager is read only on Linux".to_owned(),
         })
     }

@@ -58,19 +58,22 @@ pub(crate) fn unrecognized(from: &Path, what: &str) -> PlatformError {
     }
 }
 
-/// Runs `read` on the blocking pool, giving it up after `timeout`. A read
-/// given up keeps its thread until the read returns; the caller has its
-/// answer.
+/// Runs `read` of `from` on the blocking pool, giving it up after
+/// `timeout`. A read given up keeps its thread until the read returns; the
+/// caller has its answer.
 pub(crate) async fn blocking<T: Send + 'static>(
-    root: &Path,
+    from: impl std::fmt::Display,
     timeout: Duration,
     read: impl FnOnce() -> Result<T, PlatformError> + Send + 'static,
 ) -> Result<T, PlatformError> {
     match tokio::time::timeout(timeout, tokio::task::spawn_blocking(read)).await {
         Ok(Ok(answer)) => answer,
-        Ok(Err(joined)) => Err(unreadable(root, joined)),
+        Ok(Err(joined)) => Err(PlatformError::Unreadable {
+            from: from.to_string(),
+            detail: joined.to_string(),
+        }),
         Err(_) => Err(PlatformError::TimedOut {
-            from: root.display().to_string(),
+            from: from.to_string(),
         }),
     }
 }
