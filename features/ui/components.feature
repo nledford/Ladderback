@@ -3,8 +3,9 @@ Feature: The shared components in the gallery
   The shared component set (technical design §4.5) is exercised in the
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a sortable data table, a form field with an announced
-  error, a checkbox, a progress bar whose changes are never announced, a
-  toast and the control that pauses live updates. Every demo state a
+  error, a checkbox, a progress bar whose changes are never announced and
+  which shows no percentage while its size isn't known, a toast and the
+  control that pauses live updates. Every demo state a
   component can show (loading, empty, error, success, on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
   ARIA snapshot. The text of a control, such as a button's label, grows with
@@ -66,6 +67,11 @@ Feature: The shared components in the gallery
     And I press Enter
     Then the progress bar "Demo backup progress" shows 80 percent
     And the live regions stay silent
+
+  Scenario: A progress bar whose size isn't known yet shows no percentage
+    When I open the component gallery
+    Then the progress bar "Demo progress of unknown size" shows no percentage
+    And the "Progress" demo has no accessibility violations
 
   Scenario: A toast appears and is announced politely, and its going is not announced
     When I open the component gallery

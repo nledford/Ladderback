@@ -554,24 +554,54 @@ pub fn StatusBadge(
 /// A progress bar (`role="progressbar"` with `aria-valuenow`, `aria-valuemin`,
 /// `aria-valuemax` and `aria-valuetext`). Its value changes are never
 /// announced: nothing here calls the announcer.
+///
+/// A `value` of `None` is a bar whose size isn't known yet: indeterminate
+/// (WAI-ARIA `progressbar`), so it has no `aria-valuenow` or
+/// `aria-valuetext` and no track, and `unknown` stands in place of the
+/// percentage, as text a screen reader reads after the bar. It never shows
+/// 0%, which would say that nothing has been done.
 #[component]
-pub fn Progress(label: String, #[prop(into)] value: Signal<u8>) -> impl IntoView {
+pub fn Progress(
+    label: String,
+    #[prop(into)] value: Signal<Option<u8>>,
+    unknown: String,
+) -> impl IntoView {
+    let known = Memo::new(move |_| value.get().is_some());
     view! {
         <div
             role="progressbar"
             aria-label=label.clone()
             aria-valuemin="0"
             aria-valuemax="100"
-            aria-valuenow=move || value.get().to_string()
-            aria-valuetext=move || format!("{}%", value.get())
+            aria-valuenow=move || value.get().map(|value| value.to_string())
+            aria-valuetext=move || value.get().map(|value| format!("{value}%"))
         >
-            <div class="progress-track">
-                // A style property, which the page's content security policy
-                // allows (§10.1), not a `style` attribute, which it refuses.
-                <div class="progress-fill" style:inline-size=move || format!("{}%", value.get())></div>
-            </div>
+            {move || {
+                known
+                    .get()
+                    .then(|| {
+                        view! {
+                            <div class="progress-track">
+                                // A style property, which the page's content security policy
+                                // allows (§10.1), not a `style` attribute, which it refuses.
+                                <div
+                                    class="progress-fill"
+                                    style:inline-size=move || format!("{}%", value.get().unwrap_or_default())
+                                ></div>
+                            </div>
+                        }
+                    })
+            }}
         </div>
-        <span aria-hidden="true">{move || format!("{}%", value.get())}</span>
+        // The percentage is the bar's `aria-valuetext` already, so it is
+        // hidden from screen readers; the text of a bar of unknown size is
+        // what they have instead.
+        <span aria-hidden=move || known.get().then_some("true")>
+            {move || match value.get() {
+                Some(value) => format!("{value}%"),
+                None => unknown.clone(),
+            }}
+        </span>
     }
 }
 /// A toast: shown as plain text (§4.5 renders toasts through the announcer,

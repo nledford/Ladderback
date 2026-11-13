@@ -217,6 +217,20 @@ Then("the progress bar {string} shows {int} percent", async function (this: Brow
   );
 });
 
+// A bar whose size isn't known is indeterminate (WAI-ARIA `progressbar`): it
+// has no value to give, so it gives none, rather than a value of nothing. The
+// text beside it, where a known bar's percentage stands, says something other
+// than a percentage, so a sighted reader sees no "0%" either.
+Then("the progress bar {string} shows no percentage", async function (this: BrowserWorld, name: string) {
+  const bar = this.page.getByRole("progressbar", { name });
+  await expect(bar).toHaveCount(1);
+  await expect(bar).not.toHaveAttribute("aria-valuenow");
+  await expect(bar).not.toHaveAttribute("aria-valuetext");
+  const beside = () => bar.evaluate((element) => element.nextElementSibling?.textContent?.trim() ?? "");
+  await expect.poll(beside).not.toBe("");
+  await expect.poll(beside).not.toMatch(/%/);
+});
+
 Then("a toast reads {string}", async function (this: BrowserWorld, text: string) {
   await expect(this.page.locator("main").getByText(text)).toBeVisible();
 });
@@ -289,7 +303,9 @@ const SNAPSHOTS: Record<string, string> = {
   Progress: `- heading "Progress" [level=2]
 - progressbar "Demo backup progress"
 - paragraph:
-  - button "Advance the demo progress"`,
+  - button "Advance the demo progress"
+- progressbar "Demo progress of unknown size"
+- text: Working…`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
   - button "Save the demo settings"`,

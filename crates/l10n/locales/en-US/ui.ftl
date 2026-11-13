@@ -203,6 +203,9 @@ ui-gallery-demo-backup-progress = Demo backup progress
 # The button that advances the demo progress.
 ui-gallery-advance-progress = Advance the demo progress
 
+# The accessible name of the demo progress bar whose size isn't known.
+ui-gallery-demo-unknown-progress = Demo progress of unknown size
+
 # The heading of the gallery's toast demo.
 ui-gallery-toast-heading = Toast
 
@@ -480,6 +483,11 @@ ui-no-operations = No operations yet.
 
 # The label of a running backup's progress bar.
 ui-backup-progress = Backup progress
+
+# Shown beside a progress bar in place of its percentage while the
+# operation has no total to measure against: a backup before it has
+# walked its whole source, or a step that counts without a total.
+ui-progress-working = Working…
 
 # A status label: the operation waits for its turn.
 ui-status-queued = Queued

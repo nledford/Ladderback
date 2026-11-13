@@ -358,6 +358,12 @@ export class ScriptedDaemon {
     }
   }
 
+  /** The backup of `plan` reports `bytes` processed and no total, as the
+   *  daemon does while rustic is still walking the source for its size. */
+  async progressesWithoutTotal(plan: string, bytes: number): Promise<void> {
+    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, current: bytes, total: null });
+  }
+
   /** The backup of `plan` succeeds: its log has the end and what the backup
    *  went through, `files` files, before the page is told, as the daemon's
    *  own run tells of an end only after its last write to the log. A backup

@@ -33,6 +33,23 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the row "home" of the table "Operations" lists "3 files" in its "Result" column
     And the page has no accessibility violations
 
+  # A backup learns its size only once rustic has walked the whole source,
+  # which on a big folder takes minutes; until then the row says the backup
+  # is working and shows no percentage, never 0 percent (#422). Once the
+  # size is known, the bar shows how far the backup has come.
+  Scenario: A running backup whose size isn't known yet shows no percentage
+    Given the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total
+    Then the row "demo-home" of the table "Operations" shows "Working…" in its "Status" column
+    And the row "demo-home" of the table "Operations" shows no percentage in its "Status" column
+    And the progress bar "Backup progress" shows no percentage
+    And the page has no accessibility violations
+    When the daemon reports 4 steps of progress of the backup of "demo-home"
+    Then the progress bar "Backup progress" shows 100 percent
+    And the row "demo-home" of the table "Operations" doesn't show "Working…" in its "Status" column
+
   Scenario: A backup that ends while its row is open shows what it backed up
     Given the daemon reports a running backup of "demo-home"
     When I open the address "/operations"
@@ -142,7 +159,12 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the table "Operations" has a row "demo-home" that shows "Queued"
     And the widths of the columns of the table "Operations" are noted
     And the daemon reports that the backup of "demo-home" has started
-    And the daemon reports 4 steps of progress of the backup of "demo-home"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total
+    Then the row "demo-home" of the table "Operations" shows "Working…" in its "Status" column
+    And the columns of the table "Operations" keep the widths noted
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    When the daemon reports 4 steps of progress of the backup of "demo-home"
     Then the progress bar "Backup progress" shows 100 percent
     And the columns of the table "Operations" keep the widths noted
     And the page doesn't scroll sideways
@@ -179,7 +201,12 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the reader increases the text spacing
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
-    And the daemon reports 4 steps of progress of the backup of "demo-home"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total
+    Then the row "demo-home" of the table "Operations" shows "Working…" in its "Status" column
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    And no text is clipped
+    When the daemon reports 4 steps of progress of the backup of "demo-home"
     Then the progress bar "Backup progress" shows 100 percent
     And the page doesn't scroll sideways
     And nothing in the table "Operations" runs outside its cell
