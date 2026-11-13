@@ -755,6 +755,32 @@ mod tests {
         );
     }
 
+    /// The refusal is told by rustic's own error text at the revision the
+    /// workspace pins (`refused`): these two and the REST ones above fail
+    /// when an upgrade changes that text, rather than the probe calling a
+    /// refusal something else. OpenDAL's `fs` service says `PermissionDenied`
+    /// of a folder nobody may read.
+    #[test]
+    fn a_probe_of_an_opendal_folder_nobody_may_read_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let _restored = Writable(repository.clone());
+        fs::set_permissions(&repository, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&repository).is_ok() {
+            testkit::skip!("running as root: permissions don't stop reading a folder");
+        }
+        let spec = RepositorySpec {
+            options: [(
+                "root".to_owned(),
+                repository.to_string_lossy().into_owned(),
+            )]
+            .into(),
+            ..spec_at("opendal:fs")
+        };
+        assert_eq!(probed(&spec).ok(), Some(ProbeResult::Refused));
+    }
+
     #[test]
     fn a_probe_of_a_location_that_is_not_there_fails() {
         let root = tempfile::tempdir().unwrap();
