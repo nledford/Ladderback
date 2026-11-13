@@ -94,7 +94,8 @@ Feature: A repository reached at several locations
       Given the location "lan" doesn't answer
       And the location "public" answers
       When a forget is previewed for the repository "nas"
-      Then the repository was opened at the location "public" only
+      Then the plan's retention was applied at the location "public"
+      And the repository was opened at the location "public" only
       And the location "lan" was never opened
 
     Scenario: A location the job didn't use never had its secrets in the job

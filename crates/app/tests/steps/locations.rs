@@ -315,12 +315,31 @@ impl Engine for Sites {
                     EngineEvent::Succeeded(EngineResult::Probed(found)),
                 ]
             }
+            // One snapshot of the plan, so a forget's preview applies the
+            // plan's retention, which opens the repository in-process.
             Job::Ls(_) => vec![
                 EngineEvent::Started {
                     index_read_at: at,
                     repository: access.as_ref().and_then(|access| access.id.clone()),
                 },
-                EngineEvent::Succeeded(EngineResult::Snapshots(Vec::new())),
+                EngineEvent::Succeeded(EngineResult::Snapshots(vec![app::ports::SnapshotSummary {
+                    id: domain::SnapshotId::parse(&"5a".repeat(32)).expect("a snapshot ID"),
+                    time: at,
+                    offset: domain::Offset::UTC,
+                    hostname: "demo-machine".to_owned(),
+                    label: String::new(),
+                    tags: vec![
+                        format!(
+                            "{}{}",
+                            domain::execution::plan_tags::AGENT_TAG_PREFIX,
+                            agent_id().as_uuid().hyphenated()
+                        ),
+                        format!("{}{PLAN}", domain::execution::plan_tags::PLAN_TAG_PREFIX),
+                    ],
+                    paths: vec!["/home/demo".to_owned()],
+                    paths_truncated: false,
+                    tags_truncated: false,
+                }])),
             ],
             _ => vec![
                 EngineEvent::Started {
@@ -659,13 +678,14 @@ async fn forget_previewed(agent: &mut Agent, repository: String) {
         Arc::new(AsWritten),
     )
     .with_locations(locations);
-    let _ = maintenance
+    maintenance
         .preview(
             OperationId::from_uuid(Uuid::from_u128(0x0500)),
             &alias(&repository),
             &MaintenanceKind::Forget,
         )
-        .await;
+        .await
+        .expect("the forget is previewed");
 }
 
 #[when("the repositories are listed")]
@@ -847,6 +867,19 @@ fn opened_only_at(agent: &mut Agent, name: String) {
     for access in opens {
         assert_eq!(&access.repository, address);
     }
+}
+
+#[then(expr = "the plan's retention was applied at the location {string}")]
+fn retention_applied_at(agent: &mut Agent, name: String) {
+    let world = &agent.locations;
+    let applied: Vec<String> = world
+        .retention
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|access| access.repository.clone())
+        .collect();
+    assert_eq!(applied, vec![world.addresses[&name].clone()]);
 }
 
 #[then(expr = "the location {string} was never opened")]
