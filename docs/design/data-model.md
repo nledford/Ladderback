@@ -8,6 +8,8 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   kind TEXT NOT NULL,             -- backup|forget|prune|check|restore|stats|...
   plan_id TEXT, repo_uuid TEXT,   -- repo_uuid = rustic repository ID
   repo_alias TEXT,                -- maintenance ops: the repository's alias when the run started (decision 52)
+  location_no INTEGER,            -- the position, from 1, of the location the run used; NULL for a repository of one location (decision 80)
+  locations_json TEXT,            -- every location of the entry as the run saw it: position, address as written with credentials masked (at most 256 bytes), outcome code (`not-tried` after the one used); local to the agent, never synced; NULL as above
   trigger TEXT NOT NULL,          -- schedule|manual|catch-up|retry|hub|mcp
   status TEXT NOT NULL,           -- queued|running|succeeded|succeeded_with_warnings|failed|cancelled
   queued_at INTEGER, started_at INTEGER, finished_at INTEGER,

@@ -13,7 +13,7 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | **M4b** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub); MCP connect mode against a hub, with an `agent` argument (§4.6) | 3–4 wks |
 | **M5** | Polish | Conditions (AC power / metered), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
 
-M2 ends with its release, `0.2.0`: after the tag, it runs on real machines before M3 starts, and what that run turns up is fixed or filed first. On macOS that run uses an ad-hoc-signed build from source, with Full Disk Access granted by hand (decision 71).
+M2 ends with its release, `0.2.0`: after the tag, it runs on real machines before M3 starts, and what that run turns up is fixed or filed first. On macOS that run uses an ad-hoc-signed build from source, with Full Disk Access granted by hand (decision 71). That run found that a repository has one location, so a laptop that reaches its server by a LAN address at home and a public one away takes the slow route at home (#424): decision 80's one pull request (ordered locations, a bounded probe, the same-repository check, and rules by network link and by Wi-Fi name) is that fix and lands before M3 starts; M5's conditions reuse its platform readers.
 
 | Milestone | Feature files |
 |---|---|
@@ -23,6 +23,7 @@ M2 ends with its release, `0.2.0`: after the tag, it runs on real machines befor
 | M3 | `restore/restore.feature`, `restore/download.feature`, `automation/mcp.feature` |
 | M4a | `fleet/pairing.feature`, `fleet/sync_replay.feature` |
 | M4b | `maintenance/ownership.feature`, `maintenance/prune_guard.feature`, `restore/hub_restore.feature` |
+| 0.2.x follow-up | `repositories/repository_locations.feature` and the scheduler's location skip in `execution/` (decision 80, with the `@e2e` and `@ui` scenarios) |
 | M5 | `execution/conditions.feature`, `operations/db_rebuild.feature` |
 
 A **usable personal tool** (M0–M2: scheduled, lock-free backups with notifications on each machine) takes about **10–14 weeks part-time**. **Backrest-like multi-host management** (through M4b) takes about **18–24 weeks**, roughly **4½–6 months part-time**. These ranges include writing scenarios and tests first and building the accessible component set in M1b; M0 is longer than in v0.2 because the test tooling, including the browser toolchain, is built there.
@@ -139,6 +140,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
 | [78](decisions/78-the-rust-toolchain-is-pinned.md) | The Rust toolchain is pinned, and the MSRV is the pin |
 | [79](decisions/79-a-from-source-install-script.md) | A from-source install script |
+| [80](decisions/80-repository-locations.md) | A repository reached at several locations |
 
 ## 17. Open questions
 
