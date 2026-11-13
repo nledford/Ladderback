@@ -640,7 +640,7 @@ fn row_view(
                             view! {
                                 <Progress
                                     label=progress_label.clone()
-                                    value=Signal::derive(move || percent.get().unwrap_or_default())
+                                    value=Signal::derive(move || percent.get().flatten().unwrap_or_default())
                                 />
                             }
                         })
@@ -769,11 +769,11 @@ fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
     rows.into_iter().map(|row| row.summary.id.clone()).collect()
 }
 
-/// How far a row's run has come, as a whole percent: `None` until the run has
-/// reported any progress, so a row that has not begun has no bar.
-fn progress_percent(row: &OperationRow) -> Option<u8> {
-    row.progress
-        .map(|progress| percent(progress.current, progress.total))
+/// How far a row's run has come: `None` until the run has reported any
+/// progress, so a row that has not begun has no bar, and then the bar's
+/// whole percent, `None` while the run doesn't know its total yet.
+fn progress_percent(row: &OperationRow) -> Option<Option<u8>> {
+    todo!("{row:?}")
 }
 
 /// A status as its badge shows it: which pill, and its text. A status this
@@ -817,12 +817,9 @@ fn cancellable(status: &str) -> bool {
 }
 
 /// A run's progress as a whole percent of its total. A total of nothing or
-/// zero cannot be a share, so it shows none rather than a wrong one.
-fn percent(current: u64, total: Option<u64>) -> u8 {
-    total
-        .filter(|total| *total > 0)
-        .map(|total| (current.saturating_mul(100) / total) as u8)
-        .unwrap_or(0)
+/// zero cannot be a share, so there is none rather than a wrong one.
+fn percent(current: u64, total: Option<u64>) -> Option<u8> {
+    todo!("{current} {total:?}")
 }
 
 /// Whether the change from `previous` to `status` is a run's end arriving:
@@ -1835,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_shows_progress_once_its_run_has_reported_some() {
+    fn a_row_has_a_bar_once_its_run_has_reported_progress_and_a_value_once_it_knows_its_total() {
         let mut running = summary(Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z");
         assert_eq!(
             progress_percent(&running),
@@ -1846,15 +1843,15 @@ mod tests {
             current: 3,
             total: Some(4),
         });
-        assert_eq!(progress_percent(&running), Some(75));
+        assert_eq!(progress_percent(&running), Some(Some(75)));
         running.progress = Some(crate::backend::Progress {
             current: 9,
             total: None,
         });
         assert_eq!(
             progress_percent(&running),
-            Some(0),
-            "a run of unknown size has a bar at nothing, not no bar"
+            Some(None),
+            "a run of unknown size has a bar with no value, never one at 0%"
         );
     }
 
@@ -2037,11 +2034,39 @@ mod tests {
     }
 
     #[test]
-    fn progress_is_a_whole_percent_of_a_known_total_and_nothing_without_one() {
-        assert_eq!(percent(3, Some(4)), 75);
-        assert_eq!(percent(1, Some(3)), 33);
-        assert_eq!(percent(5, Some(0)), 0, "zero of nothing is no share");
-        assert_eq!(percent(9, None), 0);
+    fn progress_is_a_whole_percent_of_a_known_total_and_none_without_one() {
+        assert_eq!(percent(3, Some(4)), Some(75));
+        assert_eq!(percent(1, Some(3)), Some(33));
+        assert_eq!(
+            percent(0, Some(3)),
+            Some(0),
+            "nothing of a known total is 0%"
+        );
+        assert_eq!(percent(5, Some(0)), None, "zero of nothing is no share");
+        assert_eq!(percent(9, None), None, "a total not known yet is no share");
+    }
+
+    // Both numbers come from a worker's report, outside the process, and
+    // nothing keeps the count at or under the total: the share stops at 100%
+    // rather than wrapping round to a small number, and no product overflows.
+    #[test]
+    fn progress_is_never_past_a_hundred_percent_nor_wrapped() {
+        assert_eq!(
+            percent(3, Some(1)),
+            Some(100),
+            "three of one is all of it, not 44%"
+        );
+        assert_eq!(
+            percent(101, Some(100)),
+            Some(100),
+            "a count just past its total is all of it, not 101%"
+        );
+        assert_eq!(
+            percent(u64::MAX, Some(u64::MAX)),
+            Some(100),
+            "all of the largest total is all of it"
+        );
+        assert_eq!(percent(1, Some(3)), Some(33));
     }
 
     #[test]

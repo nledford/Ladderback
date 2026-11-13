@@ -233,6 +233,13 @@ When("the daemon reports {int} steps of progress of the backup of {string}", asy
 });
 
 When(
+  "the daemon reports {int} bytes processed of the backup of {string} and not yet its total",
+  async function (this: BrowserWorld, bytes: number, plan: string) {
+    await scripted(this).progressesWithoutTotal(plan, bytes);
+  },
+);
+
+When(
   "the daemon reports that the backup of {string} has succeeded with {int} files",
   async function (this: BrowserWorld, plan: string, files: number) {
     await scripted(this).succeeds(plan, files, "2026-11-09T10:05:00Z");
@@ -563,6 +570,29 @@ Then(
 Then("the table {string} shows no progress bar", async function (this: BrowserWorld, name: string) {
   await expect(table(this, name).getByRole("progressbar")).toHaveCount(0);
 });
+
+// What the cell shows, as a sighted reader sees it: the text a screen reader
+// skips counts too, so a bar's hidden "0%" would fail it.
+Then(
+  "the row {string} of the table {string} shows no percentage in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, column: string) {
+    const seen = await cellText(this, name, row, column);
+    assert.doesNotMatch(seen, /%/, `the row ${row} of the table ${name} showed "${seen}" in its ${column} column`);
+  },
+);
+
+Then(
+  "the row {string} of the table {string} doesn't show {string} in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, unexpected: string, column: string) {
+    const end = Date.now() + ROW_PATIENCE_MS;
+    let seen = await cellText(this, name, row, column);
+    while (seen.includes(unexpected) && Date.now() < end) {
+      await sleep(250);
+      seen = await cellText(this, name, row, column);
+    }
+    assert.ok(!seen.includes(unexpected), `the row ${row} of the table ${name} kept showing "${unexpected}" in its ${column} column: "${seen}"`);
+  },
+);
 
 /** Waits until the cell of `row` under `column` holds a list with an item
  *  that says `expected`: a reader hears what a run did as a list, one fact an
