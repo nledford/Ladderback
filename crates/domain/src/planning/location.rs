@@ -361,6 +361,9 @@ impl RepositoryConfig {
     /// answers at their address, as written: none for an entry with one
     /// location, which is unchanged in every way.
     pub fn location_warnings(&self) -> Vec<LocationWarning> {
+        if !self.has_several_locations() {
+            return Vec::new();
+        }
         std::iter::once(Location::of(&self.settings))
             .chain(self.locations.further.iter().cloned())
             .zip(1u8..)
@@ -559,6 +562,26 @@ mod tests {
                 cause: ExposedCredentials::PlainHttp
             }]
         );
+    }
+
+    /// A repository of one location is unchanged in every way (decision 80,
+    /// point 2): its plain-HTTP credentials are no location's warning.
+    #[test]
+    fn an_entry_of_one_location_is_warned_about_no_location() {
+        let lone = location("rest:http://nas/r", &[("password", "${PW2}")]);
+        assert!(
+            ExposedCredentials::of_location(&lone).is_some(),
+            "the location alone would be warned about"
+        );
+        let entry = RepositoryConfig {
+            settings: lone.with_password(SecretRef::Env("PW".to_owned())),
+            locations: Locations::default(),
+            id: None,
+            maintenance: super::super::Maintenance::None,
+            group_by: super::super::GroupBy::default(),
+            hooks: super::super::Hooks::default(),
+        };
+        assert_eq!(entry.location_warnings(), Vec::new());
     }
 
     fn entry(first: &str, further: &[&str], id: Option<&str>) -> RepositoryConfig {
