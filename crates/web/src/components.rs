@@ -556,6 +556,28 @@ fn holds_focus(element: &web_sys::Element) -> bool {
         .is_some_and(|active| active.is_same_node(Some(node)))
 }
 
+/// Hands focus to the element with the ID `then_focus` when the element
+/// `node` refers to goes while it holds focus, as a run's progress bar and
+/// its Cancel button do when the run ends, so focus does not fall to the page
+/// (WCAG 2.4.3; §16, decision 83). It is a cleanup of the reactive view being
+/// built, which runs before that view takes the element off the page, so it
+/// still knows whether the element holds focus. A keyed list that removes a
+/// whole item takes it off first, and the row's header with it.
+pub(crate) fn hand_focus_when_gone<E>(node: NodeRef<E>, then_focus: String)
+where
+    E: leptos::html::ElementType,
+    E::Output: JsCast + Clone + AsRef<web_sys::Element> + 'static,
+{
+    on_cleanup(move || {
+        if node
+            .get_untracked()
+            .is_some_and(|element| holds_focus(element.as_ref()))
+        {
+            focus_element(&then_focus);
+        }
+    });
+}
+
 /// A status badge: a short labeled state on a colored pill, one of
 /// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose
 /// text token on its background token is pair-checked by
@@ -602,16 +624,12 @@ pub fn Progress(
     let wake = StoredValue::new(Wake::<TimeoutHandle>::default());
     let told = RwSignal::new(None::<Told>);
     let bar = NodeRef::<leptos::html::Div>::new();
-    // A cleanup runs before the bar leaves the page, so it still knows
-    // whether the bar holds focus.
     on_cleanup(move || {
         wake.try_update_value(Wake::clear);
-        if let Some(id) = then_focus
-            && bar.get_untracked().is_some_and(|bar| holds_focus(&bar))
-        {
-            focus_element(&id);
-        }
     });
+    if let Some(id) = then_focus {
+        hand_focus_when_gone(bar, id);
+    }
     // The first reading is told as the bar is built, so it is never without
     // a value; the effect tells what follows, and asks again of the same.
     let first = reading.get_untracked();
