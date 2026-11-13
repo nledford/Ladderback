@@ -526,7 +526,35 @@ mod tests {
         assert!(CurrentNetworkName::new(b"").is_none());
         assert!(CurrentNetworkName::new(&[b'a'; MAX_NETWORK_NAME_BYTES + 1]).is_none());
         let name = on(b"canary-network");
-        assert!(!format!("{name:?}").contains("canary"));
+        // A log line that holds the value still says what it held.
+        assert_eq!(format!("{name:?}"), "CurrentNetworkName(hidden)");
+    }
+
+    #[test]
+    fn only_or_except_makes_its_filter_both_are_refused_and_neither_lists_none() {
+        assert_eq!(
+            NameFilter::of(Some(names(&["Office"])), None),
+            Ok(Some(NameFilter::Only(names(&["Office"]))))
+        );
+        assert_eq!(
+            NameFilter::of(None, Some(names(&["Guest"]))),
+            Ok(Some(NameFilter::Except(names(&["Guest"]))))
+        );
+        assert_eq!(NameFilter::of(None, None), Ok(None));
+        assert_eq!(
+            NameFilter::of(Some(names(&["Office"])), Some(names(&["Guest"])))
+                .unwrap_err()
+                .kind,
+            ValueKind::LocationRule
+        );
+    }
+
+    #[test]
+    fn an_alternative_keeps_the_names_it_lists() {
+        let listed = NameFilter::Except(names(&["Guest", "Lab"]));
+        let alternative = Alternative::new(NetworkKind::WiFi, Some(listed.clone())).unwrap();
+        assert_eq!(alternative.names(), Some(&listed));
+        assert_eq!(Alternative::from(NetworkKind::WiFi).names(), None);
     }
 
     #[test]

@@ -684,4 +684,17 @@ mod tests {
             BTreeMap::from([("endpoint", "***"), ("region", "***")])
         );
     }
+
+    #[test]
+    fn settings_that_differ_only_in_credentials_point_at_the_same_location() {
+        let mut reopened = settings();
+        reopened.password = SecretRef::Env("PW".to_owned());
+        reopened
+            .options
+            .insert("sas_token".to_owned(), "${TOKEN}".to_owned());
+        assert!(settings().same_location(&reopened));
+        let mut elsewhere = settings();
+        elsewhere.repository = "rest:http://demo:CANARY-url-password@nas.lan/other".to_owned();
+        assert!(!settings().same_location(&elsewhere));
+    }
 }

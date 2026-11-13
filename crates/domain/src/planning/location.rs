@@ -752,4 +752,79 @@ mod tests {
             Err(ValueKind::Location)
         );
     }
+
+    #[test]
+    fn an_address_is_kept_as_written_with_its_credentials_masked() {
+        let plain = location("rest:https://nas/r", &[]);
+        assert_eq!(plain.masked_address(), "rest:https://nas/r");
+        assert_eq!(plain.masked_repo_hot(), None);
+        let written = Location {
+            repo_hot: Some("rest:http://demo:CANARY@hot.lan/r".to_owned()),
+            ..location("rest:http://demo:CANARY@nas.lan/r", &[])
+        };
+        let address = written.masked_address();
+        assert!(!address.contains("CANARY"), "{address}");
+        assert!(address.ends_with("@nas.lan/r"), "{address}");
+        let hot = written.masked_repo_hot().unwrap_or_default();
+        assert!(!hot.contains("CANARY"), "{hot}");
+        assert!(hot.ends_with("@hot.lan/r"), "{hot}");
+        let hot_as_written = Location {
+            repo_hot: Some("/srv/hot".to_owned()),
+            ..plain
+        };
+        assert_eq!(
+            hot_as_written.masked_repo_hot().as_deref(),
+            Some("/srv/hot")
+        );
+    }
+
+    #[test]
+    fn each_cause_of_exposed_credentials_has_its_wire_code() {
+        for (cause, code) in [
+            (ExposedCredentials::PlainHttp, "plain-http"),
+            (
+                ExposedCredentials::UncheckedCertificate,
+                "unchecked-certificate",
+            ),
+            (ExposedCredentials::PlainEndpoint, "plain-endpoint"),
+            (ExposedCredentials::PlainFtp, "plain-ftp"),
+        ] {
+            assert_eq!(cause.code(), code);
+        }
+    }
+
+    #[test]
+    fn settings_are_exposed_as_the_location_they_describe() {
+        let settings = location("rest:http://demo:pw@nas/r", &[])
+            .with_password(SecretRef::Env("PW".to_owned()));
+        assert_eq!(
+            ExposedCredentials::of(&settings),
+            Some(ExposedCredentials::PlainHttp)
+        );
+    }
+
+    #[test]
+    fn an_rclone_location_is_exposed_only_over_plain_http_with_a_credential() {
+        let of = |address| ExposedCredentials::of_location(&location(address, &[]));
+        assert_eq!(
+            of(r#"rclone::webdav,url="https://dav.lan",user=me,pass=pw:r"#),
+            None
+        );
+        assert_eq!(of(r#"rclone::webdav,url="http://dav.lan":r"#), None);
+    }
+
+    #[test]
+    fn a_location_is_chosen_for_several_locations_or_for_a_rule() {
+        let mut lone = entry("/srv/lan", &[], Some("aa"));
+        assert!(!lone.chooses_location());
+        assert_eq!(lone.ruled_positions(), Vec::<u8>::new());
+        lone.locations.first_when = ruled(&[NetworkKind::WiFi]);
+        assert!(lone.chooses_location());
+        assert_eq!(lone.ruled_positions(), vec![1]);
+        let mut several = entry("/srv/lan", &["/srv/public", "/srv/far"], Some("aa"));
+        assert!(several.chooses_location());
+        assert_eq!(several.ruled_positions(), Vec::<u8>::new());
+        several.locations.further[0].when = ruled(&[NetworkKind::Wired]);
+        assert_eq!(several.ruled_positions(), vec![2]);
+    }
 }

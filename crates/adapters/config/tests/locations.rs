@@ -10,7 +10,7 @@ use app::ports::{ConfigStore, Problem};
 use config_adapter::render;
 use domain::RepositoryAlias;
 use domain::planning::{
-    AgentConfig, AgentSettings, Concurrency, LocationRule, MAX_NETWORK_NAME_BYTES,
+    AgentConfig, AgentSettings, Concurrency, Location, LocationRule, MAX_NETWORK_NAME_BYTES,
     MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName, ValueKind,
     Violation,
 };
@@ -62,6 +62,33 @@ fn further_locations_are_read_in_order_with_their_own_options_and_written_back()
     let written = render(Path::new(FILE), &config).expect("written");
     assert_eq!(written.matches("[[repositories.nas.locations]]").count(), 2);
     assert_eq!(parsed(&written).expect("read back").config, config);
+}
+
+#[test]
+fn a_further_locations_hot_and_cold_options_are_written_back_only_when_it_has_them() {
+    let text = nas(&format!(
+        "{}repo-hot = \"/srv/usb-hot\"\noptions-hot = {{ region = \"eu\" }}\n\
+         options-cold = {{ class = \"GLACIER\" }}\n{}",
+        location("/srv/usb"),
+        location("/srv/far"),
+    ));
+    let config = parsed(&text).expect("read").config;
+    let written = render(Path::new(FILE), &config).expect("written");
+    assert_eq!(parsed(&written).expect("read back").config, config);
+    let further = &config.repositories()[&RepositoryAlias::parse("nas").expect("an alias")]
+        .locations
+        .further;
+    assert_eq!(
+        further[0].options_hot.get("region").map(String::as_str),
+        Some("eu")
+    );
+    assert_eq!(
+        further[0].options_cold.get("class").map(String::as_str),
+        Some("GLACIER")
+    );
+    // The location with none writes no empty table.
+    assert_eq!(written.matches("options-hot").count(), 1, "{written}");
+    assert_eq!(written.matches("options-cold").count(), 1, "{written}");
 }
 
 #[test]
@@ -180,6 +207,42 @@ async fn a_save_keeps_what_a_location_table_says_as_written() {
     let saved = scratch.read();
     assert!(
         saved.contains("# the public address, away from home\n"),
+        "{saved}"
+    );
+    assert_eq!(store.load().await.expect("loaded again"), changed);
+}
+
+#[tokio::test]
+async fn a_save_changes_a_location_where_it_is_written_and_adds_one_after_the_last() {
+    let scratch = Scratch::new();
+    scratch.write(&nas(&format!(
+        "{}# the public address, away from home\noptions = {{ timeout = \"10s\" }}\n",
+        location("rest:https://backup.example.net/r")
+    )));
+    let store = scratch.store();
+    let config = store.load().await.expect("loaded");
+    let mut repositories = config.repositories().clone();
+    let entry = repositories
+        .get_mut(&RepositoryAlias::parse("nas").expect("an alias"))
+        .expect("the entry");
+    entry.locations.further[0]
+        .options
+        .insert("timeout".to_owned(), "30s".to_owned());
+    entry.locations.further.push(Location {
+        repository: "/srv/usb".to_owned(),
+        ..Location::default()
+    });
+    let changed = AgentConfig::new(
+        config.agent().clone(),
+        config.hooks().clone(),
+        repositories,
+        config.plans().to_vec(),
+    )
+    .expect("a valid configuration");
+    store.save(&changed).await.expect("saved");
+    let saved = scratch.read();
+    assert!(
+        saved.contains("# the public address, away from home\noptions = { timeout = \"30s\" }\n"),
         "{saved}"
     );
     assert_eq!(store.load().await.expect("loaded again"), changed);
