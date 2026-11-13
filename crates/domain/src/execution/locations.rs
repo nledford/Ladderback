@@ -154,10 +154,7 @@ impl LocationsRecord {
 /// `address`, already masked, cut to at most `max` bytes on a character
 /// boundary.
 pub fn recorded_address(address: &str, max: usize) -> String {
-    let mut end = address.len().min(max);
-    while !address.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
+    let end = address.floor_char_boundary(max);
     address.get(..end).unwrap_or_default().to_owned()
 }
 
