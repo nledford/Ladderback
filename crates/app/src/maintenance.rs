@@ -717,8 +717,7 @@ impl RunMaintenance {
                     snapshots: owned
                         .iter()
                         .position(|group| group.plan == plan.plan)
-                        .map(|at| owned.swap_remove(at).snapshots)
-                        .unwrap_or_default(),
+                        .map_or_default(|at| owned.swap_remove(at).snapshots),
                 })
                 .collect(),
             orphaned: partition

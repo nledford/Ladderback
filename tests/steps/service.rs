@@ -97,8 +97,7 @@ fn run_by_a_link(agent: &mut Agent) {
         .iter()
         .rev()
         .find(|(name, _)| name == "PATH")
-        .map(|(_, value)| format!(":{value}"))
-        .unwrap_or_default();
+        .map_or_default(|(_, value)| format!(":{value}"));
     agent
         .interop
         .env

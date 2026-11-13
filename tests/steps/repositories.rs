@@ -237,8 +237,7 @@ async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
         .repositories
         .cold
         .as_ref()
-        .map(|cold| contents(cold))
-        .unwrap_or_default();
+        .map_or_default(|cold| contents(cold));
     let use_case = app::repositories::InitRepository::new(
         Arc::new(platform::SystemClock),
         agent.engine.clone(),
@@ -557,8 +556,7 @@ async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
         .repositories
         .cold
         .as_ref()
-        .map(|cold| contents(cold))
-        .unwrap_or_default();
+        .map_or_default(|cold| contents(cold));
     let mut body = serde_json::json!({"settings": api_settings(agent)});
     if let Some(alias) = alias {
         body["alias"] = serde_json::json!(alias);

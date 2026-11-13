@@ -528,8 +528,7 @@ async fn list_operations(
             api::ErrorCode::InvalidCursor,
             params
                 .after
-                .map(|cursor| vec![("cursor", api::MsgArg::Text(cursor))])
-                .unwrap_or_default(),
+                .map_or_default(|cursor| vec![("cursor", api::MsgArg::Text(cursor))]),
         ),
     }
 }

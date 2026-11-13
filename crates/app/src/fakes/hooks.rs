@@ -121,10 +121,7 @@ impl FakeHookRunner {
     }
 
     pub fn calls(&self) -> Vec<HookCall> {
-        self.calls
-            .lock()
-            .map(|calls| calls.clone())
-            .unwrap_or_default()
+        self.calls.lock().map_or_default(|calls| calls.clone())
     }
 }
 

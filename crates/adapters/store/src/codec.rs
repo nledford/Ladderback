@@ -165,9 +165,7 @@ pub(crate) fn encode_failure(
         FailureReason::JobRejected { detail } => ("invalid-job-spec", Vec::new(), Some(detail)),
         FailureReason::EngineExited { exit_code } => (
             "engine-exited",
-            exit_code
-                .map(|code| text_arg("exit_code", code.to_string()))
-                .unwrap_or_default(),
+            exit_code.map_or_default(|code| text_arg("exit_code", code.to_string())),
             None,
         ),
         FailureReason::EngineFailed { detail } => ("operation-failed", Vec::new(), Some(detail)),
@@ -184,9 +182,7 @@ pub(crate) fn encode_failure(
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
             "hook-failed",
-            exit_code
-                .map(|code| text_arg("exit_code", code.to_string()))
-                .unwrap_or_default(),
+            exit_code.map_or_default(|code| text_arg("exit_code", code.to_string())),
             None,
         ),
         FailureReason::SecretsTooLargeToMask { field, limit } => (

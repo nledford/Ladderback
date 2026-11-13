@@ -193,7 +193,7 @@ pub fn command_failure(
         Stdout::ReadToEnd(bytes) if bytes.is_empty() || bytes.ends_with(b"\n") => Some(bytes),
         Stdout::ReadToEnd(_) | Stdout::LeftOpen(_) => None,
     };
-    let said = whole.map_or_else(String::new, |stdout| {
+    let said = whole.map_or_default(|stdout| {
         // A helper that rejects a value may quote it on stderr: what it
         // printed (less the line ending its last line ends with, which isn't
         // what it quotes), and its first line, which is what it would have

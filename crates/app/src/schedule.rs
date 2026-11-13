@@ -683,14 +683,13 @@ fn scheduled(
         .filter_map(|plan| {
             let rules = config
                 .repository(&plan.repository)
-                .map(|repository| {
+                .map_or_default(|repository| {
                     repository
                         .location_rules()
                         .into_iter()
                         .map(Option::<&LocationRule>::cloned)
                         .collect()
-                })
-                .unwrap_or_default();
+                });
             Some((
                 plan.id.clone(),
                 (plan.schedule.clone()?, plan.overlap, rules),

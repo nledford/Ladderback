@@ -27,7 +27,7 @@ fn report(payload: &(dyn Any + Send), location: Option<&Location<'_>>, events: &
         .map(|message| (*message).to_owned())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "the panic carries no text".to_owned());
-    let place = location.map_or_else(String::new, |place| {
+    let place = location.map_or_default(|place| {
         format!(" at {}:{}:{}", place.file(), place.line(), place.column())
     });
     events.redact_text(&format!("ladderback worker panicked{place}: {message}"))

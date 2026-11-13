@@ -952,8 +952,7 @@ impl Publish {
                 args: warning
                     .item
                     .as_ref()
-                    .map(|item| vec![MsgArg::Text(item.clone())])
-                    .unwrap_or_default(),
+                    .map_or_default(|item| vec![MsgArg::Text(item.clone())]),
             }),
             // The engine's start comes before the run's write that says the
             // operation is running, and its end before the run's ending hooks
@@ -1457,8 +1456,7 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .target
             .plan
             .as_ref()
-            .map(|plan| plan.as_str().to_owned())
-            .unwrap_or_default(),
+            .map_or_default(|plan| plan.as_str().to_owned()),
         kind_text(record.kind).to_owned(),
         status_text(&record.status).to_owned(),
         record.queued_at.to_string(),
@@ -1476,13 +1474,7 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .map(|alias| alias.as_str().to_owned()),
     )
     .map(|summary| {
-        summary.with_locations(
-            record
-                .locations
-                .as_ref()
-                .map(locations_tried)
-                .unwrap_or_default(),
-        )
+        summary.with_locations(record.locations.as_ref().map_or_default(locations_tried))
     })
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
@@ -1986,8 +1978,7 @@ impl Catalog for ConfigCatalog {
                 refusal
                     .detail
                     .as_deref()
-                    .map(|detail| format!(" ({detail})"))
-                    .unwrap_or_default()
+                    .map_or_default(|detail| format!(" ({detail})"))
             );
             SnapshotsError::SecretRefused(refusal)
         };
@@ -2849,15 +2840,13 @@ fn listed_location(location: &Location, position: u8) -> api::LocationDto {
             .flat_map(LocationRule::alternatives)
             .map(|alternative| {
                 let names = |filter: Option<&NameFilter>| {
-                    filter
-                        .map(|filter| {
-                            filter
-                                .names()
-                                .iter()
-                                .map(|name| name.as_str().to_owned())
-                                .collect()
-                        })
-                        .unwrap_or_default()
+                    filter.map_or_default(|filter| {
+                        filter
+                            .names()
+                            .iter()
+                            .map(|name| name.as_str().to_owned())
+                            .collect()
+                    })
                 };
                 let filter = alternative.names();
                 api::LocationAlternativeDto {

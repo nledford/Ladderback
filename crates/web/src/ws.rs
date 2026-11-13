@@ -87,9 +87,7 @@ pub(crate) enum Posted {
 
 /// The page's own origin, where the daemon that served the page listens.
 pub(crate) fn origin() -> String {
-    web_sys::window()
-        .map(|window| window.location().origin().unwrap_or_default())
-        .unwrap_or_default()
+    web_sys::window().map_or_default(|window| window.location().origin().unwrap_or_default())
 }
 
 /// What the page's requests need of its session (security §10.1): the CSRF
