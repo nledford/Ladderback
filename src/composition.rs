@@ -17,7 +17,7 @@ use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 use app::locations::{ChooseLocation, LocationReport};
-use domain::execution::locations::LocationOutcome;
+use domain::execution::locations::{LocationOutcome, LocationsRecord};
 
 use app::conditions::NetworkWait;
 use app::notifications::{Notify, Report};
@@ -47,7 +47,9 @@ use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Trigger, WarningKind};
-use domain::planning::{Maintenance, NotRecorded, RepositoryField, RepositorySettings};
+use domain::planning::{
+    Location, Maintenance, NotRecorded, RepositoryConfig, RepositoryField, RepositorySettings,
+};
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SourceName, Template, TemplateError,
@@ -1456,6 +1458,15 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .as_ref()
             .map(|alias| alias.as_str().to_owned()),
     )
+    .map(|summary| {
+        summary.with_locations(
+            record
+                .locations
+                .as_ref()
+                .map(locations_tried)
+                .unwrap_or_default(),
+        )
+    })
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()
 }
@@ -1887,12 +1898,7 @@ impl Catalog for ConfigCatalog {
                 .repositories()
                 .iter()
                 .map(|(alias, repository)| {
-                    repository_row(
-                        alias,
-                        &repository.settings,
-                        repository.maintenance,
-                        offered.contains(alias),
-                    )
+                    listed_repository(alias, repository, offered.contains(alias))
                 })
                 .collect(),
         })
@@ -2202,6 +2208,52 @@ impl Repositories for RepositoryService {
             Err(error) => Err(refusal_of(error, &saved.settings).await),
         }
     }
+
+    async fn test_saved(&self, alias: String) -> Result<api::LocationsTestDto, RepositoriesError> {
+        // A name that is no alias is one the configuration can't hold.
+        let Ok(parsed) = RepositoryAlias::parse(&alias) else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        let config = self.config.load().await.map_err(config_refusal)?;
+        let Some(entry) = config.repositories().get(&parsed).cloned() else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        // Probes go through the daemon's own engine, which hands a probe
+        // straight to a worker; the log hears what a job's choice tells it.
+        let saved = app::ports::SavedEntry {
+            alias: parsed,
+            entry,
+        };
+        let tested = ChooseLocation::new(
+            Arc::clone(&self.engine),
+            Arc::clone(&self.clock),
+            self.resolve.clone(),
+            Arc::new(log_location),
+        )
+        .test_each(new_operation(), &saved)
+        .await;
+        match tested {
+            Ok(record) => Ok(api::LocationsTestDto {
+                locations: locations_tried(&record),
+            }),
+            Err(error) => Err(refusal_of(error, &saved.entry.settings).await),
+        }
+    }
+}
+
+/// Every location of a choice or a Test, as the wire carries it: by
+/// position, the address masked as recorded, and the outcome's code.
+fn locations_tried(record: &LocationsRecord) -> Vec<api::LocationTriedDto> {
+    record
+        .locations
+        .iter()
+        .map(|tried| api::LocationTriedDto {
+            position: tried.position,
+            address: tried.address.clone(),
+            outcome: tried.outcome.code().to_owned(),
+            source: tried.source.clone(),
+        })
+        .collect()
 }
 
 /// A fresh operation ID: a UUIDv7, as every operation of the daemon has.
@@ -2640,6 +2692,69 @@ fn config_unusable<R>(
     }
 }
 
+/// A configured entry as the repositories list shows it: its row, and for
+/// an entry reached at several locations, each location in order and a
+/// warning for each that sends its credentials where an impostor could read
+/// them (decision 80), by position and cause, never the address.
+fn listed_repository(
+    alias: &RepositoryAlias,
+    repository: &RepositoryConfig,
+    create_offered: bool,
+) -> api::RepositoryDto {
+    let mut row = repository_row(
+        alias,
+        &repository.settings,
+        repository.maintenance,
+        create_offered,
+    );
+    row.warnings
+        .extend(repository.location_warnings().into_iter().map(|warning| {
+            api::WarningDto {
+                code: api::WarningCode::LocationPlainHttpCredentials,
+                args: [
+                    ("position".to_owned(), text(warning.position)),
+                    ("cause".to_owned(), text(warning.cause.code())),
+                ]
+                .into(),
+            }
+        }));
+    if repository.has_several_locations() {
+        row.locations = std::iter::once(Location::of(&repository.settings))
+            .chain(repository.locations.further.iter().cloned())
+            .zip(1u8..)
+            .map(|(location, position)| listed_location(&location, position))
+            .collect();
+    }
+    row
+}
+
+/// One location of an entry as the list shows it: its address masked, and
+/// each option by name, with its value only when that is references alone.
+fn listed_location(location: &Location, position: u8) -> api::LocationDto {
+    let options = [
+        ("options", &location.options),
+        ("options-hot", &location.options_hot),
+        ("options-cold", &location.options_cold),
+    ]
+    .into_iter()
+    .flat_map(|(set, options)| {
+        options
+            .iter()
+            .map(move |(name, value)| api::LocationOptionDto {
+                set: set.to_owned(),
+                name: name.clone(),
+                reference: domain::secrets::only_references(value).then(|| value.clone()),
+            })
+    })
+    .collect();
+    api::LocationDto {
+        position,
+        repository: location.masked_address(),
+        repo_hot: location.masked_repo_hot(),
+        options,
+    }
+}
+
 /// One configured repository as a list shows it: its locations masked, and
 /// where its password comes from, never the password (I4). `create_offered`
 /// is whether its row offers to create it (decision 53).
@@ -2684,6 +2799,7 @@ fn repository_row(
                 }
             })
             .collect(),
+        locations: Vec::new(),
     }
 }
 
@@ -3179,6 +3295,133 @@ mod tests {
                 "{maintenance:?}"
             );
         }
+    }
+
+    /// An entry `nas` reached at `rest:http://lan.example.lan/r` with a user
+    /// and password written in it and a key by reference, then at
+    /// `/srv/public` with a key written in the file.
+    fn two_locations() -> RepositoryConfig {
+        let mut first = demo_settings(SecretRef::Env("NAS_PASSWORD".to_owned()));
+        first.repository = "rest:http://lan:CANARY-url-pass@lan.example.lan/r".to_owned();
+        first
+            .options
+            .insert("application_key".to_owned(), "${LAN_KEY}".to_owned());
+        RepositoryConfig {
+            locations: domain::planning::Locations {
+                further: vec![Location {
+                    repository: "/srv/public".to_owned(),
+                    options_cold: [(
+                        "secret_access_key".to_owned(),
+                        "CANARY-written-key".to_owned(),
+                    )]
+                    .into(),
+                    ..Location::default()
+                }],
+            },
+            id: None,
+            settings: first,
+            maintenance: Maintenance::Local,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_listed_repository_lists_its_locations_in_order_with_references_and_never_a_written_secret()
+    {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let row = listed_repository(&alias, &two_locations(), false);
+        let option = |set: &str, name: &str, reference: Option<&str>| api::LocationOptionDto {
+            set: set.to_owned(),
+            name: name.to_owned(),
+            reference: reference.map(str::to_owned),
+        };
+        assert_eq!(
+            row.locations,
+            vec![
+                api::LocationDto {
+                    position: 1,
+                    repository: "rest:http://lan:***@lan.example.lan/r".to_owned(),
+                    repo_hot: None,
+                    options: vec![option("options", "application_key", Some("${LAN_KEY}"))],
+                },
+                api::LocationDto {
+                    position: 2,
+                    repository: "/srv/public".to_owned(),
+                    repo_hot: None,
+                    options: vec![option("options-cold", "secret_access_key", None)],
+                },
+            ]
+        );
+        let wire = serde_json::to_string(&row).expect("a row is JSON");
+        assert!(!wire.contains("CANARY"), "the row shows a secret: {wire}");
+    }
+
+    #[test]
+    fn a_listed_repository_warns_of_a_location_that_sends_its_credentials_over_plain_http() {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let row = listed_repository(&alias, &two_locations(), false);
+        let warning = api::WarningDto {
+            code: WarningCode::LocationPlainHttpCredentials,
+            args: [
+                ("position".to_owned(), MsgArg::Text("1".to_owned())),
+                ("cause".to_owned(), MsgArg::Text("plain-http".to_owned())),
+            ]
+            .into(),
+        };
+        assert!(row.warnings.contains(&warning), "{:?}", row.warnings);
+    }
+
+    #[test]
+    fn a_listed_repository_of_one_location_lists_no_locations() {
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let mut entry = two_locations();
+        entry.locations = Default::default();
+        let row = listed_repository(&alias, &entry, false);
+        assert_eq!(row.locations, Vec::new());
+        let wire = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(wire.get("locations"), None, "{wire}");
+    }
+
+    #[test]
+    fn an_operations_summary_carries_the_locations_its_choice_saw() {
+        use domain::execution::locations::LocationTried;
+        let tried = |position, address: &str, outcome| LocationTried {
+            position,
+            address: address.to_owned(),
+            outcome,
+            source: None,
+        };
+        let record = LocationsRecord {
+            locations: vec![
+                tried(1, "/srv/lan", LocationOutcome::Silent),
+                tried(2, "/srv/public", LocationOutcome::Used),
+            ],
+        };
+        let summary = api::OperationSummaryDto::new(
+            "018f0000-0000-7000-8000-000000000001".to_owned(),
+            "home".to_owned(),
+            "backup".to_owned(),
+            "succeeded".to_owned(),
+            "2026-11-12T10:00:00Z".to_owned(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .expect("a summary")
+        .with_locations(locations_tried(&record));
+        assert_eq!(summary.used_location(), Some((2, 2)));
+        let wire = serde_json::to_value(&summary).expect("a summary is JSON");
+        assert_eq!(
+            wire["locations"],
+            serde_json::json!([
+                {"position": 1, "address": "/srv/lan", "outcome": "silent"},
+                {"position": 2, "address": "/srv/public", "outcome": "used"},
+            ])
+        );
     }
 
     /// Empty scratch folders the daemon is pointed at: no configuration has

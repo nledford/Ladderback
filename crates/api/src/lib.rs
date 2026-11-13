@@ -1410,6 +1410,7 @@ mod tests {
                 code: WarningCode::ConfigInlineSecret,
                 args: [("field".to_owned(), MsgArg::Text("password".to_owned()))].into(),
             }],
+            locations: Vec::new(),
         };
         let json = serde_json::to_string(&row).unwrap();
         assert_eq!(
@@ -2595,6 +2596,29 @@ pub struct OperationSummaryDto {
     /// and for an operation an earlier version logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// For a repository reached at several locations: every location as the
+    /// run's choice saw it, in order, so a page says "Used location 2 of 2"
+    /// and why each earlier one was skipped (decision 80). Left out for a
+    /// repository of one location and an operation that opens none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<LocationTriedDto>,
+}
+
+impl OperationSummaryDto {
+    /// The same summary, with the locations the run's choice saw.
+    #[must_use]
+    pub fn with_locations(self, locations: Vec<LocationTriedDto>) -> Self {
+        Self { locations, ..self }
+    }
+
+    /// The position of the location the run used, and how many the
+    /// repository had then, when it had several.
+    pub fn used_location(&self) -> Option<(u8, usize)> {
+        self.locations
+            .iter()
+            .find(|tried| tried.outcome == "used")
+            .map(|tried| (tried.position, self.locations.len()))
+    }
 }
 
 /// Why an operation DTO can't be: an ID that isn't a UUID, or a time that
@@ -2654,6 +2678,7 @@ impl OperationSummaryDto {
             failure_code,
             result,
             repository,
+            locations: Vec::new(),
         })
     }
 }
@@ -2733,10 +2758,85 @@ pub struct RepositoryDto {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub create_offered: bool,
     /// What the configuration holds that the user should know about this
-    /// repository, one per secret written inline. Left out when there is
-    /// none.
+    /// repository: one per secret written inline, and one
+    /// `location-plain-http-credentials` per location that sends its
+    /// credentials where an impostor could read them (decision 80). Left
+    /// out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningDto>,
+    /// Every location of a repository reached at several, in the order
+    /// they are tried, the first first (decision 80). Left out for a
+    /// repository of one location, which `repository` names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<LocationDto>,
+}
+
+/// One location of a repository reached at several, as the Repositories
+/// page lists it: its address with the credentials written in it masked,
+/// and its options by name. Never a secret (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationDto {
+    /// Its place in the order, from 1.
+    pub position: u8,
+    /// `repository` as the entry writes it, masked.
+    pub repository: String,
+    /// `repo-hot`, masked the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_hot: Option<String>,
+    /// Its options, set by set, each by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<LocationOptionDto>,
+}
+
+/// One option of a location: its name, and its value only when the value
+/// is references alone (`${LAN_KEY}`), which say where a secret is and
+/// never hold it. A value written in the configuration is never shown: it
+/// may be the secret.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationOptionDto {
+    /// `options`, `options-hot` or `options-cold`, as the configuration
+    /// names the set.
+    pub set: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+/// What became of one location of a repository reached at several: in an
+/// operation, as the run's choice saw it; in a Test, as its probe found it
+/// (decision 80). Named by its position, never a network's name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationTriedDto {
+    /// Its place in the order, from 1.
+    pub position: u8,
+    /// Its address as the entry wrote it then, credentials masked, at most
+    /// 256 bytes.
+    pub address: String,
+    /// `used` (in a Test: it answers and holds the repository),
+    /// `not-tried`, `rule-not-met`, `rule-unknown`, `silent`, `refused`,
+    /// `not-a-repository`, `other-repository`, `password-not-accepted`,
+    /// `secret-unavailable`, or the refusal code of a setting that can't be
+    /// used (`template-invalid`, `repository-path-relative`,
+    /// `secret-expansion-too-long`, `secret-in-process-arguments`,
+    /// `location-too-many-credentials`).
+    pub outcome: String,
+    /// For a location whose settings didn't resolve: where the secret was
+    /// looked for (`env LAN_KEY`), or the setting that can't be used. Never
+    /// a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+/// The answer to a Test of a saved repository's locations
+/// (`POST /api/v1/repositories/{alias}/test`): each location's outcome, in
+/// order, none `not-tried`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LocationsTestDto {
+    pub locations: Vec<LocationTriedDto>,
 }
 
 /// Where a configured repository's password comes from, without its value:
@@ -3589,6 +3689,7 @@ mod catalog_dto_tests {
                 maintained_here: false,
                 create_offered: false,
                 warnings: Vec::new(),
+                locations: Vec::new(),
             }],
         };
         assert_eq!(
@@ -3641,6 +3742,7 @@ mod catalog_dto_tests {
             maintained_here: false,
             create_offered: false,
             warnings: Vec::new(),
+            locations: Vec::new(),
         };
         assert_eq!(
             to_string(&row).unwrap(),

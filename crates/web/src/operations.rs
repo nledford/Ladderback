@@ -249,6 +249,7 @@ mod tests {
             failure_code: None,
             result,
             repository: repository.map(str::to_owned),
+            locations: Vec::new(),
         }
     }
 

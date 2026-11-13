@@ -99,6 +99,19 @@ pub fn has_reference(text: &str) -> bool {
     })
 }
 
+/// Whether `text` is a valid template made of `${…}` references alone, with
+/// no text written around them: a value that says where its secrets are
+/// and holds none, so a page may show it (I4).
+pub fn only_references(text: &str) -> bool {
+    Template::parse(text).is_ok_and(|template| {
+        !template.parts().is_empty()
+            && template
+                .parts()
+                .iter()
+                .all(|part| matches!(part, Part::Reference(_)))
+    })
+}
+
 impl Template {
     pub fn parse(text: &str) -> Result<Self, TemplateError> {
         if text.len() > MAX_SECRET_BYTES {
@@ -428,5 +441,22 @@ mod tests {
                 read: FileRead::Whole,
             }
         );
+    }
+
+    #[test]
+    fn only_a_value_of_references_alone_is_one_a_page_may_show() {
+        for shown in ["${LAN_KEY}", "${file:/run/key}", "${A}${B}"] {
+            assert!(only_references(shown), "{shown}");
+        }
+        for hidden in [
+            "",
+            "written-key",
+            "prefix-${LAN_KEY}",
+            "${LAN_KEY}-suffix",
+            "$${LAN_KEY}",
+            "${LAN_KEY",
+        ] {
+            assert!(!only_references(hidden), "{hidden}");
+        }
     }
 }

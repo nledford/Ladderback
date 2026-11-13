@@ -237,7 +237,7 @@ impl ResolveRepository {
     /// when the job starts, and each location's references are read only
     /// then ([`Self::resolve_location`]), so nothing opens a location the
     /// choice didn't make.
-    async fn resolve_password(
+    pub(crate) async fn resolve_password(
         &self,
         password: &SecretRef,
     ) -> Result<ResolvedRepository, ResolveError> {

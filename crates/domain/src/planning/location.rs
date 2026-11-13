@@ -115,6 +115,15 @@ impl Location {
     /// The address as written, with the credentials written in it masked:
     /// what an operation keeps of a location, never a secret.
     pub fn masked_address(&self) -> String {
+        self.masked(&self.repository)
+    }
+
+    /// `repo-hot` as written, masked the same way.
+    pub fn masked_repo_hot(&self) -> Option<String> {
+        self.repo_hot.as_deref().map(|hot| self.masked(hot))
+    }
+
+    fn masked(&self, text: &str) -> String {
         let none = SecretValue::new("");
         Redactor::for_repository(RepositorySecrets {
             repository: &self.repository,
@@ -125,7 +134,7 @@ impl Location {
             options_cold: &self.options_cold,
             resolved: &[],
         })
-        .redact(&self.repository)
+        .redact(text)
     }
 }
 

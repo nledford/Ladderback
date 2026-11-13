@@ -70,6 +70,13 @@ impl crate::Repositories for NoRepositories {
     ) -> Result<api::RepositoryIdDto, crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
     }
+
+    async fn test_saved(
+        &self,
+        _alias: String,
+    ) -> Result<api::LocationsTestDto, crate::RepositoriesError> {
+        Err(crate::RepositoriesError::InvalidBody)
+    }
 }
 
 /// Lists nothing: the checks never reach a route.

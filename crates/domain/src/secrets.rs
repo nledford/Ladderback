@@ -27,7 +27,7 @@ pub use outcome::{
     decode, file_warning,
 };
 pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};
-pub use template::{Part, Reference, Template, TemplateError, has_reference};
+pub use template::{Part, Reference, Template, TemplateError, has_reference, only_references};
 
 /// The most bytes a secret may have, and a field that may hold references:
 /// what is read from a file or from a command's output, what a reference

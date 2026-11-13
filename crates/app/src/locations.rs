@@ -17,7 +17,7 @@ use domain::execution::locations::{
 use domain::planning::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, MAX_RECORDED_ADDRESS_BYTES,
 };
-use domain::secrets::SourceName;
+use domain::secrets::{SecretValue, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
 use futures::{FutureExt, StreamExt, select_biased};
 
@@ -25,6 +25,7 @@ use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl, ProbeAnswer,
     RepositoryAccess, RunningJob, SavedEntry,
 };
+use crate::repositories::RepositoryError;
 use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository};
 
 /// What the choice tells the daemon's log. Nothing here is a secret or a
@@ -125,13 +126,91 @@ impl ChooseLocation {
                 record: None,
             });
         };
-        let SavedEntry { alias, entry } = saved;
         // The configuration refuses further locations on an entry with no
         // recorded ID (decision 80): without one, nothing says which
         // repository a location must hold.
-        let Some(expected) = entry.id.clone() else {
+        let Some(expected) = saved.entry.id.clone() else {
             return Err((FailureReason::NoLocationUsable, None));
         };
+        let (record, chosen) = self
+            .try_each(
+                op,
+                &saved,
+                &access.password,
+                Some(&expected),
+                Reach::FirstUsed,
+                phase,
+            )
+            .await
+            .map_err(|reason| (reason, None))?;
+        (self.report)(LocationReport::Chosen {
+            alias: saved.alias.clone(),
+            record: record.clone(),
+        });
+        match chosen {
+            Some(location) => Ok(Located {
+                access: RepositoryAccess {
+                    id: Some(expected),
+                    entry: Some(saved),
+                    ..location
+                },
+                record: Some(record),
+            }),
+            None => Err((failure(&record), Some(record))),
+        }
+    }
+
+    /// A person's Test of the saved entry `saved` (decision 80): every
+    /// location is probed in order, past the one a job would use, so each
+    /// has an outcome of its own and none is `not-tried`. The entry's
+    /// password is resolved first; a location's own references are resolved
+    /// as it is about to be probed, as for a job. An entry of one location
+    /// is probed too, and while it records no repository ID, whatever
+    /// repository it holds counts as its own. Nothing is recorded.
+    pub async fn test_each(
+        &self,
+        op: OperationId,
+        saved: &SavedEntry,
+    ) -> Result<LocationsRecord, RepositoryError> {
+        let password = self
+            .resolve
+            .resolve_password(&saved.entry.settings.password)
+            .await
+            .map_err(RepositoryError::Resolve)?
+            .access
+            .password;
+        let phase = Arc::new(Mutex::new(Phase::Idle));
+        let (record, _) = self
+            .try_each(
+                op,
+                saved,
+                &password,
+                saved.entry.id.as_ref(),
+                Reach::Every,
+                &phase,
+            )
+            .await
+            .map_err(RepositoryError::Failed)?;
+        Ok(record)
+    }
+
+    /// Tries the locations of `saved` in order with the repository's
+    /// `password`: each is resolved and probed, and holds the repository
+    /// when its ID is `expected` (any ID when `None`). With
+    /// [`Reach::FirstUsed`] the ones after the first usable one are
+    /// `not-tried`. Answers every location's outcome and the first usable
+    /// one's access, or the reason the whole choice fails (secrets past
+    /// what the daemon masks).
+    async fn try_each(
+        &self,
+        op: OperationId,
+        saved: &SavedEntry,
+        password: &SecretValue,
+        expected: Option<&RepositoryId>,
+        reach: Reach,
+        phase: &Probing,
+    ) -> Result<(LocationsRecord, Option<RepositoryAccess>), FailureReason> {
+        let SavedEntry { alias, entry } = saved;
         let mut read = JobReferences::default();
         let mut tried = Vec::with_capacity(entry.location_count());
         let mut chosen = None;
@@ -141,21 +220,19 @@ impl ChooseLocation {
                 MAX_RECORDED_ADDRESS_BYTES,
             );
             let mut source = None;
-            let outcome = if chosen.is_some() {
+            let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
                 LocationOutcome::NotTried
             } else {
                 match self
                     .resolve
-                    .resolve_location(&settings, &access.password, &mut read)
+                    .resolve_location(&settings, password, &mut read)
                     .await
                 {
-                    Err(error) => match unusable(error) {
-                        Ok((outcome, named)) => {
-                            source = Some(named);
-                            outcome
-                        }
-                        Err(reason) => return Err((reason, None)),
-                    },
+                    Err(error) => {
+                        let (outcome, named) = unusable(error)?;
+                        source = Some(named);
+                        outcome
+                    }
                     Ok(resolved) => {
                         let location = resolved.access;
                         if let Some(cause) = ExposedCredentials::of_location(&Location {
@@ -171,14 +248,14 @@ impl ChooseLocation {
                                 cause,
                             });
                         }
-                        let outcome = self.probe(op, location.clone(), &expected, phase).await;
+                        let outcome = self.probe(op, location.clone(), expected, phase).await;
                         if outcome == LocationOutcome::OtherRepository {
                             (self.report)(LocationReport::OtherRepository {
                                 alias: alias.clone(),
                                 position,
                             });
                         }
-                        if outcome == LocationOutcome::Used {
+                        if outcome == LocationOutcome::Used && chosen.is_none() {
                             chosen = Some(location);
                         }
                         outcome
@@ -192,22 +269,7 @@ impl ChooseLocation {
                 source,
             });
         }
-        let record = LocationsRecord { locations: tried };
-        (self.report)(LocationReport::Chosen {
-            alias: alias.clone(),
-            record: record.clone(),
-        });
-        match chosen {
-            Some(location) => Ok(Located {
-                access: RepositoryAccess {
-                    id: Some(expected),
-                    entry: Some(SavedEntry { alias, entry }),
-                    ..location
-                },
-                record: Some(record),
-            }),
-            None => Err((failure(&record), Some(record))),
-        }
+        Ok((LocationsRecord { locations: tried }, chosen))
     }
 
     /// Probes one location, resolved: a worker of its own that opens it with
@@ -217,7 +279,7 @@ impl ChooseLocation {
         &self,
         op: OperationId,
         mut location: RepositoryAccess,
-        expected: &RepositoryId,
+        expected: Option<&RepositoryId>,
         phase: &Probing,
     ) -> LocationOutcome {
         location.id = None;
@@ -262,7 +324,9 @@ impl ChooseLocation {
             Phase::Idle => {}
         }
         match found {
-            Some(ProbeAnswer::Holds(id)) if id == *expected => LocationOutcome::Used,
+            Some(ProbeAnswer::Holds(id)) if expected.is_none_or(|expected| id == *expected) => {
+                LocationOutcome::Used
+            }
             Some(ProbeAnswer::Holds(_)) => LocationOutcome::OtherRepository,
             Some(ProbeAnswer::Refused) => LocationOutcome::Refused,
             Some(ProbeAnswer::NotARepository) => LocationOutcome::NotARepository,
@@ -279,6 +343,14 @@ fn several(access: &RepositoryAccess) -> Option<SavedEntry> {
         .entry
         .clone()
         .filter(|saved| saved.entry.has_several_locations())
+}
+
+/// How far a run of the locations goes: a job's choice stops at the first
+/// usable one, a person's Test probes them all.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    FirstUsed,
+    Every,
 }
 
 /// Why a location whose settings didn't resolve is skipped, and what the
@@ -640,5 +712,85 @@ mod tests {
                 Some(2)
             )
         );
+    }
+
+    /// A person's Test of the entry `nas`, whose locations are `/srv/lan`
+    /// and the `further` ones, recording `id`: every outcome, and the
+    /// addresses probed.
+    async fn test_each(
+        further: &[&str],
+        id: Option<&str>,
+        password: bool,
+    ) -> (Result<Vec<LocationOutcome>, RepositoryError>, Vec<String>) {
+        let fake = FakeSecrets::default();
+        if password {
+            fake.set_env("NAS_PASSWORD", "demo-password");
+        }
+        let saved = SavedEntry {
+            alias: RepositoryAlias::parse("nas").expect("an alias"),
+            entry: RepositoryConfig {
+                settings: first("/srv/lan", &[]),
+                locations: Locations {
+                    further: further
+                        .iter()
+                        .map(|repository| Location {
+                            repository: (*repository).to_owned(),
+                            ..Location::default()
+                        })
+                        .collect(),
+                },
+                id: id.map(|id| RepositoryId::parse(id).expect("an ID")),
+                maintenance: Maintenance::None,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
+            },
+        };
+        let probed = Arc::new(Mutex::new(Vec::new()));
+        let tested = ChooseLocation::new(
+            Arc::new(Holds(Arc::clone(&probed))),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            ResolveRepository::new(Arc::new(fake)),
+            Arc::new(|_| {}),
+        )
+        .test_each(OperationId::from_uuid(Uuid::from_u128(1)), &saved)
+        .await
+        .map(|record| record.locations.iter().map(|tried| tried.outcome).collect());
+        let probed = probed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        (tested, probed)
+    }
+
+    #[tokio::test]
+    async fn a_test_probes_every_location_past_the_one_a_job_would_use() {
+        let (tested, probed) = test_each(&["/srv/public"], Some(ID), true).await;
+        assert_eq!(
+            tested,
+            Ok(vec![LocationOutcome::Used, LocationOutcome::Used])
+        );
+        assert_eq!(
+            probed,
+            vec!["/srv/lan".to_owned(), "/srv/public".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_test_takes_the_repository_an_entry_that_records_no_id_finds_for_its_own() {
+        let (tested, _) = test_each(&[], None, true).await;
+        assert_eq!(tested, Ok(vec![LocationOutcome::Used]));
+        let other = "6f74686572207265706f7369746f7279206f662074686520656e7472792e2e2e";
+        let (tested, _) = test_each(&[], Some(other), true).await;
+        assert_eq!(tested, Ok(vec![LocationOutcome::OtherRepository]));
+    }
+
+    #[tokio::test]
+    async fn a_test_whose_password_doesnt_resolve_probes_nothing() {
+        let (tested, probed) = test_each(&["/srv/public"], Some(ID), false).await;
+        assert!(
+            matches!(tested, Err(RepositoryError::Resolve(_))),
+            "{tested:?}"
+        );
+        assert_eq!(probed, Vec::<String>::new());
     }
 }
