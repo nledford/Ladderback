@@ -220,6 +220,20 @@ fn cache_is_private(agent: &mut Agent) {
     }
 }
 
+#[then(expr = "the service manager waits {int} seconds for the service to stop before it kills it")]
+fn manager_waits_to_kill(agent: &mut Agent, seconds: u64) {
+    let text = service_text(agent);
+    let wanted = if cfg!(target_os = "macos") {
+        format!("<key>ExitTimeOut</key>\n\t<integer>{seconds}</integer>\n")
+    } else {
+        format!("\nTimeoutStopSec={seconds}\n")
+    };
+    assert!(
+        text.contains(&wanted),
+        "the service file lacks {wanted:?}:\n{text}"
+    );
+}
+
 #[then("the service manager was asked nothing")]
 fn manager_asked_nothing(agent: &mut Agent) {
     let since = &managers(agent).commands()[agent.service.calls_before..];

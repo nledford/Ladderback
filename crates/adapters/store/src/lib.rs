@@ -153,6 +153,17 @@ impl SqliteStore {
         self.pool.close().await;
     }
 
+    /// Ends every running operation as failed with `reason` at `at`, then
+    /// closes as [`close`](Self::close) does: the daemon's orderly stop.
+    pub async fn close_ending_running(
+        &self,
+        reason: &FailureReason,
+        at: Timestamp,
+    ) -> Result<usize, StoreError> {
+        let _ = (reason, at);
+        todo!()
+    }
+
     /// The store, held for one call until it has done with the database.
     /// Once `close` waits, a new call waits behind it and then finds the
     /// pool closed: the lock is fair, so calls can't keep `close` waiting.

@@ -190,6 +190,7 @@ pub(crate) fn encode_failure(
             None,
         ),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
+        FailureReason::DaemonShutDown => todo!(),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),

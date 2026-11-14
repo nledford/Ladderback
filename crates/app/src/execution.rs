@@ -1051,4 +1051,136 @@ mod tests {
             "the error hooks of both ending loops warn, the ignored one is silent"
         );
     }
+
+    /// An engine whose job reports `events`, then ends.
+    struct Reports(Vec<EngineEvent>);
+
+    #[async_trait::async_trait]
+    impl crate::ports::Engine for Reports {
+        async fn run(
+            &self,
+            _: OperationId,
+            _: crate::ports::Job,
+        ) -> Result<crate::ports::RunningJob, crate::ports::EngineError> {
+            use futures::StreamExt;
+            Ok(crate::ports::RunningJob {
+                events: futures::stream::iter(self.0.clone()).boxed(),
+                control: Box::new(Ended),
+            })
+        }
+    }
+
+    struct Ended;
+
+    #[async_trait::async_trait]
+    impl crate::ports::JobControl for Ended {
+        async fn stop(&mut self) {}
+    }
+
+    /// Every hook reads the log and succeeds: what it reads is what an
+    /// orderly stop that came while the hook ran would find (decision 92).
+    struct ReadsTheLog {
+        store: Arc<InMemoryOperationStore>,
+        seen: std::sync::Mutex<Vec<crate::ports::OperationRecord>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ports::HookRunner for ReadsTheLog {
+        async fn run(
+            &self,
+            _: &HookEntry,
+            context: &crate::ports::HookContext,
+        ) -> crate::ports::HookOutcome {
+            use crate::ports::OperationStore;
+            let held = self.store.get(context.operation).await;
+            if let Ok(Some(detail)) = held {
+                self.seen.lock().unwrap().push(detail.record);
+            }
+            crate::ports::HookOutcome {
+                status: crate::ports::HookStatus::Succeeded,
+                stdout: crate::ports::HookOutput::default(),
+                stderr: crate::ports::HookOutput::default(),
+            }
+        }
+    }
+
+    /// The log as each ending hook of a run whose engine reports `events`
+    /// finds it: one after, failed and finally hook at the plan's level.
+    async fn the_log_as_the_ending_hooks_find_it(
+        events: Vec<EngineEvent>,
+    ) -> Vec<crate::ports::OperationRecord> {
+        use crate::ports::{FakeEnd, FakeJob, Job};
+
+        let clock = Arc::new(FakeClock::new(t(0)));
+        let store = Arc::new(InMemoryOperationStore::new());
+        let runner = Arc::new(ReadsTheLog {
+            store: Arc::clone(&store),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let plan = Hooks {
+            run_before: Vec::new(),
+            run_after: vec![entry("after")],
+            run_failed: vec![entry("failed")],
+            run_finally: vec![entry("finally")],
+        };
+        let use_case = RunOperation::new(Arc::new(Reports(events)), clock, store).with_hooks(
+            runner.clone(),
+            HookSetup {
+                agent: Hooks::default(),
+                repository: Hooks::default(),
+                plan,
+                plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
+                repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+            },
+        );
+        let job = Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: std::time::Duration::ZERO,
+            warnings: Vec::new(),
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        let _ = use_case
+            .run(
+                OperationId::from_uuid(uuid::Uuid::from_u128(9)),
+                Trigger::Manual,
+                job,
+                std::future::pending::<()>(),
+            )
+            .await;
+        runner.seen.lock().unwrap().clone()
+    }
+
+    fn backup_result() -> EngineResult {
+        EngineResult::Backup(BackupSummary {
+            repository: RepositoryId::parse(&"1".repeat(64)).expect("the demo repository parses"),
+            snapshot: SnapshotId::parse(&"2".repeat(64)).expect("the demo snapshot parses"),
+            parent: None,
+            files_new: 1,
+            files_changed: 0,
+            files_unmodified: 0,
+            bytes_processed: Some(100),
+            data_added: 10,
+            data_added_packed: 5,
+            error_count: 0,
+        })
+    }
+
+    /// A backup's snapshot is on its record, the operation still running,
+    /// before its after hooks run: an orderly stop that ends the run in them
+    /// keeps the snapshot on the record (decision 92).
+    #[tokio::test]
+    async fn a_backups_snapshot_is_on_its_running_record_before_its_after_hooks_run() {
+        let seen = the_log_as_the_ending_hooks_find_it(vec![
+            EngineEvent::Started {
+                index_read_at: t(1),
+                repository: None,
+            },
+            EngineEvent::Succeeded(backup_result()),
+        ])
+        .await;
+        let first = seen.first().expect("the after hook read the log");
+        assert_eq!(first.status, OperationStatus::Running);
+        assert_eq!(first.result, Some(backup_result()));
+    }
 }

@@ -350,14 +350,21 @@ async fn lists_no_operation(agent: &mut Agent) {
 }
 
 /// The file a held after hook waits on, in the scenario's scratch folder.
-fn after_hook_hold(agent: &Agent) -> PathBuf {
+pub(crate) fn after_hook_hold(agent: &Agent) -> PathBuf {
     agent.scratch().join("after-hook-holds")
 }
 
-/// The script of an after hook that waits while the file `$1` is there and
-/// the daemon that started it is alive. A hook keeps the daemon's `PATH`.
+/// The file a held after hook leaves once it runs, in the scenario's scratch
+/// folder.
+fn after_hook_mark(agent: &Agent) -> PathBuf {
+    agent.scratch().join("after-hook-runs")
+}
+
+/// The script of an after hook that leaves the file `$2` once it runs, then
+/// waits while the file `$1` is there and the daemon that started it is
+/// alive. A hook keeps the daemon's `PATH`.
 const WAIT_WHILE_HELD: &str =
-    "while [ -e \"$1\" ] && kill -0 \"$PPID\" 2>/dev/null; do sleep 0.05; done";
+    ": > \"$2\"; while [ -e \"$1\" ] && kill -0 \"$PPID\" 2>/dev/null; do sleep 0.05; done";
 
 /// A plan whose after hook runs until the scenario lets it go. A backup stays
 /// running in the log until its ending hooks have run, since a failing after
@@ -371,14 +378,40 @@ async fn an_after_hook_that_waits(agent: &mut Agent) {
     let hold = after_hook_hold(agent);
     std::fs::write(&hold, b"").expect("the file the after hook waits on");
     let hold = hold.to_str().expect("a UTF-8 scratch path").to_owned();
+    let mark = after_hook_mark(agent);
+    let mark = mark.to_str().expect("a UTF-8 scratch path").to_owned();
     let wait = domain::planning::HookEntry::new(
         "/bin/sh",
-        ["-c", WAIT_WHILE_HELD, "after-hook", hold.as_str()],
+        [
+            "-c",
+            WAIT_WHILE_HELD,
+            "after-hook",
+            hold.as_str(),
+            mark.as_str(),
+        ],
         domain::planning::OnFailure::Error,
     )
     .expect("a hook that runs /bin/sh");
     agent.backup.plan_hooks.run_after = vec![wait];
     super::events_steps::save_daemon_config(agent, None).await;
+}
+
+/// The backup has written its snapshot once its after hook runs: the after
+/// hooks run on a success only.
+#[given("the plan's after hook is running")]
+async fn the_after_hook_is_running(agent: &mut Agent) {
+    let mark = after_hook_mark(agent);
+    super::blocking(move || {
+        let began = Instant::now();
+        while !mark.exists() {
+            assert!(
+                began.elapsed() < STATE_TIMEOUT,
+                "the after hook didn't run within {STATE_TIMEOUT:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    })
+    .await;
 }
 
 #[when("the plan's after hook is let go")]
@@ -823,6 +856,14 @@ fn the_hook_ran(agent: &mut Agent) {
     assert!(
         hook_mark(agent).exists(),
         "the finally hook's mark is there"
+    );
+}
+
+#[then("the plan's finally hook has not run")]
+fn the_hook_did_not_run(agent: &mut Agent) {
+    assert!(
+        !hook_mark(agent).exists(),
+        "the finally hook's mark is not there"
     );
 }
 

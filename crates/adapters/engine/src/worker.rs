@@ -397,7 +397,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
 /// deadline, may wind down before the worker exits anyway. The daemon's
 /// grace period (10 s by default) ends it sooner; this bounds a worker whose
 /// daemon is gone.
-const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+pub(crate) const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long the worker waits for a line being written before it ends the
 /// stream: a writer stuck on a full pipe must not hold its exit back.

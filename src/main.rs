@@ -33,6 +33,7 @@ mod output;
 mod profiles;
 mod service;
 mod set_password;
+mod shutdown;
 
 #[derive(Parser)]
 #[command(

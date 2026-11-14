@@ -28,6 +28,6 @@ mod step;
 pub mod worker;
 
 pub use cache_tidy::{CacheTidying, NotRemoved, Recorded, Removed, RemovedKind, tidy_cache};
-pub use client::WorkerEngine;
+pub use client::{WorkerEngine, Workers};
 pub use log_masking::Masked;
 pub use retention::{RusticRetention, RusticSources};

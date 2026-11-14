@@ -50,6 +50,13 @@ pub struct Events {
     second: Option<Daemon>,
     /// How the daemon ended once it was told to stop.
     stopped: Option<ExitStatus>,
+    /// How long the daemon took to exit once it was told to stop.
+    stop_took: Option<Duration>,
+    /// Everything the daemon that was told to stop logged, to its last line.
+    stopped_log: Option<String>,
+    /// A connection that sent a request and never finishes it, held so it
+    /// stays open until the scenario ends.
+    pub(crate) held: Option<std::net::TcpStream>,
     /// Variables added to the environment of the daemons the scenario
     /// starts, as a reference such as `${LAN_KEY}` reads them.
     pub(crate) env: Vec<(String, String)>,
@@ -64,6 +71,8 @@ struct Daemon {
     start_log: String,
     /// Everything it logged after that, kept by the thread that drains it.
     log: Arc<Mutex<String>>,
+    /// The thread that drains it, which ends once the log is closed.
+    drained: std::thread::JoinHandle<()>,
 }
 
 /// One connected tab.
@@ -167,10 +176,18 @@ impl Events {
     }
 
     /// Tells the daemon to stop, with the SIGTERM systemd and launchd send,
-    /// and waits for it to exit. Runs on a blocking thread: see [`blocking`].
+    /// and waits for it to exit and for its log to end. Runs on a blocking
+    /// thread: see [`blocking`].
     pub(crate) async fn stop(agent: &mut Agent) {
+        Self::stop_letting_go(agent, None).await;
+    }
+
+    /// Tells the daemon to stop as [`Self::stop`] does, and once its log says
+    /// it is stopping, removes `let_go` when there is one: what a held hook
+    /// waits on, let go while the daemon stops.
+    pub(crate) async fn stop_letting_go(agent: &mut Agent, let_go: Option<PathBuf>) {
         let daemon = agent.events.daemon.take().expect("Ladderback is serving");
-        let status = blocking(move || {
+        let (status, took, log) = blocking(move || {
             // `kill` sends it without a crate of its own for that, as
             // `tests/logging.rs` does.
             let mut kill = Command::new("kill");
@@ -181,24 +198,62 @@ impl Events {
                 .expect("kill ran");
             assert!(sent.success(), "the daemon is sent SIGTERM: {sent}");
             let began = std::time::Instant::now();
-            loop {
+            if let Some(let_go) = let_go {
+                while !daemon
+                    .log
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains("stopping (SIGTERM)")
+                {
+                    assert!(
+                        began.elapsed() < STOP_TIMEOUT,
+                        "the daemon didn't say it was stopping within {STOP_TIMEOUT:?} of SIGTERM"
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                std::fs::remove_file(&let_go).expect("what is let go was held");
+            }
+            let status = loop {
                 if let Some(status) = daemon.child.try_wait().expect("the daemon's status") {
-                    return status;
+                    break status;
                 }
                 assert!(
                     began.elapsed() < STOP_TIMEOUT,
                     "the daemon was still running {STOP_TIMEOUT:?} after SIGTERM"
                 );
                 std::thread::sleep(Duration::from_millis(20));
+            };
+            let took = began.elapsed();
+            // The log's last lines are read once the daemon has gone: its
+            // stderr ends with it.
+            let drained = std::time::Instant::now();
+            while !daemon.drained.is_finished() && drained.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(20));
             }
+            let rest = daemon.log.lock().unwrap_or_else(PoisonError::into_inner);
+            (status, took, format!("{}{rest}", daemon.start_log))
         })
         .await;
         agent.events.stopped = Some(status);
+        agent.events.stop_took = Some(took);
+        agent.events.stopped_log = Some(log);
     }
 
     /// How the daemon ended once it was told to stop.
     pub(crate) fn stopped(&self) -> ExitStatus {
         self.stopped.expect("the daemon was told to stop")
+    }
+
+    /// How long the daemon took to exit once it was told to stop.
+    pub(crate) fn stop_took(&self) -> Duration {
+        self.stop_took.expect("the daemon was told to stop")
+    }
+
+    /// Everything the daemon that was told to stop logged.
+    pub(crate) fn stopped_log(&self) -> &str {
+        self.stopped_log
+            .as_deref()
+            .expect("the daemon was told to stop")
     }
 
     /// The config folder of that daemon.
@@ -344,7 +399,7 @@ fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Dae
             // and keep it for the steps that read what it said.
             let kept = Arc::new(Mutex::new(String::new()));
             let into = Arc::clone(&kept);
-            std::thread::spawn(move || {
+            let drained = std::thread::spawn(move || {
                 for line in lines.by_ref() {
                     let Ok(line) = line else { return };
                     let mut log = into.lock().unwrap_or_else(PoisonError::into_inner);
@@ -358,6 +413,7 @@ fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Dae
                     addr,
                     start_log: log,
                     log: kept,
+                    drained,
                 }),
                 Outcome::Listening(addr),
             )

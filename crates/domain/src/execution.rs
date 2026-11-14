@@ -120,11 +120,16 @@ pub enum FailureReason {
     /// a secret or tells one.
     SecretsTooLargeToMask { field: Option<String>, limit: usize },
     /// The daemon stopped while the operation was queued or running, so the
-    /// operation never reached its end: a crash, a kill, a power cut or a
-    /// restart left it unfinished in the log, and the next start ended it as
-    /// failed (§9). What it did before it stopped is unknown, so it is never
-    /// recorded as succeeded.
+    /// operation never reached its end: a crash, a kill, a power cut, or a
+    /// stop that didn't get as far as recording it, left it unfinished in
+    /// the log, and the next start ended it as failed (§9). What it did
+    /// before it stopped is unknown, so it is never recorded as succeeded.
     DaemonStopped,
+    /// The daemon was told to stop while the operation was running (a
+    /// service stop, a restart, the computer shutting down), and its orderly
+    /// stop ended it once the workers had stopped (§4.2, decision 92). It is
+    /// recorded, not announced: whoever stopped the daemon knows why.
+    DaemonShutDown,
     /// The repository is reached at several locations and none could be
     /// used (decision 80): each was silent, refused, held no repository or
     /// another one, or a secret of it was unavailable. The operation's
@@ -169,6 +174,7 @@ impl FailureReason {
             Self::RepositoryNotFound => "repository-not-found",
             Self::CredentialsRefused => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
+            Self::DaemonShutDown => todo!(),
             Self::NoLocationUsable => "no-location-usable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
@@ -1341,6 +1347,11 @@ mod tests {
     #[test]
     fn a_daemon_that_stopped_codes_as_daemon_stopped() {
         assert_eq!(FailureReason::DaemonStopped.code(), "daemon-stopped");
+    }
+
+    #[test]
+    fn a_daemon_that_was_shut_down_codes_as_daemon_shut_down() {
+        assert_eq!(FailureReason::DaemonShutDown.code(), "daemon-shut-down");
     }
 
     #[test]

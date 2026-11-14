@@ -483,6 +483,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::DaemonShutDown => todo!(),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),

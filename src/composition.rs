@@ -74,6 +74,7 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod maintenance;
+mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
 pub(crate) struct Refused {
@@ -2997,6 +2998,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::DaemonShutDown => todo!(),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
