@@ -216,8 +216,20 @@ impl RunOperation {
     /// the end, then the news that it failed, as [`Self::refused`]. No hook
     /// runs and the engine is never asked.
     pub async fn refuse_resumed(&self, operation: Operation, reason: FailureReason) -> Finished {
-        let _ = (operation, reason);
-        todo!("end the resumed backup with its refusal")
+        let mut run = Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        };
+        self.fail(&mut run, reason);
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: None,
+            recording_errors: run.recording_errors,
+        }
     }
 
     /// Runs the job of an operation [`Self::queue`] recorded, as
