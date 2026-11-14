@@ -16,7 +16,7 @@ Both modes serve UI, API and `/sync/v1` on one listener; the hub's default port 
 ### 7.2 Sync protocol (`/sync/v1`, WebSocket, JSON, versioned)
 
 Agent → hub:
-- `Hello { agent_version, hostname, protocols: [min, max], clock: Timestamp }`. The hub records the clock offset and warns above 5 min. `protocols` is the range of sync protocols the agent speaks (no hub has shipped, so it replaces the single `protocol: 1`); the hub answers `Welcome`.
+- `Hello { agent_version, hostname, protocols: [min, max], clock: Timestamp }`. `agent_version` is the agent's build as `--version` names it (`BuildDto::display`, `0.3.0+3f937cf` between releases; decision 90). The hub records the clock offset and warns above 5 min. `protocols` is the range of sync protocols the agent speaks (no hub has shipped, so it replaces the single `protocol: 1`); the hub answers `Welcome`.
 - `PlansSnapshot { plans: [PlanPublic] }`, sent on connect and on change. Secrets are never included.
 - `ReposSnapshot { repos: [{ repo_id, alias, requested_maintenance }] }`, sent on connect and on change.
 - `OpEvent { epoch, seq, op_id, event }`. `epoch` is a random ID created with the agent's outbox; `seq` increases within an epoch and is assigned when the event enters the persistent outbox, so the agent replays from the hub's last acknowledged `(epoch, seq)` after a disconnect. A rebuilt database starts a new epoch, so its events are never mistaken for already-acknowledged ones. Progress events are sent live but never stored or replayed.

@@ -76,6 +76,9 @@ pub struct AppState {
     /// Who can reach the daemon at the address it listens on, which the
     /// session route tells the page (§10.1).
     pub exposure: Exposure,
+    /// The build the daemon runs, which the session route tells a page that
+    /// may see the pages (decision 90).
+    pub build: api::BuildDto,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -87,6 +90,12 @@ impl axum::extract::FromRef<AppState> for SignIn {
 impl axum::extract::FromRef<AppState> for Exposure {
     fn from_ref(state: &AppState) -> Self {
         state.exposure
+    }
+}
+
+impl axum::extract::FromRef<AppState> for api::BuildDto {
+    fn from_ref(state: &AppState) -> Self {
+        state.build.clone()
     }
 }
 
@@ -1068,6 +1077,7 @@ mod tests {
             repositories: Arc::new(Repos::default()),
             sign_in: SignIn::Off,
             exposure: Exposure::Loopback,
+            build: crate::request_checks::tests::test_build(),
         }
     }
 
@@ -1105,6 +1115,7 @@ mod tests {
             repositories: Arc::new(Repos::default()),
             sign_in: SignIn::Off,
             exposure: Exposure::Loopback,
+            build: crate::request_checks::tests::test_build(),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2224,6 +2235,7 @@ mod tests {
             repositories: repos.clone(),
             sign_in: SignIn::Off,
             exposure: Exposure::Loopback,
+            build: crate::request_checks::tests::test_build(),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

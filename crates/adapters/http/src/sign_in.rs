@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use api::{ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto, SignInStateDto};
+use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto, SignInStateDto};
 use app::access::{Access, SignInRefused};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
@@ -136,18 +136,20 @@ pub(crate) async fn enforce(
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
+    State(build): State<BuildDto>,
     headers: HeaderMap,
 ) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure);
+        return answer(SignInStateDto::Off, None, exposure, build);
     };
     match session_token(&headers).and_then(|token| access.session(&token)) {
         Some(session) => answer(
             SignInStateDto::SignedIn,
             Some((session.csrf().to_text(), session.ends_in())),
             exposure,
+            build,
         ),
-        None => answer(SignInStateDto::SignedOut, None, exposure),
+        None => answer(SignInStateDto::SignedOut, None, exposure, build),
     }
 }
 
@@ -158,10 +160,11 @@ pub(crate) async fn current(
 pub(crate) async fn sign_in(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
+    State(build): State<BuildDto>,
     request: Request,
 ) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure);
+        return answer(SignInStateDto::Off, None, exposure, build);
     };
     // Each client's sign-ins wait on their own, keyed by the connection's
     // address (§10.1). A server that didn't hand it over would put every
@@ -203,6 +206,7 @@ pub(crate) async fn sign_in(
                 SignInStateDto::SignedIn,
                 Some((signed_in.csrf.to_text(), SESSION_LIFETIME)),
                 exposure,
+                build,
             );
             let cookie = format!(
                 "{COOKIE_NAME}={}; Path=/; Max-Age={}; HttpOnly; SameSite=Strict{}",
@@ -248,10 +252,11 @@ pub(crate) async fn sign_in(
 pub(crate) async fn sign_out(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
+    State(build): State<BuildDto>,
     headers: HeaderMap,
 ) -> Response {
     let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure);
+        return answer(SignInStateDto::Off, None, exposure, build);
     };
     if let Some(token) = session_token(&headers)
         && let Some(session) = access.peek(&token)
@@ -261,7 +266,7 @@ pub(crate) async fn sign_out(
         }
         access.sign_out(&token);
     }
-    let mut response = answer(SignInStateDto::SignedOut, None, exposure);
+    let mut response = answer(SignInStateDto::SignedOut, None, exposure, build);
     let forget = format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
     if let Ok(value) = HeaderValue::from_str(&forget) {
         response.headers_mut().insert(SET_COOKIE, value);
@@ -289,13 +294,18 @@ fn over_https(headers: &HeaderMap) -> bool {
 }
 
 /// The session route's answer: where the request stands, who can reach the
-/// daemon (so the page can say who can use it with sign-in off) and, for a
-/// live session, its CSRF token and how long it has left however it is used.
+/// daemon (so the page can say who can use it with sign-in off), for a live
+/// session its CSRF token and how long it has left however it is used, and,
+/// for a page that may see the pages, the `build` the daemon runs.
 fn answer(
     sign_in: SignInStateDto,
     live: Option<(String, SignedDuration)>,
     exposure: Exposure,
+    build: BuildDto,
 ) -> Response {
+    // A page yet to sign in isn't told the build, as it isn't shown the
+    // version (#502).
+    let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some((csrf, ends_in)) => (
             Some(csrf),
@@ -315,6 +325,7 @@ fn answer(
                 Exposure::Loopback => ExposureDto::Loopback,
                 Exposure::Network => ExposureDto::Network,
             },
+            build,
         }),
     )
         .into_response()

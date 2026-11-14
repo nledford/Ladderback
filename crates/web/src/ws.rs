@@ -19,7 +19,7 @@ use crate::maintenance::{self, Kind, Next, Watch, Watched};
 use crate::session::{Answer, Lease, Resend, Signed, Stand, wait_ms};
 use crate::visit::Visit;
 use api::{
-    ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, SessionDto, SignInDto,
+    BuildDto, ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, SessionDto, SignInDto,
     SignInStateDto, UiEvent,
 };
 use futures::channel::oneshot;
@@ -102,6 +102,7 @@ struct Session {
     timer: Option<gloo_timers::callback::Timeout>,
     warning: Option<RwSignal<bool>>,
     ended: Option<RwSignal<bool>>,
+    build: Option<RwSignal<Option<BuildDto>>>,
     waiting: Vec<oneshot::Sender<bool>>,
     signed_out: bool,
 }
@@ -122,17 +123,34 @@ fn now_ms() -> i64 {
 /// `warning` is `true`, and the dialog asking to sign in again while `ended`
 /// is; the session's lease and a request refused for want of a session set
 /// them.
-pub(crate) fn watch_session(warning: RwSignal<bool>, ended: RwSignal<bool>) {
+pub(crate) fn watch_session(
+    warning: RwSignal<bool>,
+    ended: RwSignal<bool>,
+    build: RwSignal<Option<BuildDto>>,
+) {
     SESSION.with_borrow_mut(|session| {
         session.warning = Some(warning);
         session.ended = Some(ended);
+        session.build = Some(build);
     });
+}
+
+/// The daemon told the page the build it runs, as it does once the page may
+/// see the pages: the header shows it. An answer that doesn't tell it leaves
+/// the build the page last heard.
+fn told(build: Option<BuildDto>) {
+    if let Some(build) = build
+        && let Some(shown) = SESSION.with_borrow(|session| session.build)
+    {
+        shown.try_set(Some(build));
+    }
 }
 
 /// The page has a live session (none with sign-in off). Its changed requests
 /// carry its CSRF token, the page watches its lease, the requests that waited
 /// for it are sent again, as they were, and the dialog closes.
 pub(crate) fn signed_in(signed: Option<Signed>) {
+    told(signed.as_ref().and_then(|signed| signed.build.clone()));
     let (waiting, ended) = SESSION.with_borrow_mut(|session| {
         session.csrf = signed.as_ref().map(|signed| signed.csrf.clone());
         session.lease = signed.map(|signed| signed.lease);
@@ -392,8 +410,9 @@ pub(crate) async fn session() -> Option<SessionDto> {
         return None;
     }
     let read = response.json::<SessionDto>().await.ok()?;
-    if let Some(signed) = Signed::of(&read, sent) {
-        signed_in(Some(signed));
+    match Signed::of(&read, sent) {
+        Some(signed) => signed_in(Some(signed)),
+        None => told(read.build.clone()),
     }
     Some(read)
 }

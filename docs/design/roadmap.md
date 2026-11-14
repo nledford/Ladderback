@@ -152,6 +152,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [87](decisions/87-listening-on-the-network-with-sign-in-off.md) | Listening on the network with sign-in off |
 | [88](decisions/88-hub-and-agent-version-compatibility.md) | How far hub and agent versions may differ |
 | [89](decisions/89-agent-proposed-setup.md) | How an AI agent proposes a backup setup for a person to confirm |
+| [90](decisions/90-the-build-a-program-names.md) | The build a program names beside its version |
 
 ## 17. Open questions
 

@@ -635,6 +635,7 @@ async fn state_over(
             repositories,
             sign_in: SignIn::Off,
             exposure: http_adapter::Exposure::Loopback,
+            build: crate::build_info::running(),
         },
         background,
     ))

@@ -7,6 +7,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContextOptions } from "playwright";
 import { expect } from "playwright/test";
 
+import { checkoutBuild, shown } from "../../scripts/build-identity.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import { DOUBLE_FONT_CSS, TEXT_SPACING_CSS } from "../support/reader-styles.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";
@@ -100,11 +101,19 @@ async function workspaceVersion(): Promise<string> {
   return version;
 }
 
+// The build the binary under test came from, as people read it: this
+// checkout's, with its commit between releases (decision 90).
+async function runningBuild(): Promise<string> {
+  const build = checkoutBuild(repoRoot);
+  return build === undefined ? await workspaceVersion() : shown(build);
+}
+
 // The version is the header's last part, after the navigation in reading
-// order, and plain text rather than a focus stop (#502).
+// order, and plain text rather than a focus stop (#502). It names the build
+// the daemon runs (#516).
 Then("the header shows the running version after the navigation", async function (this: BrowserWorld) {
   const banner = this.page.getByRole("banner");
-  const version = banner.getByText(namePattern(`Version ${await workspaceVersion()}`));
+  const version = banner.getByText(namePattern(`Version ${await runningBuild()}`));
   await expect(version).toBeVisible();
   const navigation = banner.getByRole("navigation");
   await expect(navigation).toBeVisible();
