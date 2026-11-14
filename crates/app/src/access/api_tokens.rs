@@ -56,12 +56,13 @@ pub enum ApiTokenRefused {
 
 /// What is left of a wait, in whole seconds, rounded up.
 pub(super) fn seconds_left(left: SignedDuration) -> u64 {
-    todo!()
+    let millis = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);
+    millis.div_ceil(1000)
 }
 
 fn unavailable(error: impl std::fmt::Debug) -> String {
-        todo!()
-    }
+    format!("{error:?}")
+}
 
 impl Access {
     /// Creates a token with `label` and `scopes` under the admin password
@@ -72,18 +73,54 @@ impl Access {
         label: ApiTokenLabel,
         scopes: Scopes,
     ) -> Result<CreatedApiToken, ApiTokensRefused> {
-        todo!()
+        let under = self
+            .password
+            .fingerprint()
+            .map_err(|error| ApiTokensRefused::Unavailable(unavailable(error)))?;
+        self.tokens
+            .revoke_all_but(under)
+            .await
+            .map_err(store_refused)?;
+        let draw = || {
+            self.random
+                .token()
+                .map_err(|error| ApiTokensRefused::Unavailable(error.0))
+        };
+        let (id, secret) = (draw()?, draw()?);
+        let id = ApiTokenId::from_bytes(&id);
+        let secret = ApiTokenSecret::from_bytes(secret);
+        let token = ApiToken::issue(id, label, scopes, &secret, under, self.clock.now());
+        match self
+            .tokens
+            .add(&token, MAX_API_TOKENS)
+            .await
+            .map_err(store_refused)?
+        {
+            Added::Kept => Ok(CreatedApiToken {
+                text: ApiTokenText::new(&token.id, &secret),
+                token,
+            }),
+            Added::Full => Err(ApiTokensRefused::Full),
+        }
     }
 
     /// The tokens of the admin password kept now, oldest first; those of an
     /// earlier one are revoked on the way.
     pub async fn api_tokens(&self) -> Result<Vec<ApiToken>, ApiTokensRefused> {
-        todo!()
+        let under = self
+            .password
+            .fingerprint()
+            .map_err(|error| ApiTokensRefused::Unavailable(unavailable(error)))?;
+        self.tokens
+            .revoke_all_but(under)
+            .await
+            .map_err(store_refused)?;
+        self.tokens.all().await.map_err(store_refused)
     }
 
     /// Revokes the token `id`; whether there was one.
     pub async fn revoke_api_token(&self, id: &ApiTokenId) -> Result<bool, ApiTokensRefused> {
-        todo!()
+        self.tokens.revoke(id).await.map_err(store_refused)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
@@ -96,28 +133,85 @@ impl Access {
         address: IpAddr,
         presented: Option<&PresentedApiToken>,
     ) -> Result<ApiTokenGrant, ApiTokenRefused> {
-        todo!()
+        let client = Client::of(address);
+        self.not_waiting(client, self.clock.now())?;
+        let Some(presented) = presented else {
+            return Err(self.failed(client));
+        };
+        let under = self
+            .password
+            .fingerprint()
+            .map_err(|error| ApiTokenRefused::Unavailable(unavailable(error)))?;
+        let kept = self
+            .tokens
+            .get(presented.id())
+            .await
+            .map_err(|error| ApiTokenRefused::Unavailable(unavailable(error)))?;
+        // Checked and counted under one lock, after a second look at the
+        // wait: of two tokens checked at once, the second sees the wait the
+        // first one's failure started.
+        let now = self.clock.now();
+        let token = {
+            let mut state = self.lock();
+            if let Some(left) = state.waits.waiting(client, now) {
+                return Err(ApiTokenRefused::Wait {
+                    seconds: seconds_left(left),
+                });
+            }
+            match kept {
+                Some(token) if token.accepts(presented, under) => token,
+                _ => {
+                    // Not waiting, so this counts the failure.
+                    let _ = state.waits.attempt(client, now);
+                    return Err(ApiTokenRefused::Invalid);
+                }
+            }
+        };
+        if token.use_to_record(now) {
+            // The last use only informs the admin: a write that fails
+            // leaves the earlier one shown and refuses nothing.
+            let _ = self.tokens.record_use(&token.id, now).await;
+        }
+        Ok(ApiTokenGrant {
+            id: token.id,
+            label: token.label,
+            scopes: token.scopes,
+        })
     }
 
     /// Whether the token `id` is kept still under the admin password kept
     /// now: an events stream opened with it ends once it isn't.
     pub async fn api_token_live(&self, id: &ApiTokenId) -> bool {
-        todo!()
+        let Ok(under) = self.password.fingerprint() else {
+            return false;
+        };
+        matches!(self.tokens.get(id).await, Ok(Some(token)) if token.password == under)
     }
 
     fn not_waiting(&self, client: Client, now: Timestamp) -> Result<(), ApiTokenRefused> {
-        todo!()
+        match self.lock().waits.waiting(client, now) {
+            Some(left) => Err(ApiTokenRefused::Wait {
+                seconds: seconds_left(left),
+            }),
+            None => Ok(()),
+        }
     }
 
     /// Counts a failed token for `client`, unless its wait started meanwhile.
     fn failed(&self, client: Client) -> ApiTokenRefused {
-        todo!()
+        let now = self.clock.now();
+        match self.lock().waits.attempt(client, now) {
+            Ok(()) => ApiTokenRefused::Invalid,
+            Err(left) => ApiTokenRefused::Wait {
+                seconds: seconds_left(left),
+            },
+        }
     }
 }
 
 fn store_refused(error: StoreError) -> ApiTokensRefused {
-        todo!()
-    }
+    ApiTokensRefused::Unavailable(error.to_string())
+}
 
 #[cfg(test)]
 mod tests;
