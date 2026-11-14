@@ -303,7 +303,9 @@ fn answer(
     exposure: Exposure,
     build: BuildDto,
 ) -> Response {
-    let _ = build;
+    // A page yet to sign in isn't told the build, as it isn't shown the
+    // version (#502).
+    let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some((csrf, ends_in)) => (
             Some(csrf),
@@ -323,7 +325,7 @@ fn answer(
                 Exposure::Loopback => ExposureDto::Loopback,
                 Exposure::Network => ExposureDto::Network,
             },
-            build: None,
+            build,
         }),
     )
         .into_response()

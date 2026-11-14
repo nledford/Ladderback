@@ -1936,6 +1936,48 @@ mod tests {
     }
 
     #[test]
+    fn a_session_answer_names_the_build_in_fields_of_its_own() {
+        let off = SessionDto {
+            sign_in: SignInStateDto::Off,
+            csrf_token: None,
+            idle_seconds: None,
+            ends_in_seconds: None,
+            exposure: ExposureDto::Loopback,
+            build: Some(build(Some(COMMIT), true, false)),
+        };
+        let written = serde_json::json!({
+            "sign-in": "off",
+            "version": "0.3.0",
+            "commit": COMMIT,
+            "dirty": true,
+            "release": false
+        });
+        assert_eq!(serde_json::to_value(&off).unwrap(), written);
+        assert_eq!(serde_json::from_value::<SessionDto>(written).unwrap(), off);
+        // A build with no known commit says so with `null`.
+        let unknown = SessionDto {
+            build: Some(build(None, false, false)),
+            ..off.clone()
+        };
+        let written = serde_json::json!({
+            "sign-in": "off",
+            "version": "0.3.0",
+            "commit": null,
+            "dirty": false,
+            "release": false
+        });
+        assert_eq!(serde_json::to_value(&unknown).unwrap(), written);
+        assert_eq!(
+            serde_json::from_value::<SessionDto>(written).unwrap(),
+            unknown
+        );
+        // An answer that doesn't name the build reads as none.
+        let read: SessionDto =
+            serde_json::from_value(serde_json::json!({"sign-in": "signed-out"})).unwrap();
+        assert_eq!(read.build, None);
+    }
+
+    #[test]
     fn a_stopped_daemons_code_is_spelled_daemon_stopped() {
         assert_eq!(
             serde_json::to_string(&ErrorCode::DaemonStopped).unwrap(),
@@ -3387,7 +3429,14 @@ impl BuildDto {
     /// unknown; otherwise the version and the short commit, `0.3.0+3f937cf`,
     /// with `.dirty` after it when the tree had changes.
     pub fn display(&self) -> String {
-        todo!()
+        match &self.commit {
+            Some(commit) if self.dirty || !self.release => {
+                let short: String = commit.chars().take(SHORT_COMMIT).collect();
+                let dirty = if self.dirty { ".dirty" } else { "" };
+                format!("{}+{short}{dirty}", self.version)
+            }
+            _ => self.version.clone(),
+        }
     }
 }
 
