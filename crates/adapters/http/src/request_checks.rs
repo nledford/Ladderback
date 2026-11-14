@@ -223,7 +223,11 @@ pub fn startup_rule(
 /// the daemon by. With sign-in off, anyone who can reach one through the
 /// proxy can use the daemon, so it says so for each (§10.1, #398).
 pub fn proxied_hosts(allowed_hosts: &[String]) -> Vec<&str> {
-    todo!("the names of {} hosts beyond loopback", allowed_hosts.len())
+    allowed_hosts
+        .iter()
+        .map(String::as_str)
+        .filter(|host| !is_loopback_host(host))
+        .collect()
 }
 
 /// Who can reach the daemon at the address it listens on.

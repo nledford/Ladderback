@@ -29,6 +29,11 @@ cli-server-error = server error: { $detail }
 # `ladderback set-password` is typed as it is: keep it a string literal.
 cli-warn-network-sign-in-off = warning: sign-in is off and { -brand-name } answers on the network at { $address }, so anyone who can reach that address can run and change backups. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
 
+# Sign-in is off and the daemon listens on loopback only, but a host name beyond loopback is allowed, so a reverse proxy can bring anyone who reaches that name to it. One line for each such name. Printed by the daemon itself, never as a log record, so no log setting hides it.
+# $host (text): the allowed host name, such as backup.example. It is shown as it was given.
+# `ladderback set-password` is typed as it is: keep it a string literal.
+cli-warn-sign-in-off-behind-proxy = warning: sign-in is off and { $host } is an allowed host name, so anyone who can reach { $host } through the proxy can run and change backups. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+
 # The daemon was asked to listen beyond loopback, with sign-in on or off, but no host name was configured, so no browser on the network could use the web UI.
 # $address (text): the address it was asked to listen on, such as 0.0.0.0:9898.
 # `--allowed-host` and `nas.example.com` are typed as they are: keep them string literals.
