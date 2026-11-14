@@ -7,8 +7,8 @@
 # administrator rights (rustup, just, trunk) after asking once, clones
 # Ladderback's source into a folder of its own or updates it there, checks out
 # the newest release and installs it with `just install`. It never runs sudo:
-# a missing C compiler, git or Node.js is named with the command that
-# installs it, and nothing is changed. Decision 79
+# a missing C compiler, git or Node.js is named with how to install it, and
+# nothing is changed. Decision 79
 # (docs/design/decisions/79-a-from-source-install-script.md) says why;
 # `features/cli/install_script.feature` specifies it. `--help` lists the
 # options.
@@ -31,6 +31,16 @@ readonly TRUNK_RELEASES_URL="https://github.com/trunk-rs/trunk/releases"
 # The trunk installed where it is missing: from its release (trunk_release),
 # or built from source where trunk publishes none.
 readonly TRUNK_VERSION=0.22.1
+# The oldest Node.js major version the installer accepts: the current
+# upstream LTS line, as Ladderback requires a line upstream still supports
+# (#583).
+readonly NODE_FLOOR=26
+# A download gives up when it finds no connection within STALL_CONNECT
+# seconds, or averages under STALL_BYTES bytes a second for STALL_SECONDS;
+# nothing limits its whole time.
+readonly STALL_CONNECT=30
+readonly STALL_BYTES=1024
+readonly STALL_SECONDS=60
 
 usage() {
     cat <<EOF
@@ -141,13 +151,17 @@ how_git() {
     esac
 }
 
+# Debian's and Ubuntu's own Node.js packages are older than NODE_FLOOR, so
+# those systems are pointed at nodejs.org and NodeSource's signed apt
+# repository. Homebrew and Arch package the newest Node.js; elsewhere it
+# depends on the release.
 how_node() {
     case $1 in
         brew) say "brew install node" ;;
-        apt) say "sudo apt install nodejs npm (if your release's Node.js is older than 20, take it from https://nodejs.org)" ;;
-        dnf) say "sudo dnf install nodejs npm" ;;
+        macos) say "take Node.js $NODE_FLOOR from https://nodejs.org" ;;
+        apt) say "take Node.js $NODE_FLOOR from https://nodejs.org, or from NodeSource's signed apt repository: https://github.com/nodesource/distributions" ;;
         pacman) say "sudo pacman -S --needed nodejs npm" ;;
-        *) say "take it from https://nodejs.org" ;;
+        *) say "take Node.js $NODE_FLOOR from https://nodejs.org, or from your system's packages where they hold $NODE_FLOOR or newer" ;;
     esac
 }
 
@@ -217,11 +231,11 @@ check_tools() {
         fi
     fi
     if ! has node || ! has npm; then
-        missing+=("Node.js 20 or newer, with npm: $(how_node "$pm")")
+        missing+=("Node.js $NODE_FLOOR or newer, with npm: $(how_node "$pm")")
     else
         version=$(tool_version node --version)
-        if ! version_at_least "${version:-0}" 20; then
-            missing+=("Node.js 20 or newer, with npm (found ${version:-an unknown version}): $(how_node "$pm")")
+        if ! version_at_least "${version:-0}" "$NODE_FLOOR"; then
+            missing+=("Node.js $NODE_FLOOR or newer, with npm (found ${version:-an unknown version}): $(how_node "$pm")")
         fi
     fi
 
@@ -311,6 +325,22 @@ trunk_build_jobs() {
     say "$jobs"
 }
 
+# Downloads URL $2 into file $3, saying $1 is what it is when it fails. One
+# that stalls (STALL_CONNECT, STALL_BYTES, STALL_SECONDS) is given up, after
+# curl's three retries, with a message that says it stalled; there is no
+# limit on the whole time, so a slow link that still moves finishes.
+download() {
+    local what=$1 url=$2 out=$3 status=0
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+        --connect-timeout "$STALL_CONNECT" --speed-limit "$STALL_BYTES" --speed-time "$STALL_SECONDS" \
+        -o "$out" "$url" || status=$?
+    case $status in
+        0) ;;
+        28) die "the download of $what stalled: after three retries, it found no connection within $STALL_CONNECT s, or moved under $STALL_BYTES bytes a second for $STALL_SECONDS s. Nothing was installed; check the network connection and run this again." ;;
+        *) die "$what couldn't be downloaded. Nothing was installed; run this again." ;;
+    esac
+}
+
 # Downloads trunk's release archive for this system and checks it against the
 # SHA-256 pinned in trunk_release, before anything is installed: a mismatch
 # stops the script with nothing changed. The archive holds `trunk` alone,
@@ -318,9 +348,7 @@ trunk_build_jobs() {
 download_trunk() {
     local archive="trunk-$trunk_target.tar.gz" actual
     say "Downloading trunk $TRUNK_VERSION for $trunk_target"
-    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
-        -o "$scratch/$archive" "$TRUNK_RELEASES_URL/download/v$TRUNK_VERSION/$archive" ||
-        die "trunk's release couldn't be downloaded. Nothing was installed; run this again."
+    download "trunk's release" "$TRUNK_RELEASES_URL/download/v$TRUNK_VERSION/$archive" "$scratch/$archive"
     if has sha256sum; then
         actual=$(sha256sum "$scratch/$archive") || die "sha256sum couldn't read trunk's release. Nothing was installed."
     elif has shasum; then
@@ -428,7 +456,7 @@ install_missing_tools() {
     fi
     if [ "$install_rust" = 1 ]; then
         say "Installing Rust with rustup's installer"
-        curl --proto '=https' --tlsv1.2 -sSf "$RUSTUP_URL" -o "$scratch/rustup-init.sh"
+        download "rustup's installer" "$RUSTUP_URL" "$scratch/rustup-init.sh"
         if [ "$yes" = 1 ]; then
             sh "$scratch/rustup-init.sh" -y
         else
@@ -712,7 +740,7 @@ main() {
     os=$(uname -s)
     case $os in
         Linux | Darwin) ;;
-        *) die "Ladderback builds on Linux and macOS; this is $os." ;;
+        *) die "Ladderback builds on 64-bit Linux (x86_64 or aarch64) with glibc 2.35 or newer, and on macOS; this is $os." ;;
     esac
 
     if [ -z "$dir" ]; then

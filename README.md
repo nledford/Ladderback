@@ -28,7 +28,7 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 - **One owner for each repository (M5).** Exactly one place runs forget, prune and check for each repository, whichever machines back up to it.
 - **Later, unscheduled.** Notifications to Gotify and email.
 
-Ladderback supports **Linux and macOS**. Windows is out of scope. It runs inside WSL2 as a Linux install, for files inside WSL, but it isn't a way to back up Windows: WSL stops when idle, so scheduled backups don't run unless something keeps it running, and files under `/mnt/c` are read without shadow copies or Windows metadata (ACLs, attributes, alternate data streams), so open files may fail and a restore to Windows loses that metadata.
+Ladderback supports **Linux and macOS**. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. Windows is out of scope. It runs inside WSL2 as a Linux install, for files inside WSL, but it isn't a way to back up Windows: WSL stops when idle, so scheduled backups don't run unless something keeps it running, and files under `/mnt/c` are read without shadow copies or Windows metadata (ACLs, attributes, alternate data streams), so open files may fail and a restore to Windows loses that metadata.
 
 ## Ladderback or Backrest?
 

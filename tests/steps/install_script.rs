@@ -269,17 +269,39 @@ esac
 
 /// Saves trunk's release archive for a URL under trunk's releases, and
 /// rustup's installer, the `rustup-init` stand-in, for any other, where `-o`
-/// says.
+/// says. A URL that starts with the one `install/state/curl-stalls` names
+/// stalls: given a stall limit (`--speed-limit` and `--speed-time`), it is
+/// cut off as the real curl cuts it off, exit 28 and curl's message;
+/// without one, the real download would never end, which the stand-in
+/// reports as an exit of its own rather than hang the scenario.
 const CURL: &str = r#"out=''
 url=''
+speed_limit=''
+speed_time=''
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift ;;
+    --speed-limit) speed_limit=$2; shift ;;
+    --speed-time) speed_time=$2; shift ;;
     https://*) url=$1 ;;
   esac
   shift
 done
 [ -n "$out" ] || exit 64
+stalls=''
+[ ! -f "$state/curl-stalls" ] || stalls=$(/bin/cat "$state/curl-stalls")
+if [ -n "$stalls" ]; then
+  case "$url" in
+    "$stalls"*)
+      if [ -n "$speed_limit" ] && [ -n "$speed_time" ]; then
+        printf 'curl: (28) Operation too slow. Less than %s bytes/sec transferred the last %s seconds\n' "$speed_limit" "$speed_time" >&2
+        exit 28
+      fi
+      echo "the curl stand-in: with no --speed-limit and --speed-time this stalled download would never end" >&2
+      exit 97
+      ;;
+  esac
+fi
 case "$url" in
   https://github.com/trunk-rs/trunk/releases/download/*) /bin/cp "$state/trunk-served.tar.gz" "$out" ;;
   *) /bin/cp "$state/templates/rustup-init" "$out" ;;
@@ -590,7 +612,9 @@ fn every_tool_installed(agent: &mut Agent) {
         std::os::unix::fs::symlink(real(name), bin(agent).join(name))
             .expect("a real tool is linked");
     }
-    set(agent, "node-version", "22.11.0");
+    // The oldest Node.js the script accepts, so every scenario that installs
+    // shows that it is enough.
+    set(agent, "node-version", "26.0.0");
     set(agent, "just-version", "1.43.0");
     set(agent, "rustc-version", "1.100.0");
     set(agent, "uname-s", "Linux");
@@ -672,6 +696,11 @@ fn no_node(agent: &mut Agent) {
 
 #[given(expr = "Node.js is version {string}")]
 fn node_is(agent: &mut Agent, version: String) {
+    set(agent, "node-version", &version);
+}
+
+#[when(expr = "the owner replaces Node.js with version {string}")]
+fn node_replaced(agent: &mut Agent, version: String) {
     set(agent, "node-version", &version);
 }
 
@@ -782,6 +811,17 @@ async fn trunk_replaced(agent: &mut Agent) {
 #[given("trunk's release can't be downloaded")]
 fn trunk_unavailable(agent: &mut Agent) {
     fs::remove_file(state(agent).join("trunk-served.tar.gz")).expect("the served archive");
+}
+
+/// The `curl` stand-in stalls on every URL that starts with this one.
+#[given(regex = r"^the download of (trunk's release|rustup's installer) stalls$")]
+fn download_stalls(agent: &mut Agent, download: String) {
+    let url = if download == "trunk's release" {
+        "https://github.com/trunk-rs/trunk/releases/"
+    } else {
+        "https://sh.rustup.rs"
+    };
+    set(agent, "curl-stalls", url);
 }
 
 #[given("Rust isn't installed")]
@@ -1129,6 +1169,45 @@ fn trunk_not_downloaded(agent: &mut Agent) {
         .filter(|call| call.starts_with("curl ") && call.contains("/trunk-rs/"))
         .collect();
     assert!(downloads.is_empty(), "{downloads:?}");
+}
+
+/// Every `curl` call gives up on a connection that takes over 30 s and on a
+/// transfer under 1 KiB/s for 60 s, and sets no limit on its whole time
+/// (`--max-time`), which would cut off a slow link that still moves.
+#[then(
+    "every download gives up after 30 s without a connection or 60 s under 1 KiB/s, with no limit on its whole time"
+)]
+fn downloads_bounded(agent: &mut Agent) {
+    let downloads: Vec<String> = calls_since_run(agent)
+        .into_iter()
+        .filter(|call| call.starts_with("curl "))
+        .collect();
+    for url in ["https://github.com/trunk-rs/", "https://sh.rustup.rs"] {
+        assert!(
+            downloads.iter().any(|call| call.contains(url)),
+            "nothing was downloaded from {url}: {downloads:?}"
+        );
+    }
+    for call in &downloads {
+        let words: Vec<&str> = call.split(' ').collect();
+        for bound in [
+            ["--connect-timeout", "30"],
+            ["--speed-limit", "1024"],
+            ["--speed-time", "60"],
+        ] {
+            assert!(
+                words.windows(2).any(|pair| pair == bound),
+                "{call} lacks {}",
+                bound.join(" ")
+            );
+        }
+        assert!(
+            !words
+                .iter()
+                .any(|word| word.starts_with("-m") || word.starts_with("--max-time")),
+            "{call} limits the download's whole time"
+        );
+    }
 }
 
 #[then("the source was updated, not fetched again in full")]
