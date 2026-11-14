@@ -16,7 +16,7 @@ use domain::notifications::{
     Attempt, Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
 };
 use domain::planning::Locale;
-use domain::secrets::{SecretRef, SecretValue};
+use domain::secrets::{Redactor, SecretRef, SecretValue, SecretWarning};
 use domain::{OperationId, Timestamp, Uuid};
 use futures::StreamExt;
 use futures::channel::mpsc;
@@ -75,6 +75,7 @@ pub struct Notify {
     operations: Arc<dyn OperationStore>,
     secrets: Arc<dyn SecretResolver>,
     notifier: Arc<dyn Notifier>,
+    warned: Option<SecretWarnings>,
 }
 
 /// How the news says an operation went: started, ended with an outcome, or
@@ -150,13 +151,17 @@ impl Notify {
             operations,
             secrets,
             notifier,
+            warned: None,
         }
     }
 
     /// Tells `told` each warning reading a channel's secrets gives (§10.2).
     #[must_use]
-    pub fn telling(self, _told: SecretWarnings) -> Self {
-        todo!("tell each warning of a channel's secrets, masked")
+    pub fn telling(self, told: SecretWarnings) -> Self {
+        Self {
+            warned: Some(told),
+            ..self
+        }
     }
 
     /// Tells the channels of every rule that sends the event `news` is, and
@@ -294,16 +299,33 @@ impl Notify {
     }
 
     /// The channel's URL and credentials, read for this delivery, or `None`
-    /// when one of its secrets can't be read.
+    /// when one of its secrets can't be read. What reading them warned of is
+    /// told either way, masked of every secret read (I4).
     async fn destination(&self, matched: Matched<'_>) -> Option<Destination> {
+        let mut read = ChannelRead::default();
+        let destination = self.read_destination(matched, &mut read).await;
+        if let Some(told) = &self.warned {
+            read.tell(told);
+        }
+        destination
+    }
+
+    async fn read_destination(
+        &self,
+        matched: Matched<'_>,
+        read: &mut ChannelRead,
+    ) -> Option<Destination> {
+        let secrets = self.secrets.as_ref();
         let channel = matched.channel;
-        let url = self.secret(channel.url()).await?;
+        let url = read.secret(secrets, channel.url()).await?;
         let auth = match channel.auth() {
             None => None,
-            Some(Auth::Bearer(token)) => Some(Credentials::Bearer(self.secret(token).await?)),
+            Some(Auth::Bearer(token)) => {
+                Some(Credentials::Bearer(read.secret(secrets, token).await?))
+            }
             Some(Auth::Basic { username, password }) => Some(Credentials::Basic {
                 username: username.clone(),
-                password: self.secret(password).await?,
+                password: read.secret(secrets, password).await?,
             }),
         };
         Some(Destination {
@@ -312,13 +334,38 @@ impl Notify {
             auth,
         })
     }
+}
 
-    async fn secret(&self, secret: &SecretRef) -> Option<SecretValue> {
-        self.secrets
-            .resolve(secret)
-            .await
-            .ok()
-            .map(|resolved| resolved.value)
+/// The secrets one delivery read, and what reading them warned of, each
+/// once.
+#[derive(Default)]
+struct ChannelRead {
+    values: Vec<SecretValue>,
+    warnings: Vec<SecretWarning>,
+}
+
+impl ChannelRead {
+    async fn secret(
+        &mut self,
+        secrets: &dyn SecretResolver,
+        secret: &SecretRef,
+    ) -> Option<SecretValue> {
+        let resolved = secrets.resolve(secret).await.ok()?;
+        for warning in resolved.warnings {
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
+        self.values.push(resolved.value.clone());
+        Some(resolved.value)
+    }
+
+    /// Tells `told` each warning, its path masked of every secret read.
+    fn tell(self, told: &SecretWarnings) {
+        let redactor = Redactor::new(&self.values);
+        for warning in &self.warnings {
+            told(&warning.masked(&redactor));
+        }
     }
 }
 

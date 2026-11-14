@@ -65,6 +65,8 @@ struct HookPlan {
 pub struct Queued {
     run: Run,
     job: Job,
+    /// Attached when the run starts ([`Self::with_warnings`]).
+    warnings: Vec<Warning>,
 }
 
 impl Queued {
@@ -81,6 +83,7 @@ impl Queued {
                 stopped_by_hook: false,
             },
             job,
+            warnings: Vec::new(),
         }
     }
 
@@ -89,7 +92,7 @@ impl Queued {
     /// here, so the queued row holds none and a run the queue takes up again,
     /// which reads its secrets anew, carries them once.
     pub fn with_warnings(self, warnings: Vec<Warning>) -> Self {
-        todo!("attach {} warnings at the start", warnings.len())
+        Self { warnings, ..self }
     }
 }
 
@@ -181,7 +184,11 @@ impl RunOperation {
             stopped_by_hook: false,
         };
         self.record(&mut run).await;
-        Queued { run, job }
+        Queued {
+            run,
+            job,
+            warnings: Vec::new(),
+        }
     }
 
     /// Records a backup the schedule started whose start was refused before
@@ -247,7 +254,14 @@ impl RunOperation {
         queued: Queued,
         cancel: impl Future<Output = ()> + Send,
     ) -> Finished {
-        let Queued { mut run, job } = queued;
+        let Queued {
+            mut run,
+            job,
+            warnings,
+        } = queued;
+        for warning in warnings {
+            let _ = run.operation.attach_warning(warning);
+        }
         self.run_before_hooks(&mut run).await;
         if !run.stopped_by_hook {
             self.drive(&mut run, job, cancel).await;

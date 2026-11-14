@@ -113,18 +113,27 @@ impl SecretWarning {
     /// history says so (#386): `item` is the path and `detail` the mode in
     /// octal, as `chmod` takes it (`0644`).
     pub fn warning(&self) -> Warning {
-        todo!(
-            "the operation's warning for {self:?}: {:?}",
-            WarningKind::SecretFileReadable
-        )
+        match self {
+            Self::FileReadableByOthers { path, mode } => Warning {
+                kind: WarningKind::SecretFileReadable,
+                item: Some(path.clone()),
+                during: "secret".to_owned(),
+                detail: format!("{mode:04o}"),
+            },
+        }
     }
 
     /// This warning with its path masked by `redactor` (I4): a path is the
     /// configuration's text, which can hold a secret of the repository by
     /// chance, so it is shown as a refusal shows where a secret was looked
     /// for.
-    pub fn masked(&self, _redactor: &Redactor) -> Self {
-        todo!("mask the path of {self:?}")
+    pub fn masked(&self, redactor: &Redactor) -> Self {
+        match self {
+            Self::FileReadableByOthers { path, mode } => Self::FileReadableByOthers {
+                path: redactor.redact(path),
+                mode: *mode,
+            },
+        }
     }
 }
 
@@ -260,7 +269,7 @@ pub fn file_warning(
     (exposed && !is_runtime_secret(path, credentials_directory, resolve)).then(|| {
         SecretWarning::FileReadableByOthers {
             path: path.to_owned(),
-            mode,
+            mode: mode & 0o777,
         }
     })
 }

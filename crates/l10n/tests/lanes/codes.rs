@@ -430,6 +430,36 @@ fn a_blank_detail_is_no_detail() {
     }
 }
 
+/// An unreadable item says why it couldn't be read; a readable secret file,
+/// whose detail is its mode, already says the mode and reads the same with
+/// it, never as an unreadable item (#386).
+#[test]
+fn each_warnings_detail_form_is_its_own() {
+    let localizer = english();
+    let unreadable = localizer.warning(
+        WarningCode::SourceUnreadable,
+        &[],
+        Some("permission denied"),
+    );
+    assert!(
+        unreadable.text().contains("(permission denied)"),
+        "{}",
+        unreadable.text()
+    );
+    let args = [
+        ("path", MsgArg::Text("/home/demo/nas-password".to_owned())),
+        ("mode", MsgArg::Text("0644".to_owned())),
+    ];
+    let readable = localizer.warning(WarningCode::SecretFileReadable, &args, None);
+    assert_eq!(
+        localizer
+            .warning(WarningCode::SecretFileReadable, &args, Some("0644"))
+            .text(),
+        readable.text()
+    );
+    assert!(readable.problems().is_empty(), "{:?}", readable.problems());
+}
+
 #[test]
 fn a_translation_may_read_an_optional_argument_only_where_it_is_there() {
     let source = source_locale();

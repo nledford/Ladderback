@@ -550,15 +550,26 @@ impl Operation {
     }
 
     /// Counts `warning` and keeps a cut copy of it while there is room
-    /// ([`Self::record_warning`]).
+    /// ([`Self::record_warning`]). An operation names a readable secret file
+    /// once, however many of its reads met it (#386): such a warning for a
+    /// path already kept is neither kept nor counted again.
     fn keep(&mut self, warning: Warning) {
+        let item = warning.item.map(cut_warning_text);
+        if warning.kind == WarningKind::SecretFileReadable
+            && self
+                .warnings
+                .iter()
+                .any(|kept| kept.kind == warning.kind && kept.item == item)
+        {
+            return;
+        }
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
             // Every field is named, so a text field added to `Warning` must
             // be given its cut, or left whole on purpose, to compile.
             self.warnings.push(Warning {
                 kind: warning.kind,
-                item: warning.item.map(cut_warning_text),
+                item,
                 during: cut_warning_text(warning.during),
                 detail: cut_warning_text(warning.detail),
             });

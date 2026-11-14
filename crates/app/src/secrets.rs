@@ -25,7 +25,8 @@ pub struct ResolvedRepository {
     /// was seen, and where its settings came from. [`ResolveRepository::resolve_saved`]
     /// sets both from the entry it resolves.
     pub access: RepositoryAccess,
-    /// What the user should know about how the secrets were read, each once.
+    /// What the user should know about how the secrets were read, each once,
+    /// with every path masked of the repository's secrets (I4).
     pub warnings: Vec<SecretWarning>,
 }
 
@@ -227,6 +228,7 @@ fn template_error_place(error: &TemplateError) -> Option<usize> {
 #[derive(Clone)]
 pub struct ResolveRepository {
     resolver: Arc<dyn SecretResolver>,
+    told: Option<SecretWarnings>,
 }
 
 /// Told each warning that reading a set of secrets gave, once the set is
@@ -236,13 +238,39 @@ pub type SecretWarnings = Arc<dyn Fn(&SecretWarning) + Send + Sync>;
 
 impl ResolveRepository {
     pub fn new(resolver: Arc<dyn SecretResolver>) -> Self {
-        Self { resolver }
+        Self {
+            resolver,
+            told: None,
+        }
     }
 
     /// Tells `told` each warning a resolution gives.
     #[must_use]
-    pub fn telling(self, _told: SecretWarnings) -> Self {
-        todo!("tell each warning, masked")
+    pub fn telling(self, told: SecretWarnings) -> Self {
+        Self {
+            told: Some(told),
+            ..self
+        }
+    }
+
+    /// `warnings` masked of the secrets `access` holds (I4), each told.
+    fn warnings(
+        &self,
+        warnings: &[SecretWarning],
+        access: &RepositoryAccess,
+    ) -> Vec<SecretWarning> {
+        if warnings.is_empty() {
+            return Vec::new();
+        }
+        let redactor = access.redactor();
+        let warnings: Vec<SecretWarning> = warnings
+            .iter()
+            .map(|warning| warning.masked(&redactor))
+            .collect();
+        if let Some(told) = &self.told {
+            warnings.iter().for_each(|warning| told(warning));
+        }
+        warnings
     }
 
     /// Each distinct reference is read once, so a value can't change between
@@ -258,7 +286,7 @@ impl ResolveRepository {
         refuse_too_many_credentials(settings)?;
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(&settings.password).await?;
-        Self::resolve_rest(run, settings, password)
+        self.resolve_rest(run, settings, password)
             .await
             .map(|(resolved, _)| resolved)
     }
@@ -284,7 +312,7 @@ impl ResolveRepository {
                 field: Field::Password,
                 cause: too_much_to_mask(too_much),
             })?;
-        let (resolved, values) = Self::resolve_rest(run, settings, password.clone()).await?;
+        let (resolved, values) = self.resolve_rest(run, settings, password.clone()).await?;
         read.values = values;
         Ok(resolved)
     }
@@ -292,6 +320,7 @@ impl ResolveRepository {
     /// The rest of `settings`, past the password, resolved by `run`, with
     /// every reference `run` has read by the end.
     async fn resolve_rest(
+        &self,
         mut run: Run<'_>,
         settings: &RepositorySettings,
         password: SecretValue,
@@ -310,19 +339,20 @@ impl ResolveRepository {
         let options_cold = run
             .expand_all(&settings.options_cold, Field::OptionCold)
             .await?;
+        let access = RepositoryAccess {
+            repository,
+            repo_hot,
+            password,
+            options,
+            options_hot,
+            options_cold,
+            secrets: run.secrets,
+            id: None,
+            entry: None,
+        };
         let resolved = ResolvedRepository {
-            access: RepositoryAccess {
-                repository,
-                repo_hot,
-                password,
-                options,
-                options_hot,
-                options_cold,
-                secrets: run.secrets,
-                id: None,
-                entry: None,
-            },
-            warnings: run.warnings,
+            warnings: self.warnings(&run.warnings, &access),
+            access,
         };
         Ok((resolved, run.values))
     }
@@ -371,19 +401,20 @@ impl ResolveRepository {
     ) -> Result<ResolvedRepository, ResolveError> {
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(password).await?;
+        let access = RepositoryAccess {
+            repository: String::new(),
+            repo_hot: None,
+            password,
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+            entry: None,
+        };
         Ok(ResolvedRepository {
-            access: RepositoryAccess {
-                repository: String::new(),
-                repo_hot: None,
-                password,
-                options: BTreeMap::new(),
-                options_hot: BTreeMap::new(),
-                options_cold: BTreeMap::new(),
-                secrets: Vec::new(),
-                id: None,
-                entry: None,
-            },
-            warnings: run.warnings,
+            warnings: self.warnings(&run.warnings, &access),
+            access,
         })
     }
 }

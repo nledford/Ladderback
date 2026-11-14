@@ -201,6 +201,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
             &["http-cacert"],
         ),
+        (msg::WARNING_SECRET_FILE_READABLE, &["chmod 600"]),
     ];
     let args = [
         ("address", text("192.168.1.5:9898")),
@@ -213,6 +214,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("cause", text("plain-http")),
         ("rule", text("network")),
         ("locations", text("several")),
+        ("mode", text("0644")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);
