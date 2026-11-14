@@ -71,6 +71,10 @@ pub enum ServiceProblem {
     ManagerRefused { command: String, said: String },
     /// The manager's program had not ended after `seconds`, and was stopped.
     ManagerSilent { command: String, seconds: u64 },
+    /// The manager was asked to stop the service with `command`, and still
+    /// had it after `seconds`. The service file was left as it was, and an
+    /// install started no new service.
+    StillStopping { command: String, seconds: u64 },
     /// The file at the service file's place was not written by
     /// `install-service`: a unit written by hand, or a link such as
     /// systemd's mask. It is left as it is, and the manager asked nothing.

@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use app::contract;
 use app::contract::service::ServiceHarness;
-use app::ports::{Removed, ServiceManager, ServiceProblem};
+use app::ports::{Installed, Removed, ServiceManager, ServiceProblem};
 use async_trait::async_trait;
 use domain::service::ServicePath;
 use testkit::service_manager::FakeServiceManagers;
 
-use super::{Environment, LAUNCHD_LABEL, SYSTEMD_UNIT, Unavailable, UserService};
+use super::{Environment, Kind, LAUNCHD_LABEL, SYSTEMD_UNIT, StopWait, Unavailable, UserService};
 use super::{launchd_plist, systemd_unit};
 
 fn path(text: &str) -> ServicePath {
@@ -250,6 +250,18 @@ impl Faked {
     fn program(&self, folder: &str) -> ServicePath {
         ServicePath::parse(&self.scratch.path().join(folder).join("ladderback")).unwrap()
     }
+
+    /// The same, asking every millisecond whether an agent launchd was told
+    /// to stop is gone, for `limit` at most.
+    fn stopping_within(mut self, limit: Duration) -> Self {
+        if let Kind::Launchd { stop, .. } = &mut self.service.kind {
+            *stop = StopWait {
+                every: Duration::from_millis(1),
+                limit,
+            };
+        }
+        self
+    }
 }
 
 #[async_trait]
@@ -319,10 +331,154 @@ async fn launchd_boots_the_old_agent_out_before_it_boots_the_new_one_in() {
             format!("launchctl bootstrap gui/501 {file}"),
             format!("launchctl print {agent}"),
             format!("launchctl bootout {agent}"),
+            format!("launchctl print {agent}"),
             format!("launchctl enable {agent}"),
             format!("launchctl bootstrap gui/501 {file}"),
         ]
     );
+}
+
+/// What a long wait for launchd to let an agent go means here: longer than
+/// any test waits.
+const PATIENT: Duration = Duration::from_secs(60);
+
+/// An agent no wait sees go.
+const NEVER: u32 = 1_000_000;
+
+/// The calls after the first `count`.
+fn commands_after(faked: &Faked, count: usize) -> Vec<String> {
+    faked.fakes.commands().split_off(count)
+}
+
+#[tokio::test]
+async fn a_reinstall_boots_the_new_agent_in_only_once_launchd_has_let_the_old_one_go() {
+    let faked = Faked::new(Which::Launchd).stopping_within(PATIENT);
+    let file = faked.service.file().display().to_string();
+    let agent = format!("gui/501/{LAUNCHD_LABEL}");
+    faked
+        .service
+        .install(&faked.program("first"))
+        .await
+        .unwrap();
+    let before = faked.fakes.commands().len();
+    faked.fakes.stop_slowly(3);
+    let installed = faked.service.install(&faked.program("second")).await;
+    assert_matches!(installed, Ok(Installed { replaced: true, .. }));
+    assert!(faked.fakes.runs(LAUNCHD_LABEL));
+    assert_eq!(
+        commands_after(&faked, before),
+        [
+            format!("launchctl print {agent}"),
+            format!("launchctl bootout {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl enable {agent}"),
+            format!("launchctl bootstrap gui/501 {file}"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_reinstall_whose_old_agent_launchd_never_lets_go_starts_nothing_and_says_so() {
+    let faked = Faked::new(Which::Launchd).stopping_within(Duration::from_millis(300));
+    faked
+        .service
+        .install(&faked.program("first"))
+        .await
+        .unwrap();
+    let first = faked.file_text();
+    let before = faked.fakes.commands().len();
+    faked.fakes.stop_slowly(NEVER);
+    let error = faked
+        .service
+        .install(&faked.program("second"))
+        .await
+        .unwrap_err();
+    assert_matches!(
+        error.problem,
+        ServiceProblem::StillStopping { ref command, .. }
+            if *command == format!("launchctl bootout gui/501/{LAUNCHD_LABEL}")
+    );
+    let after = commands_after(&faked, before);
+    assert!(
+        after.len() >= 3,
+        "launchd was asked after the bootout: {after:?}"
+    );
+    assert!(
+        !after.iter().any(|call| call.contains(" bootstrap ")),
+        "{after:?}"
+    );
+    assert_eq!(faked.file_text(), first, "the old service file stays");
+}
+
+#[tokio::test]
+async fn a_removal_is_done_only_once_launchd_has_let_the_agent_go() {
+    let faked = Faked::new(Which::Launchd).stopping_within(PATIENT);
+    let agent = format!("gui/501/{LAUNCHD_LABEL}");
+    faked.service.install(&faked.program("bin")).await.unwrap();
+    let before = faked.fakes.commands().len();
+    faked.fakes.stop_slowly(3);
+    assert_matches!(faked.service.remove().await, Ok(Removed::Removed { .. }));
+    assert!(!faked.fakes.runs(LAUNCHD_LABEL));
+    assert_eq!(faked.file_text(), None);
+    assert_eq!(
+        commands_after(&faked, before),
+        [
+            format!("launchctl print {agent}"),
+            format!("launchctl bootout {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+            format!("launchctl print {agent}"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_removal_whose_agent_launchd_never_lets_go_keeps_the_file_and_says_so() {
+    let faked = Faked::new(Which::Launchd).stopping_within(Duration::from_millis(300));
+    faked.service.install(&faked.program("bin")).await.unwrap();
+    faked.fakes.stop_slowly(NEVER);
+    let error = faked.service.remove().await.unwrap_err();
+    assert_matches!(
+        error.problem,
+        ServiceProblem::StillStopping { ref command, .. }
+            if *command == format!("launchctl bootout gui/501/{LAUNCHD_LABEL}")
+    );
+    assert!(faked.service.file().exists());
+}
+
+#[tokio::test]
+async fn a_removal_whose_check_on_the_stopping_agent_fails_keeps_the_file_and_says_so() {
+    let faked = Faked::new(Which::Launchd).stopping_within(PATIENT);
+    faked.service.install(&faked.program("bin")).await.unwrap();
+    let before = faked.fakes.commands().len();
+    faked.fakes.stop_slowly(NEVER);
+    // launchd stops answering once it has been told to boot the agent out.
+    let mut removal = std::pin::pin!(faked.service.remove());
+    let mut refused = false;
+    let removed = loop {
+        tokio::select! {
+            removed = &mut removal => break removed,
+            () = tokio::time::sleep(Duration::from_millis(10)), if !refused => {
+                if commands_after(&faked, before)
+                    .iter()
+                    .any(|call| call.contains(" bootout "))
+                {
+                    faked.fakes.refuse("Could not talk to launchd");
+                    refused = true;
+                }
+            }
+        }
+    };
+    assert_matches!(
+        removed.unwrap_err().problem,
+        ServiceProblem::ManagerRefused { ref command, .. }
+            if *command == format!("launchctl print gui/501/{LAUNCHD_LABEL}")
+    );
+    assert!(faked.service.file().exists());
 }
 
 #[tokio::test]
@@ -644,11 +800,20 @@ struct Real {
 }
 
 impl Real {
+    /// A program that runs until it is told to stop, then takes about 2 s
+    /// to end, as the daemon does while it shuts down: the manager has the
+    /// service until then, and an install or a removal that didn't wait
+    /// for it would race it. Once its trap is set it leaves a file,
+    /// [`Real::started`], beside itself.
     fn program(&self, folder: &str) -> ServicePath {
         let program = self.scratch.path().join(folder).join("ladderback");
         std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        let script = format!(
+            "#!/bin/sh\ntrap '/bin/sleep 2; exit 0' TERM\n: > '{}'\nwhile :; do /bin/sleep 1; done\n",
+            Self::started(&program).display()
+        );
         spawn_gate::hold(|| {
-            std::fs::write(&program, "#!/bin/sh\nexec /bin/sleep 600\n").unwrap();
+            std::fs::write(&program, script).unwrap();
             std::fs::set_permissions(
                 &program,
                 std::os::unix::fs::PermissionsExt::from_mode(0o755),
@@ -656,6 +821,11 @@ impl Real {
             .unwrap();
         });
         ServicePath::parse(&program).unwrap()
+    }
+
+    /// The file `program` leaves once it would take its time to stop.
+    fn started(program: &Path) -> std::path::PathBuf {
+        program.with_file_name("started")
     }
 }
 
@@ -669,11 +839,31 @@ impl ServiceHarness for Real {
         [self.program("first"), self.program("second")]
     }
 
+    /// Whether the manager has the service, and then, once the program the
+    /// service file names has started: an install over it, the contract's
+    /// next step, must find it running, not still starting, when a stop
+    /// would end it at once.
     async fn runs(&self) -> bool {
         let name = self.name.clone();
-        tokio::task::spawn_blocking(move || real_runs(&name))
+        let loaded = tokio::task::spawn_blocking(move || real_runs(&name))
             .await
-            .unwrap()
+            .unwrap();
+        let Some(text) = self.file_text().filter(|_| loaded) else {
+            return loaded;
+        };
+        let program = ["first", "second"]
+            .map(|folder| self.scratch.path().join(folder).join("ladderback"))
+            .into_iter()
+            .find(|program| text.contains(&*program.to_string_lossy()))
+            .unwrap();
+        let started = Self::started(&program);
+        for _ in 0..200 {
+            if started.exists() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
     }
 
     fn file_text(&self) -> Option<String> {

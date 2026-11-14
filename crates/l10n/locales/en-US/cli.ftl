@@ -250,6 +250,11 @@ cli-service-manager-refused = { $command } failed: { $said }
 # $limit (duration): how long it was given.
 cli-service-manager-silent = { $command } did not answer within { $limit }, so { -brand-name } stopped it
 
+# The service manager was asked to stop the service, and still had it when Ladderback stopped waiting: nothing more was done, so an install started no new service, and the service file is as it was. The old service is no longer running once the manager has stopped it.
+# $command (text): the command that asked the manager to stop the service, as a person would type it.
+# $limit (duration): how long Ladderback waited.
+cli-service-still-stopping = { $command } had not stopped the service after { $limit }, so { -brand-name } went no further and left the service file as it was. Once the service has stopped, run this command again.
+
 # A file is at the service file's place that `install-service` did not write: a unit written by hand, or a link such as the one `systemctl mask` makes. Neither command replaces nor removes it.
 # $file (text): the service file's path.
 cli-service-not-ours = { $file } is not a service file { -brand-name } wrote, so { -brand-name } leaves it as it is

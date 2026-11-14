@@ -13,8 +13,8 @@ use domain::service::{ServicePath, ServicePathProblem};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::service::{Unavailable, UserService, program_path};
 
-use crate::output::to_stdout;
-use crate::{finish, say, text};
+use crate::output::{to_stderr, to_stdout};
+use crate::{finish, said, say, text};
 
 /// Installs this program as the user's service and starts it.
 pub(crate) fn install_service() -> ExitCode {
@@ -55,7 +55,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Err(error) => {
-            say_error(localizer, &error)?;
+            to_stderr(&error_said(localizer, &error))?;
             Ok(ExitCode::FAILURE)
         }
     }
@@ -86,7 +86,7 @@ fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Err(error) => {
-            say_error(localizer, &error)?;
+            to_stderr(&error_said(localizer, &error))?;
             Ok(ExitCode::FAILURE)
         }
     }
@@ -171,10 +171,10 @@ fn runtime(localizer: &Localizer) -> io::Result<Option<tokio::runtime::Runtime>>
     }
 }
 
-/// Says on stderr why an install or a removal stopped.
-fn say_error(localizer: &Localizer, error: &ServiceError) -> io::Result<()> {
+/// The line, for stderr, that says why an install or a removal stopped.
+fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
     match &error.problem {
-        ServiceProblem::File { detail } => say(
+        ServiceProblem::File { detail } => said(
             localizer,
             msg::CLI_SERVICE_FILE_ERROR,
             &[
@@ -182,17 +182,20 @@ fn say_error(localizer: &Localizer, error: &ServiceError) -> io::Result<()> {
                 ("detail", text(detail)),
             ],
         ),
-        ServiceProblem::ManagerMissing { command, detail } => say(
+        ServiceProblem::ManagerMissing { command, detail } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_MISSING,
             &[("command", text(command)), ("detail", text(detail))],
         ),
-        ServiceProblem::ManagerRefused { command, said } => say(
+        ServiceProblem::ManagerRefused {
+            command,
+            said: words,
+        } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_REFUSED,
-            &[("command", text(command)), ("said", text(said))],
+            &[("command", text(command)), ("said", text(words))],
         ),
-        ServiceProblem::ManagerSilent { command, seconds } => say(
+        ServiceProblem::ManagerSilent { command, seconds } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_SILENT,
             &[
@@ -200,7 +203,15 @@ fn say_error(localizer: &Localizer, error: &ServiceError) -> io::Result<()> {
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
-        ServiceProblem::NotOurs => say(
+        ServiceProblem::StillStopping { command, seconds } => said(
+            localizer,
+            msg::CLI_SERVICE_STILL_STOPPING,
+            &[
+                ("command", text(command)),
+                ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
+            ],
+        ),
+        ServiceProblem::NotOurs => said(
             localizer,
             msg::CLI_SERVICE_NOT_OURS,
             &[("file", MsgArg::Text(shown(&error.file)))],
@@ -231,9 +242,31 @@ fn shown(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::shown;
+    use app::ports::{ServiceError, ServiceProblem};
+    use l10n::Localizer;
+
+    use super::{error_said, shown};
+
+    #[test]
+    fn a_service_still_stopping_is_said_with_the_command_and_how_long_it_was_waited_for() {
+        let error = ServiceError {
+            file: PathBuf::from(
+                "/home/demo/Library/LaunchAgents/io.github.nledford.ladderback.plist",
+            ),
+            problem: ServiceProblem::StillStopping {
+                command: "launchctl bootout gui/501/io.github.nledford.ladderback".to_owned(),
+                seconds: 30,
+            },
+        };
+        let said = error_said(&Localizer::new(&[]), &error);
+        assert!(
+            said.contains("launchctl bootout gui/501/io.github.nledford.ladderback"),
+            "{said}"
+        );
+        assert!(said.contains("30 s"), "{said}");
+    }
 
     #[test]
     fn a_path_is_shown_as_it_is() {
