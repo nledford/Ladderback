@@ -11,7 +11,7 @@ use std::fmt::Display;
 use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
-use domain::execution::{OperationStatus, Target, Warning};
+use domain::execution::{OperationStatus, Target, Warning, WarningKind};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -316,4 +316,20 @@ pub(crate) fn warning(
         during: reader.required_text("during")?,
         detail: reader.required_text("detail")?,
     })
+}
+
+/// One row of a page's warning codes: the operation's ID as stored, and the
+/// kind of one of its kept warnings.
+pub(crate) fn warning_kind(row: &SqliteRow) -> Result<(String, WarningKind), StoreError> {
+    let page = Reader {
+        row,
+        scope: "the warning codes of a page of history".to_owned(),
+    };
+    let operation = page.required_text("op_id")?;
+    let reader = Reader {
+        row,
+        scope: format!("operation {}, its warning codes", shown(&operation)),
+    };
+    let code = reader.required_text("code")?;
+    Ok((operation, codec::warning_kind_from_text(&code)))
 }

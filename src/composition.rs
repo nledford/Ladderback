@@ -1735,8 +1735,9 @@ fn operation_of(text: &str) -> Option<OperationId> {
 }
 
 /// One log record as the history page shows it, or `None` when it holds
-/// something no page could show. The page carries the status; the warning
-/// codes come with the detail, where the kept warnings are.
+/// something no page could show. The page carries the status and each
+/// warning's code once, from the kept warnings (#508); the warnings
+/// themselves come with the detail.
 fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
     let failure = match &record.status {
         OperationStatus::Failed { reason } => Some(failure(reason)),
@@ -1754,7 +1755,11 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
         record.queued_at.to_string(),
         record.started_at.map(|at| at.to_string()),
         record.finished_at.map(|at| at.to_string()),
-        Vec::new(),
+        record
+            .warning_kinds
+            .iter()
+            .map(|kind| warning_code(*kind))
+            .collect(),
         failure,
         record
             .result

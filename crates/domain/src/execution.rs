@@ -241,7 +241,13 @@ pub enum WarningKind {
 /// The kinds of `warnings`, each once, in the order the first of each came:
 /// what the history names an operation's warnings by (#508).
 pub fn warning_kinds(warnings: &[Warning]) -> Vec<WarningKind> {
-    todo!("the kinds of {} warnings", warnings.len())
+    let mut kinds = Vec::new();
+    for warning in warnings {
+        if !kinds.contains(&warning.kind) {
+            kinds.push(warning.kind);
+        }
+    }
+    kinds
 }
 
 /// What was attempted when a lifecycle transition was refused.

@@ -2885,7 +2885,9 @@ pub struct OperationSummaryDto {
     pub queued_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
-    /// Every warning the operation recorded, by code, newest last.
+    /// The codes of the operation's warnings, each code once, from the kept
+    /// warnings (the first ten thousand), in the order the first of each
+    /// was recorded (#508). The operation's detail lists the warnings.
     pub warning_codes: Vec<WarningCode>,
     /// Set when the operation failed.
     pub failure_code: Option<ErrorCode>,

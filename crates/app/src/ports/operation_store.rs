@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
 use domain::execution::{
-    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
+    WarningKind, warning_kinds,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 
@@ -272,7 +273,7 @@ impl OperationRecord {
             started_at: operation.started_at().map(to_millisecond),
             finished_at: operation.finished_at().map(to_millisecond),
             warning_count: operation.warning_count(),
-            warning_kinds: Vec::new(),
+            warning_kinds: warning_kinds(operation.warnings()),
             result: result.cloned(),
             repository_alias: operation.repository_alias().cloned(),
             locations: operation.locations().cloned(),

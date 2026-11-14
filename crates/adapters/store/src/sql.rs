@@ -61,6 +61,16 @@ pub(crate) const GET_OPERATION: &str = select_operations!(" WHERE id = ?");
 pub(crate) const GET_WARNINGS: &str =
     "SELECT item, during, code, detail FROM op_warnings WHERE op_id = ? ORDER BY rowid LIMIT ?";
 
+/// The warning codes of a page of operations, each code of each operation
+/// once, in the order the first warning of each was recorded (#508): the
+/// kept warnings are the stored ones. Parameter: the operations' IDs as a
+/// JSON array.
+pub(crate) const LIST_WARNING_KINDS: &str = concat!(
+    "SELECT op_id, code, MIN(rowid) AS first FROM op_warnings ",
+    "WHERE op_id IN (SELECT value FROM json_each(?)) ",
+    "GROUP BY op_id, code ORDER BY first"
+);
+
 /// Ends every running operation as failed (startup recovery), and nothing
 /// else about it: not its times, warnings or target. Parameters: `status`,
 /// `error_code`, `error_args`, `error_detail`, then the status it ends,

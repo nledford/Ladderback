@@ -33,7 +33,9 @@ use app::ports::{
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
-use domain::execution::{FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus};
+use domain::execution::{
+    FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus, warning_kinds,
+};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -395,12 +397,13 @@ impl OperationStore for SqliteStore {
         let Some(found) = found else {
             return Ok(None);
         };
-        let record = row::record(&found)?;
+        let mut record = row::record(&found)?;
         let warnings = warning_rows
             .iter()
             .enumerate()
             .map(|(position, warning)| row::warning(&id, position, warning))
             .collect::<Result<Vec<_>, _>>()?;
+        record.warning_kinds = warning_kinds(&warnings);
         Ok(Some(OperationDetail { record, warnings }))
     }
 
@@ -412,25 +415,28 @@ impl OperationStore for SqliteStore {
         let after = query.after.map(|after| after.as_uuid().to_string());
         let plan = query.plan.as_ref().map(PlanId::as_str);
         let _call = self.call().await;
+        // One read transaction: the rows and their warning codes are one
+        // snapshot, so a save that lands in between can't be seen half done.
+        let mut tx = self.pool.begin().await.map_err(unavailable)?;
         let rows = match (plan, after.as_deref()) {
             (None, None) => {
                 sqlx::query(sql::LIST_FIRST_PAGE)
                     .bind(fetch)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await
             }
             (None, Some(after)) => {
                 sqlx::query(sql::LIST_AFTER)
                     .bind(after)
                     .bind(fetch)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await
             }
             (Some(plan), None) => {
                 sqlx::query(sql::LIST_PLAN_FIRST_PAGE)
                     .bind(plan)
                     .bind(fetch)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await
             }
             (Some(plan), Some(after)) => {
@@ -438,18 +444,46 @@ impl OperationStore for SqliteStore {
                     .bind(plan)
                     .bind(after)
                     .bind(fetch)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await
             }
         }
         .map_err(unavailable)?;
-
         let more = rows.len() > limit;
-        let operations = rows
+        let mut operations = rows
             .iter()
             .take(limit)
             .map(row::record)
             .collect::<Result<Vec<_>, _>>()?;
+        let ids: Vec<String> = operations
+            .iter()
+            .map(|record| record.id.as_uuid().to_string())
+            .collect();
+        let kind_rows = if ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query(sql::LIST_WARNING_KINDS)
+                .bind(serde_json::to_string(&ids).map_err(encoding)?)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(unavailable)?
+        };
+        tx.commit().await.map_err(unavailable)?;
+
+        // Each code is once per operation in the rows; an unknown code reads
+        // as one kind, so two of them name it once.
+        for kind_row in &kind_rows {
+            let (operation, kind) = row::warning_kind(kind_row)?;
+            let record = ids
+                .iter()
+                .position(|id| *id == operation)
+                .and_then(|position| operations.get_mut(position));
+            if let Some(record) = record
+                && !record.warning_kinds.contains(&kind)
+            {
+                record.warning_kinds.push(kind);
+            }
+        }
         let next = if more {
             operations.last().map(|record| record.id)
         } else {
