@@ -1,6 +1,6 @@
 # Decision NN: The build a program names beside its version
 
-**A program names its build, not only its version: `0.3.0` for a clean build of the commit its release tag `v0.3.0` names, otherwise the version with the short commit as SemVer build metadata, `0.3.0+3f937cf`, and `.dirty` after it when tracked files had uncommitted changes. `build.rs` asks `git`; a packager may name the commit instead, and no `git` gives the plain version, never a failed build. `--version`, the startup log line and the web UI's header say it; the daemon tells a page the build's parts as fields of their own, only with sign-in off or a live session** (recorded 2026-11-14, §3.1, §4.2, §4.5, §10.1, §12.1; approved by the maintainer). From #516.
+**A program names its build, not only its version: `0.3.0` for a clean build of the commit its release tag `v0.3.0` names, otherwise the version with the short commit as SemVer build metadata, `0.3.0+3f937cf`, and `.dirty` after it when tracked files had uncommitted changes. `build.rs` asks `git`; a packager may name the commit instead, and no `git` gives the plain version, never a failed build. `--version`, the startup log line and the web UI's header say it; the daemon tells a page the build's parts as fields of their own, only with sign-in off or a live session** (recorded 2026-11-14, §3.1, §4.2, §4.5, §7.2, §10.1, §12.1; approved by the maintainer). From #516.
 
 ## Why
 
