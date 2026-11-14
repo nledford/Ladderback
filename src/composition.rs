@@ -124,8 +124,13 @@ impl<S: NormalizeSources> NormalizeSources for WithinLimit<S> {
         &self,
         sources: &[domain::planning::Source],
     ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
-        let _ = sources;
-        todo!()
+        tokio::time::timeout(self.1, self.0.normalized(sources))
+            .await
+            .unwrap_or_else(|_| {
+                Err(app::ports::SourcesError::Unreadable {
+                    detail: format!("no answer within {:?}", self.1),
+                })
+            })
     }
 }
 
@@ -140,7 +145,7 @@ async fn log_never_matching_globs(
     for plan in config.plans() {
         for (code, args) in never_matching_glob_warnings(plan, sources).await {
             let message = localizer.warning(code, &args, None);
-            log::warn!("plan {}: {message}", plan.id.as_str());
+            log::warn!("{message}");
         }
     }
 }
@@ -412,7 +417,11 @@ async fn daemon_at(
     ));
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
-    log_never_matching_globs(&loaded, &engine::RusticSources).await;
+    log_never_matching_globs(
+        &loaded,
+        &WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT),
+    )
+    .await;
     let recorded = recorded_repositories(&loaded);
     let database = data_dir.join("ladderback.db");
     let log = OperationLog {
@@ -554,7 +563,7 @@ async fn state_over(
         operations: Arc::clone(&store),
         schedules: Arc::clone(&schedules),
         link: Arc::clone(&conditions.link),
-        sources: Arc::new(engine::RusticSources),
+        sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
     });
     let background = Background {
         runner,

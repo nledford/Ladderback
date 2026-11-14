@@ -170,7 +170,7 @@ impl Plan {
     /// a glob or iglob read from the root. Only then is its disk looked at
     /// for [`Self::never_matching_globs`].
     pub fn may_have_never_matching_globs(&self) -> bool {
-        todo!()
+        !self.sources.is_empty() && self.filter.reads_from_root()
     }
 }
 

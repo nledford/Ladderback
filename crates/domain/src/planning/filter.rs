@@ -83,6 +83,9 @@ impl<'a> NeverMatchingGlob<'a> {
     /// can tell ([`Placement::Holder`]).
     pub fn placement(&self) -> Placement {
         let parts = self.parts();
+        if parts.contains(&"..") {
+            return Placement::Nowhere;
+        }
         let named = self
             .written
             .iter()
@@ -118,9 +121,11 @@ impl<'a> NeverMatchingGlob<'a> {
         self.glob.strip_prefix('!').unwrap_or(self.glob)
     }
 
-    /// The glob's folders, less any empty or `.` one.
+    /// The glob's folders, less any empty or `.` one and the trailing
+    /// whitespace rustic doesn't read.
     fn parts(&self) -> Vec<&'a str> {
         self.rest()
+            .trim_end()
             .split('/')
             .filter(|part| !matches!(*part, "" | "."))
             .collect()
@@ -153,7 +158,7 @@ impl<'a> NeverMatchingGlob<'a> {
             whole.push('/');
             whole.push_str(folder);
         }
-        if self.rest().ends_with('/') {
+        if self.rest().trim_end().ends_with('/') {
             whole.push('/');
         }
         whole
@@ -199,7 +204,10 @@ impl SourceFilter {
     /// Whether any of its globs or iglobs is read from the root of the file
     /// system, so may never match: only then is a plan's disk looked at.
     pub(super) fn reads_from_root(&self) -> bool {
-        todo!()
+        self.globs
+            .iter()
+            .chain(&self.iglobs)
+            .any(|glob| rooted_path(glob).is_some())
     }
 }
 
