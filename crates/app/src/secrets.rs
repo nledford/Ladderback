@@ -1018,4 +1018,160 @@ mod tests {
             .expect("it resolves");
         assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
     }
+
+    /// A resolution that fails still tells the warnings the files it read
+    /// before the failing secret gave, masked as a resolution that succeeds
+    /// masks them: of the secrets read and the settings' own (I4, §10.2,
+    /// #539). The failure is returned as before.
+    #[tokio::test]
+    async fn a_failing_resolution_tells_the_warnings_met_before_it_masked() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/nas-password", b"bob\n", 0o644);
+        store.write_file("/srv/bob/token", b"carol", 0o644);
+        store.write_file("/srv/carol/flags", b"-v", 0o644);
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(store).telling(Arc::new(move |warning| {
+            heard.lock().expect("the list").push(warning.clone());
+        }));
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: "/home/alice/nas-password".to_owned(),
+                read: FileRead::FirstLine,
+            },
+            options: BTreeMap::from([
+                ("secret_access_key".to_owned(), "alice".to_owned()),
+                ("token".to_owned(), "${file:/srv/bob/token}".to_owned()),
+            ]),
+            options_hot: BTreeMap::from([(
+                "flags".to_owned(),
+                "${file:/srv/carol/flags}".to_owned(),
+            )]),
+            options_cold: BTreeMap::from([("late".to_owned(), "${file:/srv/missing}".to_owned())]),
+        };
+        let masked = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+
+        let error = resolve.resolve(&settings).await.expect_err("it fails");
+        assert_eq!(error.field, Field::OptionCold("late".to_owned()));
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [
+                masked("/home/***/nas-password"),
+                masked("/srv/***/token"),
+                masked("/srv/***/flags"),
+            ]
+        );
+
+        // A location of a repository reached at several, whose password
+        // was read before it.
+        told.lock().expect("the list").clear();
+        let location = RepositorySettings {
+            password: SecretRef::Inline(SecretValue::new("bob")),
+            ..settings
+        };
+        let error = resolve
+            .resolve_location(
+                &location,
+                &SecretValue::new("bob"),
+                &mut JobReferences::default(),
+            )
+            .await
+            .expect_err("it fails");
+        assert_eq!(error.field, Field::OptionCold("late".to_owned()));
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [masked("/srv/***/token"), masked("/srv/***/flags")]
+        );
+    }
+
+    /// A failing resolution that tells its warnings asks for no secret after
+    /// the failing one: they are masked of what was read and of the
+    /// settings' own alone, so masking a log line never runs a command or
+    /// asks the keychain, and a failed lookup stays fast (#539).
+    #[tokio::test]
+    async fn a_failing_resolution_asks_for_no_secret_after_the_failing_one() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/pw", b"hunter2\n", 0o644);
+        store.write_file("/home/alice/c", b"zzz9", 0o644);
+        store.set_env("KEY", "s3cr3t");
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(Arc::clone(&store) as Arc<dyn SecretResolver>)
+            .telling(Arc::new(move |warning| {
+                heard.lock().expect("the list").push(warning.clone());
+            }));
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: "/home/alice/pw".to_owned(),
+                read: FileRead::FirstLine,
+            },
+            options: BTreeMap::from([("a".to_owned(), "${file:/srv/missing}".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::from([("b".to_owned(), "${KEY}".to_owned())]),
+        };
+        let warned = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+        let file = |path: &str| SecretRef::File {
+            path: path.to_owned(),
+            read: FileRead::Whole,
+        };
+
+        resolve.resolve(&settings).await.expect_err("it fails");
+        assert_eq!(*told.lock().expect("the list"), [warned("/home/alice/pw")]);
+        assert_eq!(
+            store.reads(),
+            [
+                SecretRef::File {
+                    path: "/home/alice/pw".to_owned(),
+                    read: FileRead::FirstLine,
+                },
+                file("/srv/missing"),
+            ]
+        );
+
+        // A location of a repository reached at several, whose password
+        // was read before it.
+        told.lock().expect("the list").clear();
+        let before = store.reads().len();
+        let location = RepositorySettings {
+            password: SecretRef::Inline(SecretValue::new("hunter2")),
+            options: BTreeMap::from([("c".to_owned(), "${file:/home/alice/c}".to_owned())]),
+            options_hot: BTreeMap::from([("a".to_owned(), "${file:/srv/missing}".to_owned())]),
+            ..settings
+        };
+        resolve
+            .resolve_location(
+                &location,
+                &SecretValue::new("hunter2"),
+                &mut JobReferences::default(),
+            )
+            .await
+            .expect_err("it fails");
+        assert_eq!(*told.lock().expect("the list"), [warned("/home/alice/c")]);
+        assert_eq!(
+            store.reads()[before..],
+            [file("/home/alice/c"), file("/srv/missing")]
+        );
+    }
 }

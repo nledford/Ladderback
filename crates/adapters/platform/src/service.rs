@@ -232,6 +232,12 @@ impl UserService {
     pub fn file(&self) -> &Path {
         &self.file
     }
+
+    /// Whether to tell the user how to keep the service running while they
+    /// are logged out (`loginctl enable-linger`, #546).
+    pub async fn should_hint_lingering(&self) -> bool {
+        todo!()
+    }
 }
 
 #[async_trait]

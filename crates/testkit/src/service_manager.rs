@@ -1,18 +1,21 @@
 //! Stand-ins for the user's service manager (operations §12): a `systemctl`
 //! and a `launchctl` that keep, in a scratch folder, which services they
-//! run, and a list of every call with the environment it came with. A test
-//! that puts [`FakeServiceManagers::bin`] first, or alone, on the `PATH` of
-//! what it runs never reaches the real managers.
+//! run, a `loginctl` that says whether the user lingers, and a list of every
+//! call with the environment it came with. A test that puts
+//! [`FakeServiceManagers::bin`] first, or alone, on the `PATH` of what it
+//! runs never reaches the real managers.
 //!
 //! Each knows only the calls Ladderback makes: `systemctl --user` with
 //! `daemon-reload`, `enable <file>`, `restart <unit>` and `disable --now
 //! <unit>`; `launchctl` with `print`, `enable`, `bootstrap` and `bootout` in
-//! the `gui/<uid>` domain. They answer what the real ones answer to a call
-//! that can't succeed: an `enable` of a missing file, a `bootstrap` of a
-//! service already running, a `bootout` of one that isn't. Told to, the
-//! `launchctl` keeps an agent it booted out for a while, as the real one
-//! does while the agent's program is still stopping
-//! ([`FakeServiceManagers::stop_slowly`]).
+//! the `gui/<uid>` domain; `loginctl show-user <uid> -p Linger`. They answer
+//! what the real ones answer to a call that can't succeed: an `enable` of a
+//! missing file, a `bootstrap` of a service already running, a `bootout` of
+//! one that isn't. Told to, the `launchctl` keeps an agent it booted out for
+//! a while, as the real one does while the agent's program is still
+//! stopping ([`FakeServiceManagers::stop_slowly`]), and the `loginctl` says
+//! the user lingers ([`FakeServiceManagers::linger`]) or fails
+//! ([`FakeServiceManagers::refuse_linger_check`]).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -85,8 +88,19 @@ const LAUNCHCTL: &str = r#"case "$1" in
 esac
 "#;
 
+/// The user doesn't linger unless told to, as on a machine where nobody ran
+/// `loginctl enable-linger`.
+const LOGINCTL: &str = r#"[ "$#" = 4 ] && [ "$1" = show-user ] && [ "$3" = -p ] && [ "$4" = Linger ] || { echo "only show-user <uid> -p Linger is faked" >&2; exit 64; }
+if [ -f "$state/linger-refusal" ]; then
+  IFS= read -r words < "$state/linger-refusal"
+  printf '%s\n' "$words" >&2
+  exit 1
+fi
+if [ -f "$state/lingers" ]; then echo Linger=yes; else echo Linger=no; fi
+"#;
+
 impl FakeServiceManagers {
-    /// Writes both stand-ins into `root/bin`, keeping their state in
+    /// Writes the stand-ins into `root/bin`, keeping their state in
     /// `root/state`.
     ///
     /// # Panics
@@ -99,7 +113,11 @@ impl FakeServiceManagers {
         fs::create_dir_all(fakes.bin()).expect("the stand-ins' folder");
         fs::create_dir_all(fakes.state()).expect("the stand-ins' state folder");
         let prelude = PRELUDE.replace("@STATE@", &fakes.state().display().to_string());
-        for (name, body) in [("systemctl", SYSTEMCTL), ("launchctl", LAUNCHCTL)] {
+        for (name, body) in [
+            ("systemctl", SYSTEMCTL),
+            ("launchctl", LAUNCHCTL),
+            ("loginctl", LOGINCTL),
+        ] {
             let path = fakes.bin().join(name);
             // Written while no child starts: a child forked meanwhile would
             // hold the file open for writing, and running it would fail with
@@ -113,7 +131,7 @@ impl FakeServiceManagers {
         fakes
     }
 
-    /// The folder holding `systemctl` and `launchctl`.
+    /// The folder holding `systemctl`, `launchctl` and `loginctl`.
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
     }
@@ -132,7 +150,11 @@ impl FakeServiceManagers {
     pub fn commands(&self) -> Vec<String> {
         self.calls()
             .lines()
-            .filter(|line| line.starts_with("systemctl ") || line.starts_with("launchctl "))
+            .filter(|line| {
+                ["systemctl ", "launchctl ", "loginctl "]
+                    .iter()
+                    .any(|program| line.starts_with(program))
+            })
             .map(str::to_owned)
             .collect()
     }
@@ -185,5 +207,25 @@ impl FakeServiceManagers {
     /// When the state folder can't be written.
     pub fn stop_slowly(&self, checks: u32) {
         fs::write(self.state().join("stop-slowly"), format!("{checks}\n")).expect("the slow stop");
+    }
+
+    /// Makes `loginctl` say from now on that the user lingers.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn linger(&self) {
+        fs::write(self.state().join("lingers"), "").expect("the lingering");
+    }
+
+    /// Makes each `loginctl` call from now on fail with exit code 1, saying
+    /// `words` on its stderr; `systemctl` and `launchctl` answer as before.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn refuse_linger_check(&self, words: &str) {
+        fs::write(self.state().join("linger-refusal"), format!("{words}\n"))
+            .expect("the linger check's refusal");
     }
 }
