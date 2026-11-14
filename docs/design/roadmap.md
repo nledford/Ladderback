@@ -158,6 +158,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [89](decisions/89-agent-proposed-setup.md) | How an AI agent proposes a backup setup for a person to confirm |
 | [90](decisions/90-the-build-a-program-names.md) | The build a program names beside its version |
 | [91](decisions/91-the-operations-a-start-ends-are-announced.md) | The operations a start ends are announced |
+| [92](decisions/92-the-daemons-stop-has-a-limit.md) | The daemon's stop has a limit |
 
 ## 17. Open questions
 
