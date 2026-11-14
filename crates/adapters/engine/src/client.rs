@@ -1300,6 +1300,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 // A server refused the credentials (decision 85): nothing was
                 // read or written, and the code says it all.
                 ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused,
+                // No key opened with the repository's password (#481): the
+                // code a repository of several locations fails with too.
+                ErrorCode::PasswordNotAccepted => FailureReason::PasswordNotAccepted,
                 // A worker only ever says one of the codes above or
                 // `operation-failed`. The daemon's own codes are the log's
                 // words for what the daemon saw, the request-check codes
@@ -1335,7 +1338,6 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::DaemonStopped
                 | ErrorCode::NoLocationUsable
                 | ErrorCode::NoLocationRuleHolds
-                | ErrorCode::PasswordNotAccepted
                 | ErrorCode::HostNotAllowed
                 | ErrorCode::OriginNotAllowed
                 | ErrorCode::JsonRequired

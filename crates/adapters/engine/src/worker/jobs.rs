@@ -192,7 +192,7 @@ pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobErro
             &KeyOptions::default(),
             &ConfigOptions::default(),
         )
-        .map_err(|error| repository_exists(*error))?;
+        .map_err(|error| init_failure(spec, *error))?;
     // A hot/cold repository keeps its config in both halves: `init` wrote
     // the cold half's, `init_hot` writes the hot half's.
     if spec.repo_hot.is_some() {
@@ -203,17 +203,20 @@ pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobErro
     }))
 }
 
-/// The one refusal `init` gives that the agent reports as a code of its own:
-/// a repository already exists at the location (rustic says so when either
-/// half holds a config file), and nothing was written. Every other failure
-/// keeps rustic's words, as `operation-failed`.
-fn repository_exists(error: rustic_core::RusticError) -> JobError {
+/// The refusals `init` gives that the agent reports as codes of their own: a
+/// repository already exists at the location (rustic says so when either
+/// half holds a config file), and nothing was written; or a REST server
+/// refused the credentials, told by the status check opening makes (#484).
+/// Every other failure keeps rustic's words, as `operation-failed`.
+fn init_failure(spec: &RepositorySpec, error: rustic_core::RusticError) -> JobError {
     let detail = error.display_log();
     if detail.contains("Config file already exists") {
         JobError::Failed {
             code: api::ErrorCode::RepositoryExists,
             detail,
         }
+    } else if let Some(refused) = location::credentials_refused(spec, &error) {
+        refused
     } else {
         JobError::failed(detail)
     }

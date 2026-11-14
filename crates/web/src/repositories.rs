@@ -197,6 +197,9 @@ pub(crate) fn rereads_list(answered: bool, phase: Phase) -> bool {
 pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Field> {
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
+        // The repository answered, and the password typed opened none of
+        // its keys (#481).
+        ErrorCode::PasswordNotAccepted => Some(Field::Password),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable

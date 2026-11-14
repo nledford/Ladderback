@@ -64,9 +64,10 @@ pub(crate) fn new_repository(
 ///
 /// A half on OpenDAL's `fs` whose root folder isn't there fails the job
 /// before its backend is set up, which would make that folder (decision 53).
-/// When the repository doesn't open, and only then, a REST server's refusal
-/// of the credentials fails the job with `credentials-refused` (#478), and
-/// its folders are looked at: when each half is a folder on this machine
+/// When the repository doesn't open, and only then: a password that opens no
+/// key fails the job with `password-not-accepted` (#481); a REST server's
+/// refusal of the credentials with `credentials-refused` (#478); and its
+/// folders are looked at: when each half is a folder on this machine
 /// holding nothing of a repository, the job fails with
 /// `repository-not-found`, and otherwise with the error opening gave, as it
 /// always did. A repository that opens costs no extra look.
@@ -84,13 +85,16 @@ pub(crate) fn open(
     let repository = match new_repository(ctx, spec)?.open(&credentials) {
         Ok(repository) => repository,
         Err(error) => {
-            if let Some(status) = refusal(spec, &error) {
+            // rustic's code for "no key opens with this password": the
+            // backend answered, so no refusal of the credentials is asked for.
+            if error.is_code(WRONG_PASSWORD) {
                 return Err(JobError::Failed {
-                    code: ErrorCode::CredentialsRefused,
-                    detail: format!(
-                        "the server answered {status}: it refused the credentials sent for the repository"
-                    ),
+                    code: ErrorCode::PasswordNotAccepted,
+                    detail: "no key of the repository opens with its password".to_owned(),
                 });
+            }
+            if let Some(refused) = credentials_refused(spec, &error) {
+                return Err(refused);
             }
             if no_repository_there(spec) {
                 return Err(JobError::Failed {
@@ -203,6 +207,18 @@ fn refusal(spec: &RepositorySpec, error: &RusticError) -> Option<StatusCode> {
             answer(listed.err()?.as_ref()).flatten().filter(refuses)
         }),
     }
+}
+
+/// The job's failure when a REST server the repository is on refused its
+/// credentials, as [`refusal`] tells it from `error`: opening's and creating's
+/// one check (#478, #484).
+pub(crate) fn credentials_refused(spec: &RepositorySpec, error: &RusticError) -> Option<JobError> {
+    refusal(spec, error).map(|status| JobError::Failed {
+        code: ErrorCode::CredentialsRefused,
+        detail: format!(
+            "the server answered {status}: it refused the credentials sent for the repository"
+        ),
+    })
 }
 
 /// What `error`'s chain says of an HTTP request: `None` when it holds no
@@ -613,12 +629,12 @@ mod tests {
             password: SecretValue::new(wrong),
             ..spec_at(&repository.to_string_lossy())
         };
-        // A repository that is there, with the wrong password, is the
-        // engine's own failure: only a missing config is not-found.
+        // A repository that is there, with the wrong password, is a password
+        // not accepted (#481): only a missing config is not-found.
         let Err(JobError::Failed { code, detail }) = open(&ctx, &spec) else {
             panic!("a wrong password must fail the job");
         };
-        assert_eq!(code, api::ErrorCode::OperationFailed);
+        assert_eq!(code, api::ErrorCode::PasswordNotAccepted);
         assert!(!detail.is_empty());
         assert!(!detail.contains(wrong), "the password is in {detail}");
     }
