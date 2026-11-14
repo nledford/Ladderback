@@ -95,13 +95,23 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
 }
 
 /// Says in the log, once at load, each secret the configuration holds as
-/// text (§10.2): the repository and the setting, in the catalog's words,
-/// never the secret (I4).
+/// text (§10.2), in every location, and each location that sends its
+/// credentials where whoever answers at its address can read them (§10.6):
+/// the repository and the setting or the cause, in the catalog's words,
+/// never the secret (I4) nor the address.
 fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     for (alias, repository) in config.repositories() {
-        for secret in repository.settings.inline_secrets() {
-            let (code, args) = inline_secret_warning(&repository.settings, &secret, 1);
+        let secrets = inline_secret_warnings(repository)
+            .into_iter()
+            .map(|(_, code, args)| (code, args));
+        let exposed = repository.location_warnings().into_iter().map(|warning| {
+            (
+                WarningCode::LocationPlainHttpCredentials,
+                exposed_args(repository, warning),
+            )
+        });
+        for (code, args) in secrets.chain(exposed) {
             let message = localizer.warning(code, &args, None);
             log::warn!("repository {}: {message}", alias.as_str());
         }
@@ -174,6 +184,40 @@ fn glob_never_matches(
     let mut args = vec![("plan", text(plan)), ("glob", text(glob))];
     args.extend(absolute.map(|absolute| ("absolute", text(absolute))));
     (WarningCode::GlobNeverMatches, args)
+}
+
+/// A warning's arguments, by name.
+type WarningArgs = Vec<(&'static str, MsgArg)>;
+
+/// The warning for each secret `repository` holds as text, with the
+/// position, from 1, of the location that holds it.
+fn inline_secret_warnings(repository: &RepositoryConfig) -> Vec<(u8, WarningCode, WarningArgs)> {
+    let settings = repository.location_settings();
+    repository
+        .inline_secrets()
+        .into_iter()
+        .filter_map(|(position, secret)| {
+            let at = settings.get(usize::from(position).checked_sub(1)?)?;
+            let (code, args) = inline_secret_warning(at, &secret, position);
+            Some((position, code, args))
+        })
+        .collect()
+}
+
+/// The arguments of the `location-plain-http-credentials` warning about
+/// `warning`, a location of `repository`: by position, cause and whether it
+/// has a rule, and whether the repository has one location or several, for
+/// the text of a repository of one names no location (#473).
+fn exposed_args(
+    repository: &RepositoryConfig,
+    warning: domain::planning::LocationWarning,
+) -> Vec<(&'static str, MsgArg)> {
+    vec![
+        ("position", text(warning.position)),
+        ("cause", text(warning.cause.code())),
+        ("rule", text(warning.rule_code())),
+        ("locations", text(repository.locations_code())),
+    ]
 }
 
 /// The warning for a secret the configuration holds as text, with its
@@ -1246,7 +1290,8 @@ impl Unbuilt {
 /// Logs that plan `plan`'s run, started by `trigger`, didn't start.
 fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
     log::warn!(
-        "the {trigger:?} run of plan {} didn't start: {}",
+        "{} of plan {} didn't start: {}",
+        run_named(trigger),
         plan.as_str(),
         start_refused(error)
     );
@@ -1255,8 +1300,23 @@ fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
 /// A run started by `trigger`, in the log's words: "the scheduled run",
 /// never the trigger's name in the code.
 fn run_named(trigger: Trigger) -> &'static str {
-    let _ = trigger;
-    todo!()
+    match trigger {
+        Trigger::Schedule => "the scheduled run",
+        Trigger::Manual => "the manual run",
+        Trigger::CatchUp => "the catch-up run",
+        Trigger::Retry => "the retry",
+        Trigger::Hub => "the hub's run",
+        Trigger::Mcp => "the MCP client's run",
+    }
+}
+
+/// `code` as the API and the page name it, such as `secret-missing`, never
+/// its name in the code.
+fn wire_name(code: api::ErrorCode) -> String {
+    match serde_json::to_value(code) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => format!("{code:?}"),
+    }
 }
 
 /// Why a plan's run didn't start, for the daemon's log: a code, and for a
@@ -1267,7 +1327,10 @@ fn start_refused(error: &StartError) -> String {
     match error {
         StartError::UnknownPlan => "the plan or its repository isn't configured".to_owned(),
         StartError::Unavailable { code, .. } => {
-            format!("the configuration can't be read or used ({code:?})")
+            format!(
+                "the configuration can't be read or used ({})",
+                wire_name(*code)
+            )
         }
         StartError::SecretRefused(refusal) => {
             let named = |key: &str| {
@@ -1282,8 +1345,8 @@ fn start_refused(error: &StartError) -> String {
                 _ => String::new(),
             };
             format!(
-                "a secret of its repository was refused ({:?}){place}",
-                refusal.code
+                "a secret of its repository was refused ({}){place}",
+                wire_name(refusal.code)
             )
         }
     }
@@ -1308,7 +1371,8 @@ impl PlanRuns for PlanRunner {
                 // As a refusal by hand is logged (#483), never the refusal's
                 // words, which only the history shows, masked (I4).
                 log::warn!(
-                    "the {trigger:?} run of plan {} didn't start, and ends as failed operation {}: {}",
+                    "{} of plan {} didn't start, and ends as failed operation {}: {}",
+                    run_named(trigger),
                     plan.as_str(),
                     operation.as_uuid().hyphenated(),
                     start_refused(&StartError::SecretRefused(refusal))
@@ -2896,38 +2960,28 @@ fn listed_repository(
         repository.maintenance,
         create_offered,
     );
-    let location_settings = repository.location_settings();
-    row.warnings.extend(
-        repository
-            .inline_secrets()
+    let dto = |code, args: Vec<(&'static str, MsgArg)>| api::WarningDto {
+        code,
+        args: args
             .into_iter()
-            .filter(|(position, _)| *position > 1)
-            .filter_map(|(position, secret)| {
-                let settings = location_settings.get(usize::from(position).checked_sub(1)?)?;
-                let (code, args) = inline_secret_warning(settings, &secret, position);
-                Some(api::WarningDto {
-                    code,
-                    args: args
-                        .into_iter()
-                        .map(|(name, value)| (name.to_owned(), value))
-                        .collect(),
-                })
-            }),
+            .map(|(name, value)| (name.to_owned(), value))
+            .collect(),
+    };
+    // The row holds the first location's secrets already.
+    row.warnings.extend(
+        inline_secret_warnings(repository)
+            .into_iter()
+            .filter(|(position, _, _)| *position > 1)
+            .map(|(_, code, args)| dto(code, args)),
     );
-    let locations = || ("locations".to_owned(), text(repository.locations_code()));
     row.warnings
         .extend(repository.location_warnings().into_iter().map(|warning| {
-            api::WarningDto {
-                code: api::WarningCode::LocationPlainHttpCredentials,
-                args: [
-                    ("position".to_owned(), text(warning.position)),
-                    ("cause".to_owned(), text(warning.cause.code())),
-                    ("rule".to_owned(), text(warning.rule_code())),
-                    locations(),
-                ]
-                .into(),
-            }
+            dto(
+                api::WarningCode::LocationPlainHttpCredentials,
+                exposed_args(repository, warning),
+            )
         }));
+    let locations = || ("locations".to_owned(), text(repository.locations_code()));
     row.warnings.extend(
         repository
             .rule_notes(plans, reads_names)
@@ -5048,7 +5102,7 @@ mod tests {
             said.iter().any(|(level, line)| *level == log::Level::Warn
                 && line.contains(&hyphenated)
                 && line.contains("the configuration can't be read")
-                && line.contains("(ConfigInvalid)")),
+                && line.contains("(config-invalid)")),
             "the log says why the backup ended: {said:?}"
         );
     }
