@@ -101,7 +101,11 @@ fn event(kind: EventKind) -> Event {
         plan: PlanId::parse("demo-plan").ok(),
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).unwrap_or(Timestamp::UNIX_EPOCH),
-        code: (kind == EventKind::BackupFailed).then_some("operation-failed"),
+        codes: if kind == EventKind::BackupFailed {
+            vec!["operation-failed"]
+        } else {
+            Vec::new()
+        },
         attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 1, of: 3 }),
     }
 }

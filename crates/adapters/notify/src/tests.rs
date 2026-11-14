@@ -17,7 +17,7 @@ fn event(kind: EventKind) -> Event {
         plan: PlanId::parse("demo-plan").ok(),
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).expect("a time"),
-        code: Some("operation-failed"),
+        codes: vec!["operation-failed"],
         attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 2, of: 3 }),
     }
 }
@@ -121,11 +121,22 @@ fn a_webhook_is_posted_which_retry_is_planned_and_when_it_runs() {
 }
 
 #[test]
+fn a_webhook_is_posted_the_codes_of_a_backups_warnings_as_its_code() {
+    let warned = Event {
+        codes: vec!["source-unreadable", "hook-warning"],
+        ..event(EventKind::BackupWarning)
+    };
+    let body = webhook_body(&warned, "demo text");
+    assert_eq!(body["event"], "backup.warning");
+    assert_eq!(body["code"], "source-unreadable, hook-warning");
+}
+
+#[test]
 fn a_fact_the_event_lacks_is_null_in_a_webhook_body() {
     let mut event = event(EventKind::BackupStarted);
     event.plan = None;
     event.repository = None;
-    event.code = None;
+    event.codes = Vec::new();
     let body = webhook_body(&event, "");
     for key in ["plan", "repository", "code", "attempt", "attempts"] {
         assert_eq!(body[key], serde_json::Value::Null, "{key}");
@@ -175,7 +186,7 @@ fn a_default_message_without_a_plan_repository_or_code_names_the_operation_and_n
     let localizer = localizer();
     let mut backup = event(EventKind::BackupFailed);
     backup.plan = None;
-    backup.code = None;
+    backup.codes = Vec::new();
     assert_eq!(
         default_message(&localizer, &backup),
         "The backup of 01930000-0000-7000-8000-000000000001 failed (none)."
@@ -284,4 +295,93 @@ fn a_client_error_says_nothing_but_that_the_client_failed() {
         ClientError.to_string(),
         "the notifications client couldn't be built"
     );
+}
+
+#[test]
+fn each_event_has_a_title_that_says_what_happened() {
+    let localizer = localizer();
+    let titles: Vec<String> = EventKind::ALL
+        .into_iter()
+        .map(|kind| title(&localizer, kind))
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Backup started",
+            "Backup succeeded",
+            "Backup finished with warnings",
+            "Backup failed",
+            "Backup will be retried",
+            "Forgetting old snapshots failed",
+            "Prune failed",
+            "Check failed",
+        ]
+    );
+}
+
+#[test]
+fn printable_ascii_is_a_header_as_it_is_and_other_text_an_encoded_word() {
+    assert_eq!(header_text("Backup failed"), "Backup failed");
+    assert_eq!(header_text("~ !"), "~ !");
+    // ntfy decodes an RFC 2047 encoded word in any header it reads.
+    assert_eq!(header_text("Café 1"), "=?UTF-8?Q?Caf=C3=A9_1?=");
+    assert_eq!(header_text("a\tb"), "=?UTF-8?Q?a=09b?=");
+    assert_eq!(header_text("a\u{7f}"), "=?UTF-8?Q?a=7F?=");
+    // Plain text that looks like an encoded word is encoded, so ntfy reads
+    // it as it was written.
+    assert_eq!(header_text("=?x?="), "=?UTF-8?Q?=3D=3Fx=3F=3D?=");
+}
+
+/// The request that delivers a backup's failure to an ntfy topic, in the
+/// agent's `locale`, if any, with `message`.
+fn ntfy_request(locale: Option<&str>, message: Message) -> reqwest::Request {
+    let notifier = HttpNotifier::new(localizer(), Duration::from_secs(1)).expect("a client");
+    let notification = Notification {
+        destination: app::ports::Destination {
+            kind: ChannelKind::Ntfy,
+            url: domain::secrets::SecretValue::new("http://127.0.0.1:9/canary-topic-url"),
+            auth: None,
+        },
+        event: event(EventKind::BackupFailed),
+        message,
+        locale: locale.map(|locale| Locale::parse(locale).expect("a locale")),
+    };
+    notifier
+        .request(
+            address(notification.destination.url.expose()).expect("an address"),
+            &notification,
+        )
+        .build()
+        .expect("a request")
+}
+
+fn header<'a>(request: &'a reqwest::Request, name: &str) -> &'a str {
+    request
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+}
+
+#[test]
+fn an_ntfy_topic_is_sent_the_events_title_and_its_name_as_a_tag() {
+    for message in [Message::Default, Message::Custom("demo text".to_owned())] {
+        let request = ntfy_request(None, message);
+        assert_eq!(header(&request, "Title"), "Backup failed");
+        assert_eq!(header(&request, "Tags"), "backup.failed");
+    }
+}
+
+#[test]
+fn an_ntfy_title_is_written_in_the_agents_locale_whatever_the_message() {
+    let pseudo = title(
+        &Localizer::new(&["en-XA".parse().expect("a locale")]),
+        EventKind::BackupFailed,
+    );
+    assert_ne!(pseudo, "Backup failed");
+    for message in [Message::Default, Message::Custom("demo text".to_owned())] {
+        let request = ntfy_request(Some("en-XA"), message);
+        assert_eq!(header(&request, "Title"), header_text(&pseudo));
+        assert_eq!(header(&request, "Tags"), "backup.failed");
+    }
 }

@@ -436,7 +436,7 @@ async fn serving_with_plan(agent: &mut Agent, plan: String) {
 
 /// Writes the daemon's config.toml: the scenario's scratch repository as
 /// `demo` and its plan over the scenario's source folder, with the agent's
-/// hooks and hostname, the repository's password, and the plan's host,
+/// hooks, hostname and locale, the repository's password, and the plan's host,
 /// source filter and hooks the scenario set, keeping the last `keep_last`
 /// snapshots when given, and everything otherwise. Every step that changes
 /// the hooks, password, hostname, host or source filter sets it on the
@@ -466,6 +466,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
     plan.hooks = agent.backup.plan_hooks.clone();
     let settings = domain::planning::AgentSettings {
         hostname: agent.backup.agent_hostname.clone(),
+        locale: agent.notifications.locale.clone(),
         ..domain::planning::AgentSettings::default()
     };
     let config = domain::planning::AgentConfig::new(

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use jiff::Timestamp;
 
 use super::*;
-use crate::execution::{FailureReason, Target, Trigger};
+use crate::execution::{FailureReason, Operation, Target, Trigger, WarningKind};
 use crate::planning::{AgentConfig, AgentSettings, Hooks, Plan, Source};
 use crate::secrets::{CommandLine, SecretValue};
 use crate::{RepositoryAlias, Uuid};
@@ -53,8 +53,21 @@ fn backup_event(kind: EventKind, plan_id: Option<&str>) -> Event {
         plan: plan_id.map(plan),
         repository: Some(RepositoryAlias::parse("nas").unwrap()),
         at: at(),
-        code: None,
+        codes: Vec::new(),
         attempt: None,
+    }
+}
+
+/// The facts of `operation`, with the repository alias it records and no
+/// warning.
+fn subject(operation: &Operation) -> Subject<'_> {
+    Subject {
+        operation: operation.id(),
+        kind: operation.kind(),
+        target: operation.target(),
+        repository: operation.repository_alias(),
+        status: operation.status(),
+        warnings: &[],
     }
 }
 
@@ -185,9 +198,9 @@ fn a_failed_operation_tells_its_stored_code_and_never_its_detail() {
             at(),
         )
         .unwrap();
-    let event = Event::ended(Subject::of(&failed), Outcome::Failed, at()).unwrap();
+    let event = Event::ended(subject(&failed), Outcome::Failed, at()).unwrap();
     assert_eq!(event.kind, EventKind::BackupFailed);
-    assert_eq!(event.code, Some("operation-failed"));
+    assert_eq!(event.codes, ["operation-failed"]);
     assert_eq!(event.plan, Some(plan("home")));
     assert_eq!(event.operation, failed.id());
     assert_eq!(event.at, at());
@@ -197,13 +210,13 @@ fn a_failed_operation_tells_its_stored_code_and_never_its_detail() {
 #[test]
 fn a_started_backup_tells_its_plan_and_a_maintenance_start_is_no_event() {
     let backup = operation(OperationKind::Backup, Some("home"));
-    let event = Event::started(Subject::of(&backup), at()).unwrap();
+    let event = Event::started(subject(&backup), at()).unwrap();
     assert_eq!(event.kind, EventKind::BackupStarted);
     assert_eq!(event.plan, Some(plan("home")));
-    assert_eq!(event.code, None);
+    assert_eq!(event.codes, Vec::<&str>::new());
     let prune = operation(OperationKind::Prune, None)
         .with_repository_alias(RepositoryAlias::parse("nas").unwrap());
-    assert_eq!(Event::started(Subject::of(&prune), at()), None);
+    assert_eq!(Event::started(subject(&prune), at()), None);
 }
 
 #[test]
@@ -211,22 +224,43 @@ fn a_maintenance_failure_names_its_repository_by_alias() {
     let mut prune = operation(OperationKind::Prune, None)
         .with_repository_alias(RepositoryAlias::parse("nas").unwrap());
     prune.fail(FailureReason::DeadlinePassed, at()).unwrap();
-    let event = Event::ended(Subject::of(&prune), Outcome::Failed, at()).unwrap();
+    let event = Event::ended(subject(&prune), Outcome::Failed, at()).unwrap();
     assert_eq!(event.kind, EventKind::PruneFailed);
     assert_eq!(
         event.repository,
         Some(RepositoryAlias::parse("nas").unwrap())
     );
-    assert_eq!(event.code, Some("deadline-passed"));
+    assert_eq!(event.codes, ["deadline-passed"]);
 }
 
 #[test]
 fn a_succeeded_ending_has_no_code() {
     let mut backup = operation(OperationKind::Backup, Some("home"));
     backup.succeed(at()).unwrap();
-    let event = Event::ended(Subject::of(&backup), Outcome::Succeeded, at()).unwrap();
+    let event = Event::ended(subject(&backup), Outcome::Succeeded, at()).unwrap();
     assert_eq!(event.kind, EventKind::BackupSucceeded);
-    assert_eq!(event.code, None);
+    assert_eq!(event.codes, Vec::<&str>::new());
+}
+
+#[test]
+fn a_backup_that_warned_tells_the_code_of_each_kind_of_warning_once_in_the_order_they_came() {
+    let mut backup = operation(OperationKind::Backup, Some("home"));
+    backup.succeed(at()).unwrap();
+    let subject = Subject {
+        warnings: &[
+            WarningKind::SourceUnreadable,
+            WarningKind::Hook,
+            WarningKind::SourceUnreadable,
+        ],
+        ..subject(&backup)
+    };
+    let event = Event::ended(subject, Outcome::SucceededWithWarnings, at()).unwrap();
+    assert_eq!(event.kind, EventKind::BackupWarning);
+    assert_eq!(event.codes, ["source-unreadable", "hook-warning"]);
+    assert_eq!(
+        event.code().as_deref(),
+        Some("source-unreadable, hook-warning")
+    );
 }
 
 #[test]
@@ -237,11 +271,11 @@ fn a_failure_the_log_has_not_recorded_has_no_code_and_keeps_the_repository_it_is
     let nas = RepositoryAlias::parse("nas").unwrap();
     let subject = Subject {
         repository: Some(&nas),
-        ..Subject::of(&backup)
+        ..subject(&backup)
     };
     let event = Event::ended(subject, Outcome::Failed, at()).unwrap();
     assert_eq!(event.kind, EventKind::BackupFailed);
-    assert_eq!(event.code, None);
+    assert_eq!(event.codes, Vec::<&str>::new());
     assert_eq!(event.repository, Some(nas));
 }
 
@@ -259,7 +293,7 @@ fn a_planned_retry_tells_the_failed_backups_plan_and_code_its_attempt_and_when_i
         .unwrap();
     let runs: Timestamp = "2026-11-12T09:35:00Z".parse().unwrap();
     let attempt = Attempt { number: 2, of: 3 };
-    let event = Event::retrying(Subject::of(&failed), attempt, runs).unwrap();
+    let event = Event::retrying(subject(&failed), attempt, runs).unwrap();
     assert_eq!(
         event,
         Event {
@@ -268,7 +302,7 @@ fn a_planned_retry_tells_the_failed_backups_plan_and_code_its_attempt_and_when_i
             plan: Some(plan("home")),
             repository: Some(RepositoryAlias::parse("nas").unwrap()),
             at: runs,
-            code: Some("operation-failed"),
+            codes: vec!["operation-failed"],
             attempt: Some(attempt),
         }
     );
@@ -285,7 +319,7 @@ fn only_a_backup_is_told_as_retrying() {
         let mut failed = operation(kind, None);
         failed.fail(FailureReason::DeadlinePassed, at()).unwrap();
         assert_eq!(
-            Event::retrying(Subject::of(&failed), attempt, at()),
+            Event::retrying(subject(&failed), attempt, at()),
             None,
             "{kind:?}"
         );
@@ -651,7 +685,7 @@ mod templates {
 
     fn failed_event() -> Event {
         Event {
-            code: Some("operation-failed"),
+            codes: vec!["operation-failed"],
             ..backup_event(EventKind::BackupFailed, Some("home"))
         }
     }
@@ -676,6 +710,19 @@ mod templates {
         assert_eq!(
             template.as_str(),
             "Backup {{{plan}}} failed: {code}. }} done"
+        );
+    }
+
+    #[test]
+    fn a_warnings_codes_are_its_code_separated_by_commas() {
+        let template = Template::parse("{event} {plan} ({code})").unwrap();
+        let warned = Event {
+            codes: vec!["source-unreadable", "hook-warning"],
+            ..backup_event(EventKind::BackupWarning, Some("home"))
+        };
+        assert_eq!(
+            template.render(&warned),
+            "backup.warning home (source-unreadable, hook-warning)"
         );
     }
 

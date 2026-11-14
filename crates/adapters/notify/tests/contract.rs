@@ -222,7 +222,7 @@ async fn answer(mut stream: TcpStream, served: Arc<Served>) {
                 ChannelKind::Ntfy => Received {
                     kind,
                     ping: None,
-                    event: request.headers.get("title").cloned().unwrap_or_default(),
+                    event: request.headers.get("tags").cloned().unwrap_or_default(),
                     message: request.body.clone(),
                     auth: auth_of(&request.headers),
                 },

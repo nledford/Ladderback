@@ -3,7 +3,8 @@ Feature: Notification rules
   an ntfy topic or a healthchecks check (technical design §11). A rule may
   be for some plans only, and may write its messages with its own template.
   No notification carries a secret, a location or the engine's own words
-  (I4): only the facts of the event and the code of a failure.
+  (I4): only the facts of the event, the code of a failure or of each kind
+  of warning, and an ntfy topic's title, a sentence of the catalog.
 
   @e2e
   Scenario: A webhook on loopback is told of a backup that succeeded
@@ -11,6 +12,33 @@ Feature: Notification rules
     And Ladderback is serving on loopback with the plan "home"
     When the daemon runs a backup of the plan "home"
     Then the webhook is told "backup.succeeded" for the plan "home"
+
+  @e2e
+  Scenario: An ntfy topic is told of a backup that warned, under a title in words, tagged with the event and with the warning's code
+    Given an ntfy topic listening on loopback that the rule "warnings" sends "backup.warning" to with the template "{event}: {plan} ({code})"
+    And Ladderback is serving on loopback with the plan "home"
+    And the plan's before hook says "canary-hook-output" and exits 3, with on-failure warn
+    When the daemon runs a backup of the plan "home"
+    Then the ntfy topic is told "backup.warning: home (hook-warning)" under the title "Backup finished with warnings", tagged "backup.warning"
+    And nothing the ntfy topic is told shows its URL or "canary-hook-output"
+
+  @e2e
+  Scenario: An ntfy topic is told of a backup that failed under a title in words
+    Given an ntfy topic listening on loopback that the rule "failures" sends "backup.failed" to
+    And Ladderback is serving on loopback with the plan "home"
+    And the plan's before hook says "canary-hook-output" and exits 3, with on-failure error
+    When the daemon runs a backup of the plan "home"
+    Then the ntfy topic is told the default message under the title "Backup failed", tagged "backup.failed"
+    And nothing the ntfy topic is told shows its URL or "canary-hook-output"
+
+  @e2e
+  Scenario: An ntfy title is written in the agent's locale
+    Given an ntfy topic listening on loopback that the rule "failures" sends "backup.failed" to
+    And the agent's locale is "en-XA"
+    And Ladderback is serving on loopback with the plan "home"
+    And the plan's before hook says "canary-hook-output" and exits 3, with on-failure error
+    When the daemon runs a backup of the plan "home"
+    Then the ntfy topic is told the default message under the title "Ɓaaƈķuuƥ ƒaaiŀeeḓ", tagged "backup.failed"
 
   Rule: Each rule sends the events it names, for the plans it names, to its channel
 
@@ -69,6 +97,13 @@ Feature: Notification rules
       When the backup of "home" fails and the engine says "canary-engine-detail"
       Then "ops" is sent the message "backup.failed home nas operation-failed"
       And nothing "ops" is sent shows "canary-url-secret" or "canary-engine-detail"
+
+    Scenario: A template names the code of each kind of warning a backup had, once each, in the order they came
+      Given a webhook channel "ops" whose URL holds the canary "canary-url-secret"
+      And a rule "warnings" that sends "backup.warning" to "ops" with the template "{event} {plan} ({code})"
+      When the backup of "home" succeeds with the warnings "source-unreadable, hook-warning, source-unreadable"
+      Then "ops" is sent the message "backup.warning home (source-unreadable, hook-warning)"
+      And nothing "ops" is sent shows "canary-url-secret" or "canary-warning-detail"
 
     Scenario: A template names the repository of the plan that ran
       Given the plan "office" backs up to the repository "cloud"
