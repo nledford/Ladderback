@@ -11,7 +11,9 @@ use async_trait::async_trait;
 use domain::service::ServicePath;
 use testkit::service_manager::FakeServiceManagers;
 
-use super::{Environment, Kind, LAUNCHD_LABEL, SYSTEMD_UNIT, StopWait, Unavailable, UserService};
+use super::{
+    Environment, Kind, LAUNCHD_LABEL, STOP_LIMIT, SYSTEMD_UNIT, StopWait, Unavailable, UserService,
+};
 use super::{launchd_plist, systemd_unit};
 
 fn path(text: &str) -> ServicePath {
@@ -660,6 +662,59 @@ async fn launchd_has_no_lingering_to_tell_of() {
     let faked = Faked::new(Which::Launchd);
     assert!(!faked.service.should_hint_lingering().await);
     assert_eq!(faked.fakes.commands(), Vec::<String>::new());
+}
+
+/// `systemctl restart` and `disable --now` return only once the unit has
+/// stopped, which systemd gives up to its `TimeoutStopSec`: they are waited
+/// for while it stops, not given up at one call's limit (#543).
+#[tokio::test]
+async fn systemd_is_waited_for_while_the_unit_stops() {
+    let faked = Faked::new(Which::Systemd);
+    let service = faked.service.clone().with_limit(Duration::from_secs(1));
+    faked.fakes.stop_taking(Duration::from_millis(1_500));
+    service.install(&faked.program("bin")).await.unwrap();
+    assert!(faked.fakes.runs(SYSTEMD_UNIT));
+    service.remove().await.unwrap();
+    assert!(!faked.fakes.runs(SYSTEMD_UNIT));
+}
+
+/// The seconds the service file's manager gives the service to stop before
+/// it kills it: systemd's `TimeoutStopSec`, launchd's `ExitTimeOut`.
+fn kill_after_in(file: &str, systemd: bool) -> u64 {
+    let mut lines = file.lines().map(str::trim);
+    let value = if systemd {
+        lines.find_map(|line| line.strip_prefix("TimeoutStopSec="))
+    } else {
+        lines
+            .by_ref()
+            .find(|line| *line == "<key>ExitTimeOut</key>")
+            .and_then(|_| lines.next())
+            .and_then(|line| line.strip_prefix("<integer>"))
+            .and_then(|line| line.strip_suffix("</integer>"))
+    };
+    value
+        .unwrap_or_else(|| panic!("no stop timeout in {file}"))
+        .parse()
+        .unwrap()
+}
+
+/// A service told to stop takes up to what its file gives it; a call that
+/// waits for that stop waits longer, or a service taking all of it would be
+/// reported as a manager that didn't answer, or as one not letting it go.
+#[test]
+fn a_stop_is_waited_for_longer_than_the_manager_gives_the_service() {
+    let unit = systemd_unit(&path("/home/demo/.local/bin/ladderback"));
+    let plist = launchd_plist(
+        LAUNCHD_LABEL,
+        &path("/Users/demo/.local/bin/ladderback"),
+        &path("/Users/demo/Library/Logs/ladderback.log"),
+    );
+    for kill_after in [kill_after_in(&unit, true), kill_after_in(&plist, false)] {
+        assert!(
+            STOP_LIMIT > Duration::from_secs(kill_after),
+            "{STOP_LIMIT:?} isn't past the {kill_after} s the manager gives"
+        );
+    }
 }
 
 #[tokio::test]

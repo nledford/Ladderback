@@ -13,8 +13,10 @@
 //! missing file, a `bootstrap` of a service already running, a `bootout` of
 //! one that isn't. Told to, the `launchctl` keeps an agent it booted out for
 //! a while, as the real one does while the agent's program is still
-//! stopping ([`FakeServiceManagers::stop_slowly`]), and the `loginctl` says
-//! the user lingers ([`FakeServiceManagers::linger`]) or fails
+//! stopping ([`FakeServiceManagers::stop_slowly`]), the `systemctl` takes a
+//! while to return from a call that stops the unit, as the real one waits
+//! for the stop ([`FakeServiceManagers::stop_taking`]), and the `loginctl`
+//! says the user lingers ([`FakeServiceManagers::linger`]) or fails
 //! ([`FakeServiceManagers::refuse_linger_check`]).
 
 use std::fs;
@@ -51,9 +53,11 @@ case "$2" in
     : > "$state/enabled-${3##*/}" ;;
   restart)
     [ -f "$state/enabled-$3" ] || { echo "Failed to restart $3: Unit $3 not found." >&2; exit 5; }
+    [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
     : > "$state/runs-$3" ;;
   disable)
     [ "$3" = --now ] || { echo "only disable --now is faked" >&2; exit 64; }
+    [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
     /bin/rm -f "$state/enabled-$4" "$state/runs-$4" ;;
   *) echo "unknown command $2" >&2; exit 64 ;;
 esac
@@ -227,5 +231,20 @@ impl FakeServiceManagers {
     pub fn refuse_linger_check(&self, words: &str) {
         fs::write(self.state().join("linger-refusal"), format!("{words}\n"))
             .expect("the linger check's refusal");
+    }
+
+    /// Makes each `systemctl restart` and `disable --now` from now on take
+    /// `took` before it returns, as the real one does while the unit it
+    /// stops is still stopping.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn stop_taking(&self, took: std::time::Duration) {
+        fs::write(
+            self.state().join("stop-takes"),
+            format!("{:.3}\n", took.as_secs_f64()),
+        )
+        .expect("the stop's length");
     }
 }

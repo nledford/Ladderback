@@ -15,16 +15,21 @@
 )]
 
 use std::ffi::OsString;
+use std::future::IntoFuture as _;
 use std::io;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use api::MsgArg;
 use app::ports::Random;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::random::OsRandom;
+
+use composition::LOG_CLOSE_BOUND;
+use shutdown::{REQUESTS_BOUND, Step, Stopping, WORKERS_BOUND};
 
 mod build_info;
 mod composition;
@@ -33,6 +38,7 @@ mod output;
 mod profiles;
 mod service;
 mod set_password;
+mod shutdown;
 
 #[derive(Parser)]
 #[command(
@@ -263,6 +269,7 @@ fn run_daemon(
         log: operation_log,
         lock,
         background,
+        workers,
     } = match runtime.block_on(composition::daemon(sign_in, exposure)) {
         Ok(daemon) => daemon,
         Err(refused) => {
@@ -270,7 +277,9 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
-    let code: io::Result<ExitCode> = runtime.block_on(async {
+    // What came of serving, and the stop once it began; what is said on
+    // stderr before then can fail the whole of it.
+    let ran: io::Result<(io::Result<ExitCode>, Option<Stopping>)> = runtime.block_on(async {
         let listener = match http_adapter::GatedListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -279,7 +288,7 @@ fn run_daemon(
                     msg::CLI_CANNOT_LISTEN,
                     &[("address", text(listen)), ("detail", text(error))],
                 )?;
-                return Ok(ExitCode::FAILURE);
+                return Ok((Ok(ExitCode::FAILURE), None));
             }
         };
         let bound = listener.local_addr();
@@ -318,40 +327,97 @@ fn run_daemon(
         // The queue's leftovers and the scheduler start once the daemon
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
+        let runs = background.runs();
         let scheduled = tokio::spawn(background.run(random));
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(hosts),
             state,
         );
-        let served = axum::serve(
+        let (cause_tx, mut cause) = tokio::sync::oneshot::channel();
+        let serving = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
         )
-        .with_graceful_shutdown(shutdown_signal())
-        .await;
-        // No run starts once the daemon stops serving; one already started
-        // ends as the runtime drops it, and the next start recovers it.
+        .with_graceful_shutdown(async move {
+            let _ = cause_tx.send(shutdown_signal().await);
+        })
+        .into_future();
+        tokio::pin!(serving);
+        // Told to stop, the server stops taking connections and waits for
+        // the requests still open; the stop begins then, not once they end.
+        // With no request open, the server ends in the same poll that sees
+        // the signal, so its cause is looked for then too.
+        let (cause, served) = tokio::select! {
+            served = &mut serving => (cause.try_recv().unwrap_or("the server ended"), Some(served)),
+            Ok(cause) = &mut cause => (cause, None),
+        };
+        // At the signal, before anything else: no scheduled run starts, the
+        // workers are asked to stop, as a cancel stops one, so a backup that
+        // archives winds down and saves the index of the packs it wrote
+        // (decision 50), and every run is frozen where it stands. A run
+        // frozen starts no worker, runs no hook, records no end and
+        // announces none, whatever its worker, its timers or its turn in the
+        // queue do from now on; a worker it lets go of still gets its SIGTERM
+        // and its grace, since the stop was asked for first (decision 92).
         scheduled.abort();
-        match served {
-            Ok(()) => Ok(ExitCode::SUCCESS),
-            Err(error) => {
-                say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])?;
-                Ok(ExitCode::FAILURE)
+        let workers_stopped = workers.stop();
+        runs.freeze();
+        log::info!("stopping ({cause})");
+        let mut stop = Stopping::new(shutdown::LIMIT);
+        let served = match served {
+            Some(served) => {
+                stop.waited(Step::OpenRequests, Duration::ZERO, true);
+                Some(served)
             }
-        }
+            None => stop.wait(Step::OpenRequests, REQUESTS_BOUND, serving).await,
+        };
+        stop.wait(Step::Workers, WORKERS_BOUND, workers_stopped)
+            .await;
+        // Then the operation log ends what is still running as
+        // `daemon-shut-down` and closes, inside the runtime, so a write in
+        // flight ends as it would have rather than being cut off, and nothing
+        // of the log outlives the daemon. A stop that never gets here, or
+        // gives this step up, leaves them to the next start, which ends and
+        // announces them as `daemon-stopped` (§9, decision 92).
+        stop.wait(
+            Step::OperationLog,
+            LOG_CLOSE_BOUND,
+            operation_log.close_at_orderly_stop(),
+        )
+        .await;
+        let code = match served {
+            Some(Err(error)) => say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])
+                .map(|()| ExitCode::FAILURE),
+            Some(Ok(())) | None => Ok(ExitCode::SUCCESS),
+        };
+        Ok((code, Some(stop)))
     });
-    // The operation log closes once the server has stopped, inside the
-    // runtime, so a write in flight ends as it would have rather than being
-    // cut off, and nothing of the log outlives the daemon. Whatever came of
-    // serving, a refusal to listen included (§9).
-    runtime.block_on(operation_log.close());
-    // The lock is let go last: until the runtime is gone, a job it was running
-    // may still hold the operation log, and another daemon must not recover
-    // that log from under it (§9).
-    drop(runtime);
-    drop(lock);
-    code
+    match ran {
+        Ok((code, Some(mut stop))) => {
+            // What the runtime's tasks were still doing gets what is left of
+            // the limit; a blocking task still running then is left behind.
+            let left = stop.left();
+            let began = Instant::now();
+            runtime.shutdown_timeout(left);
+            let took = began.elapsed();
+            stop.waited(Step::Tasks, took, took < left);
+            // The lock is let go last: until then a task may still hold the
+            // operation log, and another daemon must not recover that log
+            // from under it (§9).
+            drop(lock);
+            stop.finish();
+            code
+        }
+        // The daemon never began to serve: the log closes as a refusal's
+        // does, and the lock is let go once the runtime is gone.
+        ran => {
+            runtime.block_on(operation_log.close());
+            drop(runtime);
+            drop(lock);
+            ran.and_then(|(code, _)| code)
+        }
+    }
 }
 
 /// The line `say` prints: one of Ladderback's own messages after the
@@ -384,8 +450,9 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
     MsgArg::Text(value.to_string())
 }
 
-/// Resolves on Ctrl-C or SIGTERM (what systemd and launchd send).
-async fn shutdown_signal() {
+/// Resolves on Ctrl-C or SIGTERM (what systemd and launchd send), with
+/// the signal's name.
+async fn shutdown_signal() -> &'static str {
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut signal) => {
@@ -395,8 +462,8 @@ async fn shutdown_signal() {
         }
     };
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        () = terminate => {}
+        _ = tokio::signal::ctrl_c() => "SIGINT",
+        () = terminate => "SIGTERM",
     }
 }
 

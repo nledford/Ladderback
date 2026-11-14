@@ -40,6 +40,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     EngineStartTimedOut => msg::ERROR_ENGINE_START_TIMED_OUT,
     EngineExitTimedOut => msg::ERROR_ENGINE_EXIT_TIMED_OUT,
     DaemonStopped => msg::ERROR_DAEMON_STOPPED,
+    DaemonShutDown => msg::ERROR_DAEMON_SHUT_DOWN,
     HostNotAllowed => msg::ERROR_HOST_NOT_ALLOWED,
     OriginNotAllowed => msg::ERROR_ORIGIN_NOT_ALLOWED,
     JsonRequired => msg::ERROR_JSON_REQUIRED,

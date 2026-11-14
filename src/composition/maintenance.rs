@@ -116,7 +116,10 @@ pub(super) async fn start(
     let (started, wait_for_start) = futures::channel::oneshot::channel();
     let registry = Arc::clone(&runner.registry);
     let config = Arc::clone(&runner.config);
-    tokio::spawn(async move {
+    // A start the daemon's stop freezes answers nothing, so the route says
+    // the operation failed; a run it freezes is ended by the stop (decision
+    // 92).
+    tokio::spawn(runner.runs.until_frozen(async move {
         let prepared = match use_case.start(assessment).await {
             Ok(prepared) => prepared,
             Err(refused) => {
@@ -135,7 +138,7 @@ pub(super) async fn start(
         let finished = use_case.execute(prepared, cancel).await;
         registry.finish(&operation);
         super::log_ended(&finished);
-    });
+    }));
     // A task that ended without answering has not started anything the route
     // could name.
     match wait_for_start.await {
@@ -483,6 +486,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         // read of the repository is not one; the failure has its code all the
         // same, as it has everywhere it is told.
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
@@ -1137,6 +1141,10 @@ mod tests {
             (
                 FailureReason::DaemonStopped,
                 unavailable_with(ErrorCode::DaemonStopped, Vec::new(), None),
+            ),
+            (
+                FailureReason::DaemonShutDown,
+                unavailable_with(ErrorCode::DaemonShutDown, Vec::new(), None),
             ),
         ];
         let config = InMemoryConfigStore::new();

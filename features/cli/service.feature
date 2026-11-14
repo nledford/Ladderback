@@ -76,6 +76,16 @@ Feature: Install the agent as a service
       Then the command exits with status 0
       And the service keeps rustic's cache in a private folder
 
+    Scenario: The service manager gives the agent time to stop before it kills it
+      A stop lets a backup that archives wind down, for up to 35 s, and the
+      agent's whole stop takes 65 s at most. The service manager waits longer
+      than that before it sends SIGKILL, so it never cuts a stop short
+      (decision 50, #321).
+
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service manager waits 75 seconds for the service to stop before it kills it
+
     Scenario: A service manager that refuses is named, with its words
       Given the service manager refuses with "Failed to connect to bus: No medium found"
       When the owner runs "install-service"

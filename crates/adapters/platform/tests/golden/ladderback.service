@@ -10,6 +10,7 @@ CacheDirectory=ladderback
 CacheDirectoryMode=0700
 Environment=LADDERBACK_CACHE_DIR=%C/ladderback
 KillMode=mixed
+TimeoutStopSec=75
 Restart=on-failure
 RestartSec=10
 

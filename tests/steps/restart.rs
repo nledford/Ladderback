@@ -38,6 +38,7 @@ const SEEDED_QUEUED_AT: i64 = 1_700_000_000;
 /// A backup of `plan` that is running, which the scenario then means by "the
 /// operation".
 #[given(expr = "the daemon is running a backup of the plan {string}")]
+#[when(expr = "the daemon is running a backup of the plan {string}")]
 async fn running_a_backup(agent: &mut Agent, plan: String) {
     let id = start_backup(agent, &plan);
     agent.ops.note_started(id.clone());
@@ -152,6 +153,33 @@ async fn history_shows_failed(agent: &mut Agent, code: String) {
             .and_then(serde_json::Value::as_str),
         Some(code.as_str()),
         "the operation's failure code: {operation}"
+    );
+}
+
+/// The snapshot the backup wrote, by ID, on its record in History, whatever
+/// the operation's end (decision 92).
+#[then("the history, read once, shows the snapshot the backup wrote")]
+async fn history_shows_the_snapshot(agent: &mut Agent) {
+    let id = agent.ops.the_operation();
+    let written = super::backup_steps::newest_snapshot(agent).await;
+    let written = written.id.to_hex().as_str().to_owned();
+    let page = history_page(agent, "limit=50").await;
+    let operation = page
+        .get("operations")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|operations| {
+            operations
+                .iter()
+                .find(|op| op.get("id").and_then(serde_json::Value::as_str) == Some(id.as_str()))
+        })
+        .unwrap_or_else(|| panic!("the history lists the operation {id}: {page}"));
+    assert_eq!(
+        operation
+            .get("result")
+            .and_then(|result| result.get("snapshot"))
+            .and_then(serde_json::Value::as_str),
+        Some(written.as_str()),
+        "the operation's snapshot: {operation}"
     );
 }
 

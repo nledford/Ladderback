@@ -74,6 +74,7 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod maintenance;
+mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
 pub(crate) struct Refused {
@@ -255,15 +256,17 @@ fn location_kind(rclone: bool) -> MsgArg {
 }
 
 /// What `serve` runs: the router's state, the operation log it writes, the
-/// hold on the data folder that keeps every other process off it, and the
-/// work it does with no request: the queue left from before it started and
-/// the scheduler. The caller closes the log once it has stopped serving, and
-/// keeps the lock until the daemon is gone (§9).
+/// hold on the data folder that keeps every other process off it, the work
+/// it does with no request (the queue left from before it started and the
+/// scheduler), and its workers. The caller stops the workers once it has
+/// stopped serving, then closes the log, and keeps the lock until the
+/// daemon is gone (§4.2, §9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
     pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
     pub(crate) background: Background,
+    pub(crate) workers: engine::Workers,
 }
 
 /// What the conditions before a scheduled run ask the machine (§5): what
@@ -311,6 +314,12 @@ pub(crate) struct Background {
 }
 
 impl Background {
+    /// What the daemon's orderly stop freezes: every run of an operation,
+    /// whoever started it (decision 92).
+    pub(crate) fn runs(&self) -> runs::Runs {
+        self.runner.runs.clone()
+    }
+
     /// Runs the queue's leftovers, oldest first, then the scheduler, with
     /// `random` spreading its runs over their jitter, until the future is
     /// dropped.
@@ -380,7 +389,7 @@ async fn resume_queued(
 /// them; one that hasn't by then is stalled (a disk that stopped
 /// answering), and the daemon stops without it rather than hold up the
 /// service manager, which would kill it anyway.
-const LOG_CLOSE_BOUND: std::time::Duration =
+pub(crate) const LOG_CLOSE_BOUND: std::time::Duration =
     std::time::Duration::from_secs(app::log_write::SAVE_BOUND.as_secs().unsigned_abs());
 
 /// The operation log the daemon writes, which it closes before it lets go
@@ -398,6 +407,28 @@ impl OperationLog {
     /// next start, as after a crash.
     pub(crate) async fn close(&self) {
         close_within(self.store.close(), &self.database, LOG_CLOSE_BOUND).await;
+    }
+
+    /// Ends each operation still running as failed with `daemon-shut-down`
+    /// at this moment, once the calls in flight have ended, and closes the
+    /// log, however long that takes: the daemon's orderly stop, which calls
+    /// it once its workers have stopped and bounds it as one of its steps
+    /// (`shutdown`, decision 92). Nothing is announced. Ends it couldn't
+    /// write, said in the log, are the next start's, as after a crash.
+    pub(crate) async fn close_at_orderly_stop(&self) {
+        let ended = self
+            .store
+            .close_ending_running(&FailureReason::DaemonShutDown, SystemClock.now())
+            .await;
+        match ended {
+            Ok(0) => {}
+            Ok(ended) => {
+                log::info!("stopping: {ended} running operation(s) ended as daemon-shut-down")
+            }
+            Err(error) => log::warn!(
+                "stopping: the operations still running couldn't be ended as daemon-shut-down, so the next start ends them as daemon-stopped: {error}"
+            ),
+        }
     }
 }
 
@@ -503,11 +534,12 @@ async fn daemon_at(
     )
     .await
     {
-        Ok((state, background)) => Ok(Daemon {
+        Ok((state, background, workers)) => Ok(Daemon {
             state,
             log,
             lock,
             background,
+            workers,
         }),
         Err(refused) => {
             log.close().await;
@@ -516,9 +548,9 @@ async fn daemon_at(
     }
 }
 
-/// The router's state over the operation log `log`, and the work the daemon
-/// does with no request, once it has ended what an earlier run left
-/// running, or why the daemon cannot serve. The workers' cache folder is
+/// The router's state over the operation log `log`, the work the daemon
+/// does with no request and its workers, once it has ended what an earlier
+/// run left running, or why the daemon cannot serve. The workers' cache folder is
 /// tidied first, keeping the caches of the repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
@@ -527,7 +559,7 @@ async fn state_over(
     recorded: Recorded,
     log: &OperationLog,
     conditions: RunConditions,
-) -> Result<(AppState, Background), Refused> {
+) -> Result<(AppState, Background, engine::Workers), Refused> {
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     let schedules: Arc<dyn ScheduleStore> = Arc::<SqliteStore>::clone(&log.store);
     // The bus and the notification rules come first, so that recovery can
@@ -576,6 +608,7 @@ async fn state_over(
         tidy_workers_cache(&dir, recorded).await;
         workers = workers.with_cache_root(dir);
     }
+    let stopping = workers.workers();
     // One lock for every write of the configuration the daemon makes: a
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
@@ -617,6 +650,7 @@ async fn state_over(
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
         ends: run_ends,
+        runs: runs::Runs::default(),
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -656,6 +690,7 @@ async fn state_over(
             build: crate::build_info::running(),
         },
         background,
+        stopping,
     ))
 }
 
@@ -1152,6 +1187,9 @@ struct PlanRunner {
     /// Where each backup's run says how it ended, so the scheduler can
     /// retry a failed one (§5).
     ends: app::retry::RunEndSender,
+    /// What the daemon's orderly stop freezes: every run starts under it
+    /// (decision 92).
+    runs: runs::Runs,
 }
 
 impl PlanRunner {
@@ -1277,6 +1315,7 @@ impl PlanRunner {
         let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
         let ends = self.ends.clone();
+        let runs = self.runs.clone();
         tokio::spawn(async move {
             let queued = use_case
                 .queue(operation, trigger, job)
@@ -1284,11 +1323,16 @@ impl PlanRunner {
                 .with_warnings(warnings);
             let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus. It
-            // waits in the log as queued until its turn comes.
-            let finished = use_case.run_in_turn(queued, place, cancel).await;
-            registry.finish(&operation);
-            log_ended(&finished);
-            say_how_it_ended(&ends, &finished);
+            // waits in the log as queued until its turn comes. A run the
+            // daemon's stop freezes stays queued, for the next start to run
+            // (decision 73): the stop came after the log had it.
+            runs.until_frozen(async move {
+                let finished = use_case.run_in_turn(queued, place, cancel).await;
+                registry.finish(&operation);
+                log_ended(&finished);
+                say_how_it_ended(&ends, &finished);
+            })
+            .await;
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
@@ -1513,14 +1557,14 @@ impl PlanRuns for PlanRunner {
                 let use_case = self.backup_use_case(setup);
                 let registry = Arc::clone(&self.registry);
                 let ends = self.ends.clone();
-                tokio::spawn(async move {
+                tokio::spawn(self.runs.until_frozen(async move {
                     let queued =
                         app::execution::Queued::resumed(operation, job).with_warnings(warnings);
                     let finished = use_case.run_in_turn(queued, place, cancel).await;
                     registry.finish(&id);
                     log_ended(&finished);
                     say_how_it_ended(&ends, &finished);
-                });
+                }));
             }
             // The queue can't run it again, as decision 40 ended every
             // queued operation: its plan or repository is gone or changed, its
@@ -2997,6 +3041,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
@@ -5160,6 +5205,7 @@ mod tests {
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
+            runs: crate::composition::runs::Runs::default(),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -9107,6 +9153,10 @@ mod repository_service_tests {
                 unavailable(ErrorCode::DaemonStopped, vec![], None),
             ),
             (
+                F::DaemonShutDown,
+                unavailable(ErrorCode::DaemonShutDown, vec![], None),
+            ),
+            (
                 F::SecretsTooLargeToMask {
                     field: Some("HTTPS_PROXY".to_owned()),
                     limit: 262_144,
@@ -10227,6 +10277,7 @@ mod repository_service_tests {
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
+                runs: crate::composition::runs::Runs::default(),
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -10272,6 +10323,7 @@ mod repository_service_tests {
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
+                runs: crate::composition::runs::Runs::default(),
             };
 
             let place = runner
@@ -10364,6 +10416,7 @@ mod repository_service_tests {
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
+            runs: crate::composition::runs::Runs::default(),
         };
 
         let refused = runner.start_backup("home".to_owned()).await;
@@ -10613,6 +10666,7 @@ mod repository_service_tests {
             events,
             queue: Arc::new(RunQueue::new()),
             ends,
+            runs: crate::composition::runs::Runs::default(),
         };
         (runner, heard, scripted, plan)
     }

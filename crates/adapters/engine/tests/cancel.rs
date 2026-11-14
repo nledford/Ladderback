@@ -174,14 +174,35 @@ const PATIENT_GRACE: Duration = Duration::from_secs(20);
 #[cfg(unix)]
 const UNREADABLE_FILES: usize = 400;
 
-/// A cancel that lands while the worker is blocked writing to a full event
+/// What stops the backup in [`a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`].
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum StoppedBy {
+    /// A cancel, through the job's control.
+    Cancel,
+    /// The daemon's stop of its workers (#321).
+    Daemon,
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
+    a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(StoppedBy::Cancel).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_backup_the_daemon_stops_while_nobody_reads_its_events_still_leaves_its_packs_indexed() {
+    a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(StoppedBy::Daemon).await;
+}
+
+/// A stop that lands while the worker is blocked writing to a full event
 /// pipe, because nobody has read its events for a while, still lets the
 /// backup wind down (§4.1): the stop reads what the worker writes meanwhile,
 /// so rustic's threads aren't held writing, the index of the packs saved is
 /// written, and the worker ends before the grace's SIGKILL.
 #[cfg(unix)]
-#[tokio::test]
-async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
+async fn a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(by: StoppedBy) {
     use std::os::unix::fs::PermissionsExt;
 
     let scratch = Scratch::new();
@@ -206,11 +227,11 @@ async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_ind
         testkit::skip!("running as a user that can read mode 000 files");
     }
 
+    let engine = engine().with_stop_grace(PATIENT_GRACE);
     let RunningJob {
         mut events,
         mut control,
-    } = engine()
-        .with_stop_grace(PATIENT_GRACE)
+    } = engine
         .run(op(), backup_job(&location, &scratch.source(), "home", HOUR))
         .await
         .unwrap();
@@ -243,9 +264,23 @@ async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_ind
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let began = std::time::Instant::now();
-    control.stop().await;
+    match by {
+        StoppedBy::Cancel => control.stop().await,
+        StoppedBy::Daemon => engine.workers().stop().await,
+    }
     let took = began.elapsed();
-    assert!(events.next().await.is_none(), "events followed the stop");
+    match by {
+        StoppedBy::Cancel => assert!(events.next().await.is_none(), "events followed the stop"),
+        // The run that reads them ends with the daemon, whose stop records
+        // the end for it (decision 92).
+        StoppedBy::Daemon => {
+            let next = tokio::time::timeout(Duration::from_millis(300), events.next()).await;
+            assert!(
+                next.is_err(),
+                "the events of a job the daemon stopped went on: {next:?}"
+            );
+        }
+    }
     let snapshots = fs::read_dir(scratch.repo_dir().join("snapshots")).map_or(0, |f| f.count());
     assert_eq!(snapshots, 0, "a cancelled backup wrote a snapshot");
     let findings = findings(&location);

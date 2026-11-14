@@ -125,8 +125,7 @@ fn watch(
 /// down as a cancelled one does (decision 55), finishing a snapshot write
 /// that began before the deadline, and the job ends the worker once rustic
 /// returns; the watchdog waits for it, on `stopped`, for the wind-down limit
-/// and no longer, which bounds a worker whose daemon is gone. The daemon's
-/// grace period ends it sooner.
+/// and no longer, which bounds a worker whose daemon is gone.
 fn expire(events: &Events, process: &Process, stopped: Option<&mpsc::Receiver<()>>) {
     let after = process.cancel.pass_deadline();
     let failed = deadline_failure();

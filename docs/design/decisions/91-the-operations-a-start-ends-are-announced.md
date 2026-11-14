@@ -2,6 +2,8 @@
 
 **Each operation a start ends as failed with `daemon-stopped` is announced as any failed operation is, to the notification rules for its failure: a backup as `backup.failed`, a forget, a prune or a check as `forget.failed`, `prune.failed` or `check.failed`. It is announced at most once per start, only after the log has its end, so a start that couldn't write the end announces nothing, and the next start ends and announces it; a start that did write it leaves nothing for the next start to end. The news names the time of the start that ended it** (recorded 2026-11-14, §5, §9, §11; amends decisions 40 and 74). From #547.
 
+**Amended by decision 92** (2026-11-14, #543): an orderly stop (a service stop or restart, Ctrl-C, the computer shutting down) now ends the operations it interrupts itself, as failed with `daemon-shut-down`, recorded and not announced, so the running operations a start ends and announces are the ones a crash, a kill or a power cut left, and those of a stop that didn't commit their ends. The queued ones a start can't run again are announced as before.
+
 ## Why
 
 Decision 40 ended what a stopped daemon left running "with no hooks and no event": the event bus didn't exist yet. Once notifications did (decision 74), the failures that most need a person's attention, a crash, an out-of-memory kill or a power cut in the middle of a backup, were the ones never told. On a Raspberry Pi, a backup killed by `kill -9` of the daemon was recorded as failed with `daemon-stopped` when systemd started the daemon again ten seconds later, and the plan's `backup.failed` rule stayed silent: from outside, nothing seemed wrong.
