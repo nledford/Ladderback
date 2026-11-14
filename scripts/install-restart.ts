@@ -135,17 +135,20 @@ async function restartedBuild(base: string, expected: Build | undefined, version
       if (response.status === 200) {
         const read = (await response.json()) as Partial<Build>;
         if (typeof read.version !== "string") {
-          // Sign-in is on: a page without a session isn't told the build.
-          return "the daemon tells the build only to a signed-in page (sign-in is on)";
+          // Not told the build: sign-in is on (a page without a session isn't
+          // told it), or the daemon answering is a build older than #516, as
+          // when the old one still answers. Keep asking until the deadline.
+          last = "it names no build: sign-in is on, or it runs a build older than 0.3.0";
+        } else {
+          const build: Build = {
+            version: read.version,
+            commit: read.commit ?? null,
+            dirty: read.dirty === true,
+            release: read.release === true,
+          };
+          if (same(build, expected, version)) return build;
+          last = `it runs ${shown(build)}`;
         }
-        const build: Build = {
-          version: read.version,
-          commit: read.commit ?? null,
-          dirty: read.dirty === true,
-          release: read.release === true,
-        };
-        if (same(build, expected, version)) return build;
-        last = `it runs ${shown(build)}`;
       } else {
         last = `it answered ${response.status}`;
       }
