@@ -309,6 +309,12 @@ async fn a_wrong_password(agent: &mut Agent, password: String) {
     super::events_steps::save_daemon_config(agent, None).await;
 }
 
+#[given("the plan's repository folder is gone")]
+fn the_repository_folder_is_gone(agent: &mut Agent) {
+    let repository = agent.backup.repository.clone().expect("a repository");
+    std::fs::remove_dir_all(&repository).expect("the repository folder removed");
+}
+
 #[when(expr = "the client starts a backup of the plan {string}")]
 async fn the_client_starts_a_backup(agent: &mut Agent, plan: String) {
     let body = serde_json::json!({ "plan": plan }).to_string();

@@ -798,6 +798,40 @@ mod tests {
         );
     }
 
+    /// A password that opens none of the repository's keys fails the job as
+    /// `password-not-accepted`, the code a repository of several locations
+    /// fails with when no location took it (decision 80), not in rustic's
+    /// words (#481).
+    #[test]
+    fn a_password_that_opens_no_key_fails_the_job_as_not_accepted() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repo");
+        init(&repository);
+        let spec = RepositorySpec {
+            password: SecretValue::new("canary-not-the-password"),
+            ..spec_at(&repository.to_string_lossy())
+        };
+        assert_eq!(failed_code(&spec), api::ErrorCode::PasswordNotAccepted);
+    }
+
+    /// Creating a repository on a REST server that refuses the credentials
+    /// fails the job as refused, as 401 and as 403 alike: the status check
+    /// opening makes, applied to what creating gave (#484).
+    #[test]
+    fn creating_a_repository_on_a_rest_server_that_refuses_the_credentials_fails_as_refused() {
+        for status in ["401 Unauthorized", "403 Forbidden"] {
+            let spec = spec_at(&format!("rest:http://{}/", server_answering(status)));
+            let (ctx, _capture) = context(None);
+            match super::super::jobs::init(&ctx, &spec) {
+                Err(JobError::Failed { code, .. }) => {
+                    assert_eq!(code, api::ErrorCode::CredentialsRefused, "{status}");
+                }
+                Err(other) => panic!("creating broke the events: {other:?}"),
+                Ok(_) => panic!("a repository was created on a server answering {status}"),
+            }
+        }
+    }
+
     // The probe of a location (decision 80).
 
     fn probed(spec: &RepositorySpec) -> Result<ProbeResult, JobError> {

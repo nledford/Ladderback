@@ -67,7 +67,7 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
-  Scenario: A wrong password moves focus to an error summary that says what the engine said
+  Scenario: A wrong password moves focus to an error summary that says the password was not accepted
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
     And I press Tab until focus is on the textbox "Location"
@@ -77,8 +77,9 @@ Feature: Repositories page
     And I press Tab until focus is on the button "Test the repository"
     And I press Enter
     Then focus is on the heading "There is 1 problem with the form"
-    And the page shows a message containing "The operation failed:"
-    And the page shows a message containing "Check the location and the password, then try again."
+    And the page shows a message containing "The repository's password was not accepted"
+    And the field "Password" is marked invalid
+    And the page doesn't show "Check the location and the password, then try again."
     And the page doesn't show "not-the-password"
     And the page has no accessibility violations
 

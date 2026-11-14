@@ -1637,3 +1637,74 @@ async fn a_refused_run_is_written_once_as_failed_and_announced() {
         })
     );
 }
+
+/// A backup the log held as queued from before the daemon stopped, whose
+/// start is refused when the next start takes it up again, ends failed with
+/// the refusal: one write, of the end, under its own ID, trigger and queue
+/// time, never started, and announced as any failed operation (§5, decision
+/// 73). The engine is never asked.
+#[tokio::test]
+async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_announced() {
+    use api::{ErrorCode, UiEvent};
+    use app::event_bus::BroadcastEventBus;
+    use app::ports::EventBus;
+    use domain::execution::refusal::SettingRefusal;
+
+    let store = Arc::new(Journal::default());
+    let engine = Arc::new(NeverAsked::default());
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let target = Target {
+        plan: Some(domain::PlanId::parse("home").unwrap()),
+        repository: None,
+    };
+    let queued = Operation::queue(
+        id(),
+        OperationKind::Backup,
+        Trigger::Retry,
+        target.clone(),
+        t(1),
+    );
+    let reason = FailureReason::SecretRefused {
+        field: "password".to_owned(),
+        refusal: SettingRefusal::SecretMissing {
+            source: "/srv/demo-password".to_owned(),
+        },
+    };
+    let finished = RunOperation::new(
+        engine.clone(),
+        Arc::new(FakeClock::new(t(9))),
+        store.clone(),
+    )
+    .with_events(bus)
+    .refuse_resumed(queued, reason.clone())
+    .await;
+
+    let failed = OperationStatus::Failed { reason };
+    assert_eq!(finished.operation.id(), id());
+    assert_eq!(finished.operation.status(), &failed);
+    assert_eq!(finished.operation.trigger(), Trigger::Retry);
+    assert_eq!(finished.operation.target(), &target);
+    assert_eq!(finished.operation.queued_at(), t(1));
+    assert_eq!(finished.operation.started_at(), None);
+    assert_eq!(finished.operation.finished_at(), Some(t(9)));
+    assert!(finished.result.is_none());
+    assert!(finished.recording_errors.is_empty());
+    assert_eq!(
+        store.writes(),
+        std::slice::from_ref(&failed),
+        "one write, of the end"
+    );
+    assert_eq!(engine.0.load(Ordering::SeqCst), 0, "the engine was asked");
+    let heard = page.next().now_or_never().flatten();
+    assert!(
+        matches!(
+            heard,
+            Some(UiEvent::OperationFailed {
+                code: ErrorCode::SecretMissing,
+                ..
+            })
+        ),
+        "{heard:?}"
+    );
+}

@@ -26,6 +26,9 @@ use super::{Agent, blocking};
 /// Not a real secret: the scratch repositories' password.
 pub const PASSWORD: &str = "e2e-scratch-password";
 
+/// Not a real secret: a password that opens none of the repository's keys.
+pub const WRONG_PASSWORD: &str = "canary-not-the-password";
+
 /// How long a cancelled backup runs before the user cancels it: long enough
 /// that the worker is reading the source, far shorter than the backup.
 const CANCEL_AFTER: Duration = Duration::from_millis(500);
@@ -400,6 +403,22 @@ fn failed_as_refused(agent: &mut Agent) {
     );
 }
 
+#[given("the agent has the wrong password for the repository")]
+fn has_the_wrong_password(agent: &mut Agent) {
+    agent.backup.wrong_password = true;
+}
+
+#[then("the operation ends as failed because the repository's password was not accepted")]
+fn failed_as_password_not_accepted(agent: &mut Agent) {
+    let status = agent.operation().status().clone();
+    assert_eq!(
+        status,
+        domain::execution::OperationStatus::Failed {
+            reason: domain::execution::FailureReason::PasswordNotAccepted,
+        }
+    );
+}
+
 #[when("the agent backs up the plan")]
 async fn backs_up(agent: &mut Agent) {
     agent.run_backup().await;
@@ -604,6 +623,9 @@ pub struct BackupSetup {
     /// Where the daemon's configuration says the repository's password
     /// comes from; the inline [`PASSWORD`] when unset.
     pub password: Option<domain::secrets::SecretRef>,
+    /// Whether the job the agent runs carries [`WRONG_PASSWORD`] in place
+    /// of [`PASSWORD`].
+    pub wrong_password: bool,
     /// The repository ID the job names as the one it must open (§7.3):
     /// what the configuration recorded when the repository was connected.
     pub id: Option<RepositoryId>,
@@ -636,7 +658,11 @@ impl Agent {
                     .clone()
                     .unwrap_or_else(|| text(&folders.cold).to_owned()),
                 repo_hot: folders.hot.as_deref().map(|hot| text(hot).to_owned()),
-                password: domain::secrets::SecretValue::new(PASSWORD),
+                password: domain::secrets::SecretValue::new(if self.backup.wrong_password {
+                    WRONG_PASSWORD
+                } else {
+                    PASSWORD
+                }),
                 options: Default::default(),
                 options_hot: Default::default(),
                 options_cold: Default::default(),

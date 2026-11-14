@@ -64,6 +64,7 @@ Feature: The operation lifecycle
   # failure's code, so a page can say why without the daemon's log (#474).
   Scenario: A backup that fails says why in the history, without its password
     Given the plan's repository password in the configuration is "canary-not-a-secret", which isn't the repository's
+    And the plan's repository folder is gone
     When the daemon starts a backup of the plan "home"
     Then the history page shows the operation failed
     And the history page gives the operation's failure as "operation-failed", in the engine's own words

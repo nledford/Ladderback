@@ -27,6 +27,11 @@ use super::{Agent, blocking};
 /// within a second of the start, so half that is ample.
 const REFUSED_RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The ID of the backup a scenario left queued in the log while the daemon
+/// was down: the daemon takes it up again once it is up, so the history may
+/// list it as queued until then.
+const LEFT_QUEUED: u128 = 0x0bac_0e1d;
+
 /// When the seeded prune was queued, in seconds since the Unix epoch.
 const SEEDED_QUEUED_AT: i64 = 1_700_000_000;
 
@@ -80,7 +85,7 @@ async fn a_prune_left_running(agent: &mut Agent) {
 
 #[given(expr = "the log, while the daemon is down, shows a queued backup of the plan {string}")]
 async fn a_backup_left_queued(agent: &mut Agent, plan: String) {
-    let id = OperationId::from_uuid(Uuid::from_u128(0x0bac_0e1d));
+    let id = OperationId::from_uuid(Uuid::from_u128(LEFT_QUEUED));
     let queued = Timestamp::from_second(SEEDED_QUEUED_AT).expect("a time");
     let backup = Operation::queue(
         id,
@@ -223,7 +228,14 @@ async fn history_lists_one_failed_backup(agent: &mut Agent, plan: String, code: 
             })
             .cloned()
             .collect();
-        if let [backup] = backups.as_slice() {
+        let left_queued = Uuid::from_u128(LEFT_QUEUED).hyphenated().to_string();
+        let waiting = |op: &serde_json::Value| {
+            op.get("status").and_then(serde_json::Value::as_str) == Some("queued")
+                && op.get("id").and_then(serde_json::Value::as_str) == Some(left_queued.as_str())
+        };
+        if let [backup] = backups.as_slice()
+            && !waiting(backup)
+        {
             // Settle, then look once more: a second row written just after
             // the first would otherwise go unseen.
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -245,7 +257,7 @@ async fn history_lists_one_failed_backup(agent: &mut Agent, plan: String, code: 
             break backup.clone();
         }
         assert!(
-            backups.is_empty(),
+            backups.is_empty() || matches!(backups.as_slice(), [one] if waiting(one)),
             "the history lists more than one backup of {plan}: {page}"
         );
         assert!(

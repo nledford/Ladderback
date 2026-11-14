@@ -938,6 +938,16 @@ mod tests {
         );
     }
 
+    /// The repository answered and its password opened none of its keys: the
+    /// password typed is the field to fix (#481).
+    #[test]
+    fn a_password_not_accepted_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(ErrorCode::PasswordNotAccepted, &[]),
+            Some(Field::Password)
+        );
+    }
+
     #[test]
     fn a_refusal_about_the_repository_or_the_daemon_belongs_to_no_field() {
         for code in [

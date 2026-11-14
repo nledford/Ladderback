@@ -39,6 +39,7 @@ Feature: Each row of the Operations page names its operation and says what it di
   Scenario: A failed backup's row says why it failed
     Given a demo plan "home" with a tiny scratch repository
     And the configuration has the password "canary-not-a-secret" for the repository "demo", which isn't its own
+    And the configuration has the repository "demo" at a folder that isn't there
     And a backup of the plan "home" has failed
     When I open the address "/operations"
     Then the row "home" of the table "Operations" shows "Failed" in its "Status" column
