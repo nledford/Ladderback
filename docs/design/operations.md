@@ -69,7 +69,7 @@ Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 | CLI `--json` documents (§4.5): keys, error and warning codes | Removing or renaming one | New keys or codes |
 | `config.toml` (§6.1) | Dropping the migration from an old `schema`, so a file stops loading | New keys; a new `schema` whose migration runs on load |
 | REST and WebSocket API `/api/v1` | Anything that needs `/api/v2` | New endpoints and optional fields |
-| Sync protocol `/sync/v1` (§7.2) | A new `protocol` number that the previous release can't speak | New optional message fields |
+| Sync protocol `/sync/v1` (§7.2, decision 88) | Dropping a protocol the previous release spoke (a release adding protocol N+1 drops N−1) | New optional message fields; a new protocol in a release that still speaks every protocol the previous one did |
 | Snapshot tags `ladderback-plan:` / `ladderback-agent:` (§7.3) | Any change: existing repositories would lose their plan links | — |
 | Webhook JSON: keys, event names, error codes (§11) | Removing or renaming one | New events, keys or codes |
 | Exported rustic profiles (§6.2) | A profile that the pinned rustic CLI reads differently | — |
