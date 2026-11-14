@@ -12,6 +12,10 @@
 //! scenario that runs too long, naming it, instead of hanging until CI
 //! cancels the job.
 //!
+//! [`children::Owned`] is how a test starts a process it must not leave
+//! running, a daemon above all: dropped, or at the scenario watch's limit,
+//! it is ended with the process groups its children lead.
+//!
 //! [`inheritable::InheritablePipe`] is how a test shows that what starts a
 //! child waits for the spawn gate.
 //!
@@ -19,6 +23,7 @@
 //! that is open when it is returned, which `TcpStream::connect` on macOS is
 //! not when a signal interrupts it.
 
+pub mod children;
 pub mod daemon;
 #[cfg(unix)]
 pub mod inheritable;

@@ -10,12 +10,13 @@
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use cucumber::{given, then, when};
 use futures::StreamExt;
+use testkit::children::Owned;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -54,21 +55,15 @@ pub struct Events {
     pub(crate) env: Vec<(String, String)>,
 }
 
-/// A running daemon, stopped when the scenario ends.
+/// A running daemon, ended when the scenario ends or the run stops at its
+/// limit.
 struct Daemon {
-    child: Child,
+    child: Owned,
     addr: SocketAddr,
     /// What it logged until it said where it listens.
     start_log: String,
     /// Everything it logged after that, kept by the thread that drains it.
     log: Arc<Mutex<String>>,
-}
-
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 /// One connected tab.
@@ -163,8 +158,9 @@ impl Events {
         }
     }
 
-    /// Kills the daemon with SIGKILL and waits for the process to be gone:
-    /// a crash, as far as the folders it leaves behind can tell.
+    /// Kills the daemon with SIGKILL, with the process groups its workers and
+    /// hooks lead, and waits for the process to be gone: a crash, as far as
+    /// the folders it leaves behind can tell.
     pub(crate) fn kill(&mut self) {
         let daemon = self.daemon.take().expect("Ladderback is serving");
         drop(daemon);
@@ -173,7 +169,7 @@ impl Events {
     /// Tells the daemon to stop, with the SIGTERM systemd and launchd send,
     /// and waits for it to exit. Runs on a blocking thread: see [`blocking`].
     pub(crate) async fn stop(agent: &mut Agent) {
-        let mut daemon = agent.events.daemon.take().expect("Ladderback is serving");
+        let daemon = agent.events.daemon.take().expect("Ladderback is serving");
         let status = blocking(move || {
             // `kill` sends it without a crate of its own for that, as
             // `tests/logging.rs` does.
@@ -321,8 +317,8 @@ fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Dae
     command
         .args(["serve", "--listen", "127.0.0.1:0"])
         .stderr(Stdio::piped());
-    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback serve starts");
-    let stderr = child.stderr.take().expect("the daemon's stderr");
+    let child = Owned::spawn(&mut command).expect("ladderback serve starts");
+    let stderr = child.take_stderr().expect("the daemon's stderr");
     let mut log = String::new();
     let mut lines = BufReader::new(stderr).lines();
     let listening = loop {

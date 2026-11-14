@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use serde_json::Value;
+use testkit::children::Owned;
 
 use super::interop_steps::{Ran, pipe_without_reader, ran, run, said};
 use super::{Agent, LADDERBACK, blocking};
@@ -125,7 +126,7 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
     let log = File::create(&log_path).expect("a log file for the daemon");
     let mut command = daemon_command(scratch, options, env);
     command.stderr(log);
-    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
+    let child = Owned::spawn(&mut command).expect("ladderback starts");
     let began = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();
@@ -135,16 +136,13 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
             .nth(1)
             .is_some_and(|rest| rest.contains('\n'))
         {
-            let _ = child.kill();
-            let _ = child.wait();
+            drop(child);
             return std::fs::read_to_string(&log_path).unwrap_or(text);
         }
         if let Some(status) = child.try_wait().expect("the daemon's status") {
             panic!("ladderback exited with {status} before it listened: {text}");
         }
         if began.elapsed() >= START_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
             panic!("ladderback neither listened nor exited within {START_TIMEOUT:?}: {text}");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -157,7 +155,7 @@ fn serve_until_listening(scratch: &Path, options: &str, env: &[(String, String)]
 fn serve_without_a_reader(scratch: &Path, options: &str, env: &[(String, String)]) -> Ran {
     let mut command = daemon_command(scratch, options, env);
     command.stderr(pipe_without_reader());
-    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
+    let child = Owned::spawn(&mut command).expect("ladderback starts");
     let began = Instant::now();
     loop {
         if let Some(status) = child.try_wait().expect("the daemon's status") {
@@ -169,8 +167,6 @@ fn serve_without_a_reader(scratch: &Path, options: &str, env: &[(String, String)
             };
         }
         if began.elapsed() >= START_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
             panic!(
                 "ladderback was still running {START_TIMEOUT:?} after nothing could read its log"
             );

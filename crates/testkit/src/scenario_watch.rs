@@ -32,7 +32,8 @@ pub struct ScenarioWatch {
 impl ScenarioWatch {
     /// Starts watching the scenarios of `runner` (the name its messages
     /// carry): once one has run for longer than `limit`, the process prints
-    /// its name and exits with status 1.
+    /// its name, ends every process the run owns
+    /// ([`crate::children::Owned`]) and exits with status 1.
     pub fn start(runner: &'static str, limit: Duration) -> Self {
         let watch = Self {
             runner,
@@ -99,6 +100,9 @@ impl ScenarioWatch {
                      that never comes.",
                     self.runner
                 );
+                // `exit` runs no destructor: what the scenarios started is
+                // ended here, and nothing starts more before the exit.
+                let _ended = crate::children::end_all();
                 std::process::exit(1);
             }
         }

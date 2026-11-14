@@ -7,11 +7,12 @@ use std::assert_matches;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use cucumber::{given, then, when};
+use testkit::children::Owned;
 
 use super::{Agent, LADDERBACK, blocking};
 
@@ -37,18 +38,16 @@ pub struct Web {
     pub(crate) home: Option<PathBuf>,
 }
 
-/// A running daemon, stopped when the scenario ends.
+/// A running daemon, ended when the scenario ends or the run stops at its
+/// limit.
 #[derive(Debug)]
 pub(crate) struct Server {
-    child: Child,
+    #[allow(
+        dead_code,
+        reason = "owned so that the daemon is ended with the scenario"
+    )]
+    child: Owned,
     pub(crate) addr: SocketAddr,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 #[derive(Debug)]
@@ -86,7 +85,7 @@ async fn start(
     home: Option<&Path>,
     args: &[&str],
     rust_log: Option<&'static str>,
-) -> (Child, Outcome, PathBuf) {
+) -> (Owned, Outcome, PathBuf) {
     let scratch = scratch.to_owned();
     let home = home.map(Path::to_owned);
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
@@ -102,7 +101,7 @@ fn spawn_daemon(
     home: Option<&Path>,
     args: &[&str],
     rust_log: Option<&str>,
-) -> (Child, Outcome, PathBuf) {
+) -> (Owned, Outcome, PathBuf) {
     let started = LOGS.fetch_add(1, Ordering::Relaxed);
     let log_path = scratch.join(format!("serve-{started}.log"));
     let log = std::fs::File::create(&log_path).expect("a log file for the daemon");
@@ -125,7 +124,7 @@ fn spawn_daemon(
     if let Some(rust_log) = rust_log {
         command.env("RUST_LOG", rust_log);
     }
-    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
+    let child = Owned::spawn(&mut command).expect("ladderback starts");
     let began = Instant::now();
     loop {
         let text = std::fs::read_to_string(&log_path).unwrap_or_default();
