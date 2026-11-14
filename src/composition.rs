@@ -108,6 +108,27 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     }
 }
 
+/// How long the daemon waits on one look at a plan's sources for its globs
+/// (#510): a source on a mount that stopped answering is then read as
+/// written, and holds nothing, so neither the daemon's start nor the plans
+/// list waits on it.
+const SOURCES_LOOK_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `S`, with each look at the disk given up after its limit, as one that
+/// can't be resolved.
+struct WithinLimit<S>(S, std::time::Duration);
+
+#[async_trait]
+impl<S: NormalizeSources> NormalizeSources for WithinLimit<S> {
+    async fn normalized(
+        &self,
+        sources: &[domain::planning::Source],
+    ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
+        let _ = sources;
+        todo!()
+    }
+}
+
 /// Says in the log, once at load, each glob of a plan that can never match
 /// (#510): the plan, the glob and the whole path to write instead, read
 /// against the plan's sources as the backup walks them.
@@ -3839,6 +3860,43 @@ mod tests {
             .start(domain::Timestamp::from_second(1_800_000_001).expect("a time"))
             .expect("the backup starts");
         backup
+    }
+
+    /// A disk that never answers, as a mount whose server is down.
+    struct Stalled;
+
+    #[async_trait]
+    impl NormalizeSources for Stalled {
+        async fn normalized(
+            &self,
+            _: &[domain::planning::Source],
+        ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_look_at_the_sources_that_never_answers_is_given_up() {
+        // One look to walk the sources, then one per source for the holder.
+        let limit = std::time::Duration::from_millis(50);
+        let mut plan = Plan::new(
+            domain::PlanId::parse("home").expect("an ID"),
+            domain::RepositoryAlias::parse("nas").expect("an alias"),
+            ["/home/user", "/srv/disk"]
+                .map(|source| domain::planning::Source::parse(source).expect("a source"))
+                .to_vec(),
+        );
+        plan.filter.globs = vec!["!docker/app/cache".to_owned()];
+        let said = tokio::time::timeout(
+            limit * 3 + std::time::Duration::from_millis(200),
+            never_matching_glob_warnings(&plan, &WithinLimit(Stalled, limit)),
+        )
+        .await
+        .expect("the look is given up");
+        assert_eq!(
+            said,
+            [glob_never_matches("home", "!docker/app/cache", None)]
+        );
     }
 
     #[tokio::test]

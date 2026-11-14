@@ -21,15 +21,18 @@ pub struct NeverMatching {
 
 /// The globs of `plan` that can never match, `globs` then `iglobs`, each in
 /// the order written, read against its sources as `sources` walks them.
+/// The disk is looked at only for a plan that may have one.
 pub async fn never_matching_globs(
     plan: &Plan,
     sources: &dyn NormalizeSources,
 ) -> Vec<NeverMatching> {
+    let _ = Plan::may_have_never_matching_globs;
     let walked = sources.walked(&plan.sources).await;
     let mut said = Vec::new();
     for glob in plan.never_matching_globs(&walked) {
         let absolute = match glob.placement() {
             Placement::Whole(whole) => Some(whole),
+            Placement::Nowhere => todo!(),
             Placement::Holder(folders) => {
                 let mut holding = Vec::new();
                 for source in &walked {
@@ -149,5 +152,21 @@ mod tests {
                 Some("!/home/user/docker/app/cache")
             )]
         );
+    }
+
+    /// A disk that is never to be looked at.
+    struct Untouched;
+
+    #[async_trait]
+    impl NormalizeSources for Untouched {
+        async fn normalized(&self, _: &[Source]) -> Result<Vec<Source>, SourcesError> {
+            panic!("the disk was looked at")
+        }
+    }
+
+    #[tokio::test]
+    async fn a_plan_with_no_glob_read_from_the_root_needs_no_look_at_the_disk() {
+        let plan = plan(SOURCES, &["!.cache", "!/srv/disk/a/b", "!**/a/b"]);
+        assert_eq!(never_matching_globs(&plan, &Untouched).await, []);
     }
 }

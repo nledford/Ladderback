@@ -68,6 +68,9 @@ pub enum Placement {
     /// folders on disk: the glob's own, written from that source, up to its
     /// first wildcard. [`NeverMatchingGlob::under`] writes it there.
     Holder(String),
+    /// Nowhere: the glob climbs with `..`, which rustic doesn't resolve in
+    /// a glob, so no path written from the root names what it means.
+    Nowhere,
 }
 
 impl<'a> NeverMatchingGlob<'a> {
@@ -191,6 +194,12 @@ impl SourceFilter {
                         walked,
                     })
             })
+    }
+
+    /// Whether any of its globs or iglobs is read from the root of the file
+    /// system, so may never match: only then is a plan's disk looked at.
+    pub(super) fn reads_from_root(&self) -> bool {
+        todo!()
     }
 }
 
@@ -556,5 +565,44 @@ mod tests {
             local.under(&[&walked[1]]),
             Some("!/mnt/data/set/.local/x/y".to_owned())
         );
+    }
+
+    #[test]
+    fn a_glob_that_climbs_with_dot_dot_has_no_whole_path() {
+        for sources in [&["/home/user"][..], &["/home/user", "/srv/disk"]] {
+            let plan = plan(sources, &["!../shared/x", "!a/../b/c"], &[]);
+            assert_eq!(
+                placements(&plan),
+                [Placement::Nowhere, Placement::Nowhere],
+                "{sources:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_whitespace_is_no_part_of_the_whole_path() {
+        let plan = plan(&["/home/user"], &["!a/b ", "!home/user/c/ "], &[]);
+        assert_eq!(placements(&plan), [whole("!/home/user/a/b")]);
+        let written = [Source::parse("/home/user").unwrap()];
+        let walked = [Source::parse("/var/home/user").unwrap()];
+        let mut linked = plan;
+        linked.sources = written.to_vec();
+        linked.filter.globs = vec!["!home/user ".to_owned()];
+        let said: Vec<Placement> = linked
+            .filter
+            .never_matching(&written, &walked)
+            .map(|glob| glob.placement())
+            .collect();
+        assert_eq!(said, [whole("!/var/home/user")]);
+    }
+
+    #[test]
+    fn only_a_plan_with_sources_and_a_glob_read_from_the_root_may_have_one_never_matching() {
+        let source = &["/home/user"][..];
+        let none = ["!.cache", "/srv/a/b", "!**/a/b", "#a/b", "!/a/b "];
+        assert!(!plan(source, &none, &none).may_have_never_matching_globs());
+        assert!(plan(source, &["!.cache", "!a/b"], &[]).may_have_never_matching_globs());
+        assert!(plan(source, &[], &["a/b/"]).may_have_never_matching_globs());
+        assert!(!plan(&[], &["a/b"], &["a/b"]).may_have_never_matching_globs());
     }
 }

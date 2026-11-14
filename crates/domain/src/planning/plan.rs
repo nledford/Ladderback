@@ -165,6 +165,13 @@ impl Plan {
     ) -> impl Iterator<Item = NeverMatchingGlob<'a>> {
         self.filter.never_matching(&self.sources, walked)
     }
+
+    /// Whether it may have a glob that can never match: it has sources and
+    /// a glob or iglob read from the root. Only then is its disk looked at
+    /// for [`Self::never_matching_globs`].
+    pub fn may_have_never_matching_globs(&self) -> bool {
+        todo!()
+    }
 }
 
 #[cfg(test)]
