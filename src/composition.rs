@@ -1414,7 +1414,12 @@ fn run_named(trigger: &Trigger) -> std::borrow::Cow<'static, str> {
         Trigger::Retry => "the retry".into(),
         Trigger::Hub => "the hub's run".into(),
         Trigger::Mcp => "the MCP client's run".into(),
-        Trigger::ApiToken { .. } => todo!(),
+        Trigger::ApiToken { id, label } => format!(
+            "the run API token \"{}\" ({}) asked for",
+            label.as_str(),
+            id.as_str()
+        )
+        .into(),
     }
 }
 
@@ -1820,6 +1825,11 @@ impl Operations for PlanRunner {
                 return Err(http_adapter::CancelError::Unknown);
             }
         };
+        if by == http_adapter::Canceller::ApiToken
+            && !domain::access::api_token::cancels(record.kind)
+        {
+            return Err(http_adapter::CancelError::SessionOnly);
+        }
         if !record.status.is_finished() && self.registry.cancel(&id) {
             Ok(())
         } else {
