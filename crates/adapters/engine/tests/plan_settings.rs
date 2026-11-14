@@ -6,8 +6,9 @@
 mod support;
 
 use app::ports::{BackupJob, Job};
-use domain::SignedDuration;
-use domain::planning::{Hostname, SourceFilter};
+use domain::planning::{Hostname, Plan, Source, SourceFilter};
+use domain::{PlanId, RepositoryAlias, SignedDuration};
+use engine::RusticSources;
 use support::*;
 
 const HOUR: SignedDuration = SignedDuration::from_hours(1);
@@ -98,6 +99,103 @@ async fn a_backup_leaves_out_everything_its_source_filter_excludes() {
             "{left_out}: {names:?}"
         );
     }
+}
+
+/// The premise of the `glob-never-matches` warning (#510): rustic reads a
+/// glob with a slash in the middle from the root of the file system, so one
+/// written from the source leaves nothing out, and the whole path does.
+#[tokio::test]
+async fn a_glob_with_a_slash_in_the_middle_is_read_from_the_root_of_the_file_system() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    let source = scratch.source();
+    write_file(
+        source.join("relative/inner/kept.bin"),
+        b"written from the source",
+    );
+    write_file(source.join("whole/inner/dropped.bin"), b"the whole path");
+    // The path the backup walks: the scratch folder may sit behind a link
+    // (`/var` is `/private/var` on macOS), which rustic follows.
+    let whole = source.canonicalize().unwrap().join("whole/inner");
+    let filter = SourceFilter {
+        iglobs: vec![
+            "!relative/inner".to_owned(),
+            format!("!{}", whole.to_string_lossy()),
+        ],
+        ..SourceFilter::default()
+    };
+
+    let job = with_settings(backup_job(&location, &source, "home", HOUR), None, filter);
+    let events = run_to_end(&engine(), job).await;
+    backed_up(&events);
+
+    let snapshots = location.snapshots();
+    let [snapshot] = snapshots.as_slice() else {
+        panic!("expected one snapshot: {snapshots:?}");
+    };
+    let names = location.names_in(snapshot);
+    assert!(names.iter().any(|name| name == "kept.bin"), "{names:?}");
+    assert!(!names.iter().any(|name| name == "dropped.bin"), "{names:?}");
+}
+
+/// A source given through a link (#510): the warning reads the plan's globs
+/// against the folder the backup walks, the link followed as rustic follows
+/// it, so a glob written from the link's path is said to match nothing too,
+/// and the whole path it suggests, written into the plan, leaves the folder
+/// out.
+#[tokio::test]
+async fn the_whole_path_said_for_a_source_given_through_a_link_leaves_the_folder_out() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    let real = scratch.source();
+    write_file(real.join("kept.bin"), b"backed up");
+    write_file(real.join("cache/inner/dropped.bin"), b"left out");
+    let link = scratch.dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let link_text = link.to_str().unwrap();
+    let mut plan = Plan::new(
+        PlanId::parse("home").unwrap(),
+        RepositoryAlias::parse("nas").unwrap(),
+        vec![Source::parse(link_text).unwrap()],
+    );
+    let from_the_link = format!("!{}/cache/inner", link_text.trim_start_matches('/'));
+    plan.filter.iglobs = vec!["!cache/inner".to_owned(), from_the_link.clone()];
+
+    let said: Vec<(String, Option<String>)> =
+        app::globs::never_matching_globs(&plan, &RusticSources)
+            .await
+            .into_iter()
+            .map(|glob| (glob.glob, glob.absolute))
+            .collect();
+    let whole = format!(
+        "!{}/cache/inner",
+        real.canonicalize().unwrap().to_string_lossy()
+    );
+    assert_eq!(
+        said,
+        [
+            ("!cache/inner".to_owned(), Some(whole.clone())),
+            (from_the_link, Some(whole.clone())),
+        ]
+    );
+
+    let filter = SourceFilter {
+        iglobs: vec![whole],
+        ..SourceFilter::default()
+    };
+    let job = with_settings(backup_job(&location, &link, "home", HOUR), None, filter);
+    let events = run_to_end(&engine(), job).await;
+    backed_up(&events);
+
+    let snapshots = location.snapshots();
+    let [snapshot] = snapshots.as_slice() else {
+        panic!("expected one snapshot: {snapshots:?}");
+    };
+    let names = location.names_in(snapshot);
+    assert!(names.iter().any(|name| name == "kept.bin"), "{names:?}");
+    assert!(!names.iter().any(|name| name == "dropped.bin"), "{names:?}");
 }
 
 #[tokio::test]

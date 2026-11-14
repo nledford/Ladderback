@@ -71,3 +71,71 @@ async fn a_source_that_cannot_be_read_is_an_error_not_a_panic() {
         .expect_err("nothing is at the path");
     assert_matches!(error, app::ports::SourcesError::Unreadable { .. });
 }
+
+/// The sources a glob is read against (#510): each resolved as rustic
+/// resolves it, in the order given, and one that isn't there as written.
+#[tokio::test]
+async fn each_source_is_walked_resolved_in_order_or_as_written_when_missing() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let real = scratch.path().join("real");
+    std::fs::create_dir(&real).expect("a folder");
+    let link = scratch.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("a symlink");
+    let missing = format!("{}/nowhere/./x", scratch.path().to_str().expect("UTF-8"));
+    let source = |text: &str| Source::parse(text).expect("a source");
+
+    let walked = RusticSources
+        .walked(&[source(link.to_str().expect("UTF-8")), source(&missing)])
+        .await;
+    let expected = std::fs::canonicalize(&real).expect("the real path");
+    assert_eq!(
+        walked,
+        [source(expected.to_str().expect("UTF-8")), source(&missing)]
+    );
+}
+
+/// The whole path said for each glob of `plan` that can never match.
+async fn absolutes(plan: &domain::planning::Plan) -> Vec<Option<String>> {
+    app::globs::never_matching_globs(plan, &RusticSources)
+        .await
+        .into_iter()
+        .map(|glob| glob.absolute)
+        .collect()
+}
+
+/// Which of a plan's sources a glob that can never match is for (#510): of
+/// several, the one whose folder on disk holds the glob's folders; with
+/// none or more than one, no whole path is said.
+#[tokio::test]
+async fn of_two_sources_the_whole_path_goes_under_the_one_that_holds_the_glob_s_folders() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let home = scratch.path().join("home");
+    let disk = scratch.path().join("disk");
+    let text = |path: &std::path::Path| path.to_str().expect("UTF-8").to_owned();
+    let mut plan = domain::planning::Plan::new(
+        domain::PlanId::parse("home").expect("an ID"),
+        domain::RepositoryAlias::parse("nas").expect("an alias"),
+        vec![
+            Source::parse(&text(&home)).expect("a source"),
+            Source::parse(&text(&disk)).expect("a source"),
+        ],
+    );
+    plan.filter.globs = vec!["!docker/app/cache".to_owned()];
+
+    // Under neither: the sources are there, the folders aren't.
+    std::fs::create_dir_all(&home).expect("a folder");
+    std::fs::create_dir_all(&disk).expect("a folder");
+    assert_eq!(absolutes(&plan).await, [None]);
+
+    // Under the second only, as walked (its links followed).
+    std::fs::create_dir_all(disk.join("docker/app/cache")).expect("a folder");
+    let walked = std::fs::canonicalize(&disk).expect("the real path");
+    assert_eq!(
+        absolutes(&plan).await,
+        [Some(format!("!{}/docker/app/cache", text(&walked)))]
+    );
+
+    // Under both.
+    std::fs::create_dir_all(home.join("docker/app/cache")).expect("a folder");
+    assert_eq!(absolutes(&plan).await, [None]);
+}
