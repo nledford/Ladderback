@@ -3,6 +3,8 @@
 
 use domain::service::ServicePath;
 
+use super::KILL_AFTER;
+
 /// The unit's first line. A file at the unit's place without it as a whole
 /// line was not written by `install-service`, and is never touched.
 pub const SYSTEMD_MARK: &str =
@@ -15,7 +17,7 @@ pub const LAUNCHD_MARK: &str =
 
 /// The systemd user unit that runs `program serve`. Its cache folder is the
 /// one systemd makes for it, private to the user, which the agent is pointed
-/// at (decision 59).
+/// at (decision 59). systemd waits [`KILL_AFTER`] for it to stop.
 pub fn systemd_unit(program: &ServicePath) -> String {
     format!(
         "{SYSTEMD_MARK}\n\
@@ -30,12 +32,14 @@ pub fn systemd_unit(program: &ServicePath) -> String {
          CacheDirectoryMode=0700\n\
          Environment=LADDERBACK_CACHE_DIR=%C/ladderback\n\
          KillMode=mixed\n\
+         TimeoutStopSec={kill_after}\n\
          Restart=on-failure\n\
          RestartSec=10\n\
          \n\
          [Install]\n\
          WantedBy=default.target\n",
-        systemd_word(program.as_str())
+        systemd_word(program.as_str()),
+        kill_after = KILL_AFTER.as_secs(),
     )
 }
 
@@ -49,7 +53,8 @@ fn systemd_word(text: &str) -> String {
 }
 
 /// The launchd agent labelled `label` that runs `program serve` from login
-/// on, again after a crash, and writes its log to `log`.
+/// on, again after a crash, and writes its log to `log`. launchd waits
+/// [`KILL_AFTER`] for it to stop.
 pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -71,13 +76,16 @@ pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> S
          \t\t<key>SuccessfulExit</key>\n\
          \t\t<false/>\n\
          \t</dict>\n\
+         \t<key>ExitTimeOut</key>\n\
+         \t<integer>{kill_after}</integer>\n\
          \t<key>StandardErrorPath</key>\n\
          \t<string>{}</string>\n\
          </dict>\n\
          </plist>\n",
         xml_text(label),
         xml_text(program.as_str()),
-        xml_text(log.as_str())
+        xml_text(log.as_str()),
+        kill_after = KILL_AFTER.as_secs(),
     )
 }
 

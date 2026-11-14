@@ -40,9 +40,16 @@ pub const SYSTEMD_UNIT: &str = "ladderback.service";
 /// The agent's label under launchd, and its plist's name without `.plist`.
 pub const LAUNCHD_LABEL: &str = "io.github.nledford.ladderback";
 
-/// How long the manager's program may take to answer one call. `systemctl`
-/// waits 25 s for an answer from the manager itself.
+/// How long the manager's program may take to answer one call that doesn't
+/// wait for the service to stop. `systemctl` waits 25 s for an answer from
+/// the manager itself.
 const MANAGER_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long the service manager gives the agent to stop before it sends
+/// SIGKILL: the service file's `TimeoutStopSec` and `ExitTimeOut`. Longer
+/// than the agent's own limit on its stop, 65 s, so the manager never cuts a
+/// stop short (decision 92, #543).
+pub const KILL_AFTER: Duration = Duration::from_secs(75);
 
 /// The exit codes of `launchctl print` for an agent that isn't loaded: 113
 /// ("Could not find service"), and 3 (`ESRCH`, "No such process") from
@@ -52,14 +59,15 @@ const NOT_LOADED: [i32; 2] = [113, 3];
 /// How often launchd is asked whether an agent it was told to stop is gone.
 const STOP_CHECK_EVERY: Duration = Duration::from_millis(100);
 
-/// How long an agent booted out may take to go. `bootout` returns once
-/// launchd has sent the agent's program SIGTERM, not once it has ended, and
-/// launchd keeps the label, refusing a `bootstrap` of it ("Bootstrap failed:
-/// 5: Input/output error"), until it has. launchd sends SIGKILL after the
-/// plist's `ExitTimeOut`, which ours doesn't set: 20 s by default. Past that
-/// and the time to reap the program, an agent still loaded is one launchd
-/// will not let go of.
-const STOP_LIMIT: Duration = Duration::from_secs(30);
+/// How long a service told to stop may take to go: [`KILL_AFTER`], the
+/// time to reap the program after the manager's SIGKILL, and some to spare.
+/// `systemctl restart` and `disable --now` return only once the unit has
+/// stopped, so each is given this, not [`MANAGER_LIMIT`]. launchd's
+/// `bootout` returns once launchd has sent the agent's program SIGTERM, not
+/// once it has ended, and launchd keeps the label, refusing a `bootstrap`
+/// of it ("Bootstrap failed: 5: Input/output error"), until it has: an agent
+/// still loaded after this is one launchd will not let go of.
+const STOP_LIMIT: Duration = Duration::from_secs(85);
 
 /// How much of a file at the service file's place is read to find the mark
 /// line, which the template puts in its first few lines.
@@ -223,7 +231,8 @@ impl UserService {
         })
     }
 
-    /// The same service, with `limit` for each call of the manager.
+    /// The same service, with `limit` for each call of the manager that
+    /// doesn't wait for the service to stop.
     #[must_use]
     pub fn with_limit(self, limit: Duration) -> Self {
         Self { limit, ..self }
@@ -279,7 +288,7 @@ impl ServiceManager for UserService {
                 let file = self.file.clone().into_os_string();
                 self.call_os("systemctl", vec!["--user".into(), "enable".into(), file])
                     .await?;
-                self.call("systemctl", &["--user", "restart", &self.name])
+                self.call_stopping("systemctl", &["--user", "restart", &self.name])
                     .await?;
             }
             Kind::Launchd { uid, log, stop } => {
@@ -313,7 +322,7 @@ impl ServiceManager for UserService {
         }
         match &self.kind {
             Kind::Systemd => {
-                self.call("systemctl", &["--user", "disable", "--now", &self.name])
+                self.call_stopping("systemctl", &["--user", "disable", "--now", &self.name])
                     .await?;
                 self.remove_file()?;
                 self.call("systemctl", &["--user", "daemon-reload"]).await?;
@@ -491,9 +500,25 @@ impl UserService {
             .await
     }
 
+    /// [`Self::call`], for a call that returns only once the service has
+    /// stopped: it is given [`STOP_LIMIT`].
+    async fn call_stopping(&self, program: &str, args: &[&str]) -> Result<(), ServiceError> {
+        let args = args.iter().map(OsString::from).collect();
+        self.call_within(program, args, STOP_LIMIT).await
+    }
+
     /// Runs the manager's `program` with `args`; an error is a refusal.
     async fn call_os(&self, program: &str, args: Vec<OsString>) -> Result<(), ServiceError> {
-        match manager::run(program, &args, &self.environment, self.limit).await {
+        self.call_within(program, args, self.limit).await
+    }
+
+    async fn call_within(
+        &self,
+        program: &str,
+        args: Vec<OsString>,
+        limit: Duration,
+    ) -> Result<(), ServiceError> {
+        match manager::run(program, &args, &self.environment, limit).await {
             Ok(manager::Ended::Succeeded { .. }) => Ok(()),
             Ok(manager::Ended::Failed { said, .. }) => {
                 Err(self.error(ServiceProblem::ManagerRefused {
