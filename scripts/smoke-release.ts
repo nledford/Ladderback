@@ -13,7 +13,11 @@
 //     isn't in it.
 // Checks of the program, here or, with `--container`, in a clean Linux
 // container (Docker, no network, the binary copied in):
-//   - `--version` says the workspace version;
+//   - `--version` names the build of this checkout (scripts/build-identity.ts):
+//     the workspace version alone at its release tag, as cargo-dist builds a
+//     release, and with the commit between releases (decision NN), as the
+//     nightly and pull request builds are; `--version <x.y.z>` expects that
+//     text instead;
 //   - with `LANGUAGE=en-XA` it speaks plain English: a release build has no
 //     pseudolocales (§8.4);
 //   - `serve` starts in scratch folders (LADDERBACK_CONFIG_DIR,
@@ -36,6 +40,8 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync,
 import { connect } from "node:net";
 import { platform, tmpdir } from "node:os";
 import path from "node:path";
+
+import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -623,14 +629,6 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
 
 // ---------------------------------------------------------------------------
 
-function workspaceVersion(): string {
-  const manifest = readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
-  const section = manifest.split(/^\[workspace\.package\]$/m)[1]?.split(/^\[/m)[0] ?? "";
-  const version = /^version = "([^"]+)"$/m.exec(section)?.[1];
-  if (!version) throw new Error("no [workspace.package] version in Cargo.toml");
-  return version;
-}
-
 function usage(message: string): never {
   console.error(`error: ${message}`);
   console.error(`usage: node scripts/smoke-release.ts <binary> [--container <${Object.keys(IMAGES).join("|")}|all>]... [--version <x.y.z>] [--summary <file>]`);
@@ -658,7 +656,8 @@ async function main(argv: string[]): Promise<number> {
     else usage(`a second binary: ${arg}`);
   }
   if (binary === undefined) usage("no binary given");
-  const expected = version ?? workspaceVersion();
+  const build = checkoutBuild(ROOT);
+  const expected = version ?? (build === undefined ? workspaceVersion(ROOT) : shown(build));
   const sections: string[] = [];
   let failed = false;
 
